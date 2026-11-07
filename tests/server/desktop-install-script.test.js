@@ -545,8 +545,8 @@ function serverInstaller(t, {
   explicit = false,
   unitOnly = false,
   previousLink = null,
-  b24Fails = false,
-  foreignB24 = false,
+  trackerFails = false,
+  foreignTracker = false,
   codeName = 'code',
   homeName = 'home',
 } = {}) {
@@ -561,11 +561,11 @@ function serverInstaller(t, {
   t.after(() => rmSync(container, { recursive: true, force: true }));
 
   for (const directory of [fakeBin, home, path.join(root, 'web'), path.join(root, 'bin'),
-    path.join(root, 'b24')]) {
+    path.join(root, 'tracker')]) {
     mkdirSync(directory, { recursive: true });
   }
 
-  for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/b24-cli.sh',
+  for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/tracker-cli.sh',
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
     'shared/package.json', 'shared/runtime/legacyBrand.ts',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts',
@@ -582,14 +582,14 @@ function serverInstaller(t, {
 
   writeFileSync(path.join(fakeBin, 'loginctl'),
     `#!/bin/bash\necho loginctl >> ${shellQuote(otherLog)}\nexit 0\n`, { mode: 0o755 });
-  // npm пишет полный argv; сборка b24 создаёт исполняемый результат, который проверяет helper.
+  // npm пишет полный argv; сборка tracker создаёт исполняемый результат, который проверяет helper.
   writeFileSync(path.join(fakeBin, 'npm'), [
     '#!/bin/bash',
     `printf 'npm %s\\n' "$*" >> ${shellQuote(otherLog)}`,
-    'if [[ "$1" == --prefix && "$2" == */b24 && "$3" == run && "$4" == build ]]; then',
-    b24Fails ? '  exit 4' : '  :',
-    '  printf \'#!/bin/sh\\n\' > "$2/../bin/b24"',
-    '  chmod 755 "$2/../bin/b24"',
+    'if [[ "$1" == --prefix && "$2" == */tracker && "$3" == run && "$4" == build ]]; then',
+    trackerFails ? '  exit 4' : '  :',
+    '  printf \'#!/bin/sh\\n\' > "$2/../bin/tracker"',
+    '  chmod 755 "$2/../bin/tracker"',
     'fi',
     'exit 0',
     '',
@@ -597,12 +597,12 @@ function serverInstaller(t, {
 
   if (previousLink) {
     mkdirSync(path.join(home, '.local/bin'), { recursive: true });
-    symlinkSync(previousLink, path.join(home, '.local/bin/b24'));
+    symlinkSync(previousLink, path.join(home, '.local/bin/tracker'));
   }
 
-  if (foreignB24) {
+  if (foreignTracker) {
     mkdirSync(path.join(home, '.local/bin'), { recursive: true });
-    writeFileSync(path.join(home, '.local/bin/b24'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(path.join(home, '.local/bin/tracker'), '#!/bin/sh\n', { mode: 0o755 });
   }
 
   const skipProbe = port === null ? '[[ "$*" == *"fetch("* ]] && exit 0\n' : '';
@@ -742,7 +742,7 @@ test('INS-DH-1/2 шаблон юнита получает env и только я
 });
 
 test('BL-05: --unit-only обходит сборку и ссылку', (t) => {
-  const previous = '/previous/b24';
+  const previous = '/previous/tracker';
   const result = serverInstaller(t, {
     unitOnly: true,
     previousLink: previous,
@@ -750,27 +750,27 @@ test('BL-05: --unit-only обходит сборку и ссылку', (t) => {
   const full = serverInstaller(t);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.others, /b24/);
-  assert.equal(readlinkSync(path.join(result.home, '.local/bin/b24')), previous);
+  assert.doesNotMatch(result.others, /tracker/);
+  assert.equal(readlinkSync(path.join(result.home, '.local/bin/tracker')), previous);
   assert.equal(full.status, 0, full.stderr);
-  assert.match(full.others, /npm --prefix \S+\/b24 ci --include=dev --no-audit --no-fund\n/);
-  assert.match(full.others, /npm --prefix \S+\/b24 run build\n/);
-  assert.ok(readlinkSync(path.join(full.home, '.local/bin/b24')).endsWith('/code/bin/b24'));
+  assert.match(full.others, /npm --prefix \S+\/tracker ci --include=dev --no-audit --no-fund\n/);
+  assert.match(full.others, /npm --prefix \S+\/tracker run build\n/);
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/tracker'));
 });
 
-test('BL-09: отказ сборки b24 предупреждает, но установку сервера не прерывает', (t) => {
+test('BL-09: отказ сборки tracker предупреждает, но установку сервера не прерывает', (t) => {
   for (const suffix of ['', ' с пробелами']) {
     const result = serverInstaller(t, {
-      b24Fails: true,
+      trackerFails: true,
       explicit: true,
       codeName: `code${suffix}`,
       homeName: `home${suffix}`,
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stderr, /b24 не собран; повтор: bash /);
+    assert.match(result.stderr, /tracker не собран; повтор: bash /);
 
-    const retry = result.stderr.match(/b24 не собран; повтор: (.+)/)?.[1];
+    const retry = result.stderr.match(/tracker не собран; повтор: (.+)/)?.[1];
     const parsed = spawnSync('/bin/bash', ['-c', `set -- ${retry}; printf '%s\\0' "$@"`], {
       cwd: os.tmpdir(),
       env: { PATH: '/usr/bin:/bin' },
@@ -781,21 +781,21 @@ test('BL-09: отказ сборки b24 предупреждает, но уст
     assert.equal(parsed.status, 0, parsed.stderr);
     assert.deepEqual(parsed.stdout.split('\0').slice(0, -1), [
       'bash',
-      path.join(result.root, 'deploy/lib/b24-cli.sh'),
+      path.join(result.root, 'deploy/lib/tracker-cli.sh'),
       result.root,
       path.join(result.home, '.local/bin'),
     ]);
     assert.match(result.others, /speech/);
-    assert.equal(existsSync(path.join(result.home, '.local/bin/b24')), false);
+    assert.equal(existsSync(path.join(result.home, '.local/bin/tracker')), false);
   }
 });
 
-test('BL-10: чужой файл b24 в PATH не выдаётся за неудачную сборку', (t) => {
-  const result = serverInstaller(t, { foreignB24: true });
+test('BL-10: чужой файл tracker в PATH не выдаётся за неудачную сборку', (t) => {
+  const result = serverInstaller(t, { foreignTracker: true });
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /не перезаписан/);
-  assert.doesNotMatch(result.stderr, /b24 не собран/);
+  assert.doesNotMatch(result.stderr, /tracker не собран/);
 });
 
 test('INS-DH-3 unit-only не собирает, не ставит речь и не меняет автозапуск', (t) => {

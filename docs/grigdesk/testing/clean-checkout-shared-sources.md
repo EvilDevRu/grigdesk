@@ -12,10 +12,17 @@ runtime в исходную фикстуру не входят.
 сохраняет запрет переносить готовый runtime или зависимости в clean checkout.
 
 `tests/server/helpers/sourceRuntimeFiles.mts` хранит общий минимальный список
-`runtimePaths.ts` и `runtimeBuildContext.ts`. Их переносят readiness, Docker, mobile
+`runtimePaths.ts`, `runtimeBuildContext.ts` и импортируемый `shared/node/bundleLayout.ts`.
+Их переносят readiness, Docker, mobile
 и desktop installer: `distribution.ts` и ранний data-home guard используют эти модули
 даже без установленного ELF. Отсутствие модулей даёт ERR_MODULE_NOT_FOUND до проверяемой
-команды; фикстура чистого checkout должна включать оба исходника.
+команды; фикстура чистого checkout должна включать всю эту границу импорта.
+
+Серверный installer-fixture копирует `deploy/lib/tracker-cli.sh` и моделирует
+`tracker/` → `bin/tracker` → ссылку в PATH. Прежних `b24-cli.sh` и папки `b24/`
+в исходной установке нет. Фикстуры арбитра включают журнал `operations`, а launch
+проверяет `--queue-dispatch-id` между hash каталога и `--routes-dir`, сохраняя проверку
+явного `--runner-primary`.
 
 После выноса хеша `deepseek/scripts/deepseekVendorManifest.ts` импортирует `shared/node/hash.ts`.
 Если копировать только инструменты, подготовка завершается `ERR_MODULE_NOT_FOUND`

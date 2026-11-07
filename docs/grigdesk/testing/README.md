@@ -55,7 +55,7 @@
 - [Короткий engine-фильтр может совпасть с именем checkout](engine-filter-path.md)
 - [Временная папка вложенного сторожа при явном TMPDIR](node-guard-temp-root.md)
 - [Transition-stub создаёт inert-предка Teleport-модалки в тесте фокуса](modal-transition-stub.md)
-- [Фикстура чистой установки копирует общий код вместе с инструментами](clean-checkout-shared-sources.md)
+- [Фикстуры чистой установки: общий import closure, tracker и актуальные контракты запуска](clean-checkout-shared-sources.md)
 - [Общий Node-модуль не должен попадать в браузерную программу типов по шаблону](shared-node-typecheck.md)
 - [Суффиксы Vite в проверке путей и транзитивной границы shared/node](vite-import-suffixes.md)
 - [Каталог инструментов не тянет Vue-панели; реестр компилируется с подменами](lazy-panel-imports.md)

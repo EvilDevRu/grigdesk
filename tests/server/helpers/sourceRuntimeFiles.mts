@@ -3,4 +3,5 @@
 export const SOURCE_RUNTIME_FILES = [
   'server/src/lib/runtimePaths.ts',
   'server/src/lib/runtimeBuildContext.ts',
+  'shared/node/bundleLayout.ts',
 ] as const;

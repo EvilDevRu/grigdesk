@@ -645,7 +645,11 @@ test('промпт не врёт про возможности и называе
 // Число живёт в одном месте (`ARBITER_TURN_LIMIT_MS` рядом с самим таймаутом): вторая
 // копия в тексте промпта разошлась бы с резаком, и агент планировал бы не тот бюджет.
 test('бюджет промпта берётся из лимита хода, а не из второй копии числа', async () => {
-  const prompt = buildConversationPrompt({ messages: [], result: null },
+  const prompt = buildConversationPrompt({
+    messages: [],
+    result: null,
+    operations: [],
+  },
     { identity: {}, evidence: {}, targets: [], policies: [] }, 'start');
 
   assert.equal(ARBITER_TURN_LIMIT_MS, 20 * 60_000);

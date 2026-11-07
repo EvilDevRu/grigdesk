@@ -263,9 +263,10 @@ test('launch с runnerPrimary прокидывает --runner-primary движк
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().outcome, 'launched');
   const calls = await readFile(systemdCalls, 'utf8');
+
   assert.match(calls, new RegExp(
     `--ticket-json \\S*t42\\.ticket\\.json --runner-primary claude `
-      + `--expected-catalog-hash ${'b'.repeat(64)} --routes-dir`,
+      + `--expected-catalog-hash ${'b'.repeat(64)} --queue-dispatch-id [a-f0-9-]{36} --routes-dir`,
   ));
 });
 
