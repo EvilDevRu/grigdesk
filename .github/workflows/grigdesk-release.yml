@@ -131,11 +131,13 @@ jobs:
         env:
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
           RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
+          RELEASE_SITE_PORT: ${{ secrets.RELEASE_SITE_PORT || '22' }}
           RELEASE_SITE_KEY: ${{ runner.temp }}/release-site-key
           RELEASE_SITE_DIR: ${{ secrets.RELEASE_SITE_DIR }}
           RELEASE_SITE_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN }}
           RELEASE_SITE_MIRROR_HOST: ${{ secrets.RELEASE_SITE_MIRROR_HOST }}
           RELEASE_SITE_MIRROR_USER: ${{ secrets.RELEASE_SITE_MIRROR_USER }}
+          RELEASE_SITE_MIRROR_PORT: ${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}
           RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
           RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
           RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}

@@ -128,6 +128,7 @@ Run workflow. Отправка коммитов и тегов в GitHub не з�
 workflow материализует оба ключа во временные файлы с правами 0600.
 Остальные секреты: `RELEASE_SITE_HOST`, `RELEASE_SITE_USER`, `RELEASE_SITE_DIR`,
 `RELEASE_SITE_PUBLIC_ORIGIN`; для зеркала — те же с `RELEASE_SITE_MIRROR_`.
+`RELEASE_SITE_PORT` и `RELEASE_SITE_MIRROR_PORT` необязательны: без секрета используется SSH-порт 22.
 На обоих сайтах заранее создаются `/api/releases/v1/` и `/releases/` внутри корня сайта.
 
 CI не имеет платного ключа GLM. До первого выпуска владелец отдельно проходит живой

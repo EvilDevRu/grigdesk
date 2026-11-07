@@ -19,7 +19,7 @@
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Подписанный канал сайта: CI, публикация и восстановление обновления пакета](site-release-channel.md)
-- [Ручной release workflow: контекст runner, зависимости tracker/mobile и диагностика писем](release-workflow-validation.md)
+- [Ручной release workflow: контекст runner, зависимости tracker/mobile, SSH-порт и диагностика писем](release-workflow-validation.md)
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
