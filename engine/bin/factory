@@ -2818,10 +2818,16 @@ v2_on_signal() {
   if (( stop_rc == 0 )) && [[ -n "$V2_ATTEMPT" ]]; then
     route_v2_cleanup_active_instrumentation "$TASK" "$V2_ATTEMPT"
     cleanup_rc=$?
-    (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+    if (( cleanup_rc == 0 || cleanup_rc == 3 )); then
+      # Штатная остановка по сигналу (кнопка «Стоп», systemctl stop, выключение машины):
+      # раннер погашен, инструментация снята, попытка остаётся открытой для resume.
+      # Метка в реестре отличает это от молчаливого обрыва: без неё GrigDesk читал
+      # каждую остановку кнопкой как crashed и звонил «Конвейер оборвался».
+      set_st "$TASK" STOPPED_SIGNAL 1
+    else
       set_st "$TASK" STALLED_HUMAN 1
       v2_log "instrumentation cleanup требует человека (код $cleanup_rc)"
-    }
+    fi
   else
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "quiescence runner не доказана; baseline не изменён (код $stop_rc)"
@@ -3093,7 +3099,7 @@ v2_main() {
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
       PROFILE "$PROFILE" \
       ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
-      ORCH_PID "$$" STALLED_HUMAN 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
       RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
@@ -3216,8 +3222,10 @@ v2_main() {
     return 0
   fi
 
-  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE" \
-    INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
+  # Любой новый заход движка стирает метку штатной остановки: после старта демона
+  # мёртвый процесс снова означает обрыв, а не решение человека.
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 \
+    DELIVERY_MODE "$V2_DELIVERY_MODE" INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
     CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
@@ -3683,7 +3691,7 @@ v2_admin_main() {
         loop_reset=(LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" LOOP_STAGE "" LOOP_REPORT "")
     done
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
-      STALLED_HUMAN 0 RESULT recovered ATTEMPT_ID "$out" \
+      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered ATTEMPT_ID "$out" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
       QUEUE_DISPATCH_ID "" \

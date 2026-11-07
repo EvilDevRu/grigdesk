@@ -611,7 +611,12 @@ GrigDesk показал бы новый комментарий, которого
 trap, затем через trusted runner identity останавливает exact process group активного
 узла и только после доказанной quiescence восстанавливает instrumentation. Если identity
 или cleanup нельзя доказать, попытка получает `STALLED_HUMAN=1`, а baseline и shared lease
-не освобождаются молча.
+не освобождаются молча. После доказанной остановки и снятия инструментации launcher
+ставит в реестре задачи `STOPPED_SIGNAL=1`: по метке GrigDesk (`detectStall`) отличает
+штатную остановку от молчаливого обрыва и не звонит «Конвейер оборвался» на остановку
+кнопкой. Снимают метку все пути нового захода — `--init` старта, общий `set_st ORCH_PID`
+resume/gate и recovery; не-graceful смерть (SIGKILL по таймауту, oom) метки не получает
+и по-прежнему показывается как обрыв.
 
 **Trusted identity раннера.** Публичная идентичность живого запуска — файл
 `${FACTORY_CONTROL_ROOT}/runner-processes/t<TASK>.active` (SCHEMA=1, ровно 11 строк:
