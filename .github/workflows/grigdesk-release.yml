@@ -112,6 +112,12 @@ jobs:
       - name: Production-сборка web
         run: npm --prefix web run build
 
+      - name: Освобождение тестовых артефактов
+        run: |
+          test "$GRIGDESK_TEST_DEEPSEEK_ROOT" = "$RUNNER_TEMP/deepseek-tests"
+          rm -rf -- "$GRIGDESK_TEST_DEEPSEEK_ROOT"
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+
       - name: Ключ подписи
         env:
           SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
