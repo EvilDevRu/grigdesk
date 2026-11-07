@@ -96,6 +96,8 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   assert.ok(media >= 0 && media < workflow.jobs.release.steps.indexOf(serverTests));
   assert.match(workflow.jobs.release.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
+  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg ripgrep\s/u);
+  assert.match(workflow.jobs.release.steps[media].run, /rg --version/u);
 
   const sandbox = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));

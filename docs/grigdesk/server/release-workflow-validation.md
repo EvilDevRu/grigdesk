@@ -37,6 +37,8 @@ bubblewrap недостаточно (`setting up uid map: Permission denied`). W
 Тесты записи требуют также системные `ffmpeg` и `ffprobe`: Playwright поставляет собственный
 ffmpeg для захвата, а проверка и обрезка клипа вызывают системные команды. Workflow явно
 устанавливает пакет `ffmpeg` и проверяет обе команды до тестов.
+Тот же шаг устанавливает и проверяет `ripgrep`: native shell parity использует настоящий
+`rg` внутри рабочей папки. Отсутствие команды даёт отказ сценария до проверки разрешений.
 
 После подготовки pinned dependencies workflow явно материализует проверенный snapshot
 Harness через `materializeDeepSeekSnapshot`. В Git хранится только manifest, patches
