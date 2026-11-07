@@ -31,6 +31,7 @@ import {
   requestKimiManagedUsage,
 } from '../kimi/usage.ts';
 import { withRetry } from '../retry.ts';
+import { delayWithAbort } from '../../../../shared/lib/delay.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { kimiNativeSettings } from '../executorSettings/kimi.ts';
 
@@ -507,14 +508,18 @@ export default {
    * server самого Kimi. GrigDesk не открывает OAuth credential file и не создаёт
    * model session/turn.
    */
-  async usage(config: KimiConfig, deps: { sleep?: (ms: number) => Promise<void> } = {}) {
+  async usage(config: KimiConfig, deps: {
+    sleep?: (ms: number) => Promise<void>;
+    signal?: AbortSignal;
+  } = {}) {
     // Две попытки, а не три: каждая заново поднимает локальный брокер, и запрос из шапки
     // не имеет права висеть дольше своего минутного кэша. Что именно повторяем — решает
     // за это отвечает `kimiUsageIsRetryable`.
-    const outcome = await withRetry(() => requestKimiManagedUsage(config), {
+    const outcome = await withRetry(() => requestKimiManagedUsage(config, { signal: deps.signal }), {
       attempts: 2,
-      retryWhen: kimiUsageIsRetryable,
-      ...(deps.sleep ? { sleep: deps.sleep } : {}),
+      retryWhen: (result) => !deps.signal?.aborted && kimiUsageIsRetryable(result),
+      retryOnError: () => !deps.signal?.aborted,
+      sleep: deps.sleep ?? ((ms) => delayWithAbort(ms, deps.signal)),
     });
     return classifyKimiUsageResponse(outcome);
   },

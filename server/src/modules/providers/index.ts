@@ -147,12 +147,18 @@ function normalizeCommands(list: unknown) {
     }));
 }
 
+/**
+ * Общий реестр и опрос лимитов принадлежат жизненному циклу этого экземпляра сервера.
+ * Остановка запрещает новые проверки и дожидается уборки уже запущенных адаптеров.
+ */
 async function providersModule(
   fastify: FastifyInstance,
   opts: ProvidersModuleOptions,
 ): Promise<void> {
   const { config, claudeAuth, prefs } = opts;
-  const deps = { claudeAuth };
+  const usageAbort = new AbortController();
+  const usageRequests = new Set<Promise<unknown>>();
+  const deps = { claudeAuth, signal: usageAbort.signal };
   const serviceEnv = opts.env || process.env;
   const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
   const modelsOf = opts.getModelsRegistry || getModelsRegistry;
@@ -632,7 +638,7 @@ async function providersModule(
     // исполнителей, а лимиты всё равно собирались у настоящих.
     const executors = await adaptersOf();
 
-    if (!context.isCurrent()) {
+    if (usageAbort.signal.aborted || !context.isCurrent()) {
       return {};
     }
 
@@ -651,7 +657,7 @@ async function providersModule(
       const generation = usageGenerations.get(ex.id) ?? 0;
       const held = usageBackoff.get(ex.id);
       const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
-      const isCurrent = () => context.isCurrent()
+      const isCurrent = () => !usageAbort.signal.aborted && context.isCurrent()
         && (usageGenerations.get(ex.id) ?? 0) === generation;
       const installed = ex.kind === 'api' ? true : await installedOf(ex, isCurrent);
 
@@ -686,7 +692,17 @@ async function providersModule(
         try {
           startSeq = liveUsage.get(ex.id)?.seq ?? 0;
 
-          const response: unknown = await ex.usage(config as never, deps as never);
+          const pending = Promise.resolve(ex.usage(config as never, deps as never));
+
+          usageRequests.add(pending);
+
+          let response: unknown;
+
+          try {
+            response = await pending;
+          } finally {
+            usageRequests.delete(pending);
+          }
 
           current = normalizeProviderUsage(response, {
             providerName: String(ex.name),
@@ -698,7 +714,7 @@ async function providersModule(
             current.usageSchema = response.usageSchema;
           }
         } catch {
-          if (context.isCurrent()) {
+          if (isCurrent()) {
             fastify.log.warn({ provider: ex.id }, 'usage исполнителя не получен');
           }
 
@@ -708,7 +724,7 @@ async function providersModule(
           }, { providerName: String(ex.name), checkedAt });
         }
       }
-      if (!context.isCurrent() || (usageGenerations.get(ex.id) ?? 0) !== generation) {
+      if (!isCurrent()) {
         return [ex.id, current] as const;
       }
 
@@ -755,7 +771,7 @@ async function providersModule(
 
     // Пока соседний адаптер отвечает, GET читает прежний общий кэш с его оверлеем.
     // Снимать события можно лишь вместе с готовым результатом всего опроса.
-    if (context.isCurrent()) {
+    if (!usageAbort.signal.aborted && context.isCurrent()) {
       for (const poll of completedPolls) {
         const live = liveUsage.get(poll.id);
 
@@ -888,7 +904,9 @@ async function providersModule(
   fastify.post('/api/providers/usage/refresh', (_, reply) => readUsage(
     usageCache.ageMs() >= USAGE_FORCE_MIN_AGE_MS,
     (usage) => {
-      fastify.sse?.broadcast?.('providers-usage', { usage });
+      if (!usageAbort.signal.aborted) {
+        fastify.sse?.broadcast?.('providers-usage', { usage });
+      }
 
       return reply.send({ usage });
     },
@@ -912,10 +930,14 @@ async function providersModule(
    * тем же событием, и второго пути к вендору не появляется.
    */
   async function refreshUsageIfStale(): Promise<void> {
-    if (usageCache.ageMs() < usageTickMs / 2) return;
+    if (usageAbort.signal.aborted || usageCache.ageMs() < usageTickMs / 2) {
+      return;
+    }
 
     await readUsage(true, (usage) => {
-      fastify.sse?.broadcast?.('providers-usage', { usage });
+      if (!usageAbort.signal.aborted) {
+        fastify.sse?.broadcast?.('providers-usage', { usage });
+      }
     });
   }
 
@@ -938,9 +960,19 @@ async function providersModule(
   }, usageTickMs);
 
   usageTimer.unref?.();
-  fastify.addHook('onClose', async () => {
+
+  /**
+   * Останавливает не только будущие тики, но и уже запущенные проверки с их cleanup.
+   * preClose отменяет HTTP-опрос до ожидания соединений; drain делает это до выхода сервера.
+   */
+  async function stopUsage(): Promise<void> {
     clearInterval(usageTimer);
-  });
+    usageAbort.abort();
+    await Promise.allSettled([...usageRequests]);
+  }
+
+  fastify.shutdown?.register('лимиты исполнителей', stopUsage);
+  fastify.addHook('preClose', stopUsage);
 
   /**
    * Состояние MCP-серверов исполнителя — блок в его плашке «Настройки → Исполнители».

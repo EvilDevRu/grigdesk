@@ -15,6 +15,17 @@ const server = createServer((request, response) => {
   }
 
   if (request.url.startsWith('/api/v1/oauth/usage?')) {
+    if (process.argv.includes('--fixture-request-wait')) {
+      return;
+    }
+
+    if (process.argv.includes('--fixture-request-error')) {
+      response.writeHead(503);
+      response.end('{}');
+
+      return;
+    }
+
     response.end(JSON.stringify({
       data: {
         kind: 'ok',
@@ -40,8 +51,12 @@ const server = createServer((request, response) => {
   response.end('{}');
 });
 
-server.listen(0, '127.0.0.1', () => {
-  const { port } = server.address();
+if (process.argv.includes('--fixture-startup-wait')) {
+  setInterval(() => {}, 1000);
+} else {
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address();
 
-  process.stdout.write(`Kimi server: http://127.0.0.1:${port}/#token=${token}\n`);
-});
+    process.stdout.write(`Kimi server: http://127.0.0.1:${port}/#token=${token}\n`);
+  });
+}

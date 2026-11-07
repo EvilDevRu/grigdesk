@@ -41,16 +41,45 @@ export interface KimiUsageAttempt {
   error?: string;
 }
 
-function waitForExit(child: ChildProcess, timeoutMs = EXIT_TIMEOUT_MS): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode) return Promise.resolve(true);
-  return new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeoutMs);
-    timer.unref?.();
-    child.once('close', () => {
-      clearTimeout(timer);
-      resolve(true);
-    });
-  });
+/**
+ * Сигнал адресован группе, созданной именно нашим detached spawn, включая npm/native child.
+ * Выход launcher не доказывает выход потомков; PID и PGID не принимаются извне.
+ */
+function signalBroker(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        throw error;
+      }
+    }
+  }
+
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill(signal);
+  }
+}
+
+/**
+ * Ожидает close со всеми унаследованными pipe, а не только exit launcher.
+ * Один promise создаётся до готовности: ранний close не теряется между ожиданиями.
+ */
+async function waitForExit(closed: Promise<void>): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      closed.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), EXIT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function usageBrokerEnv(config: Record<string, unknown>): Record<string, string> {
@@ -101,11 +130,17 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   spawnProcess = spawn,
   fetchImpl = globalThis.fetch,
   startupTimeoutMs = START_TIMEOUT_MS,
+  signal,
 }: {
   spawnProcess?: typeof spawn;
   fetchImpl?: typeof fetch;
   startupTimeoutMs?: number;
+  signal?: AbortSignal;
 } = {}): Promise<KimiUsageAttempt> {
+  if (signal?.aborted) {
+    return { reason: 'cancelled' };
+  }
+
   // `kimi web` индексирует cwd как workspace ещё до ready-banner. Если запускать
   // его из корня GrigDesk, read-only проверка лимитов превращается в долгий обход
   // всего репозитория и не укладывается в startup timeout.
@@ -118,6 +153,11 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
       error: String((error as Error)?.message || 'Не удалось подготовить Kimi usage workspace'),
     };
   }
+
+  if (signal?.aborted) {
+    return { reason: 'cancelled' };
+  }
+
   let child: ChildProcess;
   try {
     child = spawnProcess(String(config.kimiBin), [
@@ -126,6 +166,7 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
       cwd: workDir,
       env: usageBrokerEnv(config),
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
   } catch (error) {
     return {
@@ -140,8 +181,15 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   let startupFailure: string | null = null;
   let resolveReady: (value: BrokerReady | null) => void = () => {};
   const readyPromise = new Promise<BrokerReady | null>((resolve) => { resolveReady = resolve; });
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
   const timer = setTimeout(() => resolveReady(null), startupTimeoutMs);
   timer.unref?.();
+
+  const abort = () => {
+    resolveReady(null);
+  };
+
+  signal?.addEventListener('abort', abort, { once: true });
 
   child.stdout?.on('data', (chunk: Buffer) => {
     stdout = `${stdout}${String(chunk || '')}`.slice(-MAX_PROCESS_OUTPUT);
@@ -162,9 +210,17 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
     resolveReady(null);
   });
 
+  if (signal?.aborted) {
+    abort();
+  }
+
   try {
     ready = await readyPromise;
     clearTimeout(timer);
+
+    if (signal?.aborted) {
+      return { reason: 'cancelled' };
+    }
 
     if (!ready) {
       return {
@@ -174,21 +230,30 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
       };
     }
     let response: Response;
+
     try {
       response = await fetchImpl(
         `${ready.origin}/api/v1/oauth/usage?provider=managed%3Akimi-code`,
         {
           headers: { Authorization: `Bearer ${ready.token}` },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            ...(signal ? [signal] : []),
+          ]),
         },
       );
     } catch (error) {
       return {
-        reason: 'request_failed',
+        reason: signal?.aborted ? 'cancelled' : 'request_failed',
         error: String((error as Error)?.message || 'Kimi usage broker недоступен'),
       };
     }
     const body = await response.json().catch(() => null) as { data?: KimiUsageResult } | null;
+
+    if (signal?.aborted) {
+      return { reason: 'cancelled' };
+    }
+
     if (!response.ok) {
       return {
         reason: 'response_rejected',
@@ -199,16 +264,26 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
     return { result: body?.data ?? null };
   } finally {
     clearTimeout(timer);
-    if (ready) {
+
+    if (ready && !signal?.aborted) {
       await fetchImpl(`${ready.origin}/api/v1/shutdown`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${ready.token}` },
-        signal: AbortSignal.timeout(1_500),
+        signal: AbortSignal.any([AbortSignal.timeout(1_500), ...(signal ? [signal] : [])]),
       }).catch(() => null);
     }
-    if (!(await waitForExit(child))) {
-      child.kill('SIGTERM');
-      if (!(await waitForExit(child))) child.kill('SIGKILL');
+
+    try {
+      signalBroker(child, 'SIGTERM');
+      await waitForExit(closed);
+      // Даже после close launcher в его группе может остаться потомок с другим stdio.
+      signalBroker(child, 'SIGKILL');
+
+      if (!await waitForExit(closed)) {
+        throw new Error('Не подтверждена остановка Kimi usage broker');
+      }
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
   }
 }
