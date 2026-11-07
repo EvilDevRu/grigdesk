@@ -53,13 +53,18 @@ watch(() => auth.authenticated, (on) => {
 onUnmounted(stopSpeech);
 
 
+// Первое получение владельца сессии очищает состояние App. Открываем карточку после
+// запуска синхронизации, чтобы начальная очистка не закрыла её native-документ.
 watch(() => props.target?.kind === 'task'
-  ? [props.target.id, props.target.source] as const : null, (target) => {
-  const [id, source] = target || [];
+  ? [props.target.id, props.target.source, props.ready] as const : null, (target) => {
+  const [id, source, ready] = target || [];
 
-  if (id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source)) {
-    ui.openTaskInline(id, source);
+  if (id) {
     document.title = 'Задача #' + id + ' — GrigDesk';
+  }
+
+  if (ready && id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source)) {
+    ui.openTaskInline(id, source);
   }
 }, { immediate: true });
 // Закрытие карточки её действиями завершает только этот native-документ.
