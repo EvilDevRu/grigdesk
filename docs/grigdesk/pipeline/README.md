@@ -46,6 +46,8 @@
   область start/resume, объявленный failover и строгая публикация каталога.
 - [Несовместимость поставки раннера](runner-supply-incompatibility.md) — строгий маркер,
   покрытие всех недоступных кандидатов и одна перепривязка рантайма на resume.
+- [Отказ среды не повторяется](environment-failure-stop.md) — failed/environment
+  останавливает узел сразу: причина в комментарии и строке остановки, решение у человека.
 
 - [Холодный запуск ACP: единый бюджет без повтора initialize](deepseek-acp-startup.md)
 - [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)

@@ -2214,6 +2214,14 @@ route_v2_dispatch_next() {
   # уходит в реестр и в журнал стадий, чтобы человек не собирал её по route-v2.log.
   local evidence_left=1
   ROUTE_V2_EVIDENCE_STOP_REASON=""
+  # Вердикт failed с владельцем environment повторов НЕ имеет: агент доказал, что
+  # этап блокирует среда, а не продукт. Тот же исполнитель в той же среде на
+  # повторе даст тот же отказ (t7/t8: два захода, t100000000010: пять заходов
+  # xhigh подряд — ни один повтор ничего не вылечил), поэтому бюджет
+  # productFailure на такой вердикт не тратится вовсе, а решение уходит человеку.
+  # Причина живёт локалом узла: строку остановки печатает route_v2_stop_line_suffix
+  # из комментария реестра, глобал между функциями не нужен.
+  local environment_stop_reason=""
   # Указание человека при возврате курсора сюда. Читаем ОДИН раз на вход в узел, а не
   # на каждый заход: журнал за время узла не меняется, а каждое чтение — обход всех
   # событий попытки под локом. Держится до коммита узла, поэтому повторы его тоже видят.
@@ -2384,6 +2392,23 @@ route_v2_dispatch_next() {
         fi
         continue
       fi
+      if [[ "$ROUTE_V2_NODE_RESULT" == failed ]]; then
+        # Владелец отказа читается из typed verdict (legacy failed без вердикта
+        # даёт пустого владельца и живёт по прежним правилам). Проверка ДО траты
+        # productFailure: отказ среды повтором не лечится, бюджет на него не идёт.
+        local verdict_owner=""
+        verdict_owner=$(run_state_verdict_owner failed "${ROUTE_V2_NODE_VERDICT_B64:-}") || verdict_owner=""
+        if [[ "$verdict_owner" == environment ]]; then
+          environment_stop_reason="отказ среды: повтор с тем же исполнителем обречён —"\
+" среду этапа агент исправить не может; смени исполнителя узла или исправь среду,"\
+" затем вернись «перейти сюда»"
+          outcome=$ROUTE_V2_NODE_RESULT
+          verdict_b64=${ROUTE_V2_NODE_VERDICT_B64:-}
+          declare -F v2_log >/dev/null &&
+            v2_log "${run_key}: ${environment_stop_reason#отказ среды: }"
+          break
+        fi
+      fi
       if [[ "$ROUTE_V2_NODE_RESULT" == failed ]] && (( product_left > 0 )); then
         route_v2_cleanup_active_instrumentation "$task" "$attempt"
         cleanup_rc=$?
@@ -2405,20 +2430,30 @@ route_v2_dispatch_next() {
   # Агент сдал done, сторож отверг и повтор не помог: реестр до этой строки хранит
   # `done` и победный отчёт агента (их записал stage-result), а маршрут встал. Узел
   # переводится в failed, причина — в комментарий поверх отчёта: карточка остановки
-  # и модалка узла читают именно его, а не route-v2.log.
-  if [[ "$executor" == agent && "$outcome" == failed && -n "$ROUTE_V2_EVIDENCE_STOP_REASON" ]]; then
-    local agent_comment
-    agent_comment=$(pipeline_store_get "$task" "${run_key}_COMMENT" 2>/dev/null) || agent_comment=""
-    run_state_control_update \
-      "$task" "$run_key" failed \
-      "${run_key}_COMMENT" \
-      "${ROUTE_V2_EVIDENCE_STOP_REASON}${agent_comment:+ · отчёт агента: $agent_comment}" \
-      || {
-        rc=$?
-        runtime_lifecycle_node_visit_finish_v2 \
-          interrupted conflict attempt_interrupted '' '' >/dev/null || true
-        return "$rc"
-      }
+  # и модалка узла читают именно его, а не route-v2.log. Тот же перезаписывают
+  # вердикты failed с владельцем environment: комментарий агента здесь тоже есть
+  # (он честно назвал отказ среды), но без машинной приставки человек читал бы
+  # только отчёт и не видел, почему движок не стал повторять заход.
+  if [[ "$executor" == agent && "$outcome" == failed ]]; then
+    local agent_comment="" host_stop_reason=""
+    if [[ -n "$ROUTE_V2_EVIDENCE_STOP_REASON" ]]; then
+      host_stop_reason=$ROUTE_V2_EVIDENCE_STOP_REASON
+    elif [[ -n "$environment_stop_reason" ]]; then
+      host_stop_reason=$environment_stop_reason
+    fi
+    if [[ -n "$host_stop_reason" ]]; then
+      agent_comment=$(pipeline_store_get "$task" "${run_key}_COMMENT" 2>/dev/null) || agent_comment=""
+      run_state_control_update \
+        "$task" "$run_key" failed \
+        "${run_key}_COMMENT" \
+        "${host_stop_reason}${agent_comment:+ · отчёт агента: $agent_comment}" \
+        || {
+          rc=$?
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted conflict attempt_interrupted '' '' >/dev/null || true
+          return "$rc"
+        }
+    fi
   fi
   if [[ "$executor" == agent && ( "$outcome" == failed || "$outcome" == exhausted ) ]]; then
     route_v2_cleanup_active_instrumentation "$task" "$attempt"
@@ -2663,11 +2698,23 @@ route_v2_stop_line_suffix() {
       return 78
     }
   rm -f -- "$cursor_tmp"
-  [[ "$state" == stopped && "$stop" == human && "$last_outcome" == exhausted ]] ||
-    return 0
+  [[ "$state" == stopped && "$stop" == human ]] || return 0
   [[ "$last_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 0
   reason=$(pipeline_store_get "$task" "${last_node^^}_COMMENT" 2>/dev/null) || reason=""
-  printf ' — %s' "${reason:-исчерпан бюджет повторов}"
+  # Исчерпание бюджета: комментарий узла — единственный носитель цифр, суффикс
+  # повторяет его в строке остановки целиком.
+  if [[ "$last_outcome" == exhausted ]]; then
+    printf ' — %s' "${reason:-исчерпан бюджет повторов}"
+    return 0
+  fi
+  # Отказ среды: движок сам написал машинную причину поверх отчёта агента (t100000000010:
+  # пять обречённых заходов xhigh на SHIP). В строку идёт только машинная часть — отчёт
+  # агента остаётся в комментарии узла, строка остановки обязана быть короткой.
+  if [[ "$last_outcome" == failed && "$reason" == "отказ среды: "* ]]; then
+    printf ' — %s' "${reason%% · отчёт агента: *}"
+    return 0
+  fi
+  return 0
 }
 
 route_v2_gate_decide() {
