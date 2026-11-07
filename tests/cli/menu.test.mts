@@ -270,3 +270,46 @@ for (const outcome of ['return', 'exception', 'eof']) {
     assertRestored(result, session.output());
   });
 }
+
+const { installedFixture, pinnedKeyHook } = await import('../helpers/installedUpdateFixture.mjs');
+
+for (const language of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
+  for (const term of ['xterm-256color', 'dumb']) {
+    test(`CLI-MENU/CLI-NONBLOCK: installed ${language}/${term}, сайт удержан`, async (t) => {
+      const box = await installedFixture(t, { mode: 'server' });
+      const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
+      const entry = path.join(box.temporary, 'installed-menu.mjs');
+      const cliUrl = new URL('../../cli/installedCli.ts', import.meta.url).href;
+
+      await writeFile(entry, [
+        'globalThis.fetch = async () => new Promise(() => {});',
+        `const { runInstalledCli } = await import(${JSON.stringify(cliUrl)});`,
+        `process.exitCode = await runInstalledCli(${JSON.stringify(box.root)}, []);`,
+      ].join('\n'));
+
+      const session = startPty(t, {
+        argv: [process.execPath, '--import', hook, entry],
+        env: {
+          HOME: box.temporary,
+          PATH: '/usr/bin:/bin',
+          LANG: language,
+          TERM: term,
+        },
+        cwd: box.temporary,
+      });
+
+      await session.wait(/GrigDesk 0\.2\.0.*release/u);
+      await session.wait(language.startsWith('ru') ? /Проверить обновления/u : /Check for updates/u);
+      assert.match(session.output(), language.startsWith('ru') ? /Обновить сервер/u : /Update server/u);
+      assert.match(session.output(), /dev/u);
+      session.write('\x1b');
+
+      const result = await session.done;
+
+      assert.equal(result.code, 0, session.output());
+      assertRestored(result, session.output());
+      assert.deepEqual(await box.pointer(), box.previous);
+      await box.preserved();
+    });
+  }
+}

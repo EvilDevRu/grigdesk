@@ -1,3 +1,5 @@
+import { desktopBuildIdentity } from './buildIdentity.ts';
+import { createInstalledApplication } from './installedApplication.ts';
 import { showStyledContextMenu } from './contextMenu.ts';
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import { createApplicationLauncher } from './applicationLauncher.ts';
@@ -103,6 +105,7 @@ let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let localSession: Session | null = null;
 let client: ReturnType<typeof createClientRuntime> | null = null;
+let applicationUpdates: Awaited<ReturnType<typeof createInstalledApplication>> = null;
 let pipeOrigin: string | null = null;
 const pipeOrigins = new Set<string>();
 const lifetime = new AbortController();
@@ -205,19 +208,23 @@ const serverLogChildren = new Map<ChildProcess, RotatingLog>();
  * Exit сервера приходит раньше конца stdio: сначала дожидаемся хвоста труб.
  * Осиротевший потомок не задерживает выход окна дольше дополнительного бюджета.
  */
-async function closeServerLogs(): Promise<void> {
+async function closeServerLogs(strict = false): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const closed = [...serverLogChildren.keys()].map((child) => new Promise<void>((resolve) => {
     child.once('close', () => resolve());
   }));
 
   try {
-    await Promise.race([
-      Promise.all(closed),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, 5000);
+    const drained = await Promise.race([
+      Promise.all(closed).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 5000);
       }),
     ]);
+
+    if (strict && !drained) {
+      throw new Error(desktopText('settings.appUpdateLogDrainTimeout'));
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -266,6 +273,7 @@ function createOwnSupervisor() {
     }),
     probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
     unitState: (signal) => readUnitState(signal),
+    installedService: () => applicationUpdates?.ensureService() ?? Promise.resolve(false),
     runGate: (runtime, signal) => runVpnGate(runtime, signal),
     spawnServer: (runtime) => startOwnServer(runtime),
     sleep: (ms, signal) => delayWithAbort(ms, signal),
@@ -1179,7 +1187,48 @@ async function prepare(signal: AbortSignal): Promise<void> {
     hide: (request) => browserApi!.hide(request),
   });
 
+  applicationUpdates = await createInstalledApplication({
+    executable: process.env.APPIMAGE ?? process.execPath,
+    identity: desktopBuildIdentity,
+    localSelected: () => stored.profiles.find((profile) => profile.id === stored.selected)?.kind === 'local',
+    ownsLocal: () => supervisor.ownership === 'owned',
+    remoteApi: () => client?.shell.state().status === 'online' ? client.shell.state().serverApi : null,
+    async confirm(message) {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: desktopText('settings.appUpdateRestart'),
+        message,
+        buttons: [desktopText('settings.appUpdateLater'), desktopText('settings.appUpdateRestart')],
+        defaultId: 0,
+        cancelId: 0,
+      });
+
+      return result.response === 1;
+    },
+    drainLogs: () => closeServerLogs(true),
+    async save() {
+      saveMainWindow();
+      await saving;
+      await writeSettings(settingsFile!, stored);
+    },
+    flushCookies: () => localSession?.cookies.flushStore() ?? Promise.resolve(),
+    /**
+     * Строгий update-путь уже получил durable ACK слива и сохранил настройки.
+     * Обычный quit с fallback не используется как разрешение на замену поколений.
+     */
+    async exit() {
+      applicationUpdates?.close();
+      lifetime.abort();
+      await client?.close();
+      desktopExit.cleanup();
+      browserApi?.dispose();
+      exiting = true;
+      app.exit(0);
+    },
+  });
+
   client = createClientRuntime({
+    applicationUpdates: applicationUpdates?.port,
     keyboardLayout: createKeyboardLayoutReader({
       platform: process.platform,
       env: browserEnvironment,
@@ -1604,6 +1653,7 @@ const quit = createQuitController({
     removeBrowserIpc = null;
     lifetime.abort();
     portable?.close();
+    applicationUpdates?.close();
     client?.shell.close();
   },
   closeSplash: () => destroySplash(),
@@ -1651,9 +1701,19 @@ async function boot(): Promise<void> {
 
   bootStartedAt = Date.now();
   await startup.start();
+
+  if (revealed()) {
+    await applicationUpdates?.bootProof();
+  }
 }
 
-if (app.requestSingleInstanceLock()) {
+if (process.argv.includes('--grigdesk-release-probe')) {
+  process.stdout.write(JSON.stringify({
+    version: app.getVersion(),
+    releaseId: desktopBuildIdentity?.releaseId ?? null,
+  }) + '\n');
+  app.exit(0);
+} else if (app.requestSingleInstanceLock()) {
   app.on('second-instance', () => {
     if (!quit.stopping) {
       startup.focusRequest();

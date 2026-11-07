@@ -100,7 +100,7 @@
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
 | `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
 | `node/readContainedText.ts` | Ограниченное чтение обычного текста внутри корня без вложенных симлинков; core API 2 и Showcase |
-| `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, ограниченным ожиданием и своим release |
+| `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, своим release и [повтором захвата после reclaim](directory-lock-recovery.md), в том числе без ожидания |
 | `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |
 | `lib/contractDecoders.ts` | Проверка сетевого JSON с выводом типов и ошибкой вызывающей области |
@@ -113,3 +113,16 @@
 Общие функции одной серверной области не требуют нового межпакетного модуля:
 `server/src/lib/showcase/voice/pcm.ts` уже содержит WAV-обёртку и пик PCM16,
 которые используют голосовые адаптеры. Сначала переиспользуй такой модуль владельца.
+
+## Выпуск и обычная установка
+
+`shared/runtime/productReleaseVersion.ts` сравнивает X.Y.Z и X.Y.Z-dev.N отдельно от
+stable-only v1 и plugin comparator. `installedUpdateContracts.ts` и
+`releaseCompatibility.ts` содержат чистые правила v2/API; `applicationUpdateContracts.ts` —
+optional shell snapshot. Общие trust/channel, private layout/journal, архивы и prepare/apply
+расположены в `shared/node`. Они не импортируют server, desktop или CLI.
+`installedServer.ts` проверяет владельцев, активность и drain; `installedUpdateWorker.ts`
+связывает handoff, boot proofs и восстановление. `installedProcess.ts` запускает helper
+и новые процессы вне cgroup прежнего владельца. `bundleLayout.ts` содержит синхронный reader receipt без зависимостей updater; он используется
+только boot resolver серверного I; асинхронный — перед эффектами.
+[Контракт и границы приёмки](../server/installed-release-updates.md).

@@ -1,19 +1,8 @@
-import { prepareReleaseHelp, helpPublicationCommand } from './helpPublication.mts';
-import { shellQuote } from '../shared/lib/shellQuote.ts';
+import { publishInstalledRelease } from './installedPublication.mts';
 
-import { execFile } from 'node:child_process';
-import { randomUUID, createPublicKey, verify as verifyBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-
-import {
-  RELEASE_SIGNING_PUBLIC_KEY, decodeChannelIndex,
-} from '../shared/runtime/releaseChannelContracts.ts';
-import { sha256File } from '../shared/node/hash.ts';
-
-const execute = promisify(execFile);
 
 interface SiteTarget {
   host: string;
@@ -58,12 +47,12 @@ function targets(): SiteTarget[] {
 }
 
 /**
- * Публикация проверяет выпуск локально до отправки: подпись файла сумм, потоковый
- * SHA256 архива и согласованность channel.json; заполняет archiveUrl и только затем
- * ходит по SSH во временную папку с атомарным переименованием на каждой цели.
+ * Публикация единственного формата: подписанные артефакты обычной установки
+ * из release-artifacts/ уходят на сайт с проверкой до SSH (см. installedPublication).
+ * Историческая публикация переносного комплекта (channel.json format 1) удалена:
+ * стабильных выпусков с ним не было, сайт публикует только v1-индексы каналов.
  */
 export async function publishRelease(directory: string | undefined, ports: {
-  prepareHelp?: typeof prepareReleaseHelp;
   dryRun?: boolean;
 } = {}): Promise<void> {
 
@@ -71,12 +60,10 @@ export async function publishRelease(directory: string | undefined, ports: {
     throw new Error('Использование: node tools/release-publish.mts <каталог выпуска>');
   }
 
-  const targetList = targets();
-  const primary = targetList[0]!;
   const missing = ['RELEASE_SITE_HOST', 'RELEASE_SITE_USER', 'RELEASE_SITE_KEY',
     'RELEASE_SITE_DIR', 'RELEASE_SITE_PUBLIC_ORIGIN'].filter((name) => {
-      return !process.env[name];
-    });
+    return !process.env[name];
+  });
 
   if (missing.length) {
     process.stderr.write(`Не заданы переменные: ${missing.join(', ')}\n`);
@@ -85,160 +72,26 @@ export async function publishRelease(directory: string | undefined, ports: {
     return;
   }
 
-  process.exitCode = 3;
+  const installedArtifacts = path.join(directory, 'release-artifacts');
 
-  // Отсутствующие файлы выпуска — ошибка целостности (код 3), а не сбой команды (4).
-  let checksum: string;
-  let signature: string;
+  const hasInstalledArtifacts = await fs.stat(installedArtifacts).then((stat) => stat.isDirectory())
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
 
-  try {
-    checksum = await fs.readFile(path.join(directory, 'release.tar.gz.sha256'), 'utf8');
-    signature = (await fs.readFile(
-      path.join(directory, 'release.tar.gz.sha256.sig'), 'utf8')).trim();
-  } catch {
-    process.stderr.write('Выпуск не содержит файла сумм или подписи\n');
+      return false;
+    });
+
+  if (!hasInstalledArtifacts) {
+    process.stderr.write('Каталог не содержит release-artifacts/ — публиковать нечего\n');
     process.exitCode = 3;
 
     return;
   }
 
-  const publicKeyPem = process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE
-    ? await fs.readFile(process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE, 'utf8')
-    : RELEASE_SIGNING_PUBLIC_KEY;
-
-  if (!publicKeyPem.trim()) {
-    process.stderr.write('release_signing_key_missing: публичный ключ подписи не задан\n');
-    process.exitCode = 3;
-
-    return;
-  }
-
-  const archivePath = path.join(directory, 'release.tar.gz');
-  const archiveHash = await sha256File(archivePath);
-  const archiveLine = checksum.split('\n').find((line) => {
-    return line.includes('release.tar.gz');
-  });
-
-  if (!archiveLine || archiveLine.split(' ')[0] !== archiveHash) {
-    process.stderr.write('Фактический SHA256 архива не совпал с файлом сумм\n');
-    process.exitCode = 3;
-
-    return;
-  }
-  if (!verifyBytes(null, Buffer.from(checksum, 'utf8'), createPublicKey(publicKeyPem),
-    Buffer.from(signature, 'base64'))) {
-    process.stderr.write('Подпись выпуска не прошла проверку\n');
-    process.exitCode = 3;
-
-    return;
-  }
-
-  const channelPath = path.join(directory, 'channel.json');
-  const index = decodeChannelIndex(JSON.parse(await fs.readFile(channelPath, 'utf8')));
-  const entry = index.latest;
-
-  const bundleLine = checksum.split('\n').find((line) => {
-    return line.endsWith('  release/bin/bundle.json');
-  });
-
-  if (!entry || entry.archiveSha256 !== archiveHash || entry.signature !== signature
-    || entry.bundleSha256 !== bundleLine?.split(' ')[0]
-    || entry.archiveSize !== (await fs.stat(archivePath)).size) {
-    process.stderr.write('channel.json расходится с файлом сумм или подписью\n');
-    process.exitCode = 3;
-
-    return;
-  }
-
-  const archiveUrl = `${primary.origin.replace(/\/$/, '')}/releases/${entry.version}/release.tar.gz`;
-
-  decodeChannelIndex({
-    ...index,
-    latest: {
-    ...entry,
-    archiveUrl
-  }
-  });
+  await publishInstalledRelease(installedArtifacts, targets(), ports.dryRun);
   process.exitCode = 0;
-
-  const version = entry.version;
-  const upload = ['release.tar.gz', 'release.tar.gz.sha256', 'release.tar.gz.sha256.sig',
-    'channel.json', 'help-site.tar.gz'];
-  const tmp = `.grigdesk-publish-${version}-${randomUUID()}`;
-
-  // dry-run печатает план до мутации channel.json: пробный запуск ничего не меняет.
-  if (ports.dryRun) {
-    process.stdout.write(`План: ${upload.join(', ')} → ${tmp} → releases/${version}\n`);
-
-    return;
-  }
-
-  const prepared = await (ports.prepareHelp ?? prepareReleaseHelp)(directory, {
-    version: entry.version,
-    commit: entry.commit,
-    archiveSha256: archiveHash,
-    bundleSha256: entry.bundleSha256,
-  });
-
-  try {
-    await fs.writeFile(channelPath, `${JSON.stringify({
-      ...index,
-      latest: {
-        ...entry,
-        archiveUrl
-      },
-    }, null, 2)}\n`, { mode: 0o644 });
-
-    let mirrorFailed = false;
-
-    for (const target of targetList) {
-      if (!target.host || !target.user || !target.key || !target.dir || !target.origin) {
-        continue;
-      }
-
-      const sshOptions = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
-        '-o', 'StrictHostKeyChecking=accept-new'];
-      const remote = (command: string) => {
-        return execute('ssh', [...sshOptions, '-i', target.key, '-p', target.port,
-          `${target.user}@${target.host}`, command], { maxBuffer: 16 * 1024 * 1024 });
-      };
-      const staging = shellQuote(`${target.dir}/${tmp}`);
-
-      try {
-        await remote(`mkdir -p ${shellQuote(`${target.dir}/releases`)} ${staging}`);
-        await execute('scp', [...sshOptions, '-i', target.key, '-P', target.port,
-          ...upload.map((name) => {
-            return name === 'help-site.tar.gz' ? prepared.archive : path.join(directory, name);
-          }),
-          `${target.user}@${target.host}:${target.dir}/${tmp}/`]);
-        await remote(helpPublicationCommand({
-          directory: target.dir,
-          staging: `${target.dir}/${tmp}`,
-          version,
-          archiveSha256: archiveHash,
-        }));
-        process.stdout.write(`Опубликовано на ${target.host}: releases/${version}\n`);
-      } catch (error) {
-        if (target === primary) {
-          process.stderr.write(`Публикация на ${target.host} не удалась:`
-            + ` ${(error as Error).message}\n`);
-          process.exitCode = 4;
-
-          return;
-        }
-
-        mirrorFailed = true;
-        process.stderr.write(`Зеркало ${target.host} не опубликовано:`
-          + ` ${(error as Error).message}\n`);
-      }
-    }
-
-    if (mirrorFailed) {
-      process.stderr.write('Часть зеркал не опубликована; основной хост обновлён.\n');
-    }
-  } finally {
-    await prepared.dispose();
-  }
 }
 
 if (process.argv[1]

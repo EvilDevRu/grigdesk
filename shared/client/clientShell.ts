@@ -1,3 +1,4 @@
+import type { ApplicationUpdateSnapshot } from '../runtime/applicationUpdateContracts.ts';
 import type { BrowserPreferences } from '../browser/browserContract.ts';
 
 import { translator } from '../i18n/catalogs.ts';
@@ -38,6 +39,7 @@ export function isAppLockState(value: unknown): value is AppLockState {
 }
 
 export interface ShellState {
+  applicationUpdate?: ApplicationUpdateSnapshot;
   browser?: { preferences: BrowserPreferences; revision: number };
   windowControls?: WindowControlsState;
   desktopExit?: { skipConfirmation: boolean };
@@ -56,7 +58,7 @@ export interface ShellState {
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
   capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'taskSources' | 'browser'
-    | 'applicationLauncher')[];
+    | 'applicationLauncher' | 'appUpdates')[];
 }
 
 export const RELEASES_URL = '';

@@ -1,4 +1,5 @@
 import { i18nBrowser } from './i18nBrowser.js';
+import { browserDiagnostics } from './browserDiagnostics.js';
 
 /**
  * Прежние source-контракты читают русское представление настоящего каркаса.
@@ -37,12 +38,16 @@ export async function shellContractBrowser(t) {
   t.after(() => context.close());
 
   const page = await context.newPage();
+  const diagnose = browserDiagnostics(page, 'app-shell-controls');
 
-  await page.goto(origin + '#/chats');
-  await page.getByRole('button', { name: 'Настройки', exact: true }).waitFor();
+  await diagnose(async () => {
+    await page.goto(origin + '#/chats');
+    await page.getByRole('button', { name: 'Настройки', exact: true }).waitFor();
+  });
 
   return {
     page,
+    diagnose,
     async openProvider() {
       await page.locator('[data-context="provider-status"]').click();
       await page.locator('.ptip-name').waitFor();

@@ -4,7 +4,7 @@ import {
 } from '../../../shared/runtime/serverBinary.ts';
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import { sha256 } from '../../../shared/node/hash.ts';
-import { isStableReleaseVersion } from '../../../shared/runtime/releaseChannelContracts.ts';
+import { parseProductVersion } from '../../../shared/runtime/productReleaseVersion.ts';
 import { decodePayloadDescriptor, type PayloadDescriptor } from './payload.ts';
 
 export interface ServerPackageManifest extends Record<string, unknown> {
@@ -31,7 +31,7 @@ export function createServerManifest(payload: PayloadDescriptor, input: {
   engineSha256: string;
   buildInputs: Record<string, string>;
 }): ServerPackageManifest {
-  if (!isStableReleaseVersion(input.version)) {
+  if (!parseProductVersion(input.version)) {
     throw Object.assign(new Error('Некорректная продуктовая версия серверного пакета'), {
       code: 'server_metadata_invalid',
     });

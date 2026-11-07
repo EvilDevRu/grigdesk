@@ -1,4 +1,5 @@
-export type Action = 'start' | 'stop' | 'restart' | 'status' | 'logs';
+export type Action = 'start' | 'stop' | 'restart' | 'status' | 'logs'
+  | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
 
 export type CliArgs = {
   kind: 'open' | 'status' | 'server' | 'relay' | 'device' | 'help' | 'version';
@@ -6,6 +7,9 @@ export type CliArgs = {
   deviceValue?: string;
   address?: string;
   action?: Action;
+  restart?: boolean;
+  rollback?: boolean;
+  channel?: 'release' | 'dev';
   force: boolean;
   wait: boolean;
   json: boolean;
@@ -24,6 +28,12 @@ grigdesk-ctl server stop [--force]
 grigdesk-ctl server restart [--wait] [--force]
 grigdesk-ctl server status [--json]
 grigdesk-ctl server logs [-n N|--lines N] [-f|--follow]
+grigdesk-ctl server check-updates [--json]
+grigdesk-ctl server update [--restart] [--json] [--force]
+grigdesk-ctl server update-status [--json]
+grigdesk-ctl server resume-update [--restart] [--json] [--force]
+                                [--rollback — вернуть прежний выпуск]
+grigdesk-ctl server update-channel release|dev
 grigdesk-ctl relay start | stop | restart
 grigdesk-ctl relay status [--json]
 grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
@@ -32,7 +42,7 @@ grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
-grigdesk-ctl bundle             Собрать переносимую папку release/ и архив из исходников
+grigdesk-ctl bundle             Собрать установочные артефакты из исходников (для CI)
 grigdesk-ctl build [all|server|web|window|deepseek|apk]
                                 Без аргументов: сервер → веб → окно (all по умолчанию)
                                 apk: Android-приложение со встроенным вебом
@@ -95,24 +105,45 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new Error(`Не указано действие: grigdesk-ctl ${command} start | stop | restart | status | logs`);
     }
 
-    if (!['start', 'stop', 'restart', 'status', 'logs'].includes(action)) {
+    const updates = ['check-updates', 'update', 'update-status', 'resume-update', 'update-channel'];
+
+    if (!['start', 'stop', 'restart', 'status', 'logs', ...(command === 'server' ? updates : [])]
+      .includes(action)) {
       throw new Error(`Неизвестная команда: ${command} ${action}. ${HELP_HINT}`);
     }
 
     args.action = action as Action;
   }
 
-  const status = command === 'status' || args.action === 'status';
+  if (args.action === 'update-channel') {
+    const channel = argv[index++];
+
+    if (channel !== 'release' && channel !== 'dev') {
+      throw new Error('Укажите канал release или dev.');
+    }
+
+    args.channel = channel;
+  }
+
+  const update = args.action === 'update' || args.action === 'resume-update';
+  const status = command === 'status'
+    || ['status', 'check-updates', 'update-status', 'update', 'resume-update'].includes(args.action ?? '');
   const logs = args.action === 'logs';
   const server = command === 'server';
-  const allowForce = command === 'open' || (server && ['stop', 'restart'].includes(args.action ?? ''));
+  const allowForce = command === 'open'
+    || (server && ['stop', 'restart', 'update', 'resume-update'].includes(args.action ?? ''));
   const allowWait = server && ['start', 'restart'].includes(args.action ?? '');
+  const allowRollback = args.action === 'resume-update';
 
   for (; index < argv.length; index++) {
     const flag = argv[index]!;
 
     if (flag === '--json' && status) {
       args.json = true;
+    } else if (flag === '--restart' && update) {
+      args.restart = true;
+    } else if (flag === '--rollback' && allowRollback) {
+      args.rollback = true;
     } else if (flag === '--force' && allowForce) {
       args.force = true;
     } else if (flag === '--wait' && allowWait) {

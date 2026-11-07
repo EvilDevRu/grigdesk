@@ -12,8 +12,12 @@ import localApiPlugin from './scripts/localApiPlugin.ts';
 
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Номер выпуска приходит из единого build input, локальная сборка читает VERSION.
+ * Git identity остаётся отдельной подписью интерфейса и не заменяет продуктовый номер.
+ */
 function buildMetadata() {
-  let version = process.env.VITE_GRIGDESK_VERSION || 'dev';
+  let version = process.env.GRIGDESK_RELEASE_VERSION || process.env.VITE_GRIGDESK_VERSION || 'dev';
   let sha = process.env.VITE_GRIGDESK_SHA || 'dev';
   try { if (version === 'dev') version = readFileSync(path.join(envDir, 'VERSION'), 'utf8').trim(); }
   catch { /* dev checkout без VERSION */ }

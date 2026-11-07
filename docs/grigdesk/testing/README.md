@@ -109,3 +109,5 @@
 - [Живой замер production-сборки: посредник с CLI-токеном и что под ним не открывается](live-ui-cli-proxy.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)
 - [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.
+
+- [Сданные GREEN/RED, проверки updater и закрепление снимка TESTS](release-update-stage-order.md)

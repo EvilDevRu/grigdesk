@@ -1150,6 +1150,16 @@
   padding: 0;
 }
 
+/* Кнопка обновления занимает всю площадку знака, заданную раскладкой шапки.
+   Её геометрия принадлежит UI-kit; нажатие не должно перетаскивать desktop-окно. */
+.ui-pressable[data-context='application-update-mark'] {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
 .ui-pressable[data-context='provider-status'] {
   position: relative;
   display: inline-grid;

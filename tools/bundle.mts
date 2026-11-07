@@ -11,7 +11,7 @@ import {
 } from '../shared/chat/deepSeekBinary.ts';
 import { assertDeepSeekGlmApiAdmission } from '../shared/node/glmCompatibility.ts';
 import { writeBuildStepEvent } from '../shared/node/buildStepEvents.ts';
-import { executeBundle } from './bundleSteps.mts';
+import { executeInstalledBundle } from './installedBundle.mts';
 import type { BundleBuildInput } from './bundleSteps.mts';
 
 const execute = promisify(execFile);
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     throw new Error('Использование: grigdesk-ctl bundle');
   }
 
-  await executeBundle({
+  await executeInstalledBundle({
     root,
     ...(process.env.GRIGDESK_RELEASE_SIGNING_KEY
       ? {
@@ -145,7 +145,8 @@ async function main(): Promise<void> {
        */
       async window(input) {
         await run('npm', ['--prefix', path.join(root, 'desktop'), 'run', 'dist', '--',
-          `--config.directories.output=${input.outDir}`], input);
+          `--config.directories.output=${input.outDir}`,
+          `--config.extraMetadata.version=${input.env.GRIGDESK_RELEASE_VERSION}`], input);
 
         const images = (await readdir(input.outDir)).filter((name) => name.endsWith('.AppImage'));
 
@@ -191,7 +192,7 @@ async function main(): Promise<void> {
     },
   });
 
-  process.stdout.write('Готовы release/, release.tar.gz и release.tar.gz.sha256.\n');
+  process.stdout.write('Готовы установочные артефакты в release-artifacts/.\n');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

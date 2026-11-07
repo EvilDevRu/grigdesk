@@ -134,3 +134,15 @@ Electron 44 сам переводит в `app.quit()` → `before-quit`; обр�
 `tests/desktop/{splash-window,startup-controller,quit-controller,connection-lifecycle}.test.js`,
 `build-contract.test.js`; сквозные — [E2E старта](../testing/desktop-startup-e2e.md) и
 `window.e2e.mjs`, пакет — [DW-P4 и DW-P5](../testing/desktop-window-package.md).
+
+## Registered descriptor
+
+Descriptor v5 содержит root, installationId, dataHome и cliPaths. Загрузчик проверяет
+receipt/current и разрешает конкретный server ELF поколения; прежние v1–v4 сохранены.
+Desktop main передаёт clientRuntime updater-порт созданного автономного updater'а.
+
+В registered-запуске main создаёт автономный updater до соединения с машиной. Его локальный
+journal не ждёт сайта, а фоновая сеть не удерживает первый кадр. Исправная зарегистрированная
+служба запускается/ожидается через собственного владельца даже при inactive; supervisor
+не создаёт рядом child. Новый main пишет bound boot ACK собственной build identity после
+старта оболочки. [Контракт нового обновления](../server/installed-release-updates.md).

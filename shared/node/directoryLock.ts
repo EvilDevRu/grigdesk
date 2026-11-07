@@ -109,7 +109,7 @@ function sameOwner(left: DirectoryLockOwner | null, right: DirectoryLockOwner): 
  * Reclaim внутри старого каталога сериализует уборщиков до его удаления.
  * Владелец перечитывается после захвата claim: свежий lock не удаляется по старому снимку.
  */
-async function retireDead(directory: string, options: DirectoryLockOptions): Promise<void> {
+async function retireDead(directory: string, options: DirectoryLockOptions): Promise<boolean> {
   const claim = path.join(directory, '.reclaim');
   let inode: bigint;
 
@@ -118,7 +118,7 @@ async function retireDead(directory: string, options: DirectoryLockOptions): Pro
     inode = (await fs.lstat(claim, { bigint: true })).ino;
   } catch (error) {
     if (['EEXIST', 'ENOENT', 'ENOTDIR'].includes(String((error as NodeJS.ErrnoException).code))) {
-      return;
+      return false;
     }
 
     throw error;
@@ -132,6 +132,8 @@ async function retireDead(directory: string, options: DirectoryLockOptions): Pro
 
       await fs.rename(directory, stale);
       await fs.rm(stale, { recursive: true, force: true });
+
+      return true;
     }
   } finally {
     const current = await fs.lstat(claim, { bigint: true }).catch(() => null);
@@ -148,11 +150,14 @@ async function retireDead(directory: string, options: DirectoryLockOptions): Pro
       }
     }
   }
+
+  return false;
 }
 
 /**
  * Эксклюзивный mkdir-lock ограничивает ожидание и снимается только своим владельцем.
  * Восстановление после SIGKILL требует PID и времени старта, а не возраста lock.
+ * Уборка мёртвого владельца разрешает повторный захват даже без ожидания.
  */
 export async function acquireDirectoryLock(
   directory: string,
@@ -215,10 +220,12 @@ export async function acquireDirectoryLock(
       }
     }
 
-    await retireDead(directory, options);
+    if (await retireDead(directory, options)) {
+      continue;
+    }
 
     if (performance.now() >= deadline) {
-      throw Object.assign(new Error('Кэш DeepSeek занят другим процессом; повторите запуск'), {
+      throw Object.assign(new Error('Каталог занят другим процессом; повторите запуск'), {
         code: 'directory_lock_busy',
       });
     }

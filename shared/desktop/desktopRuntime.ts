@@ -1,4 +1,11 @@
 export type RuntimeDescriptor = {
+  version: 5;
+  kind: 'installed';
+  root: string;
+  installationId: string;
+  home: string;
+  cliPaths: string[];
+} | {
   version: 1;
   root: string;
   node: string;
@@ -53,6 +60,27 @@ export function parseRuntimeDescriptor(text: string): RuntimeDescriptor | null {
   const descriptor = value as Record<string, unknown>;
 
   const version = descriptor.version;
+
+  if (version === 5) {
+    const absolute = (value: unknown): value is string => typeof value === 'string'
+      && value.startsWith('/') && !value.includes('\0');
+
+    if (Object.keys(descriptor).length !== 6 || descriptor.kind !== 'installed'
+      || !absolute(descriptor.root) || !absolute(descriptor.home)
+      || typeof descriptor.installationId !== 'string' || !/^[a-f0-9-]{36}$/u.test(descriptor.installationId)
+      || !Array.isArray(descriptor.cliPaths) || !descriptor.cliPaths.every(absolute)) {
+      return null;
+    }
+
+    return {
+      version,
+      kind: 'installed',
+      root: descriptor.root,
+      installationId: descriptor.installationId,
+      home: descriptor.home,
+      cliPaths: descriptor.cliPaths,
+    };
+  }
 
   if (version === 4) {
     const absolute = (value: unknown): value is string => typeof value === 'string'

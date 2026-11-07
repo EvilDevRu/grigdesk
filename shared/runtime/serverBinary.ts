@@ -1,5 +1,5 @@
 import { contractDecoders } from '../lib/contractDecoders.ts';
-import { isStableReleaseVersion } from './releaseChannelContracts.ts';
+import { parseProductVersion } from './productReleaseVersion.ts';
 
 const decode = contractDecoders(invalidMetadata);
 const requiredCapabilities = ['api', 'ipc', 'helpers', 'engine'] as const;
@@ -46,7 +46,7 @@ function invalidMetadata(field: string): never {
 function releaseVersion(value: unknown, field: string): string {
   const version = decode.text(value, field);
 
-  if (!isStableReleaseVersion(version)) {
+  if (!parseProductVersion(version)) {
     invalidMetadata(field);
   }
 

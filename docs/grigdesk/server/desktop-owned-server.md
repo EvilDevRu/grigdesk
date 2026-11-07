@@ -101,3 +101,13 @@ CLI называет сервер вне службы «работает вне 
 Сквозь приложение — [E2E старта](../testing/desktop-startup-e2e.md), включая настоящий GrigDesk
 под окном (SE-10); установку и ярлык — `desktop-install-script` и `shortcut-script`, CLI —
 `tests/cli/{open,server}.test.mts`.
+
+## Граница новой установки
+
+Runtime identity фиксирует boot версию отдельно от installed. Legacy package-update
+зарегистрированной local-пары запрещён: отдельная серверная мутация не обновляет весь комплект.
+Новый manual update-drain проверяет CLI auth и подтверждённое задание своей installationId.
+Внешний apply-worker использует отдельный intent, durable ACK и proof слива после close сервера.
+Main ждёт хвост stdio, сохраняет настройки/cookies и выходит до замены current пары.
+Registered service active/inactive имеет приоритет над child. [Новый lifecycle](installed-release-updates.md)
+не меняет описанный выше обычный выход и legacy код 75.

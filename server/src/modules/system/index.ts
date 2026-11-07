@@ -1,14 +1,18 @@
+import { runtimeBuildContext } from '../../lib/runtimeBuildContext.ts';
+import { readInstalledPointer, writeInstallationJson } from '../../../../shared/node/installedLayout.ts';
+import { readInstalledUpdate } from '../../../../shared/node/installedUpdateState.ts';
+import { installationForExecutable } from '../../../../shared/node/updateProcessOwner.ts';
 // Модуль system — нагрузка домашнего ПК (CPU/RAM) + жизненный цикл самого сервера
 // (режим запуска, перезапуск, автозапуск и ярлык — из «Настройки → Сервер»).
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
+import { API_VERSION } from '../../../../shared/client/apiVersion.ts';
 
 import { config as runtimeConfig } from '../../config.ts';
 import { PackagedReleaseService, PackagedUpdateManager, readInstallVersion }
   from '../../lib/packagedRelease.ts';
-import { ReleaseChannelService } from '../../lib/releaseChannel.ts';
 import type { GrigDeskReleaseService } from '../../lib/grigDeskRelease.ts';
 import type { GrigDeskUpdateManager } from '../../lib/grigDeskUpdate.ts';
 import { createReleaseServices } from '../../lib/releaseServices.ts';
@@ -118,12 +122,21 @@ async function systemModule(
   const packaged = (opts.runtimeKind ?? runtimeKind)() === 'packaged';
   // Packaged-сервисы собираются здесь и передаются фабрике через opts: инъекции
   // тестов (opts.releases/opts.updates) имеют приоритет, как у source-ветки.
+  // Канал сайта больше не читается packaged-веткой: переносная поставка не публикуется,
+  // зарегистрированные установки обслуживает общий InstalledUpdateService в CLI/desktop.
   const packagedInstallRoot = runtimeInstallationRoot();
-  const packagedChannel = packaged ? new ReleaseChannelService() : undefined;
+  const buildContext = runtimeBuildContext();
+  const registeredInstallation = packaged && buildContext.mode === 'payload'
+    ? await installationForExecutable(buildContext.binary) : null;
   const packagedReleases = opts.releases ?? (packaged
     ? new PackagedReleaseService(config.rootDir, undefined, {
-      channel: packagedChannel,
-      installVersionReader: () => {
+      installVersionReader: async () => {
+        if (registeredInstallation) {
+          const current = await readInstalledPointer(registeredInstallation);
+
+          return current.server?.split('/')[1] ?? null;
+        }
+
         return readInstallVersion(packagedInstallRoot);
       },
     })
@@ -133,7 +146,6 @@ async function systemModule(
       installRoot: packagedInstallRoot,
       statePath: path.join(runtimeConfig.dataHome, 'state',
         'grigdesk-package-update.json'),
-      channel: packagedChannel,
       onRestart: () => {
         return schedulePackageRestart();
       },
@@ -162,12 +174,38 @@ async function systemModule(
 
   // GET принципиально локальный: HEAD/status + сохранённый результат последней remote-
   // проверки. Сеть разрешена только явному POST и редкому фоновому таймеру.
+  let bootIdentity: Promise<unknown> | null = null;
+
+  // Identity закрепляется за процессом и не перечитывает установленное поколение.
+  // Отказ не защёлкивается: следующий вызов строит identity заново.
+  // Общий auth guard закрывает маршрут так же, как остальной /api/system.
+  fastify.get('/api/system/runtime-identity', async () => {
+    if (!bootIdentity) {
+      const identity = releases.getStatus().then((status) => Object.freeze({
+        ...status.running,
+        ...(registeredInstallation ? { installationId: registeredInstallation.installationId } : {}),
+        pid: process.pid,
+        binary: buildContext.mode === 'payload' ? buildContext.binary : null,
+        owner: serverMode(),
+        api: API_VERSION,
+      }));
+
+      identity.catch(() => {
+        bootIdentity = null;
+      });
+      bootIdentity = identity;
+    }
+
+    return bootIdentity;
+  });
+
   fastify.get('/api/system/version', async () => {
     const status = await releases.getStatus();
 
     return packaged ? {
       ...status,
-      job: await updates.getJob()
+      ...registeredInstallation ? { updateAvailable: false, packageUpdate: null } : {},
+      job: registeredInstallation ? null : await updates.getJob()
     } : status;
   });
   fastify.post('/api/system/version/check', async () => {
@@ -176,7 +214,8 @@ async function systemModule(
     if (packaged && typeof status === 'object' && status !== null) {
       return {
         ...status,
-        job: await updates.getJob()
+        ...registeredInstallation ? { updateAvailable: false, packageUpdate: null } : {},
+        job: registeredInstallation ? null : await updates.getJob()
       };
     }
 
@@ -205,6 +244,13 @@ async function systemModule(
     if (!packaged) {
       return packageRequired(reply);
     }
+    if (registeredInstallation) {
+      return reply.code(409).send({
+        error: registeredInstallation.mode === 'local'
+          ? 'pair_update_required' : 'server_update_requires_cli',
+      });
+    }
+
     try {
       const job = await updates.startPackageUpdate(request.body);
 
@@ -217,7 +263,9 @@ async function systemModule(
     }
   });
 
-  fastify.get('/api/system/update-job', async () => ({ job: await updates.getJob() }));
+  fastify.get('/api/system/update-job', async () => ({
+    job: registeredInstallation ? null : await updates.getJob(),
+  }));
 
   /**
    * Отказ релиза наружу. Чужую ошибку не переодеваем в 4xx: без кода и статуса это
@@ -375,6 +423,77 @@ async function systemModule(
       ok: true,
       mode: mode === 'manual' ? 'script' : mode,
     };
+  });
+
+  let updateDrainScheduled = false;
+
+  // Подтверждение пишется только после всех шагов слива и close Fastify.
+  // Forced exit и ошибка шага не дают worker разрешение заменить программу.
+  if (registeredInstallation) {
+    fastify.shutdown?.afterDrain?.(async (success) => {
+      const job = await readInstalledUpdate(registeredInstallation);
+
+      if (job?.intent && ['stopping', 'applying', 'starting'].includes(job.stage)) {
+        await writeInstallationJson(registeredInstallation.root, 'update/server-drain.json', {
+          jobId: job.id,
+          nonce: job.intent.nonce,
+          instanceId: (await releases.getStatus()).running.instanceId,
+          success,
+        });
+      }
+    });
+  }
+
+  // Внешний worker с CLI-токеном может слить только подтверждённое задание своей установки.
+  // Повторный POST не создаёт второй shutdown и не меняет код штатного завершения.
+  fastify.post<{
+    Body: {
+      jobId: string;
+      installationId: string;
+      manifestDigest: string;
+    };
+  }>('/api/system/update-drain', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId', 'installationId', 'manifestDigest'],
+        propertyNames: { enum: ['jobId', 'installationId', 'manifestDigest'] },
+        properties: {
+          jobId: { type: 'string', pattern: '^[0-9a-f-]{36}$' },
+          installationId: { type: 'string', pattern: '^[0-9a-f-]{36}$' },
+          manifestDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (request.authKind !== 'cli') {
+      return reply.code(403).send({ error: 'cli_token_required' });
+    }
+
+    if (!registeredInstallation || !['manual', 'desktop'].includes(serverMode())) {
+      return reply.code(409).send({ error: 'registered_manual_owner_required' });
+    }
+
+    const job = await readInstalledUpdate(registeredInstallation);
+
+    if (!job?.intent || job.id !== request.body.jobId
+      || job.installationId !== request.body.installationId
+      || job.manifestDigest !== request.body.manifestDigest
+      || !['stopping', 'applying', 'starting'].includes(job.stage)) {
+      return reply.code(409).send({ error: 'update_job_mismatch' });
+    }
+
+    if (!fastify.shutdown) {
+      return reply.code(503).send({ error: 'shutdown_unavailable' });
+    }
+
+    if (!updateDrainScheduled && !fastify.shutdown.active) {
+      updateDrainScheduled = true;
+      setTimeout(() => void fastify.shutdown!.begin('обновление GrigDesk'), 400);
+    }
+
+    return reply.code(202).send({ ok: true });
   });
 
   fastify.post<UpdateRestartRoute>('/api/system/update-restart', {
@@ -549,8 +668,10 @@ async function systemModule(
     return reply.code(202).send({ ok: true });
   });
 
-  await updates.recover?.();
-  releases.start?.();
+  if (!registeredInstallation) {
+    await updates.recover?.();
+    releases.start?.();
+  }
 
   fastify.addHook('onClose', async () => { releases.stop?.(); });
 }

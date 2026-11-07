@@ -72,3 +72,15 @@ supervisor и его поколением. Команды имеют requestId �
 Before-quit, SIGTERM и SIGINT обходят вопрос и отменяют предварительную фазу. Общий restart,
 ctl, systemd, дополнительные окна, браузер и телефон не начинают остановку конвейеров.
 Подробности прежней уборки — [старт окна](desktop-startup.md).
+
+## Новое обновление
+
+Обычный quit не является подтверждением применения. Общий installed apply требует
+отдельного intent; concrete handoff/drain/boot-proof подключены через installedApplication.
+Прежний fallback обычного выхода этим изменением не расширяется на update.
+
+Registered update использует отдельный строгий путь: native-согласие по свежей активности,
+durable handoff ACK, Stop задач, подтверждённый server drain, сохранение настроек/cookies,
+слив stdio и exit main. Deadline либо неизвестная активность не разрешают pointer switch.
+Обычный quit/fallback выше не становится разрешением update; ready не применяется при close.
+[Применение и восстановление](../server/installed-release-updates.md).

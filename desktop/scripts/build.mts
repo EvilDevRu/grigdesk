@@ -1,3 +1,5 @@
+import { buildReleaseIdentity, type ReleaseChannel } from '../../shared/runtime/productReleaseVersion.ts';
+import { readProductBuildVersion } from '../../shared/node/releaseBuild.ts';
 import { copyFile, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -15,6 +17,15 @@ const splashFiles = ['index.html', 'style.css', 'background.png', 'wordmark.svg'
 async function buildDesktop(): Promise<void> {
   // Staging рядом с desktop/dist: замена идёт через rename, а он работает только в пределах
   // одной файловой системы; папка данных может лежать на другом диске.
+  const version = await readProductBuildVersion(path.dirname(desktop));
+  const identity = process.env.GRIGDESK_RELEASE_COMMIT && process.env.GRIGDESK_RELEASE_CHANNEL
+    ? buildReleaseIdentity(process.env.GRIGDESK_RELEASE_CHANNEL as ReleaseChannel,
+      version, process.env.GRIGDESK_RELEASE_COMMIT) : null;
+
+  if (identity && identity.releaseId !== process.env.GRIGDESK_RELEASE_ID) {
+    throw new Error('release_identity_invalid');
+  }
+
   const staging = await mkdtemp(path.join(desktop, '.dist-staging-'));
   const output = path.join(staging, 'dist');
   const previous = path.join(staging, 'previous');
@@ -35,7 +46,10 @@ async function buildDesktop(): Promise<void> {
       external: ['electron'],
       // Импортируемые CLI-модули проверяют свой URL до запуска главного процесса.
       // В CommonJS он должен указывать на готовый файл, а не исчезать при сборке.
-      define: { 'import.meta.url': 'grigdeskBundleUrl' },
+      define: {
+        'import.meta.url': 'grigdeskBundleUrl',
+        __GRIGDESK_BUILD_IDENTITY__: JSON.stringify(identity),
+      },
       banner: {
         js: [
           "'use strict';",

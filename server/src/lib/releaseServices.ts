@@ -2,7 +2,6 @@ import { GrigDeskReleaseService } from './grigDeskRelease.ts';
 import { GrigDeskUpdateManager } from './grigDeskUpdate.ts';
 import { createPackagedServices } from './packagedRelease.ts';
 import type { PackagedReleaseService, PackagedUpdateManager } from './packagedRelease.ts';
-import type { ReleaseChannelService } from './releaseChannel.ts';
 import { runtimeKind } from './runtimePaths.ts';
 import type { RuntimeKind } from './runtimePaths.ts';
 
@@ -12,7 +11,6 @@ export interface ReleaseServicesOptions {
   kind?: RuntimeKind;
   releases?: GrigDeskReleaseService | PackagedReleaseService;
   updates?: GrigDeskUpdateManager | PackagedUpdateManager;
-  packagedChannel?: ReleaseChannelService;
   broadcast?: (name: string, payload?: unknown) => void;
   desktop?: () => boolean;
   origin?: string;

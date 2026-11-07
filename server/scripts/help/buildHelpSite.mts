@@ -109,12 +109,17 @@ export const latestScript = `(() => {
   const english = navigator.language.toLowerCase().startsWith('en');
   const target = document.getElementById('message');
   target.textContent = english ? 'Opening the current guide…' : 'Открываем актуальное руководство…';
-  return fetch('../api/releases/v1/channel.json', {credentials: 'omit', signal: AbortSignal.timeout(10000)})
+  const channel = location.pathname.endsWith('latest-dev.html') ? 'dev' : 'release';
+  return fetch('../api/releases/v1/' + channel + '.json', {
+    credentials: 'omit', signal: AbortSignal.timeout(10000)
+  })
     .then((response) => { if (!response.ok) throw new Error('channel'); return response.json(); })
     .then((index) => {
-      const version = index && index.latest && index.latest.version;
+      const version = index && index.latest && index.latest.payload && index.latest.payload.version;
       const stable = /^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$/;
-      if (index.format !== 1 || typeof version !== 'string' || !stable.test(version)) {
+      if (index.format !== 2 || index.channel !== channel || typeof version !== 'string'
+        || !/^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-dev\\.[0-9]+)?$/.test(version)
+        || (channel === 'release' && !stable.test(version))) {
         throw new Error('version');
       }
       location.replace('./' + version + '/index.html' + location.hash);

@@ -1,3 +1,4 @@
+import { parseProductVersion } from '../../../shared/runtime/productReleaseVersion.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID, createPublicKey, verify as verifyBytes } from 'node:crypto';
 import { constants, realpathSync } from 'node:fs';
@@ -80,7 +81,7 @@ export async function readPackagedIdentity(root: string,
 
       const version = (await handle.readFile('utf8')).trim();
 
-      if (!isStableReleaseVersion(version)) {
+      if (!parseProductVersion(version)) {
         throw new Error('Неподдерживаемая версия серверного payload');
       }
 
@@ -159,7 +160,7 @@ export class PackagedReleaseService {
 
   private readonly rootDir: string;
 
-  private readonly identityReader: (root: string) => Promise<PackagedIdentity>;
+  private readonly bootIdentity: Promise<PackagedIdentity>;
 
   private channelSnapshot: {
     entry: ChannelEntry;
@@ -178,7 +179,8 @@ export class PackagedReleaseService {
     options: PackagedServiceOptions = {}) {
     this.options = options;
     this.rootDir = rootDir;
-    this.identityReader = identityReader;
+    this.bootIdentity = identityReader(rootDir);
+    void this.bootIdentity.catch(() => {});
   }
 
   /**
@@ -186,12 +188,12 @@ export class PackagedReleaseService {
    * Checkout-поля пусты: UI выбирает представление пакета по capability.
    */
   async getStatus(_options?: { fresh?: boolean }): Promise<ReleaseStatus> {
-    const manifest = await this.identityReader(this.rootDir);
+    const manifest = await this.bootIdentity;
     const installed = await (this.options.installVersionReader
       ?? (async () => {
         return readInstallVersion(this.rootDir);
       }))();
-    const current = installed ?? manifest.version;
+    const current = manifest.version;
 
     const version = {
       version: current,
@@ -202,6 +204,7 @@ export class PackagedReleaseService {
     };
 
     const status: ReleaseStatus = {
+      installed: { version: installed ?? manifest.version },
       updateCapability: { kind: 'package', message: PACKAGE_UPDATE_MESSAGE },
       running: {
         ...version,
@@ -439,14 +442,8 @@ export class PackagedUpdateManager {
       return;
     }
     if (job.status === 'restarting') {
-      const installed = await readInstallVersion(this.options.installRoot);
-
-      if (installed === job.targetVersion) {
-        await this.#complete(job);
-      } else {
-        await this.#fail(job, 'restart_not_confirmed',
-          'Сервер перезапущен, но версия установки не совпала с целью.');
-      }
+      await this.#fail(job, 'restart_not_confirmed',
+        'Живые версии приложения и сервера не подтверждены. Резервы сохранены; проверьте установку.');
 
       return;
     }
@@ -985,17 +982,14 @@ export class PackagedUpdateManager {
 /**
  * Фабрика SEA подставляется сборкой вместо source-композиции.
  * Типы source-классов стираются: их код и worker не входят в runtime-граф.
- * Канал создаёт только system-модуль (options.packagedChannel): фабрика без явной
- * опции не ходит в сеть — тесты фабрики остаются герметичными.
+ * Канал сайта фабрика не читает: переносная поставка не публикуется, тесты герметичны.
  */
 export function createPackagedServices(options: ReleaseServicesOptions) {
-  const channel = options.packagedChannel;
   const installRoot = runtimeInstallationRoot();
 
   return {
     releases: options.releases ?? new PackagedReleaseService(options.rootDir, undefined,
       {
-        ...(channel ? { channel } : {}),
         installVersionReader: () => {
           return readInstallVersion(installRoot);
         },
@@ -1003,7 +997,6 @@ export function createPackagedServices(options: ReleaseServicesOptions) {
     updates: options.updates ?? new PackagedUpdateManager({
       installRoot,
       statePath: path.join(path.dirname(options.statePath), 'grigdesk-package-update.json'),
-      ...(channel ? { channel } : {}),
     }),
   };
 }

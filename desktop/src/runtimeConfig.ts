@@ -1,3 +1,4 @@
+import { readInstallation, readInstalledPointer } from '../../shared/node/installedLayout.ts';
 import { desktopText } from './locale.ts';
 import { assertServerBinaryFile, recoverRuntimeSelection } from '../../server/src/lib/selectSeaServer.ts';
 import { applyBuiltServer } from '../../server/src/lib/builtServerSelection.ts';
@@ -469,6 +470,28 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
       problem: 'invalid',
       message: desktopText('desktop.serverDescriptorDamaged', { path: descriptorPath }),
     };
+  }
+
+  if (descriptor.version === 5) {
+    try {
+      const receipt = await readInstallation(descriptor.root);
+      const current = await readInstalledPointer(receipt);
+
+      if (receipt.installationId !== descriptor.installationId || receipt.mode !== 'local'
+        || receipt.dataHome !== descriptor.home || !current.server) {
+        throw new Error(desktopText('desktop.serverNotPrepared'));
+      }
+
+      return loadBinaryRuntime(input, {
+        version: 4,
+        kind: 'binary',
+        binary: path.join(receipt.root, current.server, 'bin/grigdesk-server'),
+        home: receipt.dataHome,
+        cliPaths: [path.join(receipt.root, current.server, 'bin')],
+      });
+    } catch {
+      return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+    }
   }
 
   if (descriptor.version === 4) {

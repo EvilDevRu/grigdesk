@@ -115,7 +115,6 @@ import type { HelpBundle } from '../../../../shared/help/helpContracts.ts';
 import type { HelpLoadError } from '../../shared/helpLoader.ts';
 import { helpHref } from '../../../../shared/help/helpLinks.ts';
 import { queryHelp } from '../../../../shared/help/helpQuery.ts';
-import { RELEASE_CHANNEL_URLS } from '../../../../shared/runtime/releaseChannelContracts.ts';
 
 const props = withDefaults(defineProps<{
   bundle: HelpBundle | null;
@@ -182,10 +181,9 @@ const website = computed(() => {
     return '';
   }
 
-  const origin = new URL(RELEASE_CHANNEL_URLS[0]).origin;
   const version = props.bundle.version;
 
-  return `${origin}/help/${version}/index.html#/help/${props.articleId}`;
+  return `https://grigdesk.com/help/${version}/index.html#/help/${props.articleId}`;
 });
 const noImages = () => false as const;
 const resolveHref = (href: string) => props.bundle ? helpHref(props.bundle, props.articleId, href) : false;

@@ -98,3 +98,7 @@ mobile/android/client/src/main/assets/ui/
 /release.tar.gz.sha256
 /.grigdesk-bundle-*/
 /.grigdesk-bundle.lock/
+
+# Обычная готовая поставка и отдельный staging её CI-сборки.
+/release-artifacts/
+/.installed-release-*/

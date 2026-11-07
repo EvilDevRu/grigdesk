@@ -93,7 +93,7 @@ test('PRC-3: отказ канала даёт checkError и не роняет с
   assert.equal(status.updateAvailable, false);
 });
 
-test('PRC-4: версия установки из bin/bundle.json приоритетнее identity', async (t) => {
+test('PRC-4/LIVE-DISK: диск меняет installed, но не identity запущенного процесса', async (t) => {
   const root = await packageRoot(t);
 
   await fs.mkdir(path.join(root, 'bin'), { recursive: true });
@@ -111,7 +111,8 @@ test('PRC-4: версия установки из bin/bundle.json приорит
   const status = await service.checkRemote();
 
   assert.equal(status.updateAvailable, true);
-  assert.equal(status.running.version, '0.2.5', 'версия установки читается из описи');
+  assert.equal(status.running.version, '0.2.0', 'running берётся из release.json своего процесса');
+  assert.equal(status.installed.version, '0.2.5', 'отдельный installed берётся из bin/bundle.json');
 });
 
 test('PRC-5: start() запускает фоновый опрос, stop() его снимает', async (t) => {

@@ -1,4 +1,5 @@
-import { cp, copyFile, readFile, readdir } from 'node:fs/promises';
+import { readProductBuildVersion } from '../../../shared/node/releaseBuild.ts';
+import { cp, copyFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { makeReadOnlyTree } from '../../../shared/node/files.ts';
@@ -95,6 +96,8 @@ export async function buildPayload(input: {
   await cp(path.join(input.directory, 'licenses'), path.join(input.directory, 'server/help/site/licenses'), {
     recursive: true,
   });
+  await writeFile(path.join(input.directory, 'VERSION'),
+    `${await readProductBuildVersion(input.sourceRoot)}\n`);
   await makeReadOnlyTree(input.directory);
 
   const compatibility = JSON.parse(await readFile(

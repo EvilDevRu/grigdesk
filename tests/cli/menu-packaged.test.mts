@@ -105,3 +105,39 @@ test('MP-MOVED барьер: собранный helper без TTY показыв
   assert.deepEqual(box.calls(), []);
   assert.deepEqual(box.requests(), []);
 });
+
+const { installedFixture, pinnedKeyHook } = await import('../helpers/installedUpdateFixture.mjs');
+const { execFile } = await import('node:child_process');
+const { promisify } = await import('node:util');
+
+ test('CLI-HEADLESS: installed status без DISPLAY, source cwd и сетевых вызовов', async (t) => {
+  const box = await installedFixture(t, { mode: 'server' });
+  const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
+  const entry = path.join(box.temporary, 'headless-status.mjs');
+  const cliUrl = new URL('../../cli/installedCli.ts', import.meta.url).href;
+
+  await writeFile(entry, [
+    'globalThis.fetch = async () => { throw new Error("Неожиданная сеть status"); };',
+    `const { runInstalledCli } = await import(${JSON.stringify(cliUrl)});`,
+    `process.exitCode = await runInstalledCli(${JSON.stringify(box.root)},`,
+    "  ['server', 'update-status', '--json']);",
+  ].join('\n'));
+
+  const result = await promisify(execFile)(process.execPath, ['--import', hook, entry], {
+    env: {
+      HOME: box.temporary,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      TERM: 'dumb',
+    },
+    cwd: box.temporary,
+    timeout: 5000,
+  });
+  const status = JSON.parse(result.stdout);
+
+  assert.equal(status.installed.server, '0.2.0');
+  assert.equal(status.check.state, 'unknown');
+  assert.equal(status.job, null);
+  assert.equal(result.stderr, '');
+  await box.preserved();
+});

@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { runtimeBuildContext } from './runtimeBuildContext.ts';
 import type { RuntimeBuildContext } from './runtimeBuildContext.ts';
+import { installationForExecutableSync } from '../../../shared/node/bundleLayout.ts';
 
 /**
  * Единый контракт путей сервера.
@@ -111,7 +112,7 @@ export function createRuntimePaths(context: RuntimeBuildContext): RuntimePaths {
       execPath: binary,
       helperDirectory: path.join(root, 'server/runtime/helpers'),
       installationBin,
-      installationRoot: path.dirname(installationBin),
+      installationRoot: installationForExecutableSync(binary)?.root ?? path.dirname(installationBin),
     };
   }
 
@@ -138,7 +139,9 @@ export function createRuntimePaths(context: RuntimeBuildContext): RuntimePaths {
       : fileURLToPath(context.helperUrl),
     helperDirectory: path.join(root, 'server/runtime/helpers'),
     installationBin,
-    installationRoot: path.dirname(installationBin),
+    installationRoot: context.mode === 'helper' && context.binary
+      ? installationForExecutableSync(context.binary)?.root ?? path.dirname(installationBin)
+      : path.dirname(installationBin),
   };
 }
 

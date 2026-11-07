@@ -251,3 +251,105 @@ test('PB-CTL-SELECT: use-server работает без source и host Node', as
   assert.match(calls, /--release-preparation/u);
   assert.doesNotMatch(calls, /host-node|sudo|systemctl|npm/u);
 });
+
+const { installedBuild } = await import('../helpers/installedBuildFixture.mjs');
+
+for (const channel of ['release', 'dev']) {
+  test(`VER-PROPAGATION: ${channel} identity передана всем сборщикам`, async (t) => {
+    const built = await installedBuild(t, channel);
+    const identity = built.index.latest.payload;
+
+    assert.equal(built.captured.length, 5);
+
+    for (const { env, outDir } of built.captured) {
+      assert.equal(env.GRIGDESK_RELEASE_VERSION, identity.version);
+      assert.equal(env.GRIGDESK_RELEASE_CHANNEL, channel);
+      assert.equal(env.GRIGDESK_RELEASE_COMMIT, identity.commit);
+      assert.equal(env.GRIGDESK_RELEASE_ID, identity.releaseId);
+      assert.ok(outDir.startsWith(built.root));
+      assert.notEqual(env.HOME, process.env.HOME);
+    }
+
+    assert.deepEqual(built.admission, ['verify', 'compatibility']);
+
+    const portableOutput = (await fs.readdir(built.directory))
+      .some((name) => /portable|bundle\.json/.test(name));
+
+    assert.equal(portableOutput, false);
+  });
+}
+
+const { installedRelease, isolatedEnvironment } = await import('../helpers/installedUpdateFixture.mjs');
+const { loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
+
+for (const mode of ['local', 'remote', 'server']) {
+  test(`PUB-INSTALL: ${mode}, готовые tar, отдельные данные и launchers без старта`, async (t) => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'normal-install-'));
+    const release = installedRelease();
+    const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts', release.publicKeyPem);
+    const stubs = path.join(temporary, 'stubs');
+    const calls = path.join(temporary, 'calls');
+    const root = path.join(temporary, 'installation');
+    const dataHome = path.join(temporary, 'data');
+    const userData = path.join(temporary, 'user');
+    const binDirectory = path.join(temporary, 'bin');
+    const applicationsDirectory = path.join(temporary, 'applications');
+    const unitDirectory = path.join(temporary, 'units');
+    const maintenance = path.join(temporary, 'maintenance');
+
+    t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+    await fs.mkdir(stubs);
+    await fs.mkdir(dataHome);
+    await fs.mkdir(userData);
+    await fs.writeFile(path.join(dataHome, '.env'), 'сохранить');
+    await fs.writeFile(maintenance, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    await fs.writeFile(path.join(stubs, 'systemctl'),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`, { mode: 0o700 });
+    isolatedEnvironment(t, {
+      HOME: temporary,
+      XDG_DATA_HOME: path.join(temporary, 'share'),
+      PATH: `${stubs}:/usr/bin:/bin`,
+    });
+
+    const input = {
+      root,
+      mode,
+      dataHome,
+      userData,
+      binDirectory,
+      applicationsDirectory,
+      unitDirectory,
+      envelope: release.envelope,
+      maintenance,
+      archive: async (component) => {
+        const file = path.join(temporary, `${component}.tar.gz`);
+        const artifact = release.envelope.payload.artifacts[component];
+
+        await fs.writeFile(file, release.archives.get(artifact.url));
+
+        return file;
+      },
+    };
+    const receipt = await installRelease(input);
+    const pointer = JSON.parse(await fs.readFile(path.join(root, 'current.json'), 'utf8'));
+
+    assert.equal(receipt.mode, mode);
+    assert.equal(pointer.desktop === null, mode === 'server');
+    assert.equal(pointer.server === null, mode === 'remote');
+    assert.equal(await fs.readFile(path.join(dataHome, '.env'), 'utf8'), 'сохранить');
+    assert.equal(await fs.stat(path.join(binDirectory, 'grigdesk-ctl')).then(() => true), true);
+    assert.equal(await fs.stat(path.join(root, 'bin/bundle.json')).then(() => true, () => false), false);
+
+    const descriptor = path.join(temporary, 'share/grigdesk/desktop/runtime.json');
+
+    assert.equal(await fs.stat(descriptor).then(() => true, () => false), mode === 'local');
+    assert.equal(await fs.stat(path.join(unitDirectory, 'grigdesk-server.service'))
+      .then(() => true, () => false), mode !== 'remote');
+    assert.doesNotMatch(await fs.readFile(calls, 'utf8').catch(() => ''), /start|enable/);
+    assert.deepEqual(await installRelease(input), receipt, 'Повтор своей установки идемпотентен');
+
+    await assert.rejects(installRelease({ ...input, dataHome: path.join(temporary, 'foreign-data') }),
+      /installation_collision/);
+    assert.equal(await fs.readFile(path.join(dataHome, '.env'), 'utf8'), 'сохранить');
+  });
+}

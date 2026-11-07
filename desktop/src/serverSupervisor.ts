@@ -23,6 +23,7 @@ export interface SupervisorAdapters {
     Promise<{ runtime: ServerRuntime } | { problem: string; message: string }>;
   probe(signal: AbortSignal): Promise<GrigDeskProbe>;
   unitState(signal: AbortSignal): Promise<string>;
+  installedService?(signal: AbortSignal): Promise<boolean>;
   runGate(runtime: ServerRuntime, signal: AbortSignal): Promise<{ code: number; lastLine: string }>;
   spawnServer(runtime: ServerRuntime): ChildHandle;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -138,6 +139,14 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       }
 
       return decideStart(probe, 'unavailable');
+    }
+
+    if (await adapters.installedService?.(input.signal)) {
+      check(input);
+      stage = 'starting';
+      waitReason = desktopText('desktop.serviceStarting');
+
+      return 'wait';
     }
 
     const state = await adapters.unitState(input.signal);

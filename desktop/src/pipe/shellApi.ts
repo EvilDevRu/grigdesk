@@ -1,3 +1,4 @@
+import type { ApplicationUpdatePort } from '../../../shared/runtime/applicationUpdateContracts.ts';
 import { locales, localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { resolveLocale } from '../../../shared/i18n/core.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -38,6 +39,7 @@ export interface NativeBrowserState {
 }
 
 interface ShellOptions {
+  applicationUpdates?: ApplicationUpdatePort;
   keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
@@ -119,6 +121,7 @@ export function createShellApi(options: ShellOptions) {
     address: profile.address,
     status: states.get(profile.id)?.status || 'none',
   });
+  const unsubscribeUpdates = options.applicationUpdates?.subscribe(changed);
   const unsubscribeExit = options.desktopExit?.subscribe(changed);
   const unsubscribeWindow = options.windowControls?.subscribe(changed);
   const unsubscribeBrowser = options.nativeBrowser?.subscribe(changed);
@@ -133,6 +136,7 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.applicationUpdates ? { applicationUpdate: options.applicationUpdates.state() } : {}),
       ...(options.nativeBrowser ? { browser: options.nativeBrowser.state() } : {}),
       ...(options.windowControls ? { windowControls: options.windowControls.state() } : {}),
       ...(options.desktopExit ? { desktopExit: { skipConfirmation: options.desktopExit.get() } } : {}),
@@ -149,6 +153,7 @@ export function createShellApi(options: ShellOptions) {
       serverApi: connection?.serverApi || null,
       appApi,
       capabilities: [
+        ...(options.applicationUpdates ? ['appUpdates' as const] : []),
         ...(options.applicationLauncher ? ['applicationLauncher' as const] : []),
         ...(options.nativeWindows ? ['windows' as const, 'taskSources' as const] : []),
         ...(options.nativeBrowser ? ['browser' as const] : []),
@@ -382,6 +387,14 @@ export function createShellApi(options: ShellOptions) {
 
       const body = await readBody(req, locale);
 
+      if (req.method === 'POST' && pathname.startsWith('/__shell/updates/')
+        && options.applicationUpdates) {
+        await options.applicationUpdates.action(pathname.slice('/__shell/updates/'.length), body);
+        json(res, 200, state());
+
+        return;
+      }
+
       if (pathname === '/__shell/launcher') {
         await applicationLauncherApi(req, res, body, options.applicationLauncher);
 
@@ -608,6 +621,7 @@ export function createShellApi(options: ShellOptions) {
      */
     close() {
       closed = true;
+      unsubscribeUpdates?.();
       unsubscribeExit?.();
       unsubscribeWindow?.();
       unsubscribeBrowser?.();

@@ -1,3 +1,4 @@
+import type { ApplicationUpdatePort } from '../../shared/runtime/applicationUpdateContracts.ts';
 import { desktopText } from './locale.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -18,6 +19,7 @@ import type { ApplicationLauncher } from './applicationLauncher.ts';
 import type { KeyboardLayout } from '../../shared/desktop/keyboardLayout.ts';
 
 interface RuntimeOptions {
+  applicationUpdates?: ApplicationUpdatePort;
   keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
@@ -59,6 +61,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    applicationUpdates: options.applicationUpdates,
     keyboardLayout: options.keyboardLayout,
     applicationLauncher: options.applicationLauncher,
     windowControls: options.windowControls,

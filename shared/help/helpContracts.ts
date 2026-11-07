@@ -1,3 +1,4 @@
+import { parseProductVersion } from '../runtime/productReleaseVersion.ts';
 import { contractDecoders } from '../lib/contractDecoders.ts';
 
 export const HELP_FORMAT = 1;
@@ -54,7 +55,7 @@ export function decodeHelpBundle(value: unknown): HelpBundle {
   const keys = ['articles', 'commit', 'format', 'locale', 'revision', 'version'];
 
   if (Object.keys(value as object).sort().join(',') !== keys.join(',')
-    || !/^\d+\.\d+\.\d+$/u.test(result.version)
+    || !parseProductVersion(result.version)
     || !/^(?:[a-f0-9]{40}|source)$/u.test(result.commit)
     || !/^[a-f0-9]{64}$/u.test(result.revision)
     || result.articles.length === 0 || result.articles.length > 128) {

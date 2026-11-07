@@ -13,6 +13,7 @@ import { resolveRuntimeSettings } from '../shared/runtime/runtimeSettings.ts';
 import type { Settings } from '../shared/runtime/runtimeSettings.ts';
 import { HELP_TEXT, parseArgs } from './args.ts';
 import type { CliArgs } from './args.ts';
+import { insideUnit, insideWindowScope } from './cgroup.ts';
 import { readLinks, readRelay, relayCommand } from './relay.ts';
 import { readServer, serverCommand, UNIT } from './server.ts';
 import { collectStatus, printable, renderText, toJson } from './status.ts';
@@ -24,9 +25,9 @@ import type { CliOutput } from './output.ts';
 
 export type { Settings } from '../shared/runtime/runtimeSettings.ts';
 
-// Electron сам переносит окно в scope app-<build.executableName>-<pid>.scope
-// (desktop/package.json); сервер окна и ходы его агентов наследуют этот scope.
-const WINDOW_SCOPE = /^app-grigdesk-\d+\.scope$/u;
+// Cgroup-сторож живёт в собственном лёгком модуле: его импортирует helper
+// установленного ctl без зависимостей source-CLI.
+export { insideUnit, insideWindowScope } from './cgroup.ts';
 
 /**
  * Читает .env как данные без экспорта его содержимого в процесс CLI или окно.
@@ -41,35 +42,6 @@ export function readSettings(
     home: env.HOME || os.homedir(),
     legacyTokenPath,
   });
-}
-
-/**
- * Сегменты путей cgroup из всех строк: v2 даёт одну строку, v1 — по строке на контроллер.
- * Строка без двух двоеточий не разбирается и сегментов не добавляет.
- */
-function cgroupSegments(cgroupText: string): string[] {
-  return cgroupText.split('\n').flatMap((line) => {
-    const first = line.indexOf(':');
-    const second = line.indexOf(':', first + 1);
-
-    return first >= 0 && second >= 0 ? line.slice(second + 1).split('/') : [];
-  });
-}
-
-/**
- * Принадлежность службе определяется только точным сегментом пути cgroup.
- * Несколько контроллеров v1 проверяются независимо, сходное имя не подходит.
- */
-export function insideUnit(cgroupText: string, unit: string): boolean {
-  return cgroupSegments(cgroupText).includes(unit);
-}
-
-/**
- * Сервер, поднятый окном, работает не в службе systemd, а в scope окна; агенты — там же.
- * Терминал человека живёт в своём scope, поэтому сторож его не задевает.
- */
-export function insideWindowScope(cgroupText: string): boolean {
-  return cgroupSegments(cgroupText).some((segment) => WINDOW_SCOPE.test(segment));
 }
 
 /**
@@ -139,7 +111,8 @@ export async function runCli(argv: readonly string[], output: CliOutput = plainO
     }
 
     const guarded = args.kind === 'open' || args.kind === 'server' &&
-      ['stop', 'restart'].includes(args.action ?? '');
+      (['stop', 'restart'].includes(args.action ?? '')
+        || Boolean(args.restart && ['update', 'resume-update'].includes(args.action ?? '')));
 
     if (guarded && !args.force) {
       const cgroup = await readText(process.env.GRIGDESK_CLI_CGROUP_FILE || '/proc/self/cgroup');
@@ -149,6 +122,13 @@ export async function runCli(argv: readonly string[], output: CliOutput = plainO
 
         return 1;
       }
+    }
+
+    if (args.kind === 'server' && ['check-updates', 'update', 'update-status', 'resume-update',
+      'update-channel'].includes(args.action ?? '')) {
+      const { runUpdateCommand } = await import('./updates.ts');
+
+      return await runUpdateCommand(args, root, output);
     }
 
     const { settings } = await readCliContext(root);

@@ -398,7 +398,7 @@ test('PUM-8: recover в середине замены возвращает ре�
     /0\.2\.0/, 'резерв bin возвращён');
 });
 
-test('PUM-9: recover после рестарта подтверждает новую версию и чистит резервы', async (t) => {
+test('PUM-9/LIVE-NO-PROOF: новая версия на диске не подтверждает живую пару', async (t) => {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const root = await install(t, '0.2.0');
   const rel = await release(t, '0.3.0', privateKey);
@@ -418,14 +418,8 @@ test('PUM-9: recover после рестарта подтверждает нов
   await second.recover();
   const job = await second.getJob();
 
-  assert.equal(job?.status, 'completed');
-  await assert.rejects(
-    fs.stat(String(done.backups?.bin)),
-    (error) => {
-      return error.code === 'ENOENT';
-    },
-    'резерв удалён после подтверждения',
-  );
+  assert.notEqual(job?.status, 'completed', 'нет boot proof ни от desktop, ни от нового сервера');
+  assert.ok(await fs.stat(String(done.backups?.bin)), 'до подтверждения резерв должен сохраняться');
 });
 
 test('PUM-10: прогресс скачивания отражается в задании', async (t) => {
@@ -441,6 +435,10 @@ test('PUM-10: прогресс скачивания отражается в за
         archive.slice(Math.floor(total / 2))];
 
       return new Response(new ReadableStream({
+        /**
+         * Половина реального архива удерживает downloader на измеримой границе.
+         * До разрешения проверяется сохранённый journal, после него поток закрывается.
+         */
         async start(controller) {
           for (const chunk of chunks) {
             controller.enqueue(chunk);
@@ -594,4 +592,221 @@ test('PUM-14: неверный JSON и чужая версия пробы пол
     assert.equal(job.error?.code, 'package_probe_failed');
     assert.equal(await fs.readFile(path.join(root, 'GrigDesk'), 'utf8'), 'window');
   }
+});
+
+// Зарегистрированная установка проверяется настоящим менеджером и архивами,
+// отдельно от исторического portable adapter и его неизменяемых барьеров.
+const { installedFixture, installedRelease } = await import('../helpers/installedUpdateFixture.mjs');
+
+ test('PREP-PAIR/PREP-LATER: обе части готовы, current и данные прежние', async (t) => {
+  const box = await installedFixture(t);
+  const job = await box.create();
+  const ready = await box.manager.prepare(job.id);
+
+  assert.equal(ready.stage, 'ready');
+  assert.equal(ready.intent, null);
+  assert.equal(ready.progress, null);
+  assert.deepEqual(await box.pointer(), box.previous);
+
+  for (const component of ['desktop', 'server']) {
+    const file = box.release.files.get(component);
+    const absolute = path.join(box.root, 'update', job.id, component, file.name);
+
+    assert.deepEqual(await fs.readFile(absolute), file.bytes);
+    assert.equal((await fs.stat(absolute)).mode & 0o777, 0o555);
+  }
+
+  assert.equal((await box.manager.prepare(job.id)).id, job.id);
+  await box.preserved();
+});
+
+test('JOB-IDEMPOTENT/JOB-PINNED: потеря ответа и новый latest не меняют job', async (t) => {
+  const release = installedRelease();
+  let latest = release.envelope;
+  const box = await installedFixture(t, { release, channel: { latest: async () => latest } });
+  const job = await box.create('потерянный-ответ');
+
+  latest = installedRelease({ version: '0.4.0' }).envelope;
+  assert.deepEqual(await box.create('потерянный-ответ'), job);
+  await assert.rejects(box.create('второй-запрос'), /release_update_in_progress/);
+  await box.manager.prepare(job.id);
+  assert.equal((await box.job()).manifestDigest, release.manifestDigest);
+  assert.equal((await box.job()).envelope.payload.version, release.identity.version);
+  assert.deepEqual(await box.pointer(), box.previous);
+});
+
+for (const entryName of ['../outside', '/absolute']) {
+  test(`PREP-FAIL: архив ${entryName} не выходит из staging`, async (t) => {
+    const box = await installedFixture(t, { release: installedRelease({ entryName }) });
+    const job = await box.create();
+
+    await assert.rejects(box.manager.prepare(job.id), /release_archive_entry_invalid/);
+    assert.deepEqual(await box.pointer(), box.previous);
+    assert.equal((await box.job()).stage, 'failed');
+    assert.equal((await box.job()).error.nextAction, 'resume-update');
+    await box.preserved();
+  });
+}
+
+for (const failure of ['size', 'hash', 'second-download', 'probe']) {
+  test(`PREP-FAIL: ${failure} сохраняет прежнюю пару`, async (t) => {
+    const release = installedRelease();
+    const box = await installedFixture(t, {
+      release,
+      fetcher: async (url) => {
+        const bytes = release.archives.get(String(url));
+
+        if (String(url).includes('server') && failure === 'second-download') {
+          return new Response('unavailable', { status: 503 });
+        }
+
+        const body = failure === 'size' ? bytes.subarray(1)
+          : failure === 'hash' ? Buffer.alloc(bytes.length) : bytes;
+
+        return new Response(body);
+      },
+      ...(failure === 'probe' ? { probe: async () => {
+        throw new Error('probe_failed');
+      } } : {}),
+    });
+    const job = await box.create();
+
+    await assert.rejects(box.manager.prepare(job.id),
+      /release_download_integrity_invalid|release_download_failed|probe_failed/);
+    assert.deepEqual(await box.pointer(), box.previous);
+    assert.equal((await box.job()).stage, 'failed');
+    assert.equal((await box.job()).error.nextAction, 'resume-update');
+    await box.preserved();
+  });
+}
+
+test('PREP-PROGRESS: journal хранит реальные байты только во время downloading', async (t) => {
+  const release = installedRelease();
+  const held = Promise.withResolvers();
+  let box;
+  let observed;
+
+  box = await installedFixture(t, {
+    release,
+    fetcher: async (url) => {
+      const bytes = release.archives.get(String(url));
+      const middle = Math.floor(bytes.length / 2);
+
+      return new Response(new ReadableStream({
+        /**
+         * Половина реального архива удерживает downloader на измеримой границе.
+         * До разрешения проверяется сохранённый journal, после него поток закрывается.
+         */
+        async start(controller) {
+          controller.enqueue(bytes.subarray(0, middle));
+          await held.promise;
+          controller.enqueue(bytes.subarray(middle));
+          controller.close();
+        },
+      }));
+    },
+  });
+
+  const job = await box.create();
+  const flight = box.manager.prepare(job.id);
+
+  try {
+    const deadline = Date.now() + 2000;
+
+    while (Date.now() < deadline) {
+      observed = await box.job();
+
+      if (observed.stage === 'downloading' && observed.progress.downloadedBytes > 0) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    assert.equal(observed.stage, 'downloading');
+    assert.equal(observed.progress.downloadedBytes,
+      Math.floor(release.envelope.payload.artifacts.desktop.size / 2));
+    assert.equal(observed.progress.totalBytes,
+      release.envelope.payload.artifacts.desktop.size + release.envelope.payload.artifacts.server.size);
+    assert.deepEqual(await box.pointer(), box.previous);
+  } finally {
+    held.resolve();
+    await flight;
+  }
+
+  assert.equal((await box.job()).progress, null);
+});
+
+test('PREP-FAIL: реальный EACCES staging не меняет current и оставляет nextAction', async (t) => {
+  const box = await installedFixture(t);
+  const job = await box.create();
+  const directory = path.join(box.root, 'update', job.id);
+
+  await fs.mkdir(directory, { mode: 0o700 });
+  await fs.chmod(directory, 0);
+
+  try {
+    await assert.rejects(box.manager.prepare(job.id), { code: 'EACCES' });
+    assert.equal((await box.job()).stage, 'failed');
+    assert.equal((await box.job()).error.nextAction, 'resume-update');
+    assert.deepEqual(await box.pointer(), box.previous);
+    await box.preserved();
+  } finally {
+    await fs.chmod(directory, 0o700);
+  }
+});
+
+test('JOB-IDEMPOTENT: concurrent app+CLI создают один installation-bound journal', async (t) => {
+  const box = await installedFixture(t);
+  const results = await Promise.allSettled([box.create('app'), box.create('cli')]);
+  const fulfilled = results.filter((result) => result.status === 'fulfilled');
+
+  assert.equal(fulfilled.length, 1);
+  assert.equal((await box.job()).id, fulfilled[0].value.id);
+  assert.deepEqual(await box.pointer(), box.previous);
+});
+
+test('PREP-FAIL: настоящий ENOSPC в отдельном tmpfs staging сохраняет journal и данные', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'update-enospc-'));
+  const script = path.join(directory, 'enospc.mjs');
+  const helper = new URL('../helpers/installedUpdateFixture.mjs', import.meta.url).href;
+
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(script, [
+    "import assert from 'node:assert/strict';",
+    "import fs from 'node:fs/promises';",
+    "import path from 'node:path';",
+    "import { randomBytes } from 'node:crypto';",
+    "import { execFile } from 'node:child_process';",
+    "import { promisify } from 'node:util';",
+    `import { installedFixture, installedRelease } from ${JSON.stringify(helper)};`,
+    'const execute = promisify(execFile);',
+    'const hooks = [];',
+    'const release = installedRelease({',
+    '  script: (_part, _identity, source) => source + "#" + randomBytes(2 * 1024 * 1024).toString("base64"),',
+    '});',
+    'const box = await installedFixture({ after: (hook) => hooks.push(hook) }, { mode: "server", release });',
+    'const job = await box.create();',
+    'const staging = path.join(box.root, "update", job.id);',
+    'await fs.mkdir(staging, { mode: 0o700 });',
+    'await execute("mount", ["-t", "tmpfs", "-o", "size=512k,mode=0700", "tmpfs", staging]);',
+    'try {',
+    '  await assert.rejects(box.manager.prepare(job.id), { code: "ENOSPC" });',
+    '  assert.equal((await box.job()).stage, "failed");',
+    '  assert.equal((await box.job()).error.nextAction, "resume-update");',
+    '  assert.deepEqual(await box.pointer(), box.previous);',
+    '  await box.preserved();',
+    '  process.stdout.write("ENOSPC_OBSERVED\\n");',
+    '} finally {',
+    '  await execute("umount", [staging]);',
+    '  for (const hook of hooks) await hook();',
+    '}',
+  ].join('\n'));
+
+  const result = await execute('unshare', ['-Urnm', process.execPath, script], {
+    env: { HOME: directory, PATH: '/usr/bin:/bin' },
+    timeout: 10000,
+  });
+
+  assert.match(result.stdout, /ENOSPC_OBSERVED/);
 });

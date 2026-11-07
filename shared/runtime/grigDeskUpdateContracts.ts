@@ -84,6 +84,7 @@ export interface LatestRelease {
  * Объявлен явно, а не выведен: без имени тип ссылался бы сам на себя через кеш.
  */
 export interface ReleaseStatus {
+  installed?: { version: string };
   updateCapability?: { kind: 'source' } | { kind: 'package'; message: string };
   running: RunningRelease;
   checkout: CheckoutState;

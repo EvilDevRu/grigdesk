@@ -2,6 +2,21 @@ name: Релиз GrigDesk — сборка и публикация
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Канал выпуска
+        type: choice
+        options: [release, dev]
+        default: release
+        required: true
+      publish:
+        description: Опубликовать проверенный выпуск
+        type: boolean
+        default: false
+      notes:
+        description: Описание RU/EN в JSON (необязательно)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -31,6 +46,11 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
+
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
 
       - name: Зависимости сервера
         run: npm --prefix server ci
@@ -71,6 +91,7 @@ jobs:
           printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
 
       - name: Ключ сайта
+        if: ${{ inputs.publish }}
         env:
           SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
           MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
@@ -84,9 +105,24 @@ jobs:
 
       - name: Сборка комплекта
         run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
+        env:
+          GRIGDESK_RELEASE_NOTES_JSON: ${{ inputs.notes }}
+
+      - name: Deb-пакет
+        # Bootstrap-пакет для apt: ставит только загрузчик и подписанный installer,
+        # установка и обновления остаются в пределах пользователя.
+        run: node tools/buildDeb.mts
+
+      - name: Артефакты проверочного выпуска
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grigdesk-${{ inputs.channel }}-${{ github.run_number }}
+          path: release-artifacts/
+          if-no-files-found: error
 
       - name: Публикация на сайт
-        # Сборщик кладёт выпуск в корень репозитория: release/, release.tar.gz и суммы.
+        if: ${{ inputs.publish }}
+        # Новый сборщик кладёт installer, компоненты и v2-индекс в release-artifacts/.
         run: node tools/release-publish.mts "$PWD"
         env:
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}

@@ -82,6 +82,9 @@
         :heading="t('settings.sectionGrigdeskVersion')"
         :description="t('settings.installedVersionStableChannelAndUpdateCheck')"
       >
+        <UiButton v-if="applicationUpdate.enabled" @click="applicationUpdate.open = true">
+          {{ t('settings.appUpdateTitle') }}
+        </UiButton>
         <PackagedServerVersion
           v-if="packageCapability"
           :version="release?.running.version || '—'"
@@ -134,7 +137,7 @@
             {{ t('settings.releaseInstallation') }} {{ blockReasonLabel(reason, uiLocale) }}
           </p>
         </template>
-        <template v-if="release?.updateCapability?.kind === 'package'">
+        <template v-if="release?.updateCapability?.kind === 'package' && !applicationUpdate.enabled">
           <p data-context="package-update-card">
             {{ t('settings.pkgUpdateTitle') }} · {{ release.running.version }}
             <template v-if="release.updateAvailable && release.packageUpdate">
@@ -193,6 +196,7 @@ import SettingsFacts from '../SettingsFacts.vue';
 import PackagedServerVersion from '../PackagedServerVersion.vue';
 import PackageUpdateDialog from '../../../shared/PackageUpdateDialog.vue';
 import { useShellStore } from '../../../stores/shell.ts';
+import { useApplicationUpdateStore } from '../../../stores/applicationUpdate.ts';
 import { shellAction } from '../../../shared/shellClient.ts';
 import {
   createApplicationLauncherResource,
@@ -217,6 +221,7 @@ const settings = useSettingsStore();
 const updates = useGrigDeskUpdateStore();
 const packageDialogOpen = ref(false);
 const shell = useShellStore();
+const applicationUpdate = useApplicationUpdateStore();
 const server = ref<ServerView | null>(null);
 const launcher = ref<LauncherState | null>(null);
 const applicationLauncher = ref<ApplicationLauncherState | null>(null);

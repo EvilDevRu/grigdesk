@@ -1,3 +1,4 @@
+import { readProductBuildVersion } from '../../../shared/node/releaseBuild.ts';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -14,7 +15,7 @@ export async function writeHelpResources(input: {
   sourceRoot: string;
   directory: string;
 }, site = buildHelpSite): Promise<string[]> {
-  const version = (await readFile(path.join(input.sourceRoot, 'VERSION'), 'utf8')).trim();
+  const version = await readProductBuildVersion(input.sourceRoot);
   const commit = await execute('git', ['rev-parse', 'HEAD'], {
     cwd: input.sourceRoot, timeout: 5000,
   }).then((result) => result.stdout.trim()).catch(() => 'source');

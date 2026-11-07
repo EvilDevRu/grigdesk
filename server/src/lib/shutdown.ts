@@ -29,6 +29,7 @@ export interface ShutdownCoordinator {
   readonly active: boolean;
   // Зарегистрировать шаг слива; порядок — порядок регистрации.
   register(name: string, run: () => Promise<void>): void;
+  afterDrain?(observer: (success: boolean) => Promise<void>): void;
   // Начать остановку. Повторный вызов возвращает ту же остановку.
   begin(reason: string, exitCode?: number): Promise<void>;
   // Повесить обработчики SIGTERM/SIGINT. Второй сигнал во время остановки — немедленный выход.
@@ -55,6 +56,7 @@ export function createShutdownCoordinator({
   signals?: EventEmitter;
 }): ShutdownCoordinator {
   const steps: ShutdownStep[] = [];
+  const observers: ((success: boolean) => Promise<void>)[] = [];
 
   let active = false;
   let running: Promise<void> | null = null;
@@ -66,6 +68,7 @@ export function createShutdownCoordinator({
    */
   async function run(reason: string, exitCode: number): Promise<void> {
     const startedAt = Date.now();
+    let drained = true;
 
     log?.info?.({ reason, steps: steps.map((step) => step.name) }, 'сервер: начинаю остановку');
 
@@ -79,6 +82,7 @@ export function createShutdownCoordinator({
       try {
         await step.run();
       } catch (error) {
+        drained = false;
         log?.error?.({ step: step.name, err: (error as Error)?.message }, 'сервер: шаг остановки упал');
       }
     }
@@ -92,8 +96,19 @@ export function createShutdownCoordinator({
       return;
     }
 
-    clearTimeout(hardStop);
     log?.info?.({ reason, tookMs: Date.now() - startedAt }, 'сервер: остановлен');
+
+    // Наблюдатели drain-пруфов остаются внутри общего бюджета: зависший observer
+    // не должен держать процесс (и systemd до SIGKILL) после закрытия соединений.
+    for (const observer of observers) {
+      try {
+        await observer(drained);
+      } catch (error) {
+        log?.error?.({ err: (error as Error)?.message }, 'сервер: подтверждение слива не записано');
+      }
+    }
+
+    clearTimeout(hardStop);
     exit(exitCode);
   }
 
@@ -125,6 +140,9 @@ export function createShutdownCoordinator({
     get active() { return active; },
     register(name, runStep) {
       steps.push({ name, run: runStep });
+    },
+    afterDrain(observer) {
+      observers.push(observer);
     },
     begin,
     arm() {

@@ -1,3 +1,4 @@
+import { readProductBuildVersion } from '../shared/node/releaseBuild.ts';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -23,7 +24,7 @@ export interface BundleBuildInput {
   env: NodeJS.ProcessEnv;
 }
 
-interface BundleOptions {
+export interface BundleOptions {
   root: string;
   onStep?(event: BuildStepEvent): void;
   env?: NodeJS.ProcessEnv;
@@ -199,11 +200,14 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
         cwd: root,
       })).stdout.length > 0,
     };
-    const version = (await files.readFile(path.join(root, 'VERSION'), 'utf8')).trim();
+    const version = await readProductBuildVersion(root, options.env ?? process.env);
 
     work = await files.mkdtemp(path.join(root, '.grigdesk-bundle-'));
 
     const env = await buildEnvironment(work, options.env ?? process.env);
+
+    env.GRIGDESK_RELEASE_VERSION = version;
+
     const stage = path.join(work, 'release');
     const targets: Record<Stage, string> = {
       server: 'bin/grigdesk-server',

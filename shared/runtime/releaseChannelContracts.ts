@@ -4,6 +4,11 @@ export interface ChannelCompat {
   glibc: string;
 }
 
+/**
+ * Историческая запись переносного комплекта: сайт её больше не публикует и клиенты
+ * не читают. Тип и декодер остаются валидаторами локального выхода executeBundle
+ * и внедряемых заглушек packaged-сервиса в тестах.
+ */
 export interface ChannelEntry {
   version: string;
   commit: string;
@@ -14,17 +19,6 @@ export interface ChannelEntry {
   archiveUrl: string | null;
   compat: ChannelCompat;
 }
-
-export interface ChannelIndex {
-  format: 1;
-  latest: ChannelEntry | null;
-  publishedAt: string;
-}
-
-export const RELEASE_CHANNEL_URLS = [
-  'https://grigdesk.com/api/releases/v1/channel.json',
-  'https://grigdesk.ru/api/releases/v1/channel.json',
-] as const;
 
 /**
  * Публичный ключ подписи релизов (SPKI PEM). Пустая строка — ключ ещё не задан владельцем:
@@ -114,30 +108,5 @@ export function decodeChannelEntry(value: unknown): ChannelEntry {
       arch: 'x64',
       glibc: compat.glibc
     },
-  };
-}
-
-/**
- * Индекс канала декодируется целиком: format 1, latest допускает null (пустой канал),
- * publishedAt — строгий ISO, чтобы кеш мог отличать свежие данные от устаревших.
- */
-export function decodeChannelIndex(value: unknown): ChannelIndex {
-  if (typeof value !== 'object' || value === null) {
-    throw new Error('Некорректный индекс канала релизов');
-  }
-
-  const index = value as Record<string, unknown>;
-
-  if (index.format !== 1 || typeof index.publishedAt !== 'string'
-    || Number.isNaN(Date.parse(index.publishedAt))
-    || new Date(index.publishedAt).toISOString() !== index.publishedAt
-    || Object.keys(index).length !== 3) {
-    throw new Error('Некорректный индекс канала релизов');
-  }
-
-  return {
-    format: 1,
-    latest: index.latest === null ? null : decodeChannelEntry(index.latest),
-    publishedAt: index.publishedAt,
   };
 }

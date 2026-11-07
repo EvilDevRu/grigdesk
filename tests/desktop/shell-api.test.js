@@ -463,7 +463,7 @@ test('SA-01: capability и закрытые действия поверхнос�
   });
 
   t.after(() => f.shell.close());
-  assert.deepEqual(f.shell.state().capabilities, ['windows']);
+  assert.deepEqual(f.shell.state().capabilities, ['windows', 'taskSources']);
   assert.deepEqual(await invokeSurface(f.shell, '/__shell/surfaces/open', {
     kind: 'task', id: '42',
   }), { status: 200, result: { opened: true } });
@@ -740,4 +740,53 @@ test('BR-S01: browser capability только с native port; HTTP state не с
   assert.equal(response.status, 404);
   value.shell.close();
   assert.equal(disposed, true);
+});
+
+test('APP-UPDATES: локальные actions и long-poll доступны без local и upstream', async (t) => {
+  const calls = [];
+  let notify;
+  let unsubscribed = false;
+  const snapshot = {
+    running: '0.2.0',
+    checkState: 'unknown',
+    job: null,
+  };
+  const value = fixture({
+    applicationUpdates: {
+      state: () => snapshot,
+      subscribe(listener) {
+        notify = listener;
+
+        return () => {
+          unsubscribed = true;
+        };
+      },
+      action: async (action, body) => {
+        calls.push({ action, body });
+      },
+    },
+  });
+
+  t.after(() => value.shell.close());
+  value.unavailable();
+  assert.equal(value.shell.state().capabilities.includes('appUpdates'), true);
+  assert.equal(value.shell.state().applicationUpdate.running, '0.2.0');
+
+  const revision = value.shell.state().rev;
+
+  notify();
+  assert.ok(value.shell.state().rev > revision);
+
+  for (const [action, body] of [
+    ['check', {}], ['prepare', {}], ['apply', { confirmed: true }], ['channel', { channel: 'dev' }],
+  ]) {
+    const response = await invokeSurface(value.shell, `/__shell/updates/${action}`, body);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls.at(-1), { action, body });
+  }
+
+  assert.equal(value.probes(), 0);
+  value.shell.close();
+  assert.equal(unsubscribed, true);
 });

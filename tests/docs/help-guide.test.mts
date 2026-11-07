@@ -106,3 +106,13 @@ test('HELP-S3: фактический корпус полный, обезлич�
   assert.ok(corpus.articles.some((entry) => entry.id === 'getting-started'));
   assert.ok(corpus.articles.some((entry) => entry.id === 'troubleshooting'));
 });
+
+test('VER-DEV-HELP: корпус справки получает ту же dev-версию и commit сборки', async (t) => {
+  const box = await fixture(t);
+  const buildIdentity = { version: '0.2.0-dev.42', commit: 'c'.repeat(40) };
+  const corpus = await compileHelpSources(box.root, buildIdentity);
+
+  assert.equal(corpus.version, buildIdentity.version);
+  assert.equal(corpus.commit, buildIdentity.commit);
+  assert.equal(corpus.articles.length, 2);
+});

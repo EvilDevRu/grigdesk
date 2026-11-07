@@ -398,3 +398,52 @@ test('PB-PACK-FAIL: любой build, verify, audit, tar и rename сохран�
     });
   }
 });
+
+const { installedBuild } = await import('../helpers/installedBuildFixture.mjs');
+const { extractReleaseArtifact } = await import('../../shared/node/releaseArchive.ts');
+
+test('PB-PACK-INSTALLED-01–06: allowlist, bytes, mode и admission installer', async (t) => {
+  const built = await installedBuild(t, 'release');
+  const payload = built.index.latest.payload;
+
+  for (const component of ['desktop', 'server']) {
+    const artifact = payload.artifacts[component];
+    const directory = path.join(built.temporary, `unpack-${component}`);
+
+    await extractReleaseArtifact(path.join(built.directory, `${component}.tar.gz`), directory, artifact);
+    assert.deepEqual(artifact.files.map((entry) => entry.path).sort(), component === 'desktop'
+      ? ['GrigDesk'] : ['bin/b24', 'bin/deepseek', 'bin/grigdesk-relay', 'bin/grigdesk-server']);
+
+    for (const entry of artifact.files) {
+      const file = path.join(directory, entry.path);
+      const bytes = await fs.readFile(file);
+
+      assert.equal(sha256(bytes), entry.sha256);
+      assert.equal(bytes.length, entry.size);
+      assert.equal((await fs.stat(file)).mode & 0o777, 0o555);
+    }
+
+    assert.deepEqual(artifact.buildIdentity, {
+      channel: payload.channel,
+      version: payload.version,
+      commit: payload.commit,
+      releaseId: payload.releaseId,
+    });
+  }
+
+  for (const input of built.captured) {
+    for (const key of ['NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD', 'SECRET_TOKEN', 'VITE_API_URL']) {
+      assert.equal(input.env[key], undefined);
+    }
+  }
+
+  assert.deepEqual(built.admission, ['verify', 'compatibility']);
+  assert.equal(await fs.readFile(path.join(built.root, 'VERSION'), 'utf8'), '0.3.0\n');
+});
+
+for (const failBuilder of ['server', 'b24', 'relay', 'deepseek', 'window']) {
+  test(`PB-PACK-INSTALLED-FAIL: ${failBuilder} не выдаёт готовый выпуск`, async (t) => {
+    await assert.rejects(installedBuild(t, 'release', { failBuilder }),
+      new RegExp(`fixture_builder_failed:${failBuilder}`));
+  });
+}

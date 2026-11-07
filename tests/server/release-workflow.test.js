@@ -22,6 +22,7 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.match(text, /npm --prefix deepseek ci/);
   assert.match(text, /npm --prefix desktop ci/);
   assert.match(text, /tools\/bundle\.mts/);
+  assert.match(text, /tools\/buildDeb\.mts/);
   assert.match(text, /tools\/release-publish\.mts "\$PWD"/);
   assert.match(text, /secrets\.RELEASE_SIGNING_KEY/);
   assert.match(text, /secrets\.RELEASE_SITE_KEY/);
@@ -35,4 +36,26 @@ test('RW-2: отдельный relay-workflow удалён', async () => {
       return error.code === 'ENOENT';
     },
   );
+});
+
+test('RW-CHANNELS: ручной выпуск выбирает release/dev и по умолчанию только проверяет', async () => {
+  const source = await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
+  );
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = yaml.parse(source);
+  const inputs = workflow.on.workflow_dispatch?.inputs;
+
+  assert.ok(inputs?.channel, 'ручной workflow должен объявлять выбор канала');
+  assert.deepEqual(inputs.channel.options, ['release', 'dev']);
+  assert.equal(inputs.channel.default, 'release');
+  assert.equal(inputs.publish.type, 'boolean');
+  assert.equal(inputs.publish.default, false);
+  assert.equal(workflow.on.push, undefined);
+
+  const publish = workflow.jobs.release.steps.find((step) =>
+    step.run?.includes('tools/release-publish.mts'));
+
+  assert.ok(publish, 'publisher остаётся отдельным шагом');
+  assert.match(publish.if ?? '', /inputs\.publish/u);
 });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -8,6 +9,7 @@ import { insideUnit, insideWindowScope, readSettings } from '../../cli/commands.
 import { deriveServerState, gateReason, parseShow } from '../../cli/server.ts';
 import type { UnitInfo } from '../../cli/server.ts';
 import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
+import { parseArgs } from '../../cli/args.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 const unitName = 'grigdesk-server.service';
@@ -395,4 +397,94 @@ test('CLI-DH-3 файл не может переназначать общую п
   assert.equal(result.code, 1);
   assert.match(result.stderr, /GRIGDESK_HOME.*запрещён/);
   assert.deepEqual(box.calls(), []);
+});
+
+for (const action of ['check-updates', 'update', 'update-status', 'resume-update']) {
+  test(`CLI-UPDATES: прямая команда server ${action} доступна без работающего сервера`, () => {
+    const args = parseArgs(['server', action]);
+
+    assert.equal(args.kind, 'server');
+    assert.equal(args.action, action);
+  });
+}
+
+test('CLI-UPDATES: явный канал dev и подтверждение restart разбираются без эффектов', () => {
+  const channel = parseArgs(['server', 'update-channel', 'dev']);
+  const update = parseArgs(['server', 'update', '--restart', '--force']);
+
+  assert.equal(channel.action, 'update-channel');
+  assert.equal(update.action, 'update');
+  assert.equal('restart' in update && update.restart, true);
+  assert.equal(update.force, true);
+});
+
+const { installedFixture, pinnedKeyHook, isolatedEnvironment } = await import(
+  '../helpers/installedUpdateFixture.mjs'
+);
+const { loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
+
+ test('CLI-STOPPED: nonTTY готовит server, не запускает и не применяет без --restart', async (t) => {
+  const box = await installedFixture(t, { mode: 'server' });
+  const created = await box.create();
+  const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
+  const worker = path.join(box.temporary, 'prepare.mjs');
+  const nodeModule = new URL('../../shared/node/installedUpdateService.ts', import.meta.url).href;
+  const stubs = path.join(box.temporary, 'stubs');
+
+  await fs.mkdir(stubs);
+
+  for (const component of ['desktop', 'server']) {
+    const artifact = box.release.envelope.payload.artifacts[component];
+
+    await fs.writeFile(path.join(box.temporary, `${component}.tar.gz`),
+      box.release.archives.get(artifact.url));
+  }
+
+  await fs.writeFile(path.join(stubs, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0o700 });
+  await fs.writeFile(worker, [
+    `import { InstalledUpdateService } from ${JSON.stringify(nodeModule)};`,
+    `const service = new InstalledUpdateService(${JSON.stringify(box.root)});`,
+    `import fs from 'node:fs/promises';`,
+    `globalThis.fetch = async (url) => new Response(await fs.readFile(`,
+    `  ${JSON.stringify(box.temporary)} + '/' + (String(url).includes('server') ? 'server' : 'desktop')`,
+    `  + '.tar.gz'));`,
+    'await service.manager().prepare(process.argv[3]);',
+  ].join('\n'));
+  await fs.writeFile(path.join(box.root, 'update/maintenance'), [
+    '#!/bin/sh',
+    `exec '${process.execPath}' --import '${hook}' '${worker}' "$@"`,
+  ].join('\n'), { mode: 0o700 });
+  isolatedEnvironment(t, { PATH: `${stubs}:/usr/bin:/bin` });
+
+  const { runUpdateCommand } = await loadInstalledModule(t, 'cli/updates.ts', box.release.publicKeyPem);
+  const output: string[] = [];
+  const port = {
+    write: (text: string) => output.push(text),
+    error: (text: string) => output.push(text),
+  };
+  const code = await runUpdateCommand({
+    kind: 'server',
+    action: 'update',
+    json: true,
+  }, box.root, port);
+
+  assert.equal(code, 0, output.join(''));
+  assert.equal((await box.job())?.id, created.id);
+  assert.equal((await box.job())?.stage, 'ready');
+  assert.equal((await box.job())?.intent, null);
+  assert.deepEqual(await box.pointer(), box.previous);
+  assert.equal(await fs.stat(path.join(box.root, 'update/server-process.json'))
+    .then(() => true, () => false), false);
+
+  for (const action of ['update-status', 'resume-update']) {
+    output.length = 0;
+    assert.equal(await runUpdateCommand({
+      kind: 'server',
+      action,
+      json: true,
+    }, box.root, port), 0);
+    assert.equal(JSON.parse(output.join('')).job.id, created.id);
+  }
+
+  await box.preserved();
 });

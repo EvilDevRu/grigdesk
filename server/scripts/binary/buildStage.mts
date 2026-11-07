@@ -1,3 +1,4 @@
+import { readProductBuildVersion } from '../../../shared/node/releaseBuild.ts';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
     }
 
     const manifest = createServerManifest(payload, {
-      version: (await readFile(path.join(input.sourceRoot, 'VERSION'), 'utf8')).trim(),
+      version: await readProductBuildVersion(input.sourceRoot),
       launcherSha256: await sha256File(path.join(input.work, 'bundle.cjs')),
       engineSha256: sha256(canonicalJson(payload.entries.filter((entry) =>
         entry.path.startsWith('engine/') || entry.path.startsWith('schemas/analytics/')))),

@@ -103,7 +103,9 @@ Workflow «Релиз GrigDesk» (`grigdesk-release.yml`) запускается
 Run workflow. Отправка коммитов и тегов в GitHub не запускает сборку и публикацию.
 Он устанавливает зависимости server, web, b24, relay, deepseek и desktop, готовит среду
 офлайн-тестового исполнителя, прогоняет server/web/shared, собирает UI и комплект
-`node tools/bundle.mts`, затем публикует из корня репозитория через release-publish.
+`node tools/bundle.mts`, затем deb-бутстрап `node tools/buildDeb.mts` и публикует
+из корня репозитория через release-publish. Deb-пакет кладёт только загрузчик
+и подписанный установщик: пользовательская установка и обновления идут без root.
 Версии checkout/setup-node закреплены SHA. Сборщик сам install не вызывает.
 Прежний `relay-release.yml` удалён, отдельные новые GitHub Releases посредника не создаются.
 `tools/release` и корневой `VERSION` сохраняют свои роли для source-канала.

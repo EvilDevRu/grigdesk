@@ -117,12 +117,24 @@
       </section>
     </UiDialog>
     <div id="phone-actions-parking" hidden></div>
+    <ApplicationUpdateDialog v-if="applicationUpdate.enabled" />
 
     <header data-ui-topbar class="topbar" :class="{
       'window-titlebar': isDesktopMain,
       'window-titlebar--controls': isDesktopMain && shell.snapshot?.windowControls,
     }">
-      <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
+      <span class="app-mark" aria-label="GrigDesk">
+        <UiPressable v-if="applicationUpdate.enabled" class="app-update-mark"
+          data-context="application-update-mark" :aria-label="t('settings.appUpdateTitle')"
+          v-tooltip.bottom="applicationUpdate.open ? null : t('settings.appUpdateTitle')"
+          @click="applicationUpdate.open = true">
+          <span class="app-update-icon">
+            <GrigDeskMark class="logo" />
+            <span v-if="applicationUpdate.available" class="updot" aria-hidden="true"></span>
+          </span>
+        </UiPressable>
+        <GrigDeskMark v-else class="logo" />
+      </span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <div id="tb-slot" class="tb-slot"></div>
@@ -507,6 +519,8 @@ import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
 import { useGrigDeskUpdateStore } from '../../stores/grigdeskUpdate.ts';
+import { useApplicationUpdateStore } from '../../stores/applicationUpdate.ts';
+import ApplicationUpdateDialog from '../ApplicationUpdateDialog.vue';
 import { useChatStore } from '../../stores/chat.ts';
 import { useBoardStore } from '../../stores/board.ts';
 import { useTasksStore } from '../../stores/tasks.ts';
@@ -578,6 +592,7 @@ const sysSnapshotTime = computed(() => (sysUpdatedAt.value
 // Снимок обновления общий для настроек и уведомлений. Оболочка запускает опрос
 // и перечитывает его по серверному событию; поток SSE один на вкладку.
 const grigDeskUpdate = useGrigDeskUpdateStore();
+const applicationUpdate = useApplicationUpdateStore();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
@@ -1206,6 +1221,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .app-mark {
   display: grid; place-items: center; flex: none; width: var(--app-rail-w); height: 100%;
 }
+.app-update-icon { position: relative; display: grid; width: 20px; height: 20px; }
 .app-mark .logo { width: 20px; height: 20px; }
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }

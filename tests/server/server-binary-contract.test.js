@@ -192,3 +192,20 @@ test('SB-version: metadata допускает стабильный SemVer, manif
     });
   }
 });
+
+test('VER-DEV: createServerManifest и публичная metadata сохраняют 0.2.0-dev.42', () => {
+  const version = '0.2.0-dev.42';
+  const manifest = createServerManifest({
+    entries: [],
+    sha256: hash,
+    size: 22,
+  }, {
+    version,
+    launcherSha256: hash,
+    engineSha256: hash,
+    buildInputs: {},
+  });
+
+  assert.equal(manifest.version, version);
+  assert.equal(decodeServerBinaryInfo({ ...info, version }).version, version);
+});

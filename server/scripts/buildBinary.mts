@@ -1,3 +1,4 @@
+import { readProductBuildVersion } from '../../shared/node/releaseBuild.ts';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import type { Readable, Writable } from 'node:stream';
@@ -123,6 +124,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
     npm_config_cache: path.join(options.cacheDir, 'npm'),
     XDG_CACHE_HOME: path.join(options.cacheDir, 'xdg'),
     GRIGDESK_ARTIFACTS_DIR: runRoot,
+    GRIGDESK_RELEASE_VERSION: await readProductBuildVersion(sourceRoot),
     NODE_ENV: 'production',
     NODE_TEST_MAX_RSS_MB: '4096',
   };

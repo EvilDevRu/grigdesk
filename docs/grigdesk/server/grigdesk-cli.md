@@ -33,7 +33,7 @@
 | `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl b24 …` | Собранный `bin/b24`, без него — исходник `b24/src/main.ts` ([команда b24](../b24/binary-cli.md)) |
-| `grigdesk-ctl bundle` | Свежая переносимая папка и архив без установки ([контракт](portable-bundle.md)) |
+| `grigdesk-ctl bundle` | Установочные артефакты для CI ([контракт](portable-bundle.md)) |
 | `grigdesk-ctl build [all\|server\|web\|window\|deepseek\|apk]` | Сборка и установка; без цели — сервер, веб, окно; `deepseek` — поставка исполнителя, `apk` — Android-приложение ([контракт](ctl-build.md)) |
 | `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |
@@ -161,3 +161,17 @@ Codex) не скрывает cgroup, поэтому сторож видит хо
 В [переносимом комплекте](portable-bundle.md) `open` находит корневой `GrigDesk`,
 не передаёт forced origin и всегда поручает запуск сервера окну, даже без runtime.json.
 Библиотека ctl лежит в bin/lib; команды работают своим Node из payload без исходников.
+
+## Подготовка обновления обычной установки
+
+Registered CLI принимает `server check-updates [--json]`, `server update-status [--json]`,
+`server update [--json]`, `server resume-update [--json] [--rollback]`
+и `server update-channel release|dev`.
+Check/status/prepare читают установку напрямую и не требуют работающего API.
+Server-only подготовка не запускает остановленный сервер; local-пара направляется в приложение.
+Installed maintenance содержит собственный Node, меню и server start/stop/restart/status/logs.
+Сеть не задерживает первый render меню. --restart подтверждает применение; без TTY
+update оставляет ready. Stopped после применения остаётся stopped; start подтверждает runtime.
+--rollback возвращает прежний выпуск из applied_not_started/manual-состояний по явному
+согласию; cgroup-сторож stop/restart действует и на применение из меню.
+Source-команды выше сохраняются. [Контракт обычной установки](installed-release-updates.md).

@@ -1071,6 +1071,7 @@ test('SB24-prepare-B-port: supervisor принимает ACK настоящег�
   const archive = await deepSeekPayloadFixture(t);
   const payload = await packagePayload(archive.options);
   const manifest = createServerManifest(payload, {
+    version: '0.2.0',
     launcherSha256: 'b'.repeat(64),
     engineSha256: 'c'.repeat(64),
     buildInputs: {},
@@ -1351,4 +1352,20 @@ test('SV-STAGE-VPN-STICKY: исправные ворота не показыва
   assert.ok(stages.includes('starting'));
   assert.equal(stages.includes('vpn'), false);
   assert.equal(fixture.supervisor.stage, null);
+});
+
+test('APP-SERVICE-INACTIVE: зарегистрированная служба исключает второй child', async (t) => {
+  const value = supervisorFixture({ probes: ['refused', 'grigdesk'] });
+  let serviceStarts = 0;
+
+  value.adapters.installedService = async () => {
+    serviceStarts += 1;
+
+    return true;
+  };
+  t.after(() => value.supervisor.stop());
+  await value.run();
+  assert.equal(serviceStarts, 1);
+  assert.equal(value.calls.includes('spawn'), false);
+  assert.equal(value.supervisor.ownership, 'external');
 });
