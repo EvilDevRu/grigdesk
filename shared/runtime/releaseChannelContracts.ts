@@ -24,7 +24,9 @@ export interface ChannelEntry {
  * Публичный ключ подписи релизов (SPKI PEM). Пустая строка — ключ ещё не задан владельцем:
  * проверка подписи обязана отказать с release_signing_key_missing, а не пропустить канал.
  */
-export const RELEASE_SIGNING_PUBLIC_KEY = '';
+export const RELEASE_SIGNING_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA/YGUiVW8isVOUt6dI68DgQ2qBAbgI9Oxz5TqoR5D3aw=
+-----END PUBLIC KEY-----`;
 
 const SEMVER_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
