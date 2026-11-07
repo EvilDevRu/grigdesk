@@ -110,6 +110,7 @@
 - [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
 - [Повтор INSTRUMENT после временного отказа упирался в завершённую транзакцию](instrumentation-retry.md)
 - [Codex на SHIP: native Auto-review, защищённый Git и границы сдачи](codex-delivery-permissions.md)
+- [«SHIP опять вернул решение человеку», а попытка Codex завершилась ok = публикация и не могла случиться: песочница Codex не пишет `.git`; доставка собирается временным клоном, перемотка `dev` — три команды человека](codex-delivery-permissions.md)
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
 - [Подключение раннера: неявный effort, статус, fanout и host-диагностика](runner-extension-boundaries.md)
 - [Не все исполнители видны в узле: отдельный каталог раннеров, цепочка живого переключения и граница GLM](runner-selection-boundaries.md)
