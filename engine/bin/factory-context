@@ -22,6 +22,8 @@ TASK_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 PORT_RE = re.compile(r"^[1-9][0-9]{0,4}$")
 STAGE_RESULT_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,40}):([a-z][a-z-]{0,20}):([0-9]{1,6})$")
 FINDING_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# Отчёт визита исполнителя в режиме «цикл»: report.r<круг>.md, повторный — .v<номер>.
+LOOP_REPORT_RE = re.compile(r"^report\.r[0-9]{1,3}(?:\.v[0-9]{1,4})?\.md$")
 FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
 # Имя хоста стенда: буквы, цифры, точка и дефис. Схема, порт и слэши запрещены —
 # их добавляет сам движок, а «http://…» в значении дало бы http://http://host:5192.
@@ -29,7 +31,29 @@ SERVICE_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$"
 URL_RE = re.compile(r"^https?://[A-Za-z0-9.:[\]-]+(?:/.*)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
 MAX_JSON_BYTES = 256 * 1024
-DELIVERY_ACTIONS = {"commit", "push", "pull-request", "task-comment"}
+# Проекция находок приходит файлом: одна строка argv или env в Linux не длиннее 128 КиБ
+# (MAX_ARG_STRLEN), а история цикла растёт с каждым этапом. У обычного маршрута пределы
+# проекции прежние. У цикла вход вмещает историю всего потолка кругов (до 300 кругов по
+# 32 находки на вердикт у двух узлов), а в контекст узла история идёт ограниченной:
+# открытые — все, закрытые и отложенные — самые свежие в пределах бюджета, счёт
+# опущенных — в `omitted`. Полная история остаётся в журнале попытки, сторожа читают его.
+# Бюджет мал намеренно: промпт узла уходит раннеру тоже одной строкой argv, и история
+# не должна съедать запас под задачу, контекст проекта и открытые находки.
+LOOP_FINDINGS_BYTES = 32 * 1024 * 1024
+LOOP_FINDINGS_RECORDS = 20_000
+LOOP_FINDINGS_BUDGET = {"closed": 16 * 1024, "deferred": 16 * 1024}
+# Результаты этапов приходят по аргументу на коммит; у цикла их до трёх на круг, так что
+# потолок 300 кругов — это до 900 записей. В контекст узла идёт только свежий хвост: весь
+# список при сотнях кругов съел бы запас строки argv промпта (128 КиБ), а полная история
+# и так лежит в журнале попытки. Сколько записей опущено — `stageResultsOmitted`; у
+# короткой истории ключа нет, и контекст побайтно прежний.
+STAGE_RESULTS_LIMIT = 1000
+STAGE_RESULTS_IN_CONTEXT = 120
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../lib"))
+from delivery_contract import ACTIONS as STRATEGY_ACTIONS, validate as validate_strategy
+
+DELIVERY_ACTIONS = {"commit", "merge", "push", "pull-request", "task-comment"}
 WORKSPACE_RESERVED_KEYS = {"mode", "generation", "repos", "stateDir", "containerName"}
 
 
@@ -196,8 +220,8 @@ def optional_port(value: str, label: str) -> int | None:
 def service_host(value: str, label: str) -> str:
     # Под каким именем агент открывает стенд. Не косметика: фронт вправе решать
     # «локалка или прод» по window.location.hostname, и тогда 127.0.0.1 вместо
-    # localhost уводит приложение в продовую ветку авторизации. Инцидент t8165:
-    # приёмка открыла стенд по IP, фронт посчитал себя продом, ушёл на несуществующий
+    # localhost уводит приложение в другую ветку авторизации. Приёмка может открыть
+    # стенд по IP, клиент посчитает себя внешним и уйдёт на несуществующий
     # /tools/login и зациклил редиректы — узел browser 90 минут висел на мёртвой
     # странице, не проверив ни одного сценария.
     if not SERVICE_HOST_RE.fullmatch(value):
@@ -257,27 +281,77 @@ def project_context(raw: str) -> dict[str, list[str]]:
     return result
 
 
-def findings_ledger(raw: str) -> dict[str, Any]:
+def findings_source(args: argparse.Namespace, max_bytes: int) -> str:
+    """Текст проекции находок: файлом от launcher-а или (совместимость) аргументом."""
+    if args.findings_ledger_file is None:
+        if args.findings_ledger_json is None:
+            return '{"schema":1,"open":[],"closed":[]}'
+        return args.findings_ledger_json
+    if args.findings_ledger_json is not None:
+        fail("findings-ledger: нужен один источник — файл или JSON")
+    path = args.findings_ledger_file
+    if not Path(path).is_absolute() or os.path.abspath(path) != path:
+        fail("findings-ledger-file: нужен нормализованный абсолютный путь")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        fail(f"findings-ledger-file: файл недоступен: {error}")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+            fail("findings-ledger-file: нужен обычный файл в пределе размера")
+        with os.fdopen(fd, "rb", closefd=True) as source:
+            fd = -1
+            payload = source.read(max_bytes + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    try:
+        return payload.decode("utf-8")
+    except UnicodeError as error:
+        fail(f"findings-ledger-file: не UTF-8: {error}")
+
+
+def findings_ledger(
+    raw: str,
+    *,
+    max_bytes: int = MAX_JSON_BYTES,
+    max_records: int = 2_000,
+) -> dict[str, Any]:
     """Проверяет производную проекцию typed findings из immutable ledger."""
     try:
         value = json.loads(
-            string(raw, "findings-ledger-json", maximum=MAX_JSON_BYTES),
+            string(raw, "findings-ledger-json", maximum=max_bytes),
             parse_constant=lambda item: fail(
                 f"findings-ledger-json: запрещено не-JSON число {item}"
             ),
         )
     except json.JSONDecodeError as error:
         fail(f"findings-ledger-json: повреждённый JSON: {error}")
-    value = exact_object(value, {"schema", "open", "closed"}, "findings-ledger-json")
-    if value["schema"] != 1:
-        fail("findings-ledger-json.schema: поддерживается только 1")
+    # Секция отложенных находок появилась позже открытых и закрытых: проекция без
+    # неё — законная старая форма, а не ошибка. Дополняем пустой, чтобы дальше
+    # схема оставалась ровно одна.
+    if isinstance(value, dict) and value.get("schema") == 1 and "deferred" not in value:
+        value = {**value, "deferred": []}
+    value = exact_object(
+        value, {"schema", "open", "closed", "deferred"}, "findings-ledger-json"
+    )
+    version = value["schema"]
+    if isinstance(version, bool) or version not in {1, 2}:
+        fail("findings-ledger-json.schema: поддерживаются 1 и 2")
 
-    seen: set[tuple[str, str]] = set()
-    projected: dict[str, list[dict[str, Any]]] = {"open": [], "closed": []}
-    for status in ("open", "closed"):
+    seen: set[tuple[str, str, str]] = set()
+    # `deferred` — находки вне цели задачи: возврата не вызывают, живут до ворот
+    # приёмки. Автору они видны как справка, а не как список к ремонту.
+    projected: dict[str, list[dict[str, Any]]] = {
+        "open": [],
+        "closed": [],
+        "deferred": [],
+    }
+    for status in ("open", "closed", "deferred"):
         records = value[status]
-        if not isinstance(records, list) or len(records) > 2_000:
-            fail(f"findings-ledger-json.{status}: ожидался массив до 2000 записей")
+        if not isinstance(records, list) or len(records) > max_records:
+            fail(f"findings-ledger-json.{status}: ожидался массив до {max_records} записей")
         for index, raw_record in enumerate(records):
             label = f"findings-ledger-json.{status}[{index}]"
             record = exact_object(
@@ -291,9 +365,25 @@ def findings_ledger(raw: str) -> dict[str, Any]:
                     "lastSeenSequence",
                     "status",
                     "closedSequence",
-                },
+                } | ({"source"} if version == 2 else set()),
                 label,
             )
+            source = {"phase": "route"}
+            if version == 2:
+                source = record["source"]
+                if not isinstance(source, dict):
+                    fail(f"{label}.source: ожидался объект")
+                if source.get("phase") == "route":
+                    exact_object(source, {"phase"}, f"{label}.source")
+                elif source.get("phase") == "bootstrap":
+                    exact_object(source, {"phase", "recordHash", "runId", "epoch"}, f"{label}.source")
+                    identifier(source["recordHash"], HASH_RE, f"{label}.source.recordHash")
+                    identifier(source["runId"], re.compile(r"^[A-Za-z0-9._-]+$"), f"{label}.source.runId")
+                    epoch = source["epoch"]
+                    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+                        fail(f"{label}.source.epoch: нужно целое от 1")
+                else:
+                    fail(f"{label}.source.phase: неизвестная фаза")
             finding_id = identifier(record["id"], FINDING_RE, f"{label}.id")
             source_node = identifier(record["sourceNode"], NODE_RE, f"{label}.sourceNode")
             owner = identifier(record["owner"], ID_RE, f"{label}.owner")
@@ -304,7 +394,13 @@ def findings_ledger(raw: str) -> dict[str, Any]:
                 fail(f"{label}.summary: управляющие символы запрещены")
             opened = record["openedSequence"]
             last_seen = record["lastSeenSequence"]
-            if (
+            bootstrap = source["phase"] == "bootstrap"
+            if bootstrap and (
+                status != "deferred" or source_node != "scout"
+                or opened is not None or last_seen is not None
+            ):
+                fail(f"{label}: bootstrap допускает только deferred с null sequence")
+            if not bootstrap and (
                 isinstance(opened, bool)
                 or not isinstance(opened, int)
                 or not 1 <= opened <= 999_999
@@ -316,16 +412,16 @@ def findings_ledger(raw: str) -> dict[str, Any]:
             if record["status"] != status:
                 fail(f"{label}.status: не совпадает с секцией")
             closed = record["closedSequence"]
-            if status == "open":
+            if status in ("open", "deferred"):
                 if closed is not None:
-                    fail(f"{label}.closedSequence: у открытого finding нужен null")
+                    fail(f"{label}.closedSequence: у незакрытого finding нужен null")
             elif (
                 isinstance(closed, bool)
                 or not isinstance(closed, int)
                 or not last_seen <= closed <= 999_999
             ):
                 fail(f"{label}.closedSequence: недопустимый sequence")
-            key = (source_node, finding_id)
+            key = (source["phase"], source_node, finding_id)
             if key in seen:
                 fail(f"{label}: повтор finding {source_node}/{finding_id}")
             seen.add(key)
@@ -339,9 +435,107 @@ def findings_ledger(raw: str) -> dict[str, Any]:
                     "lastSeenSequence": last_seen,
                     "status": status,
                     "closedSequence": closed,
+                    **({"source": source} if version == 2 else {}),
                 }
             )
-    return {"schema": 1, **projected}
+    return {"schema": version, **projected}
+
+
+def bound_loop_findings(findings: dict[str, Any]) -> dict[str, Any]:
+    """История находок цикла для контекста узла — ограниченная по размеру.
+
+    Открытые находки — задание текущего круга, они идут все (их число ограничено
+    вердиктом: до 32 на узел). Закрытые и отложенные копятся с каждым этапом, поэтому
+    в контекст попадают самые свежие в пределах бюджета секции, в прежнем порядке;
+    сколько опущено — в `omitted`. Без усечения форма проекции прежняя.
+    """
+    bounded: dict[str, Any] = {"schema": findings["schema"], "open": findings["open"]}
+    omitted: dict[str, int] = {}
+    for status, budget in LOOP_FINDINGS_BUDGET.items():
+        records = findings[status]
+        kept: set[int] = set()
+        used = 0
+        newest_first = sorted(
+            range(len(records)),
+            key=lambda index: finding_freshness(status, records[index]),
+            reverse=True,
+        )
+        for index in newest_first:
+            size = len(
+                json.dumps(records[index], ensure_ascii=False, sort_keys=True).encode("utf-8")
+            )
+            if used + size > budget:
+                break
+            kept.add(index)
+            used += size
+        bounded[status] = [record for index, record in enumerate(records) if index in kept]
+        if len(kept) != len(records):
+            omitted[status] = len(records) - len(kept)
+    if omitted:
+        bounded["omitted"] = omitted
+    return bounded
+
+
+def finding_freshness(status: str, record: dict[str, Any]) -> tuple[int, int, int]:
+    # Bootstrap предшествует main и не имеет sequence его журнала.
+    # Фазовый ключ сохраняет прежнюю свежесть route без сравнения null с числом.
+    if record.get("source", {}).get("phase") == "bootstrap":
+        return (0, 0, 0)
+    if status == "closed":
+        return (1, record["closedSequence"], record["lastSeenSequence"])
+    return (1, record["lastSeenSequence"], record["openedSequence"])
+
+
+def loop_context(raw: str, max_rounds_raw: str, node: str) -> dict[str, Any] | None:
+    # Витрина режима «цикл» для узла: роль, число исполненных кругов, этап, потолок
+    # профиля и остаток. Числа приходят из проверенного журнала попытки (loop-state),
+    # потолок — из профиля текущего процесса. Без аргумента узел — не из цикла.
+    if not raw:
+        if max_rounds_raw:
+            fail("loop-max-rounds без loop-state-json")
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        fail("loop-state-json: невалидный JSON")
+    if not isinstance(value, dict) or value.get("schema") != 1:
+        fail("loop-state-json: ожидалась schema=1")
+    loop = value.get("loop")
+    if not isinstance(loop, dict):
+        fail("loop-state-json: у маршрута нет цикла")
+    lead = identifier(loop.get("lead"), NODE_RE, "loop.lead")
+    worker = identifier(loop.get("worker"), NODE_RE, "loop.worker")
+    rounds = loop.get("rounds")
+    stage = loop.get("stage")
+    for label, number in (("rounds", rounds), ("stage", stage)):
+        if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+            fail(f"loop-state-json: {label} — неотрицательное целое")
+    if not re.fullmatch(r"[1-9][0-9]?|[12][0-9]{2}|300", max_rounds_raw or ""):
+        fail("loop-max-rounds: нужно целое 1..300")
+    max_rounds = int(max_rounds_raw)
+    # Имена отчётов вычисляет журнал попытки: следующий визит исполнителя пишет в новый
+    # файл, ведущий читает последний сданный с результатом.
+    worker_report = loop.get("workerReport")
+    last_report = loop.get("lastReport")
+    if not isinstance(worker_report, str) or not LOOP_REPORT_RE.fullmatch(worker_report):
+        fail("loop-state-json: workerReport — имя отчёта визита")
+    if last_report is not None and (
+        not isinstance(last_report, str) or not LOOP_REPORT_RE.fullmatch(last_report)
+    ):
+        fail("loop-state-json: lastReport — имя отчёта визита или null")
+    role = "lead" if node == lead else "worker" if node == worker else "other"
+    if role == "worker":
+        report = worker_report
+    else:
+        report = last_report or f"report.r{rounds}.md"
+    return {
+        "role": role,
+        "round": rounds,
+        "maxRounds": max_rounds,
+        "roundsLeft": max(0, max_rounds - rounds),
+        "stage": stage,
+        "report": report,
+    }
 
 
 def decision(status: str, comment: str) -> dict[str, str]:
@@ -364,7 +558,17 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     if workspace_mode not in {"isolated", "shared"}:
         fail("workspace-mode: допускается только isolated или shared")
     project = project_context(args.project_context_json)
-    findings = findings_ledger(args.findings_ledger_json)
+    loop = loop_context(args.loop_state_json, args.loop_max_rounds, node)
+    if loop is None:
+        findings = findings_ledger(findings_source(args, MAX_JSON_BYTES))
+    else:
+        findings = bound_loop_findings(
+            findings_ledger(
+                findings_source(args, LOOP_FINDINGS_BYTES),
+                max_bytes=LOOP_FINDINGS_BYTES,
+                max_records=LOOP_FINDINGS_RECORDS,
+            )
+        )
 
     # Репозитории профиля: произвольный список `--repo имя:worktree:source:branch`.
     # Ветка своя у каждого репозитория — у проекта из нескольких репозиториев
@@ -452,7 +656,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "outcome": matched.group(2),
             "sequence": sequence,
         })
-    if len(stage_results) > 500:
+    if len(stage_results) > STAGE_RESULTS_LIMIT:
         fail("stage-result: слишком много записей")
     if [item["sequence"] for item in stage_results] != sorted(
         item["sequence"] for item in stage_results
@@ -465,7 +669,16 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     actions = list(dict.fromkeys(args.delivery_action))
     if any(action not in DELIVERY_ACTIONS for action in actions):
         fail("delivery-action: неизвестное действие")
-    if args.delivery_mode == "publish" and not {
+    if args.delivery_strategy is None and "merge" in actions:
+        fail("delivery-action: merge требует явную стратегию")
+    if args.delivery_strategy is not None:
+        try:
+            validate_strategy(args.delivery_strategy, args.delivery_action)
+        except ValueError as error:
+            fail(str(error))
+        if args.delivery_mode != "publish":
+            fail("delivery-strategy: требуется publish")
+    if args.delivery_strategy is None and args.delivery_mode == "publish" and not {
         "commit",
         "push",
         "pull-request",
@@ -485,6 +698,51 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     source_branch = branch_name(args.source_branch, "source-branch")
 
     artifact = lambda suffix: f"{state_dir}/t{task_id}.{suffix}"
+    artifacts = {
+        "recon": artifact("recon.md"),
+        "plan": artifact("plan.md"),
+        "diagnosis": artifact("diag.md"),
+        "diagnosisRaw": artifact("diag.raw.md"),
+        "testsDigest": artifact("tests.sha256"),
+        "report": artifact("report.md"),
+        "rejection": artifact("reject.md"),
+        # Контракт приёмки, выписанный REVIEW при первом отказе: полный список
+        # условий, который BUILD закрывает целиком, а REVIEW проверяет на повторных
+        # заходах, вместо поиска очередного одиночного примера нарушения.
+        "reviewContract": artifact("review-contract.md"),
+        # Досье аудита перед воротами приёмки: чем узел AUDIT отчитывается
+        # человеку. Отдельный файл, а не findings: typed-находки живут внутри
+        # журнала попытки, и до интерфейса ворот, где человек принимает
+        # решение, они не доезжают. Route-нейтрально — маршруты без узла
+        # ключ просто не используют.
+        "audit": artifact("audit.md"),
+        "ship": artifact("ship.md"),
+        # Консилиум (маршруты consilium-*): независимые мнения членов и trusted
+        # сводка состава от command-узла COUNCIL_AGG. Route-нейтрально: остальные
+        # маршруты ключи просто не используют.
+        "councilOpinionA": artifact("council.opinion-a.md"),
+        "councilOpinionB": artifact("council.opinion-b.md"),
+        "councilOpinionC": artifact("council.opinion-c.md"),
+        "councilAggregate": artifact("council.aggregate.json"),
+        "councilBrief": artifact("council.brief.md"),
+    }
+    # Длинная история цикла урезается до свежего хвоста (см. STAGE_RESULTS_IN_CONTEXT).
+    omitted_stage_results = max(0, len(stage_results) - STAGE_RESULTS_IN_CONTEXT)
+    evidence = {
+        "eventCount": event_count,
+        "stageResults": stage_results[omitted_stage_results:],
+        "findings": findings,
+    }
+    if omitted_stage_results:
+        evidence["stageResultsOmitted"] = omitted_stage_results
+    if loop is not None:
+        # У цикла свой отчёт на каждый круг: исполнитель пишет в отчёт своего круга,
+        # ведущий читает отчёт последнего. Старый файл не может выдать себя за свежий —
+        # путь нового круга до визита исполнителя не существует. Исходный замер — один
+        # на задачу, пишется один раз и дальше только читается.
+        artifacts["report"] = artifact(loop.pop("report"))
+        artifacts["baseline"] = artifact("baseline.md")
+        evidence["loop"] = loop
     return {
         "task": read_ticket(Path(args.ticket_json), task_id),
         "attempt": {
@@ -525,32 +783,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
                 else "unavailable"
             ),
         },
-        "artifacts": {
-            "recon": artifact("recon.md"),
-            "plan": artifact("plan.md"),
-            "diagnosis": artifact("diag.md"),
-            "diagnosisRaw": artifact("diag.raw.md"),
-            "testsDigest": artifact("tests.sha256"),
-            "report": artifact("report.md"),
-            "rejection": artifact("reject.md"),
-            # Контракт приёмки, выписанный REVIEW при первом отказе: полный список
-            # условий, который BUILD закрывает целиком, а REVIEW проверяет на повторных
-            # заходах, вместо поиска очередного одиночного примера нарушения.
-            "reviewContract": artifact("review-contract.md"),
-            "ship": artifact("ship.md"),
-            "lessons": f"{state_dir}/archive/t{task_id}.lessons-proposed.md",
-            # Консилиум (маршруты consilium-*): мнения/ранги членов и trusted сводка
-            # command-узла COUNCIL_AGG. Route-нейтрально: остальные маршруты ключи
-            # просто не используют.
-            "councilOpinionA": artifact("council.opinion-a.md"),
-            "councilOpinionB": artifact("council.opinion-b.md"),
-            "councilOpinionC": artifact("council.opinion-c.md"),
-            "councilRankA": artifact("council.rank-a.md"),
-            "councilRankB": artifact("council.rank-b.md"),
-            "councilRankC": artifact("council.rank-c.md"),
-            "councilAggregate": artifact("council.aggregate.json"),
-            "councilBrief": artifact("council.brief.md"),
-        },
+        "artifacts": artifacts,
         "diagnosis": {
             "kind": args.diagnosis_kind,
             "signal": string(args.diagnosis_signal, "diagnosis-signal", maximum=200),
@@ -564,11 +797,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "allowedFiles": allowed_files,
             "phase": args.instrumentation_phase,
         },
-        "evidence": {
-            "eventCount": event_count,
-            "stageResults": stage_results,
-            "findings": findings,
-        },
+        "evidence": evidence,
         "decisions": {
             "cause": decision(args.cause_decision, args.cause_comment),
             "review": decision(args.review_decision, args.review_comment),
@@ -578,6 +807,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             ),
         },
         "delivery": {
+            **({"strategy": args.delivery_strategy} if args.delivery_strategy is not None else {}),
             "mode": args.delivery_mode,
             "actions": actions,
             "targetBranches": targets,
@@ -637,10 +867,13 @@ def parser() -> argparse.ArgumentParser:
     # Проверенные записи журнала попытки: node:outcome:sequence, по возрастанию.
     result.add_argument("--stage-result", action="append", default=[])
     # Производная проекция открытых/закрытых замечаний из проверенного hash-chain.
-    result.add_argument(
-        "--findings-ledger-json",
-        default='{"schema":1,"open":[],"closed":[]}',
-    )
+    # Launcher отдаёт её файлом; JSON-аргумент — совместимость и тесты. Без обоих —
+    # пустая проекция.
+    result.add_argument("--findings-ledger-file", default=None)
+    result.add_argument("--findings-ledger-json", default=None)
+    # Режим «цикл»: проверенное состояние цикла и потолок кругов профиля.
+    result.add_argument("--loop-state-json", default="")
+    result.add_argument("--loop-max-rounds", default="")
     result.add_argument(
         "--selected-by",
         choices=["human", "scout", "recovery"],
@@ -653,6 +886,7 @@ def parser() -> argparse.ArgumentParser:
             default="pending",
         )
         result.add_argument(f"--{name}-comment", default="")
+    result.add_argument("--delivery-strategy", choices=sorted(STRATEGY_ACTIONS))
     result.add_argument(
         "--delivery-mode",
         choices=["disabled", "publish"],

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { graphForRoute } from '../../server/src/lib/factory-graph.js';
+import { graphForRoute } from '../../server/src/lib/factoryGraph.ts';
 
 test('graph can map internal visual nodes to the canonical runner stage per route', () => {
   const graph = {

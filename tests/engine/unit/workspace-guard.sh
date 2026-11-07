@@ -81,6 +81,62 @@ workspace_guard_snapshot "$after" "$repo"
 workspace_guard_compare "$before" "$after"
 assert_rc 0 "$?" "ordinary ignored runtime artifacts stay outside the baseline"
 
+# --- объявленные runtime-пути проверочного инструментария ---
+# Playwright-сетап проекта переписывал untracked storage state при каждом прогоне e2e из
+# проверяющего узла, и сторож ронял попытку кодом 75. Профиль объявляет такой путь
+# (файл или каталог) — untracked-файлы под ним из снимка выпадают. Всё остальное под тем же
+# путём (tracked-файл, чувствительный файл) сторожится как прежде: послабление касается
+# только того, что git не отслеживает.
+mkdir -p "$repo/e2e/.auth" "$repo/e2e/tracked-dir"
+printf 'токен до этапа\n' >"$repo/e2e/.auth/user.json"
+printf 'отслеживаемый под runtime-путём\n' >"$repo/e2e/tracked-dir/keep.txt"
+git -C "$repo" add e2e/tracked-dir/keep.txt
+git -C "$repo" commit -qm 'tracked under volatile prefix'
+volatile="$TEST_ROOT/volatile.list"
+printf '# runtime-артефакты e2e\n%s\n\n%s/\nrelative/path\n' \
+  "$repo/e2e/.auth" "$repo/e2e/tracked-dir" >"$volatile"
+
+workspace_guard_snapshot "$before" "$repo"
+printf 'токен переписан прогоном\n' >"$repo/e2e/.auth/user.json"
+workspace_guard_snapshot "$after" "$repo"
+workspace_guard_compare "$before" "$after"
+assert_rc 1 "$?" "без объявления runtime-путь сторожится как любой untracked-файл"
+
+export WORKSPACE_GUARD_VOLATILE_LIST_FILE="$volatile"
+workspace_guard_snapshot "$before" "$repo"
+printf 'токен переписан ещё раз\n' >"$repo/e2e/.auth/user.json"
+printf 'новый артефакт прогона\n' >"$repo/e2e/.auth/state.json"
+workspace_guard_snapshot "$after" "$repo"
+workspace_guard_compare "$before" "$after"
+assert_rc 0 "$?" "объявленный runtime-путь: изменение и появление untracked-файлов терпится"
+auth_rel=$(printf '%s' 'e2e/.auth/user.json' | base64 -w0)
+if grep -qF "$auth_rel" "$after"; then
+  test_fail "untracked-файл под объявленным runtime-путём не попадает в снимок"
+else
+  test_ok "untracked-файл под объявленным runtime-путём не попадает в снимок"
+fi
+
+printf 'tracked изменён этапом\n' >"$repo/e2e/tracked-dir/keep.txt"
+workspace_guard_snapshot "$after" "$repo"
+workspace_guard_compare "$before" "$after"
+assert_rc 1 "$?" "tracked-файл под объявленным runtime-путём сторожится по-прежнему"
+git -C "$repo" checkout -q -- e2e/tracked-dir/keep.txt
+
+printf 'runtime-файл вне объявленных путей\n' >"$repo/e2e/stray.txt"
+workspace_guard_snapshot "$after" "$repo"
+workspace_guard_compare "$before" "$after"
+assert_rc 1 "$?" "объявление не расползается на соседние каталоги"
+rm -f -- "$repo/e2e/stray.txt"
+
+printf '%s\n' "$repo/e2e/.auth/user.json" >>"$sensitive"
+workspace_guard_snapshot "$before" "$repo"
+printf 'чувствительный под runtime-путём изменён\n' >"$repo/e2e/.auth/user.json"
+workspace_guard_snapshot "$after" "$repo"
+workspace_guard_compare "$before" "$after"
+assert_rc 1 "$?" "чувствительный файл под объявленным runtime-путём сторожится по хешу"
+sed -i '$d' "$sensitive"
+unset WORKSPACE_GUARD_VOLATILE_LIST_FILE
+
 scope="$TEST_ROOT/scope.list"
 printf '%s\n' "$repo/tracked.txt" >"$scope"
 workspace_guard_snapshot "$before" "$repo"

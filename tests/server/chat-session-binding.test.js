@@ -7,10 +7,10 @@ import path from 'node:path';
 import {
   BindingStoreError,
   ChatSessionBindingStore,
-} from '../../server/src/lib/chat/session-binding-store.js';
+} from '../../server/src/lib/chat/sessionBindingStore.ts';
 
 async function fresh(t, { retentionMs, now } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-binding-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-binding-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return new ChatSessionBindingStore({
     dir: path.join(root, 'bindings'),

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "src/lib/telegram/**/*.ts",
+    "src/modules/telegram/**/*.ts",
+    "../tests/types/telegram-server-contract.test.mts"
+  ]
+}

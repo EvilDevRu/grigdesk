@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true
+  },
+  "include": [
+    "src/ui.ts",
+    "src/components/**/*.vue",
+    "src/composables/**/*.ts",
+    "src/services/**/*.ts",
+    "src/types/**/*.ts",
+    "dev/ui-gallery/**/*.vue",
+    "dev/ui-gallery/**/*.ts"
+  ]
+}

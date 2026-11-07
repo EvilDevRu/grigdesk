@@ -103,6 +103,14 @@ assert_contains "$bad_format" 'недопустимый id исполнител�
 assert_file_missing "$TEST_ROOT/state-bad-format" \
   "отклонённый по формату start не создаёт state каталог"
 
+runner_too_long=$(printf 'a%.0s' {1..65})
+long_runner=$(run_start too-long --runner-primary "$runner_too_long" 2>&1)
+assert_rc 78 "$?" "start --runner-primary длиннее 64 символов отклонён"
+assert_contains "$long_runner" 'недопустимый id исполнителя' \
+  "отказ называет ограниченный формат id исполнителя"
+assert_file_missing "$TEST_ROOT/state-too-long" \
+  "слишком длинный runner id не создаёт state каталог"
+
 # 3. Флаг допустим только при start: resume ведёт immutable попытку.
 resume_error=$(FACTORY_FORBID_LIVE=0 "$tool" "$fixture_task" resume \
   --profile "$profile_id" \
@@ -143,17 +151,21 @@ assert_eq alpha "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$alpha_reg
 assert_eq beta "$(awk -F= '$1=="RUNNER_OVERRIDE_FAILOVER"{print $2}' "$alpha_registry")" \
   "failover профиля перенесён в override без выбранного id"
 
-# 6. Без флага реестр не получает override-ключей: цепочка живёт в runners.env.
+# 6. Без флага schema 2 всё равно проецирует точные пустые значения: отсутствие
+# override нельзя смешивать с устаревшим/неполным registry-документом.
 default_out=$(run_start default 2>&1)
 default_rc=$?
 if (( default_rc != 0 )); then test_note "start без override: $default_out"; fi
 assert_rc 0 "$default_rc" "start без --runner-primary доходит до human gate"
 default_registry="$TEST_ROOT/state-default/t${fixture_task}.pipeline"
-if grep -q '^RUNNER_OVERRIDE_' "$default_registry"; then
-  test_fail "без --runner-primary реестр не содержит override-ключей" \
-    "$(cat "$default_registry")"
-else
-  test_ok "без --runner-primary реестр не содержит override-ключей"
-fi
+assert_eq "" \
+  "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$default_registry")" \
+  "без --runner-primary реестр проецирует точный пустой primary override"
+assert_eq "" \
+  "$(awk -F= '$1=="RUNNER_OVERRIDE_FAILOVER"{print $2}' "$default_registry")" \
+  "без --runner-primary реестр проецирует точный пустой failover override"
+grep -q '^RUNNER_OVERRIDE_PRIMARY=$' "$default_registry" &&
+  grep -q '^RUNNER_OVERRIDE_FAILOVER=$' "$default_registry"
+assert_rc 0 "$?" "пустые override-ключи schema 2 записаны явно"
 
 finish_tests

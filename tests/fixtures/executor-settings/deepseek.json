@@ -1,0 +1,13 @@
+{
+  "writable": true,
+  "hasDocument": true,
+  "namespaces": [{
+    "ns": "future-namespace", "revision": 3, "applies": "live", "secrets": [{"path": ["credential"], "set": true}],
+    "value": {"enabled": false, "credential": "redacted-sentinel"},
+    "schema": {"uid": 3, "refs": {
+      "1": {"type": "boolean", "meta": {"default": true}},
+      "2": {"type": "string", "meta": {"role": "secret"}},
+      "3": {"type": "object", "meta": {"default": {}}, "dict": {"enabled": 1, "credential": 2}}
+    }}
+  }]
+}

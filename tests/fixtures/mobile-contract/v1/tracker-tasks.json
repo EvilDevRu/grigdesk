@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "101",
+      "title": "Первая задача",
+      "status": "В работе",
+      "deadline": 1791530400000,
+      "priority": 1,
+      "onPipeline": true
+    }
+  ],
+  "hasMore": false,
+  "nextCursor": null
+}

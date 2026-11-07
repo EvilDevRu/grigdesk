@@ -11,13 +11,19 @@ export RUNNER_CODEX_ADD_DIRS="$state_root $project_extra"
 
 factory_exec() {
   printf '%s\n' "$@" >"$TEST_ROOT/codex-argv"
-  return 0
+  cat >"$TEST_ROOT/codex-stdin"
+  return "${FIXTURE_CODEX_RC:-0}"
 }
 
 runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
 assert_rc 0 "$?" "Codex runner can be inspected without a model call"
 
 argv=$(cat "$TEST_ROOT/codex-argv")
+# Регрессия 07.11.2026: имя CLI ставит factory_external_launch, args его не
+# содержат — иначе парсер получает сдвоенное «codex codex» перед подкомандой.
+head_args=$(head -n 7 "$TEST_ROOT/codex-argv" | tr '\n' '|')
+assert_eq 'provider|timeout|-k|30|30|codex|exec|' "$head_args" \
+  "launch puts the CLI once before its subcommand"
 assert_contains "$argv" "$state_root" "Codex sandbox receives writable state root"
 assert_contains "$argv" "$project_extra" "Codex sandbox receives profile write root"
 add_count=$(grep -c '^--add-dir$' "$TEST_ROOT/codex-argv" || true)
@@ -27,6 +33,61 @@ assert_contains "$argv" "sandbox_workspace_write.network_access=true" \
 
 grep -q '^danger-full-access$' "$TEST_ROOT/codex-argv"
 assert_rc 1 "$?" "Codex runner never disables the sandbox for extra roots"
+
+# Auto-review определяется точным сочетанием route policy и native sandbox,
+# поэтому SHIP и BUILD имеют одинаковые права, а неизвестные политики не расширяются.
+for stage in BUILD SHIP; do
+  FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write RUNNER_AUTO_COMPACT_WINDOW=120000 \
+    runner_codex_run 42 "prompt" "$stage" gpt-fixture high 30 "$run_dir"
+  assert_rc 0 "$?" "$stage workspace-write запускается через штатный reviewer"
+  argv=$(cat "$TEST_ROOT/codex-argv")
+  approve_count=$(grep -c '^--approve-for-me$' "$TEST_ROOT/codex-argv" || true)
+  assert_eq 1 "$approve_count" "$stage задаёт ровно один approve-for-me"
+
+  for forbidden in --sandbox --yolo --dangerously-bypass-approvals-and-sandbox danger-full-access; do
+    grep -Fxq -- "$forbidden" "$TEST_ROOT/codex-argv"
+    assert_rc 1 "$?" "$stage не смешивает Auto-review с $forbidden"
+  done
+  grep -Fq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "$stage не выключает native approvals"
+
+  for exact in provider timeout -k 30 codex exec --json --skip-git-repo-check -m gpt-fixture \
+    'model_reasoning_effort="high"' model_auto_compact_token_limit=120000 \
+    sandbox_workspace_write.network_access=true "$state_root" "$project_extra" "$run_dir/last.md" -; do
+    grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
+    assert_rc 0 "$?" "$stage сохраняет аргумент $exact"
+  done
+  assert_eq prompt "$(cat "$TEST_ROOT/codex-stdin")" "$stage сохраняет prompt в stdin"
+done
+
+for policy in state-only transactional-write unset unknown; do
+  route_policy=$policy
+  [[ "$policy" != unset ]] || route_policy=''
+  FACTORY_ROUTE_FILESYSTEM_POLICY="$route_policy" \
+    runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+  assert_rc 0 "$?" "$policy сохраняет старую файловую политику"
+  grep -Fxq -- '--approve-for-me' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "$policy не получает Auto-review даже на SHIP"
+  grep -Fxq -- '--sandbox' "$TEST_ROOT/codex-argv"
+  assert_rc 0 "$?" "$policy сохраняет native sandbox"
+  if [[ "$policy" == state-only ]]; then
+    grep -Fxq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+    assert_rc 0 "$?" "state-only явно запрещает escalation"
+  fi
+done
+
+for sandbox in read-only danger-full-access; do
+  FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write RUNNER_CODEX_SANDBOX="$sandbox" \
+    runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+  grep -Fxq -- '--approve-for-me' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "explicit $sandbox не подменяется Auto-review"
+  grep -Fxq -- "$sandbox" "$TEST_ROOT/codex-argv"
+  assert_rc 0 "$?" "explicit $sandbox сохраняется как прежний вход"
+done
+
+FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write FIXTURE_CODEX_RC=17 \
+  runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+assert_rc 17 "$?" "Auto-review сохраняет exit code провайдера"
 
 # Shared stand получает не общий workspace-write/network, а самодостаточный
 # permission profile: exact control dir read-only, network полностью выключен.
@@ -38,11 +99,31 @@ chmod 400 "$control_dir/client.lock"
 export RUNNER_CODEX_RESTRICT_SHARED_STAND=1
 export PROFILE_AGENT_CONTROL_DIR="$control_dir"
 export RUNNER_CODEX_READ_DIRS="$project_extra"
-runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
+
+# Shared-stand resolver проверяет layout установленного npm-пакета. Собираем
+# минимальный tracked-by-test runtime под TEST_ROOT, не полагаясь на ignored
+# node_modules рабочей машины.
+codex_runtime="$TEST_ROOT/codex-runtime"
+codex_entry="$codex_runtime/bin/codex"
+codex_native="$codex_runtime/node_modules/@openai/codex-linux-fixture/vendor/fixture/bin/codex"
+mkdir -p "$(dirname "$codex_entry")" "$(dirname "$codex_native")"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$codex_entry"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$codex_native"
+chmod +x "$codex_entry" "$codex_native"
+export PATH="$codex_runtime/bin:$PATH"
+
+FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write \
+  runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
 restricted_rc=$?
 assert_rc 0 "$restricted_rc" "shared-stand Codex policy can be inspected without a model call"
 
 restricted=$(cat "$TEST_ROOT/codex-argv")
+for exact in '--approve-for-me' '--sandbox'; do
+  grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "restricted SHIP не получает $exact"
+done
+grep -Fxq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+assert_rc 0 "$?" "restricted SHIP сохраняет never"
 for exact in --ignore-user-config --strict-config --dangerously-bypass-hook-trust; do
   grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
   assert_rc 0 "$?" "shared-stand runner emits $exact"
@@ -69,6 +150,45 @@ for forbidden in features.network_proxy unix_sockets domains= 127.0.0.1 /var/run
 done
 control_add_count=$(grep -Fx -- "$control_dir" "$TEST_ROOT/codex-argv" | wc -l)
 assert_eq 0 "$control_add_count" "control directory is never emitted as writable --add-dir"
+
+browser_runtime="$TEST_ROOT/browser-runtime"
+browser_evidence="$TEST_ROOT/browser-evidence"
+browser_mailbox="$STATE_DIR/status-requests/browser-fixture/browser"
+mkdir -p "$browser_runtime" "$browser_evidence" "$browser_mailbox"
+export GRIGDESK_BROWSER_NODE="$TEST_ROOT/pinned-browser-node"
+export GRIGDESK_BROWSER_HELPER="$TEST_ROOT/pinned-browser-helper"
+printf '#!/bin/sh\nexit 0\n' >"$GRIGDESK_BROWSER_HELPER"
+cat >"$GRIGDESK_BROWSER_NODE" <<'BROWSER_NODE'
+#!/usr/bin/env bash
+case "$2" in
+  read-roots) printf '%s\n' "$FIXTURE_BROWSER_RUNTIME" ;;
+  evidence-root) printf '%s\n' "$FIXTURE_BROWSER_EVIDENCE" ;;
+  *) exit 4 ;;
+esac
+BROWSER_NODE
+chmod +x "$GRIGDESK_BROWSER_NODE"
+export FIXTURE_BROWSER_RUNTIME="$browser_runtime" FIXTURE_BROWSER_EVIDENCE="$browser_evidence"
+export FACTORY_BROWSER_ENABLED=1 FACTORY_ROUTE_BROWSER_POLICY=allow
+export FACTORY_BROWSER_REQUEST_DIR="$browser_mailbox"
+runner_codex_run 42 prompt BUILD gpt-fixture high 30 "$run_dir"
+assert_rc 0 "$?" "browser helper доступен ограниченному runner без модели"
+browser_argv=$(cat "$TEST_ROOT/codex-argv")
+for directory in "$browser_runtime" "$browser_evidence"; do
+  assert_contains "$browser_argv" "\"$directory\" = \"read\"" "browser root readonly"
+  grep -Fxq -- "$directory" "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "readonly browser root не выдаётся через writable add-dir"
+done
+assert_contains "$browser_argv" "\"$browser_mailbox\" = \"write\"" "own mailbox writable"
+assert_contains "$browser_argv" "shared-stand $GRIGDESK_BROWSER_NODE $GRIGDESK_BROWSER_HELPER" \
+  "hook receives captured pinned paths"
+export FACTORY_BROWSER_ENABLED=0
+runner_codex_run 42 prompt BUILD gpt-fixture high 30 "$run_dir"
+assert_rc 0 "$?" "forbid сохраняет прежний runner"
+case "$(cat "$TEST_ROOT/codex-argv")" in
+  *"$browser_evidence"*) test_fail "disabled browser не монтирует evidence" ;;
+  *) test_ok "disabled browser не монтирует evidence" ;;
+esac
+unset FACTORY_BROWSER_REQUEST_DIR
 
 RUNNER_CODEX_ADD_DIRS="$state_root $project_extra $control_dir"
 runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir" >/dev/null 2>&1

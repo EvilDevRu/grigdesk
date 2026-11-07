@@ -1,0 +1,360 @@
+[
+  {
+    "file": "README.md",
+    "id": "overview",
+    "title": "Руководство GrigDesk",
+    "section": "Начало работы",
+    "keywords": [
+      "справка",
+      "руководство",
+      "помощь",
+      "оглавление"
+    ]
+  },
+  {
+    "file": "getting-started.md",
+    "id": "getting-started",
+    "title": "Первый запуск",
+    "section": "Начало работы",
+    "keywords": [
+      "старт",
+      "мастер",
+      "запуск",
+      "начало"
+    ]
+  },
+  {
+    "file": "installation.md",
+    "id": "installation",
+    "title": "Установка приложения",
+    "section": "Начало работы",
+    "keywords": [
+      "установка",
+      "скачать",
+      "linux",
+      "комплект"
+    ]
+  },
+  {
+    "file": "updates.md",
+    "id": "updates",
+    "title": "Обновление и возврат",
+    "section": "Начало работы",
+    "keywords": [
+      "обновление",
+      "версия",
+      "откат",
+      "релиз"
+    ]
+  },
+  {
+    "file": "data-and-backups.md",
+    "id": "data-and-backups",
+    "title": "Данные и резервные копии",
+    "section": "Начало работы",
+    "keywords": [
+      "данные",
+      "backup",
+      "резерв",
+      "восстановление"
+    ]
+  },
+  {
+    "file": "chats.md",
+    "id": "chats",
+    "title": "Разговоры с агентами",
+    "section": "Разговоры",
+    "keywords": [
+      "чат",
+      "агент",
+      "исполнитель",
+      "модель",
+      "разрешения"
+    ]
+  },
+  {
+    "file": "chat-context.md",
+    "id": "chat-context",
+    "title": "Память и контекст разговора",
+    "section": "Разговоры",
+    "keywords": [
+      "контекст",
+      "память",
+      "сжатие",
+      "compact",
+      "токены"
+    ]
+  },
+  {
+    "file": "chat-workdir.md",
+    "id": "chat-workdir",
+    "title": "Рабочая папка разговора",
+    "section": "Разговоры",
+    "keywords": [
+      "рабочая папка",
+      "каталог",
+      "cwd",
+      "директория",
+      "репозиторий"
+    ]
+  },
+  {
+    "file": "deepseek.md",
+    "id": "deepseek",
+    "title": "DeepSeek и GLM",
+    "section": "Разговоры",
+    "keywords": [
+      "deepseek",
+      "glm",
+      "ключ",
+      "баланс",
+      "harness"
+    ]
+  },
+  {
+    "file": "usage-forecast.md",
+    "id": "usage-forecast",
+    "title": "Прогноз лимитов",
+    "section": "Разговоры",
+    "keywords": [
+      "прогноз",
+      "лимит",
+      "квота",
+      "темп",
+      "сброс"
+    ]
+  },
+  {
+    "file": "projects.md",
+    "id": "projects",
+    "title": "Проекты и репозитории",
+    "section": "Проекты и задачи",
+    "keywords": [
+      "проект",
+      "репозиторий",
+      "архив",
+      "регистрация"
+    ]
+  },
+  {
+    "file": "tasks.md",
+    "id": "tasks",
+    "title": "Задачи и триаж",
+    "section": "Проекты и задачи",
+    "keywords": [
+      "задача",
+      "триаж",
+      "доска",
+      "полка",
+      "битрикс"
+    ]
+  },
+  {
+    "file": "incoming.md",
+    "id": "incoming",
+    "title": "Входящие, Telegram и GitHub",
+    "section": "Проекты и задачи",
+    "keywords": [
+      "входящие",
+      "telegram",
+      "github",
+      "issue",
+      "очередь"
+    ]
+  },
+  {
+    "file": "pipelines.md",
+    "id": "pipelines",
+    "title": "Запуск и работа конвейера",
+    "section": "Конвейер",
+    "keywords": [
+      "конвейер",
+      "запуск",
+      "попытка",
+      "статус",
+      "этап"
+    ]
+  },
+  {
+    "file": "gates.md",
+    "id": "gates",
+    "title": "Решения человека и остановки",
+    "section": "Конвейер",
+    "keywords": [
+      "ворота",
+      "приёмка",
+      "арбитр",
+      "остановка",
+      "возврат"
+    ]
+  },
+  {
+    "file": "routes.md",
+    "id": "routes",
+    "title": "Редактор маршрутов",
+    "section": "Конвейер",
+    "keywords": [
+      "маршрут",
+      "черновик",
+      "публикация",
+      "схема",
+      "конфликт"
+    ]
+  },
+  {
+    "file": "plugins.md",
+    "id": "plugins",
+    "title": "Плагины",
+    "section": "Инструменты",
+    "keywords": [
+      "плагин",
+      "каталог",
+      "установка",
+      "расширение",
+      "размещение"
+    ]
+  },
+  {
+    "file": "code.md",
+    "id": "code",
+    "title": "Код и Git",
+    "section": "Инструменты",
+    "keywords": [
+      "код",
+      "git",
+      "diff",
+      "коммит",
+      "файл",
+      "изменения"
+    ]
+  },
+  {
+    "file": "docker.md",
+    "id": "docker",
+    "title": "Докер",
+    "section": "Инструменты",
+    "keywords": [
+      "docker",
+      "контейнер",
+      "образ",
+      "том",
+      "журнал"
+    ]
+  },
+  {
+    "file": "sandboxes.md",
+    "id": "sandboxes",
+    "title": "Песочницы и стенды",
+    "section": "Инструменты",
+    "keywords": [
+      "песочница",
+      "стенд",
+      "слот",
+      "подъём",
+      "снос"
+    ]
+  },
+  {
+    "file": "showcase.md",
+    "id": "showcase",
+    "title": "Презентации и ролики",
+    "section": "Инструменты",
+    "keywords": [
+      "презентация",
+      "ролик",
+      "сцена",
+      "озвучка",
+      "голос",
+      "видео"
+    ]
+  },
+  {
+    "file": "browser.md",
+    "id": "browser",
+    "title": "Браузер и доступ агента",
+    "section": "Инструменты",
+    "keywords": [
+      "браузер",
+      "вкладка",
+      "доступ",
+      "страница"
+    ]
+  },
+  {
+    "file": "settings.md",
+    "id": "settings",
+    "title": "Настройки GrigDesk",
+    "section": "Настройки",
+    "keywords": [
+      "настройки",
+      "поиск",
+      "параметры",
+      "применить"
+    ]
+  },
+  {
+    "file": "connections.md",
+    "id": "connections",
+    "title": "Машины и подключения",
+    "section": "Настройки",
+    "keywords": [
+      "машина",
+      "сервер",
+      "телефон",
+      "подключение",
+      "qr"
+    ]
+  },
+  {
+    "file": "speech.md",
+    "id": "speech",
+    "title": "Диктовка и встречи",
+    "section": "Настройки",
+    "keywords": [
+      "речь",
+      "диктовка",
+      "встреча",
+      "whisper",
+      "видео"
+    ]
+  },
+  {
+    "file": "web-log.md",
+    "id": "web-log",
+    "title": "Журнал окна и диагностика",
+    "section": "Помощь",
+    "keywords": [
+      "журнал",
+      "диагностика",
+      "лог",
+      "ошибка",
+      "отметка"
+    ]
+  },
+  {
+    "file": "troubleshooting.md",
+    "id": "troubleshooting",
+    "title": "Как решить проблему",
+    "section": "Помощь",
+    "keywords": [
+      "ошибка",
+      "сбой",
+      "связь",
+      "квота",
+      "восстановление"
+    ]
+  },
+  {
+    "file": "glossary.md",
+    "id": "glossary",
+    "title": "Термины",
+    "section": "Помощь",
+    "keywords": [
+      "термины",
+      "словарь",
+      "ход",
+      "профиль",
+      "маршрут"
+    ]
+  }
+]

@@ -1,0 +1,96 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "models": {
+    "currentModelId": "synthetic-model(openai)",
+    "availableModels": [
+      {
+        "modelId": "coder-model(qwen-oauth)",
+        "name": "coder-model",
+        "description": "Qwen 3.5 Plus — efficient hybrid model with leading coding performance",
+        "_meta": {
+          "contextLimit": 1000000
+        }
+      },
+      {
+        "modelId": "synthetic-model(openai)",
+        "name": "Synthetic metadata fixture",
+        "description": null,
+        "_meta": {
+          "contextLimit": 131072
+        }
+      }
+    ]
+  },
+  "modes": {
+    "currentModeId": "default",
+    "availableModes": [
+      {
+        "id": "plan",
+        "name": "Plan",
+        "description": "Analyze only, do not modify files or execute commands"
+      },
+      {
+        "id": "default",
+        "name": "Default",
+        "description": "Require approval for file edits or shell commands"
+      },
+      {
+        "id": "auto-edit",
+        "name": "Auto Edit",
+        "description": "Automatically approve file edits"
+      }
+    ]
+  },
+  "configOptions": [
+    {
+      "id": "mode",
+      "name": "Mode",
+      "description": "Session permission mode",
+      "category": "mode",
+      "type": "select",
+      "currentValue": "default",
+      "options": [
+        {
+          "value": "plan",
+          "name": "Plan",
+          "description": "Analyze only, do not modify files or execute commands"
+        },
+        {
+          "value": "default",
+          "name": "Default",
+          "description": "Require approval for file edits or shell commands"
+        },
+        {
+          "value": "auto-edit",
+          "name": "Auto Edit",
+          "description": "Automatically approve file edits"
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "name": "Model",
+      "description": "AI model to use",
+      "category": "model",
+      "type": "select",
+      "currentValue": "synthetic-model(openai)",
+      "options": [
+        {
+          "value": "coder-model(qwen-oauth)",
+          "name": "coder-model",
+          "description": "Qwen 3.5 Plus — efficient hybrid model with leading coding performance"
+        },
+        {
+          "value": "synthetic-model(openai)",
+          "name": "Synthetic metadata fixture",
+          "description": ""
+        },
+        {
+          "value": "synthetic-corporate-model(gigacode)",
+          "name": "synthetic-corporate-model",
+          "description": ""
+        }
+      ]
+    }
+  ]
+}

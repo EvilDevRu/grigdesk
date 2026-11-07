@@ -22,7 +22,24 @@
 
 ## Структура
 
-Создай вручную:
+Готовый общий образец с маршрутами `small`, `feature`, `debug` поставляется в
+`server/seed/pipeline-sample/` исходников и комплекта сервера. Начните с копии его
+`profile/`, заполните единственный `project.json`, настройте исполнителей через
+`configure.py --factory <absolute-factory-cli>`. Публикация сначала во временный store,
+проверка движком и включение capability последней описаны в
+[ручном подключении образца](../grigdesk/pipeline/profile-sample.md).
+
+Общие инструкции этапов не содержат текста проекта. В описании выбираются отдельные
+Git-копии без стенда либо чистый shared checkout с существующим стендом, наличие интерфейса,
+команды, правила продукта, исполнители и сдача (commit/merge/pull-request). Умолчания образца:
+короткий debug, isolated без интерфейса и локальный commit. UI требует браузера: isolated
+с интерфейсом остановится у человека на приёмке. Один provider допустим с разными моделями.
+Существующие профили вручную не переводятся и при старте сервера не меняются.
+
+Значение каждого общего параметра, его формат, умолчание и место хранения перечислены
+в [справочнике профилей](../grigdesk/pipeline/project-profiles.md).
+
+Для собственной конфигурации без образца создай вручную:
 
 ~~~text
 profiles/<name>/
@@ -36,7 +53,8 @@ profiles/<name>/
     prompts/...
 ~~~
 
-profiles/ игнорируется Git. Не добавляй проектные пути и секреты в tracked engine-файлы.
+Содержимое профилей — локальная конфигурация вне Git исходников; ссылка на внешний каталог
+может отслеживаться отдельно. Не добавляй проектные пути и секреты в tracked engine-файлы.
 
 До публикации оставь capability выключенной:
 
@@ -71,10 +89,14 @@ PROJECT_RUNNER_FAILOVER=claude
 profile_workspace_mode         # isolated | shared
 profile_repositories TASK      # name<TAB>source<TAB>workspace
 profile_project_context        # JSON: stack[] + guardrails[]
-profile_source_branch TASK
+profile_source_branch TASK REPO # ветка указанного репозитория
 profile_container TASK
 profile_stand_alive TASK       # только health, без lifecycle
 ~~~
+
+Isolated-профиль, чей стенд не переживает перезагрузку машины, объявляет ещё
+`profile_stand_start TASK` — идемпотентный подъём процессов существующего стенда. GrigDesk
+зовёт его перед продолжением попытки, если стенд не отвечает (см. PROFILE-CONTRACT.md).
 
 Shared-профиль дополнительно реализует:
 
@@ -150,7 +172,7 @@ catalog и отдельное включение capability. Эти два де�
 
 ## Проверки
 
-Структурная проверка без Cockpit и model call:
+Структурная проверка без GrigDesk и model call:
 
 ~~~bash
 engine/bin/factory-check <name> --quick

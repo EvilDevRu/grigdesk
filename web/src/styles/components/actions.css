@@ -1,0 +1,2976 @@
+/* Выбор машины сохраняет плотность служебной панели и выделяет текущий профиль.
+   Все интерактивные состояния принадлежат UI-kit, содержимое строки — компоненту связи. */
+.ui-button[data-context='connection-machine'] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.ui-button[data-context='connection-machine'][aria-current='true'] {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--topbar-panel));
+}
+
+.ui-button[data-context='connection-machine']:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.ui-button[data-context='connection-machine'] > .ui-button__content,
+.ui-button[data-context='connection-machine'] .ui-button__label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+
+.ui-button[data-context='connection-action'] {
+  height: auto;
+  min-height: var(--control-height);
+  padding: 8px 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-button[data-context='connection-action'] > .ui-button__content {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 10px;
+}
+
+.ui-button[data-context='connection-action'][data-tone='accent'] {
+  color: var(--accent);
+}
+
+.ui-button[data-context='connection-action']:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.ui-button[data-context='connection-trigger'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-button[data-context='connection-trigger'][aria-expanded='true'],
+.ui-button[data-context='connection-trigger']:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+/* В компактной шапке машина занимает такую же площадку, как соседние иконки.
+   Скрываем и обёртку подписи: пустой label сохранял gap и сдвигал рисунок влево. */
+@media (max-width: 1100px) {
+  .ui-button[data-context='connection-trigger'] {
+    flex: none;
+    width: var(--toolbar-control-h);
+    padding: 0;
+  }
+
+  .ui-button[data-context='connection-trigger'] .ui-button__label {
+    display: none;
+  }
+}
+
+.ui-pressable[data-context='studio-model-card'] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='studio-model-card']:hover {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+
+.ui-pressable[data-context='studio-model-card']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ui-pressable[data-context='studio-version-row'] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 8px;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.ui-pressable[data-context='studio-version-row']:hover {
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='studio-version-row'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+/* Инструменты холста используют компактную геометрию toolbar внутри общего kit.
+   Подписи доступны через aria-label, состояния не зависят от оформления экрана. */
+.ui-icon-button[data-context='studio-view-tool'] {
+  width: var(--toolbar-control-h);
+  min-width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 5px;
+  border-radius: 4px;
+}
+
+.ui-icon-button[data-context='studio-view-tool'] svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-disclosure-button[data-context='studio-inspector-section'] {
+  padding-right: 0;
+  padding-left: 0;
+  font-size: 12px;
+}
+
+.ui-disclosure-button[data-context='studio-next-operation'] {
+  height: auto;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.ui-disclosure-button[data-context='studio-next-operation']:hover:not(:disabled),
+.ui-disclosure-button[data-context='studio-next-operation'][aria-expanded='true'] {
+  border-color: var(--line-2);
+  background: var(--surface);
+}
+
+.ui-disclosure-button[data-context='studio-next-operation'] .ui-button__label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.ui-pressable[data-context='studio-separator'] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.ui-pressable[data-context='studio-guide'] {
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+  font-size: 10px;
+}
+
+/* Строка рабочего каталога: выбранная сущность заметна и мышью, и с клавиатуры.
+   Скин принадлежит UI-kit; сам экран задаёт только раскладку содержимого строки. */
+.ui-pressable[data-context='workspace-catalog-row'] {
+  min-height: max(34px, var(--control-height));
+  padding: var(--workspace-row-inset);
+  border: 0;
+  border-radius: var(--control-radius);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.ui-pressable[data-context='workspace-catalog-row']:hover {
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='workspace-catalog-row'][aria-current='page'] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 14%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ui-pressable[data-context='workspace-catalog-row']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Компактные действия панели и рабочей формы берут один toolbar-токен. */
+.ui-button[data-context='workspace-toolbar'], .ui-button[data-context='workspace-filter'], .ui-button[data-context='project-repo-action'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='workspace-toolbar'][data-role], .ui-button[data-context='project-repo-action'] {
+  width: var(--toolbar-control-h);
+  padding: 0;
+  flex: none;
+}
+
+.ui-icon-button[data-context='workspace-toolbar'][data-role] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
+/* В строках формы кнопки равны полям; компактная высота остаётся у шапок. */
+.ui-button[data-context='workspace-form'],
+.ui-button[data-context='workspace-form-wrap'] {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+/* Длинные названия операций переносятся; короткая кнопка сохраняет высоту поля. */
+.ui-button[data-context='workspace-form-wrap'] {
+  height: auto;
+  padding-block: 5px;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Варианты арбитра образуют список действий с читаемой подписью и знаком отправки.
+   Цвет рекомендации задаётся общими variant/tone; экран отвечает только за содержимое. */
+.ui-button[data-context='arbiter-question-option'] {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.ui-button[data-context='arbiter-question-option'][data-tone='neutral'] {
+  --ui-action-tone: var(--ink);
+}
+
+.ui-button[data-context='arbiter-question-option'] .ui-button__content,
+.ui-button[data-context='arbiter-question-option'] .ui-button__label {
+  width: 100%;
+  text-align: left;
+}
+
+/* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
+.ui-button[data-context='grigdesk-task-title'] {
+  height: auto;
+  max-width: 100%;
+  padding-block: 5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.ui-icon-button[data-context='workspace-form'][data-role] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0;
+}
+
+/* Небольшой знак справки сохраняет полную сенсорную площадку на touch. */
+.ui-icon-button[data-context='field-help'][data-role] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0;
+}
+
+.ui-icon-button[data-context='field-help'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-button[data-context='workspace-filter'] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-button[data-context='workspace-filter'][aria-pressed='true'] {
+  color: var(--accent);
+  box-shadow: inset 0 -1px var(--accent);
+}
+
+.ui-button[data-context='workspace-save'] {
+  font-size: 12px;
+}
+
+/* Выбор версии должен читаться целиком даже в узкой карточке с крупным текстом.
+   Высота растёт по содержимому, сохраняя общий минимум площадки нажатия. */
+.ui-button[data-context='project-conflict-action'] {
+  height: auto;
+  padding-block: 9px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.ui-button,
+.ui-action-link,
+.ui-icon-button,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button {
+  --ui-action-tone: var(--control-text);
+  --ui-action-solid: var(--surface-2);
+  --ui-action-solid-text: var(--control-text);
+  --ui-action-soft: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+  --ui-action-background: var(--control-background);
+  --ui-action-background-hover: var(--control-background-hover);
+  --ui-action-border: var(--control-border);
+  --ui-action-color: var(--control-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  border: 1px solid var(--ui-action-border);
+  border-radius: var(--control-radius);
+  background: var(--ui-action-background);
+  color: var(--ui-action-color);
+  cursor: pointer;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+  white-space: nowrap;
+}
+
+.ui-button,
+.ui-action-link,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button {
+  padding: 0 13px;
+}
+
+/* Компактный размер consumer выбирает явно, без чужого data-context: геометрия toolbar.
+   На touch токен поднимается до 44 px, поэтому площадка нажатия не сжимается. */
+.ui-button[data-size='compact'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.ui-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-action-link:hover:not([aria-disabled='true']),
+.ui-icon-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-command-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-toggle-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-disclosure-button:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: color-mix(in srgb, var(--ui-action-tone) 48%, var(--control-border-hover));
+  background: var(--ui-action-background-hover);
+}
+
+.ui-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-action-link:active:not([aria-disabled='true']),
+.ui-icon-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-command-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-toggle-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-disclosure-button:active:not(:disabled):not([aria-disabled='true']) {
+  filter: brightness(0.92);
+}
+
+.ui-button--accent,
+.ui-button[data-tone='accent'],
+.ui-action-link[data-tone='accent'],
+.ui-icon-button[data-tone='accent'],
+.ui-command-button[data-tone='accent'],
+.ui-toggle-button[data-tone='accent'],
+.ui-disclosure-button[data-tone='accent'] {
+  --ui-action-tone: var(--accent);
+  --ui-action-solid: var(--accent);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ui-button--success,
+.ui-button[data-tone='success'],
+.ui-action-link[data-tone='success'],
+.ui-icon-button[data-tone='success'],
+.ui-command-button[data-tone='success'],
+.ui-toggle-button[data-tone='success'],
+.ui-disclosure-button[data-tone='success'] {
+  --ui-action-tone: var(--good);
+  --ui-action-solid: var(--good);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--good) 12%, transparent);
+}
+
+.ui-button--warning,
+.ui-button[data-tone='warning'],
+.ui-action-link[data-tone='warning'],
+.ui-icon-button[data-tone='warning'],
+.ui-command-button[data-tone='warning'],
+.ui-toggle-button[data-tone='warning'],
+.ui-disclosure-button[data-tone='warning'] {
+  --ui-action-tone: var(--warn);
+  --ui-action-solid: var(--warn);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.ui-button--danger,
+.ui-button[data-tone='danger'],
+.ui-action-link[data-tone='danger'],
+.ui-icon-button[data-tone='danger'],
+.ui-command-button[data-tone='danger'],
+.ui-toggle-button[data-tone='danger'],
+.ui-disclosure-button[data-tone='danger'] {
+  --ui-action-tone: var(--bad);
+  --ui-action-solid: var(--bad);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+
+.ui-button--neutral,
+.ui-button[data-tone='neutral'],
+.ui-action-link[data-tone='neutral'],
+.ui-icon-button[data-tone='neutral'],
+.ui-command-button[data-tone='neutral'],
+.ui-toggle-button[data-tone='neutral'],
+.ui-disclosure-button[data-tone='neutral'] {
+  --ui-action-tone: var(--ink-mid);
+  --ui-action-solid: var(--surface-2);
+  --ui-action-solid-text: var(--ink);
+  --ui-action-soft: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+}
+
+.ui-button--solid,
+.ui-button[data-variant='solid'],
+.ui-action-link[data-variant='solid'],
+.ui-icon-button[data-variant='solid'],
+.ui-command-button[data-variant='solid'],
+.ui-toggle-button[data-variant='solid'],
+.ui-disclosure-button[data-variant='solid'] {
+  --ui-action-background: var(--ui-action-solid);
+  --ui-action-background-hover: color-mix(in srgb, var(--ui-action-solid) 86%, var(--ink));
+  --ui-action-border: var(--ui-action-solid);
+  --ui-action-color: var(--ui-action-solid-text);
+}
+
+.ui-button--outline,
+.ui-button[data-variant='outline'],
+.ui-action-link[data-variant='outline'],
+.ui-icon-button[data-variant='outline'],
+.ui-command-button[data-variant='outline'],
+.ui-toggle-button[data-variant='outline'],
+.ui-disclosure-button[data-variant='outline'] {
+  --ui-action-background: var(--control-background);
+  --ui-action-background-hover: var(--control-outline-background-hover, var(--ui-action-soft));
+  --ui-action-border: var(--control-outline-border,
+    color-mix(in srgb, var(--ui-action-tone) 44%, var(--control-border)));
+  --ui-action-color: var(--ui-action-tone);
+}
+
+.ui-button--ghost,
+.ui-button[data-variant='ghost'],
+.ui-action-link[data-variant='ghost'],
+.ui-icon-button[data-variant='ghost'],
+.ui-command-button[data-variant='ghost'],
+.ui-toggle-button[data-variant='ghost'],
+.ui-disclosure-button[data-variant='ghost'],
+.ui-button--text,
+.ui-button[data-variant='text'],
+.ui-action-link[data-variant='text'],
+.ui-icon-button[data-variant='text'],
+.ui-command-button[data-variant='text'],
+.ui-toggle-button[data-variant='text'],
+.ui-disclosure-button[data-variant='text'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: var(--ui-action-soft);
+  --ui-action-border: transparent;
+  --ui-action-color: var(--ui-action-tone);
+}
+
+.ui-button {
+  position: relative;
+}
+
+.ui-button--block,
+.ui-button[data-block='true'] {
+  width: 100%;
+}
+
+.ui-button__content,
+.ui-button__loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ui-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Длинное действие на узком экране растёт по тексту и сохраняет сенсорный минимум. */
+.ui-button--wrap {
+  height: auto;
+  padding-block: 10px;
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.ui-button--wrap .ui-button__label {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.ui-button__label > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.ui-button__leading,
+.ui-button__trailing {
+  display: inline-flex;
+  flex: none;
+}
+
+.ui-button__leading > svg,
+.ui-button__trailing > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-disclosure-button > .ui-button__content {
+  flex: 1;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.ui-disclosure-button .ui-button__label {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  text-align: left;
+}
+
+.ui-disclosure-button .ui-button__trailing {
+  margin-left: auto;
+}
+
+.ui-disclosure-button--compact,
+.ui-disclosure-button[data-density='compact'] {
+  height: auto;
+  min-height: 0;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+
+.ui-button__loading {
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ui-button.is-loading .ui-button__content,
+.ui-button[aria-busy='true'] .ui-button__content {
+  visibility: hidden;
+}
+
+.ui-button.is-loading .ui-button__loading,
+.ui-button[aria-busy='true'] .ui-button__loading {
+  opacity: 1;
+}
+
+/* Выполняемое действие сохраняет контраст даже при одновременном disabled.
+   Спиннер наследует цвет надписи: тёмный на яркой заливке и светлый на тёмной. */
+.ui-button.is-loading,
+.ui-button[aria-busy='true'] {
+  opacity: 1;
+  cursor: progress;
+}
+
+.ui-button__loading > .ui-spinner {
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}
+
+.ui-button.is-pressed,
+.ui-button[aria-pressed='true'],
+.ui-toggle-button.is-pressed,
+.ui-toggle-button[aria-pressed='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 62%, var(--control-border));
+  --ui-action-color: var(--ui-action-tone);
+}
+
+/* Ссылочный вариант сохраняет геометрию и фокус действия, меняя только цвет знака.
+   Наведение и открытая панель не возвращают ему рамку или фоновую плашку. */
+:is(.ui-button, .ui-action-link, .ui-icon-button, .ui-command-button,
+    .ui-toggle-button, .ui-disclosure-button)[data-variant='link'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: transparent;
+  --ui-action-border: transparent;
+  --ui-action-color: var(--ui-action-tone);
+}
+
+:is(
+  .ui-button, .ui-action-link, .ui-icon-button,
+  .ui-command-button, .ui-toggle-button, .ui-disclosure-button
+)[data-variant='link']:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: transparent;
+  color: color-mix(in srgb, var(--ui-action-tone) 60%, var(--ink));
+}
+
+.ui-icon-button {
+  flex: none;
+  width: var(--control-height);
+  padding: 0;
+}
+
+.ui-icon-button .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.ui-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ui-icon-button--peer,
+.ui-icon-button[data-role='peer'] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+
+.ui-icon-button[data-context='window-control'] {
+  width: var(--app-topbar-h);
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  border-radius: 0;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='tool-window-control'] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
+.ui-icon-button[data-context='tool-window-control'] svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-icon-button--embedded,
+.ui-icon-button[data-role='embedded'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border-radius: 7px;
+}
+
+.ui-icon-button--rail,
+.ui-icon-button[data-role='rail'] {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border-radius: 7px;
+}
+
+.ui-icon-button--stepper,
+.ui-icon-button[data-role='stepper'] {
+  width: 24px;
+  height: 17px;
+  min-height: 17px;
+  border-radius: 5px;
+}
+
+.ui-icon-button[data-context^='tool-dock-'] {
+  width: var(--tool-dock-action-size);
+  height: var(--tool-dock-action-size);
+  min-height: var(--tool-dock-action-size);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  transition: color .12s, border-color .12s, background .12s;
+}
+
+.ui-icon-button[data-context^='tool-dock-']:hover {
+  border-color: var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='tool-dock-expand'][aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context^='tool-dock-']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ui-icon-button[data-context^='tool-dock-'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Переключатель навигатора «Кода» — иконка без подписи, ровно того же роста, что
+   соседние кнопки дока: три квадрата в ряд, а не кнопка с текстом среди значков. */
+.ui-button[data-context='tool-dock-navigator'] {
+  flex: none;
+  width: var(--tool-dock-action-size, 30px);
+  height: var(--tool-dock-action-size, 30px);
+  min-height: var(--tool-dock-action-size, 30px);
+  padding: 0;
+  border-radius: 7px;
+  line-height: 1;
+}
+
+.ui-button[data-context='tool-dock-navigator'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* «+N» в строке хода чата: текст той же тихой строки, без коробки, чтобы не спорить с
+   индикатором. Поле по горизонтали только расширяет мишень пальца; рамки и вертикальных
+   отступов нет — иначе кнопка вылезла бы из общей базовой линии строки. */
+.ui-pressable[data-context='chat-status-more'] {
+  flex: none;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='chat-status-more']:hover,
+.ui-pressable[data-context='chat-status-more'][aria-expanded='true'] {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='chat-status-more']:focus-visible {
+  outline: 1px solid transparent;
+  box-shadow: var(--control-focus-ring);
+}
+
+.ui-pressable[data-context='code-commit-disclosure'] {
+  min-height: 28px;
+  border-radius: 6px;
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='code-commit-disclosure']:hover {
+  color: var(--ink);
+}
+
+/* Файловые иконки плагинов и резервные SVG следуют размеру соседних разделов.
+   Правило обеих реек перекрывает базовые 24 px общего PluginIcon. */
+.shell [data-ui-shell-nav] :is(svg, .plugin-icon),
+.ui-icon-button[data-context='tool-rail-item'] :is(svg, .plugin-icon) {
+  width: 16px;
+  height: 16px;
+}
+
+/* Внутренняя рейка разделов плагина «Код» сохраняет собственную геометрию плиток.
+   Активный раздел выражен pressed-состоянием самой кнопки, а не внешним классом. */
+.ui-icon-button[data-context='code-rail-item'] {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='code-rail-item']:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='code-rail-item']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ui-icon-button[data-context='code-rail-item'] svg {
+  width: 19px;
+  height: 19px;
+}
+
+/* Строка дерева и списка изменений плагина «Код». Это плотный список, а не ряд
+   одноранговых контролов формы, поэтому у него своя высота: на общей высоте поля
+   в панель помещалось бы вдвое меньше файлов. */
+.ui-pressable[data-context='code-tree-row'] {
+  min-height: 28px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='code-tree-row']:hover {
+  background-color: var(--surface);
+}
+
+.ui-pressable[data-context='code-tree-row']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+/* Каталог узнаётся по aria-expanded: он есть ровно у раскрываемых строк, и вторым
+   признаком-классом эти два источника правды разъехались бы. */
+.ui-pressable[data-context='code-tree-row'][aria-expanded] {
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='code-tree-row'][aria-pressed='true'] {
+  background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 82%, transparent);
+}
+
+/* Множественный выбор независим от открытого файла и относится также к каталогам.
+   Контур дополняет фон текущего файла, сохраняя общий skin строк дерева и списка. */
+.ui-pressable[data-context='code-tree-row'][aria-selected='true'] {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Коммит в журнале — такая же плотная строка навигации, но с отдельной парой
+   «короткий hash + тема». Скин живёт здесь, чтобы экран не переопределял размеры
+   и интерактивные состояния базового контрола. */
+.ui-pressable[data-context='code-commit-row'] {
+  width: 100%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='code-commit-row']:hover {
+  background-color: var(--surface);
+}
+
+.ui-pressable[data-context='code-commit-row']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.ui-pressable[data-context='code-commit-row'][aria-pressed='true'] {
+  background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 82%, transparent);
+}
+
+/* Обзор патча остаётся плотным, но кликабельные заголовки и roving-focus строк
+   должны быть видны без добавления тысяч постоянных tab-остановок. */
+.ui-pressable[data-context='code-patch-file']:hover {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.ui-pressable[data-context='code-patch-file']:focus-visible,
+.ui-pressable[data-context='code-patch-line']:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: -2px;
+}
+
+.ui-pressable[data-context='code-patch-line']:hover {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Кадр записи в черновике задачи раздела «Видео». Это не кнопка формы, а само превью,
+   которое открывают крупно: отступов и фона у него нет, рамка принадлежит картинке.
+   Отказ человека от кадра ОБЕСЦВЕЧИВАЕТ превью, но оставляет его на экране — решение
+   обратимо, и видно, от чего отказались. */
+.ui-pressable[data-context='meeting-frame-preview'] {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='meeting-frame-preview']:hover {
+  border-color: var(--accent);
+}
+
+.ui-pressable[data-context='meeting-frame-preview'][data-muted='true'] {
+  opacity: .45;
+  filter: grayscale(1);
+}
+
+/* Индексация одной строки. На указателе кнопка появляется по наведению и лежит
+   ПОВЕРХ строки: постоянная колонка 30px отнимала место у имени файла, а список
+   изменений открывают ради имени. Наводить на планшете нечем — там она в потоке. */
+.ui-icon-button[data-context='code-row-action'] {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  border-radius: 6px;
+  color: var(--ui-action-tone);
+}
+
+/* Композер коммита живёт в узкой боковой панели рядом со строками в 25px, поэтому
+   у него свой ритм — 30px, как у кнопок дока. Все четыре контрола одной высоты:
+   разнобой внутри одной группы запрещён так же, как и полная высота формы. */
+.ui-button[data-context='code-commit'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.ui-icon-button[data-context='code-commit'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+/* Шапка редактора плотнее обычной формы: это панель инструментов над Monaco.
+   Текстовые и иконочные действия одной высоты, поэтому строка не раздувается до 50px. */
+.ui-button[data-context='code-editor-action'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='code-editor-action'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+.ui-button[data-context='code-editor-action'] .chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-button[data-context='code-editor-action']:focus-visible,
+.ui-icon-button[data-context='code-editor-action']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 1px;
+}
+
+/* Действия внутри teleport-popover «Кода» используют центральный skin: scoped CSS
+   страницы не достигает поверхности в body. */
+.ui-button[data-context='code-popover-action'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.ui-button[data-context='code-popover-choice'] {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+/* Служебные кнопки заголовка группы мельче строчной: они вторичны, а место в узкой
+   панели нужно самому названию группы — иначе «Не в коммите» уезжало в многоточие. */
+.ui-icon-button[data-context='code-group-action'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: 6px;
+  color: var(--ui-action-tone);
+}
+
+.ui-icon-button[data-context='code-row-action']:hover:not(:disabled),
+.ui-icon-button[data-context='code-group-action']:hover:not(:disabled) {
+  background: var(--ui-action-soft);
+  color: var(--ui-action-tone);
+}
+
+.ui-icon-button[data-context='code-group-action'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/* Заголовок группы изменений — кнопка сворачивания дерева: шеврон рисуется
+   псевдоэлементом, чтобы первым span оставался сам текст заголовка. */
+.ui-pressable[data-context='code-group-toggle'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.ui-pressable[data-context='code-group-toggle']::before {
+  content: '▾';
+  flex: none;
+  font-size: 10px;
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='code-group-toggle'][aria-expanded='false']::before {
+  content: '▸';
+}
+
+/* Текстовая кнопка заголовка группы («+ текущие», «Сбросить»): тот же рост и ритм, что
+   у значков. UiIconButton тоже носит класс .ui-button, поэтому правило исключает его явно —
+   иначе боковые отступы оставляли значку 10px, и три точки рисовались одной. */
+.ui-button[data-context='code-group-action']:not(.ui-icon-button) {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--ink-mid);
+}
+
+.ui-button[data-context='code-group-action']:not(.ui-icon-button):hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-button[data-context='code-group-action']:not(.ui-icon-button)[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ui-button[data-context='code-group-action']:not(.ui-icon-button)[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-icon-button[data-context='code-group-action'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Служебная колонка зарезервирована постоянно: hover раскрывает действия, но не меняет
+   ширину имени и статистики файла. */
+[data-ui-row='code-change'] > .ui-pressable {
+  padding-right: calc(var(--row-actions, 1) * 28px + 4px);
+}
+
+.ui-pressable,
+.ui-svg-pressable {
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ui-pressable {
+  padding: 0;
+}
+
+/* Кнопка обновления занимает всю площадку знака, заданную раскладкой шапки.
+   Её геометрия принадлежит UI-kit; нажатие не должно перетаскивать desktop-окно. */
+.ui-pressable[data-context='application-update-mark'] {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.ui-pressable[data-context='provider-status'] {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.ui-icon-button[data-context='alert-history'] {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+/* Счётчик привязан к кнопке, а не к обрезаемой подписи внутри UiButton.
+   На touch он целиком помещается в 44 px, включая верхний край окна телефона. */
+.ui-icon-button[data-context='alert-history'] .ui-button__label {
+  overflow: visible;
+}
+
+.ui-icon-button[data-context='alert-history'] .alert-bell-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--ground);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  white-space: nowrap;
+  text-align: center;
+  pointer-events: none;
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-badge {
+  top: 2px;
+  right: 2px;
+}
+
+.ui-button[data-context='board-filter-toggle'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+@media (max-width: 600px) {
+  .ui-button[data-context='board-filter-toggle'] {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+
+  .ui-button[data-context='board-filter-toggle'] :is(.filter-toggle-label, .filter-count) {
+    display: none;
+  }
+}
+
+.ui-icon-button[data-context='topbar-action'] svg,
+.ui-icon-button[data-context='alert-history'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
+.ui-pressable[data-context='provider-status'].codex,
+.ui-pressable[data-context='provider-status'].kimi {
+  color: var(--ink);
+}
+
+.ui-pressable[data-context='provider-status'].off {
+  color: var(--ink-mid);
+}
+
+/* Недоступность приглушает знак, сохраняя сплошной фон активной плитки.
+   Opacity всей кнопки разрывала бы её цветовой стык с панелью. */
+.ui-pressable[data-context='provider-status'].off > .prov-mark {
+  opacity: 0.45;
+}
+
+.ui-pressable[data-context='provider-status'].upd > .prov-mark {
+  opacity: 1;
+}
+
+/* Карточка активного B24-таймера целиком открывает задачу. Геометрия и интерактивное
+   оформление общие для доски; содержимое карточки остаётся доменным и живёт в BoardView. */
+.ui-pressable[data-context='active-timer-card'] {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  text-align: left;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-pressable[data-context='active-timer-card']:hover {
+  border-color: color-mix(in srgb, var(--good) 46%, var(--line));
+  background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
+}
+
+/* Каталог и меню используют одну ссылку; геометрия выбирается контекстом.
+   Оформление наведения, фокуса и выбранного раздела остаётся внутри UI-kit. */
+.ui-action-link[data-context='tool-tile'] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  height: auto;
+  min-height: 104px;
+  padding: 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 13px;
+  text-align: center;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-tile']:hover:not([aria-disabled='true']) {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-tile'][aria-current='page'] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: var(--accent);
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon :is(svg, .plugin-icon) {
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon :is(svg, .plugin-icon) {
+  width: 20px;
+  height: 20px;
+}
+
+.ui-action-link:is([data-context='tool-menu-item'], [data-context='tool-tile']) .tool-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-label {
+  flex: 1;
+}
+
+.ui-action-link[data-context='tool-menu-item']:hover:not([aria-disabled='true']) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-menu-item'][aria-current='page'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--topbar-panel));
+  color: var(--accent);
+}
+
+/* Таймеры, конвейеры и прерванные оценки используют общую геометрию статусов topbar.
+   Интерактивный элемент сохраняем для клавиатуры и тач-экрана; список открывается
+   наведением или нажатием. */
+.ui-button[data-context='board-timers-topbar'],
+.ui-button[data-context='analysis-attention-topbar'],
+.ui-button[data-context='pipeline-topbar'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-mid);
+  transition: color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-button[data-context='board-timers-topbar'] > .ui-button__content,
+.ui-button[data-context='board-timers-topbar'] .ui-button__label,
+.ui-button[data-context='analysis-attention-topbar'] > .ui-button__content,
+.ui-button[data-context='analysis-attention-topbar'] .ui-button__label,
+.ui-button[data-context='pipeline-topbar'] > .ui-button__content,
+.ui-button[data-context='pipeline-topbar'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-button[data-context='analysis-attention-topbar'] {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.ui-button[data-context='board-timers-topbar']:hover:not(:disabled),
+.ui-button[data-context='board-timers-topbar'][aria-expanded='true'],
+.ui-button[data-context='pipeline-topbar']:hover:not(:disabled),
+.ui-button[data-context='pipeline-topbar'][aria-expanded='true'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+}
+
+.ui-button[data-context='topbar-timer-task'] {
+  width: auto;
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 7px;
+  border-radius: 8px;
+  text-align: left;
+  transition:
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-button[data-context='topbar-timer-task'] > .ui-button__content,
+.ui-button[data-context='topbar-timer-task'] .ui-button__label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-button[data-context='topbar-timer-task']:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ui-icon-button[data-context='topbar-timer-toggle'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex: none;
+  border-color: transparent;
+  background: transparent;
+}
+
+.ui-icon-button[data-context='topbar-timer-toggle']:hover:not(:disabled) {
+  background: var(--ui-action-soft);
+}
+
+/* Popover в узком topbar хранит служебные действия, а не полноразмерную форму.
+   Высоты повторяют прежнюю плотность и не съедают половину карточки лимитов. */
+.ui-button[data-context='topbar-popover-action'],
+.ui-inline-confirm[data-context='topbar-popover-confirm'] .ui-button {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: var(--line-2);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.ui-button[data-context='topbar-popover-action']:hover:not(:disabled),
+.ui-inline-confirm[data-context='topbar-popover-confirm'] .ui-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ui-button[data-context='topbar-popover-footer'] {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11.5px;
+}
+
+.ui-pressable[data-context='topbar-metrics'],
+.ui-pressable[data-context='topbar-network'] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+}
+
+/* Активная кнопка получает общий фон псевдоэлементом на всю высоту топбара.
+   Собственный hover skin не должен рисовать поверх него скруглённое пятно. */
+[data-ui-topbar-trigger][aria-expanded='true'] {
+  --ui-action-background-hover: transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-button[data-context='topbar-popover-footer']:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Иконки в шапке всплывашки исполнителя. Там строка имени, а не панель инструментов:
+   кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
+.ui-icon-button[data-context='topbar-popover-settings'],
+.ui-icon-button[data-context='topbar-popover-refresh'],
+.ui-icon-button[data-context='topbar-popover-result'],
+.ui-icon-button[data-context='topbar-popover-update'] {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border-radius: 6px;
+}
+
+.ui-icon-button[data-context='topbar-popover-settings'] svg,
+.ui-icon-button[data-context='topbar-popover-refresh'] svg,
+.ui-icon-button[data-context='topbar-popover-update'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Внешний ресурс и страница состояния вендора — ссылки, а не кнопки формы. Обычный
+   action skin добавляет им 36 px высоты и nowrap; длинная подпись Claude из-за этого
+   раздвигала popover. Скин один: обе ссылки живут строкой в тексте всплывашки. */
+.ui-action-link[data-context='topbar-popover-resource-link'],
+.ui-action-link[data-context='topbar-popover-status-link'] {
+  justify-content: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-align: left;
+  text-decoration: underline;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='topbar-popover-resource-link']:hover:not([aria-disabled='true']),
+.ui-action-link[data-context='topbar-popover-status-link']:hover:not([aria-disabled='true']) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
+
+.ui-pressable[data-role='transcript-segment'] {
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  font-size: 13.5px;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-pressable[data-role='transcript-segment']:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.ui-pressable[data-role='task-title'] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-pressable[data-role='task-title'][data-emphasis='active'] {
+  font-weight: 600;
+}
+
+.ui-pressable[data-role='task-title']:hover {
+  color: var(--accent);
+}
+
+.ui-pressable[data-role='task-title'][data-context='board-task'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: 100%;
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ui-icon-button[data-context='board-task-favorite'][aria-pressed='false']:not(:hover) {
+  --ui-action-color: var(--ink-low);
+}
+
+.ui-button[data-context='board-quick-filter'][aria-pressed='false'] {
+  --ui-action-color: var(--ink-mid);
+}
+
+@media (max-width: 600px) {
+  .ui-pressable[data-role='task-title'][data-context='board-task'] {
+    min-height: 44px;
+  }
+}
+
+.ui-tab[data-context='board-related-tab'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.ui-command-button {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* Панель конвейера использует плотность toolbar, а не кнопок формы.
+   Тон остаётся у точек и выбранного состояния; проекты отмечены нижней линией. */
+.ui-button[data-context='pipeline-project'],
+.ui-button[data-context='pipeline-toolbar-more'],
+.ui-button[data-context='pipeline-status'],
+.ui-button[data-context='pipeline-status-trigger'],
+.ui-icon-button[data-context='pipeline-view'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: color-mix(in srgb, var(--ink) 3%, transparent);
+  --ui-action-color: var(--ink-mid);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.ui-button[data-context='pipeline-project'] {
+  padding-inline: 10px;
+}
+
+.ui-button[data-context='pipeline-project'][aria-pressed='true'] {
+  --ui-action-color: var(--accent);
+}
+
+.ui-button[data-context='pipeline-project'][aria-pressed='true']::after {
+  position: absolute;
+  right: 10px;
+  bottom: -4px;
+  left: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  content: '';
+}
+
+.ui-button[data-context='pipeline-status-menu-option'] {
+  --ui-action-background-hover: color-mix(in srgb, var(--ink) 3%, transparent);
+  --ui-action-color: var(--ink-mid);
+  border-color: transparent;
+}
+
+.ui-button[data-context='pipeline-status'][data-empty='true'],
+.ui-button[data-context='pipeline-status-menu-option'][data-empty='true'] {
+  --ui-action-color: var(--ink-low);
+}
+
+.ui-button[data-context='pipeline-status'][aria-pressed='true'],
+.ui-button[data-context='pipeline-status-menu-option'][aria-checked='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-background-hover: var(--ui-action-soft);
+  --ui-action-color: var(--ui-action-tone);
+  background: var(--ui-action-background);
+}
+
+.ui-button[data-context='pipeline-status'][data-tone='neutral'][aria-pressed='true'],
+.ui-button[data-context='pipeline-status-menu-option'][data-tone='neutral'][aria-checked='true'] {
+  --ui-action-background: var(--surface-2);
+  --ui-action-background-hover: var(--surface-2);
+  --ui-action-color: var(--ink);
+}
+
+.ui-icon-button[data-context='pipeline-view'] {
+  width: var(--toolbar-control-h);
+  padding: 0;
+}
+
+.ui-icon-button[data-context='pipeline-view'][aria-pressed='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-color: var(--accent);
+}
+
+.ui-button[data-role='pipeline-task-id'],
+.ui-button[data-role='pipeline-title'] {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.ui-button[data-role='pipeline-task-id'] {
+  flex: none;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ui-button[data-role='pipeline-title'] {
+  flex: 1;
+  justify-content: flex-start;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ui-button[data-role='pipeline-title'] > .ui-button__content,
+.ui-button[data-role='pipeline-title'] .ui-button__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-button[data-role='pipeline-title'] .ui-button__label {
+  white-space: nowrap;
+}
+
+.ui-button[data-role='pipeline-task-id']:hover,
+.ui-button[data-role='pipeline-title']:hover {
+  color: var(--accent);
+}
+
+.ui-button[data-role='pipeline-compact-action'],
+.ui-button[data-role='pipeline-stall-answer-open'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* Телефонная панель оставляет фильтры и меню в одной строке вокруг схемы.
+   Геометрия карточки принадлежит разделу, оформление controls — общей библиотеке. */
+@media (max-width: 600px) {
+  .ui-icon-button[data-context='pipeline-phone-controls'] {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .ui-button[data-context='pipeline-phone-menu'] > .ui-button__content,
+  .ui-button[data-context='pipeline-phone-menu'] .ui-button__label {
+    width: 100%;
+    text-align: left;
+  }
+
+  .ui-action-link[data-context='pipeline-stand-link'] {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+
+  .ui-button[data-role='pipeline-compact-action'],
+  .ui-button[data-role='pipeline-stall-answer-open'] {
+    height: auto;
+    min-height: 44px;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: normal;
+  }
+
+  .ui-button[data-role='pipeline-task-id'] {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .ui-button[data-role='pipeline-title'] {
+    min-height: 44px;
+    padding-block: 6px;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+}
+
+.ui-button[data-role='task-compact-action'] {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ui-button[data-context='task-footer-action'] {
+  height: auto;
+  min-height: var(--control-height);
+  padding: 6px 10px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.ui-disclosure-button[data-role='task-note-disclosure'],
+.ui-disclosure-button[data-role='task-analysis-disclosure'] {
+  width: 100%;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.ui-disclosure-button[data-role='task-note-disclosure'] {
+  color: var(--accent);
+}
+
+.ui-tabs:has(.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])) {
+  gap: 24px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']) {
+  min-height: max(42px, var(--toolbar-control-h));
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+}
+
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']):hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.ui-tab[data-context='pipeline-stage-tab'] {
+  gap: 7px;
+}
+
+.ui-button[data-role='pipeline-section-disclosure'] {
+  width: 100%;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+/* Оглавление читается вертикально по левой оси, включая многострочные названия.
+   Пункты растут по тексту и сохраняют общий сенсорный минимум площадки нажатия. */
+.ui-button[data-context='stage-document-section'] {
+  height: auto;
+  min-height: var(--toolbar-control-h);
+  padding: 6px 10px;
+}
+
+.ui-button[data-context='stage-document-section'] > .ui-button__content,
+.ui-button[data-context='stage-document-section'] .ui-button__label {
+  width: 100%;
+}
+
+.ui-disclosure-button__icon,
+.ui-disclosure-button__chevron {
+  display: inline-flex;
+  flex: none;
+  transition: transform var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__icon,
+.ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__chevron {
+  transform: rotate(90deg);
+}
+
+/* Создание во всех панелях повторяет круглый плюс списка чатов.
+   Общий контекст сохраняет размер и непрозрачную поверхность вне конкретного раздела. */
+.ui-icon-button[data-role][data-context='workspace-create'] {
+  flex: none;
+  margin-left: 6px;
+  margin-right: 6px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='workspace-create']:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-list-action'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--row-bg, var(--surface));
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='chat-list-action']:hover:not(:disabled) {
+  background: var(--row-bg, var(--surface-2));
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-list-action'][data-tone='accent']:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-list-action'][data-tone='danger']:hover:not(:disabled) {
+  color: var(--bad);
+}
+
+/* Компактные действия списка не забирают ширину у названия разговора.
+   Прозрачная область сохраняет касание 44 px без чёрной подложки. */
+html[data-ui-touch] .ui-icon-button[data-role]:is(
+  [data-context='workspace-create'],
+  [data-context='chat-list-action']
+) {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+html[data-ui-touch] .ui-icon-button[data-role]:is(
+  [data-context='workspace-create'],
+  [data-context='chat-list-action']
+)::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.ui-icon-button[data-context='chat-session-back'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.ui-icon-button[data-context='chat-session-back']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-title-edit'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 12px;
+  opacity: 0.5;
+  transition:
+    opacity var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.cs .hrow:hover .ui-icon-button[data-context='chat-title-edit'],
+.ui-icon-button[data-context='chat-title-edit']:hover:not(:disabled),
+.ui-icon-button[data-context='chat-title-edit']:focus-visible {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-title-edit']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='chat-title-edit'] {
+  width: 44px;
+  height: 44px;
+  color: color-mix(in srgb, var(--ink-low) 70%, var(--surface));
+  opacity: 1;
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='chat-title-edit']:is(:hover, :focus-visible) {
+  color: var(--ink-mid);
+}
+
+/* Техническая лента намеренно плотнее форм и основных действий телефона.
+   Высота самой кнопки уменьшена: прозрачные 44 px иначе сохраняют прежние интервалы. */
+html[data-ui-touch] .cs .ui-disclosure-button:is(
+  [data-context='chat-step'], [data-context='chat-activity-summary'], [data-role='chat-reply-expand']
+) {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+}
+
+.ui-button[data-context='chat-context'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+}
+
+/* Полоса и процент образуют один фокусируемый control с общей подсказкой.
+   Обычное text-overflow кнопки не должно обрезать ни шкалу, ни её подпись. */
+.ui-button[data-context='chat-context'] .ui-button__label {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
+}
+
+.ui-button[data-context='chat-context'] .ctx-meter-cap {
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  opacity: .75;
+}
+
+.ui-button[data-context='chat-context'] .ctx-meter-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-button[data-context='chat-context']:hover:not([aria-disabled='true']) {
+  background: var(--surface-2);
+}
+
+.ui-button[data-context='chat-context'][aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.ui-button[data-context='chat-context'].compacting {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-message-copy'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-bottom: 3px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  opacity: 0;
+  transition:
+    opacity var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-icon-button[data-context='chat-message-copy'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.msg:hover .ui-icon-button[data-context='chat-message-copy'],
+.ui-icon-button[data-context='chat-message-copy']:focus-visible,
+.ui-icon-button[data-context='chat-message-copy'].done {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-message-copy']:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-message-copy'].done {
+  color: var(--good);
+}
+
+/* Недоставленное сообщение: значок ошибки вплотную к пузырю, как в Telegram. Виден всегда —
+   в отличие от копирования, это состояние, а не действие по наведению. */
+.ui-icon-button[data-context='chat-delivery-retry'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-bottom: 3px;
+  padding: 1px;
+  border: 0;
+  background: transparent;
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-delivery-retry'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-icon-button[data-context='chat-delivery-retry']:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
+}
+
+/* Подписанный выбор папки остаётся рядом с задачей и сохраняет геометрию шапки.
+   Состояние открытого окна использует общий pressed-скин кнопки. */
+/* Папку не ужимают соседи: короткое имя важнее пустоты в выборе задачи; длинное
+   режется только по потолку max-width. */
+.ui-button[data-context='chat-workdir'] {
+  flex: 0 0 auto;
+  max-width: min(240px, 45%);
+  height: 30px;
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12.5px;
+}
+
+.ui-button[data-context='chat-workdir'] .ui-button__trailing > svg {
+  width: 12px;
+  height: 12px;
+}
+
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] > .ui-button__content {
+    width: 100%;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] .ui-button__label {
+    flex: 1;
+    gap: 14px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] .ctx-meter-value {
+    font-size: 18px;
+  }
+
+  .ui-button[data-context='chat-effort-level'] {
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 14px;
+  }
+
+  .phone-chat-options .ui-button[data-context='chat-workdir'] {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 16px;
+  }
+}
+
+.ui-button[data-context='chat-pending-preview'] {
+  height: auto;
+  min-height: max(30px, var(--toolbar-control-h));
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.ui-icon-button[data-context='chat-pending-remove'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 14px;
+}
+
+.ui-icon-button[data-context='chat-pending-remove']:hover:not(:disabled) {
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-microphone'] {
+  isolation: isolate;
+  overflow: visible;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='chat-microphone'] svg {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+}
+
+.ui-icon-button[data-context='chat-microphone']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-microphone'].rec {
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-microphone'].rec::before {
+  position: absolute;
+  z-index: -1;
+  inset: 3px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bad) 48%, transparent);
+  content: '';
+  pointer-events: none;
+  animation: ui-chat-mic-pulse 1.35s ease-out infinite;
+}
+
+.ui-icon-button[data-context='chat-microphone'].wait {
+  color: var(--accent);
+  cursor: default;
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-microphone'] .spin-ico {
+  animation: ui-chat-icon-rotate 0.9s linear infinite;
+}
+
+.ui-button[data-role='chat-speech-action'] {
+  height: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.ui-button[data-role='chat-command'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-role='chat-command'] > .ui-button__content,
+.ui-button[data-role='chat-command'] .ui-button__label {
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-button[data-role='chat-command'] .ui-button__label {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.ui-button[data-role='chat-command'].on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.ui-button[data-role='chat-command'].off {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ui-button[data-role='chat-command'].off .c-cmd {
+  color: var(--ink-mid);
+}
+
+/* Настройки используют те же primitives, но навигация и компактные служебные
+   действия сохраняют собственную плотность и двухстрочную геометрию. */
+.ui-button[data-role='settings-action'] {
+  font-size: 14px;
+}
+.ui-button[data-role='settings-action'][data-context='workspace-form-wrap'] {
+  font-size: 12px;
+}
+
+/* Строка гармошки вмещает сводку исполнителя и остаётся одной кнопкой.
+   Естественная высота сохраняет все строки и на узком экране. */
+.ui-disclosure-button[data-role='settings-provider-disclosure'] {
+  width: 100%;
+  height: auto;
+  min-height: 60px;
+  padding: 10px 12px;
+  white-space: normal;
+}
+
+.ui-button[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.speech-field-actions .ui-button[data-role='settings-action'],
+.speech-model-actions .ui-button[data-role='settings-action'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ui-button.speech-cancel[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.ui-button.mcpbtn[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.trusted-item .ui-button[data-role='settings-compact-action'] {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.trusted-add .ui-button[data-role='settings-action'] {
+  height: 38px;
+  min-height: 38px;
+}
+
+.ui-button.plugin-save[data-role='settings-action'] {
+  --ui-action-border: color-mix(in srgb, var(--accent) 42%, var(--line));
+  --ui-action-color: var(--accent);
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ui-button.plugin-save[data-role='settings-action']:hover:not(:disabled) {
+  --ui-action-border: var(--accent);
+  --ui-action-background-hover: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+}
+
+.ui-button.plugin-save[data-role='settings-action'].saved {
+  --ui-action-border: color-mix(in srgb, var(--good) 38%, var(--line));
+  --ui-action-color: var(--good);
+}
+
+.ui-button.plugin-save[data-role='settings-action'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-button.upd[data-role='settings-action'] {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.ui-button.upd[data-role='settings-action']:hover:not(:disabled) {
+  --ui-action-border: var(--line-2);
+}
+
+.ui-button.upd[data-role='settings-action'].hot {
+  --ui-action-background: color-mix(in srgb, var(--warn) 14%, transparent);
+  --ui-action-border: color-mix(in srgb, var(--warn) 55%, var(--line));
+  --ui-action-color: var(--warn);
+}
+
+.ui-command-button[data-role='settings-command'] {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 2px 7px;
+  border-color: var(--line);
+  border-radius: 5px;
+  background: var(--ground);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+  user-select: all;
+}
+
+.ui-command-button[data-role='settings-command']:hover:not(:disabled) {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-send'],
+.ui-icon-button[data-context='chat-stop'] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='chat-send']:disabled,
+.ui-icon-button[data-context='chat-stop']:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ui-icon-button[data-context='chat-stop'] .sq {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #fff;
+}
+
+@keyframes ui-chat-mic-pulse {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.62);
+  }
+}
+
+@keyframes ui-chat-icon-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-button[data-context='chat-microphone'].rec::before {
+    animation: none;
+    opacity: 0.35;
+    transform: scale(1.18);
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-tabs:has(.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])) {
+    width: 100%;
+    gap: 20px;
+  }
+
+  .ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']) {
+    min-height: max(42px, var(--toolbar-control-h));
+  }
+
+}
+
+/* Шапки диалогов следуют высоте controls и в узком desktop-окне. */
+.ui-dialog__header .ui-icon-button,
+.ui-icon-button[data-context='task-modal-header'] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
+.ui-icon-button[data-context='pipeline-stage-close'] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+
+/* Подложка иконки заполняет всю доступную ширину боковой рейки без скругления.
+   Обе панели сохраняют прежние плоские цвета активного пункта и наведения. */
+.shell [data-ui-shell-nav],
+.ui-icon-button[data-context='tool-rail-item'] {
+  width: 100%;
+  height: var(--app-nav-row-h);
+  min-height: var(--app-nav-row-h);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  box-shadow: none;
+  transition: background .12s, color .12s;
+}
+
+/* Общий skin навигационных ссылок и pressable оболочки. Раскладка остаётся в shell. */
+.shell [data-ui-shell-nav] {
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Нижние вкладки телефона используют общий skin рейки, но вмещают подпись.
+   Высота совпадает со строкой сетки оболочки и не зависит от типа указателя. */
+@media (max-width: 600px) {
+  .shell .phone-nav [data-ui-shell-nav] {
+    height: 60px;
+    min-height: 60px;
+  }
+}
+
+.shell [data-ui-shell-nav]:hover,
+.ui-icon-button[data-context='tool-rail-item']:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.shell [data-ui-shell-nav].active,
+.ui-icon-button[data-context='tool-rail-item'].active:not(:disabled):not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.shell [data-ui-shell-nav]:focus-visible,
+.ui-icon-button[data-context='tool-rail-item']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Одна и та же кнопка ресурсов открывает диалог на любой ширине.
+   Телефон сохраняет свою площадку, desktop получает геометрию топбара ниже. */
+.ui-pressable.resource-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.ui-pressable.resource-trigger.stale .resource-reading {
+  opacity: 0.5;
+}
+
+/* Как у .prov-mark, якорь охватывает только содержимое, а не всю площадку кнопки.
+   Метка остаётся у верхнего правого края показаний при любой высоте топбара. */
+.ui-pressable.resource-trigger .resource-memory {
+  position: relative;
+  display: inline-flex;
+}
+
+.ui-pressable.resource-trigger .resources-alarm {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+
+/* Метрики не наследуют размер текста страницы после переноса из .status.
+   Кегль совпадает со счётчиками конвейера, подсветка заполняет высоту топбара. */
+.ui-pressable[data-context='topbar-metrics'] {
+  gap: 8px;
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  padding: 0 6px;
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition:
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-pressable[data-context='topbar-metrics'] b {
+  font-weight: 600;
+}
+
+/* Нижняя линия шапки рисуется её внутренней тенью, поверх которой живёт кнопка.
+   Заливка оставляет последний пиксель прозрачным, не меняя площадку и ось текста. */
+.ui-pressable[data-context='topbar-metrics']:hover:not(:disabled):not([aria-disabled='true']),
+.ui-pressable[data-context='topbar-metrics']:focus-visible,
+.ui-pressable[data-context='topbar-metrics'][aria-expanded='true'] {
+  background:
+    linear-gradient(var(--topbar-panel), var(--topbar-panel))
+    top / 100% calc(100% - 1px) no-repeat;
+  color: var(--ink);
+}
+
+.ui-pressable[data-context='topbar-metrics']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ui-pressable[data-context='topbar-network'] {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  gap: 6px;
+  color: var(--ink-mid);
+}
+.ui-pressable[data-context='topbar-network'] .flag {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Сводка узкого окна показывает подписанные строки с полной площадкой нажатия.
+   Число исполнителей увеличивает высоту панели, сохраняя ширину верхней полосы. */
+.topbar-status-label {
+  display: none;
+}
+
+.shell-status-panel .topbar-status-label {
+  display: block;
+  white-space: normal;
+}
+
+.shell-status-panel .ui-button {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.shell-status-panel .ui-pressable:is([data-context='provider-status'], [data-context='topbar-network']) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.shell-status-panel .ui-pressable[data-context='topbar-metrics'] {
+  position: relative;
+  justify-content: center;
+  min-height: 44px;
+}
+
+/* Полное название задачи остаётся доступным в две строки узкой карточки. */
+@media (max-width: 600px) {
+  .ui-button[data-role='pipeline-title'] {
+    height: auto;
+    text-align: left;
+    white-space: normal;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-button[data-role='pipeline-title'] .ui-button__label {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    text-overflow: clip;
+  }
+}
+
+/* Сенсорная площадка общих действий сохраняется и в компактных embedded-контекстах.
+   Минимум переопределяет размер роли, оставляя цвета и поведение её обычному skin. */
+:root[data-ui-touch] :is(.ui-button, .ui-pressable, .ui-action-link, [data-ui-shell-nav]) {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Выбор этапа сохраняет семантику кнопки и общий масштаб строк каталога. */
+.ui-button[data-context='workspace-catalog-row'] {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  min-height: var(--control-height);
+  padding: 7px 10px;
+  line-height: 20px;
+  font-size: var(--workspace-text-size);
+  color: var(--ink);
+  border: 1px solid transparent;
+}
+
+.ui-button[data-context='workspace-catalog-row'] .ui-button__content,
+.ui-button[data-context='workspace-catalog-row'] .ui-button__label { width: 100%; }
+
+.ui-button[data-context='workspace-catalog-row'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 13%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+/* Строка машины и её меню наследуют общую защиту действий и сенсорную геометрию. */
+.ui-pressable[data-context='machine-choice'] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 84px;
+  padding: 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.ui-pressable[data-context='machine-choice']:hover {
+  background: var(--surface-2);
+}
+
+.ui-button[data-context='machine-menu-action'] {
+  min-height: 48px;
+  justify-content: flex-start;
+}
+
+.ui-button[data-context='machine-menu-action'] .ui-button__content {
+  justify-content: flex-start;
+}
+
+.ui-button[data-context='machine-connection-details'] {
+  min-height: 48px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
+@media (max-width: 600px) {
+  .ui-button[data-context='grigdesk-task-title'] {
+    width: 100%;
+    min-height: var(--control-height);
+    padding: 0;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .ui-button[data-context='grigdesk-task-title'] .ui-button__content {
+    width: 100%;
+  }
+
+  .ui-button[data-context='grigdesk-task-title'] .ui-button__label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .ui-pane-header__actions :is(.ui-button, .ui-action-link) {
+    max-width: 100%;
+    height: auto;
+    min-height: var(--control-height);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-action-link[data-context='tool-menu-item'] {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 600px) {
+  [data-ui-static-row][data-context='workspace-catalog-row'] {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--control-height);
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    line-height: 20px;
+    font-size: var(--workspace-text-size);
+    color: var(--ink);
+    text-align: left;
+  }
+}
+
+/* Все текстовые действия шапки используют одну геометрию, включая ссылки.
+   Невидимое расширение оставляет площадку 44 px при видимой высоте 32 px на touch. */
+.ui-pane-header__actions .ui-button:not(.ui-icon-button) {
+  position: relative;
+  height: auto;
+  min-height: var(--pane-header-action-h);
+  max-width: 100%;
+  margin-block: max(0px, calc((var(--toolbar-control-h) - var(--pane-header-action-h)) / 2));
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-pane-header__actions .ui-button:not(.ui-icon-button)::after {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((var(--pane-header-action-h) - var(--toolbar-control-h)) / 2)) 0;
+}
+
+@media (max-width: 600px) {
+  .ui-icon-button[data-board-tracker-settings] {
+    --ui-action-color: var(--board-secondary-color, var(--ink-low));
+  }
+
+  .ui-icon-button[data-board-tracker-settings]:hover,
+  .ui-icon-button[data-board-tracker-settings]:focus-visible {
+    --ui-action-color: var(--ink-mid);
+  }
+}
+
+/* Перенесённые действия сохраняют прежние компоненты и обработчики.
+   В каталоге телефона они получают подписанную строку с площадкой 44 px. */
+.ui-button[data-context='phone-section-action'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-action-tone);
+  font-size: 15px;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-context='phone-section-action'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.ui-button[data-context='phone-section-action'] .ui-button__label > svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+/* Тонкая телефонная полоса сохраняет свою высоту и явное нажатие исполнителя.
+   Подробности используют прежнюю общую всплывашку, без второй карточки лимитов. */
+@media (max-width: 600px) {
+  [data-ui-phone-status] .ui-pressable[data-context='provider-status'] {
+    width: 32px;
+    min-width: 32px;
+    height: var(--app-phone-status-h);
+    min-height: var(--app-phone-status-h);
+  }
+}
+
+/* CPU и RAM составляют одну кнопку сводки в тонкой полосе телефона.
+   Прежний popup получает от неё якорь, фокус и обработку Escape. */
+@media (max-width: 600px) {
+  [data-ui-phone-status] .ui-pressable[data-context='phone-status-metrics'] {
+    width: auto;
+    height: var(--app-phone-status-h);
+    min-height: var(--app-phone-status-h);
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+    line-height: 16px;
+  }
+}
+
+[data-ui-phone-sections] .topbar-status-label {
+  display: inline;
+}
+
+[data-ui-phone-sections] .ui-button:is(
+  [data-context='board-timers-topbar'], [data-context='analysis-attention-topbar']
+),
+[data-ui-phone-sections] .ui-pressable[data-context='topbar-network'] {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 15px;
+}
+
+.ui-pressable.resource-trigger .lv-ok { color: var(--ink); }
+.ui-pressable.resource-trigger .lv-warn { color: var(--warn); }
+.ui-pressable.resource-trigger .lv-bad { color: var(--bad); }
+
+/* Ссылки reader используют общий skin навигации: текущая статья заметна,
+   а длинное название переносится без изменения ширины оглавления. */
+.ui-action-link[data-context='help-index-item'],
+.ui-action-link[data-context='help-outline-item'] {
+  --ui-action-tone: var(--ink-mid);
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: max(32px, var(--toolbar-control-h));
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='help-index-item']:hover {
+  background: var(--surface-2);
+}
+
+.ui-action-link[data-context='help-index-item'][aria-current='page'] {
+  --ui-action-tone: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ui-action-link[data-context='help-outline-item'] {
+  min-height: max(28px, var(--toolbar-control-h));
+  padding-block: 5px;
+}
+
+.ui-action-link[data-context='help-outline-item'][aria-current='location'] {
+  --ui-action-tone: var(--accent);
+}

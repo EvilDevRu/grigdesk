@@ -1,0 +1,103 @@
+{
+  "format": 1,
+  "files": [
+    {
+      "file": "xterm-6.0.0-LICENSE.txt",
+      "source": "https://github.com/xtermjs/xterm.js/blob/f447274f430fd22513f6adbf9862d19524471c04/LICENSE",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    },
+    {
+      "file": "LGPL-3.0.txt",
+      "source": "https://www.gnu.org/licenses/lgpl-3.0.txt",
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    {
+      "file": "GPL-3.0.txt",
+      "source": "https://www.gnu.org/licenses/gpl-3.0.txt",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "file": "aws-sdk-LICENSE.txt",
+      "source": "https://github.com/aws/aws-sdk-js-v3/blob/313813d9e1f25eb6896cf2880977f01ee7fb2556/LICENSE",
+      "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "packages": [
+        {
+          "name": "@aws-sdk/credential-provider-http",
+          "version": "3.972.48",
+          "integrity": "sha512-fA5loSdlocacRxyUXtpoHSMuk5rsIKRDzQYVMnMxjcmFeZshaJlJ8lymy/hYKji6sne/UmNGj5pxuEs6kq/Qcg==",
+          "license": "Apache-2.0"
+        },
+        {
+          "name": "@aws-sdk/credential-provider-login",
+          "version": "3.972.52",
+          "integrity": "sha512-9hu2oR0qH7Fst5Tzdx+UWxm+w5zCXtErTLtOOW5hwwQc170CLwOeniRxyFY6s9mHfGEfC5zFukNBdKBwJR8mhQ==",
+          "license": "Apache-2.0"
+        },
+        {
+          "name": "@aws-sdk/nested-clients",
+          "version": "3.997.20",
+          "integrity": "sha512-IYJuLpXp2DEILVQpQOy0PMpkftv0AHEOCn52o0atyOaumA0CdWQ3klPyXdViGYLbNpESsVFMVybvHUeZAuiGxA==",
+          "license": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "file": "pi-0.85.1-LICENSE.txt",
+      "source": "https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/LICENSE",
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+      "packages": [
+        {
+          "name": "@earendil-works/pi-ai",
+          "version": "0.85.1",
+          "integrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
+          "license": "MIT"
+        },
+        {
+          "name": "@earendil-works/pi-telemetry",
+          "version": "0.85.1",
+          "integrity": "sha512-Bg/YN6kA7Swja/NQxka8xFdecb4E/auIEGF2G5A25EaQXhRnPj300/7/KpgsDDMYUzHTDAv4RyUxaQPJKW81Rw==",
+          "license": "MIT"
+        }
+      ]
+    },
+    {
+      "file": "entities-2.2.0-LICENSE.txt",
+      "source": "https://github.com/nodable/val-parsers/blob/1a2c08a483b5b6428f1b3d01974875c97f3b3953/LICENSE",
+      "sha256": "750cb3fb6362804957ef52caaf9b5c824015be44d494637330d7cd8834d31d40",
+      "packages": [
+        {
+          "name": "@nodable/entities",
+          "version": "2.2.0",
+          "integrity": "sha512-9uGyhaQavEUMC8AIddIjau4NsnsXhou+j5sBAGojCM1oxmQpVKTWR/9JxABD6UAv12vpIms55fPZKFQEhG6uBg==",
+          "license": "MIT"
+        }
+      ]
+    },
+    {
+      "file": "standardwebhooks-1.1.1-LICENSE.txt",
+      "source": "https://github.com/standard-webhooks/standard-webhooks/blob/b4d2c14fc5b4ccff3ff271e3b087dff812254c59/libraries/LICENSE",
+      "sha256": "5ec8c7b26b64d881a6706617bed25c049f97f2f35de034c756de8546fd6dbe27",
+      "packages": [
+        {
+          "name": "standardwebhooks",
+          "version": "1.1.1",
+          "integrity": "sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ==",
+          "license": "MIT"
+        }
+      ]
+    },
+    {
+      "file": "xml-naming-0.1.0-LICENSE.txt",
+      "source": "https://github.com/NaturalIntelligence/xml-naming/blob/c0afc395948730bed124859d7fc7cccabe0aac8a/LICENSE",
+      "sha256": "8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07",
+      "packages": [
+        {
+          "name": "xml-naming",
+          "version": "0.1.0",
+          "integrity": "sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==",
+          "license": "MIT"
+        }
+      ]
+    }
+  ]
+}

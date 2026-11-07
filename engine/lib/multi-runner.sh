@@ -137,22 +137,55 @@ _multi_execution_plan() {
   [[ "${MULTI_PLAN_LEVEL[$provider]}" != unavailable ]]
 }
 
+# Версия исполнителя — первое semver-подобное слово ответа пробы; prerelease и build
+# suffix сохраняются. Preflight пишет её в снимок, а dispatch и сверка сборки читают
+# той же функцией: префикс CLI в ответе пробы не должен выглядеть сменой сборки.
+_multi_probe_version() {
+  local version
+  version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' <<<"$1" | head -1)
+  printf '%s\n' "${version:-1.0.0}"
+}
+
+# Сначала отсекаем недоступного кандидата по покрытию цепочки, затем резолвим
+# фактическую модель и сборку. Диспетчер сохраняет причину перехода к резерву.
 _multi_resolve() {
   local provider=$1 requested_family=${2:-}
   local config family version variant effort exact fallback provider_key auth_profile
-  local probe_output runner_version
+  local probe_output runner_version previous_version refresh_probe=0
   config=$(multi_runner_config_file)
+  if [[ "${MULTI_COVERAGE_REQUIRED:-0}" == 1 ]] &&
+     ! coverage_provider_ready "$STATE_DIR/coverage/$PROFILE_NAME/structural.env" \
+       "$STATE_DIR/coverage/$PROFILE_NAME/host.env" "$provider"; then
+    DISPATCH_RESOLVE_RESULT=unavailable_preflight
+    flog "$MULTI_TASK" "$MULTI_STAGE: $provider недоступен по снимку; проверяю следующий резерв" || true
+    return 4
+  fi
   runner_registry_has "$provider" || {
     DISPATCH_RESOLVE_RESULT=route_unavailable
     return 4
   }
-  if [[ "${MULTI_PROBE_READY[$provider]:-0}" != 1 ]]; then
+  if declare -F "runner_${provider}_refresh_probe" >/dev/null &&
+     runner_call "$provider" refresh_probe; then
+    refresh_probe=1
+  fi
+  previous_version=${MULTI_PROBE_VERSION[$provider]:-}
+  if [[ "${MULTI_PROBE_READY[$provider]:-0}" != 1 || "$refresh_probe" == 1 ]]; then
     probe_output=$(runner_call "$provider" probe 2>/dev/null) || {
-      DISPATCH_RESOLVE_RESULT=unavailable_preflight
+      if [[ "$refresh_probe" == 1 && -n "$previous_version" ]]; then
+        DISPATCH_RESOLVE_RESULT=runtime_changed
+        printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$provider" >&2
+      else
+        DISPATCH_RESOLVE_RESULT=unavailable_preflight
+      fi
       return 4
     }
-    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+' <<<"$probe_output" | head -1)
-    [[ -n "$runner_version" ]] || runner_version=1.0.0
+    runner_version=$(_multi_probe_version "$probe_output")
+    if [[ "$refresh_probe" == 1 && -n "$previous_version" &&
+          "$previous_version" != "$runner_version" ]]; then
+      DISPATCH_RESOLVE_RESULT=runtime_changed
+      printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$provider" >&2
+      return 4
+    fi
     MULTI_PROBE_READY["$provider"]=1
     MULTI_PROBE_VERSION["$provider"]=$runner_version
   fi
@@ -184,6 +217,8 @@ _multi_resolve() {
     effort=$(awk -F= '$1=="EFFORT"{print $2}' <<<"$defaults")
   fi
   if ! _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
+    # Смену сборки runtime-sensitive runner-а уже отсекла проба выше. Здесь каталог
+    # отказал той же сборке: это выбор модели, а не runtime_changed без failover.
     if [[ -n "$exact" ]]; then
       DISPATCH_RESOLVE_RESULT=invalid_config
     else
@@ -233,9 +268,29 @@ _multi_request_matches() {
      "$(_run_state_get "$request" EPOCH)" == "$epoch" ]]
 }
 
+# Ручной switch решается только после затихания точной сессии провайдера, но до закрытия
+# runner_finished/usage/meta. Launcher вызывает этот хук, пока всё ещё владеет удерживаемым
+# дескриптором run-каталога, поэтому RESULT_CLASS не нужно небезопасно дописывать или
+# переоткрывать после атомарного финального зеркала.
+_multi_postamble_reclassify_v2() {
+  local task=$1 stage=$2 run_id=$3 epoch=$4 current=$5
+  local request_id target
+  RUNNER_POSTAMBLE_RESULT_CLASS=$current
+  _multi_request_matches "$task" "$stage" "$run_id" "$epoch" || return 0
+  request_id=$(_run_state_get "$(_runtime_switch_file "$task" "$stage")" REQUEST_ID)
+  target=$(runtime_switch_consume "$task" "$stage" "$run_id" "$epoch" "$request_id") || {
+    MULTI_SWITCH_CONSUME_FAILED=1
+    RUNNER_POSTAMBLE_RESULT_CLASS=unknown
+    return 0
+  }
+  MULTI_MANUAL_TARGET=$target
+  RUNNER_POSTAMBLE_RESULT_CLASS=manual_switch
+}
+
 _multi_invoke() {
   local provider=$1 family=$2 model=$3
   local run_id epoch token run_dir rc result request_id target fanout_count active_reason
+  local denial_count
   if ! runner_call "$provider" probe >/dev/null 2>&1; then
     DISPATCH_INVOKE_RESULT=unavailable_preflight
     DISPATCH_INVOKE_STARTED=0
@@ -259,6 +314,9 @@ _multi_invoke() {
   run_id=$(_multi_new_id)
   token=$(_multi_new_token)
   run_dir="$STATE_DIR/logs/runs/t${MULTI_TASK}/${MULTI_STAGE}/${run_id}"
+  MULTI_LAST_RUN_ID=$run_id
+  MULTI_LAST_RUN_EPOCH=$epoch
+  MULTI_LAST_RUNNER=$provider
   run_state_begin "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token" || {
     DISPATCH_INVOKE_RESULT=unknown
     DISPATCH_INVOKE_STARTED=0
@@ -266,7 +324,7 @@ _multi_invoke() {
   }
   # Bash передаёт local-переменные вызывающей функции динамически: dispatcher
   # держит здесь доказанную причину перехода (limit/preflight/manual). Публикуем
-  # её до запуска provider, иначе весь долгий run Cockpit показывает устаревшую
+  # её до запуска provider, иначе весь долгий run GrigDesk показывает устаревшую
   # причину предыдущего этапа.
   active_reason=${last_switch_reason:-primary}
   set_st "$MULTI_TASK" "RUNNER_ACTUAL_${MULTI_STAGE}" "$provider" \
@@ -300,6 +358,8 @@ ${plan_note}
   ${status_command} done
   ${status_command} failed \"причина\"
   ${status_command} --failure-owner build --finding \"stable-id=краткое проверяемое замечание\" failed \"причина\"
+  ${status_command} --failure-owner build --finding \"stable-id=замечание\" --finding-anchor \"stable-id=путь/до/файла\" --reviewed \"путь/до/файла\" failed \"причина\"
+  ${status_command} --finding-deferred \"stable-id=дефект вне цели задачи\" done \"что принято\"
   ${status_command} skipped \"причина\"
 Команда принимает результат только текущего run; старый или повторный результат будет отклонён.
 Для проверочного failed типизированные замечания обязательны; bare failed оставлен только
@@ -308,11 +368,26 @@ tests — дефект/неполнота теста; environment —
 стенд, зависимости или конфигурация; plan — неверное требование/план; human — нужно решение
 человека. У каждого замечания стабильный id в kebab-case: при повторной проверке сохраняй тот
 же id, пока проблема та же, и не включай уже исчезнувшее замечание. Нельзя передавать owner без
-хотя бы одного --finding или metadata у done/skipped.
+хотя бы одного --finding или metadata у skipped.
+ВЕС ЗАМЕЧАНИЯ (решаешь ты, и это главный рычаг твоей автономии): --finding возвращает работу
+автору, --finding-deferred — нет. Блокирует ТОЛЬКО то, что ломает цель самой задачи или
+является регрессией ранее работавшего. Настоящий дефект вне цели задачи объявляй отложенным:
+он уедет хвостом на ворота приёмки и попадёт человеку одним списком вместе с результатом,
+а не остановит маршрут. Проверку, которую на этом стенде выполнить нечем (нужны прод-данные,
+прод-нагрузка, внешний сервис), нельзя предъявлять как блокирующую — это отложенная находка
+с прямым указанием, где её проверять. Отказ, в котором нет ни одного блокирующего замечания,
+движок сам выпрямит в done с этим хвостом.
 ЛИМИТЫ ЗАМЕЧАНИЙ (нарушение — отказ команды с кодом 2 и названной причиной): id — kebab-case
 до 64 символов; summary — ОДНА строка до 500 символов без переводов строки; замечаний не
 больше 32. summary — ярлык замечания, а не разбор: доказательства, числа и цитаты кладутся в
-файл этапа в STATE_DIR, на который ссылается причина."
+файл этапа в STATE_DIR, на который ссылается причина.
+ЯКОРЬ И ОХВАТ (проверяющим узлам): --finding-anchor \"id=путь\" называет файл, к которому
+относится замечание, а --reviewed \"путь\" перечисляет всё, что ты на этом проходе фактически
+просмотрел (относительные пути, до 64 штук). Их читает не человек, а движок: по ним он
+отличает первый проход по файлу, созданному предыдущим ремонтом, от новой претензии к уже
+проверенному коду. Первый случай маршрут проводит сам, второй останавливает и зовёт человека.
+Не объявляй просмотренным то, что не открывал: пропущенный файл потом нельзя будет назвать
+новым, и маршрут встанет на ровном месте."
   prompt+="
 
 ПРОГРЕСС И МЕТАДАННЫЕ (не завершает этап):
@@ -336,23 +411,32 @@ tests — дефект/неполнота теста; environment —
   runner_launch "$provider" "$MULTI_TASK" "$prompt" "$MULTI_STAGE" "$model" \
     "${DISPATCH_RESOLVED_EFFORT:-high}" "$MULTI_TIMEOUT" "$run_dir" "$run_id" "$epoch" "$token"
   rc=$?
+  if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" && "$rc" != 0 ]]; then
+    DISPATCH_INVOKE_RESULT=invalid_config
+    DISPATCH_INVOKE_DETAIL="браузерный транспорт: $BROWSER_TRANSPORT_ERROR"
+    DISPATCH_INVOKE_STARTED=0
+    return 0
+  fi
   fanout_count=$(runner_call "$provider" fanout_count "$run_dir" 2>/dev/null)
   [[ "$fanout_count" =~ ^[0-9]+$ ]] || fanout_count=0
   set_st "$MULTI_TASK" "FANOUT_${MULTI_STAGE}" "$fanout_count"
 
-  if _multi_request_matches "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch"; then
-    request_id=$(_run_state_get "$(_runtime_switch_file "$MULTI_TASK" "$MULTI_STAGE")" REQUEST_ID)
-    target=$(runtime_switch_consume "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$request_id") || {
-      DISPATCH_INVOKE_RESULT=unknown
-      DISPATCH_INVOKE_STARTED=1
-      return 0
-    }
-    # runner-launcher уже записал classifier результата завершённого процесса. При
-    # operator switch это не crash/unknown: последняя запись выигрывает в env-parser-е
-    # и честно объясняет attempt в Cockpit.
-    printf 'RESULT_CLASS=manual_switch\n' >>"$run_dir/meta.env"
-    MULTI_MANUAL_TARGET=$target
+  # Отказы политики прав внутри хода. В отличие от веера здесь НЕТ умолчания в ноль:
+  # у оборванного хода события `result` не будет вовсе, и записанный ноль означал бы
+  # «отказов не случилось» там, где мы просто не знаем. Не знаем — ключа нет, и чип в
+  # модалке узла не рисуется. Метод необязательный: раннер без него ничего не пишет.
+  denial_count=$(runner_call "$provider" denial_count "$run_dir" 2>/dev/null)
+  if [[ "$denial_count" =~ ^[0-9]+$ ]]; then
+    set_st "$MULTI_TASK" "DENIALS_${MULTI_STAGE}" "$denial_count"
+  fi
+
+  if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
     DISPATCH_INVOKE_RESULT=manual_switch
+    DISPATCH_INVOKE_STARTED=1
+    return 0
+  fi
+  if [[ "${MULTI_SWITCH_CONSUME_FAILED:-0}" == 1 ]]; then
+    DISPATCH_INVOKE_RESULT=unknown
     DISPATCH_INVOKE_STARTED=1
     return 0
   fi
@@ -360,32 +444,142 @@ tests — дефект/неполнота теста; environment —
   result=$(_run_state_get "$run_dir/meta.env" RESULT_CLASS)
   [[ -n "$result" ]] || result=unknown
   DISPATCH_INVOKE_RESULT=$result
+  DISPATCH_INVOKE_DETAIL=$(_run_state_get "$run_dir/meta.env" FAILURE_DETAIL)
   DISPATCH_INVOKE_STARTED=1
   DISPATCH_LIMIT_SCOPE=provider
   DISPATCH_LIMIT_UNTIL=""
+  # Срок сброса спрашиваем только у отказа по лимиту и только у того раннера,
+  # который умеет его назвать: метод ОПЦИОНАЛЬНЫЙ, и его отсутствие оставляет
+  # предохранителю общий cooldown, а не ломает контракт (docs/engine/ADDING-RUNNER.md).
+  if [[ "$result" == limited ]] && declare -F "runner_${provider}_limit_until" >/dev/null 2>&1; then
+    local limit_until
+    limit_until=$(runner_call "$provider" limit_until "$run_dir" 2>/dev/null) || limit_until=""
+    [[ "$limit_until" =~ ^[0-9]+$ ]] && DISPATCH_LIMIT_UNTIL=$limit_until
+  fi
   return 0
 }
 
+# Runtime-sensitive runners сверяются даже в пределах TTL перед каждым новым узлом.
+# Отдельная оболочка сохраняет registry и cache уже работающего dispatch. Несовпавшие
+# providers печатаются через запятую: решение об обновлении снимка принимает вызывающий.
+# Версия разбирается той же функцией, что и при записи снимка в preflight.
+_multi_coverage_runtime_match() (
+  local chain=$1 host=$2 provider observed expected changed=''
+  source "$FACTORY_HOME/lib/profile-preflight.sh" || return 79
+  runner_registry_reset
+  runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 79
+
+  # Недоступный кандидат не блокирует объявленный готовый резерв своей сборкой.
+  # Дубликаты внутри цепочки пробуются один раз, чужие цепочки не читаются.
+  while IFS= read -r provider; do
+    [[ -n "$provider" ]] || continue
+    coverage_provider_ready "$(dirname "$host")/structural.env" "$host" "$provider" || continue
+    if ! declare -F "runner_${provider}_refresh_probe" >/dev/null ||
+       ! runner_call "$provider" refresh_probe; then
+      continue
+    fi
+
+    expected=$(coverage_artifact_get "$host" "RUNTIME_VERSION_$provider")
+    if observed=$(runner_call "$provider" probe 2>/dev/null); then
+      observed=$(_multi_probe_version "$observed")
+    else
+      observed=''
+    fi
+    if [[ -z "$expected" || "$expected" != "$observed" ]]; then
+      changed+="${changed:+,}$provider"
+    fi
+  done < <(tr ',' '\n' <<<"$chain" | LC_ALL=C sort -u)
+
+  [[ -n "$changed" ]] || return 0
+  printf '%s\n' "$changed"
+  return 79
+)
+
+# Обновляет снимок ровно одним host preflight и принимает только новый снимок исходной
+# revision, который ещё не истёк и совпадает с наблюдаемыми сборками runtime-sensitive
+# исполнителей. Второго обновления нет: нестабильная сборка останавливает узел, а не
+# зацикливает его. FACTORY_ERROR печатается лишь при окончательном отказе: строка из
+# удачного обновления в журнале маршрута выглядела бы причиной чужого падения.
+_multi_refresh_coverage() {
+  local task=$1 stage=$2 config=$3 expected_revision=$4 reason=$5
+  local chain=$6
+  local coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}" refresh_rc=0 changed
+
+  flog "$task" "$stage: $reason; повторяю host preflight" || true
+  # Preflight использует резолверы этого модуля и меняет глобальный registry/catalog.
+  # Отдельная оболочка допускает ленивую загрузку без изменения состояния dispatch.
+  (
+    source "$FACTORY_HOME/lib/profile-preflight.sh" || exit 78
+    profile_runner_host_preflight "$PROFILE_NAME"
+  ) || refresh_rc=$?
+  if (( refresh_rc != 0 && refresh_rc != 1 )); then
+    flog "$task" "$stage: повторная проверка исполнителей не пройдена (код $refresh_rc)" || true
+    return 79
+  fi
+
+  # Сверяем исходную revision и новое время: во время пробы могли измениться
+  # конфигурация или снимок, а короткий TTL мог уже истечь. Второго обновления нет.
+  if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$expected_revision" "$(date +%s)" "$chain"; then
+    flog "$task" "$stage: обновлённый preflight несовместим или уже просрочен" || true
+    return 79
+  fi
+  if ! changed=$(_multi_coverage_runtime_match "$chain" "$coverage_dir/host.env"); then
+    flog "$task" "$stage: сборка ${changed:-исполнителя} не совпала и после обновления" || true
+    [[ -z "$changed" ]] || printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$changed" >&2
+    return 79
+  fi
+  flog "$task" "$stage: проверка исполнителей обновлена; продолжаю запуск узла" || true
+}
+
+# Истёкший положительный снимок и прежняя схема требуют новой metadata-проверки.
+# Повреждение/недоступность цепочки не обновляем; TTL вручную не продлеваем.
+# Смена сборки runtime-sensitive исполнителя (в том числе легитимное обновление) лечится
+# так же, как истёкший срок: иначе новая сборка резерва останавливала бы узлы любого
+# основного исполнителя до ручного preflight.
+_multi_require_coverage() {
+  local task=$1 stage=$2 config=$3 coverage_dir expected_revision changed
+  local primary=$4 failover=$5 chain
+  chain="$primary${failover:+,$failover}"
+  coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
+  expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
+  if coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$expected_revision" "$(date +%s)" "$chain"; then
+    changed=$(_multi_coverage_runtime_match "$chain" "$coverage_dir/host.env") && return 0
+    _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" \
+      "сменилась сборка ${changed:-исполнителя}" "$chain"
+    return
+  fi
+  local reason
+  case "${COVERAGE_GATE_REASON:-}" in
+    expired) reason='истёк срок проверки исполнителей' ;;
+    obsolete_schema) reason='устарела схема проверки исполнителей' ;;
+    *) return 79 ;;
+  esac
+
+  _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" "$reason" "$chain"
+}
+
+# Цепочка узла разрешается до coverage тем же порядком task/profile overrides.
+# Ни один кандидат не получает model call без допуска, включая ручной switch.
 multi_runner_run() {
   local task=$1 prompt=$2 stage=$3 timeout_s=$4
   local config route primary failover rc manual_count=0 switched=0
   config=$(multi_runner_config_file)
   profile_config_validate "$config" || return 78
+  route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
+  primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
+  failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+  MULTI_COVERAGE_REQUIRED=0
   if [[ "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
-    local coverage_dir expected_revision
-    coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
-    expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
-    if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
-      "$expected_revision" "$(date +%s)"; then
+    MULTI_COVERAGE_REQUIRED=1
+    if ! _multi_require_coverage "$task" "$stage" "$config" "$primary" "$failover"; then
       set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
       return 79
     fi
   fi
   runner_registry_reset
   runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 78
-  route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
-  primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
-  failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
   MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$route")
   MULTI_PRIMARY=$primary
   MULTI_FAILOVER=$failover
@@ -396,24 +590,47 @@ multi_runner_run() {
   MULTI_PROMPT=$prompt
   MULTI_TIMEOUT=$timeout_s
   MULTI_MANUAL_TARGET=""
+  MULTI_SWITCH_CONSUME_FAILED=0
+  MULTI_LAST_RUN_ID=""
+  MULTI_LAST_RUN_EPOCH=""
+  MULTI_LAST_RUNNER=""
+  MULTI_DISPATCH_ORDINAL=0
+  MULTI_DISPATCH_SOURCE_OVERRIDE=""
   MULTI_CATALOG_REVISION=""
   declare -gA MULTI_PROBE_READY=()
   declare -gA MULTI_PROBE_VERSION=()
   declare -gA MULTI_PLAN_LEVEL=()
   declare -gA MULTI_PLAN_DEGRADED=()
   MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX")
+  # Исполнитель, назначенный ЧЕЛОВЕКОМ, а не политикой профиля: назначение на задачу
+  # (`task`) или на этап (`task-stage`). Такой заход предохранитель не отменяет —
+  # см. комментарий в lib/dispatcher.sh.
+  local human_choice=""
+  case "$MULTI_ROUTE_SOURCE" in
+    task-stage|task) human_choice=$primary ;;
+  esac
   while (( manual_count < 2 )); do
     dispatcher_run_chain "$task" "$stage" "$primary" "$failover" "$(date +%s)" \
-      _multi_resolve _multi_invoke
+      _multi_resolve _multi_invoke "$human_choice"
     rc=$?
     if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
       primary=$MULTI_MANUAL_TARGET
+      # Кнопка переключения нажата прямо во время хода — это тот же явный выбор.
+      human_choice=$primary
       failover=""
       MULTI_PRIMARY=$primary
       MULTI_FAILOVER=$failover
       MULTI_MANUAL_TARGET=""
       manual_count=$((manual_count + 1))
       switched=1
+      MULTI_DISPATCH_ORDINAL=$((MULTI_DISPATCH_ORDINAL + 1))
+      MULTI_DISPATCH_SOURCE_OVERRIDE=manual-switch
+      if [[ "$MULTI_COVERAGE_REQUIRED" == 1 ]] &&
+         ! _multi_require_coverage "$task" "$stage" "$config" "$primary" "$failover"; then
+        set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
+        _multi_catalog_cleanup
+        return 79
+      fi
       continue
     fi
     set_st "$task" "RUNNER_ACTUAL_${stage}" "${DISPATCH_RESULT_RUNNER:-$primary}" \

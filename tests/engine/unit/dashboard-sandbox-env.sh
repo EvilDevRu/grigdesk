@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Python-дашборд читает тот же generic env, что сервер Cockpit: single-repo
+# Python-дашборд читает тот же generic env, что сервер GrigDesk: single-repo
 # показывается без выдуманных BE/FE, а повреждённый REPO_* не падает в legacy.
 python3 - "$FACTORY_HOME/lib/dashboard.py" <<'PY'
 import importlib.util
@@ -15,17 +15,17 @@ print('1..4')
 
 generic = dashboard.parse_sandbox_repositories({
     'REPO_COUNT': '1',
-    'REPO_0_NAME': 'rdesigner',
-    'REPO_0_WT': '/tmp/rdesigner-worktree',
-    'REPO_0_BRANCH': 'factory/t9123',
+    'REPO_0_NAME': 'sample-repository',
+    'REPO_0_WT': '/tmp/sample-worktree',
+    'REPO_0_BRANCH': 'task/42',
     'BE_WT': '/tmp/must-not-win',
 })
 assert generic == {
     'kind': 'generic',
     'repos': [{
-        'name': 'rdesigner',
-        'path': '/tmp/rdesigner-worktree',
-        'branch': 'factory/t9123',
+        'name': 'sample-repository',
+        'path': '/tmp/sample-worktree',
+        'branch': 'task/42',
     }],
 }
 print('ok 1 - single-repo generic сохраняет имя, путь и ветку')
@@ -33,8 +33,8 @@ print('ok 1 - single-repo generic сохраняет имя, путь и вет�
 legacy = dashboard.parse_sandbox_repositories({
     'BE_WT': '/tmp/be-worktree',
     'FE_WT': '/tmp/fe-worktree',
-    'BE_BRANCH': 'factory/t9123',
-    'FE_BRANCH': 'factory/t9123',
+    'BE_BRANCH': 'task/42',
+    'FE_BRANCH': 'task/42',
 })
 assert legacy['kind'] == 'legacy'
 assert [repo['name'] for repo in legacy['repos']] == ['be', 'fe']
@@ -42,8 +42,8 @@ print('ok 2 - legacy BE/FE остаётся совместимым')
 
 missing = dashboard.parse_sandbox_repositories({
     'REPO_COUNT': '1',
-    'REPO_0_NAME': 'rdesigner',
-    'REPO_0_WT': '/tmp/rdesigner-worktree',
+    'REPO_0_NAME': 'sample-repository',
+    'REPO_0_WT': '/tmp/sample-worktree',
     'BE_WT': '/tmp/must-not-open',
 })
 assert missing == {'kind': 'invalid', 'repos': []}
@@ -51,9 +51,9 @@ print('ok 3 - неполный generic не откатывается к legacy')
 
 extra = dashboard.parse_sandbox_repositories({
     'REPO_COUNT': '1',
-    'REPO_0_NAME': 'rdesigner',
-    'REPO_0_WT': '/tmp/rdesigner-worktree',
-    'REPO_0_BRANCH': 'factory/t9123',
+    'REPO_0_NAME': 'sample-repository',
+    'REPO_0_WT': '/tmp/sample-worktree',
+    'REPO_0_BRANCH': 'task/42',
     'REPO_1_NAME': 'лишний',
 })
 assert extra == {'kind': 'invalid', 'repos': []}

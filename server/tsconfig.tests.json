@@ -1,0 +1,26 @@
+// Проверка серверных тестов. База та же, что у сервера: тест, который проверяется
+// слабее проверяемого им кода, доказывает меньше, чем кажется.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Переходно: тесты ещё на JavaScript и переносятся вместе со своей волной.
+    // checkJs выключен, чтобы невыведенные формы не выдавались за проверенные;
+    // allowJs снимается вместе с последним .js этой области.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../tests/server/**/*",
+    "../tests/shared/**/*.mts",
+    "../tests/desktop/browser-*.test.mts",
+    "../tests/desktop/e2e/**/*.mjs",
+    "../tests/desktop/e2e/**/*.mts",
+    "../tests/cli/**/*.mts",
+    "../tests/engine/**/*.js",
+    "../tests/engine/**/*.mjs",
+    "../tests/engine/**/*.ts",
+    "../tests/engine/**/*.mts",
+    "../tests/fixtures/**/*"
+  ]
+}

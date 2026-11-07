@@ -1,0 +1,1187 @@
+{
+  "version": 1,
+  "include": [
+    "web/src/views/settings",
+    "web/src/views/ext/PluginModulePanel.vue",
+    "web/src/pluginRuntime",
+    "web/src/features/settings",
+    "web/src/shared/layout/AppShell.vue",
+    "web/src/shared/layout/DesktopWindowControls.vue",
+    "web/src/shared/layout/ToolsGrid.vue",
+    "web/src/shared/layout/ToolDock.vue",
+    "web/src/shared/layout/ToolHost.vue",
+    "web/src/shared/layout/ConnectionButton.vue",
+    "web/src/shared/layout/ConnectionStatus.vue",
+    "web/src/shared/layout/AddMachineDialog.vue",
+    "web/src/shared/layout/LockOverlay.vue",
+    "web/src/views/ConnectionsView.vue",
+    "web/src/views/NoAccessView.vue",
+    "web/src/App.vue",
+    "desktop/src/menu.ts",
+    "desktop/src/locale.ts",
+    "web/src/components/composites/UiFilePicker.vue",
+    "web/src/components/composites/UiInlineConfirm.vue",
+    "web/src/components/composites/UiNumberField.vue",
+    "web/src/components/composites/UiPasswordInput.vue",
+    "web/src/components/composites/UiSearchInput.vue",
+    "web/src/components/feedback/UiToastHost.vue",
+    "web/src/components/feedback/UiLoadingState.vue",
+    "web/src/components/overlays/UiDialog.vue",
+    "web/src/components/overlays/UiDialogHost.vue",
+    "web/src/components/overlays/UiFloatingDialog.vue",
+    "web/src/components/overlays/UiPopover.vue",
+    "web/src/components/overlays/UiTooltip.vue",
+    "web/src/components/primitives/UiActionLink.vue",
+    "web/src/components/primitives/UiButton.vue",
+    "web/src/components/primitives/UiSpinner.vue",
+    "web/src/features/providers/ProviderUsageForecast.vue",
+    "web/src/features/providers/ProviderUsageResources.vue",
+    "web/src/features/analysis/AttentionAlerts.vue",
+    "web/src/features/alerts/AlertHistoryPopover.vue",
+    "web/src/features/board/BoardTimerPopover.vue",
+    "web/src/features/pipeline/PipelineTopbarPopover.vue",
+    "web/src/shared/factoryDebug.ts",
+    "web/src/shared/grigdeskUpdate.ts",
+    "web/src/shared/hotkeys/combo.ts",
+    "web/src/shared/tools/catalog.ts",
+    "web/src/shared/tools/registry.ts",
+    "web/src/shared/navBadges.ts",
+    "web/src/shared/pipelineNavBadge.ts",
+    "web/src/shared/pluginInstall.ts",
+    "web/src/shared/pluginInstallView.ts",
+    "web/src/shared/sectionLoadFailure.ts",
+    "web/src/shared/alerts.ts",
+    "web/src/shared/notify.ts",
+    "web/src/features/providers/providerUsage.ts",
+    "web/src/features/providers/providerUsageSummary.ts",
+    "web/src/features/providers/usageForecastText.ts",
+    "web/src/features/providers/providerUsageActions.ts",
+    "desktop/src/connection.ts",
+    "desktop/src/pairing.ts",
+    "desktop/src/profiles.ts",
+    "desktop/src/runtimeConfig.ts",
+    "desktop/src/serverSupervisor.ts",
+    "desktop/src/uiRelease.ts",
+    "desktop/src/startupController.ts",
+    "desktop/src/windowDocuments.ts",
+    "web/src/stores/device.ts",
+    "web/src/stores/hotkeys.ts",
+    "web/src/stores/plugins.ts",
+    "web/src/stores/providers.ts",
+    "web/src/stores/providerSettings.ts",
+    "web/src/shared/shellClient.ts",
+    "web/src/shared/uiLocale.ts",
+    "desktop/src/main.ts",
+    "desktop/src/clientRuntime.ts",
+    "desktop/src/settings.ts",
+    "web/src/stores/settings.ts",
+    "web/src/features/providers/usageResourceText.ts",
+    "web/src/views/ToolsView.vue",
+    "web/src/features/providers/providerLocale.ts",
+    "web/src/shared/desktopExit.ts",
+    "web/src/shared/desktopExitActivity.ts",
+    "web/src/shared/layout/DesktopExitHost.vue"
+  ],
+  "fragments": [
+    "web/src/stores/chat.ts",
+    "web/src/stores/notifyWatch.ts"
+  ],
+  "dynamicKeys": {},
+  "technicalTokens": [
+    {
+      "text": "browser_preferences_ack_invalid",
+      "file": "web/src/features/settings/resources/browser.ts",
+      "reason": "Код повреждённого native ACK для resourceWriteFailure; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "desktop/src/main.ts",
+      "reason": "Код отказа native browser IPC при отсутствии окна; часть протокола"
+    },
+    {
+      "text": "invalid-api-path",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа API; панель показывает локализованное сообщение вместо исключения"
+    },
+    {
+      "text": "invalid-module-descriptor",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа DTO; панель показывает локализованное сообщение"
+    },
+    {
+      "text": "invalid-module-dictionary",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа словаря; панель показывает локализованное сообщение"
+    },
+    {
+      "text": "load-failed",
+      "file": "web/src/pluginRuntime/styles.ts",
+      "reason": "Внутренний код отказа CSS; панель показывает локализованное сообщение"
+    },
+    {
+      "text": "GrigDesk",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "API",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "CLI",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "MCP",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "SSH",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "HTTP",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "HTTPS",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "WebSocket",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "SSE",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "JSON",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "URL",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "IP",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "QR",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "ID",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "PIN",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "CPU",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "GPU",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "CUDA",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "RAM",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "VRAM",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "RMS",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Whisper",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "OpenAI",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Codex",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Claude",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Kimi",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "DeepSeek",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "GLM",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Tripo",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Z.ai",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "GitHub",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Telegram",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Docker",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Б24",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "B24",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "MB",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "GB",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "KB",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "B",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "C",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "RU",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "EN",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "English",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "Русский",
+      "reason": "Название продукта, протокола или технической единицы"
+    },
+    {
+      "text": "relay.example.com",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "https://github.com/owner/plugin",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "v",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "PID",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "Whisper:",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "CUDA:",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "deploy/install.sh --with-cuda",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "GRIGDESK_SPEECH_BENCHMARK_AUDIO",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "GRIGDESK:PAIR:1:…",
+      "reason": "Точный пример адреса, команда, идентификатор окружения или технический префикс"
+    },
+    {
+      "text": "3D",
+      "reason": "Обозначение формата инструмента"
+    },
+    {
+      "text": "identity_unavailable",
+      "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
+    },
+    {
+      "text": "server_start_failed",
+      "file": "desktop/src/clientRuntime.ts",
+      "reason": "Код ошибки подготовки local в ответе трубы; текст причины передаётся в detail.message"
+    },
+    {
+      "text": "disconnected",
+      "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
+    },
+    {
+      "text": "https://company.bitrix24.ru",
+      "reason": "Пример адреса портала, не надпись интерфейса"
+    },
+    {
+      "text": "detached HEAD",
+      "reason": "Термин состояния Git"
+    },
+    {
+      "text": "user",
+      "file": "web/src/views/settings/ProviderMcpStatus.vue",
+      "reason": "Технический ID области MCP при отсутствии scope во внешнем ответе"
+    },
+    {
+      "text": "unknown",
+      "file": "web/src/views/settings/pages/SpeechPage.vue",
+      "reason": "Начальный ID состояния браузерного распознавания; отображается через browserStatusLabel"
+    },
+    {
+      "text": "medium",
+      "file": "web/src/views/settings/pages/SpeechPage.vue",
+      "reason": "ID модели распознавания в значениях запроса и технической сводке"
+    }
+  ],
+  "dynamicKeyTables": {
+    "web/src/features/settings/catalog.ts": [
+      "GROUP_MESSAGES",
+      "PAGE_MESSAGES",
+      "FIELD_MESSAGES"
+    ],
+    "desktop/src/menu.ts": [
+      "EDIT_ACTIONS"
+    ],
+    "web/src/shared/grigdeskUpdate.ts": [
+      "UPDATE_STAGE_MESSAGES",
+      "UPDATE_STAGE_SHORT_MESSAGES",
+      "BLOCK_REASON_MESSAGES"
+    ],
+    "web/src/shared/factoryDebug.ts": [
+      "MESSAGES"
+    ]
+  },
+  "dynamicExpressions": {
+    "web/src/stores/providers.ts": {
+      "mode.labelKey": [
+        "core.agentModeAsk",
+        "core.agentModeAuto",
+        "core.agentModeReadOnly"
+      ],
+      "mode.hintKey": [
+        "core.agentModeAskHint",
+        "core.agentModeAutoHint",
+        "core.agentModeReadOnlyHint"
+      ]
+    },
+    "web/src/features/settings/catalog.ts": {
+      "labelKey": [
+        "settings.browserOpen",
+        "settings.browserApplication",
+        "settings.browserAgents",
+        "settings.browserSearch"
+      ],
+      "hintKey": [
+        "settings.browserOpenHint",
+        "settings.browserApplicationHint",
+        "settings.browserAgentsHint",
+        "settings.browserSearchHint"
+      ],
+      "GROUP_MESSAGES[group.id]!.label!": [
+        "settings.*"
+      ],
+      "PAGE_MESSAGES[page.id]!.label!": [
+        "settings.*"
+      ],
+      "PAGE_MESSAGES[page.id]!.description!": [
+        "settings.*"
+      ],
+      "keys.label!": [
+        "settings.*"
+      ],
+      "keys.description!": [
+        "settings.*"
+      ],
+      "keys.scope!": [
+        "settings.*"
+      ]
+    },
+    "web/src/features/settings/metadataLocale.ts": {
+      "`${key}.label`": [
+        "settings.builtinProviders.*.credentials.*.label"
+      ],
+      "`${key}.hint`": [
+        "settings.builtinProviders.*.credentials.*.hint"
+      ],
+      "`${key}.options.${option.value}.label`": [
+        "settings.builtinProviders.*.credentials.*.options.*.label"
+      ],
+      "`${key}.options.${option.value}.hint`": [
+        "settings.builtinProviders.*.credentials.*.options.*.hint"
+      ],
+      "`settings.builtinProviders.${entry.id}.settings.${field.id}.label`": [
+        "settings.builtinProviders.*.settings.*.label"
+      ],
+      "`settings.builtinProviders.${entry.id}.settings.${field.id}.hint`": [
+        "settings.builtinProviders.*.settings.*.hint"
+      ],
+      "`settings.builtinProviders.${entry.id}.models.${model.id}`": [
+        "settings.builtinProviders.*.models.*"
+      ],
+      "`${key}.name`": [
+        "settings.builtinPlugins.*.name"
+      ],
+      "`${key}.description`": [
+        "settings.builtinPlugins.*.description"
+      ],
+      "`${key}.fields.${field.key}.label`": [
+        "settings.builtinPlugins.*.fields.*.label"
+      ],
+      "`${key}.fields.${field.key}.hint`": [
+        "settings.builtinPlugins.*.fields.*.hint"
+      ],
+      "`settings.pluginSlots.${slot.slot}`": [
+        "settings.pluginSlots.*"
+      ],
+      "`settings.pluginCategories.${category.id}.label`": [
+        "settings.pluginCategories.*.label"
+      ],
+      "`settings.pluginCategories.${category.id}.hint`": [
+        "settings.pluginCategories.*.hint"
+      ],
+      "`settings.nativeScopes.${catalog.scope.id}`": [
+        "settings.nativeScopes.*"
+      ],
+      "`settings.executorTypes.${group.id}.label`": [
+        "settings.executorTypes.*.label"
+      ],
+      "`settings.executorTypes.${group.id}.hint`": [
+        "settings.executorTypes.*.hint"
+      ],
+      "`settings.nativeMetadata.${kind}.${id}`": [
+        "settings.nativeMetadata.*"
+      ],
+      "`settings.builtinProviderText.${providerId}.${id}`": [
+        "settings.builtinProviderText.*"
+      ],
+      "`settings.builtinProviders.${entry.id}.distribution.label`": [
+        "settings.builtinProviders.*.distribution.label"
+      ]
+    },
+    "desktop/src/menu.ts": {
+      "action.label": [
+        "desktop.*"
+      ]
+    },
+    "desktop/src/locale.ts": {
+      "key": [
+        "*"
+      ]
+    },
+    "desktop/src/connection.ts": {
+      "ADDRESS_ERROR": [
+        "desktop.addressError"
+      ]
+    },
+    "web/src/shared/grigdeskUpdate.ts": {
+      "BLOCK_REASON_MESSAGES[code]": [
+        "core.*"
+      ]
+    },
+    "web/src/shared/hotkeys/combo.ts": {
+      "issue": [
+        "settings.comboInvalidKey",
+        "settings.comboMetaReserved",
+        "settings.comboNeedsModifier",
+        "settings.reservedShortcut*"
+      ]
+    },
+    "web/src/shared/tools/registry.ts": {
+      "`core.builtinNavigation.${item.id}`": [
+        "core.builtinNavigation.*"
+      ]
+    },
+    "web/src/shared/pipelineNavBadge.ts": {
+      "group.messageKey": [
+        "core.*"
+      ]
+    },
+    "web/src/shared/pluginInstallView.ts": {
+      "`settings.installStage.${input.job.stage}`": [
+        "settings.installStage.*"
+      ]
+    },
+    "web/src/stores/hotkeys.ts": {
+      "`core.builtinNavigation.${item.id}`": [
+        "core.builtinNavigation.*"
+      ]
+    },
+    "web/src/stores/plugins.ts": {
+      "`core.builtinNavigation.${item.id}`": [
+        "core.builtinNavigation.*"
+      ]
+    },
+    "web/src/stores/notifyWatch.ts": {
+      "crashed ? 'core.pipelineCrashed' : 'core.pipelineStalled'": [
+        "core.pipelineCrashed",
+        "core.pipelineStalled"
+      ]
+    },
+    "web/src/stores/device.ts": {
+      "state.wakeLockIssue": [
+        "settings.wakeLock*"
+      ],
+      "state.notificationIssue": [
+        "settings.notification*"
+      ]
+    },
+    "web/src/views/settings/ProviderMcpStatus.vue": {
+      "`settings.mcpGroups.${props.providerId}.${group.id}.hint`": [
+        "settings.mcpGroups.*.hint"
+      ]
+    },
+    "web/src/features/providers/providerUsage.ts": {
+      "key": [
+        "core.usageResources.*"
+      ],
+      "control.value ? 'core.extraUsageEnabled' : 'core.extraUsageDisabled'": [
+        "core.extraUsageEnabled",
+        "core.extraUsageDisabled"
+      ]
+    },
+    "web/src/features/providers/usageResourceText.ts": {
+      "`core.${key}`": [
+        "core.*"
+      ],
+      "`core.usageText.${key}`": [
+        "core.usageText.*"
+      ]
+    },
+    "web/src/features/providers/providerLocale.ts": {
+      "`settings.builtinProviders.${provider.id}.auth.${key}`": [
+        "settings.builtinProviders.*.auth.*"
+      ],
+      "`core.providerLogin.${providerId}`": [
+        "core.providerLogin.*"
+      ]
+    },
+    "web/src/features/settings/resources/speech.ts": {
+      "`settings.speechChecks.${key}`": [
+        "settings.speechChecks.*"
+      ]
+    },
+    "web/src/views/settings/PluginSourceNotice.vue": {
+      "keys[props.membership]": [
+        "settings.marketplaceOfficial",
+        "settings.marketplaceCommunity",
+        "settings.marketplaceUnknownSource",
+        "settings.marketplaceUnverifiedSource",
+        "settings.marketplaceManual"
+      ]
+    },
+    "web/src/views/settings/pages/PluginCatalogPanel.vue": {
+      "statusKey": [
+        "settings.marketplaceCatalog",
+        "settings.marketplaceStale",
+        "settings.marketplaceUnavailable",
+        "settings.marketplaceUnconfigured"
+      ],
+      "reasonKeys[action.reason] ?? 'settings.marketplaceDetailError'": [
+        "settings.marketplaceArchived",
+        "settings.marketplaceIncompatible",
+        "settings.marketplaceSourceConflict",
+        "settings.marketplaceCommitConflict",
+        "settings.marketplaceDetailError"
+      ]
+    },
+    "web/src/views/settings/pages/PluginPage.vue": {
+      "provenanceKeys[sourceMembership(catalog.index, catalog.state,\n    entry.id, entry.install?.source ?? null)]": [
+        "settings.marketplaceOfficial",
+        "settings.marketplaceCommunity",
+        "settings.marketplaceExternal",
+        "settings.marketplaceUnverifiedSource",
+        "settings.marketplaceManual"
+      ]
+    }
+  },
+  "metadataCoverage": [
+    {
+      "file": "server/src/lib/pluginsRegistry.ts",
+      "table": "SYSTEM",
+      "id": "id",
+      "prefix": "settings.builtinPlugins",
+      "fields": {
+        "name": "name",
+        "description": "description",
+        "nav.label": "navigation"
+      },
+      "children": [
+        {
+          "property": "settings",
+          "target": "fields",
+          "id": "key",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "shared/plugins/pluginsContracts.ts",
+      "table": "PLUGIN_CATEGORIES",
+      "id": "id",
+      "prefix": "settings.pluginCategories",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      }
+    },
+    {
+      "file": "shared/plugins/slots/providerSlots.ts",
+      "table": "PROVIDER_SLOT_LABELS",
+      "dictionary": true,
+      "prefix": "settings.pluginSlots"
+    },
+    {
+      "file": "server/src/lib/executors/claude.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.claude.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/claude.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.claude.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/codex.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.codex.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/codex.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.codex.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/deepseek.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.deepseek.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/deepseek.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.deepseek.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/glm.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.glm.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/glm.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.glm.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/kimi.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.kimi.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/kimi.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.kimi.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/tripo.ts",
+      "property": "settings",
+      "id": "id",
+      "prefix": "settings.builtinProviders.tripo.settings",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/tripo.ts",
+      "property": "credentials",
+      "id": "env",
+      "prefix": "settings.builtinProviders.tripo.credentials",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      },
+      "children": [
+        {
+          "property": "options",
+          "target": "options",
+          "id": "value",
+          "fields": {
+            "label": "label",
+            "hint": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "file": "shared/chat/executorTypes.ts",
+      "table": "EXECUTOR_TYPES",
+      "id": "id",
+      "prefix": "settings.executorTypes",
+      "fields": {
+        "label": "label",
+        "hint": "hint"
+      }
+    },
+    {
+      "file": "server/src/lib/executors/deepseek.ts",
+      "table": "base",
+      "object": true,
+      "prefix": "settings.builtinProviders.deepseek.distribution",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/executors/glm.ts",
+      "table": "base",
+      "object": true,
+      "prefix": "settings.builtinProviders.glm.distribution",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/executors/claude.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.claude",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/executors/codex.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.codex",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/glm/usage.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.glm",
+      "fields": {
+        "label": "label"
+      },
+      "excludeIds": [
+        "zai:5h",
+        "zai:week",
+        "zai:mcp",
+        "balance-usd"
+      ],
+      "excludeReason": "Окна переводятся по длительности, баланс — общим параметризованным core.usageBalance."
+    },
+    {
+      "file": "server/src/lib/deepseek/balance.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.deepseek",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/deepseek/tariff.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.deepseek",
+      "fields": {
+        "label": "label"
+      }
+    },
+    {
+      "file": "server/src/lib/tripo/account.ts",
+      "recordId": "key",
+      "prefix": "core.usageResources.tripo",
+      "fields": {
+        "label": "label"
+      }
+    }
+  ],
+  "nativeFiles": [
+    "mobile/android/client/src/main/java/local/grigdesk/client/MainActivity.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/AndroidActions.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/ClientRuntime.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/ClientApplication.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/shell/ShellApi.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/shell/ProfileStore.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/shell/Pairing.java"
+  ],
+  "nativeMetadataSources": [
+    {
+      "file": "server/src/lib/executorSettings/claude.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/codex.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/kimi.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/deepseek.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/projection.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ],
+      "variables": [
+        "reason"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/jsonSchema.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ],
+      "variables": [
+        "reason"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/consumers.ts",
+      "properties": [
+        "reason",
+        "owner"
+      ],
+      "calls": [
+        "unsupported"
+      ]
+    },
+    {
+      "file": "server/src/lib/executorSettings/validation.ts",
+      "properties": [
+        "message"
+      ]
+    },
+    {
+      "file": "shared/chat/providerSettingsContracts.ts",
+      "properties": [
+        "reason"
+      ],
+      "technicalTokens": [
+        {
+          "text": "consumerSupport.reason",
+          "reason": "Адрес поля в decoder, не подпись интерфейса"
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/claude.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ],
+      "technicalTokens": [
+        {
+          "text": "Needs authentication",
+          "reason": "Точный маркер внешнего CLI, который сохраняется как исходный вывод"
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/codex.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ],
+      "technicalTokens": [
+        {
+          "text": "toolsAndAuthOnly",
+          "reason": "Значение параметра RPC mcpServerStatus/list, не подпись интерфейса"
+        }
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/deepseek.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/glm.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/kimi.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ]
+    },
+    {
+      "file": "server/src/lib/executors/tripo.ts",
+      "properties": [
+        "note",
+        "detail",
+        "emptyText",
+        "authHint"
+      ],
+      "catalogPrefixes": [
+        "settings.builtinProviderText.",
+        "core.usageText."
+      ]
+    }
+  ]
+}

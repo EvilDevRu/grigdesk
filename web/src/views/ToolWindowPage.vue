@@ -1,0 +1,220 @@
+<template>
+  <main class="tool-window-page"
+    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface">
+    <header class="tool-window-titlebar">
+      <span>{{ item?.label || 'GrigDesk' }}</span>
+      <div class="tool-window-actions">
+        <UiIconButton v-if="panelReady" data-context="tool-window-control"
+                      :label="t('core.returnTool')" v-tooltip.bottom="t('core.returnTool')"
+                      :disabled="returning" @click="returnToColumn">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+            <path d="M10.5 2.5v11M4 8h4m-2-2 2 2-2 2" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control" :label="t('desktop.windowMinimize')"
+                      v-tooltip.bottom="t('desktop.windowMinimize')"
+                      :disabled="windowControlsBusy || !ready" @click="controlWindow('minimize')">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11h10" /></svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control"
+                      :label="maximized ? t('desktop.windowRestore') : t('desktop.windowMaximize')"
+                      v-tooltip.bottom="maximized ? t('desktop.windowRestore') : t('desktop.windowMaximize')"
+                      :disabled="windowControlsBusy || !ready" @click="controlWindow('toggle-maximize')">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path v-if="maximized" d="M6 3h7v7M3 6h7v7H3Z" />
+            <path v-else d="M3 3h10v10H3Z" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control" :label="t('core.closeTool')"
+                      v-tooltip.bottom="t('core.closeTool')" @click="closeWindow">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M4 12l8-8" /></svg>
+        </UiIconButton>
+      </div>
+    </header>
+    <p v-if="error" role="alert">{{ error }}</p>
+    <component :is="item.component" v-if="initialized && !returning && item?.component"
+               ref="panel" v-bind="item.panelProps || {}" :active="true" :compact="false"
+               presentation="page" :intents="intents"
+               @consume-intent="consume" @context="receiver?.context($event)" />
+    <component :is="panelLoading(id)" v-else-if="!error" :label="t('core.toolWaiting')" />
+  </main>
+</template>
+
+<script setup lang="ts">
+import { panelLoading } from '../shared/tools/panelLoading.ts';
+
+import { toolWindowText } from '../shared/tools/toolWindowMessages.ts';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import {
+  UiIconButton,
+  t,
+  vTooltip,
+} from '../ui.ts';
+import { useAuthStore } from '../stores/auth.ts';
+import { usePluginsStore } from '../stores/plugins.ts';
+import { toolById } from '../shared/tools/registry.ts';
+import { createToolWindowReceiver } from '../shared/tools/toolWindowRelay.ts';
+import type { SurfaceDocument } from '../../../shared/desktop/surfaceContract.ts';
+import type { ToolPanelHandle, ToolWindowState } from '../shared/tools/toolWindowState.ts';
+import { registryToolId } from '../shared/tools/toolWindowState.ts';
+import { setCodeWindowAction } from '../shared/tools/toolWindowActions.ts';
+import { useToolWindowControls } from '../shared/tools/useToolWindowControls.ts';
+
+const props = defineProps<{ target: SurfaceDocument | null; ready: boolean }>();
+const auth = useAuthStore();
+const { maximized, busy: windowControlsBusy, control: controlWindow } = useToolWindowControls(
+  () => props.target,
+  () => props.ready,
+);
+const plugins = usePluginsStore();
+const id = computed(() => registryToolId(props.target?.id ?? ''));
+const item = computed(() => toolById(plugins, id.value));
+const initialized = ref(false);
+const returning = ref(false);
+const panelReady = ref(false);
+const error = ref('');
+const panel = ref<ToolPanelHandle | null>(null);
+const intents = ref<Record<string, unknown>[]>([]);
+const pendingCommands = new Map<number, { seq: number; epoch: string }>();
+let intentId = 0;
+let receiver: ReturnType<typeof createToolWindowReceiver> | null = null;
+let saved: ToolWindowState = {};
+const readyTimer = setInterval(() => receiver?.ready(), 1000);
+
+/**
+ * Состояние импортируется после единственного mount registry-панели.
+ * До init документ содержит только шапку, поэтому соединения не дублируются.
+ */
+async function importState(state: ToolWindowState) {
+  await plugins.load?.();
+
+  if (!item.value?.component) {
+    error.value = toolWindowText('toolUnavailable');
+
+    throw new Error(error.value);
+  }
+
+  saved = state;
+  initialized.value = true;
+  await nextTick();
+
+  const transfersState = ['code', 'shelf', 'ssh', 'db', 'docker'].includes(id.value);
+
+  for (let attempt = 0; attempt < 200
+    && (!panel.value || transfersState && !panel.value.importState); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  if (transfersState && !panel.value?.importState) {
+    throw new Error(toolWindowText('toolStateNotReady'));
+  }
+
+  await panel.value?.importState?.(state);
+  panelReady.value = true;
+}
+
+watch(() => props.ready && auth.authenticated, (ready) => {
+  if (!ready || receiver || props.target?.kind !== 'tool' || !props.target.instance) {
+    return;
+  }
+
+  receiver = createToolWindowReceiver({
+    origin: location.origin,
+    scope: auth.clientScope || '',
+    target: { kind: 'tool', id: id.value },
+    instance: props.target.instance,
+    channel: new BroadcastChannel('grigdesk-tool-windows-v1'),
+    importState,
+    enqueue: (intent, seq, epoch) => {
+      const id = ++intentId;
+
+      pendingCommands.set(id, { seq, epoch });
+      intents.value.push({ ...intent, id });
+    },
+    returned: async (accepted, message) => {
+      if (accepted) {
+        window.close();
+      } else {
+        error.value = message || toolWindowText('toolReturnFailed');
+        returning.value = false;
+        await importState(saved);
+      }
+    },
+  });
+  setCodeWindowAction((action) => receiver?.mainAction(action));
+}, { immediate: true });
+
+/**
+ * Локальный id не повторяется после перезагрузки main и смены его эпохи.
+ * Поздний consume старой команды не подтверждает новый такой же seq.
+ */
+function consume(id: number) {
+  const command = pendingCommands.get(id);
+
+  intents.value = intents.value.filter((intent) => intent.id !== id);
+  pendingCommands.delete(id);
+
+  if (command) {
+    receiver?.consume(command.seq, command.epoch);
+  }
+}
+
+/**
+ * Исходная панель снимается до запроса возврата, сохраняя снимок для отказа.
+ * Закрытие документа возможно только после подтверждения нового владельца.
+ */
+async function returnToColumn() {
+  try {
+    saved = await panel.value?.exportState?.() ?? { id: id.value };
+    returning.value = true;
+    await nextTick();
+    receiver?.returnState(saved);
+  } catch (reason) {
+    error.value = String(reason);
+  }
+}
+
+function closeWindow() {
+  window.close();
+}
+
+onBeforeUnmount(() => {
+  clearInterval(readyTimer);
+  receiver?.dispose();
+  setCodeWindowAction(null);
+});
+</script>
+
+<style scoped>
+.tool-window-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
+}
+.tool-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  padding: 4px 8px;
+  -webkit-app-region: drag;
+}
+.tool-window-actions :deep(button) {
+  -webkit-app-region: no-drag;
+}
+.tool-window-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+.tool-window-page > :deep(.panel) {
+  flex: 1;
+  min-height: 0;
+}
+</style>

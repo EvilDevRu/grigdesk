@@ -17,16 +17,6 @@ DEBUG_LOG_SOURCE=default
 DEBUG_LOG_DROPPED=0
 DEBUG_LOG_CLOSED=1
 
-_debug_log_rank() {
-  case "${1:-off}" in
-    off) printf '0\n' ;;
-    errors) printf '1\n' ;;
-    decisions) printf '2\n' ;;
-    verbose) printf '3\n' ;;
-    *) return 2 ;;
-  esac
-}
-
 _debug_log_field_valid() {
   local key=${1:-} value=${2:-}
   case "$key" in
@@ -45,7 +35,12 @@ _debug_log_field_valid() {
 
 _debug_log_meta_once() {
   local key=$1 value=$2 meta="$DEBUG_LOG_RUN_DIR/meta.env"
-  [[ -f "$meta" ]] || return 0
+  # Schema 2 — целиком записываемое host-зеркало, публикуемое через удерживаемый
+  # дескриптор run-dir. Диагностическая трассировка не должна дописывать его и не должна
+  # переходить по созданному провайдером symlink/FIFO. Launcher включает текущее debug-
+  # состояние при атомарной публикации начального и финального зеркал.
+  [[ -f "$meta" && ! -L "$meta" ]] || return 0
+  grep -qx 'SCHEMA=2' "$meta" 2>/dev/null && return 0
   grep -q "^${key}=" "$meta" 2>/dev/null && return 0
   printf '%s=%s\n' "$key" "$value" >>"$meta" 2>/dev/null || true
   chmod 600 "$meta" 2>/dev/null || true
@@ -171,7 +166,7 @@ debug_log_init() {
 debug_log_event() {
   local required=${1:?required level} event=${2:?event}; shift 2
   local key value
-  _debug_log_rank "$required" >/dev/null || return 2
+  debug_settings_rank "$required" >/dev/null || return 2
   [[ "$event" =~ ^[a-z][a-z0-9_]*$ ]] || return 2
   (( $# % 2 == 0 )) || return 2
   local -a fields=("$@")
@@ -208,8 +203,8 @@ debug_log_event() {
   fi
 
   local required_rank current_rank
-  required_rank=$(_debug_log_rank "$required") || return 2
-  current_rank=$(_debug_log_rank "$DEBUG_LOG_LEVEL") || return 0
+  required_rank=$(debug_settings_rank "$required") || return 2
+  current_rank=$(debug_settings_rank "$DEBUG_LOG_LEVEL") || return 0
   (( current_rank >= required_rank )) || return 0
   _debug_log_append "$event" "${fields[@]}"
 }

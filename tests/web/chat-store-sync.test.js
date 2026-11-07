@@ -1,14 +1,17 @@
 // Историю читают все устройства сразу, а узнать об изменении им было неоткуда: чат,
 // начатый на планшете, появлялся на компьютере только после F5. Теперь пишущее окно
 // помечает запрос своим origin, сервер шлёт SSE `chat-store`, остальные тянут ровно
-// изменившийся чат (`GET /api/chat/store/chat/:id`).
+// изменившуюся шапку, а для уже открытого чата — полную ленту.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+import { protocolHead, protocolList, reconcileWith } from './helpers/chat-protocol.js';
 
 import {
   apiHarness,
   chatNotifications,
   chatStoreFixture,
+  setChatVisible,
   sseOf,
 } from './helpers/chat-store.js';
 
@@ -25,17 +28,38 @@ function fixture(extra = {}) {
 function serveChat(chat) {
   apiHarness.get = async (url) => {
     if (url === '/api/chat/active') return { active: [] };
+    if (url === `/api/chat/store/head/${chat.id}`) {
+      return { head: protocolHead(chat) };
+    }
+
     assert.equal(url, `/api/chat/store/chat/${chat.id}`);
-    return { chat };
+
+    return { chat, version: protocolHead(chat).version };
   };
 }
+
+test('COMP-VIS-04: markRead и notifications используют exact registered surface', async () => {
+  const chat = await fixture({ unread: true });
+
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, true, 'смонтированный, но скрытый чат не прочитан');
+
+  setChatVisible('other');
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, true, 'видимость другого id не подходит');
+
+  setChatVisible('c1');
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, false);
+});
 
 test('WEB-00: старые миллионы Codex не заполняют кольцо после миграции метрики', async () => {
   const chat = await fixture({
     model: 'gpt-5.6-sol',
     modelRef: { provider: 'codex', model: 'gpt-5.6-sol' },
-    contextTokens: 25_626_388,
+    contextTokens: 240_000,
     contextMetric: '',
+    contextCache: { scope: 'request', status: 'reported', readTokens: -1, uncachedTokens: '240000' },
   });
   const session = chat.sessions[0];
   chat._normalize(chat.sessions);
@@ -44,7 +68,9 @@ test('WEB-00: старые миллионы Codex не заполняют кол
   assert.equal(session.contextWindow, 0);
   assert.equal(session.contextMetric, 'legacy-unavailable');
   assert.equal(session.contextIsEstimate, true);
-  assert.equal(session.totalInputTokens, 25_626_388, 'старое значение остаётся только расходом');
+  assert.equal(session.totalInputTokens, 240_000, 'старое значение остаётся только расходом');
+  assert.deepEqual(session.contextCache, { scope: 'request', status: 'unavailable' },
+    'reported без единой валидной числовой метрики не изображает измерение');
 });
 
 test('WEB-01: чат, начатый на другом устройстве, появляется без перезагрузки', async () => {
@@ -149,29 +175,58 @@ test('WEB-07: чужая мета меняет дефолты новых чат�
   assert.equal(chat.activeId, 'c1', 'разговор из-под рук не забираем');
 });
 
-test('WEB-08: после разрыва связи история сверяется целиком', async () => {
+test('WEB-08: после разрыва связи история сверяется по известным версиям', async () => {
   const chat = await fixture();
   const sse = sseOf(chat);
   const asked = [];
-  apiHarness.get = async (url) => {
-    asked.push(url);
-    if (url === '/api/chat/active') return { active: [] };
-    if (url === '/api/chat/waiting') return { waiting: [] };
-    // Пока связи не было: c1 переименовали, c2 завели, а старый c0 удалили.
+  const changed = { ...CHAT, title: 'Переименован там' };
+
+  serveChat(changed);
+  apiHarness.post = async (url, body) => {
+    asked.push({ url, body });
+
+    if (url === '/api/chat/store/reconcile') {
+      return {
+        pending: [],
+        heads: [],
+        gone: [],
+        deliveries: [],
+      };
+    }
+
+    assert.equal(url, '/api/chat/store/changes');
+
     return {
-      sessions: [{ ...CHAT, title: 'Переименован там' }, { id: 'c2', title: 'С планшета', messages: [], createdAt: 500 }],
-      archived: [],
+      ...protocolList({
+        sessions: [changed, { id: 'c2', title: 'С планшета', messages: [], createdAt: 500 }],
+        archived: [],
+      }),
+      gone: ['c0'],
     };
   };
 
-  chat.sessions.push({ id: 'c0', title: 'Стёртый', messages: [], createdAt: 10, steps: [] });
-  chat._markSent(); // сервер эти чаты видел — значит их исчезновение и есть удаление
+  const removed = { id: 'c0', title: 'Стёртый', messages: [], createdAt: 10, steps: [] };
 
+  chat.sessions.push(removed);
+  chat._markSent();
+  chat._applyChatHead(protocolHead(removed), false);
   sse('hello', {});
   await new Promise(setImmediate);
   await new Promise(setImmediate);
 
-  assert.ok(asked.includes('/api/chat/store'), 'на переподключении историю перечитываем');
+  const changes = asked.filter((call) => call.url === '/api/chat/store/changes');
+
+  assert.equal(changes.length, 1, 'одна сверка на переподключение');
+  assert.deepEqual(changes[0].body.known, {
+    c1: protocolHead({
+      ...CHAT,
+      sending: false,
+      compacting: false,
+      steps: [],
+      archived: false,
+    }).version,
+    c0: protocolHead(removed).version,
+  });
   assert.deepEqual(chat.sessions.map((s) => s.id), ['c1', 'c2']);
   assert.equal(chat.sessions[0].title, 'Переименован там');
 });
@@ -180,10 +235,33 @@ test('WEB-09: сверка не трогает свой новый чат и н�
   const chat = await fixture();
   const sse = sseOf(chat);
   let pulls = 0;
+
+  serveChat(CHAT);
+
+  const get = apiHarness.get;
+
   apiHarness.get = async (url) => {
-    if (url === '/api/chat/store') { pulls += 1; return { sessions: [CHAT], archived: [] }; }
     if (url === '/api/chat/active') return { active: [] };
-    return { waiting: [] };
+    if (url.includes('/waiting')) {
+      return { waiting: [] };
+    }
+
+    return get(url);
+  };
+
+  apiHarness.post = async (url) => {
+    if (url === '/api/chat/store/changes') {
+      pulls += 1;
+
+      return { ...protocolList({ sessions: [CHAT], archived: [] }), gone: [] };
+    }
+
+    return {
+        pending: [],
+        heads: [],
+        gone: [],
+        deliveries: [],
+      };
   };
 
   chat.sessions.push({ id: 'c3', title: 'Только что завёл', messages: [], createdAt: 900, steps: [] });
@@ -210,14 +288,21 @@ test('WEB-10: ход в ещё неизвестном чате тянет и с�
     if (url === '/api/chat/active') {
       return { active: [{ chatKey: 'c2', startedAt: 1, tokens: 12, steps: [], compact: false }] };
     }
-    return { chat: { id: 'c2', title: 'С планшета', messages: [], createdAt: 500, updatedAt: 500 } };
+
+    return { head: protocolHead({
+      id: 'c2',
+      title: 'С планшета',
+      messages: [],
+      createdAt: 500,
+      updatedAt: 500,
+    }) };
   };
 
   sse('chat-turn-start', { chatKey: 'c2', at: 8 });
   await new Promise(setImmediate);
   await new Promise(setImmediate);
 
-  assert.deepEqual(asked, ['/api/chat/store/chat/c2', '/api/chat/active']);
+  assert.deepEqual(asked, ['/api/chat/store/head/c2', '/api/chat/active']);
   const added = chat.sessions.find((s) => s.id === 'c2');
   assert.ok(added, 'чат подтянулся по событию хода');
   assert.equal(added.sending, true, 'и сразу с «думает…» — событие о старте мы уже пропустили');
@@ -251,6 +336,61 @@ test('WEB-11: ответ, пришедший синхронизацией в ф�
   assert.equal(chatNotifications().length, 1);
 });
 
+test('WEB-11b: промежуточная реплика идущего хода не помечает чат непрочитанным, итог хода — помечает',
+  async () => {
+    const chat = await fixture();
+    const block = {
+      role: 'assistant',
+      kind: 'assistant-block',
+      runId: 'run-1',
+      assistantMessageId: 'block-0001',
+      text: 'Смотрю файлы этапа.',
+      complete: true,
+    };
+
+    chat._visible = () => false;
+
+    const sse = sseOf(chat);
+
+    serveChat({
+      ...CHAT,
+      messages: [...CHAT.messages, block],
+      updatedAt: 300,
+    });
+    sse('chat-store', {
+      id: 'c1',
+      archived: false,
+      origin: 'сервер',
+      at: 10,
+    });
+    await new Promise(setImmediate);
+
+    assert.equal(chatNotifications().length, 0, 'промежуточная реплика — не ответ');
+    assert.equal(Boolean(chat.sessions[0].unread), false);
+
+    serveChat({
+      ...CHAT,
+      messages: [...CHAT.messages, block, {
+        role: 'assistant',
+        runId: 'run-1',
+        text: 'Этап готов.',
+        steps: [],
+      }],
+      updatedAt: 400,
+    });
+    sse('chat-store', {
+      id: 'c1',
+      archived: false,
+      origin: 'сервер',
+      at: 11,
+    });
+    await new Promise(setImmediate);
+
+    assert.equal(chatNotifications().length, 1);
+    assert.equal(chatNotifications()[0][1], 'Этап готов.');
+    assert.equal(chat.sessions[0].unread, true);
+  });
+
 test('WEB-12: ответ из pending после обрыва фонового запроса тоже показывает оповещение', async () => {
   const chat = await fixture({ sending: true, offline: true });
   chat._visible = () => false;
@@ -258,10 +398,12 @@ test('WEB-12: ответ из pending после обрыва фонового �
     assert.equal(url, '/api/chat/pending');
     return {
       pending: [{
-        id: 'orphan-1', chatKey: 'c1', role: 'assistant', reply: 'Дошло после сна', at: 400,
+        id: 'orphan-1', chatKey: 'c1', role: 'assistant', reply: 'Дошло после сна',
+        userText: 'Вопрос, потерянный окном', userSentAt: 250, at: 400,
       }],
     };
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
 
   await chat._collectPending();
 
@@ -269,6 +411,12 @@ test('WEB-12: ответ из pending после обрыва фонового �
   assert.equal(chatNotifications()[0][1], 'Дошло после сна');
   assert.equal(chat.sessions[0].unread, true);
   assert.equal(chat.sessions[0].offline, false);
+  assert.deepEqual(chat.sessions[0].messages.slice(-2).map((message) => ({
+    role: message.role, text: message.text, sentAt: message.sentAt,
+  })), [
+    { role: 'user', text: 'Вопрос, потерянный окном', sentAt: 250 },
+    { role: 'assistant', text: 'Дошло после сна', sentAt: undefined },
+  ]);
 
   // Тот же pending до подтверждения DELETE может попасть в следующую сверку.
   await chat._collectPending();

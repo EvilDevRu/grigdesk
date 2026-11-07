@@ -1,0 +1,437 @@
+import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { messageKey } from '../../shared/chat/chatMessageIdentity.ts';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { InTurnHistory } from '../../server/src/lib/chat/inTurnHistory.ts';
+import { applyWebPending } from '../../server/src/lib/chat/webPendingHistory.ts';
+import { chatAppFixture, saveChat } from './helpers/chat-turns.js';
+import { putPending } from './helpers/chat-list.js';
+
+const ROUTE = '/api/chat/store/chat/step-reuse';
+const messages = () => [{
+    role: 'assistant',
+    text: 'Одинаковый старый ответ',
+    steps: [{
+      k: 'tool',
+      text: 'первый'
+    }]
+  },
+  {
+    role: 'assistant',
+    text: 'Одинаковый старый ответ',
+    steps: [{
+      k: 'tool',
+      text: 'второй'
+    }]
+  },
+];
+
+/**
+ * Сетевой снимок удаляет только подтверждённые steps и сохраняет точные позиции legacy-реплик.
+ * Исходная полная история остаётся доступной для проверки fallback и результата GET.
+ */
+function sparse(chat) {
+  const refs = chat.messages.flatMap((message, index) => Array.isArray(message.steps) ? [{
+    messageIndex: index,
+    sourceIndex: index,
+    expectedKey: messageKey(message),
+    expectedLength: message.steps.length,
+  }] : []);
+  const copy = {
+    ...chat,
+    messages: chat.messages.map(({
+      steps,
+      ...message
+    }) => message)
+  };
+
+  return {
+    chat: copy,
+    reuseSteps: {
+      protocol: 1,
+      baseRevision: chat.revision,
+      refs
+    }
+  };
+}
+
+test('маршруты full → refs → GET сохраняют legacy-ленты, no-op не повышает revision и SSE', async (t) => {
+  const {
+    app,
+    events
+  } = await chatAppFixture(t);
+  const ack = await saveChat(app, 'reuse-chat', {
+    messages: messages()
+  });
+  const original = (await app.inject('/api/chat/store/chat/reuse-chat')).json().chat;
+
+  assert.equal((await app.inject('/api/chat/store')).json().historyStepReuseProtocol, 1);
+  assert.equal(ack.stepReuseAck.confirmed.length, 2);
+
+  const request = sparse({
+    ...original,
+    draft: 'правка'
+  });
+  const response = await app.inject({
+    method: 'PUT',
+    url: ROUTE,
+    payload: request
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().stepReuseAck.confirmed.length, 2);
+
+  const saved = (await app.inject('/api/chat/store/chat/reuse-chat')).json().chat;
+
+  assert.deepEqual(saved.messages, messages());
+
+  const eventCount = events.length;
+  const noop = await app.inject({
+    method: 'PUT',
+    url: ROUTE,
+    payload: sparse(saved)
+  });
+
+  assert.equal(noop.json().written, false);
+  assert.equal(noop.json().revision, saved.revision);
+  assert.equal(events.length, eventCount);
+});
+
+test('повреждённые refs отказывают без записи и освобождают учёт сохранений', async (t) => {
+  const {
+    app,
+    events
+  } = await chatAppFixture(t);
+
+  await saveChat(app, 'bad-refs-chat', {
+    messages: messages()
+  });
+
+  const original = (await app.inject('/api/chat/store/chat/bad-refs-chat')).json().chat;
+  const cases = [
+    [400, (body) => {
+      body.reuseSteps.protocol = '1';
+    }],
+    [400, (body) => {
+      body.reuseSteps.baseRevision = 0;
+    }],
+    [400, (body) => {
+      body.reuseSteps.refs[0].messageIndex = 2;
+    }],
+    [400, (body) => {
+      body.reuseSteps.refs[0].expectedLength = -1;
+    }],
+    [400, (body) => {
+      body.reuseSteps.refs[0].extra = true;
+    }],
+    [400, (body) => {
+      body.reuseSteps.refs[1].messageIndex = 0;
+    }],
+    [400, (body) => {
+      body.reuseSteps.refs[1].sourceIndex = 0;
+    }],
+    [400, (body) => {
+      body.chat.messages[0].steps = null;
+    }],
+    [400, (body) => {
+      body.chat.messages = [];
+    }],
+    [409, (body) => {
+      body.reuseSteps.refs[0].sourceIndex = 9;
+    }],
+    [409, (body) => {
+      body.reuseSteps.refs[0].expectedKey = 'другой';
+    }],
+    [409, (body) => {
+      body.reuseSteps.refs[0].expectedLength = 9;
+    }],
+  ];
+  const eventCount = events.length;
+
+  for (const [status, change] of cases) {
+    const request = sparse(original);
+
+    change(request);
+
+    const result = await app.inject({
+      method: 'PUT',
+      url: ROUTE,
+      payload: request
+    });
+
+    assert.equal(result.statusCode, status, result.body);
+    assert.equal(result.json().error, status === 400 ? 'bad_step_reuse' : 'chat_steps_changed');
+    assert.deepEqual((await app.inject('/api/chat/store/chat/bad-refs-chat')).json().chat, original);
+    assert.equal(events.length, eventCount);
+  }
+
+  const deleted = await app.inject({
+    method: 'DELETE',
+    url: '/api/chat/store/chat/bad-refs-chat'
+  });
+
+  assert.equal(deleted.statusCode, 200);
+});
+
+test('конфликт revision не обходит stale CAS; архив, новые steps и очистка остаются полными', async (t) => {
+  const {
+    app
+  } = await chatAppFixture(t);
+
+  await saveChat(app, 'conflict-chat', {
+    messages: messages()
+  });
+
+  const original = (await app.inject('/api/chat/store/chat/conflict-chat')).json().chat;
+  const other = {
+    ...original,
+    draft: 'другое окно',
+    messages: [...original.messages,
+      {
+        role: 'user',
+        text: 'Новая задача'
+      }
+    ]
+  };
+
+  await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: other
+    }
+  });
+
+  const conflict = await app.inject({
+    method: 'PUT',
+    url: ROUTE,
+    payload: sparse(original)
+  });
+
+  assert.equal(conflict.statusCode, 200);
+  assert.equal(conflict.json().stale, true);
+  assert.equal(conflict.json().stepReuseAck.confirmed.length, 2);
+
+  const full = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: original
+    }
+  });
+
+  assert.equal(full.json().stale, true);
+
+  const saved = (await app.inject('/api/chat/store/chat/conflict-chat')).json().chat;
+
+  assert.equal(saved.messages.at(-1).text, 'Новая задача');
+
+  const archived = await app.inject({
+    method: 'PUT',
+    url: ROUTE,
+    payload: {
+      ...sparse(saved),
+      archived: true
+    }
+  });
+
+  assert.equal(archived.statusCode, 200);
+
+  const clear = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        ...saved,
+        revision: archived.json().revision,
+        messages: []
+      },
+      archived: true,
+    }
+  });
+
+  assert.equal(clear.statusCode, 200);
+  assert.deepEqual((await app.inject('/api/chat/store/chat/conflict-chat')).json().chat.messages, []);
+});
+
+test('canonical protection с нулевыми флагами не подтверждает заменённые тела той же длины', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-reuse-canonical-'));
+
+  t.after(() => fs.rm(dir, {
+    recursive: true,
+    force: true
+  }));
+
+  const store = new ChatHistoryStore({
+    chatsDir: dir
+  });
+  const incoming = {
+    id: 'canonical-chat',
+    createdAt: 1000,
+    updatedAt: 1000,
+    messages: [{
+      role: 'assistant',
+      assistantMessageId: 'answer',
+      runId: 'run',
+      text: 'Ответ',
+      steps: [{
+        k: 'tool',
+        text: 'клиент'
+      }]
+    }],
+  };
+  const first = await store.saveOne(incoming);
+
+  store.setCanonicalMessages(() => [{
+    ...incoming.messages[0],
+    serverCanonical: true,
+    steps: [{
+      k: 'tool',
+      text: 'сервер'
+    }]
+  }]);
+
+  const saved = await store.saveOne({
+    ...first.chat,
+    draft: 'изменение'
+  });
+
+  assert.equal(saved.stale, false);
+  assert.equal(saved.restored, 0);
+  assert.equal(saved.dropped, 0);
+  assert.deepEqual(saved.stepReuseAck.confirmed, []);
+  assert.equal((await store.readOne(incoming.id)).messages[0].steps[0].text, 'сервер');
+});
+
+test('ошибка durable write и отсутствие базы не создают подтверждение и revision', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-reuse-write-'));
+
+  t.after(() => fs.rm(dir, {
+    recursive: true,
+    force: true
+  }));
+
+  const store = new ChatHistoryStore({
+    chatsDir: dir
+  });
+  const first = await store.saveOne({
+    id: 'write-chat',
+    messages: messages(),
+    createdAt: 1000
+  });
+
+  store.writeAtomic = async () => {
+    throw new Error('disk failure');
+  };
+
+  const body = sparse({
+    ...first.chat,
+    draft: 'правка'
+  });
+
+  await assert.rejects(store.saveOne(body.chat, false, {
+    reuseSteps: body.reuseSteps
+  }), /disk failure/);
+  assert.deepEqual(await store.readOne('write-chat'), first.chat);
+  await assert.rejects(store.saveOne({
+    ...body.chat,
+    id: 'missing'
+  }, false, {
+    reuseSteps: body.reuseSteps
+  }), {
+    code: 'chat_steps_changed'
+  });
+});
+
+test('pending дополняет новые сообщения, сохраняя steps существующего финала и прошлых ответов', () => {
+  const projection = new InTurnHistory({
+    ledger: { byRun: () => [], byChat: () => [] },
+    assistant: { byRun: () => [] },
+  });
+  const steps = [{ k: 'tool', text: 'Уже сохранённое тело' }];
+  const final = {
+    role: 'assistant',
+    runId: 'pending-run',
+    assistantMessageId: 'pending-answer',
+    text: 'Промежуточный текст',
+    steps,
+  };
+  const current = {
+    id: 'pending-reuse',
+    unread: false,
+    messages: [...messages(), final],
+  };
+  const pending = {
+    id: 'pending-final',
+    chatKey: current.id,
+    runId: final.runId,
+    assistantMessageId: final.assistantMessageId,
+    reply: 'Полный текст',
+    steps: [{ k: 'tool', text: 'Другое тело той же длины' }],
+  };
+  const applied = applyWebPending(current, pending, projection, null);
+
+  assert.equal(applied.messages.at(-1).text, 'Полный текст');
+  assert.equal(applied.messages.at(-1).steps, steps);
+  assert.equal(applied.messages[0].steps, current.messages[0].steps);
+  assert.equal(current.messages.at(-1).text, 'Промежуточный текст');
+  // Финал уже лежал в ленте (совпадение по runId+assistantMessageId без pid):
+  // дополнение его тела не делает ответ новым и не взводит «не прочитано».
+  assert.equal(applied.unread, false);
+
+  const repeated = applyWebPending({ ...current, ...applied }, pending, projection, null);
+  const appended = applyWebPending(current, {
+    ...pending,
+    id: 'new-pending',
+    assistantMessageId: 'new-answer',
+  }, projection, null);
+
+  assert.equal(repeated.messages.at(-1).steps, steps);
+  assert.equal(repeated.unread, false);
+  assert.deepEqual(appended.messages.at(-1).steps, pending.steps);
+  // Финал, которого в ленте не было, — законная отметка непрочитанного.
+  assert.equal(appended.unread, true);
+});
+
+test('reconcile публикует свежую head и не заменяет сохранённые steps финала', async (t) => {
+  const fixture = await chatAppFixture(t);
+  const id = 'head-reuse';
+  const final = {
+    role: 'assistant',
+    text: 'Ранее сохранённый блок',
+    runId: 'head-run',
+    assistantMessageId: 'head-answer',
+    steps: [{ k: 'tool', text: 'Сохранённое тело' }],
+  };
+
+  await saveChat(fixture.app, id, { messages: [final] });
+  await putPending(fixture, {
+    id: 'head-pending',
+    chatKey: id,
+    runId: final.runId,
+    assistantMessageId: final.assistantMessageId,
+    reply: 'Полный текст',
+    steps: [{ k: 'tool', text: 'Сервер не заменяет это тело' }],
+  });
+
+  const result = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/chat/store/reconcile',
+    payload: { loadedIds: [], deliveryIds: [] },
+  });
+  const saved = (await fixture.app.inject(`/api/chat/store/chat/${id}`)).json().chat;
+  const event = fixture.events.findLast((entry) => entry.event === 'chat-store' && entry.data.head);
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(saved.messages[0].steps, final.steps);
+  assert.equal(saved.messages[0].text, 'Полный текст');
+  assert.notEqual(saved.unread, true, 'уже сохранённый финал не взводит непрочитанность');
+  assert.equal(event.data.head.id, id);
+  assert.equal(event.data.head.revision, saved.revision);
+  assert.deepEqual(event.data.head, result.json().heads[0]);
+  assert.equal(Object.hasOwn(event.data.head, 'messages'), false);
+});

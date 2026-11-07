@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "scopeTuple": {
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001"
+  },
+  "canonicalScope": "{\"provider\":\"codex\",\"threadId\":\"00000000-0000-4000-8000-000000000001\"}",
+  "scopeSha256": "b4fc684d237b4c6e9172371091e4cfb576b0f8f918314c19937c1d189aa8c345",
+  "initialRecordSha256": "cf70b6e8ded4b95260647beda7b42fa867e7e8169c4353aea25f8cdccffe8ef3",
+  "initializeRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "lineageGeneration": 0,
+    "runId": "run-parent",
+    "usageDocumentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "checkpointHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "runnerUsageRecordedEventHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "runnerScopeBoundEventHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "usageCompleteness": "complete",
+    "resumeEligible": true
+  },
+  "reserveRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "expectedStateRevision": 1,
+    "lineageGeneration": 1,
+    "predecessorRunId": "run-parent",
+    "predecessorUsageDocumentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "predecessorCheckpointHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reservationId": "lr_11111111111111111111111111111111",
+    "childRunId": "run-child"
+  },
+  "startedRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "expectedStateRevision": 2,
+    "reservationId": "lr_11111111111111111111111111111111",
+    "childRunId": "run-child",
+    "runnerStartedEventHash": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "advanceRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "expectedStateRevision": 3,
+    "reservationId": "lr_11111111111111111111111111111111",
+    "childRunId": "run-child",
+    "usageDocumentHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "checkpointHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "runnerUsageRecordedEventHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "runnerScopeBoundEventHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "usageCompleteness": "complete",
+    "resumeEligible": true
+  },
+  "cancelRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "expectedStateRevision": 2,
+    "reservationId": "lr_11111111111111111111111111111111",
+    "childRunId": "run-child",
+    "cancellationProof": {
+      "neverReleased": true,
+      "processSessionQuiesced": true,
+      "neverReleasedEvidenceHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "quiescenceEvidenceHash": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  },
+  "blockRequest": {
+    "schemaVersion": 1,
+    "protocolVersion": 2,
+    "provider": "codex",
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "expectedStateRevision": 3,
+    "reservationId": "lr_11111111111111111111111111111111",
+    "childRunId": "run-child",
+    "blockProof": {
+      "reasonCode": "missing_complete_usage",
+      "evidenceHash": "6666666666666666666666666666666666666666666666666666666666666666"
+    }
+  }
+}

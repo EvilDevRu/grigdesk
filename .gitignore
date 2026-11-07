@@ -1,20 +1,94 @@
 node_modules/
 web/dist/
+mobile/dist/
+desktop/dist/
+desktop/.dist-staging-*/
+desktop/release/
+relay/*.env
+mobile/android/**/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/**/*.apk
+mobile/android/**/*.jks
+mobile/android/**/*.keystore
 # Краткоживущие rollback-копии update-worker-а. Они удаляются только после того,
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
-web/dist.cockpit-backup-*/
-server/node_modules.cockpit-backup-*/
+web/dist.grigdesk-backup-*/
+server/node_modules.grigdesk-backup-*/
+server/runtime/deepseek/
+# Пакет DeepSeek владеет snapshot по commit из upstream.lock.json; в Git — manifest и патчи.
+/deepseek/vendor/deepseek-harness/upstream/
+/deepseek/vendor/.deepseek-*/
+/deepseek/vendor/deepseek-harness.sync-lock/
+# Кэш пребандла dev-сервера vite. Локальные стенды предпросмотра поднимают его с root в корне
+# репозитория, где нет package.json, — тогда vite кладёт кэш не в web/node_modules/.vite, а сюда.
+.vite/
 *.log
 .env
 .env.local
 .DS_Store
 .state/
 **/.state/
+# После переноса это ссылка: шаблон каталога её не скрывает.
+/server/.state
 __pycache__/
 BUGS.md
 
-# Local project profiles can contain machine-specific paths, credentials and runtimes.
-/profiles/
+# Пользовательские плагины — тоже локальные для машины (адреса, токены, чужие сервисы);
+# в репозитории остаётся только описание контракта.
+/plugins/*
+!/plugins/README.md
 
 # Локальные планы реализации — рабочие заметки, а не документация проекта.
 /docs/plans/
+
+# Карты снятой базы знаний: её записи перенесены в папки областей docs/grigdesk/<область>/,
+# а верхний уровень docs/grigdesk/ держит только папки. Правило уйдёт вместе со старыми картами.
+/docs/grigdesk/*.md
+
+# Опыт этой машины: рабочие проекты, номера задач и прочее, чему не место в публичном
+# репозитории. Устроен как docs/grigdesk/ — папки областей с README-оглавлениями.
+/docs/local/
+
+# Локальная точка входа Claude Code: ведёт в docs/local/. В свежем клоне её нет.
+/CLAUDE.local.md
+
+# Изолированный renderer Markdown генерируется перед dev/build.
+web/.generated/markdown/
+
+# Готовый посредник и проверяемый кэш сборки SEA.
+/bin/grigdesk-relay
+/bin/grigdesk-relay.sha256
+/bin/.grigdesk-relay-*.tmp
+/relay/.cache/
+
+# Готовый tracker и проверяемый кэш его сборки SEA.
+/bin/tracker
+/bin/.tracker-*.tmp
+/tracker/.cache/
+
+# Готовый DeepSeek и отдельные зависимости и кэш его SEA-сборки.
+/bin/deepseek
+/bin/deepseek.grigdesk-deepseek.json
+/bin/deepseek.install-lock/
+/bin/.deepseek-install-*/
+/bin/.deepseek-*.tmp
+/deepseek/node_modules/
+/deepseek/.cache/
+
+# Установленный серверный ELF, private receipt и собственный install staging.
+/bin/grigdesk-server
+/bin/grigdesk-server.grigdesk-server.json
+/bin/grigdesk-server.install-lock/
+/bin/.grigdesk-server-install-*/
+
+# Установленное окно: AppImage из desktop/release под именем программы.
+/bin/grigdesk-app
+/bin/.grigdesk-app.*
+
+# Встроенный общий интерфейс готовит tools/client-ui.mts.
+mobile/android/client/src/main/assets/ui/
+
+# Обычная готовая поставка и отдельный staging её CI-сборки.
+/release-artifacts/
+/.installed-release-*/

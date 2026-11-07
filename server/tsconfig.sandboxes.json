@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "src/lib/sandboxes/**/*.ts",
+    "src/modules/sandboxes/**/*.ts",
+    "../shared/plugins/sandboxes/sandboxContracts.ts",
+    "../tests/types/sandbox-server-contract.test.mts"
+  ]
+}

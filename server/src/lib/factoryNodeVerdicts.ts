@@ -1,0 +1,228 @@
+// Что узел СКАЗАЛ, закрывая свой заход.
+//
+// Движок кладёт в провайдерскую проекцию `t<TASK>.pipeline` только однострочный дайджест
+// `<КЛЮЧ>_COMMENT` (300 символов), а сам вердикт — класс владельца провала и список
+// типизированных находок с якорями на файлы — остаётся в журнале попытки. GrigDesk его не
+// читал вовсе, поэтому модалка узла показывала одну обрезанную строку, а вопрос, ради
+// которого маршрут встал на человеке, человеку не показывался нигде: он доставался
+// только чтением `stage-results/` руками.
+//
+// Отсюда роль модуля: достать последний вердикт КАЖДОГО узла попытки и отдать его в
+// `nodeMeta`. Текст в находках пишет агент, то есть это недоверенные данные: они
+// ограничиваются по числу и длине здесь, а рисуются только интерполяцией.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+const EVENT_RE = /^event\.(\d{20})\.[0-9a-f]{64}\.json$/;
+const NODE_RE = /^[a-z0-9][a-z0-9_]{0,40}$/;
+const CONTROL_RE = /[\u0000-\u001f\u007f]/g;
+
+// Потолки. Находок у одного узла бывает пять-шесть, двадцать — заведомо аномалия;
+// длина взята с запасом к живым summary (около 300 символов) и режет, а не отбрасывает:
+// обрезанное замечание всё ещё полезно, потерянное — нет.
+const MAX_FINDINGS = 20;
+const SUMMARY_LIMIT = 900;
+const REF_LIMIT = 200;
+const MAX_REVIEWED = 20;
+// Защита от попытки с аномально длинным журналом: читаем только хвост. Вердикт узла,
+// вытесненный из хвоста, означает заход, после которого прошло больше четырёхсот
+// событий, — такой узел давно переигран.
+const MAX_EVENTS = 400;
+
+const SEVERITIES = new Set(['blocking', 'deferred']);
+
+// Одна находка узла: якорь на место в коде и однострочная формулировка агента.
+export interface VerdictFinding {
+  id: string | null;
+  anchor: string | null;
+  severity: string;
+  summary: string;
+}
+
+// Нормализованный вердикт: кто владелец провала, что нашли и что успели посмотреть.
+export interface NodeVerdict {
+  owner: string | null;
+  findings: VerdictFinding[];
+  reviewed: string[];
+  omitted: number;
+}
+
+// Вердикт узла в контексте события журнала: чем заход кончился и когда.
+export interface NodeVerdictEntry extends NodeVerdict {
+  outcome: string | null;
+  stop: string | null;
+  rewind: string | null;
+  at: string | null;
+  sequence: number | null;
+}
+
+// Карта «узел → его последний вердикт».
+export type NodeVerdicts = Record<string, NodeVerdictEntry | undefined>;
+
+/**
+ * Приводит недоверенную строку агента к безопасному однострочному виду.
+ *
+ * Управляющие символы уезжают в браузер и в подсказки, поэтому схлопываются в пробел;
+ * перевод строки тоже, потому что находка — это одна формулировка, а не абзац.
+ */
+function text(value: unknown, limit: number): string | null {
+  if (typeof value !== 'string') return null;
+  const flat = value.replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim();
+  if (!flat) return null;
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+}
+
+/**
+ * Нормализует один вердикт события журнала.
+ *
+ * Возвращает null, когда вердикта нет вовсе либо в нём не осталось ничего показываемого:
+ * пустая карточка на узле хуже её отсутствия — она обещает содержание, которого нет.
+ */
+function normalizeVerdict(verdict: unknown): NodeVerdict | null {
+  if (!verdict || typeof verdict !== 'object') return null;
+
+  const source = verdict as { owner?: unknown; findings?: unknown; reviewed?: unknown };
+  const owner = text(source.owner, 40);
+  const findings = Array.isArray(source.findings) ? source.findings : [];
+  const reviewed = Array.isArray(source.reviewed) ? source.reviewed : [];
+
+  const items: VerdictFinding[] = [];
+  for (const entry of findings.slice(0, MAX_FINDINGS)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const raw = entry as { id?: unknown; anchor?: unknown; severity?: unknown; summary?: unknown };
+    const summary = text(raw.summary, SUMMARY_LIMIT);
+    if (!summary) continue;
+    const severity = SEVERITIES.has(String(raw.severity)) ? String(raw.severity) : 'blocking';
+    items.push({
+      id: text(raw.id, REF_LIMIT),
+      anchor: text(raw.anchor, REF_LIMIT),
+      severity,
+      summary,
+    });
+  }
+
+  const files = reviewed
+    .slice(0, MAX_REVIEWED)
+    .map((entry) => text(entry, REF_LIMIT))
+    .filter((entry): entry is string => Boolean(entry));
+
+  if (!owner && !items.length && !files.length) return null;
+  return {
+    owner,
+    findings: items,
+    reviewed: files,
+    omitted: Math.max(0, findings.length - MAX_FINDINGS),
+  };
+}
+
+/**
+ * Последний вердикт каждого узла закреплённой попытки.
+ *
+ * События идут возрастающей последовательностью, поэтому поздний вердикт узла
+ * перезаписывает ранний: показывать надо то, чем узел кончил, а не чем начинал.
+ * Ошибка чтения журнала возвращает пустую карту — вердикт это дополнение к карточке
+ * узла, и его отсутствие не имеет права ронять граф.
+ */
+export async function readNodeVerdicts(
+  { controlDir, task, attempt }: { controlDir?: string; task: string | number; attempt?: string },
+): Promise<NodeVerdicts> {
+  if (!controlDir || !path.isAbsolute(controlDir) || !attempt) return {};
+  const dir = path.join(
+    controlDir, 'protocol-v2', 'tasks', `t${String(task)}`, 'attempts', attempt, 'stage-results',
+  );
+
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return {};
+  }
+
+  const ordered = names
+    .map((name) => ({ match: EVENT_RE.exec(name), name }))
+    .filter((entry): entry is { match: RegExpExecArray; name: string } => Boolean(entry.match))
+    .sort((a, b) => Number(a.match[1]) - Number(b.match[1]))
+    .slice(-MAX_EVENTS)
+    .map((entry) => entry.name);
+
+  const byNode: NodeVerdicts = {};
+  for (const name of ordered) {
+    let event: {
+      node?: unknown;
+      verdict?: unknown;
+      outcome?: unknown;
+      action?: { stop?: unknown; rewind?: unknown };
+      at?: unknown;
+      sequence?: unknown;
+    };
+    try {
+      event = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
+    } catch {
+      continue;
+    }
+    const node = typeof event.node === 'string' && NODE_RE.test(event.node) ? event.node : null;
+    if (!node) continue;
+    const verdict = normalizeVerdict(event.verdict);
+    if (!verdict) continue;
+    byNode[node] = {
+      ...verdict,
+      outcome: text(event.outcome, 40),
+      // Чем кончилось событие с этим вердиктом: обычный переход, возврат или остановка.
+      // По нему модалка отличает «узел вернул решение человеку» от рядового замечания.
+      stop: text(event.action?.stop, 40),
+      rewind: text(event.action?.rewind, REF_LIMIT),
+      at: text(event.at, 40),
+      // Порядковый номер события. По нему потребитель находит узел, НА КОТОРОМ маршрут
+      // встал: узлов с непустым `stop` в журнале может остаться несколько, если прежнюю
+      // остановку сняли возвратом на соседний узел.
+      sequence: typeof event.sequence === 'number' && Number.isInteger(event.sequence)
+        ? event.sequence
+        : null,
+    };
+  }
+  return byNode;
+}
+
+/**
+ * Узел и класс владельца ТЕКУЩЕЙ остановки.
+ *
+ * Узлов с непустым `stop` в журнале может остаться несколько: прежнюю остановку могли
+ * снять возвратом на соседний узел, а её событие осталось в immutable-журнале. Побеждает
+ * событие с наибольшим номером — то есть последнее по времени.
+ */
+export function stopVerdictOf(
+  verdicts: NodeVerdicts | null | undefined,
+  stop: string | null | undefined,
+): (NodeVerdictEntry & { node: string }) | null {
+  if (!stop) return null;
+  const entry = Object.entries(verdicts || {})
+    .filter((pair): pair is [string, NodeVerdictEntry] => Boolean(pair[1]) && pair[1]?.stop === stop)
+    .sort((a, b) => (b[1].sequence ?? -1) - (a[1].sequence ?? -1))[0];
+  return entry ? { node: entry[0], ...entry[1] } : null;
+}
+
+/**
+ * Bootstrap остаётся отдельным источником, даже если основной узел тоже зовётся scout.
+ * Sequence основного журнала не назначается вопросу отдельной разведки.
+ */
+export function bootstrapNodeVerdict(stop: {
+  verdict: unknown;
+  outcome: string;
+  at: string;
+} | null | undefined): (NodeVerdictEntry & { phase: 'bootstrap' }) | null {
+  if (!stop) {
+    return null;
+  }
+
+  const verdict = normalizeVerdict(stop.verdict);
+
+  return verdict ? {
+    ...verdict,
+    phase: 'bootstrap',
+    outcome: stop.outcome,
+    stop: 'human',
+    rewind: null,
+    at: stop.at,
+    sequence: null,
+  } : null;
+}

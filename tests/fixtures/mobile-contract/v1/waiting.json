@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "pid": "permission-alpha",
+      "chatId": "chat-beta",
+      "kind": "permission",
+      "tool": "ExitPlanMode",
+      "summary": "Подтвердить план",
+      "details": "Полный синтетический план",
+      "acceptsComment": true,
+      "canRemember": false,
+      "contentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hasMore": false,
+      "nextOffset": null,
+      "actionToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "pid": "typed-alpha",
+      "chatId": "chat-alpha",
+      "kind": "question",
+      "prompt": "Уточни параметры",
+      "structured": true,
+      "actions": [
+        "accept",
+        "cancel"
+      ],
+      "questions": [
+        {
+          "id": "count",
+          "header": "Количество",
+          "question": "Сколько попыток?",
+          "multiSelect": false,
+          "allowFreeText": true,
+          "inputType": "integer",
+          "required": true,
+          "options": [],
+          "constraints": {
+            "minimum": 1,
+            "maximum": 3
+          }
+        },
+        {
+          "id": "enabled",
+          "header": "Включение",
+          "question": "Включить?",
+          "multiSelect": false,
+          "allowFreeText": false,
+          "inputType": "boolean",
+          "required": false,
+          "options": [],
+          "constraints": {}
+        }
+      ],
+      "actionToken": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "hasMore": false,
+  "nextCursor": null
+}

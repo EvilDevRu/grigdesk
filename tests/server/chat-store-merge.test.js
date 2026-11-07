@@ -6,13 +6,13 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
-import { mergeMessages, mergeChat } from '../../server/src/lib/chat/merge-chat.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { mergeMessages, mergeChat } from '../../server/src/lib/chat/mergeChat.ts';
 
 const msg = (role, text) => ({ role, text });
 
 async function freshStore(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-merge-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-merge-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
 }
@@ -82,10 +82,37 @@ test('обычное дополнение ленты идёт как есть', 
 
 test('очистка чата человеком уважается', async (t) => {
   const store = await freshStore(t);
-  await store.saveOne(baseChat(), false);
-  await store.saveOne(baseChat({ messages: [], updatedAt: Date.UTC(2026, 7, 1, 3) }), false);
+  const current = await store.saveOne(baseChat(), false);
+  // Явная очистка является CAS-операцией: только окно с текущей revision вправе
+  // отличить намеренное действие от пустого stale-снимка до первого ответа.
+  await store.saveOne({
+    ...current.chat,
+    messages: [],
+    updatedAt: Date.UTC(2026, 7, 1, 3),
+  }, false);
   const state = await store.read();
   assert.deepEqual(state.sessions[0].messages, []);
+});
+
+test('пустая stale-копия не очищает сообщения другого окна', async (t) => {
+  const store = await freshStore(t);
+  const empty = await store.saveOne(baseChat({ messages: [] }), false);
+  const filled = await store.saveOne({
+    ...empty.chat,
+    messages: [msg('user', 'Вопрос'), msg('assistant', 'Ответ')],
+    sessionId: 'live-session',
+    contextTokens: 42_000,
+    updatedAt: Date.UTC(2026, 7, 1, 3),
+  }, false);
+  assert.equal(filled.chat.messages.length, 2);
+
+  const stale = await store.saveOne(empty.chat, false);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.restored, 2);
+  const persisted = await store.readOne(empty.chat.id);
+  assert.deepEqual(persisted.messages.map((message) => message.text), ['Вопрос', 'Ответ']);
+  assert.equal(persisted.sessionId, 'live-session');
+  assert.equal(persisted.contextTokens, 42_000);
 });
 
 test('одновременные сохранения двух окон не теряют ни одного хвоста', async (t) => {
@@ -112,11 +139,13 @@ test('состояние агента не откатывается копией
   const disk = baseChat({
     sessionId: 'новая-сессия', contextTokens: 90_000, contextWindow: 258_400,
     contextMetric: 'active-input-v1', totalInputTokens: 2_000_000, cachedInputTokens: 1_800_000,
+    contextCache: { scope: 'request', status: 'reported', readTokens: 80_000, uncachedTokens: 10_000 },
     updatedAt: Date.UTC(2026, 7, 1, 6),
   });
   const stale = baseChat({
     sessionId: 'старая-сессия', contextTokens: 12_000, contextWindow: 400_000,
     contextMetric: 'legacy-unavailable', totalInputTokens: 12_000, cachedInputTokens: 0,
+    contextCache: { scope: 'request', status: 'unavailable' },
     updatedAt: Date.UTC(2026, 7, 1, 2),
   });
 
@@ -127,6 +156,9 @@ test('состояние агента не откатывается копией
   assert.equal(chat.contextMetric, 'active-input-v1');
   assert.equal(chat.totalInputTokens, 2_000_000);
   assert.equal(chat.cachedInputTokens, 1_800_000);
+  assert.deepEqual(chat.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 80_000, uncachedTokens: 10_000,
+  });
   assert.equal(chat.updatedAt, Date.UTC(2026, 7, 1, 6));
 });
 
@@ -217,4 +249,39 @@ test('повторы одного текста не схлопываются', (
   );
   assert.deepEqual(messages.map((m) => `${m.role}:${m.text}`),
     ['user:Делай', 'assistant:Готово', 'user:Делай']);
+});
+
+test('подтверждение приёма хода не откатывается отставшей серверной копией', () => {
+  // На диске ответ уже есть (его записало другое окно), а реплика ещё с отметкой
+  // «приём не подтверждён». Окно, получившее подтверждение, присылает её без отметки,
+  // но без ответа — сервер оставляет свою копию начала ленты и раньше возвращал отметку.
+  const question = {
+    role: 'user',
+    text: 'Собери отчёт',
+    turnId: 'turn-merge-0001',
+  };
+  const disk = [
+    {
+      ...question,
+      delivery: 'sending',
+      outbox: { seed: 'x' },
+    },
+    {
+      role: 'assistant',
+      text: 'Готово',
+      pid: 'turn-merge-0001',
+    },
+  ];
+  const confirmed = [{ ...question }];
+
+  const { messages } = mergeMessages(disk, confirmed);
+
+  assert.deepEqual(messages.map((m) => `${m.role}:${m.text}`), ['user:Собери отчёт', 'assistant:Готово']);
+  assert.equal(messages[0].delivery, undefined, 'снятая отметка доставки не возвращается');
+  assert.equal(messages[0].outbox, undefined);
+  assert.equal(disk[0].delivery, 'sending', 'серверная копия не мутируется на месте');
+
+  const stillSending = mergeMessages(disk, [{ ...disk[0] }]);
+
+  assert.equal(stillSending.messages[0].delivery, 'sending', 'без подтверждения отметка остаётся');
 });

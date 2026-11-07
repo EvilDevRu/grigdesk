@@ -7,10 +7,10 @@ import test from 'node:test';
 import {
   normalizeFavoriteTaskId,
   TaskFavoritesStore,
-} from '../../server/src/lib/task-favorites-store.js';
+} from '../../server/src/lib/taskFavoritesStore.ts';
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-favorites-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-favorites-'));
   const filePath = path.join(root, 'task-favorites.json');
   t.after(() => rm(root, { recursive: true, force: true }));
   return { filePath, store: new TaskFavoritesStore({ filePath }) };

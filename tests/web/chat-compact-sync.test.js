@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { reconcileWith } from './helpers/chat-protocol.js';
+
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 
 // Второе устройство: история уже загружена, своих запросов нет — только SSE и сверки.
@@ -86,6 +88,13 @@ test('WEB-05: своё незакрытое сжатие сверка не ра�
   sseOf(chat)('chat-done', { chatKey: 'c1' });
   assert.equal(sess.compacting, true);
 
+  // Запрос сжатия уходит после записи чата через его очередь — ждём сам запрос,
+  // а не угадываем число микрозадач до него.
+  while (!release) {
+    await new Promise(setImmediate);
+  }
+
+  assert.equal(sess.compacting, true, 'и пока летит сам запрос сжатия');
   release({ compact: { kind: 'native' } });
   await running;
   assert.equal(sess.compacting, false, 'разморозил собственный ответ');
@@ -101,4 +110,90 @@ test('WEB-06: прерванное сжатие не выдаёт себя за 
   assert.equal(sess.compactedAt, undefined);
   assert.equal(sess.compacting, false);
   assert.match(sess.messages.at(-1).text, /прервано/);
+});
+
+// ── Итог сжатия и следующий ход, доехавшие через pending ──────────────────────
+// Окно перезагрузили посреди сжатия или посреди первого хода после него. Сервер
+// помнит весь текст запроса вместе с блоком выжимки, а итог сжатия кладёт в pending
+// как обычный ответ: ни то ни другое в переписке показываться не должно.
+
+const SEED = 'Задача: собрать ролик. Сделано: этапы 0–9. Осталось: живая приёмка.';
+const SEEDED = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${SEED}\n[/Выжимка]\n\n`;
+
+test('WEB-07: вопрос из pending восстанавливается без блока выжимки', async () => {
+  const chat = await fixture();
+  const sess = chat.sessions[0];
+  sess.sessionId = null;
+  // Человек отправил только скриншот: в истории его сообщение с пустым текстом.
+  sess.messages.push({ role: 'user', text: '', sentAt: 10, attachments: [{ name: 'image.png' }] });
+  apiHarness.get = async (url) => (url === '/api/chat/pending'
+    ? {
+      pending: [{
+        id: 'o1', chatKey: 'c1', role: 'assistant', reply: 'Продолжаю приёмку.',
+        userText: SEEDED, userSentAt: 10, sessionId: 'sess-2', at: 20,
+      }],
+    }
+    : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
+
+  await chat._collectPending();
+
+  assert.deepEqual(sess.messages.map((m) => m.role), ['user', 'assistant'],
+    'выжимка не всплывает отдельным «сообщением пользователя»');
+  assert.equal(sess.messages.at(-1).text, 'Продолжаю приёмку.');
+  assert.equal(sess.sessionId, 'sess-2');
+});
+
+test('WEB-08: потерянный вместе с окном вопрос восстанавливается видимой частью', async () => {
+  const chat = await fixture();
+  const sess = chat.sessions[0];
+  apiHarness.get = async (url) => (url === '/api/chat/pending'
+    ? {
+      pending: [{
+        id: 'o2', chatKey: 'c1', role: 'assistant', reply: 'Готово.',
+        userText: `${SEEDED}посмотри скриншот`, userSentAt: 30, at: 40,
+      }],
+    }
+    : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
+
+  await chat._collectPending();
+
+  assert.deepEqual(sess.messages.map((m) => [m.role, m.text]), [
+    ['user', 'посмотри скриншот'],
+    ['assistant', 'Готово.'],
+  ]);
+});
+
+test('WEB-09: итог сжатия из pending засевает новую сессию, а не ложится ответом агента', async () => {
+  const chat = await fixture();
+  const sess = chat.sessions[0];
+  sess.compacting = true;
+  const deleted = [];
+  apiHarness.get = async (url) => (url === '/api/chat/pending'
+    ? {
+      pending: [{
+        id: 'o3', chatKey: 'c1', role: 'assistant', reply: '🗜 Контекст сжат.',
+        compact: { kind: 'summary', seed: SEED }, sessionId: null, contextTokens: 0, at: 50,
+      }],
+    }
+    : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
+  apiHarness.del = async (url) => { deleted.push(url); return {}; };
+
+  await chat._collectPending();
+
+  assert.equal(sess.pendingSeed, SEED, 'выжимка ждёт следующего сообщения');
+  assert.equal(sess.sessionId, null, 'старая сессия забыта — следующий ход начнёт новую');
+  assert.equal(sess.contextTokens, 0);
+  assert.equal(sess.compacting, false);
+  assert.deepEqual(sess.messages.map((m) => [m.role, m.pid]), [['note', 'o3']]);
+  assert.match(sess.messages[0].text, /было 120\D000 токенов/);
+  assert.deepEqual(deleted, ['/api/chat/pending/o3']);
+
+  // Повторная сверка до подтверждения DELETE не засевает дважды и не дублирует плашку.
+  sess.pendingSeed = '';
+  await chat._collectPending();
+  assert.equal(sess.pendingSeed, '');
+  assert.equal(sess.messages.length, 1);
 });

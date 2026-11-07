@@ -13,15 +13,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import {
-  hashRoutesBytes,
-  RoutesStore,
-} from '../../server/src/modules/routes/store.js';
+import { sha256 } from '../../shared/node/hash.ts';
+
+import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import {
   validatePromptFiles,
   validateRoute,
-} from '../../server/src/modules/routes/schema.js';
-import { acquireKernelFileLock } from '../../server/src/lib/kernel-lock.js';
+} from '../../server/src/modules/routes/schema.ts';
+import { acquireKernelFileLock } from '../../server/src/lib/kernelLock.ts';
 
 const PROFILE = 'demo-profile';
 
@@ -245,7 +244,7 @@ function catalogDocument(routeHash) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const baseDir = path.join(root, 'routes');
   return {
@@ -291,7 +290,7 @@ test('ROUTES-V2-01: route bundle публикуется целиком и пов
     first.routeHash,
   );
   const manifestBytes = await readFile(path.join(revisionDir, 'manifest.json'));
-  assert.equal(hashRoutesBytes(manifestBytes), first.routeHash);
+  assert.equal(sha256(manifestBytes), first.routeHash);
   const manifest = JSON.parse(manifestBytes);
   assert.deepEqual(
     manifest.files.map((entry) => entry.path),
@@ -722,7 +721,7 @@ test('ROUTES-V2-14: kernel lock переживает конкуренцию и �
 });
 
 test('ROUTES-V2-15: symlink в корне store не перенаправляет публикацию', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-root-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-root-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const outside = path.join(root, 'outside');
   const baseDir = path.join(root, 'routes-link');

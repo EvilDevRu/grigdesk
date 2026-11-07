@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Все проверки профиля в одном месте: factory-check [профиль ...] [--quick] [--host-preflight]
-#   --quick — изолированный временный state, без запуска Cockpit и без запросов к моделям.
+#   --quick — изолированный временный state, без запуска GrigDesk и без запросов к моделям.
 #   --host-preflight — metadata-only проверка CLI/каталогов; требует RUN_HOST_PREFLIGHT=1.
 # Ноль на выходе = профиль готов вести задачи — либо честно заявил, что не ведёт их
 # вовсе (`"launchable": false` в graph.json: проверки запуска для него пропускаются).
@@ -68,7 +68,7 @@ for prof in "${PROFILES[@]}"; do
   graph_json="$FACTORY_PROFILES_DIR/${prof}/graph.json"
 
   # Профиль, который задач не ведёт вообще (только triage-конфигурация и allow-list для
-  # чата кокпита), заявляет это полем "launchable": false. Без него проверка требовала
+  # чата GrigDesk), заявляет это полем "launchable": false. Без него проверка требовала
   # route-контракт от КАЖДОГО каталога в profiles/ и держала общий код возврата на
   # единице вечно: «ЕСТЬ ПРОБЛЕМЫ» перестало что-либо значить, потому что не отличало
   # сломанный конвейер от профиля, у которого конвейера нет по замыслу, — а проверку,
@@ -113,7 +113,7 @@ raise SystemExit(0 if isinstance(caps, list) and "route-v2" in caps else 1)
 PY
   then
     route_miss=$(bash -c "
-      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' || { echo 'project.json: профиль не загружен'; exit 1; }
       for f in profile_workspace_mode profile_repositories profile_project_context \
         profile_source_branch profile_container profile_stand_alive; do
         declare -F \$f >/dev/null || echo \"нет route-хука \$f\"
@@ -127,8 +127,8 @@ PY
           declare -F \$f >/dev/null || echo \"нет shared-хука \$f\"
         done
         # Ветка закреплена НА РЕПОЗИТОРИЙ — сверяем фактический HEAD каждого checkout.
-        # Без этой проверки расхождение всплывало только отказом 78 на первом же
-        # действии движка, включая приёмку уже сделанной работы (задача 90002).
+        # Без этой проверки расхождение всплывает только отказом 78 на первом же
+        # действии движка, включая приёмку уже сделанной работы.
         # TASK здесь пуст: у shared-профиля workspace совпадает с source checkout
         # человека и от номера задачи не зависит по построению.
         while IFS=\$'\t' read -r rname rsource rwt; do
@@ -171,9 +171,9 @@ PY
 
     # Форма имени хоста стенда. Схему и порт подставляет движок, поэтому «http://host»
     # или «host:5192» в значении дают неоткрываемый адрес, а узнаётся это только когда
-    # браузерный агент уже стоит перед мёртвой страницей (инцидент t8165).
+    # браузерный агент уже стоит перед мёртвой страницей.
     host_bad=$(bash -c "
-      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' || { echo 'project.json: профиль не загружен'; exit 1; }
       host=\${PROFILE_SERVICE_HOST:-127.0.0.1}
       [[ \"\$host\" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,61}[A-Za-z0-9])?\$ ]] ||
         echo \"«\$host» — нужно голое имя хоста или адрес, без схемы, порта и слэшей\"

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCodexExecArgs } from '../../server/src/lib/executors/codex.js';
+import { buildCodexExecArgs } from '../../server/src/lib/executors/codex.ts';
 
 test('Codex first message keeps execution policy on exec', () => {
   assert.deepEqual(buildCodexExecArgs({
@@ -19,6 +19,8 @@ test('Codex first message keeps execution policy on exec', () => {
     '-C', '/work',
     '-m', 'gpt-test',
     '-c', 'model_reasoning_effort="high"',
+    // Развёрнутое резюме размышления: с дефолтом в ленту приезжал огрызок фразы.
+    '-c', 'model_reasoning_summary="detailed"',
     '--json',
     'first',
   ]);
@@ -45,6 +47,7 @@ test('Codex second message puts exec-only sandbox and cwd before resume', () => 
     '--add-dir', '/repos/frontend',
     '-m', 'gpt-test',
     '-c', 'model_reasoning_effort="high"',
+    '-c', 'model_reasoning_summary="detailed"',
     '-c', 'model_auto_compact_token_limit=200000',
     'resume',
     '--json',

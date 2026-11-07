@@ -1,0 +1,2 @@
+{"event":"agent_message_chunk","text":"PONG"}
+{"event":"result","stopReason":"end_turn"}

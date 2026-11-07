@@ -10,8 +10,8 @@ import {
   FactoryDebugSettings,
   FactoryDebugInputError,
   parseFactoryDebugView,
-} from '../../server/src/lib/factory-debug.js';
-import settingsModule from '../../server/src/modules/settings/index.js';
+} from '../../server/src/lib/factoryDebug.ts';
+import settingsModule from '../../server/src/modules/settings/index.ts';
 
 const requireFromServer = createRequire(
   new URL('../../server/package.json', import.meta.url),
@@ -80,19 +80,19 @@ test('factory debug adapter builds only allowlisted argv', async () => {
     },
   });
 
-  await adapter.set({ scope: 'profile', profile: 'arsenkin', level: 'errors' });
+  await adapter.set({ scope: 'profile', profile: 'project-alpha', level: 'errors' });
   await adapter.set({ scope: 'task', task: '8126', level: 'verbose', duration: '2h' });
-  await adapter.clear({ scope: 'profile', profile: 'arsenkin' });
+  await adapter.clear({ scope: 'profile', profile: 'project-alpha' });
 
   assert.deepEqual(calls, [
-    ['profile', 'arsenkin', 'debug', 'set', 'errors'],
+    ['profile', 'project-alpha', 'debug', 'set', 'errors'],
     ['8126', 'debug', 'set', 'verbose', '--for', '2h'],
-    ['profile', 'arsenkin', 'debug', 'clear'],
+    ['profile', 'project-alpha', 'debug', 'clear'],
   ]);
 });
 
 test('factory debug adapter conforms to the real engine CLI without model calls', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-factory-debug.'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-factory-debug.'));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
   const configRoot = path.join(root, 'config');
@@ -151,15 +151,15 @@ test('factory debug parser fails closed on malformed CLI output', () => {
 
 test('settings API exposes global debug level and maps invalid input to 400', async () => {
   const calls = [];
+  const broadcasts = [];
   const factoryDebug = {
     show: async (input) => { calls.push(['show', input]); return parseFactoryDebugView(SHOW); },
     set: async (input) => { calls.push(['set', input]); return parseFactoryDebugView(SHOW); },
     clear: async (input) => { calls.push(['clear', input]); return parseFactoryDebugView(SHOW); },
   };
   const app = Fastify({ logger: false });
+  app.decorate('sse', { broadcast: (name) => broadcasts.push(name) });
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs: { read: () => ({}), write: () => ({}) },
     factoryDebug,
   });
@@ -177,6 +177,7 @@ test('settings API exposes global debug level and maps invalid input to 400', as
   assert.deepEqual(calls.at(-1), ['set', {
     scope: 'global', profile: undefined, task: undefined, level: 'off', duration: undefined,
   }]);
+  assert.deepEqual(broadcasts, ['diagnostic-logging']);
 
   factoryDebug.set = async () => { throw new FactoryDebugInputError('bad level'); };
   const bad = await app.inject({
@@ -186,5 +187,6 @@ test('settings API exposes global debug level and maps invalid input to 400', as
   });
   assert.equal(bad.statusCode, 400);
   assert.equal(bad.json().error, 'bad_debug_setting');
+  assert.deepEqual(broadcasts, ['diagnostic-logging']);
   await app.close();
 });

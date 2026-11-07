@@ -11,8 +11,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
-import factoryModule from '../../server/src/modules/factory/index.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { routeLaunchEnv } from '../../server/src/lib/factoryRouteCli.ts';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -132,7 +133,7 @@ function routeRegistry(extra = {}) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-override-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runner-override-'));
   const stateDir = path.join(root, 'state');
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');
@@ -146,8 +147,8 @@ async function fixture(t) {
     mkdir(binDir, { recursive: true }),
     mkdir(runnersDir, { recursive: true }),
   ]);
-  // Установлены только claude и codex; kimi — валидное имя, но не установлен.
-  for (const name of ['claude.sh', 'codex.sh', 'index.sh']) {
+  // Kimi остаётся валидным, но не установленным именем; DeepSeek уже поставлен.
+  for (const name of ['claude.sh', 'codex.sh', 'deepseek.sh', 'index.sh']) {
     await writeFile(path.join(runnersDir, name), '# адаптер\n');
   }
 
@@ -198,12 +199,13 @@ async function fixture(t) {
   adapter.getTaskGraph = async () => graph;
 
   const app = Fastify({ logger: false });
+
   await app.register(factoryModule, {
     factoryState: adapter,
     config,
     prefs: { read: () => ({}) },
-    b24: null,
-    analyzer: { readClarifications: async () => null },
+    tracker: null,
+    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();
   t.after(async () => {
@@ -335,6 +337,26 @@ test('валидный override пишется через runner set движк�
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().ok, true);
   assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD codex$/m);
+});
+
+test('DeepSeek доступен для override, а его точный binary pin доезжает в Factory env', async (t) => {
+  const { app, callsLog } = await fixture(t);
+  const response = await app.inject({
+    method: 'POST', url: '/api/tasks/8/runner/override',
+    payload: { stage: 'BUILD', primary: 'deepseek' },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD deepseek$/m);
+
+  const bin = '/opt/grigdesk/deepseek/install/current/node_modules/.bin/dsh';
+  const env = routeLaunchEnv({
+    rootDir: '/opt/grigdesk', factoryHome: '/opt/grigdesk/engine',
+    profilesDir: '/opt/grigdesk/profiles', factoryConfigRoot: '/tmp/factory-config',
+    routesDir: '/opt/grigdesk/routes', stateDir: '/tmp/factory-state',
+    factoryControlDir: '/tmp/factory-control', factoryBin: '/opt/grigdesk/engine/bin/factory',
+    deepseekBinOverride: bin,
+  });
+  assert.equal(env.GRIGDESK_DEEPSEEK_BIN, bin);
 });
 
 test('пустой primary снимает override через runner clear, идемпотентно', async (t) => {

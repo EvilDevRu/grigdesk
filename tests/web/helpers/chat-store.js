@@ -1,96 +1,244 @@
-// Общая обвязка для офлайн-тестов стора чатов.
-//
-// Стор тянет роутер, соседние сторы, уведомления и общий EventSource — подменяем их
-// заглушками прямо в исходнике (тот же приём, что в task-favorites-store). DOM не
-// поднимаем: vue сам обходится без него, а самодельный `document` ломает runtime-dom
-// на импорте, поэтому пути, которым он нужен (`_visible`), тесты не трогают.
-import { readFile } from 'node:fs/promises';
+// Офлайн-фикстура компилирует настоящий граф стора через общий resolver.
+// Сеть, навигация и каналы подменены, чистые зависимости загружаются из исходников.
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
+import { loadProductModule } from './compile-vue.js';
+import { protocolHead, protocolReconcile } from './chat-protocol.js';
+import { createChatVisibilityRegistry } from '../../../web/src/shared/chatVisibility.ts';
+
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
-const PINIA_URL = pathToFileURL(PINIA_PATH).href;
+const LOCALE_PATH = fileURLToPath(new URL('../../../web/src/services/locale.ts', import.meta.url));
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
+/** @type {{
+ * get(url: string, options?: object): Promise<unknown>;
+ * post(url: string, body?: object): Promise<unknown>;
+ * put(url: string, body?: object): Promise<unknown>;
+ * patch(url: string, body?: object): Promise<unknown>;
+ * del(url: string): Promise<unknown>;
+ * }} */
 export const apiHarness = {};
 globalThis.__chatApi = apiHarness;
 globalThis.__chatNotifications = [];
+globalThis.__chatDismissed = [];
+globalThis.__chatVisibility = {
+  ids: new Set(),
+  isVisible(id) { return this.ids.has(id); },
+  register() { return { update() {}, dispose() {} }; },
+};
+globalThis.__chatUiContext = {
+  capture: () => ({ routingScope: null, promptContext: { page: '', path: '/chats' } }),
+};
 
-let patchedSource;
-let instance = 0;
+/** Реестр исполнителей по умолчанию: любая запрошенная модель существует, уровней нет. */
+function defaultProviders() {
+  return {
+    ensureModel: async () => {},
+    modelOf(value) {
+      const id = typeof value === 'object' && value ? value.model : (value || 'test-model');
+      const provider = typeof value === 'object' && value?.provider ? value.provider : 'test-provider';
+      return { id, model: { id }, provider: { id: provider } };
+    },
+  };
+}
+globalThis.__chatProviders = defaultProviders();
 
-function patch(source) {
-  return source
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__chatApi;')
-    .replace(
-      "import { router } from '../router.js';",
-      "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
-      + ' const document = { hidden: false };',
-    )
-    .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({ extra: {} });')
-    .replace(
-      "import { useProvidersStore } from './providers.js';",
-      'const useProvidersStore = () => ({ modelOf: (value) => {'
-      + ' const id = typeof value === "object" ? value.model : (value || "test-model");'
-      + ' const provider = typeof value === "object" && value.provider ? value.provider : "test-provider";'
-      + ' return { id, model: { id }, provider: { id: provider } }; } });',
-    )
-    .replace(
-      "import { notify } from '../shared/notify.js';",
-      'const notify = (...args) => globalThis.__chatNotifications.push(args);',
-    )
-    .replace(
-      "import { sseSubscribe } from '../composables/useSse.js';",
-      'const sseSubscribe = (fn) => { globalThis.__chatSse = fn; return () => {}; };',
-    )
-    .replace("import { mdToText } from '../shared/md.js';", 'const mdToText = (x) => x;')
-    .replace(
-      /import \{[^}]*\} from '\.\.\/shared\/chat-title\.js';/,
-      'const applyGeneratedChatTitle = (s) => s, firstMessageTitle = () => "",'
-      + ' provisionalChatTitle = () => "", shouldRequestChatTitle = () => false;',
-    );
+/**
+ * Подменяет каталог для теста уровней усилия, пропавшей модели или живого store.
+ * Статические подмены не загружают каталог; настоящий store сохраняет свой барьер.
+ */
+export function setChatProviders(providers) {
+  globalThis.__chatProviders = providers || defaultProviders();
+
+  if (!globalThis.__chatProviders.ensureModel) {
+    globalThis.__chatProviders.ensureModel = async () => {};
+  }
 }
 
 /**
- * Свежий экземпляр стора на каждый тест (уникальный текст модуля = отдельный модуль):
+ * Подменяется окружение стора, а не его относительные импорты в data URL.
+ * Новый чистый импорт разрешается тем же compiler, что и в component-тестах.
+ */
+function storeStubs() {
+  return {
+    '../ui.ts': `
+      import { messageRef, resolveUiText, t } from ${JSON.stringify(LOCALE_PATH)};
+      export { messageRef, t };
+      globalThis.__chatResolveText = resolveUiText;
+    `,
+    '../shared/alerts.ts': `
+      export const alertUser = (notice) => globalThis.__chatNotifications.push([
+        notice.title, notice.body, notice.id, notice,
+      ]);
+      export const dismissAlert = (id) => globalThis.__chatDismissed.push(id);
+      export const dismissAlertScope = (scope) => globalThis.__chatDismissed.push('scope:' + scope);
+    `,
+    '../shared/apiClient.ts': 'export const api = globalThis.__chatApi;',
+    '../router.ts': `
+      export const router = { currentRoute: { value: { path: '/chats', meta: {} } } };
+    `,
+    './uiContext.ts': 'export const useUiContextStore = () => globalThis.__chatUiContext;',
+    './providers.ts': 'export const useProvidersStore = () => globalThis.__chatProviders;',
+    '../composables/useSse.ts': `
+      export const sseSubscribe = (fn) => {
+        globalThis.__chatSse = fn;
+        return () => {};
+      };
+    `,
+    '../shared/md.ts': 'export const mdToText = (value) => value;',
+    '../shared/chatVisibility.ts': 'export const chatVisibility = globalThis.__chatVisibility;',
+    '../shared/chatTitle.ts': `
+      export const applyGeneratedChatTitle = (session) => session;
+      export const firstMessageTitle = () => '';
+      export const provisionalChatTitle = () => '';
+      export const shouldRequestChatTitle = () => false;
+    `,
+  };
+}
+
+/**
+ * Свежая сборка стора на каждый тест сохраняет отдельное состояние модуля:
  * у стора есть состояние вне pinia — подписка на SSE, карта отправленного, id окна, —
  * и общий модуль протаскивал бы его из теста в тест.
  *
+ * `api` — свой транспорт окна (например, настоящий модуль чата через inject): так два
+ * экземпляра стора в одном тесте ведут себя как два окна со своими сетями.
+ * `fromServer` — окно грузит историю само, как после F5, а не из готового состояния.
+ * `unloaded` — возвращает исходный store без чтения API и без установки loaded;
+ * тест сам начинает управляемую загрузку и проверяет состояния до её завершения.
+ *
  * @param {{ sessions?: object[], archived?: object[], activeId?: string }} state
- * @returns {Promise<object>} стор, уже помеченный как загруженный и синхронный с сервером
+ * @param {{ api?: object, fromServer?: boolean, unloaded?: boolean }} options
  */
-export async function chatStoreFixture(state = {}) {
+export async function chatStoreFixture(state = {}, {
+  api = null,
+  fromServer = false,
+  unloaded = false,
+} = {}) {
   globalThis.__chatNotifications = [];
-  if (!patchedSource) patchedSource = patch(await readFile(STORE_PATH, 'utf8'));
+  globalThis.__chatDismissed = [];
+  globalThis.__chatProviders = defaultProviders();
+
+  const registry = createChatVisibilityRegistry();
+
+  globalThis.__chatVisibility = {
+    ...registry,
+    ids: new Set(),
+    isVisible(id) {
+      return this.ids.has(id) || registry.isVisible(id);
+    },
+  };
+  globalThis.__chatUiContext.capture = () => ({
+    routingScope: null,
+    promptContext: { page: '', path: '/chats' },
+  });
+
+  // Модуль стора читает транспорт один раз при загрузке: подменяем его до импорта
+  // и сразу возвращаем общий, чтобы соседние тесты работали с apiHarness.
+  globalThis.__chatApi = api || apiHarness;
+  globalThis.__chatResolveText = (value) => value;
+
   const [{ createPinia, setActivePinia }, { useChatStore }] = await Promise.all([
     import(pathToFileURL(PINIA_PATH).href),
-    import(`data:text/javascript;base64,${Buffer.from(
-      `${patchedSource}\n// экземпляр ${++instance}`,
-    ).toString('base64')}`),
+    loadProductModule('src/stores/chat.ts', storeStubs()),
   ]);
+
+  globalThis.__chatApi = apiHarness;
   setActivePinia(createPinia());
   const chat = useChatStore();
+
+  if (!api) {
+    apiHarness.get = async () => ({ active: [] });
+    apiHarness.post = async (url) => {
+      if (url === '/api/chat/store/changes') {
+        return {
+          listProtocol: 1,
+          sessions: [],
+          archived: [],
+          gone: [],
+        };
+      }
+      if (url === '/api/chat/store/reconcile') {
+        return protocolReconcile();
+      }
+
+      return {};
+    };
+    apiHarness.put = async () => ({});
+    apiHarness.patch = async () => ({});
+    apiHarness.del = async () => ({});
+  }
+  if (unloaded) {
+    return chat;
+  }
+
+  if (fromServer) {
+    await chat._load();
+
+    return chat;
+  }
+
   chat.sessions = state.sessions || [];
   chat.archived = state.archived || [];
   chat.activeId = state.activeId ?? (chat.sessions[0]?.id || null);
   chat.loaded = true;
-  apiHarness.get = async () => ({ active: [] });
-  apiHarness.post = async () => ({});
-  apiHarness.put = async () => ({});
-  apiHarness.del = async () => ({});
   // Стор считает себя совпавшим с сервером — иначе любое чужое изменение он отвергнет
   // как «у нас есть несохранённое» (см. `_dirty`).
   chat._markSent();
+
+  for (const session of [...chat.sessions, ...chat.archived]) {
+    if (chat.messageLoads) {
+      chat.messageLoads[session.id] = { state: 'loaded', error: '' };
+    }
+
+    chat._applyChatHead?.(protocolHead({ ...session, archived: chat.archived.includes(session) }), false);
+  }
+
   return chat;
 }
 
+/**
+ * Старые проверки читают русское представление UiText, как его показывает UI до bootstrap.
+ * Исходные descriptors и обработчики действий остаются в уведомлении стора неизменными.
+ */
 export function chatNotifications() {
-  return globalThis.__chatNotifications;
+  const render = (value) => value == null || typeof value === 'string'
+    ? value : globalThis.__chatResolveText(value);
+
+  return globalThis.__chatNotifications.map(([title, body, id, notice]) => {
+    const rendered = {
+      ...notice,
+      title: render(title),
+      body: render(body),
+    };
+
+    if (notice.actions) {
+      rendered.actions = notice.actions.map((action) => ({ ...action, label: render(action.label) }));
+    }
+
+    return [render(title), render(body), id, rendered];
+  });
+}
+
+export function setChatVisible(id, visible = true) {
+  if (visible) globalThis.__chatVisibility.ids.add(id);
+  else globalThis.__chatVisibility.ids.delete(id);
+}
+
+export function setChatContextCapture(capture) {
+  globalThis.__chatUiContext.capture = capture;
 }
 
 /** Обработчик SSE, который стор зарегистрировал через initPerms(). */
 export function sseOf(chat) {
   chat.initPerms();
   return globalThis.__chatSse;
+}
+
+/**
+ * Возвращает скалярные id погашенных оповещений для проверки сверок и ответов.
+ * Подмена общего канала сохраняет формат прежних проверок notifications.
+ */
+export function chatDismissed() {
+  return globalThis.__chatDismissed;
 }

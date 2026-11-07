@@ -1,63 +1,114 @@
-<script setup>
-import { computed } from 'vue';
+<template>
+  <div class="eff" :class="{ off: disabled, 'eff--expanded': expanded }" :data-lvl="model"
+       v-tooltip="expanded ? '' : hint || effortTooltip">
+    <template v-if="expanded">
+      <div class="eff-options" role="group" :aria-label="t('core.chatOptionEffort')"
+           :style="{ gridTemplateColumns: `repeat(${Math.min(levels.length, 3)}, minmax(0, 1fr))` }">
+        <UiButton v-for="level in levels" :key="level" variant="outline"
+                  :tone="model === level ? 'accent' : 'neutral'"
+                  :pressed="model === level" :disabled="disabled"
+                  data-context="chat-effort-level" @click="model = level">
+          {{ level }}
+        </UiButton>
+      </div>
+      <p class="eff-hint">{{ hint || selectedDescription }}</p>
+    </template>
+    <template v-else>
+      <span class="cap">эффорт</span>
+      <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
+                        :max="Math.max(0, levels.length - 1)" :step="1"
+                        :labels="sliderLabels" :value-text="selectedDescription"
+                        :unselected="idx < 0"
+                        thin ticks :disabled="disabled" label="Усилие рассуждения" />
+      <span class="val">{{ model || '—' }}</span>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, type PropType } from 'vue';
+import { t, UiButton, UiDiscreteSlider, vTooltip } from '../../ui';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
-// дискретные точки, клик по точке (или трек) задаёт уровень.
+// дискретные риски, клик по риске (или треку) задаёт уровень.
 // УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({
-  modelValue: { type: String, default: '' },
-  levels: { type: Array, default: () => [] },
+  levels: { type: Array as PropType<string[]>, default: () => [] },
+  hints: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
+  // Уровень показан, но менять его здесь нельзя (замороженный разговор). Слайдер
+  // тогда остаётся индикатором и молча ничего не эмитит.
+  disabled: { type: Boolean, default: false },
+  // Чем заменить обычную подсказку: неактивный слайдер обязан объяснить, где менять.
+  hint: { type: String, default: '' },
+  // В настройках телефона уровни выбираются отдельными сенсорными кнопками.
+  expanded: { type: Boolean, default: false },
 });
-const emit = defineEmits(['update:modelValue']);
 
+const model = defineModel({ type: String, default: '' });
+
+// Скринридер получает выбранный уровень вместе с его смыслом.
+// Пустой выбор означает умолчание исполнителя, а не первую риску слайдера.
+const selectedDescription = computed(() => {
+  if (!model.value) {
+    return t('core.chatEffortDefault');
+  }
+
+  const description = props.hints[model.value];
+
+  return description ? `${model.value} — ${description}` : model.value;
+});
+
+// Справка позволяет сравнить все доступные ступени до смены значения.
+// Список задаёт модель, поэтому чужие и неподдерживаемые уровни сюда не попадают.
+const effortTooltip = computed(() => {
+  const heading = model.value
+    ? `Усилие рассуждения: ${model.value}`
+    : 'Усилие рассуждения: по умолчанию исполнителя';
+  const descriptions = props.levels.map((level) => {
+    const description = props.hints[level] || 'Описание этого уровня пока недоступно.';
+
+    return `${level} — ${description}`;
+  });
+
+  return [heading, ...descriptions].join('\n');
+});
+
+const sliderLabels = computed(() => Object.fromEntries(
+  props.levels.map((level, index) => [index, level]),
+));
 const idx = computed(() => {
-  return props.levels.indexOf(props.modelValue);
+  return props.levels.indexOf(model.value);
 });
-const pct = computed(() => (idx.value < 0 ? 0 : (idx.value / Math.max(1, props.levels.length - 1)) * 100));
-function posOf(i) { return (i / Math.max(1, props.levels.length - 1)) * 100; }
-function set(i) {
-  if (i >= 0 && i < props.levels.length) emit('update:modelValue', props.levels[i]);
-}
-// Клик по треку — ближайшая точка.
-function onTrack(e) {
-  if (!props.levels.length) return;
-  const r = e.currentTarget.getBoundingClientRect();
-  const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-  set(Math.round(f * (props.levels.length - 1)));
-}
+const sliderIndex = computed({
+  get: () => Math.max(0, idx.value),
+  set: (value: number) => {
+    if (!props.disabled && props.levels[value] !== undefined) {
+      model.value = props.levels[value];
+    }
+  },
+});
 </script>
-
-<template>
-  <div class="eff" :data-lvl="modelValue" :title="modelValue ? `Усилие рассуждения: ${modelValue}` : 'Усилие рассуждения: дефолт CLI'">
-    <span class="cap">эффорт</span>
-    <div class="track" @click="onTrack">
-      <div class="rail"></div>
-      <div class="fill" :style="{ width: pct + '%' }"></div>
-      <button v-for="(l, i) in levels" :key="l" type="button" class="node" :class="{ on: i <= idx, cur: i === idx }"
-              :style="{ left: posOf(i) + '%' }" :aria-label="l" @click.stop="set(i)"></button>
-    </div>
-    <span class="val">{{ modelValue || '—' }}</span>
-  </div>
-</template>
 
 <style scoped>
 /* Без своей коробки: панель чата — строка состояния, а не набор форм */
 .eff { display: inline-flex; align-items: center; gap: 8px; height: 28px; background: none; border: none;
   padding: 0; user-select: none; flex: none; }
 .cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; flex: none; }
-.track { position: relative; width: 78px; height: 16px; flex: none; cursor: pointer; }
-.rail { position: absolute; top: 50%; left: 0; right: 0; height: 3px; transform: translateY(-50%); background: var(--surface-2); border-radius: 999px; }
-.fill { position: absolute; top: 50%; left: 0; height: 3px; transform: translateY(-50%); border-radius: 999px; background: var(--accent); transition: width .15s; }
-.node { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%);
-  background: var(--surface-2); border: none; padding: 0; cursor: pointer; transition: background .15s, box-shadow .15s, width .15s, height .15s; }
-.node.on { background: var(--accent); }
-.node.cur { width: 14px; height: 14px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; min-width: 46px; }
+.eff-slider { width: 78px; flex: none; }
+.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; }
+
+/* Только индикатор: курсор не обещает клика, но значение остаётся читаемым —
+   человек обязан видеть, каким усилием уйдёт ход. */
+.eff.off { opacity: .72; }
 
 /* Уровни не красим в warn/bad — это цвета ошибок, настройка не должна «тревожить».
    Всё в акценте, только low приглушён. */
-.eff[data-lvl="low"] .fill, .eff[data-lvl="low"] .node.on { background: var(--ink-mid); }
-.eff[data-lvl="low"] .node.cur { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-mid) 22%, transparent); }
 .eff[data-lvl="low"] .val { color: var(--ink-mid); }
+
+/* В развёрнутой форме нет короткого трека и повторных подписей.
+   До трёх уровней в ряду: каждый остаётся отдельной площадкой для касания. */
+.eff.eff--expanded { display: grid; height: auto; min-width: 0; gap: 8px; }
+.eff-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.eff-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 </style>

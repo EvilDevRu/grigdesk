@@ -64,6 +64,34 @@ assert_rc 1 "$?" "breaker without expiry expires after the default cooldown"
 FACTORY_BREAKER_COOLDOWN_S=60
 breaker_match claude acct111 opus opus 1100
 assert_rc 1 "$?" "cooldown length is configurable"
+
+# Срок, названный самим CLI, короче общего cooldown-а и потому ценнее: пока его
+# не прокидывали, живой провайдер лежал выключенным до конца окна ожидания.
+breaker_record claude acct222 provider "" "" 1000 1300 classifier
+breaker_match claude acct222 opus opus 1250
+assert_rc 0 "$?" "provider-reported deadline keeps the breaker closed"
+breaker_match claude acct222 opus opus 1350
+assert_rc 1 "$?" "provider-reported deadline releases earlier than the cooldown"
+
+# Обратная сторона: срок приходит из чужого текста, и доверять ему без границ
+# нельзя. Разбор даты промахнулся на год — и предохранитель выключил бы ИИ
+# насовсем, потому что чинить такое можно только удалением файла руками.
+FACTORY_BREAKER_MAX_S=86400
+breaker_record claude acct333 provider "" "" 1000 999999999 classifier
+breaker_match claude acct333 opus opus $(( 1000 + 86400 - 1 ))
+assert_rc 0 "$?" "an absurd deadline still limits inside the ceiling"
+breaker_match claude acct333 opus opus $(( 1000 + 86400 + 1 ))
+assert_rc 1 "$?" "an absurd deadline is clamped by the ceiling"
+
+# Срок в прошлом — тоже промах разбора, а не «лимит уже кончился»: отказ
+# провайдера случился ТОЛЬКО ЧТО. Такое значение отбрасывается, остаётся cooldown.
+FACTORY_BREAKER_COOLDOWN_S=900
+breaker_record claude acct444 provider "" "" 1000 500 classifier
+breaker_match claude acct444 opus opus 1200
+assert_rc 0 "$?" "a deadline in the past falls back to the cooldown"
+breaker_match claude acct444 opus opus 1901
+assert_rc 1 "$?" "the cooldown fallback still expires"
+unset FACTORY_BREAKER_MAX_S
 unset FACTORY_BREAKER_COOLDOWN_S
 
 finish_tests

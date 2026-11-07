@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   codexModelFamily,
   parseCodexModelList,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('Codex model/list becomes a current picker without duplicate aliases', () => {
   const models = parseCodexModelList({
@@ -70,6 +70,9 @@ test('Codex model/list becomes a current picker without duplicate aliases', () =
   assert.equal(models[0].defaultEffort, 'low');
   assert.equal(models[0].isDefault, true);
   assert.deepEqual(models[0].inputModalities, ['text', 'image']);
+  assert.equal(models[0].context, 0);
+  assert.equal(models[0].contextUnverified, true);
+  assert.equal(models[0].contextRuntimeOnly, true);
   assert.deepEqual(models[1].aliases, ['codex-auto-review']);
   assert.equal(models[1].family, 'terra');
   assert.equal(models[1].extra, false);
@@ -86,4 +89,82 @@ test('Codex versioned slugs expose a stable family for model policy', () => {
 test('Codex model/list rejects an empty response so the previous catalog survives', () => {
   assert.equal(parseCodexModelList(null), null);
   assert.equal(parseCodexModelList({ data: [] }), null);
+});
+
+test('Codex keeps an explicit context window from an older app-server contract', () => {
+  const [model] = parseCodexModelList({
+    data: [{
+      id: 'gpt-context',
+      model: 'gpt-context',
+      displayName: 'GPT Context',
+      contextWindow: 256_000,
+    }],
+  });
+
+  assert.equal(model.context, 256_000);
+  assert.equal(model.contextUnverified, undefined);
+  assert.equal(model.contextRuntimeOnly, undefined);
+});
+
+
+test('SPEED-CATALOG: скорости exact записи не берутся у rollout-алиаса', () => {
+  const rows = parseCodexModelList({ data: [
+    {
+      id: 'gpt-test',
+      model: 'gpt-test',
+      displayName: 'Test',
+      serviceTiers: [],
+    },
+    {
+      id: 'codex-test',
+      model: 'codex-test',
+      displayName: 'Test',
+      serviceTiers: [{
+        id: 'priority',
+        name: 'Fast',
+        description: 'Быстрее',
+      }],
+    },
+    {
+      id: 'gpt-fast',
+      model: 'gpt-fast',
+      displayName: 'Fast',
+      serviceTiers: [{
+        id: 'priority',
+        name: 'Fast',
+        description: 'Быстрее',
+      }],
+    },
+    {
+      id: 'gpt-unknown',
+      model: 'gpt-unknown',
+      displayName: 'Unknown',
+    },
+  ] });
+
+  assert.deepEqual(rows.map((row) => [row.id, row.chatSpeedModes]), [
+    ['gpt-test', ['standard']],
+    ['gpt-fast', ['standard', 'fast']],
+    ['gpt-unknown', ['standard']],
+  ]);
+});
+
+
+test('SPEED-ULTRA-CATALOG: каждый tier подтверждён exact metadata независимо', () => {
+  const rows = parseCodexModelList({ data: [
+    { id: 'ultra-only', serviceTiers: [{ id: 'ultrafast' }] },
+    { id: 'both', serviceTiers: [{ id: 'priority' }, { id: 'ultrafast' }] },
+    { id: 'fast-only', serviceTiers: [{ id: 'priority', name: 'Fast' }] },
+    { id: 'wrong-id', serviceTiers: [{ id: 'fast', name: 'Fast' }] },
+    { id: 'wrong-name', serviceTiers: [{ id: 'warp', name: 'Fast' }] },
+    { id: 'unknown-tier', serviceTiers: [{ id: 'warp' }] },
+    { id: 'empty', serviceTiers: [] },
+    { id: 'missing' },
+  ] });
+
+  assert.deepEqual(rows.map((row) => row.chatSpeedModes), [
+    ['standard', 'ultrafast'], ['standard', 'fast', 'ultrafast'],
+    ['standard', 'fast'], ['standard'], ['standard'],
+    ['standard'], ['standard'], ['standard'],
+  ]);
 });

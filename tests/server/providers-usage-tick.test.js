@@ -1,0 +1,785 @@
+// Фоновая свежесть лимитов: сервер сам перечитывает их раз в период и рассылает по SSE,
+// пока хотя бы одно окно держит поток. Пустой зал вендора не тревожит, а снимок, который
+// только что принёс запрос окна, второй раз подряд не читается.
+import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+import providersModule from '../../server/src/modules/providers/index.ts';
+
+const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
+const Fastify = requireFromServer('fastify');
+
+// Исполнитель с API лимитов: каждое чтение считается, чтобы отличить «тик сходил»
+// от «тик промолчал».
+function tickingAdapter(onUsage) {
+  return {
+    id: 'ticking-provider',
+    name: 'Ticking Provider',
+    vendor: 'Test',
+    color: '#123456',
+    bin: () => '/bin/true',
+    probe: async () => ({ ok: true, version: '1.0' }),
+    auth: async () => ({ mode: 'none', label: 'ok', available: true }),
+    seedModels: () => [],
+    run: async () => ({ reply: 'ok' }),
+    usage: async () => {
+      onUsage();
+
+      return { state: 'ok', bars: [{ key: 'week', label: 'Неделя', pct: 42 }] };
+    },
+  };
+}
+
+// Исполнитель, чей вендор просит стучаться реже. `retryAfterMs` — названный им срок:
+// без него GrigDesk считает паузу своей шкалой.
+function rateLimitedAdapter(onUsage, { retryAfterMs = 0 } = {}) {
+  return {
+    ...tickingAdapter(onUsage),
+    usage: async () => {
+      onUsage();
+
+      return {
+        state: 'rate_limited',
+        message: 'Вендор временно ограничил запрос проверки лимитов.',
+        ...(retryAfterMs ? { retryAt: Date.now() + retryAfterMs } : {}),
+      };
+    },
+  };
+}
+
+/**
+ * Изолирует реестр, окружение и файлы квот, сохраняя настоящий таймер модуля.
+ * Счётчик чтений отличает опрос адаптера от публикации уже полученного patch.
+ */
+async function tickFixture(t, { clients, usageTickMs, adapter, extraAdapters = [] }) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-usage-tick-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const events = [];
+  let usageReads = 0;
+  const app = Fastify({ logger: false });
+
+  app.decorate('sse', {
+    broadcast(event, data) {
+      events.push({ event, data });
+    },
+    clientCount: () => clients,
+  });
+  await app.register(providersModule, {
+    config: {
+      modelsPath: path.join(root, 'models.json'),
+      providerUsageSeenPath: path.join(root, 'usage-seen.json'),
+      envPath: path.join(root, 'fixture.env'),
+    },
+    claudeAuth: null,
+    env: {},
+    usageTickMs,
+    getProviderAdapters: async () => new Map([[
+      'ticking-provider',
+      (adapter ?? tickingAdapter)(() => { usageReads += 1; }),
+    ], ...extraAdapters.map((entry) => [entry.id, entry])]),
+    getModelsRegistry: async () => ({}),
+  });
+  t.after(() => app.close());
+
+  return {
+    app,
+    root,
+    events,
+    reads: () => usageReads
+  };
+}
+
+// Тик короткий, но таймеры Node точности не обещают: ждём условие с запасом.
+async function waitFor(check, limitMs = 3000) {
+  const deadline = Date.now() + limitMs;
+
+  while (!check()) {
+    if (Date.now() > deadline) return false;
+    await sleep(5);
+  }
+
+  return true;
+}
+
+test('external freshness отличает первый отказ от успешного замера и не освежается patch', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let state = 'unavailable';
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usagePresentation: { freshness: true, spentLabel: true },
+      usage: async () => ({ state, bars: state === 'ok' ? [liveBar(13)] : [] }),
+    }),
+  });
+  const read = async () =>
+    (await fixture.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+  const failed = await read();
+
+  assert.equal(failed.lastSuccessfulAt, null);
+  state = 'ok';
+  t.mock.timers.setTime(initial + 300_001);
+
+  const success = await read();
+  const sink = fixture.app.providerUsageSink('ticking-provider');
+
+  assert.equal(success.lastSuccessfulAt, initial + 300_001);
+  assert.equal(success.pollIntervalMs, 300_000);
+  assert.equal(sink({ bars: [liveBar(14)] }), true);
+  assert.equal((await read()).lastSuccessfulAt, success.lastSuccessfulAt);
+  state = 'unavailable';
+  t.mock.timers.setTime(initial + 600_002);
+
+  const later = await read();
+
+  assert.equal(later.lastSuccessfulAt, success.lastSuccessfulAt);
+  assert.equal(later.stale, true);
+});
+
+test('тик без CLI замораживает запись и возобновляется после установки', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let installed = false;
+  let probes = 0;
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 20_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usagePresentation: { freshness: true },
+      probe: async () => {
+        probes += 1;
+
+        return {
+          ok: installed,
+          version: installed ? '1.0' : null,
+        };
+      },
+    }),
+  });
+  const warn = t.mock.method(fixture.app.log, 'warn');
+  const registry = (await fixture.app.inject('/api/providers')).json().providers;
+
+  assert.equal(registry[0].installed, false);
+  await fixture.app.refreshProvidersUsage();
+
+  const removed = fixture.events.at(-1).data.usage['ticking-provider'];
+
+  assert.equal(fixture.reads(), 0, 'usage не вызывается даже при наличии читаемых credentials');
+  assert.equal(probes, 1, 'тик использует уже выполненный probe реестра');
+  assert.equal(removed.state, 'unavailable');
+  assert.equal(removed.message, 'Программа исполнителя удалена. Установи CLI для проверки лимитов.');
+  assert.deepEqual(removed.bars, []);
+  assert.deepEqual(removed.resources, []);
+  assert.equal(removed.stale, true);
+  assert.equal(removed.lastSuccessfulAt, null);
+
+  for (const offset of [20_001, 40_002]) {
+    t.mock.timers.setTime(initial + offset);
+    await fixture.app.refreshProvidersUsage();
+    assert.deepEqual(fixture.events.at(-1).data.usage['ticking-provider'], removed);
+  }
+
+  assert.equal(probes, 1, 'свежий probe не повторяется на каждом тике');
+  assert.equal(fixture.reads(), 0);
+  assert.equal(warn.mock.callCount(), 0, 'отсутствие CLI не журналируется как сбой usage');
+  installed = true;
+  t.mock.timers.setTime(initial + 60_003);
+  await fixture.app.refreshProvidersUsage();
+
+  const restored = fixture.events.at(-1).data.usage['ticking-provider'];
+
+  assert.equal(probes, 2, 'истёкший probe перепроверяет наличие CLI');
+  assert.equal(fixture.reads(), 1);
+  assert.equal(restored.state, 'ok');
+  assert.equal(restored.stale, false);
+  assert.equal(restored.lastSuccessfulAt, initial + 60_003);
+});
+
+test('удаление CLI через UI и вне GrigDesk сохраняет одинаковый замер и допускает возврат', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+  const snapshots = [];
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  for (const throughUi of [true, false]) {
+    t.mock.timers.setTime(initial);
+
+    let installed = true;
+    const fixture = await tickFixture(t, {
+      clients: 0,
+      usageTickMs: 300_000,
+      adapter: (onUsage) => ({
+        ...tickingAdapter(onUsage),
+        usagePresentation: { freshness: true },
+        probe: async () => ({
+          ok: installed,
+          version: installed ? '1.0' : null,
+        }),
+        usage: async () => {
+          onUsage();
+
+          return {
+            state: 'ok',
+            bars: [liveBar(12)],
+            resources: [{
+              key: 'credits',
+              label: 'Кредиты',
+              summary: '5 кредитов',
+              tone: 'ok',
+            }],
+          };
+        },
+      }),
+    });
+    const read = async () =>
+      (await fixture.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+    const before = await read();
+    const sink = fixture.app.providerUsageSink('ticking-provider');
+
+    assert.equal(sink({ bars: [liveBar(13)] }), true);
+    installed = false;
+    t.mock.timers.setTime(initial + 300_001);
+
+    if (throughUi) {
+      await fixture.app.invalidateProviderRuntime('ticking-provider', { removed: true });
+    }
+
+    await fixture.app.refreshProvidersUsage();
+
+    const removed = await read();
+    const { runtimeGeneration, ...snapshot } = removed;
+
+    snapshots.push(snapshot);
+    assert.notEqual(runtimeGeneration, before.runtimeGeneration);
+    assert.equal(removed.lastSuccessfulAt, before.lastSuccessfulAt);
+    assert.equal(removed.checkedAt, before.checkedAt);
+    assert.equal(removed.dataCheckedAt, before.dataCheckedAt);
+    assert.deepEqual(removed.bars, []);
+    assert.deepEqual(removed.resources, []);
+    assert.equal(sink({ bars: [liveBar(14)] }), false, 'событие удалённого CLI отклоняется');
+    t.mock.timers.setTime(initial + 600_002);
+    await fixture.app.refreshProvidersUsage();
+    assert.deepEqual(await read(), removed, 'повторный тик не меняет замороженный замер');
+    assert.equal(fixture.reads(), 1);
+    installed = true;
+    t.mock.timers.setTime(initial + 900_003);
+    await fixture.app.refreshProvidersUsage();
+    assert.equal((await read()).state, 'ok');
+    assert.equal((await read()).lastSuccessfulAt, initial + 900_003);
+    assert.equal(fixture.reads(), 2, 'возврат CLI не требует lifecycle-события');
+  }
+
+  assert.deepEqual(snapshots[0], snapshots[1]);
+});
+
+test('установленный CLI без входа продолжает опрашиваться и возвращает auth_required', async (t) => {
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      auth: async () => ({
+        mode: 'none',
+        label: 'Войди в CLI',
+        available: false,
+      }),
+      usage: async () => {
+        onUsage();
+
+        return {
+          state: 'auth_required',
+          message: 'Войди в CLI',
+        };
+      },
+    }),
+  });
+  const card = (await fixture.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(card.installed, true);
+  assert.equal(card.available, false);
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.at(-1).data.usage['ticking-provider'].state, 'auth_required');
+});
+
+test('runtime invalidation сохраняет свой 429, отклоняет старый sink и не меняет managed DTO', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let neighborReads = 0;
+  const neighbor = { ...tickingAdapter(() => {
+    neighborReads += 1;
+  }), id: 'managed-fixture' };
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...rateLimitedAdapter(onUsage, { retryAfterMs: 1_200_000 }),
+      usagePresentation: { freshness: true, spentLabel: true },
+    }),
+    extraAdapters: [neighbor],
+  });
+  const before = (await fixture.app.inject('/api/providers/usage')).json().usage;
+  const sink = fixture.app.providerUsageSink('ticking-provider');
+
+  assert.equal(typeof fixture.app.invalidateProviderRuntime, 'function');
+  assert.equal(await fixture.app.invalidateProviderRuntime('ticking-provider'), true);
+  assert.equal(await fixture.app.invalidateProviderRuntime('managed-fixture'), false);
+  assert.equal(sink({ bars: [liveBar(13)] }), false);
+
+  const after = (await fixture.app.inject('/api/providers/usage')).json().usage;
+
+  assert.equal(fixture.reads(), 1, 'переустановка не отменяет собственный Retry-After');
+  assert.equal(neighborReads, 1, 'инвалидация внешнего CLI не сбрасывает TTL managed-соседа');
+  assert.equal(after['ticking-provider'].retryAt, before['ticking-provider'].retryAt);
+  assert.notEqual(after['ticking-provider'].runtimeGeneration, before['ticking-provider'].runtimeGeneration);
+  assert.equal('lastSuccessfulAt' in after['managed-fixture'], false);
+  assert.equal('runtimeGeneration' in after['managed-fixture'], false);
+  t.mock.timers.setTime(initial + 1_200_000);
+  await fixture.app.inject('/api/providers/usage');
+  assert.equal(fixture.reads(), 2, 'на границе Retry-After новый poll разрешён');
+});
+
+test('каталог объявляет поддержку порога только по контракту адаптера', async (t) => {
+  for (const capability of [{}, { chatAutoCompact: true }, { autoCompactEnv: 'FIXTURE_COMPACT_WINDOW' }]) {
+    const fixture = await tickFixture(t, {
+      clients: 0,
+      usageTickMs: 20,
+      adapter: (onUsage) => ({ ...tickingAdapter(onUsage), ...capability }),
+    });
+    const response = await fixture.app.inject({ method: 'GET', url: '/api/providers' });
+    assert.equal(response.statusCode, 200);
+    const supported = response.json().providers[0].capabilities.chatAutoCompact;
+
+    assert.equal(supported, Object.keys(capability).length > 0);
+  }
+});
+
+test('без окон на потоке тик к вендору не ходит и ничего не рассылает', async (t) => {
+  const fixture = await tickFixture(t, { clients: 0, usageTickMs: 20 });
+
+  await sleep(150);
+  assert.equal(fixture.reads(), 0);
+  assert.deepEqual(fixture.events, []);
+});
+
+test('хук refreshProvidersUsage перечитывает и рассылает снимок без окон, но не чаще полупериода', async (t) => {
+  const fixture = await tickFixture(t, { clients: 0, usageTickMs: 60_000 });
+
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.length, 1);
+  assert.equal(fixture.events[0].event, 'providers-usage');
+  assert.equal(fixture.events[0].data.usage['ticking-provider'].bars[0].pct, 42);
+
+  // Снимок свежий — второй вызов подряд к вендору не идёт и события не даёт.
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.length, 1);
+});
+
+test('при открытом окне тик перечитывает лимиты и рассылает снимок событием providers-usage', async (t) => {
+  const fixture = await tickFixture(t, { clients: 1, usageTickMs: 20 });
+
+  assert.ok(await waitFor(() => fixture.events.length >= 1), 'тик не дал ни одного события');
+  const [first] = fixture.events;
+  assert.equal(first.event, 'providers-usage');
+  assert.equal(first.data.usage['ticking-provider'].state, 'ok');
+  assert.equal(first.data.usage['ticking-provider'].bars[0].pct, 42);
+  assert.ok(fixture.reads() >= 1);
+});
+
+test('снимок, который только что принёс запрос окна, тик второй раз подряд не читает', async (t) => {
+  const fixture = await tickFixture(t, { clients: 1, usageTickMs: 1000 });
+
+  await sleep(700);
+  const response = await fixture.app.inject({ method: 'GET', url: '/api/providers/usage' });
+  assert.equal(response.statusCode, 200);
+  assert.equal(fixture.reads(), 1);
+
+  await sleep(400);
+  assert.equal(fixture.reads(), 1, 'тик перечитал снимок моложе половины периода');
+  assert.deepEqual(fixture.events, []);
+});
+
+// Фон стучится круглосуточно, а не пока водят мышью, поэтому «стучитесь реже» — единственная
+// беда, на которую GrigDesk отвечает молчанием: повтор в прежнем темпе держал бы аккаунт
+// в отказе сам. Тики при этом продолжают идти — они просто не ходят к вендору.
+test('после отказа по частоте GrigDesk пропускает свои тики, а не стучится снова', async (t) => {
+  const fixture = await tickFixture(t, {
+    clients: 1,
+    usageTickMs: 30,
+    adapter: (onUsage) => rateLimitedAdapter(onUsage),
+  });
+
+  assert.ok(await waitFor(() => fixture.events.length >= 1), 'тик не дал ни одного события');
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events[0].data.usage['ticking-provider'].state, 'rate_limited');
+
+  // Пауза — три своих тика: за 70 мс их прошло бы два, и без паузы чтений было бы три.
+  await sleep(70);
+  assert.equal(fixture.reads(), 1, 'GrigDesk постучался к вендору внутри паузы');
+  assert.ok(fixture.events.length >= 2, 'тики внутри паузы обязаны продолжаться');
+
+  // По истечении паузы чтение возобновляется само, без вмешательства окна.
+  assert.ok(await waitFor(() => fixture.reads() >= 2), 'после паузы чтение не возобновилось');
+});
+
+// Заголовок Retry-After вендора длиннее нашей шкалы: своя пауза не вправе сделать
+// отступление короче, чем попросили.
+test('названный вендором срок продлевает паузу сверх собственной шкалы', async (t) => {
+  const fixture = await tickFixture(t, {
+    clients: 1,
+    usageTickMs: 20,
+    adapter: (onUsage) => rateLimitedAdapter(onUsage, { retryAfterMs: 5_000 }),
+  });
+
+  assert.ok(await waitFor(() => fixture.events.length >= 1), 'тик не дал ни одного события');
+  assert.equal(fixture.reads(), 1);
+
+  // Своя пауза — три тика (60 мс) — давно истекла бы, а названный срок ещё идёт.
+  await sleep(200);
+  assert.equal(fixture.reads(), 1, 'GrigDesk постучался раньше названного вендором срока');
+});
+
+// Кнопка «проверить сейчас» обходит TTL кэша, но не пределы вендора: свежий снимок
+// отдаётся как есть, а итог рассылается всем окнам — полосы общие.
+test('принудительная проверка перечитывает лимиты, рассылает снимок и не дробит клики', async (t) => {
+  const fixture = await tickFixture(t, { clients: 1, usageTickMs: 60_000 });
+
+  const first = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().usage['ticking-provider'].bars[0].pct, 42);
+  assert.equal(fixture.reads(), 1);
+  assert.deepEqual(fixture.events.map((event) => event.event), ['providers-usage']);
+
+  const second = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  assert.equal(second.statusCode, 200);
+  assert.equal(fixture.reads(), 1, 'снимок моложе 15 секунд перечитан второй раз подряд');
+});
+
+// Срок паузы едет в снимок: по нему всплывашка гасит кнопку и называет время вместо
+// того, чтобы клик молча возвращал прошлые цифры.
+test('после отказа вендора снимок называет срок, до которого проверять не будем', async (t) => {
+  const before = Date.now();
+  const fixture = await tickFixture(t, {
+    clients: 1,
+    usageTickMs: 60_000,
+    adapter: (onUsage) => rateLimitedAdapter(onUsage),
+  });
+
+  const response = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const snapshot = response.json().usage['ticking-provider'];
+
+  assert.equal(snapshot.state, 'rate_limited');
+  // Своя пауза — три тика по минуте: срок лежит между «через 3 минуты от начала» и «сейчас + 3».
+  assert.ok(snapshot.retryAt >= before + 3 * 60_000, 'срок короче собственной паузы');
+  assert.ok(snapshot.retryAt <= Date.now() + 3 * 60_000, 'срок длиннее собственной паузы');
+});
+
+
+test('usage-actions использует подменённый реестр исполнителей', async (t) => {
+  const f = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 60000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usageActions: { 'fixture-action': async () => ({ ok: true }) },
+    }),
+  });
+  const response = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/usage-actions/fixture-action',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+});
+
+
+const LIVE_RESET = '2030-01-01T05:00:00.000Z';
+const liveBar = (pct) => ({
+  key: 'session',
+  label: 'Сессия',
+  pct,
+  resetsAt: LIVE_RESET
+});
+const liveSnapshot = (pct = 6) => ({ state: 'ok', bars: [liveBar(pct)] });
+
+/**
+ * Стенд живых квот управляет ответом опроса через Promise и держит тик без окон.
+ * У адаптера есть синтетические ключ и действие для проверки независимых сбросов.
+ */
+function liveFixture(t, load = () => liveSnapshot(), options = {}) {
+  return tickFixture(t, {
+    clients: 0,
+    usageTickMs: 60000,
+    ...options,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usage: async () => {
+        onUsage();
+
+        return load();
+      },
+      credentials: [{
+        env: 'SYNTHETIC_USAGE_KEY',
+        kind: 'secret',
+        label: 'Ключ стенда'
+      }],
+      usageActions: { 'fixture-action': async () => ({ ok: true }) },
+    }),
+  });
+}
+
+function sinkOf(app, id = 'ticking-provider') {
+  assert.equal(typeof app.providerUsageSink, 'function');
+
+  return app.providerUsageSink(id);
+}
+
+test('R3: GET сохраняет patch до завершения общего опроса медленного соседа', async (t) => {
+  let slowReads = 0;
+  let finishSlow;
+  let startedSlow;
+  const slowBegun = new Promise((resolve) => {
+    startedSlow = resolve;
+  });
+  let fastValue = 6;
+  const f = await liveFixture(t, () => liveSnapshot(fastValue), {
+    usageTickMs: 2000,
+    extraAdapters: [{
+      ...tickingAdapter(() => {}),
+      id: 'slow-provider',
+      usage: async () => {
+        slowReads += 1;
+
+        if (slowReads === 1) {
+          return liveSnapshot(6);
+        }
+
+        startedSlow();
+
+        return new Promise((resolve) => {
+          finishSlow = resolve;
+        });
+      },
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+  fastValue = 8;
+  await sleep(1050);
+
+  const refreshing = f.app.refreshProvidersUsage();
+
+  await slowBegun;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  try {
+    const during = (await f.app.inject('/api/providers/usage')).json().usage;
+
+    assert.equal(during['ticking-provider'].bars[0].pct, 8);
+  } finally {
+    finishSlow(liveSnapshot(8));
+    await refreshing;
+  }
+
+  const after = (await f.app.inject('/api/providers/usage')).json().usage;
+
+  assert.equal(after['ticking-provider'].bars[0].pct, 8);
+});
+
+test('живой patch во время опроса сохраняется на GET и в полной карте SSE', async (t) => {
+  let finish;
+  let started;
+  const begun = new Promise((resolve) => {
+    started = resolve;
+  });
+  const f = await liveFixture(t, () => new Promise((resolve) => {
+    finish = resolve;
+    started();
+  }), {
+    extraAdapters: [{ ...tickingAdapter(() => {}), id: 'other-provider' }],
+  });
+  const sink = sinkOf(f.app);
+  const reading = f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+
+  await begun;
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(f.events.filter((event) => event.event === 'providers-usage').length, 0);
+  finish(liveSnapshot(6));
+
+  const response = await reading;
+  const current = (await f.app.inject('/api/providers/usage')).json().usage;
+  const event = f.events.find((entry) => entry.event === 'providers-usage');
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(current['ticking-provider'].bars[0].pct, 8);
+  assert.equal(event.data.usage['ticking-provider'].bars[0].pct, 8);
+  assert.ok(event.data.usage['other-provider']);
+});
+
+test('опрос после patch вправе уменьшить расход того же окна', async (t) => {
+  let value = 6;
+  const f = await liveFixture(t, () => liveSnapshot(value), { usageTickMs: 20 });
+
+  await f.app.inject('/api/providers/usage');
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+  value = 7;
+  await sleep(25);
+
+  const response = await f.app.inject('/api/providers/usage');
+
+  assert.equal(response.json().usage['ticking-provider'].bars[0].pct, 7);
+});
+
+test('R4: patch соседа после сброса ключа не рассылает неполную карту', async (t) => {
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{
+      ...tickingAdapter(() => {}),
+      id: 'kimi',
+      credentials: [{
+        env: 'SYNTHETIC_KIMI_USAGE_KEY',
+        kind: 'secret',
+        label: 'Ключ стенда',
+      }],
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const changed = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/kimi/credentials',
+    payload: { values: { SYNTHETIC_KIMI_USAGE_KEY: 'replacement-fixture-key' } },
+  });
+  const before = f.events.filter((entry) => entry.event === 'providers-usage').length;
+  const sink = sinkOf(f.app);
+
+  assert.equal(changed.statusCode, 200);
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(sink({ bars: [liveBar(8)] }), false, 'оверлей сохранён без публикации');
+  assert.equal(f.events.filter((entry) => entry.event === 'providers-usage').length, before);
+
+  await f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+
+  const event = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.ok(event.data.usage.kimi, 'ближайший опрос публикует полную карту');
+  assert.ok(event.data.usage['ticking-provider']);
+});
+
+test('первый отказ без полос принимает patch без изменения состояния и времени', async (t) => {
+  const f = await liveFixture(t, () => ({ state: 'unavailable', message: 'нет замера' }));
+  const before = (await f.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+
+  const after = (await f.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+
+  assert.equal(after.state, 'unavailable');
+  assert.equal(after.dataCheckedAt, before.dataCheckedAt);
+  assert.deepEqual(after.bars, [liveBar(8)]);
+});
+
+test('повтор и неверный patch не читают вендора и не рассылают повторов', async (t) => {
+  const f = await liveFixture(t);
+
+  await f.app.inject('/api/providers/usage');
+
+  const sink = sinkOf(f.app);
+  const seenBefore = await fs.readFile(path.join(f.root, 'usage-seen.json'), 'utf8').catch(() => null);
+
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(sink({ bars: [liveBar(8)] }), false);
+  assert.equal(sink({ bars: [{ key: 'session', pct: NaN }] }), false);
+  assert.equal(sink(null), false);
+  assert.equal(f.reads(), 1);
+  assert.equal(f.events.filter((entry) => entry.event === 'providers-usage').length, 1);
+  assert.equal(await fs.readFile(path.join(f.root, 'usage-seen.json'), 'utf8').catch(() => null), seenBefore);
+});
+
+test('смена ключа инвалидирует только sink своего аккаунта и сохраняет паузу соседа', async (t) => {
+  let neighborReads = 0;
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{
+      ...rateLimitedAdapter(() => {
+        neighborReads += 1;
+      }, { retryAfterMs: 600000 }),
+      id: 'other-provider',
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const old = sinkOf(f.app);
+  const neighbor = sinkOf(f.app, 'other-provider');
+  const changed = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/credentials',
+    payload: { values: { SYNTHETIC_USAGE_KEY: 'fixture-key' } },
+  });
+
+  assert.equal(changed.statusCode, 200);
+  assert.equal(old({ bars: [liveBar(8)] }), false);
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(9)] }), true);
+  assert.equal(neighbor({ bars: [liveBar(11)] }), true);
+  await f.app.inject('/api/providers/usage');
+  assert.equal(neighborReads, 1);
+});
+
+test('успешное действие очищает свой оверлей, сохраняя sink и оверлей соседа', async (t) => {
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{ ...tickingAdapter(() => {}), id: 'other-provider' }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const sink = sinkOf(f.app);
+
+  sink({ bars: [liveBar(8)] });
+  sinkOf(f.app, 'other-provider')({ bars: [{
+    key: 'week',
+    pct: 50,
+    resetsAt: null
+  }] });
+
+  const response = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/usage-actions/fixture-action',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  sinkOf(f.app, 'other-provider')({ bars: [{
+    key: 'week',
+    pct: 51,
+    resetsAt: null
+  }] });
+
+  const cleared = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.equal(cleared.data.usage['ticking-provider'].bars[0].pct, 6);
+  assert.equal(sink({ bars: [liveBar(6)] }), false, 'повтор снимка после очистки');
+  assert.equal(sink({ bars: [liveBar(9)] }), true, 'поколение не сменилось');
+
+  const event = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.equal(event.data.usage['other-provider'].bars[0].pct, 51);
+});

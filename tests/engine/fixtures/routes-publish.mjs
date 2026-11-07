@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const fixtureDir = path.dirname(fileURLToPath(import.meta.url));
 const { RoutesStore } = await import(
-  path.resolve(fixtureDir, '../../../server/src/modules/routes/store.js')
+  path.resolve(fixtureDir, '../../../server/src/modules/routes/store.ts')
 );
 
 const [
@@ -11,9 +11,11 @@ const [
   title = 'Диагностика',
   expected = 'null',
   conditionalValue = '"performance"',
+  nodeLabels = '{}',
 ] = process.argv.slice(2);
 if (!baseDir) throw new Error('baseDir обязателен');
 const parsedConditionalValue = JSON.parse(conditionalValue);
+const parsedNodeLabels = JSON.parse(nodeLabels);
 
 const profile = 'demo-profile';
 const routeId = 'debug';
@@ -197,6 +199,12 @@ const bootstrap = {
     },
   ],
 };
+
+for (const node of route.nodes) {
+  if (Object.hasOwn(parsedNodeLabels, node.id)) {
+    node.label = parsedNodeLabels[node.id];
+  }
+}
 
 const store = new RoutesStore({ baseDir });
 const publishedRoute = await store.publishRoute(profile, routeId, {

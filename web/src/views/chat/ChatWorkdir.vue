@@ -1,0 +1,670 @@
+<template>
+  <UiButton
+    v-if="chat.workdirProtocol"
+    variant="ghost"
+    :aria-label="t('core.workdirTrigger', { name: directoryName })"
+    v-tooltip="t('core.workdirWorkingIn', { path: currentDirectory || directory })"
+    :aria-haspopup="embedded ? undefined : 'dialog'"
+    :aria-controls="pickerOpen ? pickerId : undefined"
+    :aria-expanded="pickerOpen"
+    :pressed="pickerOpen"
+    :disabled="busy"
+    data-context="chat-workdir"
+    @click="openPicker"
+  >
+    <template #leading>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path :d="NAV_ICONS.projects" />
+      </svg>
+    </template>
+    {{ directoryName }}
+    <template #trailing>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path :d="pickerOpen ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'" />
+      </svg>
+    </template>
+  </UiButton>
+  <ChatWorkdirPicker v-model:open="pickerOpen" :id="pickerId" :embedded="embedded" :busy="busy">
+    <div class="workdir-content" :class="{ 'workdir-content--embedded': embedded }">
+      <UiInlineMessage v-for="warning in preview?.target?.warnings || []" :key="warning" tone="warning">
+        {{ warning }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
+      <template v-if="editable">
+        <div v-if="mode === 'catalog'" class="workdir-catalog">
+          <div class="workdir-toolbar">
+            <UiSearchInput v-model="search" :aria-label="t('core.workdirSearch')" :disabled="busy"
+                           :placeholder="t('core.search')" autocomplete="off" :spellcheck="false" />
+            <UiButton ref="pathModeButton" :disabled="busy" @click="showPathInput">
+              <template #leading>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" />
+                </svg>
+              </template>
+              {{ t('core.workdirByPath') }}
+            </UiButton>
+          </div>
+          <div class="workdir-list-heading">
+            <span class="workdir-caption">{{ t('core.workdirCatalog') }}</span>
+            <UiSpinner v-if="loadingProjects" :label="t('core.loading')" />
+          </div>
+          <div class="workdir-choices" role="group" :aria-label="t('core.workdirAvailable')"
+               :aria-busy="loadingProjects">
+            <UiSelectableRow
+              v-for="option in choices"
+              :key="option.key"
+              :selected="option.selected"
+              :pressed="option.selected"
+              :disabled="busy"
+              data-context="workspace-catalog"
+              @select="choose(option.workdir)"
+            >
+              <span class="workdir-choice">
+                <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
+                </svg>
+                <span class="workdir-choice-copy">
+                  <span class="workdir-choice-title">{{ option.title }}</span>
+                  <span v-if="option.workdir.kind !== 'project' || option.workdir.repoKey"
+                        class="workdir-choice-detail">{{ option.detail }}</span>
+                </span>
+                <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     :aria-label="t('core.workdirCurrent')" role="img">
+                  <path d="m5 13 4 4L19 7" />
+                </svg>
+              </span>
+            </UiSelectableRow>
+            <p v-if="!choices.length && !loadingProjects" class="workdir-empty" role="status">
+              {{ t('core.workdirNoResults') }}
+            </p>
+          </div>
+        </div>
+        <div v-else class="workdir-path-editor">
+          <UiButton variant="ghost" size="compact" :disabled="busy" @click="showCatalog">
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m10 6-6 6 6 6M4 12h16" />
+              </svg>
+            </template>
+            {{ t('core.workdirBackToCatalog') }}
+          </UiButton>
+          <form class="workdir-form" @submit.prevent="choosePath">
+            <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
+              <UiInput ref="pathField" v-model="pathInput" placeholder="/home/user/project" :disabled="busy"
+                       autocomplete="off" autocapitalize="off" :spellcheck="false" />
+            </UiField>
+            <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()">
+              {{ t('core.workdirChoose') }}
+            </UiButton>
+          </form>
+        </div>
+      </template>
+      <div class="workdir-current">
+        <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="NAV_ICONS.projects" />
+        </svg>
+        <div class="workdir-current-copy">
+          <span class="workdir-caption">
+            {{ t('core.workdirCurrent') }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
+          </span>
+          <code class="workdir-path">{{ directory }}</code>
+        </div>
+      </div>
+      <div v-if="additionalCopies.length" class="workdir-copies">
+        <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
+        <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
+          <span>{{ copy.key }}</span>
+          <code class="workdir-path">{{ copy.path }}</code>
+        </div>
+      </div>
+      <span v-if="!editable" class="workdir-caption">{{ t('core.workdirManaged') }}</span>
+      <UiButton v-if="needsTransfer" :disabled="busy" @click="confirmCurrent">
+        {{ t('core.workdirTransfer') }}
+      </UiButton>
+    </div>
+  </ChatWorkdirPicker>
+  <UiDialog
+    :open="Boolean(proposal)"
+    layer="confirm"
+    title="Смена рабочей папки"
+    :busy="Boolean(session?.workdirChanging)"
+    @close="cancel"
+  >
+    <p>Работаем в: {{ proposal?.preview.target?.cwd }}</p>
+    <p v-if="retrying">
+      Сервер не подтвердил переход. «Повторить» отправит тот же запрос — второй выжимки и
+      второго сброса памяти не будет.
+    </p>
+    <p v-else>Исполнитель начнёт новую сессию. Можно сохранить выжимку разговора или сбросить память.</p>
+    <UiInlineMessage v-if="session?.error" tone="danger">{{ session.error }}</UiInlineMessage>
+    <template #footer>
+      <UiButton v-if="retrying" :disabled="session?.workdirChanging" @click="retry">Повторить</UiButton>
+      <template v-else>
+        <UiButton
+          :disabled="session?.workdirChanging || !proposal?.preview.summaryAvailable
+            || proposal?.preview.transfer === 'unavailable'"
+          @click="chat.commitWorkdir(sid, 'summary')"
+        >
+          Сжать разговор и перейти
+        </UiButton>
+        <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')">
+          Перейти без выжимки
+        </UiButton>
+      </template>
+      <UiButton variant="text" :disabled="session?.workdirChanging" @click="cancel">Отмена</UiButton>
+    </template>
+  </UiDialog>
+</template>
+
+<script setup lang="ts">
+import { computed, nextTick, ref, useId, watch } from 'vue';
+
+import {
+  UiButton,
+  UiDialog,
+  UiField,
+  UiInlineMessage,
+  UiInput,
+  UiSearchInput,
+  UiSpinner,
+  UiSelectableRow,
+  t,
+  vTooltip,
+} from '../../ui.ts';
+import ChatWorkdirPicker from './ChatWorkdirPicker.vue';
+import { api } from '../../shared/apiClient.ts';
+import { NAV_ICONS } from '../../shared/navIcons.ts';
+import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
+import { useChatStore } from '../../stores/chat.ts';
+import {
+  chatWorkdirLabel, normalizeRecentWorkdirs, sameChatWorkdir,
+} from '../../../../shared/chat/chatWorkdir.ts';
+import type { ChatWorkdir as WorkdirChoice } from '../../../../shared/chat/chatWorkdir.ts';
+
+interface WorkdirPreview {
+  transfer?: string;
+  summaryAvailable?: boolean;
+  target?: {
+    cwd?: string;
+    source?: string;
+    copies?: Array<{ key: string; path: string; }>;
+    warnings?: string[];
+  };
+}
+
+interface WorkdirSession {
+  id: string;
+  taskId?: string | number | null;
+  purpose?: string;
+  workdir?: unknown;
+  modelRef?: unknown;
+  error?: string | null;
+  sending?: boolean;
+  compacting?: boolean;
+  sessionResetting?: boolean;
+  workdirChanging?: boolean;
+  workdirPreview?: WorkdirPreview | null;
+  workdirState?: { committed?: { cwd?: string; }; } | null;
+  workdirProposal?: {
+    transfer?: string | null;
+    preview: WorkdirPreview;
+  } | null;
+}
+
+interface ProjectOption {
+  id: string;
+  title?: string;
+  archivedAt?: string | null;
+}
+
+const props = withDefaults(defineProps<{
+  sid: string;
+  embedded?: boolean;
+  active?: boolean;
+}>(), {
+  embedded: false,
+  active: true,
+});
+
+const chat = useChatStore();
+const pickerId = `chat-workdir-picker-${useId()}`;
+const pickerOpen = ref(false);
+const mode = ref<'catalog' | 'path'>('catalog');
+const search = ref('');
+const pathInput = ref('');
+const pathField = ref<InstanceType<typeof UiInput> | null>(null);
+const pathModeButton = ref<InstanceType<typeof UiButton> | null>(null);
+const loadingProjects = ref(false);
+const projects = ref<ProjectOption[]>([]);
+const error = ref('');
+
+const session = computed<WorkdirSession | undefined>(() => (
+  chat.sessions.find((entry: WorkdirSession) => entry.id === props.sid)
+  || chat.archived.find((entry: WorkdirSession) => entry.id === props.sid)
+));
+const preview = computed(() => session.value?.workdirPreview);
+const proposal = computed(() => session.value?.workdirProposal || null);
+// Стратегия уже отправлена, а ответа нет: окно предлагает повтор того же запроса.
+const retrying = computed(() => Boolean(proposal.value?.transfer) && !session.value?.workdirChanging);
+const directory = computed(() => session.value?.workdirState?.committed?.cwd
+  || preview.value?.target?.cwd || chatWorkdirLabel(session.value?.workdir));
+// Подпись шапки показывает подтверждённую папку, даже если предпросмотр предлагает другую.
+// До первого подтверждения серверный preview разрешает фактический путь сохранённого выбора.
+const currentDirectory = computed(() => session.value?.workdirState?.committed?.cwd
+  || preview.value?.target?.cwd || '');
+const directoryName = computed(() => (
+  currentDirectory.value
+    ? currentDirectory.value.split('/').filter(Boolean).at(-1) || '/'
+    : t('core.workdirFolder')
+));
+const busy = computed(() => Boolean(session.value?.sending || session.value?.compacting
+  || session.value?.sessionResetting || session.value?.workdirChanging));
+const editable = computed(() => !session.value?.taskId && session.value?.purpose !== 'companion');
+const needsTransfer = computed(() => ['reseed', 'unavailable'].includes(preview.value?.transfer || ''));
+const sourceLabel = computed(() => ({
+  'task-copies': t('core.workdirTaskCopies'),
+  'task-project': t('core.workdirTaskProject'),
+  project: t('core.workdirProjectRepos'),
+  path: t('core.workdirChosenDirectory'),
+  grigdesk: t('core.workdirAppRepo'),
+} as Record<string, string>)[preview.value?.target?.source || ''] || '');
+const additionalCopies = computed(() => (
+  (preview.value?.target?.copies || []).filter((copy) => copy.path !== directory.value)
+));
+// Текущий выбор и недавние идут первыми, остальные проекты дополняют каталог.
+// Сравнение по контракту папки исключает повтор проекта из недавних в том же списке.
+const choices = computed(() => {
+  const current = normalizeChatWorkdir(session.value?.workdir);
+  const candidates: WorkdirChoice[] = [
+    ...(current ? [current] : []),
+    ...normalizeRecentWorkdirs(chat.recentWorkdirs),
+    ...projects.value.map((project): WorkdirChoice => ({
+      kind: 'project',
+      projectId: project.id,
+      repoKey: null,
+    })),
+    { kind: 'grigdesk' },
+  ];
+  const unique = candidates.filter((workdir, index) => (
+    !candidates.slice(0, index).some((previous) => sameChatWorkdir(previous, workdir))
+  ));
+  const query = search.value.trim().toLocaleLowerCase();
+
+  return unique.map((workdir) => ({
+    key: JSON.stringify(workdir),
+    workdir,
+    title: choiceTitle(workdir),
+    detail: choiceDetail(workdir),
+    selected: sameChatWorkdir(workdir, session.value?.workdir),
+  })).filter((option) => `${option.title} ${option.detail}`.toLocaleLowerCase().includes(query));
+});
+
+/**
+ * Название каталога остаётся коротким, а полный путь виден второй строкой.
+ * У проекта показываем заголовок паспорта; пока каталог грузится, доступен его id.
+ */
+function choiceTitle(workdir: WorkdirChoice): string {
+  if (workdir.kind === 'project') {
+    return projects.value.find((project) => project.id === workdir.projectId)?.title || workdir.projectId;
+  }
+  if (workdir.kind === 'path') {
+    return workdir.path.split('/').filter(Boolean).at(-1) || workdir.path;
+  }
+
+  return 'GrigDesk';
+}
+
+/**
+ * Подпись различает проекты и одноимённые каталоги в недавних выборах.
+ * Фактические пути проектов не угадываются по их названиям.
+ */
+function choiceDetail(workdir: WorkdirChoice): string {
+  if (workdir.kind === 'path') {
+    return workdir.path;
+  }
+  if (workdir.kind === 'project') {
+    return workdir.repoKey
+      ? t('core.workdirProjectRepo', { name: workdir.repoKey })
+      : t('core.workdirProjectMain');
+  }
+
+  return t('core.workdirAppFolder');
+}
+
+/**
+ * Папка и задача проходят общий серверный переход.
+ * Предпочтение меняется лишь после успешного явного выбора папки.
+ */
+async function choose(workdir: WorkdirChoice): Promise<void> {
+  error.value = '';
+
+  const accepted = await chat.proposeWorkdir(props.sid, { taskId: null, workdir }, true);
+
+  error.value = session.value?.error || '';
+
+  if (accepted || proposal.value) {
+    closePicker();
+  }
+}
+
+/**
+ * Сервер принимает только абсолютный путь. Относительный или «~/…» объясняем на месте,
+ * а не отказом сервера про «повреждённый выбор».
+ */
+function choosePath(): Promise<void> | void {
+  const path = pathInput.value.trim();
+
+  if (!path.startsWith('/')) {
+    error.value = t('core.workdirInvalidPath');
+
+    return;
+  }
+
+  return choose({ kind: 'path', path });
+}
+
+function closePicker(): void {
+  pickerOpen.value = false;
+}
+
+/**
+ * Явный переход к ручному вводу сразу переносит фокус в поле.
+ * При обычном открытии окна клавиатура по-прежнему не вызывается.
+ */
+async function showPathInput(): Promise<void> {
+  mode.value = 'path';
+  await nextTick();
+  pathField.value?.focus();
+}
+
+/**
+ * Возврат восстанавливает фокус у действия, которое открыло ручной ввод.
+ * Поиск и черновик пути сохраняются до закрытия окна.
+ */
+async function showCatalog(): Promise<void> {
+  mode.value = 'catalog';
+  await nextTick();
+  pathModeButton.value?.focus();
+}
+
+function retry(): void {
+  void chat.commitWorkdir(props.sid, proposal.value?.transfer || '');
+}
+
+function cancel(): void {
+  if (session.value && !session.value.workdirChanging) {
+    session.value.workdirProposal = null;
+  }
+}
+
+/**
+ * Закрываем выбор при переходе к подтверждению переноса, чтобы два слоя не перекрывались.
+ * Серверная ошибка остаётся в открытом выборе рядом с текущей папкой.
+ */
+async function confirmCurrent(): Promise<void> {
+  if (!session.value) {
+    return;
+  }
+
+  const accepted = await chat.proposeWorkdir(props.sid, {
+    taskId: session.value.taskId || null,
+    workdir: normalizeChatWorkdir(session.value.workdir),
+  });
+
+  error.value = session.value?.error || '';
+
+  if (accepted || proposal.value) {
+    closePicker();
+  }
+}
+
+/**
+ * Предпросмотр выбора этого чата: путь, копии и нужен ли перенос.
+ * Чистый чат при этом на сервер заново не отправляется.
+ */
+async function refresh(): Promise<void> {
+  if (!chat.workdirProtocol || busy.value) {
+    return;
+  }
+
+  try {
+    await chat.previewWorkdir(props.sid);
+    error.value = '';
+  } catch (failure) {
+    error.value = (failure as Error).message;
+  }
+}
+
+/**
+ * Каталог проектов нужен только открытому окошку выбора,
+ * поэтому грузится при открытии, а не после каждого хода.
+ */
+async function loadProjects(): Promise<void> {
+  loadingProjects.value = true;
+
+  try {
+    const catalog = await api.get('/api/projects') as { projects?: ProjectOption[]; };
+
+    projects.value = (catalog.projects || []).filter((project) => !project.archivedAt);
+  } catch (failure) {
+    error.value ||= (failure as Error).message;
+  } finally {
+    loadingProjects.value = false;
+  }
+}
+
+/**
+ * Каждый вход начинает выбор с общего каталога без прежнего поискового фильтра.
+ * Встроенный выбор сворачивается повторным нажатием; открытие не вызывает клавиатуру.
+ */
+async function openPicker(): Promise<void> {
+  if (props.embedded && pickerOpen.value) {
+    closePicker();
+
+    return;
+  }
+
+  mode.value = 'catalog';
+  search.value = '';
+  pathInput.value = '';
+  error.value = '';
+  pickerOpen.value = true;
+
+  await Promise.all([refresh(), loadProjects()]);
+}
+
+watch(() => props.sid, closePicker);
+watch(() => props.embedded, closePicker);
+watch(() => props.active, (active) => {
+  if (!active) {
+    closePicker();
+  }
+});
+
+// Обновление зависит от значений выбора, а не от ссылок объектов ACK:
+// так нет цикла preview → save → новый объект workdir → preview.
+watch(() => JSON.stringify([
+  props.sid, chat.workdirProtocol, session.value?.workdir, session.value?.taskId, session.value?.modelRef,
+  busy.value,
+]), refresh, { immediate: true });
+</script>
+
+<style scoped>
+.workdir-content {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 20px 20px;
+  overflow-wrap: anywhere;
+}
+
+.workdir-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workdir-current-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workdir-content--embedded {
+  padding: 12px 0 0;
+}
+
+.workdir-catalog,
+.workdir-path-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workdir-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workdir-toolbar > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.workdir-current {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.workdir-current > .workdir-icon {
+  margin-top: 2px;
+}
+
+.workdir-copies,
+.workdir-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workdir-form > :last-child,
+.workdir-path-editor > .ui-button,
+.workdir-content > .ui-button {
+  justify-self: start;
+  align-self: flex-start;
+}
+
+.workdir-caption,
+.workdir-choice-detail {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workdir-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.workdir-copy {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.workdir-list-heading {
+  padding: 2px 10px 0;
+  margin-bottom: -6px;
+}
+
+.workdir-choices {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 2px;
+  min-height: 72px;
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-low) transparent;
+}
+
+.workdir-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workdir-choice-copy {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workdir-choice-title {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.workdir-choice-title,
+.workdir-choice-detail {
+  overflow-wrap: anywhere;
+}
+
+.workdir-icon,
+.workdir-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.workdir-icon {
+  color: var(--ink-mid);
+}
+
+.workdir-check {
+  color: var(--accent);
+}
+
+.workdir-empty {
+  margin: 0;
+  padding: 20px 8px;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .workdir-content:not(.workdir-content--embedded) {
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+}
+</style>

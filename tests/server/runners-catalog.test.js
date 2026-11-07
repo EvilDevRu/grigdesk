@@ -7,14 +7,17 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { listInstalledRunners } from '../../server/src/lib/runners-catalog.js';
+import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
 
 test('каталог исполнителей: только валидные адаптеры, отсортированные', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runners-catalog-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runners-catalog-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const runnersDir = path.join(root, 'engine', 'lib', 'runners');
   await mkdir(runnersDir, { recursive: true });
-  for (const name of ['codex.sh', 'claude.sh', 'index.sh', 'policy.sh', 'catalog.sh']) {
+
+  const names = ['codex.sh', 'claude.sh', 'deepseek.sh', 'glm.sh', 'index.sh', 'policy.sh', 'catalog.sh'];
+
+  for (const name of names) {
     await writeFile(path.join(runnersDir, name), '# адаптер\n');
   }
   // Не модуль движка и имена, непригодные для CLI-аргумента.
@@ -23,7 +26,7 @@ test('каталог исполнителей: только валидные а�
   await writeFile(path.join(runnersDir, '0bad.sh'), '# цифра в начале\n');
 
   assert.deepEqual(await listInstalledRunners({ factoryHome: path.join(root, 'engine') }), [
-    'claude', 'codex',
+    'claude', 'codex', 'deepseek', 'glm',
   ]);
 });
 

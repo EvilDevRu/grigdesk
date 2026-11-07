@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grigdesk.local/schemas/analytics/usage-document.schema.json",
+  "title": "Неизменяемый нормализованный документ расхода раннера",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "attemptId",
+    "nodeVisitId",
+    "nodeExecutionId",
+    "dispatchId",
+    "runId",
+    "epoch",
+    "provider",
+    "requestedModel",
+    "resolvedModel",
+    "source",
+    "completeness",
+    "observedAt",
+    "extractorVersion",
+    "normalizerDialect",
+    "normalizerVersion",
+    "sourceFingerprint",
+    "providerSessionMode",
+    "requestedProviderScope",
+    "observedProviderScope",
+    "parentUsageRef",
+    "terminalCounterCheckpoint",
+    "lastObservedCounter",
+    "resumeEligible",
+    "usageSamples",
+    "usageSegments",
+    "tokenSummary",
+    "providerReportedCost",
+    "providerRootResult",
+    "diagnostics"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "taskId": { "$ref": "#/$defs/taskId" },
+    "attemptId": { "$ref": "#/$defs/attemptId" },
+    "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+    "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+    "dispatchId": { "$ref": "#/$defs/dispatchId" },
+    "runId": { "$ref": "#/$defs/runId" },
+    "epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "provider": { "$ref": "#/$defs/provider" },
+    "requestedModel": { "$ref": "#/$defs/nullableText" },
+    "resolvedModel": { "$ref": "#/$defs/nullableText" },
+    "source": { "$ref": "#/$defs/source" },
+    "completeness": { "$ref": "#/$defs/completeness" },
+    "observedAt": { "$ref": "#/$defs/utcMilliseconds" },
+    "extractorVersion": { "$ref": "#/$defs/dialect" },
+    "normalizerDialect": { "$ref": "#/$defs/dialect" },
+    "normalizerVersion": { "$ref": "#/$defs/dialect" },
+    "sourceFingerprint": { "$ref": "#/$defs/sourceFingerprint" },
+    "providerSessionMode": {
+      "enum": ["fresh", "resume", "legacy-derived", "unknown"]
+    },
+    "requestedProviderScope": { "$ref": "#/$defs/nullableText" },
+    "observedProviderScope": { "$ref": "#/$defs/nullableText" },
+    "parentUsageRef": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/parentUsageRef" }
+      ]
+    },
+    "terminalCounterCheckpoint": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/terminalCounterCheckpoint" }
+      ]
+    },
+    "lastObservedCounter": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/lastObservedCounter" }
+      ]
+    },
+    "resumeEligible": { "type": "boolean" },
+    "usageSamples": {
+      "type": "array",
+      "maxItems": 50000,
+      "items": { "$ref": "#/$defs/usageSample" }
+    },
+    "usageSegments": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/usageSegment" }
+    },
+    "tokenSummary": { "$ref": "#/$defs/tokenSummary" },
+    "providerReportedCost": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/providerReportedCost" }
+      ]
+    },
+    "providerRootResult": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/providerRootResult" }
+      ]
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/diagnosticCode" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "uint": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "positiveUint": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+    "decimal": {
+      "type": "string",
+      "maxLength": 49,
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+    },
+    "utcMilliseconds": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "taskId": { "type": "string", "pattern": "^t[1-9][0-9]{0,18}$" },
+    "attemptId": { "type": "string", "pattern": "^a_[a-f0-9]{32}$" },
+    "nodeVisitId": { "type": "string", "pattern": "^nv_[a-f0-9]{32}$" },
+    "nodeExecutionId": { "type": "string", "pattern": "^ne_[a-f0-9]{32}$" },
+    "dispatchId": { "type": "string", "pattern": "^d_[a-f0-9]{32}$" },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "sampleId": { "type": "string", "pattern": "^sa_[a-f0-9]{32}$" },
+    "segmentId": { "type": "string", "pattern": "^us_[a-f0-9]{32}$" },
+    "provider": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,39}$" },
+    "nullableText": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1, "maxLength": 160 }
+      ]
+    },
+    "dialect": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "source": { "enum": ["provider_final", "provider_partial", "unavailable"] },
+    "completeness": { "enum": ["complete", "partial", "missing", "conflict"] },
+    "diagnosticCode": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,79}$"
+    },
+    "sourceFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dev", "ino", "size", "mtimeNs", "sha256", "finalFstatHash", "rawFsyncCompleted"
+      ],
+      "properties": {
+        "dev": { "$ref": "#/$defs/uint" },
+        "ino": { "$ref": "#/$defs/uint" },
+        "size": { "$ref": "#/$defs/uint" },
+        "mtimeNs": { "$ref": "#/$defs/uint" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "finalFstatHash": { "$ref": "#/$defs/sha256" },
+        "rawFsyncCompleted": { "type": "boolean" }
+      }
+    },
+    "parentUsageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "documentHash", "checkpointHash", "provider", "normalizerDialect"],
+      "properties": {
+        "runId": { "$ref": "#/$defs/runId" },
+        "documentHash": { "$ref": "#/$defs/sha256" },
+        "checkpointHash": { "$ref": "#/$defs/sha256" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "normalizerDialect": { "$ref": "#/$defs/dialect" }
+      }
+    },
+    "counterVector": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/dialect" },
+      "additionalProperties": { "$ref": "#/$defs/decimal" }
+    },
+    "terminalCounterCheckpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "counterScope", "counterGeneration", "vector", "presenceMask", "dialect",
+        "extractorVersion", "lifecycleEventHash", "checkpointHash", "resumeEligible"
+      ],
+      "properties": {
+        "counterScope": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "counterGeneration": { "$ref": "#/$defs/uint" },
+        "vector": { "$ref": "#/$defs/counterVector" },
+        "presenceMask": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/dialect" }
+        },
+        "dialect": { "$ref": "#/$defs/dialect" },
+        "extractorVersion": { "$ref": "#/$defs/dialect" },
+        "lifecycleEventHash": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        },
+        "checkpointHash": { "$ref": "#/$defs/sha256" },
+        "resumeEligible": { "const": true }
+      }
+    },
+    "lastObservedCounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counterScope", "vector", "resumeEligible"],
+      "properties": {
+        "counterScope": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "vector": { "$ref": "#/$defs/counterVector" },
+        "resumeEligible": { "const": false }
+      }
+    },
+    "usageSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleId", "sourceOrdinal", "byteOffset", "lineHash", "counterScope",
+        "counterGeneration", "quantitySemantics", "vector", "providerEventId", "eventAt"
+      ],
+      "properties": {
+        "sampleId": { "$ref": "#/$defs/sampleId" },
+        "sourceOrdinal": { "$ref": "#/$defs/positiveUint" },
+        "byteOffset": { "$ref": "#/$defs/uint" },
+        "lineHash": { "$ref": "#/$defs/sha256" },
+        "counterScope": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "counterGeneration": {
+          "oneOf": [
+            { "$ref": "#/$defs/uint" },
+            { "const": "unknown" }
+          ]
+        },
+        "quantitySemantics": {
+          "enum": ["delta", "cumulative_snapshot", "final_total"]
+        },
+        "vector": { "$ref": "#/$defs/counterVector" },
+        "providerEventId": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1, "maxLength": 256 }
+          ]
+        },
+        "eventAt": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/utcMilliseconds" }
+          ]
+        }
+      }
+    },
+    "sampleRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["firstSampleId", "lastSampleId"],
+      "properties": {
+        "firstSampleId": { "$ref": "#/$defs/sampleId" },
+        "lastSampleId": { "$ref": "#/$defs/sampleId" }
+      }
+    },
+    "billingWindow": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "basis"],
+          "properties": {
+            "kind": { "const": "unknown" },
+            "basis": { "const": "unknown" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "notBefore", "notAfter", "basis"],
+          "properties": {
+            "kind": { "const": "closed" },
+            "notBefore": { "$ref": "#/$defs/utcMilliseconds" },
+            "notAfter": { "$ref": "#/$defs/utcMilliseconds" },
+            "basis": {
+              "enum": [
+                "provider_billing", "provider_event", "trusted_run_window", "derived_run_window"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "segmentAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "billingProduct", "serviceTier", "inferenceGeo", "speed", "contextBand",
+        "cacheMode", "cacheTtl", "toolName"
+      ],
+      "properties": {
+        "billingProduct": { "$ref": "#/$defs/nullableText" },
+        "serviceTier": { "$ref": "#/$defs/nullableText" },
+        "inferenceGeo": { "$ref": "#/$defs/nullableText" },
+        "speed": { "$ref": "#/$defs/nullableText" },
+        "contextBand": { "$ref": "#/$defs/nullableText" },
+        "cacheMode": { "$ref": "#/$defs/nullableText" },
+        "cacheTtl": { "$ref": "#/$defs/nullableText" },
+        "toolName": { "$ref": "#/$defs/nullableText" },
+        "reasoningTokens": { "$ref": "#/$defs/decimal" }
+      }
+    },
+    "usageSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segmentId", "sampleRange", "billingWindow", "metric", "unit", "quantity",
+        "resolvedModel", "attributes", "source", "completeness"
+      ],
+      "properties": {
+        "segmentId": { "$ref": "#/$defs/segmentId" },
+        "sampleRange": { "$ref": "#/$defs/sampleRange" },
+        "billingWindow": { "$ref": "#/$defs/billingWindow" },
+        "metric": { "$ref": "#/$defs/dialect" },
+        "unit": { "$ref": "#/$defs/dialect" },
+        "quantity": { "$ref": "#/$defs/decimal" },
+        "resolvedModel": { "$ref": "#/$defs/nullableText" },
+        "attributes": { "$ref": "#/$defs/segmentAttributes" },
+        "source": { "$ref": "#/$defs/source" },
+        "completeness": { "$ref": "#/$defs/completeness" }
+      }
+    },
+    "tokenSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uncachedInput", "output", "cacheRead",
+        "cacheWrite5m", "cacheWrite1h", "cacheWriteUnknown"
+      ],
+      "properties": {
+        "uncachedInput": { "$ref": "#/$defs/decimal" },
+        "output": { "$ref": "#/$defs/decimal" },
+        "cacheRead": { "$ref": "#/$defs/decimal" },
+        "cacheWrite5m": { "$ref": "#/$defs/decimal" },
+        "cacheWrite1h": { "$ref": "#/$defs/decimal" },
+        "cacheWriteUnknown": { "$ref": "#/$defs/decimal" }
+      }
+    },
+    "reportedCostEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "rawModel", "amount"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "rawModel": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "amount": { "$ref": "#/$defs/decimal" }
+      }
+    },
+    "providerReportedCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "amount", "semantics", "breakdown"],
+      "properties": {
+        "currency": { "const": "USD" },
+        "amount": { "$ref": "#/$defs/decimal" },
+        "semantics": { "const": "run_total" },
+        "breakdown": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/reportedCostEntry" }
+        }
+      }
+    },
+    "providerRootResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceOrdinal", "subtype", "isError"],
+      "properties": {
+        "sourceOrdinal": { "$ref": "#/$defs/positiveUint" },
+        "subtype": { "$ref": "#/$defs/nullableText" },
+        "isError": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "boolean" }
+          ]
+        }
+      }
+    }
+  }
+}

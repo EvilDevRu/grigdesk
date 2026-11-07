@@ -44,6 +44,16 @@ debug_settings_level_valid() {
   esac
 }
 
+debug_settings_rank() {
+  case "${1:-}" in
+    off) printf '0\n' ;;
+    errors) printf '1\n' ;;
+    decisions) printf '2\n' ;;
+    verbose) printf '3\n' ;;
+    *) return 2 ;;
+  esac
+}
+
 debug_settings_get() {
   local file=${1:?settings file} key=${2:?key}
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); value=$0 } END { print value }' \
@@ -51,7 +61,8 @@ debug_settings_get() {
 }
 
 debug_settings_validate() {
-  local file=${1:?settings file} line key value schema revision level expires
+  local file=${1:?settings file} line key value
+  local parsed_schema= parsed_revision= parsed_level= parsed_expires=
   local -A seen=()
   [[ -f "$file" ]] || return 2
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -61,24 +72,38 @@ debug_settings_validate() {
     [[ -z "${seen[$key]+present}" ]] || return 2
     seen["$key"]=1
     case "$key" in
-      DEBUG_SCHEMA|CONFIG_REVISION|EXPIRES_AT)
+      DEBUG_SCHEMA)
         debug_settings_uint_valid "$value" || return 2
+        parsed_schema=$value
+        ;;
+      CONFIG_REVISION)
+        debug_settings_uint_valid "$value" || return 2
+        parsed_revision=$value
+        ;;
+      EXPIRES_AT)
+        debug_settings_uint_valid "$value" || return 2
+        parsed_expires=$value
         ;;
       LEVEL)
         debug_settings_level_valid "$value" || return 2
+        parsed_level=$value
         ;;
       *)
         return 2
         ;;
     esac
   done <"$file"
-  schema=$(debug_settings_get "$file" DEBUG_SCHEMA)
-  revision=$(debug_settings_get "$file" CONFIG_REVISION)
-  level=$(debug_settings_get "$file" LEVEL)
-  expires=$(debug_settings_get "$file" EXPIRES_AT)
-  [[ "$schema" == 1 ]] && debug_settings_uint_valid "$revision" &&
-    debug_settings_uint_valid "$expires" || return 2
-  debug_settings_level_valid "$level"
+  [[ "$parsed_schema" == 1 ]] && debug_settings_uint_valid "$parsed_revision" &&
+    debug_settings_uint_valid "$parsed_expires" &&
+    debug_settings_level_valid "$parsed_level" || return 2
+
+  if (( $# == 3 )); then
+    local -n level_result=$2 expires_result=$3
+    level_result=$parsed_level
+    expires_result=$parsed_expires
+  elif (( $# != 1 )); then
+    return 2
+  fi
 }
 
 _debug_settings_path_allowed() {
@@ -159,7 +184,8 @@ debug_settings_resolve() {
   local profile=${1:-} task=${2:-} now=${3:-}
   [[ -n "$now" ]] || now=$(debug_settings_now)
   debug_settings_uint_valid "$now" || return 2
-  local file level expires
+  local file level expires chosen_level= chosen_source= chosen_expires=0
+  local global_level=off global_source=default global_expires=0
 
   if [[ -n "$task" ]]; then
     [[ "${task#[tT]}" =~ ^[0-9]+$ ]] || return 2
@@ -172,42 +198,59 @@ debug_settings_resolve() {
       return 0
     fi
     if _debug_settings_active "$level" "$expires" "$now"; then
-      _debug_settings_print "$level" task "$expires"
-      return 0
+      chosen_level=$level
+      chosen_source=task
+      chosen_expires=$expires
     fi
   fi
 
-  if [[ -n "$profile" ]]; then
+  if [[ -z "$chosen_level" && -n "$profile" ]]; then
     file=$(debug_settings_profile_file "$profile") || return 2
     if [[ -f "$file" ]]; then
-      if ! debug_settings_validate "$file"; then
+      if ! debug_settings_validate "$file" level expires; then
         _debug_settings_print off invalid_profile 0
         return 0
       fi
-      level=$(debug_settings_get "$file" LEVEL)
-      expires=$(debug_settings_get "$file" EXPIRES_AT)
       if _debug_settings_active "$level" "$expires" "$now"; then
-        _debug_settings_print "$level" profile "$expires"
-        return 0
+        chosen_level=$level
+        chosen_source=profile
+        chosen_expires=$expires
       fi
     fi
   fi
 
   file=$(debug_settings_global_file)
   if [[ -f "$file" ]]; then
-    if ! debug_settings_validate "$file"; then
+    if ! debug_settings_validate "$file" level expires; then
       _debug_settings_print off invalid_global 0
       return 0
     fi
-    level=$(debug_settings_get "$file" LEVEL)
-    expires=$(debug_settings_get "$file" EXPIRES_AT)
     if _debug_settings_active "$level" "$expires" "$now"; then
-      _debug_settings_print "$level" global "$expires"
-      return 0
+      global_level=$level
+      global_source=global
+      global_expires=$expires
     fi
   fi
 
-  _debug_settings_print off default 0
+  if [[ -z "$chosen_level" ]]; then
+    _debug_settings_print "$global_level" "$global_source" "$global_expires"
+    return 0
+  fi
+
+  local chosen_rank global_rank
+  chosen_rank=$(debug_settings_rank "$chosen_level") || return 2
+  global_rank=$(debug_settings_rank "$global_level") || return 2
+  if (( chosen_rank > global_rank )); then
+    _debug_settings_print "$global_level" global_cap "$global_expires"
+    return 0
+  fi
+
+  # Даже более строгий scoped-уровень выключится по истечении глобального TTL.
+  if (( global_expires > 0 &&
+        ( chosen_expires == 0 || global_expires < chosen_expires ) )); then
+    chosen_expires=$global_expires
+  fi
+  _debug_settings_print "$chosen_level" "$chosen_source" "$chosen_expires"
 }
 
 debug_settings_duration_seconds() {

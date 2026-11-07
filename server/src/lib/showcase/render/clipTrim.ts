@@ -1,0 +1,676 @@
+// Обрезка записи до границ сцены.
+//
+// Видео контекста начинается вместе со страницей, и первые секунды в нём — белый
+// лист и сборка каркаса. В ролике это выглядело как перезагрузка страницы на
+// каждой сцене. Ключевой кадр у записи браузера один, в самом начале, поэтому
+// вырезать начало копированием потока нельзя — клип перекодируется. VP9 в режиме
+// реального времени укладывается в доли секунды на сцену, а замер PSNR против
+// исходника (63 дБ) показывает, что картинка не страдает: сама запись браузера
+// сделана с куда большими потерями.
+//
+// Цепочка сцен пишется одним видео, и тогда у среза есть и конец: клип сцены —
+// от её готовности до её конца, а хвост записи принадлежит следующим сценам.
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+import { ShowcaseError } from '../errors.ts';
+import type { CalibrationMarkerSample } from './recorder.ts';
+
+const run = promisify(execFile);
+
+// Короче одного кадра резать нечего: такая запись отдаётся как есть.
+const MIN_TRIM_MS = 40;
+const MARKER_COLOR_DISTANCE = 70;
+const CALIBRATION_METHOD = 'visual-marker-affine-v1' as const;
+const CALIBRATION_LIMIT_MS = 100;
+
+// Видео контекста начинается позже отсчёта готовности: между созданием страницы и
+// первым кадром трансляции проходят сотни миллисекунд, и точный срез по часам
+// исполнителя попадал уже на первое действие сцены — клип открывался раскрытым
+// списком. Запас отступает назад в затишье перед готовностью, где кадр уже не
+// меняется; вместе с паузой перед первым действием он перекрывает разброс старта.
+export const READY_MARGIN_MS = 400;
+
+export interface TrimInput {
+  rawPath: string;
+  startMs: number;
+  // Конец клипа от начала записи. Без него клип идёт до конца файла: так режется
+  // одиночная сцена и последняя сцена цепочки.
+  endMs?: number;
+  outFile: string;
+  signal?: AbortSignal;
+}
+
+export interface VideoFramePoint {
+  index: number;
+  ptsMs: number;
+  durationMs: number;
+}
+
+export interface CalibratedVideoTiming {
+  status: 'calibrated';
+  method: typeof CALIBRATION_METHOD;
+  browserOriginMonoMs: number;
+  videoOriginPtsMs: number;
+  rate: number;
+  errorMs: number;
+  startErrorMs: number;
+  endErrorMs: number;
+  headExcludedBeforePtsMs: number;
+  tailExcludedFromPtsMs: number;
+}
+
+export interface UnavailableVideoTiming {
+  status: 'unavailable';
+  method: typeof CALIBRATION_METHOD;
+  reason: string;
+}
+
+export type VideoCalibration = CalibratedVideoTiming | UnavailableVideoTiming;
+
+export interface ExactTrimInput {
+  rawPath: string;
+  startPtsMs: number;
+  endPtsMs: number;
+  fps: number;
+  outFile: string;
+  signal?: AbortSignal;
+}
+
+export interface ExactTrimResult {
+  path: string;
+  requestedStartPtsMs: number;
+  requestedEndPtsMs: number;
+  firstRetainedSourcePtsMs: number;
+  sourceEndExclusivePtsMs: number;
+  outputFirstPtsMs: number;
+  frameCount: number;
+  durationMs: number;
+  fps: number;
+}
+
+export interface VideoFrameSignature {
+  index: number;
+  ptsMs: number;
+  // Серый кадр 64×36 после area-усреднения: прокрутку, диалог и курсор он
+  // различает, а на полный кадр память не тратит.
+  pixels: Uint8Array;
+}
+
+export interface StableFrameRun {
+  fromIndex: number;
+  // Включительно: последний кадр того же экранного состояния.
+  toIndex: number;
+}
+
+export const STABLE_FRAME_WIDTH = 64;
+export const STABLE_FRAME_HEIGHT = 36;
+
+// Допуск сравнения с опорным кадром серии, в уровнях серого 0..255. Измерено на
+// восьми клипах VP9 1080p: между соседними кадрами неподвижного экрана codec
+// noise даёт до ±2 (изредка 3) на десятках пикселей, мигающий каретой ввод —
+// около 7, движущийся курсор — от 40. Прежнее округление до 16 уровней шум не
+// снимало: пиксель на границе ступени перескакивал от ±1, и у таблиц с плотной
+// вёрсткой ни один кадр не совпадал с соседним — устойчивых интервалов не было.
+export const STABLE_FRAME_TOLERANCE = 3;
+
+function finite(value: number): boolean {
+  return Number.isFinite(value);
+}
+
+/** PTS всех декодированных кадров, без догадки по format.duration. */
+export async function probeVideoFrames(file: string): Promise<VideoFramePoint[]> {
+  const { stdout } = await run('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'frame=best_effort_timestamp_time,pts_time,pkt_duration_time',
+    '-of', 'json',
+    file,
+  ], { maxBuffer: 64 * 1024 * 1024 });
+  const parsed = JSON.parse(stdout) as {
+    frames?: Array<{
+      best_effort_timestamp_time?: string;
+      pts_time?: string;
+      pkt_duration_time?: string;
+    }>;
+  };
+  const source = parsed.frames ?? [];
+  const result: VideoFramePoint[] = [];
+
+  for (const [index, frame] of source.entries()) {
+    const seconds = Number(frame.best_effort_timestamp_time ?? frame.pts_time);
+
+    if (!finite(seconds)) {
+      continue;
+    }
+
+    const nextSeconds = Number(source[index + 1]?.best_effort_timestamp_time
+      ?? source[index + 1]?.pts_time);
+    const declared = Number(frame.pkt_duration_time);
+    const durationSeconds = finite(nextSeconds) && nextSeconds > seconds
+      ? nextSeconds - seconds
+      : finite(declared) && declared > 0
+        ? declared
+        : result.at(-1)?.durationMs
+          ? (result.at(-1) as VideoFramePoint).durationMs / 1000
+          : 0;
+
+    result.push({ index: result.length, ptsMs: seconds * 1000, durationMs: durationSeconds * 1000 });
+  }
+
+  return result;
+}
+
+async function averageFrameColors(file: string): Promise<readonly [number, number, number][]> {
+  const output = await run('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error',
+    '-i', file,
+    '-map', '0:v:0',
+    '-vf', 'scale=1:1:flags=area',
+    '-vsync', '0',
+    '-pix_fmt', 'rgb24',
+    '-f', 'rawvideo',
+    'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+  const bytes = Buffer.isBuffer(output.stdout)
+    ? output.stdout
+    : Buffer.from(output.stdout as unknown as string, 'binary');
+  const colors: [number, number, number][] = [];
+
+  for (let offset = 0; offset + 2 < bytes.length; offset += 3) {
+    colors.push([bytes[offset] as number, bytes[offset + 1] as number, bytes[offset + 2] as number]);
+  }
+
+  return colors;
+}
+
+function colorDistance(
+  actual: readonly [number, number, number],
+  expected: readonly [number, number, number],
+): number {
+  return Math.hypot(
+    actual[0] - expected[0],
+    actual[1] - expected[1],
+    actual[2] - expected[2],
+  );
+}
+
+function median(values: readonly number[]): number {
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+
+  return ordered.length % 2 === 0
+    ? ((ordered[middle - 1] as number) + (ordered[middle] as number)) / 2
+    : ordered[middle] as number;
+}
+
+/**
+ * Находит видимые marker transitions и строит affine mapping browser-monotonic →
+ * raw video PTS. Две группы нужны не для красоты: только хвост показывает drift
+ * шкалы на длине реальной цепочки.
+ */
+export async function calibrateVideoTiming(
+  file: string,
+  samples: readonly CalibrationMarkerSample[],
+): Promise<VideoCalibration> {
+  const unavailable = (reason: string): UnavailableVideoTiming => ({
+    status: 'unavailable', method: CALIBRATION_METHOD, reason,
+  });
+  const head = samples.filter((sample) => sample.phase === 'head');
+  const tail = samples.filter((sample) => sample.phase === 'tail');
+
+  if (head.length < 3 || tail.length < 3) {
+    return unavailable('Браузер не зарегистрировал обе серии калибровочной отметки.');
+  }
+
+  const frames = await probeVideoFrames(file).catch(() => []);
+  const colors = await averageFrameColors(file).catch(() => []);
+
+  if (frames.length === 0 || colors.length !== frames.length) {
+    return unavailable('Не удалось сопоставить кадры и PTS исходной записи.');
+  }
+
+  type Observation = {
+    sample: CalibrationMarkerSample;
+    ptsMs: number;
+    firstFrame: number;
+    lastFrame: number;
+  };
+  const matches = (index: number, sample: CalibrationMarkerSample) => (
+    index >= 0
+    && index < colors.length
+    && colorDistance(colors[index] as [number, number, number], sample.rgb) <= MARKER_COLOR_DISTANCE
+  );
+  const observationOf = (
+    sample: CalibrationMarkerSample,
+    firstFrame: number,
+    lastFrame: number,
+  ): Observation => {
+    const firstPtsMs = (frames[firstFrame] as VideoFramePoint).ptsMs;
+    const previousPtsMs = firstFrame > 0
+      ? (frames[firstFrame - 1] as VideoFramePoint).ptsMs
+      : firstPtsMs;
+
+    return {
+      sample,
+      // Переключение лежит между последним старым и первым новым кадром. Середина
+      // этого интервала не вносит систематический сдвиг на целый frame duration.
+      ptsMs: (previousPtsMs + firstPtsMs) / 2,
+      firstFrame,
+      lastFrame,
+    };
+  };
+
+  // Хвост ищется С КОНЦА записи, голова — с начала и только до хвоста. Раньше обе
+  // серии искались одним проходом вперёд, и когда guard головы не попадал в запись
+  // (первые кадры контекста screencast отдаёт с задержкой), поиск уходил к
+  // одноимённому цвету ХВОСТА: отметки хвоста доставались голове, а самому хвосту
+  // не оставалось ничего — «В видео не найдена отметка tail:0» примерно у каждой
+  // десятой цепочки, при исправной записи. Guard (первый цвет серии) будит
+  // compositor и в регрессию не входит: он берётся только как кадры, вплотную
+  // предшествующие второму цвету, — сколько бы их ни было, хоть один, хоть ни одного.
+  const runEndingAt = (sample: CalibrationMarkerSample, lastFrame: number): Observation => {
+    let firstFrame = lastFrame;
+
+    while (matches(firstFrame - 1, sample)) {
+      firstFrame -= 1;
+    }
+
+    return observationOf(sample, firstFrame, lastFrame);
+  };
+  const guardBefore = (sample: CalibrationMarkerSample, index: number): Observation | null => (
+    matches(index - 1, sample) ? runEndingAt(sample, index - 1) : null
+  );
+  const tailFound: Observation[] = [];
+  let end = colors.length;
+
+  for (const sample of [...tail].reverse()) {
+    if (sample.sequence === 0) {
+      const guard = guardBefore(sample, end);
+
+      if (guard) {
+        tailFound.unshift(guard);
+        end = guard.firstFrame;
+      }
+
+      continue;
+    }
+
+    let lastFrame = -1;
+
+    for (let index = end - 1; index > 0; index -= 1) {
+      if (matches(index, sample) && matches(index - 1, sample)) {
+        lastFrame = index;
+        break;
+      }
+    }
+
+    if (lastFrame < 0) {
+      return unavailable(`В видео не найдена отметка ${sample.phase}:${sample.sequence}.`);
+    }
+
+    const run = runEndingAt(sample, lastFrame);
+
+    tailFound.unshift(run);
+    end = run.firstFrame;
+  }
+
+  const headFound: Observation[] = [];
+  let cursor = 0;
+
+  for (const sample of head) {
+    if (sample.sequence === 0) {
+      continue;
+    }
+
+    let firstFrame = -1;
+
+    for (let index = cursor; index + 1 < end; index += 1) {
+      if (matches(index, sample) && matches(index + 1, sample)) {
+        firstFrame = index;
+        break;
+      }
+    }
+
+    if (firstFrame < 0) {
+      return unavailable(`В видео не найдена отметка ${sample.phase}:${sample.sequence}.`);
+    }
+
+    let lastFrame = firstFrame;
+
+    while (lastFrame + 1 < end && matches(lastFrame + 1, sample)) {
+      lastFrame += 1;
+    }
+
+    if (headFound.length === 0) {
+      const guardSample = head.find((item) => item.sequence === 0);
+      const guard = guardSample ? guardBefore(guardSample, firstFrame) : null;
+
+      if (guard) {
+        headFound.push(guard);
+      }
+    }
+
+    headFound.push(observationOf(sample, firstFrame, lastFrame));
+    cursor = lastFrame + 1;
+  }
+
+  const observations: Observation[] = [...headFound, ...tailFound];
+
+  // Первый цвет каждой серии будит/перекрывает compositor и не имеет наблюдаемого
+  // предыдущего marker state. Он нужен как guard frame, но не как точка регрессии.
+  // Цвет, которым запись НАЧИНАЕТСЯ, тоже не точка: его переключение случилось до
+  // первого кадра, и «середина интервала» здесь — просто старт видео, на десятки
+  // миллисекунд позже правды; такая точка одна вытягивала погрешность за предел.
+  const fittedObservations = observations.filter((entry) => (
+    entry.sample.sequence > 0 && entry.firstFrame > 0
+  ));
+  const origin = fittedObservations[0]?.sample.browserMonoMs;
+
+  if (!finite(origin as number)) {
+    return unavailable('Калибровочная отметка содержит неверное монотонное время.');
+  }
+
+  const relative = (sample: CalibrationMarkerSample) => sample.browserMonoMs - (origin as number);
+  const headObservations = fittedObservations.filter((entry) => entry.sample.phase === 'head');
+  const tailObservations = fittedObservations.filter((entry) => entry.sample.phase === 'tail');
+  const headCenter = median(headObservations.map((entry) => relative(entry.sample)));
+  const tailCenter = median(tailObservations.map((entry) => relative(entry.sample)));
+  const headOffset = median(headObservations.map((entry) => entry.ptsMs - relative(entry.sample)));
+  const tailOffset = median(tailObservations.map((entry) => entry.ptsMs - relative(entry.sample)));
+  const span = tailCenter - headCenter;
+
+  if (!(span > 0)) {
+    return unavailable('Концевая отметка не следует за начальной в монотонной шкале.');
+  }
+
+  const rate = 1 + (tailOffset - headOffset) / span;
+
+  if (!finite(rate) || rate < 0.98 || rate > 1.02) {
+    return unavailable(`Скорость видеошкалы отличается от часов страницы: ${rate}.`);
+  }
+
+  const videoOriginPtsMs = median(fittedObservations.map((entry) => (
+    entry.ptsMs - rate * relative(entry.sample)
+  )));
+  const residual = (entry: typeof observations[number]) => Math.abs(
+    entry.ptsMs - (videoOriginPtsMs + rate * relative(entry.sample)),
+  );
+  const uncertaintyOf = (entry: typeof observations[number]) => Math.max(
+    (frames[entry.firstFrame] as VideoFramePoint).durationMs / 2,
+    entry.firstFrame > 0
+      ? ((frames[entry.firstFrame] as VideoFramePoint).ptsMs
+        - (frames[entry.firstFrame - 1] as VideoFramePoint).ptsMs) / 2
+      : 0,
+  );
+  const groupError = (group: typeof observations) => Math.max(...group.map((entry) => (
+    residual(entry) + uncertaintyOf(entry)
+  )));
+  const startErrorMs = groupError(headObservations);
+  const endErrorMs = groupError(tailObservations);
+  const errorMs = Math.max(startErrorMs, endErrorMs);
+
+  if (!finite(errorMs) || errorMs > CALIBRATION_LIMIT_MS) {
+    return unavailable(
+      `Погрешность калибровки ${Math.round(errorMs)} мс превышает 100 мс `
+      + `(начало ${Math.round(startErrorMs)}, конец ${Math.round(endErrorMs)}, rate ${rate.toFixed(6)}, `
+      + `residual ${fittedObservations.map((entry) => Math.round(residual(entry))).join('/')}).`,
+    );
+  }
+
+  const lastHead = observations.filter((entry) => entry.sample.phase === 'head').at(-1);
+  const firstTail = observations.find((entry) => entry.sample.phase === 'tail');
+
+  if (!lastHead || !firstTail) {
+    return unavailable('В обнаруженных кадрах нет обеих фаз калибровки.');
+  }
+  const afterHead = frames[lastHead.lastFrame + 1];
+
+  if (!afterHead) {
+    return unavailable('После начальной отметки не осталось пользовательских кадров.');
+  }
+
+  return {
+    status: 'calibrated',
+    method: CALIBRATION_METHOD,
+    browserOriginMonoMs: origin as number,
+    videoOriginPtsMs,
+    rate,
+    errorMs,
+    startErrorMs,
+    endErrorMs,
+    headExcludedBeforePtsMs: afterHead.ptsMs,
+    tailExcludedFromPtsMs: (frames[firstTail.firstFrame] as VideoFramePoint).ptsMs,
+  };
+}
+
+export function browserMonoToVideoPts(
+  calibration: CalibratedVideoTiming,
+  browserMonoMs: number,
+): number {
+  return calibration.videoOriginPtsMs
+    + calibration.rate * (browserMonoMs - calibration.browserOriginMonoMs);
+}
+
+/** Полноэкранная marker-палитра не должна встретиться в готовом клипе. */
+export async function videoContainsCalibrationMarker(
+  file: string,
+  samples: readonly CalibrationMarkerSample[],
+): Promise<boolean> {
+  const colors = await averageFrameColors(file);
+  const expected = samples.map((sample) => sample.rgb);
+
+  return colors.some((color, index) => (
+    index + 1 < colors.length
+    && expected.some((marker) => (
+      colorDistance(color, marker) <= MARKER_COLOR_DISTANCE
+      && colorDistance(colors[index + 1] as [number, number, number], marker)
+        <= MARKER_COLOR_DISTANCE
+    ))
+  ));
+}
+
+/** Уменьшенные decoded-кадры для поиска устойчивых интервалов клипа. */
+export async function probeVideoFrameSignatures(file: string): Promise<VideoFrameSignature[]> {
+  const frames = await probeVideoFrames(file);
+  const width = STABLE_FRAME_WIDTH;
+  const height = STABLE_FRAME_HEIGHT;
+  const frameBytes = width * height;
+  const output = await run('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-i', file,
+    '-map', '0:v:0',
+    '-vf', `scale=${width}:${height}:flags=area,format=gray`,
+    '-vsync', '0', '-f', 'rawvideo', 'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+  const bytes = Buffer.isBuffer(output.stdout)
+    ? output.stdout
+    : Buffer.from(output.stdout as unknown as string, 'binary');
+  const count = Math.min(frames.length, Math.floor(bytes.length / frameBytes));
+  const result: VideoFrameSignature[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    result.push({
+      index,
+      ptsMs: (frames[index] as VideoFramePoint).ptsMs,
+      pixels: Uint8Array.from(bytes.subarray(index * frameBytes, (index + 1) * frameBytes)),
+    });
+  }
+
+  return result;
+}
+
+/** Кадр относится к тому же состоянию экрана, что и опорный, пока каждый пиксель в допуске. */
+function withinTolerance(reference: Uint8Array, candidate: Uint8Array, tolerance: number): boolean {
+  if (reference.length !== candidate.length) {
+    return false;
+  }
+
+  for (let offset = 0; offset < reference.length; offset += 1) {
+    if (Math.abs((reference[offset] as number) - (candidate[offset] as number)) > tolerance) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Серии кадров одного экранного состояния. Каждый кадр сравнивается с ОПОРНЫМ —
+ * первым кадром серии, а не с предыдущим: иначе медленное затухание или плавная
+ * анимация, меняющие картинку на уровень за кадр, прошли бы за неподвижный экран.
+ * Серия короче `minFrames` не публикуется: два одинаковых кадра после 25→30 CFR
+ * могут быть всего лишь дублем `fps`, а не доказательством неподвижности.
+ */
+export function stableFrameRunsOf(
+  frames: readonly VideoFrameSignature[],
+  options: { minFrames: number; tolerance?: number },
+): StableFrameRun[] {
+  const tolerance = options.tolerance ?? STABLE_FRAME_TOLERANCE;
+  const runs: StableFrameRun[] = [];
+
+  for (let start = 0; start < frames.length;) {
+    const reference = (frames[start] as VideoFrameSignature).pixels;
+    let end = start;
+
+    while (
+      end + 1 < frames.length
+      && withinTolerance(reference, (frames[end + 1] as VideoFrameSignature).pixels, tolerance)
+    ) {
+      end += 1;
+    }
+
+    if (end - start + 1 >= options.minFrames) {
+      runs.push({ fromIndex: start, toIndex: end });
+    }
+
+    start = end + 1;
+  }
+
+  return runs;
+}
+
+/**
+ * Возвращает путь к клипу от `startMs` до `endMs`. Если резать нечего, это
+ * исходный файл — лишнее перекодирование не делается.
+ *
+ * Длина задаётся как `-t` после `-ss`, а не как `-to`: после перемотки на входе
+ * ffmpeg считает время вывода от нуля, и абсолютный конец попал бы мимо.
+ */
+export async function trimSceneClip(input: TrimInput): Promise<string> {
+  const startMs = Math.max(0, input.startMs);
+  const lengthMs = input.endMs === undefined ? null : input.endMs - startMs;
+
+  if (!(startMs >= MIN_TRIM_MS) && lengthMs === null) {
+    return input.rawPath;
+  }
+
+  if (lengthMs !== null && !(lengthMs >= MIN_TRIM_MS)) {
+    throw new ShowcaseError(
+      'record_failed',
+      `Сцена в записи короче одного кадра: ${Math.round(lengthMs)} мс.`,
+      500,
+    );
+  }
+
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-ss', (startMs / 1000).toFixed(3),
+    '-i', input.rawPath,
+    ...(lengthMs === null ? [] : ['-t', (lengthMs / 1000).toFixed(3)]),
+    '-an',
+    '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-cpu-used', '6', '-row-mt', '1',
+    '-crf', '10', '-b:v', '0',
+    input.outFile,
+  ], { signal: input.signal });
+
+  return input.outFile;
+}
+
+/**
+ * Точная нарезка measured-пути. Окно сначала разрешается в номера настоящих raw
+ * кадров, затем результат нормализуется в общий CFR проекта. Возвращаемая точка
+ * первого source frame — единственная допустимая база для переноса событий в клип.
+ */
+export async function trimSceneClipExact(input: ExactTrimInput): Promise<ExactTrimResult> {
+  if (
+    !finite(input.startPtsMs)
+    || !finite(input.endPtsMs)
+    || !(input.endPtsMs > input.startPtsMs)
+    || !Number.isSafeInteger(input.fps)
+    || input.fps <= 0
+  ) {
+    throw new ShowcaseError('record_failed', 'Точные границы клипа некорректны.', 500);
+  }
+
+  const frames = await probeVideoFrames(input.rawPath);
+
+  if (frames.length === 0) {
+    throw new ShowcaseError('record_failed', 'В исходной записи нет кадров для нарезки.', 500);
+  }
+
+  const epsilon = 0.001;
+  const startFrame = frames.findIndex((frame) => frame.ptsMs + epsilon >= input.startPtsMs);
+  const resolvedStart = startFrame < 0 ? frames.length : startFrame;
+  const endFrame = frames.findIndex((frame) => frame.ptsMs + epsilon >= input.endPtsMs);
+  const resolvedEnd = endFrame < 0 ? frames.length : endFrame;
+
+  if (resolvedStart >= frames.length || resolvedEnd <= resolvedStart) {
+    throw new ShowcaseError(
+      'record_failed',
+      'Измеренные границы сцены не содержат ни одного кадра записи.',
+      500,
+    );
+  }
+
+  const firstRetained = frames[resolvedStart] as VideoFramePoint;
+  const sourceEndExclusivePtsMs = resolvedEnd < frames.length
+    ? (frames[resolvedEnd] as VideoFramePoint).ptsMs
+    : (frames.at(-1) as VideoFramePoint).ptsMs + (frames.at(-1) as VideoFramePoint).durationMs;
+  const filter = [
+    `trim=start_frame=${resolvedStart}:end_frame=${resolvedEnd}`,
+    'setpts=PTS-STARTPTS',
+    `fps=fps=${input.fps}:start_time=0:round=near`,
+  ].join(',');
+
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', input.rawPath,
+    '-an',
+    '-vf', filter,
+    '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-cpu-used', '6', '-row-mt', '1',
+    '-crf', '10', '-b:v', '0',
+    input.outFile,
+  ], { signal: input.signal });
+
+  const outputFrames = await probeVideoFrames(input.outFile);
+
+  if (outputFrames.length === 0) {
+    throw new ShowcaseError('record_failed', 'После точной нарезки не осталось кадров.', 500);
+  }
+
+  const frameMs = 1000 / input.fps;
+
+  for (const [index, frame] of outputFrames.entries()) {
+    // WebM timebase — целая миллисекунда, поэтому 30 fps чередует PTS 33/34 мс.
+    // Лог хранит точную CFR-сетку по frame index; контейнер допускает полмиллисекунды.
+    if (Math.abs(frame.ptsMs - index * frameMs) > 0.51) {
+      throw new ShowcaseError(
+        'record_failed',
+        `Нарезанный клип нарушил CFR на кадре ${index}.`,
+        500,
+      );
+    }
+  }
+
+  return {
+    path: input.outFile,
+    requestedStartPtsMs: input.startPtsMs,
+    requestedEndPtsMs: input.endPtsMs,
+    firstRetainedSourcePtsMs: firstRetained.ptsMs,
+    sourceEndExclusivePtsMs,
+    outputFirstPtsMs: (outputFrames[0] as VideoFramePoint).ptsMs,
+    frameCount: outputFrames.length,
+    durationMs: outputFrames.length * frameMs,
+    fps: input.fps,
+  };
+}

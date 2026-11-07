@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/ssh/sshContracts.ts",
+    "src/lib/ssh/**/*.ts",
+    "src/lib/executors/_directSshPolicy.ts",
+    "src/lib/executors/work-tools/supervisedSsh.ts",
+    "src/modules/ssh/**/*.ts",
+    "../tests/types/ssh-server-contract.test.mts"
+  ]
+}

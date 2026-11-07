@@ -10,8 +10,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
-import factoryModule from '../../server/src/modules/factory/index.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { buildTicket, writeTicketFile } from '../../server/src/lib/factoryTicket.ts';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -133,7 +134,7 @@ function routeRegistry(extra = {}) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-single-engine-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-single-engine-'));
   const stateDir = path.join(root, 'state');
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');
@@ -142,7 +143,9 @@ async function fixture(t) {
   const taskSourceDir = path.join(root, 'task-source');
   const taskWorktreeDir = path.join(root, 'task-worktree');
   const controlDir = path.join(root, 'control');
+
   await Promise.all([
+    mkdir(controlDir, { mode: 0o700 }),
     mkdir(path.join(stateDir, 'logs'), { recursive: true }),
     mkdir(routesDir, { recursive: true }),
     mkdir(path.join(profilesDir, 'demo'), { recursive: true }),
@@ -238,6 +241,8 @@ async function fixture(t) {
   t.after(() => { process.env.PATH = oldPath; });
 
   const config = {
+    rootDir: root,
+    dataHome: path.join(root, 'data'),
     factoryHome: root,
     factoryBin,
     factoryConfigRoot: path.join(root, 'config'),
@@ -258,12 +263,13 @@ async function fixture(t) {
 
 async function server(t, fx) {
   const app = Fastify({ logger: false });
+
   await app.register(factoryModule, {
     factoryState: fx.adapter,
     config: fx.config,
     prefs: { read: () => ({}) },
-    b24: null,
-    analyzer: { readClarifications: async () => null },
+    tracker: null,
+    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();
   t.after(async () => app.close());
@@ -285,6 +291,28 @@ test('STATE-01: один root показывает current и legacy как read
   assert.equal(current.result, null);
   assert.equal(current.workspaceMode, 'isolated');
   assert.equal('generation' in current, false);
+});
+
+test('STATE-01b: список задач берёт заголовок ручного запуска из тикета', async (t) => {
+  const fx = await fixture(t);
+  await writeTicketFile({
+    dir: fx.config.ticketsDir,
+    task: '8',
+    ticket: buildTicket({
+      task: '8',
+      title: 'Задача без Bitrix',
+      description: 'Постановка пришла из чата.',
+      acceptanceCriteria: ['заголовок виден в конвейере'],
+      sourceUrl: 'http://127.0.0.1:8140/api/tasks/8',
+    }),
+  });
+  const app = await server(t, fx);
+
+  const response = await app.inject({ method: 'GET', url: '/api/tasks' });
+  assert.equal(response.statusCode, 200, response.body);
+  const tasks = response.json().tasks;
+  assert.equal(tasks.find((task) => task.task === '8').title, 'Задача без Bitrix');
+  assert.equal(tasks.find((task) => task.task === '7').title, null);
 });
 
 test('STATE-02: missing pinned route fails graph instead of falling back to graph.json', async (t) => {
@@ -429,6 +457,21 @@ test('STATE-07b: shared service ports are pinned by the immutable profile contra
   assert.equal(await missing(fx.gitLog), true);
 });
 
+// Подъём стенда падает раньше, чем профиль запишет t<номер>.env: для isolated-попытки
+// это штатный исход (упасть можно на втором шаге из одиннадцати). Пустая проекция не
+// должна запирать снос — иначе половинчатую песочницу не убрать ни одной кнопкой, а
+// движок откажется поднимать новую поверх её остатков.
+test('STATE-07c: упавший до записи env подъём не запирает снос стенда', async (t) => {
+  const fx = await fixture(t);
+  const app = await server(t, fx);
+  await rm(path.join(fx.stateDir, 't8.env'));
+
+  const response = await app.inject({ method: 'POST', url: '/api/tasks/8/sandbox/down', payload: {} });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(await missing(fx.downLog), false, 'down.sh профиля вызван');
+  assert.match(await readFile(fx.callsLog, 'utf8'), /abandon/, 'попытку закрыл движок');
+});
+
 test('STATE-08: forged valid-looking attempt identity cannot reach resume engine', async (t) => {
   const fx = await fixture(t);
   const app = await server(t, fx);
@@ -457,17 +500,48 @@ test('STATE-09: provider-writable state can never be configured as trusted contr
   );
 });
 
-test('STATE-10: recovery endpoint inert and cannot resume anything automatically', async (t) => {
+// Автовосстановления нет вовсе: эндпоинт удалён вместе с тумблером и решателем.
+// Заглушка `enabled: false` держалась годами и читалась как «функция есть, но выключена»,
+// поэтому её отсутствие проверяется явно — иначе она вернётся следующей правкой.
+test('STATE-10: recovery endpoint is gone and nothing resumes automatically', async (t) => {
   const fx = await fixture(t);
   const app = await server(t, fx);
   const response = await app.inject({ method: 'GET', url: '/api/factory/recovery' });
-  assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), {
-    enabled: false,
-    running: false,
-    checkedAt: null,
-    items: [],
-    reason: 'manual_resume_only',
-  });
+  assert.equal(response.statusCode, 404);
   assert.equal(await missing(fx.callsLog), true);
+});
+
+test('LOCAL-LIST-01: собственный title/source из записи, ручной тикет остаётся прежним', async (t) => {
+  const fx = await fixture(t);
+  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
+  const task = ownTask();
+
+  fx.config.grigdeskTasksPath = path.join(fx.config.stateDir, 'own.json');
+  await seedTasks(fx.config, [task]);
+  await writeFile(
+    path.join(fx.config.stateDir, `t${task.id}.pipeline`),
+    await readFile(path.join(fx.config.stateDir, 't7.pipeline'), 'utf8'),
+  );
+  await writeTicketFile({
+    dir: fx.config.ticketsDir,
+    task: '7',
+    ticket: buildTicket({
+      task: '7',
+      title: 'Ручная задача',
+      sourceUrl: 'http://client.test/tasks/7'
+    }),
+  });
+
+  const app = await server(t, fx);
+  const response = await app.inject({ url: '/api/tasks' });
+
+  assert.equal(response.statusCode, 200, response.body);
+
+  const own = response.json().tasks.find((entry) => entry.task === task.id);
+  const manual = response.json().tasks.find((entry) => entry.task === '7');
+
+  assert.equal(own.title, task.title);
+  assert.equal(own.source, 'grigdesk');
+  assert.equal(manual.title, 'Ручная задача');
+  assert.equal(manual.source, undefined);
 });

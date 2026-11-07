@@ -4,21 +4,34 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.ts';
 import {
   resolveLegacyModel,
   resolveModelRef,
-} from '../../server/src/lib/chat/model-ref.js';
+} from '../../server/src/lib/chat/modelRef.ts';
 
 const registry = {
-  claude: [{ id: 'claude-opus-5', aliases: ['opus'], tier: 100 }],
+  claude: [{
+    id: 'claude-opus-5',
+    aliases: ['opus'],
+    modelRefAliases: ['claude-opus-5[1m]'],
+    tier: 100,
+  }],
   codex: [{ id: 'gpt-5.6-sol', family: 'sol', tier: 100 }],
   other: [{ id: 'shared', tier: 1 }],
   duplicate: [{ id: 'shared', tier: 1 }],
 };
 
+test('снятый адаптер отсутствует в карточках и не разрешается для запуска', async () => {
+  const adapters = await getProviderAdapters();
+
+  assert.equal(adapters.has('ollama'), false);
+  assert.equal(await getExecutor('ollama'), null);
+});
+
 async function tempStore(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-schema-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-schema-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return {
     root,
@@ -35,6 +48,43 @@ test('modelRef разрешается строго внутри указанно
     { provider: 'codex', model: 'gpt-5.6-sol' });
   assert.equal(resolveModelRef({ provider: 'claude', model: 'gpt-5.6-sol' }, registry).error, 'unknown_model');
   assert.equal(resolveModelRef({ provider: 'missing', model: 'anything' }, registry).error, 'unknown_provider');
+});
+
+test('versioned modelRef канонизирует только retired exact id внутри своего provider', () => {
+  assert.deepEqual(
+    resolveModelRef({ provider: 'claude', model: 'claude-opus-5[1m]' }, registry).modelRef,
+    { provider: 'claude', model: 'claude-opus-5' },
+  );
+  assert.equal(
+    resolveModelRef({ provider: 'claude', model: 'opus' }, registry).error,
+    'unknown_model',
+    'динамический rollout alias не является versioned pin',
+  );
+  assert.equal(
+    resolveModelRef({ provider: 'codex', model: 'claude-opus-5[1m]' }, registry).error,
+    'unknown_model',
+    'retired alias не пробивает provider boundary',
+  );
+});
+
+test('сохранённый schema-2 ref на свёрнутый [1m] мигрирует в канонический id', async (t) => {
+  const { root, store } = await tempStore(t);
+  const monthDir = path.join(root, 'chats', '2026-08');
+  await fs.mkdir(monthDir, { recursive: true });
+  await fs.writeFile(path.join(monthDir, 'retired-1m.json'), JSON.stringify({
+    schema: 2,
+    id: 'retired-1m',
+    modelRef: { provider: 'claude', model: 'claude-opus-5[1m]' },
+    model: 'claude-opus-5[1m]',
+    messages: [],
+    createdAt: Date.UTC(2026, 7, 1),
+    updatedAt: Date.UTC(2026, 7, 1),
+  }));
+
+  const chat = await store.readOne('retired-1m');
+  assert.deepEqual(chat.modelRef, { provider: 'claude', model: 'claude-opus-5' });
+  assert.equal(chat.model, 'claude-opus-5', 'rollback dual-write тоже становится каноническим');
+  assert.deepEqual(chat.modelRefState, { state: 'resolved' });
 });
 
 test('неоднозначный legacy model требует явного перевыбора provider', () => {

@@ -4,9 +4,10 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_kimi_probe() {
-  local version
-  command -v kimi >/dev/null 2>&1 || return 4
-  version=$(factory_exec provider kimi --version) || return
+  local version cli
+  cli=$(factory_external_bin kimi kimi)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  version=$(factory_external_exec kimi kimi --version) || return
   # Версия — диагностика конкретного run, а не допуск. Совместимость Kimi
   # обеспечивают terminal CAS и fail-closed classify: незнакомый отказ остаётся
   # unknown и не запускает стадию повторно только из-за смены semver.
@@ -49,7 +50,7 @@ runner_kimi_capabilities() {
 # Поэтому effort применяется через per-run home: копия config.toml с переписанной
 # секцией [thinking], credentials/oauth — symlink на дефолтный home (OAuth refresh
 # обязан попадать в общее хранилище). CLI невалидный effort молча нормализует в high
-# (spike 2026-08-03, migrations-effort.json), поэтому набор low|high|max раннер
+# (проверено fixture `migrations-effort.json`), поэтому набор low|high|max раннер
 # проверяет здесь fail-closed, до вызова модели.
 _runner_kimi_prepare_home() {
   local run_home=$1 effort=$2
@@ -112,7 +113,10 @@ runner_kimi_run() {
   # Промпт — только аргументом: stdin-форму `-p -` CLI не читает (доказано spike,
   # KIMI.md). Потолок ARG_MAX (~2 МБ на argv+env) на порядки выше конвейерных
   # промптов, отдельной защиты не делаем.
-  local -a args=(kimi -p "$prompt" --output-format stream-json)
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама. Сдвоенное
+  # «kimi kimi» CLI разбирает как неизвестную команду и падает с «unknown command
+  # 'kimi'» ещё до модели (инцидент 07.11.2026, три падения на SHIP-этапе подряд).
+  local -a args=(-p "$prompt" --output-format stream-json)
   [[ -z "$model" ]] || args+=(-m "$model")
   if [[ -n "$effort" ]]; then
     case "$effort" in
@@ -132,9 +136,26 @@ runner_kimi_run() {
   for add_dir in ${RUNNER_KIMI_ADD_DIRS:-}; do
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
+  # Поток CLI идёт в журнал через мост телеметрии: делегируя работу инструментом
+  # `Agent`, kimi перестаёт писать в stdout вообще — ни вызова, ни событий субагентов.
+  # Внутренний wire-журнал при этом продолжает получать события. Внешний журнал мог
+  # надолго замирать при
+  # здоровом ходе, а GrigDesk считает молчание по его свежести и звал человека зря.
+  # Мост — единственный писатель: строки CLI переливаются байт-в-байт, события
+  # субагентов вливаются между ними. Второй параллельный писатель в тот же fd
+  # недопустим — строки CLI доходят до 32 КБ, это много больше PIPE_BUF.
+  # Без python3 мост тихо пропускается: телеметрия субагентов не стоит отказа хода.
+  local bridge="${FACTORY_HOME:?}/lib/runners/kimi-wire.py"
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
-  KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
+  factory_external_launch kimi kimi "${args[@]}" || return $?
+  if [[ -f "$bridge" ]] && command -v python3 >/dev/null 2>&1; then
+    KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}" \
+      | python3 "$bridge" --merge "$run_home"
+    # Исход хода — только у CLI: сбой моста не имеет права стать отказом стадии.
+    return "${PIPESTATUS[0]}"
+  fi
+  KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}"
 }
 
 _runner_kimi_meta() {
@@ -202,13 +223,59 @@ runner_kimi_classify() {
       return
     fi
   fi
-  # Сигнатуры лимитов/401/403/413/429 spike не доказал — classify v1 их не
-  # содержит: лимит Kimi уйдёт в unknown, стадия не переключится (fail-closed,
-  # KIMI.md). При первом живом инциденте — снять stderr/events и добавить fixture.
+  # Исчерпанная квота биллингового цикла: доказана живым инцидентом на узле совета
+  # (CLI 0.33.0, fixture kimi-usage-limit). Требуем ОБЕ части текста —
+  # сам `provider.auth_error: 403` этого не доказывает: тем же кодом отвечает
+  # отозванный или неверный токен, а он лечится не ожиданием, а входом.
+  # Условие «модель не работала» то же, что у no-login: иначе предохранитель
+  # запишет лимит по ходу, который частично выполнился, и следующий заход
+  # переиграет уже сделанное.
+  if grep -qE "provider\.auth_error: 403 .*usage limit" \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    if _runner_kimi_no_model_activity "$run_dir"; then
+      printf 'limited\n'
+      return
+    fi
+  fi
+  # Обрыв транспорта на обновлении OAuth-токена. Доказан 10 живыми инцидентами
+  # (CLI 0.33.0, fixture kimi-oauth-transport): CLI помечает ошибку
+  # `"retryable": false` и завершает ход целиком. Семь из десяти случились ПОСЛЕ
+  # реальной работы — от 7,7 до 58,9 минут, 169 минут суммарно; в самом долгом ходе
+  # wire-журнал насчитал 59 обращений к модели, и все они пропали вместе с ходом.
+  #
+  # Класс `transient` вместо прежнего молчаливого `unknown` не меняет механику
+  # (ни он, ни unknown не переключают исполнителя — и правильно: работа модели уже
+  # была, чужой заход переиграл бы её), но делает отказ ВИДИМЫМ: раньше в meta.env
+  # стояло `RESULT_CLASS=unknown`, и отличить моргнувшую сеть от настоящей поломки
+  # можно было только грепом по wire.jsonl внутри per-run home.
+  #
+  # Проверки «модель не работала» здесь нет намеренно: в этом отказе она как раз
+  # работала, и такой guard исключил бы ровно тот случай, ради которого класс заведён.
+  # Признак берём из ДВУХ частей сразу — адрес токен-эндпоинта и обрыв соединения:
+  # один `OAuth request` покрыл бы и отозванный токен, который ожиданием не лечится.
+  if grep -qE 'OAuth request to https://auth\.kimi\.com/api/oauth/token failed' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null &&
+     grep -qE 'fetch failed|socket disconnected|ECONNRESET|ETIMEDOUT|EAI_AGAIN' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    printf 'transient\n'
+    return
+  fi
+  # Остальные сигнатуры лимитов/401/413/429 spike не доказал: они уходят в unknown,
+  # стадия не переключается (fail-closed, KIMI.md). При новом живом инциденте —
+  # снять stderr/events и добавить fixture рядом.
   printf 'unknown\n'
 }
 
 runner_kimi_fanout_count() {
+  local run_dir=$1
+  local bridge="${FACTORY_HOME:?}/lib/runners/kimi-wire.py"
+  # Считать по events.jsonl нечего: вызовов `Agent` там не бывает вовсе (см.
+  # runner_kimi_run). Источник — wire.jsonl per-run home, и разбирается он как
+  # JSON, а не грепом: `llm.tools_snapshot` несёт ОПИСАНИЕ инструмента Agent,
+  # поэтому греп по имени дал бы ненулевой fanout на ходе без делегирований.
+  if [[ -f "$bridge" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 "$bridge" --fanout "$run_dir/kimi-home" 2>/dev/null && return 0
+  fi
   printf '0\n'
 }
 
@@ -219,6 +286,6 @@ runner_kimi_dialect() {
 runner_kimi_interrupt() {
   # CLI не создаёт собственную сессию: дерево остаётся в setsid-сессии launcher'а,
   # штатный quiesce достаточен (KIMI.md). По имени процесса убивать нельзя — на
-  # хосте живут долгоживущие `kimi acp` процессы чат-рантайма Cockpit.
+  # хосте живут долгоживущие `kimi acp` процессы чат-рантайма GrigDesk.
   return 0
 }

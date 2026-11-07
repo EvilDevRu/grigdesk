@@ -1,0 +1,39 @@
+{
+  "action": {
+    "escalate": {
+      "routes": [
+        "debug",
+        "consilium-debug",
+        "feature",
+        "trivial",
+        "hunt",
+        "command"
+      ]
+    }
+  },
+  "catalogHash": "17bc69db988f5c174f484063523f6a59321223d073c11a007f0f846ebe5877eb",
+  "escalationPolicy": {
+    "allowedRoutes": [
+      "debug",
+      "consilium-debug",
+      "feature",
+      "trivial",
+      "hunt",
+      "command"
+    ],
+    "from": "scout",
+    "requiresHumanWhenPinned": true
+  },
+  "node": "scout",
+  "outcome": "done",
+  "phase": "bootstrap",
+  "retry": {
+    "noResult": 1,
+    "productFailure": 0,
+    "providerFailure": {
+      "attempts": 1,
+      "strategy": "runner-failover"
+    }
+  },
+  "schema": 2
+}

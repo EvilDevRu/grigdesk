@@ -27,6 +27,7 @@ first=$("$NODE_BIN" "$publisher" "$routes_dir" 'Диагностика v1' null)
 assert_rc 0 "$?" "immutable route fixture is published"
 catalog_v1=$(json_field "$first" catalogHash)
 route_v1=$(json_field "$first" routeHash)
+dispatch_v1=00000000-0000-4000-8000-000000000001
 
 # protocol root мог появиться раньше ledger через orchestrator/shared locks под umask 0002.
 # Prepare обязан безопасно сузить уже существующие owned canonical directories.
@@ -36,7 +37,8 @@ assert_eq 775 "$(stat -c '%a' "$control_dir/protocol-v2")" \
   "fixture starts with a group-writable protocol root"
 
 ATTEMPT_STATE_ID_OVERRIDE=a_11111111111111111111111111111111
-attempt_v1=$(attempt_state_begin_v2 42 demo-profile "$routes_dir")
+attempt_v1=$(attempt_state_begin_v2 \
+  42 demo-profile "$routes_dir" "$catalog_v1" "$dispatch_v1" alpha)
 begin_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$begin_rc" "v2 bootstrap attempt starts"
@@ -63,8 +65,62 @@ assert_eq 400 "$(stat -c '%a' "$attempt_dir/attempt.json")" \
   "immutable attempt metadata is read-only"
 assert_eq 2 "$(_attempt_state_json get "$attempt_dir/attempt.json" protocolVersion)" \
   "attempt metadata records protocolVersion"
+assert_eq 2 "$(_attempt_state_json get "$attempt_dir/attempt.json" schema)" \
+  "new attempt metadata uses the versioned launch identity schema"
 assert_eq "$catalog_v1" "$(_attempt_state_json get "$attempt_dir/attempt.json" catalogHash)" \
   "attempt metadata pins the verified current catalog"
+assert_eq "$dispatch_v1" \
+  "$(_attempt_state_json get "$attempt_dir/attempt.json" queueDispatchId)" \
+  "attempt metadata pins the exact queue dispatch identity"
+assert_eq alpha \
+  "$(_attempt_state_json get "$attempt_dir/attempt.json" runnerPrimaryOverride)" \
+  "attempt metadata distinguishes the exact runner override"
+
+strict_v2="$TEST_ROOT/attempt-v2-missing-identity.json"
+python3 - "$attempt_dir/attempt.json" "$strict_v2" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    value = json.load(source)
+del value["runnerPrimaryOverride"]
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(value, target, ensure_ascii=False, sort_keys=True, indent=2)
+    target.write("\n")
+PY
+_attempt_state_json validate-attempt "$strict_v2" 42 "$attempt_v1" >/dev/null 2>&1
+assert_rc 78 "$?" "attempt schema 2 refuses a missing identity field"
+
+strict_v2_runner="$TEST_ROOT/attempt-v2-long-runner.json"
+python3 - "$attempt_dir/attempt.json" "$strict_v2_runner" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    value = json.load(source)
+value["runnerPrimaryOverride"] = "a" * 65
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(value, target, ensure_ascii=False, sort_keys=True, indent=2)
+    target.write("\n")
+PY
+_attempt_state_json validate-attempt "$strict_v2_runner" 42 "$attempt_v1" >/dev/null 2>&1
+assert_rc 78 "$?" "attempt schema 2 bounds runner override to 64 characters"
+
+strict_v2_dispatch="$TEST_ROOT/attempt-v2-uppercase-dispatch.json"
+python3 - "$attempt_dir/attempt.json" "$strict_v2_dispatch" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    value = json.load(source)
+value["queueDispatchId"] = "00000000-0000-4000-8000-00000000000A"
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(value, target, ensure_ascii=False, sort_keys=True, indent=2)
+    target.write("\n")
+PY
+_attempt_state_json validate-attempt "$strict_v2_dispatch" 42 "$attempt_v1" \
+  >/dev/null 2>&1
+assert_rc 78 "$?" "attempt schema 2 rejects uppercase dispatch UUID"
 
 metadata_before=$(sha256sum "$attempt_dir/attempt.json" | awk '{print $1}')
 pins_before=$(sha256sum "$attempt_dir/pins.json" | awk '{print $1}')
@@ -79,6 +135,152 @@ second=$("$NODE_BIN" "$publisher" "$routes_dir" 'Диагностика v2' "$ca
 assert_rc 0 "$?" "a new current catalog is published while Scout is running"
 catalog_v2=$(json_field "$second" catalogHash)
 route_v2=$(json_field "$second" routeHash)
+
+# Если между fast check и authoritative begin исчез именно canonical current,
+# valid expected получает typed mismatch с `none`. Повреждённый существующий
+# pointer остаётся integrity failure: его нельзя безопасно переименовать в CAS.
+current_pointer="$routes_dir/demo-profile/catalog/current.json"
+current_saved="$TEST_ROOT/current.saved.json"
+mv -- "$current_pointer" "$current_saved"
+ATTEMPT_STATE_ID_OVERRIDE=a_52525252525252525252525252525252
+current_missing=$(attempt_state_begin_v2 \
+  52 demo-profile "$routes_dir" "$catalog_v2" "$dispatch_v1" alpha 2>&1)
+current_missing_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+mv -- "$current_saved" "$current_pointer"
+assert_rc 75 "$current_missing_rc" \
+  "missing current after fast check is a typed catalog transition"
+assert_contains "$current_missing" \
+  "FACTORY_ERROR=catalog_changed EXPECTED=$catalog_v2 ACTUAL=none" \
+  "missing current exposes the stable none marker"
+current_missing_root=$(attempt_state_v2_task_root 52)
+assert_file_missing "$current_missing_root/active-attempt.json" \
+  "missing current publishes no active pointer"
+assert_eq 0 \
+  "$(find "$current_missing_root/attempts" -mindepth 1 -maxdepth 1 -type d ! -name '.new.*' | wc -l | tr -d ' ')" \
+  "missing current publishes no attempt or pins"
+
+mv -- "$current_pointer" "$current_saved"
+printf '%s\n' '{"schema":2' >"$current_pointer"
+ATTEMPT_STATE_ID_OVERRIDE=a_53535353535353535353535353535353
+current_corrupt=$(attempt_state_begin_v2 \
+  53 demo-profile "$routes_dir" "$catalog_v2" "$dispatch_v1" alpha 2>&1)
+current_corrupt_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+rm -- "$current_pointer"
+mv -- "$current_saved" "$current_pointer"
+assert_rc 78 "$current_corrupt_rc" \
+  "corrupt current remains a fail-closed integrity error"
+case "$current_corrupt" in
+  *FACTORY_ERROR=catalog_changed*)
+    test_fail "corrupt current is not masked as a safe catalog mismatch" \
+      "$current_corrupt"
+    ;;
+  *)
+    test_ok "corrupt current is not masked as a safe catalog mismatch"
+    ;;
+esac
+current_corrupt_root=$(attempt_state_v2_task_root 53)
+assert_file_missing "$current_corrupt_root/active-attempt.json" \
+  "corrupt current publishes no active pointer"
+assert_eq 0 \
+  "$(find "$current_corrupt_root/attempts" -mindepth 1 -maxdepth 1 -type d ! -name '.new.*' | wc -l | tr -d ' ')" \
+  "corrupt current publishes no attempt or pins"
+
+# Ранний check мог увидеть catalog v1, но authoritative begin обязан заново
+# сравнить current под task lock. Mismatch не публикует ни attempt, ни pins/pointer.
+ATTEMPT_STATE_ID_OVERRIDE=a_47474747474747474747474747474747
+catalog_changed=$(attempt_state_begin_v2 \
+  47 demo-profile "$routes_dir" "$catalog_v1" "$dispatch_v1" alpha 2>&1 >/dev/null)
+catalog_changed_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+assert_rc 75 "$catalog_changed_rc" "authoritative begin rejects a stale expected catalog"
+assert_contains "$catalog_changed" \
+  "FACTORY_ERROR=catalog_changed EXPECTED=$catalog_v1 ACTUAL=$catalog_v2" \
+  "catalog CAS failure has a stable machine-readable marker"
+catalog_changed_root=$(attempt_state_v2_task_root 47)
+assert_file_missing "$catalog_changed_root/active-attempt.json" \
+  "catalog CAS mismatch publishes no active pointer"
+assert_eq 0 \
+  "$(find "$catalog_changed_root/attempts" -mindepth 1 -maxdepth 1 -type d ! -name '.new.*' | wc -l | tr -d ' ')" \
+  "catalog CAS mismatch publishes no attempt or pins"
+
+# expected hash без dispatch — штатный manual launch; guard однонаправленный.
+ATTEMPT_STATE_ID_OVERRIDE=a_48484848484848484848484848484848
+manual_expected=$(attempt_state_begin_v2 48 demo-profile "$routes_dir" "$catalog_v2")
+manual_expected_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+assert_rc 0 "$manual_expected_rc" "manual begin may pin an expected catalog without dispatch"
+manual_expected_dir="$(attempt_state_v2_task_root 48)/attempts/$manual_expected"
+assert_eq null "$(json_field "$(cat "$manual_expected_dir/attempt.json")" queueDispatchId)" \
+  "manual expected launch records nullable queue provenance"
+assert_eq "" "$(_attempt_state_json get "$manual_expected_dir/attempt.json" runnerPrimaryOverride)" \
+  "empty runner override remains an exact empty string"
+attempt_state_abandon_v2 48 "$manual_expected" 'manual expected fixture завершён' >/dev/null
+assert_rc 0 "$?" "manual expected attempt remains normally closable"
+
+attempt_state_begin_v2 49 demo-profile "$routes_dir" "" "$dispatch_v1" alpha \
+  >/dev/null 2>&1
+assert_rc 2 "$?" "dispatch without expected catalog is refused before state mutation"
+attempt_state_begin_v2 49 demo-profile "$routes_dir" invalid "" alpha \
+  >/dev/null 2>&1
+assert_rc 2 "$?" "invalid expected catalog is refused before state mutation"
+attempt_state_begin_v2 49 demo-profile "$routes_dir" "$catalog_v2" \
+  not-a-uuid alpha >/dev/null 2>&1
+assert_rc 2 "$?" "invalid dispatch UUID is refused before state mutation"
+uppercase_dispatch=00000000-0000-4000-8000-00000000000A
+attempt_state_begin_v2 49 demo-profile "$routes_dir" "$catalog_v2" \
+  "$uppercase_dispatch" alpha >/dev/null 2>&1
+assert_rc 2 "$?" "uppercase dispatch UUID is refused before state mutation"
+runner_too_long=$(printf 'a%.0s' {1..65})
+attempt_state_begin_v2 49 demo-profile "$routes_dir" "$catalog_v2" \
+  "" "$runner_too_long" >/dev/null 2>&1
+assert_rc 2 "$?" "runner override over 64 characters is refused before state mutation"
+assert_file_missing "$control_dir/protocol-v2/tasks/t49" \
+  "invalid launch identity creates no task ledger"
+
+# Recovery — новый run: он сохраняет task-level runner policy, но dispatch ID
+# остаётся уникальным для предшественницы и не может принадлежать двум attempts.
+ATTEMPT_STATE_ID_OVERRIDE=a_50505050505050505050505050505050
+queued_predecessor=$(attempt_state_begin_v2 \
+  50 demo-profile "$routes_dir" "$catalog_v2" "$dispatch_v1" alpha)
+unset ATTEMPT_STATE_ID_OVERRIDE
+attempt_state_select_route_v2 50 "$queued_predecessor" debug >/dev/null
+attempt_state_abandon_v2 50 "$queued_predecessor" 'queue fixture recovery' >/dev/null
+ATTEMPT_STATE_ID_OVERRIDE=a_51515151515151515151515151515151
+queued_recovery=$(attempt_state_recover_v2 \
+  50 "$queued_predecessor" 'отдельный recovery' beta)
+queued_recovery_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+assert_rc 0 "$queued_recovery_rc" "schema 2 queue attempt can recover as a separate run"
+queued_root=$(attempt_state_v2_task_root 50)
+assert_eq "$dispatch_v1" \
+  "$(_attempt_state_json get "$queued_root/attempts/$queued_predecessor/attempt.json" queueDispatchId)" \
+  "predecessor retains its immutable dispatch identity"
+assert_eq "" \
+  "$(_attempt_state_json get "$queued_root/attempts/$queued_recovery/attempt.json" queueDispatchId)" \
+  "recovery does not create a second owner of the dispatch identity"
+assert_eq alpha \
+  "$(_attempt_state_json get "$queued_root/attempts/$queued_recovery/attempt.json" runnerPrimaryOverride)" \
+  "schema 2 recovery trusts the predecessor runner override, not a fallback"
+strict_recovery="$TEST_ROOT/recovery-v2-with-dispatch.json"
+python3 - \
+  "$queued_root/attempts/$queued_recovery/attempt.json" "$strict_recovery" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    value = json.load(source)
+value["queueDispatchId"] = "00000000-0000-4000-8000-000000000009"
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(value, target, ensure_ascii=False, sort_keys=True, indent=2)
+    target.write("\n")
+PY
+_attempt_state_json validate-attempt \
+  "$strict_recovery" 50 "$queued_recovery" >/dev/null 2>&1
+assert_rc 78 "$?" "schema 2 recovery rejects non-null dispatch provenance"
+attempt_state_abandon_v2 50 "$queued_recovery" 'queue recovery fixture завершён' >/dev/null
+assert_rc 0 "$?" "queue recovery attempt remains independently closable"
 
 bootstrap_after_promotion=$(attempt_state_resume_v2 42 "$attempt_v1")
 assert_rc 0 "$?" "bootstrap attempt resumes after current promotion"
@@ -168,16 +370,41 @@ abandoned_begin_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$abandoned_begin_rc" "attempt for recovery scenario starts"
 abandoned_dir="$task_root/attempts/$abandoned"
+
+# Rolling upgrade: schema 1 был exact-документом без queue/runner полей. Reader
+# обязан принять его как есть, а не требовать миграцию immutable attempt на месте.
+chmod 600 "$abandoned_dir/attempt.json" "$abandoned_dir/attempt.sha256"
+python3 - "$abandoned_dir/attempt.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    value = json.load(source)
+value["schema"] = 1
+del value["queueDispatchId"]
+del value["runnerPrimaryOverride"]
+with open(path, "w", encoding="utf-8") as target:
+    json.dump(value, target, ensure_ascii=False, sort_keys=True, indent=2)
+    target.write("\n")
+PY
+sha256sum "$abandoned_dir/attempt.json" | awk '{print $1}' \
+  >"$abandoned_dir/attempt.sha256"
+chmod 400 "$abandoned_dir/attempt.json" "$abandoned_dir/attempt.sha256"
+legacy_attempt_resume=$(attempt_state_resume_v2 42 "$abandoned")
+assert_rc 0 "$?" "schema 1 attempt remains readable and resumable after upgrade"
+assert_contains "$legacy_attempt_resume" "\"catalogHash\": \"$catalog_v2\"" \
+  "schema 1 resume keeps its original catalog pin"
 attempt_state_select_route_v2 42 "$abandoned" debug >/dev/null
 assert_rc 0 "$?" "predecessor has its own route selection"
 
-# Причина ручного вмешательства ограничена одной строкой в 500 символов, и отказ
-# обязан называть нарушенное правило: молчащий код 2 неотличим от отказа ledger,
-# и человек ищет причину в состоянии попытки, а не в своём тексте.
-long_reason=$(python3 -c 'print("щ" * 501, end="")')
+# Причина ручного вмешательства ограничена 20 000 символов, и отказ обязан называть
+# нарушенное правило: молчащий код 2 неотличим от отказа ledger, и человек ищет
+# причину в состоянии попытки, а не в своём тексте.
+long_reason=$(python3 -c 'print("щ" * 20001, end="")')
 long_stderr=$(attempt_state_abandon_v2 42 "$abandoned" "$long_reason" 2>&1 >/dev/null)
 assert_rc 2 "$?" "abandon refuses a reason over the limit"
-assert_contains "$long_stderr" 'причина 501 символов, допустимо 1..500' \
+assert_contains "$long_stderr" 'причина 20001 символов, допустимо 1..20000' \
   "the refusal names the violated rule instead of a bare exit code"
 assert_contains "$long_stderr" 'файл этапа' \
   "the refusal says where a long explanation belongs"
@@ -185,16 +412,21 @@ empty_stderr=$(_attempt_state_reason '' 2>&1 >/dev/null)
 assert_rc 2 "$?" "an empty reason is refused"
 assert_contains "$empty_stderr" 'не может быть пустой' \
   "the empty reason refusal is named too"
-multiline_stderr=$(_attempt_state_reason 'первая строка
-вторая строка' 2>&1 >/dev/null)
-assert_rc 2 "$?" "a multi-line reason is refused"
-assert_contains "$multiline_stderr" 'перевод строки в позиции 14' \
+# Указание человека — это текст задания следующему агенту: перечень точек правки,
+# таблица замеров, запреты. Однострочный лимит резал его на первом абзаце, поэтому
+# многострочность разрешена, а из управляющих символов запрещено всё остальное.
+_attempt_state_reason 'первая строка
+вторая строка'
+assert_rc 0 "$?" "a multi-line reason is accepted"
+control_stderr=$(_attempt_state_reason "$(printf 'первая строка\rвторая')" 2>&1 >/dev/null)
+assert_rc 2 "$?" "a carriage return is still refused"
+assert_contains "$control_stderr" 'возврат каретки в позиции 14' \
   "the refusal points at the offending character"
-# Лимит считается в символах, а не в байтах: 500 кириллических — это 1000 байт,
-# и граница обязана пропускать их, иначе русская причина обрезается вдвое.
-boundary_reason=$(python3 -c 'print("щ" * 500, end="")')
+# Лимит считается в символах, а не в байтах: 20 000 кириллических — это 40 000 байт,
+# и граница обязана пропускать их, иначе русский текст обрезается вдвое.
+boundary_reason=$(python3 -c 'print("щ" * 20000, end="")')
 _attempt_state_reason "$boundary_reason"
-assert_rc 0 "$?" "a reason of exactly 500 characters is accepted"
+assert_rc 0 "$?" "a reason of exactly 20000 characters is accepted"
 assert_eq 0 \
   "$(find "$abandoned_dir" -maxdepth 1 -type f -name 'terminal.*.json' | wc -l | tr -d ' ')" \
   "a refused reason closes nothing"
@@ -210,7 +442,8 @@ assert_rc 0 "$?" "another catalog can be promoted before recovery"
 catalog_v3=$(json_field "$third" catalogHash)
 
 ATTEMPT_STATE_ID_OVERRIDE=a_44444444444444444444444444444444
-recovery=$(attempt_state_recover_v2 42 "$abandoned" 'продолжить от принятой границы')
+recovery=$(attempt_state_recover_v2 \
+  42 "$abandoned" 'продолжить от принятой границы' alpha)
 recovery_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$recovery_rc" "recovery creates a separate active attempt"
@@ -222,6 +455,13 @@ assert_eq recovery "$(_attempt_state_json get "$recovery_dir/attempt.json" origi
   "recovery origin is explicit"
 assert_eq "$catalog_v3" "$(_attempt_state_json get "$recovery_dir/attempt.json" catalogHash)" \
   "recovery performs a new explicit catalog pin"
+assert_eq 2 "$(_attempt_state_json get "$recovery_dir/attempt.json" schema)" \
+  "recovery from schema 1 writes the new strict schema 2"
+assert_eq "" "$(_attempt_state_json get "$recovery_dir/attempt.json" queueDispatchId)" \
+  "recovery never inherits queue provenance"
+assert_eq alpha \
+  "$(_attempt_state_json get "$recovery_dir/attempt.json" runnerPrimaryOverride)" \
+  "schema 1 recovery receives the exact legacy registry runner fallback"
 recovery_resume=$(attempt_state_resume_v2 42 "$recovery")
 assert_contains "$recovery_resume" "\"route\": null" \
   "recovery gets separate bootstrap state rather than copied route state"

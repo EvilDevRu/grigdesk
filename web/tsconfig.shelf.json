@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/lib/contractDecoders.ts",
+    "../shared/trackers/shelfContracts.ts",
+    "src/shared/shelfApi.ts",
+    "src/shared/taskShelfDecision.ts",
+    "src/stores/taskShelf.ts",
+    "src/views/shelf/**/*.vue",
+    "src/views/ShelfView.vue",
+    "../tests/types/shelf-contract.test.ts"
+  ]
+}

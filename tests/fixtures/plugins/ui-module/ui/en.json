@@ -1,0 +1,12 @@
+{
+  "greeting": "Hello, {name}",
+  "b1": {
+    "notify": "B1 notification",
+    "dismiss": "Dismiss B1",
+    "open": "Open B1",
+    "close": "Close B1",
+    "expand": "Expand B1",
+    "ask": "Ask B1",
+    "notification": "B1 notification"
+  }
+}

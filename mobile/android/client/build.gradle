@@ -1,0 +1,67 @@
+apply plugin: 'com.android.application'
+
+// Номер общий с прежним приложением; до выпуска остаётся 0.1.0.
+def mobileVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def parts = mobileVersion.tokenize('.').collect { Integer.parseInt(it) }
+if (parts.size() != 3 || parts[1] > 99 || parts[2] > 99) {
+    throw new GradleException('Версия требует major.minor.patch, minor и patch от 0 до 99')
+}
+
+android {
+    namespace 'local.grigdesk.client'
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId 'local.grigdesk.mobile'
+        minSdk rootProject.ext.minSdkVersion
+        targetSdk rootProject.ext.targetSdkVersion
+        versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
+        versionName mobileVersion
+    }
+    sourceSets {
+        main.assets.srcDir '../../../shared/i18n/assets'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    signingConfigs {
+        debug {
+            if (System.getenv('ANDROID_USER_HOME')) {
+                storeFile new File(System.getenv('ANDROID_USER_HOME'), 'debug.keystore')
+            }
+        }
+        release {
+            if (System.getenv('GRIGDESK_ANDROID_STORE_FILE')) {
+                storeFile file(System.getenv('GRIGDESK_ANDROID_STORE_FILE'))
+                storePassword System.getenv('GRIGDESK_ANDROID_STORE_PASSWORD')
+                keyPassword System.getenv('GRIGDESK_ANDROID_KEY_PASSWORD')
+                keyAlias System.getenv('GRIGDESK_ANDROID_KEY_ALIAS')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (System.getenv('GRIGDESK_ANDROID_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
+    }
+    testOptions {
+        unitTests.all {
+            workingDir projectDir
+        }
+    }
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    testImplementation "junit:junit:$junitVersion"
+    testImplementation 'org.json:json:20240303'
+}

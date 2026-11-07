@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { boardActivity, boardTaskIds } from '../../web/src/shared/board-activity.js';
+import { boardActivity, boardTaskIds } from '../../web/src/shared/boardActivity.ts';
 
 test('чип доски считает только задачи с живым таймером, а не все начатые', () => {
   const dashboard = {
@@ -35,5 +35,29 @@ test('оставшийся activeTimer не выдаёт остановленн�
     activeTimerCount: 0,
     unseenCount: 0,
     unseenTaskIds: [],
+  });
+});
+
+test('без базовой линии отметок новых задач не бывает вовсе', () => {
+  const dashboard = {
+    tasks: [
+      { id: 31, status: 2, statusKind: 'todo', timerRunning: true },
+      { id: 32, status: 2, statusKind: 'todo', timerRunning: false },
+    ],
+  };
+
+  // Пустой набор отметок означает «сервер ещё не ответил», а не «ничего не смотрели»:
+  // иначе первая же загрузка объявила бы новыми все давние задачи разом.
+  assert.deepEqual(boardActivity(dashboard, [], { ready: false }), {
+    activeTimerCount: 1,
+    unseenCount: 0,
+    unseenTaskIds: [],
+  });
+
+  // С базовой линией тот же пустой набор читается уже буквально.
+  assert.deepEqual(boardActivity(dashboard, [], { ready: true }), {
+    activeTimerCount: 1,
+    unseenCount: 2,
+    unseenTaskIds: ['31', '32'],
   });
 });

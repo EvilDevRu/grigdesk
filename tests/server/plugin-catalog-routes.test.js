@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { PluginCatalogService } from '../../server/src/lib/pluginCatalog.ts';
+import { installHttpFixture } from './helpers/pluginInstallHttpFixture.js';
+import { catalogFixture } from '../helpers/pluginCatalog.js';
+import { moduleCatalogFixture } from '../helpers/pluginCatalogModules.js';
+import { decodeCatalogResponse, decodeCatalogDetail } from '../../shared/plugins/pluginCatalogContracts.ts';
+
+test('CAT-R1: auth до сети, same-origin API, строгие query, детали и 404', async (t) => {
+  const data = catalogFixture();
+  const calls = [];
+  const catalog = new PluginCatalogService({
+    urls: ['https://catalog.example.invalid/api/plugins/v1/index.json'],
+    applicationVersion: '1.0.0',
+    fetch: async (input) => {
+      calls.push(String(input));
+
+      return new Response(JSON.stringify(String(input).endsWith('index.json') ? data.index : data.detail), {
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  t.after(() => catalog.close());
+
+
+  const fixture = await installHttpFixture(t, { catalog });
+
+  assert.equal((await fixture.app.inject('/api/plugin-catalog')).statusCode, 401);
+  assert.equal((await fixture.app.inject('/api/plugin-catalog/demo')).statusCode, 401);
+  assert.equal(calls.length, 0);
+
+  for (const headers of [fixture.session, fixture.cli, fixture.internal]) {
+    const response = await fixture.app.inject({ url: '/api/plugin-catalog', headers });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().state, 'fresh');
+  }
+
+  for (const address of ['/api/plugin-catalog?url=https://foreign.invalid',
+    '/api/plugin-catalog?refresh=true']) {
+    assert.equal((await fixture.app.inject({ url: address, headers: fixture.session })).statusCode, 400);
+  }
+
+  const detail = await fixture.app.inject({ url: '/api/plugin-catalog/demo', headers: fixture.session });
+
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.json().plugin.id, 'demo');
+  assert.equal((await fixture.app.inject({
+    url: '/api/plugin-catalog/missing', headers: fixture.session,
+  })).statusCode, 404);
+  assert.equal(calls.some((value) => value.includes('foreign.invalid')), false);
+});
+
+
+test('CAT-R2-MIXED: общий маршрут отдаёт api1/2, сохраняет auth и строгие query', async (t) => {
+  const data = moduleCatalogFixture();
+  const calls = [];
+  const catalog = new PluginCatalogService({
+    urls: ['https://catalog.test/api/plugins/v1/index.json'],
+    applicationVersion: '1.0.0',
+    fetch: async (input) => {
+      const url = String(input);
+
+      calls.push(url);
+
+      return Response.json(url.endsWith('index.json') ? data.index : data.detail);
+    },
+  });
+
+  t.after(() => catalog.close());
+
+  const fixture = await installHttpFixture(t, { catalog });
+
+  for (const url of ['/api/plugin-catalog', '/api/plugin-catalog/demo']) {
+    assert.equal((await fixture.app.inject(url)).statusCode, 401);
+  }
+
+  assert.deepEqual(calls, []);
+
+  for (const headers of [fixture.session, fixture.cli, fixture.internal]) {
+    const index = await fixture.app.inject({ url: '/api/plugin-catalog', headers });
+    const detail = await fixture.app.inject({ url: '/api/plugin-catalog/demo', headers });
+
+    assert.equal(index.statusCode, 200);
+    assert.equal(detail.statusCode, 200);
+    assert.deepEqual(decodeCatalogResponse(index.json()).catalog, data.index);
+    assert.deepEqual(decodeCatalogDetail(detail.json()), data.detail);
+  }
+
+  const refreshed = await fixture.app.inject({
+    url: '/api/plugin-catalog?refresh=1',
+    headers: fixture.session,
+  });
+
+  assert.equal(refreshed.statusCode, 200);
+  assert.equal(calls.filter((url) => url.endsWith('index.json')).length, 2);
+  assert.ok(calls.every((url) => url.includes('/v1/')));
+
+  for (const root of ['/api/plugin-catalog', '/api/plugin-catalog/demo']) {
+    for (const query of [
+      'api=1', 'api=2', 'api=3', 'api=x', 'api=2&foreign=1', 'url=https://foreign.invalid',
+    ]) {
+      const response = await fixture.app.inject({ url: `${root}?${query}`, headers: fixture.session });
+
+      assert.equal(response.statusCode, 400, `${root}?${query}`);
+    }
+  }
+});
+
+test('CAT-V1-MEDIA-ROUNDTRIP: service и HTTP сохраняют media и README детальной карточки', async (t) => {
+  const data = catalogFixture();
+  const icon = {
+    path: 'assets/icon.webp',
+    sha: data.version.sha,
+    mediaType: 'image/webp',
+    bytes: 1024
+  };
+
+  data.detail.plugin.icon = icon;
+  data.detail.plugin.gallery = { screenshots: [{ ...icon, path: 'assets/screen.webp' }] };
+
+  const catalog = new PluginCatalogService({
+    urls: ['https://catalog.test/api/plugins/v1/index.json'],
+    applicationVersion: '1.0.0',
+    fetch: async (input) => Response.json(String(input).endsWith('index.json') ? data.index : data.detail),
+  });
+
+  t.after(() => catalog.close());
+
+  const f = await installHttpFixture(t, { catalog });
+
+  await f.app.inject({ url: '/api/plugin-catalog', headers: f.session });
+
+  const response = await f.app.inject({ url: '/api/plugin-catalog/demo', headers: f.session });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().plugin.icon, icon);
+  assert.deepEqual(response.json().plugin.gallery, data.detail.plugin.gallery);
+  assert.equal(response.json().plugin.readme, data.detail.plugin.readme);
+});

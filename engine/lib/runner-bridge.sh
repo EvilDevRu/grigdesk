@@ -16,4 +16,13 @@ declare -F "$fn" >/dev/null || {
 if [[ "${FACTORY_LAUNCH_BARRIER:-0}" == 1 ]]; then
   kill -STOP "$$"
 fi
-"$fn" "$@"
+if [[ "$method" == run && "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
+  source "$FACTORY_HOME/lib/browser-transport.sh"
+  browser_task=$1
+  browser_prompt=$2
+  shift 2
+  browser_transport_prompt "$browser_prompt" || exit "$?"
+  "$fn" "$browser_task" "$BROWSER_TRANSPORT_PROMPT" "$@"
+else
+  "$fn" "$@"
+fi

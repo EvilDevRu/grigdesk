@@ -1,102 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TaskModal.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-
-async function compileTaskModal() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-task-modal-launch-profile-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', 'from "' + VUE_URL + '"')
-    .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
-    .replaceAll("from 'pinia'", "from '" + PINIA_URL + "'")
-    .replace(
-      "import { useRouter } from 'vue-router';",
-      'const useRouter = () => ({ push() {} });',
-    )
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__taskModalLaunchApi;',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import HelpTip from '../shared/ui/HelpTip.vue';",
-      'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__taskModalLaunchUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__taskModalLaunchTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__taskModalLaunchBoardStore;',
-    )
-    .replace(
-      "import { useAnalysisStore } from '../stores/analysis.js';",
-      'const useAnalysisStore = globalThis.__taskModalLaunchAnalysisStore;',
-    )
-    .replace(
-      "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
-      'const useTaskFavoritesStore = globalThis.__taskModalLaunchFavoriteStore;',
-    )
-    .replace(
-      "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { providerLabel } from '../shared/runner-display.js';",
-      'const { providerLabel } = globalThis.__taskModalLaunchRunnerDisplay;',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { template: "<span></span>" };',
-    )
-    .replace(
-      "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-      'const TaskFavoriteButton = { props: ["active", "pending", "taskTitle"], template: "<span></span>" };',
-    );
-  // Уникальный хвост: иначе data: URL совпадает между тестами, import отдаёт кеш
-  // модуля, и компонент навсегда остаётся склеен с заглушками ПЕРВОГО теста.
-  compileTaskModal.seq = (compileTaskModal.seq || 0) + 1;
-  return (await import(
-    'data:text/javascript;base64,'
-    + Buffer.from(`${code}\n// compile #${compileTaskModal.seq}`).toString('base64')
-  )).default;
-}
-
 // Общий стенд для сценариев формы запуска: happy-dom + заглушки сторов.
 // launchOptions/launch задаёт тест, остальные вызовы — безобидные пустышки.
-async function mountLaunchForm(t, { launchOptions }) {
+async function mountLaunchForm(t, { launchOptions, launch = null }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -120,6 +32,13 @@ async function mountLaunchForm(t, { launchOptions }) {
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const launchCalls = [];
+  const listeners = new Set();
+
+  globalThis.__taskModalLaunchSubscribe = (handler) => {
+    listeners.add(handler);
+
+    return () => listeners.delete(handler);
+  };
   globalThis.__taskModalLaunchApi = {
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };
@@ -129,20 +48,25 @@ async function mountLaunchForm(t, { launchOptions }) {
     async post() { return {}; },
     async upload() { return {}; },
   };
-  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__taskModalLaunchUiStore = defineStore('task-modal-launch-ui', {
     state: () => ({ taskId: 42 }),
     actions: { close() {} },
   });
   globalThis.__taskModalLaunchTasksStore = defineStore('task-modal-launch-tasks', {
     actions: {
-      async load() { return { title: 'Экспорт чертежа', description: 'Проверить GLB' }; },
+      async load() { return { title: 'Обновить отчёт', description: 'Проверить результат' }; },
       async timer() {},
       async complete() {},
       async comment() {},
       launchOptions,
       async launch(id, payload) {
         launchCalls.push([String(id), payload]);
+
+        if (launch) {
+          return launch(id, payload);
+        }
+
         return { outcome: 'launched', profile: payload.profile, route: payload.route };
       },
     },
@@ -150,7 +74,7 @@ async function mountLaunchForm(t, { launchOptions }) {
   globalThis.__taskModalLaunchBoardStore = defineStore('task-modal-launch-board', {
     state: () => ({
       data: {
-        tasks: [{ id: 42, title: 'Экспорт чертежа', group: 'RDesigner' }],
+        tasks: [{ id: 42, title: 'Обновить отчёт', group: 'Проект Бета' }],
         toReview: [], created: [], accomplice: [], auditor: [],
       },
     }),
@@ -162,7 +86,7 @@ async function mountLaunchForm(t, { launchOptions }) {
       async analyze() {},
     },
   });
-  globalThis.__taskModalLaunchFavoriteStore = defineStore('task-modal-launch-favorite', {
+  globalThis.__taskModalLaunchFavoritesStore = defineStore('task-modal-launch-favorite', {
     state: () => ({ taskIds: [], loaded: true, loading: false, error: null, pending: {} }),
     getters: {
       isFavorite: () => () => false,
@@ -170,10 +94,19 @@ async function mountLaunchForm(t, { launchOptions }) {
     },
     actions: { async load() {}, async toggle() {} },
   });
+  // Открытая задача перестаёт быть новой; форме запуска отметка безразлична.
+  globalThis.__taskModalLaunchSeenStore = defineStore('task-modal-launch-seen', {
+    state: () => ({ taskIds: [], loaded: true, initialized: true, loading: false, error: null }),
+    getters: {
+      isSeen: () => () => false,
+      ready: () => true,
+    },
+    actions: { async load() {}, async markSeen() { return true; } },
+  });
 
-  const wrapper = mount(await compileTaskModal(), {
+  const wrapper = mount(await compileTaskModal('__taskModalLaunch'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia()], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
@@ -185,16 +118,138 @@ async function mountLaunchForm(t, { launchOptions }) {
       '__taskModalLaunchTasksStore',
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
-      '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchFavoritesStore',
+      '__taskModalLaunchSeenStore',
+      '__taskModalLaunchSubscribe',
     ]) delete globalThis[key];
   });
   await flushPromises();
-  return { wrapper, flushPromises, launchCalls };
+
+  return {
+    wrapper,
+    flushPromises,
+    launchCalls,
+    listeners,
+    emit: (name, payload) => listeners.forEach((handler) => handler(name, payload)),
+  };
 }
 
-test('TaskModal выбирает rdesigner, перечитывает feature и шлёт profile в launch', async (t) => {
+/**
+ * Каталог содержит валидный маршрут: кнопка блокируется именно исчезнувшим профилем.
+ * Наличие соседа проверяет запрет автоматического выбора вместо удалённого проекта.
+ */
+function deletionCatalog(removed = false) {
+  return {
+    profiles: removed ? ['project-beta'] : ['project-alpha', 'project-beta'],
+    profile: removed ? 'project-beta' : 'project-alpha',
+    routes: ['feature'],
+    defaultRoute: 'feature',
+    routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
+    repositories: [{ name: 'repo', targetBranch: 'main' }],
+  };
+}
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD: открытая форма сверяет удаление через ${event}`, async (t) => {
+    let removed = false;
+    let reads = 0;
+    const { wrapper, flushPromises, emit, listeners } = await mountLaunchForm(t, {
+      launchOptions: async () => {
+        reads += 1;
+
+        return deletionCatalog(removed);
+      },
+    });
+
+    await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('[data-role="task-launch-note"]').setValue('Критерии человека');
+    assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+    removed = true;
+    emit(event, {
+    kind: 'deleted',
+    id: 'project-alpha',
+    revision: 3,
+  });
+    await flushPromises();
+    assert.equal(reads, 2);
+    assert.equal(wrapper.get('#launch-profile-native').element.value, '');
+    assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+    assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Критерии человека');
+    assert.equal(wrapper.get('#launch-profile-native').findAll('option')
+      .some((option) => option.element.value === 'project-alpha'), false);
+    wrapper.unmount();
+    assert.equal(listeners.size, 0);
+  });
+}
+
+test('PD: поздний первый launch-options не возвращает удалённый профиль', async (t) => {
+  let release;
+  let reads = 0;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { wrapper, flushPromises, emit } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      return reads === 1 ? pending : deletionCatalog(true);
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  emit('projects-changed', {
+    kind: 'deleted',
+    id: 'project-alpha',
+    revision: 3,
+  });
+  await flushPromises();
+  release(deletionCatalog());
+  await flushPromises();
+  assert.equal(reads, 2);
+  assert.equal(wrapper.get('#launch-profile-native').element.value, '');
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+});
+
+test('PD: ошибка сверки блокирует запуск, повтор сохраняет выбор и текущие критерии', async (t) => {
+  let reads = 0;
+  let release;
+  const { wrapper, flushPromises, emit } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      if (reads === 2) {
+        throw new Error('Сеть недоступна');
+      }
+      if (reads === 3) {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+
+      return deletionCatalog();
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  emit('hello', {});
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+  assert.match(wrapper.text(), /Не удалось обновить параметры запуска/u);
+  emit('hello', {});
+  await wrapper.get('[data-role="task-launch-note"]').setValue('Правка во время запроса');
+  release(deletionCatalog());
+  await flushPromises();
+  assert.equal(wrapper.get('#launch-profile-native').element.value, 'project-alpha');
+  assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Правка во время запроса');
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+  assert.equal(wrapper.text().includes('Не удалось обновить параметры запуска'), false);
+});
+
+test('TaskModal выбирает project-beta, перечитывает feature и шлёт profile в launch', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -219,7 +274,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   ]);
   const optionCalls = [];
   const launchCalls = [];
-  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__taskModalLaunchApi = {
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };
@@ -235,31 +290,31 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   });
   globalThis.__taskModalLaunchTasksStore = defineStore('task-modal-launch-tasks', {
     actions: {
-      async load() { return { title: 'Экспорт чертежа', description: 'Проверить GLB' }; },
+      async load() { return { title: 'Обновить отчёт', description: 'Проверить результат' }; },
       async timer() {},
       async complete() {},
       async comment() {},
       async launchOptions(id, profile = '') {
         optionCalls.push([String(id), profile]);
-        if (profile === 'rdesigner') {
+        if (profile === 'project-beta') {
           return {
-            profile: 'rdesigner',
-            profiles: ['rdesigner'],
-            routes: ['debug', 'feature'],
+            profile: 'project-beta',
+            profiles: ['project-beta'],
+            routes: ['consilium-debug', 'feature'],
             defaultRoute: 'feature',
             routeOptions: {
-              debug: { deliveryMode: 'publish', instrumentationRequired: true },
+              'consilium-debug': { deliveryMode: 'publish', instrumentationRequired: true },
               feature: { deliveryMode: 'publish', instrumentationRequired: false },
             },
-            repositories: [{ name: 'rdesigner', targetBranch: 'master' }],
-            instrumentationSuggestions: ['rdesigner:webapp/pipeline.py'],
-            diagnosisSuggestion: { kind: 'data', signal: 'GLB экспорт повреждён' },
+            repositories: [{ name: 'project-beta', targetBranch: 'master' }],
+            instrumentationSuggestions: ['project-beta:src/diagnostics.py'],
+            diagnosisSuggestion: { kind: 'data', signal: 'Повторный запуск создаёт дубликаты' },
             profileContractError: null,
           };
         }
         return {
-          profile: 'arsenkin',
-          profiles: ['arsenkin', 'rdesigner'],
+          profile: 'project-alpha',
+          profiles: ['project-alpha', 'project-beta'],
           routes: [],
           defaultRoute: null,
           error: 'no_catalog',
@@ -275,7 +330,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   globalThis.__taskModalLaunchBoardStore = defineStore('task-modal-launch-board', {
     state: () => ({
       data: {
-        tasks: [{ id: 42, title: 'Экспорт чертежа', group: 'RDesigner' }],
+        tasks: [{ id: 42, title: 'Обновить отчёт', group: 'Проект Бета' }],
         toReview: [], created: [], accomplice: [], auditor: [],
       },
     }),
@@ -287,7 +342,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
       async analyze() {},
     },
   });
-  globalThis.__taskModalLaunchFavoriteStore = defineStore('task-modal-launch-favorite', {
+  globalThis.__taskModalLaunchFavoritesStore = defineStore('task-modal-launch-favorite', {
     state: () => ({ taskIds: [], loaded: true, loading: false, error: null, pending: {} }),
     getters: {
       isFavorite: () => () => false,
@@ -295,10 +350,19 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
     },
     actions: { async load() {}, async toggle() {} },
   });
+  // Открытая задача перестаёт быть новой; форме запуска отметка безразлична.
+  globalThis.__taskModalLaunchSeenStore = defineStore('task-modal-launch-seen', {
+    state: () => ({ taskIds: [], loaded: true, initialized: true, loading: false, error: null }),
+    getters: {
+      isSeen: () => () => false,
+      ready: () => true,
+    },
+    actions: { async load() {}, async markSeen() { return true; } },
+  });
 
-  const wrapper = mount(await compileTaskModal(), {
+  const wrapper = mount(await compileTaskModal('__taskModalLaunch'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia()], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
@@ -310,45 +374,47 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
       '__taskModalLaunchTasksStore',
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
-      '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchFavoritesStore',
+      '__taskModalLaunchSeenStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  const profile = wrapper.get('#launch-profile');
-  assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['arsenkin', 'rdesigner']);
-  assert.match(wrapper.text(), /каталог маршрутов профиля не опубликован/);
-  assert.equal(wrapper.get('.lbtns .primary').attributes('disabled'), '');
 
-  await profile.setValue('rdesigner');
+  const profile = wrapper.get('#launch-profile-native');
+  assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['project-alpha', 'project-beta']);
+  assert.match(wrapper.text(), /каталог маршрутов профиля не опубликован/);
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').attributes('disabled'), '');
+
+  await profile.setValue('project-beta');
   await flushPromises();
-  assert.equal(wrapper.get('#launch-route').element.value, 'feature');
+  assert.equal(wrapper.get('#launch-route-native').element.value, 'feature');
   assert.match(wrapper.text(), /debug/);
-  assert.equal(wrapper.find('#launch-profile').exists(), false);
-  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /rdesigner/);
-  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /rdesigner\/master/);
-  assert.equal(wrapper.find('[aria-label="Целевая ветка rdesigner"]').exists(), false);
+  assert.equal(wrapper.find('#launch-profile-native').exists(), false);
+  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta/);
+  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta\/master/);
+  assert.equal(wrapper.find('[aria-label="Целевая ветка project-beta"]').exists(), false);
   assert.equal(wrapper.get('.ladvanced').attributes('open'), undefined);
   assert.match(wrapper.get('.ladvanced').text(), /Целевые ветки из конфигурации профиля/);
 
-  await wrapper.get('#launch-route').setValue('debug');
+  await wrapper.get('#launch-route-native').setValue('consilium-debug');
   await flushPromises();
-  assert.equal(wrapper.get('#launch-instrumentation').element.value, 'rdesigner:webapp/pipeline.py');
-  assert.equal(wrapper.get('#launch-diagnosis-kind').element.value, 'data');
-  assert.equal(wrapper.get('#launch-diagnosis-signal').element.value, 'GLB экспорт повреждён');
-  await wrapper.get('#launch-route').setValue('feature');
+  assert.equal(wrapper.get('#launch-instrumentation').element.value, 'project-beta:src/diagnostics.py');
+  assert.equal(wrapper.get('#launch-diagnosis-kind-native').element.value, 'data');
+  assert.equal(wrapper.get('#launch-diagnosis-signal').element.value, 'Повторный запуск создаёт дубликаты');
+  await wrapper.get('#launch-route-native').setValue('feature');
   await flushPromises();
 
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
-  assert.deepEqual(optionCalls, [['42', ''], ['42', 'rdesigner']]);
+  assert.deepEqual(optionCalls, [['42', ''], ['42', 'project-beta']]);
   assert.equal(launchCalls.length, 1);
   assert.equal(launchCalls[0][0], '42');
-  assert.equal(launchCalls[0][1].profile, 'rdesigner');
+  assert.equal(launchCalls[0][1].profile, 'project-beta');
   assert.equal(launchCalls[0][1].route, 'feature');
-  assert.equal(launchCalls[0][1].title, 'Экспорт чертежа');
+  assert.equal(launchCalls[0][1].title, 'Обновить отчёт');
   assert.deepEqual(launchCalls[0][1].acceptanceCriteria, []);
   assert.equal(Object.hasOwn(launchCalls[0][1], 'deliveryTargets'), false);
   assert.deepEqual(launchCalls[0][1].instrumentationFiles, []);
@@ -360,21 +426,22 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
 test('TaskModal: исполнитель по умолчанию «из профиля», runnerPrimary уходит только при явном выборе', async (t) => {
   const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
     launchOptions: async () => ({
-      profile: 'arsenkin',
-      profiles: ['arsenkin'],
+      profile: 'project-alpha',
+      profiles: ['project-alpha'],
       routes: ['feature'],
       defaultRoute: 'feature',
       routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
-      repositories: [{ name: 'arsenkin', targetBranch: 'main' }],
+      repositories: [{ name: 'project-alpha', targetBranch: 'main' }],
       runners: ['claude', 'codex'],
       defaultRunner: 'claude',
     }),
   });
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
 
-  const runner = wrapper.get('#launch-runner');
+
+  const runner = wrapper.get('#launch-runner-native');
   assert.deepEqual(
     runner.findAll('option').map((option) => option.text()),
     ['Из профиля (Claude)', 'Claude', 'Codex'],
@@ -382,16 +449,16 @@ test('TaskModal: исполнитель по умолчанию «из проф�
   assert.equal(runner.element.value, '');
 
   // Без выбора исполнителя payload его не несёт — решение остаётся за профилем.
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 1);
   assert.equal(Object.hasOwn(launchCalls[0][1], 'runnerPrimary'), false);
 
   // Явный выбор — runnerPrimary уезжает в launch.
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  await wrapper.get('#launch-runner').setValue('codex');
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('#launch-runner-native').setValue('codex');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 2);
   assert.equal(launchCalls[1][1].runnerPrimary, 'codex');
@@ -399,7 +466,7 @@ test('TaskModal: исполнитель по умолчанию «из проф�
 
 test('TaskModal: смена профиля сбрасывает выбор исполнителя на «из профиля»', async (t) => {
   const catalog = (override) => ({
-    profiles: ['arsenkin', 'rdesigner'],
+    profiles: ['project-alpha', 'project-beta'],
     routes: ['feature'],
     defaultRoute: 'feature',
     routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
@@ -407,29 +474,120 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
     ...override,
   });
   const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
-    launchOptions: async (id, profile = '') => (profile === 'rdesigner'
-      ? catalog({ profile: 'rdesigner', runners: ['codex'], defaultRunner: 'codex' })
-      : catalog({ profile: 'arsenkin', runners: ['claude', 'codex'], defaultRunner: 'claude' })),
+    launchOptions: async (id, profile = '') => (profile === 'project-beta'
+      ? catalog({ profile: 'project-beta', runners: ['codex'], defaultRunner: 'codex' })
+      : catalog({ profile: 'project-alpha', runners: ['claude', 'codex'], defaultRunner: 'claude' })),
   });
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  await wrapper.get('#launch-runner').setValue('codex');
-  assert.equal(wrapper.get('#launch-runner').element.value, 'codex');
+  await wrapper.get('#launch-runner-native').setValue('codex');
+  assert.equal(wrapper.get('#launch-runner-native').element.value, 'codex');
 
   // У нового профиля свой набор исполнителей и свой primary — прошлый выбор терять обязаны.
-  await wrapper.get('#launch-profile').setValue('rdesigner');
+  await wrapper.get('#launch-profile-native').setValue('project-beta');
   await flushPromises();
-  const runner = wrapper.get('#launch-runner');
+
+  const runner = wrapper.get('#launch-runner-native');
   assert.equal(runner.element.value, '');
   assert.deepEqual(
     runner.findAll('option').map((option) => option.text()),
     ['Из профиля (Codex)', 'Codex'],
   );
 
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 1);
-  assert.equal(launchCalls[0][1].profile, 'rdesigner');
+  assert.equal(launchCalls[0][1].profile, 'project-beta');
   assert.equal(Object.hasOwn(launchCalls[0][1], 'runnerPrimary'), false);
+});
+
+// Объём из триажа — предзаполнение критериев приёмки: человек видит и правит объём до
+// конвейера, а «не делаем» показано рядом с причинами. Своё введённое (даже стёртое до
+// пустоты) смена профиля не перезаписывает подсказкой.
+test('TaskModal: критерии предзаполняются объёмом триажа, список «не делаем» показан рядом', async (t) => {
+  const catalog = (override) => ({
+    profiles: ['project-alpha', 'project-beta'],
+    routes: ['small'],
+    defaultRoute: 'small',
+    routeOptions: { small: { deliveryMode: 'publish', instrumentationRequired: false } },
+    repositories: [{ name: 'repo', targetBranch: 'main' }],
+    scopeSuggestion: {
+      criteria: ['Пустая ячейка подсказывает, как снять выбранный тип', 'Окно называет тип и число фраз'],
+      skip: ['Раздел «Частота» — по ответу человека'],
+    },
+    ...override,
+  });
+  const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
+    launchOptions: async (id, profile = '') => (profile === 'project-beta'
+      ? catalog({ profile: 'project-beta' })
+      : catalog({ profile: 'project-alpha' })),
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  const criteria = wrapper.get('[data-role="task-launch-note"]');
+  assert.equal(
+    criteria.element.value,
+    'Пустая ячейка подсказывает, как снять выбранный тип\nОкно называет тип и число фраз',
+  );
+  assert.match(wrapper.get('[data-role="task-launch-scope-skip"]').text(), /Раздел «Частота» — по ответу человека/);
+
+  // Человек стёр подсказку — смена профиля не возвращает её.
+  await criteria.setValue('');
+  await wrapper.get('#launch-profile-native').setValue('project-beta');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, '');
+
+  await wrapper.get('[data-role="task-launch-note"]').setValue('Своя формулировка');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
+  await flushPromises();
+  assert.equal(launchCalls.length, 1);
+  assert.deepEqual(launchCalls[0][1].acceptanceCriteria, ['Своя формулировка']);
+});
+
+test('PD-launch-catalog: tombstoned при старте перечитывает варианты и сохраняет причину', async (t) => {
+  let removed = false;
+  let reads = 0;
+  const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      return {
+
+        profiles: removed ? [] : ['project-alpha'],
+
+        profile: removed ? '' : 'project-alpha',
+        routes: removed ? [] : ['feature'],
+
+        defaultRoute: removed ? '' : 'feature',
+        repositories: removed ? [] : [{ name: 'project-alpha', targetBranch: 'main' }],
+        runners: ['claude'],
+        defaultRunner: 'claude',
+
+        routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
+
+        reason: removed ? 'Регистрация проекта удалена.' : '',
+
+      };
+    },
+    launch: async () => {
+      removed = true;
+
+      throw Object.assign(new Error('Регистрация проекта «project-alpha» удалена.'), {
+        status: 409, data: { error: 'tombstoned', message: 'Регистрация проекта «project-alpha» удалена.' },
+      });
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
+  await flushPromises();
+  assert.equal(launchCalls.length, 1, 'валидная форма отправляет запуск и получает tombstoned');
+  assert.equal(reads >= 2, true, 'после tombstoned нужен свежий каталог');
+  assert.match(wrapper.text(), /Регистрация проекта/);
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
 });

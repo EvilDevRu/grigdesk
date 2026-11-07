@@ -1,0 +1,519 @@
+{
+  "exports": {
+    "web/src/features/speech/controller.ts": [
+      "createDictationController",
+      "speechExecutionFingerprint"
+    ],
+    "web/src/features/speech/provider.ts": [
+      "DICTATION_CONTROLLER_KEY",
+      "SpeechProvider",
+      "createSpeechProvider",
+      "useDictationController"
+    ],
+    "web/src/main.ts": [],
+    "web/src/shared/chatApprovals.ts": [
+      "useChatApprovals"
+    ],
+    "web/src/shared/speechPcmWorklet.ts": [],
+    "web/src/shared/speechStream.ts": [
+      "SPEECH_PCM_FRAME_SAMPLES",
+      "SPEECH_PCM_SAMPLE_RATE",
+      "SPEECH_PCM_WORKLET_NAME",
+      "SPEECH_STREAM_AUDIO",
+      "SPEECH_STREAM_ENDPOINT",
+      "SPEECH_STREAM_PROTOCOL_VERSION",
+      "createSpeechStream",
+      "encodeSpeechPcmPacket"
+    ],
+    "web/src/stores/auth.ts": [
+      "useAuthStore"
+    ],
+    "web/src/stores/board.ts": [
+      "useBoardStore"
+    ],
+    "web/src/stores/chat.ts": [
+      "CONTEXT_WINDOW",
+      "DEFAULT_SPEECH",
+      "normalizeContextCache",
+      "normalizeSpeechSnapshot",
+      "useChatStore"
+    ],
+    "web/src/stores/grigdeskUpdate.ts": [
+      "ACTIVE_UPDATE_STATES",
+      "BLOCK_REASON_LABELS",
+      "UPDATE_STAGE_LABELS",
+      "UPDATE_STAGE_SHORT_LABELS",
+      "blockReasonLabel",
+      "grigDeskUpdateTone",
+      "useGrigDeskUpdateStore"
+    ],
+    "web/src/stores/notifyWatch.ts": [
+      "useNotifyWatchStore"
+    ],
+    "web/src/stores/plugins.ts": [
+      "NAV_GROUPS",
+      "normalizeNavItem",
+      "pluginCategoryOf",
+      "sortNavItems",
+      "usePluginsStore"
+    ],
+    "web/src/stores/providers.ts": [
+      "useProvidersStore"
+    ],
+    "web/src/stores/system.ts": [
+      "useSystemStore"
+    ],
+    "web/src/stores/taskFavorites.ts": [
+      "useTaskFavoritesStore"
+    ],
+    "web/src/stores/taskSeen.ts": [
+      "useTaskSeenStore"
+    ],
+    "web/src/stores/tasks.ts": [
+      "useTasksStore"
+    ],
+    "web/src/stores/ui.ts": [
+      "useUiStore"
+    ],
+    "web/src/router.ts": [
+      "router"
+    ]
+  },
+  "stores": {
+    "web/src/stores/auth.ts": {
+      "id": "auth",
+      "state": {
+        "ready": false,
+        "configured": true,
+        "authenticated": false,
+        "clientScope": "",
+        "logConfirmation": 0,
+        "logEpoch": 0,
+        "logReason": "load"
+      }
+    },
+    "web/src/stores/board.ts": {
+      "id": "board",
+      "state": {
+        "data": null,
+        "loading": false,
+        "error": null,
+        "loadedAt": 0,
+        "readAt": 0,
+        "sourceKey": "",
+        "sourceEpoch": 0,
+        "sourceSuspended": false,
+        "_polling": false,
+        "_timer": null
+      }
+    },
+    "web/src/stores/chat.ts": {
+      "id": "chat",
+      "state": {
+        "sessions": [],
+        "archived": [],
+        "activeId": null,
+        "defModel": "",
+        "defModelRef": null,
+        "defEffort": "",
+        "defMode": "",
+        "defWorkdir": {
+          "kind": "grigdesk"
+        },
+        "recentWorkdirs": [],
+        "loaded": false,
+        "revealRequest": "",
+        "pending": {},
+        "saveError": null,
+        "compactWindow": 0,
+        "speech": {
+          "engine": "browser",
+          "browserProcessing": "auto",
+          "browserAutoConsent": false,
+          "language": "auto",
+          "dictionary": "",
+          "quality": "balanced",
+          "videoQuality": "balanced",
+          "model": null,
+          "videoModel": null,
+          "device": "auto",
+          "computeType": null,
+          "beamSize": null,
+          "vadSilenceMs": 500,
+          "conditionOnPreviousText": true,
+          "resident": false,
+          "keepAliveMin": 5,
+          "local": {
+            "ready": false,
+            "reason": "Локальный движок не настроен."
+          },
+          "capabilities": {
+            "models": [],
+            "cuda": {
+              "state": "probe_failed",
+              "reason": ""
+            },
+            "languages": [
+              "ru",
+              "en",
+              "auto"
+            ],
+            "lastDictionaryMeasure": null,
+            "resident": null,
+            "benchmark": null,
+            "local": {
+              "ready": false,
+              "reason": "Локальный движок не настроен.",
+              "checks": []
+            }
+          },
+          "revision": ""
+        },
+        "turnProtocol": 0,
+        "workdirProtocol": 0,
+        "historyStepReuseProtocol": 0,
+        "deliveries": {},
+        "inTurnProtocol": 0,
+        "inTurnRuns": {},
+        "runtimeRuns": {},
+        "runRevisions": {},
+        "activeRequest": 0,
+        "inTurnAttempts": {},
+        "inTurnError": ""
+      }
+    },
+    "web/src/stores/grigdeskUpdate.ts": {
+      "id": "grigdesk-update",
+      "state": {
+        "status": null,
+        "loading": false,
+        "checking": false,
+        "actionBusy": false,
+        "error": "",
+        "initialized": false
+      }
+    },
+    "web/src/stores/notifyWatch.ts": {
+      "id": "notifyWatch",
+      "state": {
+        "waiting": [],
+        "stalled": [],
+        "silent": [],
+        "running": [],
+        "observedByTask": {},
+        "loadedAt": 0,
+        "error": null
+      }
+    },
+    "web/src/stores/plugins.ts": {
+      "id": "plugins",
+      "state": {
+        "list": [],
+        "loaded": false,
+        "loadError": null,
+        "restartPending": {}
+      }
+    },
+    "web/src/stores/providers.ts": {
+      "id": "providers",
+      "state": {
+        "providers": [],
+        "usage": {},
+        "usageAt": 0,
+        "usageVersion": 0,
+        "usageRequest": 0,
+        "usageTransport": {
+          "status": "idle",
+          "receivedAt": 0,
+          "error": "",
+          "connected": false,
+          "everConnected": false,
+          "deliveryStale": false
+        },
+        "mcp": {},
+        "loaded": false,
+        "registryVersion": 0,
+        "registryRequest": 0,
+        "showAllModels": false,
+        "updating": "",
+        "updateResults": {},
+        "usageRefreshing": false
+      }
+    },
+    "web/src/stores/system.ts": {
+      "id": "system",
+      "state": {
+        "data": null,
+        "updatedAt": 0,
+        "stale": false,
+        "error": ""
+      }
+    },
+    "web/src/stores/taskFavorites.ts": {
+      "id": "taskFavorites",
+      "state": {
+        "scope": "",
+        "revision": -1,
+        "taskIds": [],
+        "loaded": false,
+        "loading": false,
+        "error": null,
+        "pending": {},
+        "_epoch": 0,
+        "_requestSeq": 0,
+        "_scopeRequestSeq": 0
+      }
+    },
+    "web/src/stores/taskSeen.ts": {
+      "id": "taskSeen",
+      "state": {
+        "scope": "",
+        "revision": -1,
+        "initialized": false,
+        "taskIds": [],
+        "loaded": false,
+        "loading": false,
+        "marking": false,
+        "error": null,
+        "_epoch": 0,
+        "_requestSeq": 0,
+        "_scopeRequestSeq": 0,
+        "_inflight": null
+      }
+    },
+    "web/src/stores/tasks.ts": {
+      "id": "tasks",
+      "state": {
+        "details": {}
+      }
+    },
+    "web/src/stores/ui.ts": {
+      "id": "ui",
+      "state": {
+        "taskId": null
+      }
+    }
+  },
+  "routes": [
+    {
+      "path": "/",
+      "redirect": "/board"
+    },
+    {
+      "path": "/3d",
+      "name": "studio3d",
+      "redirect": {
+        "path": "/ext/studio3d",
+        "query": {
+          "model": "model #1",
+          "version": "version 2",
+          "extra": [
+            "a",
+            "b"
+          ]
+        },
+        "hash": "#saved-selection"
+      }
+    },
+    {
+      "path": "/board",
+      "name": "board",
+      "meta": {
+        "title": "Доска"
+      },
+      "component": "./views/BoardView.vue"
+    },
+    {
+      "path": "/pipeline",
+      "name": "pipeline",
+      "meta": {
+        "title": "Конвейер"
+      },
+      "component": "./views/PipelineView.vue"
+    },
+    {
+      "path": "/sandboxes",
+      "name": "sandboxes",
+      "meta": {
+        "title": "Песочницы"
+      },
+      "component": "./views/SandboxesView.vue"
+    },
+    {
+      "path": "/showcase/:id?",
+      "name": "showcase",
+      "meta": {
+        "title": "Презентации"
+      },
+      "component": "./views/ShowcaseView.vue"
+    },
+    {
+      "path": "/chats",
+      "name": "chats",
+      "meta": {
+        "layout": "workspace",
+        "title": "Чаты"
+      },
+      "component": "./views/ChatsView.vue"
+    },
+    {
+      "path": "/agents",
+      "redirect": "/routes"
+    },
+    {
+      "path": "/diff",
+      "name": "diff",
+      "meta": {
+        "title": "Диф",
+        "layout": "workspace"
+      },
+      "component": "./views/DiffView.vue"
+    },
+    {
+      "path": "/documents",
+      "name": "documents",
+      "meta": {
+        "title": "Документ"
+      },
+      "component": "./views/DocumentsView.vue"
+    },
+    {
+      "path": "/terminal",
+      "name": "terminal",
+      "meta": {
+        "layout": "workspace",
+        "title": "Терминал",
+        "tool": "terminal"
+      },
+      "component": "./views/TerminalView.vue"
+    },
+    {
+      "path": "/ssh",
+      "name": "ssh",
+      "meta": {
+        "layout": "workspace",
+        "title": "SSH",
+        "tool": "ssh"
+      },
+      "component": "./views/SshView.vue"
+    },
+    {
+      "path": "/db",
+      "name": "db",
+      "meta": {
+        "title": "Базы",
+        "tool": "db"
+      },
+      "component": "./views/DbView.vue"
+    },
+    {
+      "path": "/docker",
+      "name": "docker",
+      "meta": {
+        "title": "Докер",
+        "tool": "docker"
+      },
+      "component": "./views/DockerView.vue"
+    },
+    {
+      "path": "/routes",
+      "name": "routes",
+      "meta": {
+        "title": "Маршруты"
+      },
+      "component": "./views/RoutesView.vue"
+    },
+    {
+      "path": "/projects/:id?",
+      "name": "projects",
+      "meta": {
+        "title": "Проекты"
+      },
+      "component": "./views/ProjectsView.vue"
+    },
+    {
+      "path": "/code",
+      "name": "code",
+      "meta": {
+        "layout": "workspace",
+        "title": "Код",
+        "tool": "code"
+      },
+      "component": "./views/CodeView.vue"
+    },
+    {
+      "path": "/shelf",
+      "name": "shelf",
+      "meta": {
+        "title": "Полка",
+        "tool": "shelf"
+      },
+      "component": "./views/ShelfView.vue"
+    },
+    {
+      "path": "/tools",
+      "name": "tools",
+      "meta": {
+        "title": "Инструменты"
+      },
+      "component": "./views/ToolsView.vue"
+    },
+    {
+      "path": "/ext/:id",
+      "name": "ext",
+      "meta": {
+        "title": "Плагин",
+        "tool": "ext"
+      },
+      "component": "./views/PluginView.vue"
+    },
+    {
+      "path": "/video",
+      "name": "video",
+      "meta": {
+        "title": "Видео"
+      },
+      "component": "./views/VideoView.vue"
+    },
+    {
+      "path": "/inbox",
+      "name": "inbox",
+      "meta": {
+        "title": "Входящие"
+      },
+      "component": "./views/InboxView.vue"
+    },
+    {
+      "path": "/github",
+      "name": "github",
+      "meta": {
+        "title": "GitHub"
+      },
+      "component": "./views/GitHubView.vue"
+    },
+    {
+      "path": "/telegram",
+      "name": "telegram",
+      "meta": {
+        "title": "Телеграм"
+      },
+      "component": "./views/TelegramView.vue"
+    },
+    {
+      "path": "/surface",
+      "name": "surface",
+      "component": "inline-empty",
+      "meta": {
+        "title": "Карточка задачи"
+      }
+    },
+    {
+      "path": "/settings",
+      "name": "settings",
+      "meta": {
+        "title": "Настройки"
+      },
+      "component": "settings-stub"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+/* Vendor CSS входит в тот же production-граф, что и проектный skin. */
+@import '@xterm/xterm/css/xterm.css';

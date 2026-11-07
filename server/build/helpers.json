@@ -1,0 +1,241 @@
+{
+  "schema": 1,
+  "helpers": [
+    {
+      "id": "run-logged-server",
+      "entry": "server/scripts/runLoggedServer.mts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Ручной сервер с потоковой ротацией stdout и stderr."
+    },
+    {
+      "id": "factory-browser",
+      "entry": "server/src/lib/browser/factoryBrowserCli.ts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Run-scoped браузерный helper Factory."
+    },
+    {
+      "id": "external-cli-lease",
+      "entry": "server/scripts/externalCliLease.mts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Внешний CLI удерживает reader установки до выхода процесса и потомков."
+    },
+    {
+      "id": "factory-runtime-pin",
+      "entry": "server/scripts/factoryRuntimePin.mts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Host-side привязка runtime до active pointer новой попытки."
+    },
+    {
+      "id": "launch-sea-server",
+      "entry": "server/scripts/launchSeaServer.mts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Раннее окружение ручного запуска и execve своего SEA."
+    },
+    {
+      "id": "select-sea-server",
+      "entry": "server/src/lib/selectSeaServer.ts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Выбор проверенного SEA-комплекта для установленного окна."
+    },
+    {
+      "id": "grigdesk-cli",
+      "entry": "cli/main.ts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Единая команда GrigDesk из готового комплекта."
+    },
+    {
+      "id": "legacy-brand",
+      "entry": "shared/runtime/legacyBrand.ts",
+      "entryKind": "library",
+      "exports": [
+        "LEGACY",
+        "legacyRootProblem",
+        "legacyEnvWarnings"
+      ],
+      "description": "Библиотечные exports прежнего shell-контракта имён."
+    },
+    {
+      "id": "routes-publish-kit",
+      "entry": "server/src/modules/routes/publishKit.ts",
+      "entryKind": "library",
+      "exports": [
+        "RoutesStore",
+        "validateBootstrap",
+        "validateCatalog",
+        "validatePromptFiles",
+        "validateRoute"
+      ],
+      "description": "Схема и хранилище маршрутов для скриптов публикации профилей."
+    },
+    {
+      "id": "engine-runtime-usage",
+      "entry": "engine/lib/runtime-usage.mjs",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Мост движка к нормализатору аналитики без серверных исходников."
+    },
+    {
+      "id": "engine-codex-failure",
+      "entry": "engine/lib/codex-failure.mjs",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Классификатор отказов движка без серверных исходников."
+    },
+    {
+      "id": "chat-permission-mcp",
+      "entry": "server/src/lib/chat/permission-mcp.js",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Permission MCP чата: initialize, tools/list и проверка nonce."
+    },
+    {
+      "id": "work-mcp",
+      "entry": "server/src/lib/executors/work-mcp.js",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Work MCP исполнителя с ограниченным набором инструментов."
+    },
+    {
+      "id": "direct-ssh-policy-hook",
+      "entry": "server/src/lib/executors/_direct-ssh-policy-hook.js",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Хук политики прямого SSH: читает JSON и выдаёт разрешение или отказ."
+    },
+    {
+      "id": "plugin-command-supervisor",
+      "entry": "server/src/lib/packageInstall/commandSupervisor.mjs",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Supervisor установки плагинов с повторным запуском leader-а."
+    },
+    {
+      "id": "plugin-git-blob-prefix",
+      "entry": "server/src/lib/packageInstall/gitBlobPrefix.mjs",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Разбор git-blob префикса для установки плагина из репозитория."
+    },
+    {
+      "id": "media-ingest-worker",
+      "entry": "server/src/lib/media/ingestWorker.ts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runIngestWorker"
+      ],
+      "description": "Worker приёма медиа: статус и результат задания."
+    },
+    {
+      "id": "showcase-worker",
+      "entry": "server/scripts/showcaseWorker.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Worker рендера презентаций."
+    },
+    {
+      "id": "showcase-rehearsal",
+      "entry": "server/scripts/showcaseRehearsal.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Worker репетиции презентации."
+    },
+    {
+      "id": "showcase-voice-install",
+      "entry": "server/scripts/showcaseVoiceInstall.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Установщик голосовых движков презентаций."
+    },
+    {
+      "id": "showcase-browser-install",
+      "entry": "server/scripts/showcaseBrowserInstall.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Установщик браузера Playwright."
+    },
+    {
+      "id": "data-home-check",
+      "entry": "server/scripts/dataHomeCheck.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Проверка папки данных из shell-скриптов."
+    },
+    {
+      "id": "deepseek-instructions-hook",
+      "entry": "server/scripts/deepseekInstructionsHook.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Инструкции DeepSeek из host hook."
+    },
+    {
+      "id": "glm-tool-policy-hook",
+      "entry": "server/scripts/glmToolPolicyHook.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Политика инструментов и marker GLM."
+    },
+    {
+      "id": "deepseek-runtime-info",
+      "entry": "server/scripts/deepseekRuntimeInfo.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Metadata автономного DeepSeek для Factory без model call."
+    },
+    {
+      "id": "deepseek-runner",
+      "entry": "server/scripts/deepseekRunner.mts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runDeepSeekFactory"
+      ],
+      "description": "Host-wrapper DeepSeek для автономного узла Factory."
+    },
+    {
+      "id": "glm-runtime-info",
+      "entry": "server/scripts/glmRuntimeInfo.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Metadata этапа GLM для Factory без ключа и model call."
+    },
+    {
+      "id": "glm-runner",
+      "entry": "server/scripts/glmRunner.mts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runGlmFactory"
+      ],
+      "description": "Host-wrapper GLM для автономного узла Factory."
+    },
+    {
+      "id": "factory-status-mcp",
+      "entry": "server/scripts/deepseekStatusMcp.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Run-scoped статус Factory через настоящий stage-result/progress."
+    }
+  ]
+}

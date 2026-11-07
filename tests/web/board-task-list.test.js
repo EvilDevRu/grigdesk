@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   boardTaskListResetKey,
   selectBoardTasks,
-} from '../../web/src/shared/board-task-list.js';
+} from '../../web/src/shared/boardTaskList.ts';
 
 const tasks = [
   { id: 11, title: 'Альфа отчёт', group: 'SEO', status: 2 },
@@ -39,11 +39,13 @@ function select(overrides = {}) {
     tasks,
     analysisByTask,
     query: '',
-    sortBy: 'b24',
+    sortBy: 'tracker',
     onlyUnrated: false,
     onlyNeedsInfo: false,
     favoriteOnly: false,
     favoriteTaskIds: [],
+    newOnly: false,
+    seenTaskIds: [],
     ...overrides,
   });
 }
@@ -52,6 +54,18 @@ test('LIST-01: поиск работает по id, названию и груп
   assert.deepEqual(select({ query: '22' }).map((task) => task.id), [22]);
   assert.deepEqual(select({ query: 'ФОРМУ' }).map((task) => task.id), [22]);
   assert.deepEqual(select({ query: 'backend' }).map((task) => task.id), [33]);
+});
+
+test('поиск соединяет слова из разных полей и одинаково читает # и е/ё', () => {
+  const result = selectBoardTasks({
+    tasks: [
+      { id: 11, title: 'Отчёт по заявкам', group: 'Кабинет', responsible: 'Семён' },
+      { id: 12, title: 'Отчёт по заявкам', group: 'Кабинет', responsible: 'Анна' },
+    ],
+    query: '  #11 СЕМЕН отчет кабинет  ',
+  });
+
+  assert.deepEqual(result.map((task) => task.id), [11]);
 });
 
 test('LIST-02/07: порядок B24 сохраняется и выключенное избранное его не меняет', () => {
@@ -108,7 +122,8 @@ test('LIST-08: ключ сброса пагинации меняется от п
     onlyUnrated: false,
     onlyNeedsInfo: false,
     favoriteOnly: false,
-    sortBy: 'b24',
+    newOnly: false,
+    sortBy: 'tracker',
     taskCount: 77,
   });
   for (const patch of [
@@ -116,6 +131,7 @@ test('LIST-08: ключ сброса пагинации меняется от п
     { onlyUnrated: true },
     { onlyNeedsInfo: true },
     { favoriteOnly: true },
+    { newOnly: true },
     { sortBy: 'risk' },
     { taskCount: 78 },
   ]) {
@@ -124,9 +140,69 @@ test('LIST-08: ключ сброса пагинации меняется от п
       onlyUnrated: false,
       onlyNeedsInfo: false,
       favoriteOnly: false,
-      sortBy: 'b24',
+      newOnly: false,
+      sortBy: 'tracker',
       taskCount: 77,
       ...patch,
     }), base);
   }
+});
+
+test('LIST-09: newOnly оставляет только непросмотренные задачи', () => {
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11', 33],
+  }).map((task) => task.id), [22, 44]);
+
+  // Отметка несуществующей задачи никого не выбрасывает, а полный список отметок
+  // честно оставляет пустой результат: «новых нет» — это состояние, а не сбой.
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['999'],
+  }).map((task) => task.id), [11, 22, 33, 44]);
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11', '22', '33', '44'],
+  }), []);
+});
+
+test('LIST-10: «новые» складываются с поиском, избранным и триажем через AND', () => {
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11'],
+    query: 'обновить',
+  }).map((task) => task.id), [33]);
+
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11'],
+    favoriteOnly: true,
+    favoriteTaskIds: ['11', '33'],
+  }).map((task) => task.id), [33]);
+
+  // Просмотренная задача не возвращается через триаж-фильтр.
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['33'],
+    onlyUnrated: true,
+  }), []);
+});
+
+test('даты создания образуют стабильный порядок, недатированные строки остаются в своём порядке', () => {
+  const rows = [
+    { id: 1, createdAt: 'плохая дата' },
+    { id: 2, createdAt: '2026-11-02T10:00:00+07:00' },
+    { id: 3 },
+    { id: 4, createdAt: '2026-11-02T03:00:00Z' },
+    { id: 5, createdAt: '2026-11-03T00:00:00Z' },
+  ];
+  const before = structuredClone(rows);
+
+  assert.deepEqual(selectBoardTasks({ tasks: rows }).map((row) => row.id), [5, 2, 4, 1, 3]);
+  assert.deepEqual(rows, before);
+  assert.deepEqual(selectBoardTasks({ tasks: rows, sources: [] }), []);
+  assert.notEqual(boardTaskListResetKey({ sources: ['tracker'], composition: 'a' }),
+    boardTaskListResetKey({ sources: ['tracker'], composition: 'b' }));
+  assert.equal(boardTaskListResetKey({ sources: ['grigdesk', 'tracker'] }),
+    boardTaskListResetKey({ sources: ['tracker', 'grigdesk'] }));
 });

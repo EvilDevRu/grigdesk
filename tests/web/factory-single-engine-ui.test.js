@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-
-const ROOT = new URL('../../web/src/', import.meta.url);
+import { migrationUrl } from './helpers/compile-vue.js';
 
 async function source(path) {
-  return readFile(new URL(path, ROOT), 'utf8');
+  return readFile(migrationUrl(`src/${path}`), 'utf8');
 }
 
 test('factory UI has no engine-generation branch or operational suffix', async () => {
   const files = await Promise.all([
-    source('stores/tasks.js'),
+    source('stores/tasks.ts'),
     source('views/TaskModal.vue'),
     source('views/PipelineView.vue'),
   ]);
@@ -24,23 +23,36 @@ test('factory UI has no engine-generation branch or operational suffix', async (
 
 test('route launch, resume and goto use the single API contract', async () => {
   const [store, modal, pipeline, chat] = await Promise.all([
-    source('stores/tasks.js'),
+    source('stores/tasks.ts'),
     source('views/TaskModal.vue'),
     source('views/PipelineView.vue'),
     source('views/chat/ChatSession.vue'),
   ]);
 
   assert.match(store, /api\.post\(`\/api\/tasks\/\$\{id\}\/launch`, payload\)/);
-  assert.match(modal, /profile:\s*launchForm\.value\.profile[\s\S]*route:\s*launchForm\.value\.route[\s\S]*acceptanceCriteria:/);
+
+  const launchFields = [
+    /profile:\s*launchForm\.value!?\.profile/,
+    /route:\s*launchForm\.value!?\.route/,
+    /acceptanceCriteria:/,
+  ];
+
+  assert.match(modal, new RegExp(launchFields.map((field) => field.source).join('[\\s\\S]*')));
   assert.match(modal, /instrumentationFiles,[\s\S]*diagnosisKind:/);
   assert.doesNotMatch(modal, /deliveryTargets:\s*launchNeedsDelivery/);
   assert.match(modal, /<details[\s\S]*Дополнительные параметры[\s\S]*launch-instrumentation/);
   assert.doesNotMatch(modal, /\bticket:\s*`/);
-  assert.match(chat, /ui\.openTaskLaunch\(s\.taskId\)/);
+  assert.doesNotMatch(chat, /openTaskLaunch/);
   assert.doesNotMatch(chat, /tasks\.launch\(/);
 
   assert.match(pipeline, /api\.post\(`\/api\/tasks\/\$\{task\}\/resume`\)/);
-  assert.match(pipeline, /api\.post\(`\/api\/tasks\/\$\{stage\.value\.task\}\/stage\/\$\{stage\.value\.key\}\/\$\{status\}`/);
+
+  const stageEndpoint = [
+    /api\.post\(\s*`\/api\/tasks\/\$\{stage\.value!?\.task\}/,
+    /\/stage\/\$\{stage\.value!?\.key\}\/\$\{status\}`/,
+  ];
+
+  assert.match(pipeline, new RegExp(stageEndpoint.map((part) => part.source).join('')));
   assert.match(pipeline, /!t\.readOnly[\s\S]*t\.result/);
   assert.match(pipeline, /t\.workspaceMode !== 'shared'/);
 });

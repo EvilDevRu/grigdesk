@@ -1,7 +1,7 @@
 // Подтверждение запуска resume. `systemd-run` возвращает 0 сразу после регистрации
 // юнита, поэтому «прогон продолжен» раньше означало лишь «юнит зарегистрирован»:
-// на t7802 юнит умирал через две секунды на разошедшемся контракте профиля (код 75),
-// а кокпит четыре раза подряд отвечал успехом.
+// В регрессионном сценарии юнит умирал через две секунды на разошедшемся контракте профиля (код 75),
+// а GrigDesk четыре раза подряд отвечал успехом.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -10,16 +10,25 @@ import path from 'node:path';
 
 import {
   confirmRouteResume, logLength, readLogSince, routeFailure,
-} from '../../server/src/lib/factory-route-cli.js';
+} from '../../server/src/lib/factoryRouteCli.ts';
 
 const ATTEMPT = 'a_00112233445566778899aabbccddeeff';
 
-test('живой юнит и совпавшая попытка — прогон подтверждён', async () => {
+test('живой юнит и совпавшая попытка — прогон подтверждён', async (t) => {
   let polls = 0;
+  let clockMs = 1000;
+  // Время окна зависит от ответов юнита: задержка event loop под нагрузкой
+  // не должна завершать окно после первого же таймера и скрывать повторный опрос.
+  t.mock.method(Date, 'now', () => clockMs);
+
   const res = await confirmRouteResume({
     attempt: ATTEMPT,
     identity: async () => ({ attempt: ATTEMPT, alive: true }),
-    unitAlive: async () => { polls += 1; return true; },
+    unitAlive: async () => {
+      polls += 1;
+      clockMs += 4;
+      return true;
+    },
     reason: async () => '',
     settleMs: 12, stepMs: 4,
   });
@@ -56,13 +65,141 @@ test('живой юнит с ЧУЖОЙ попыткой в реестре не 
   assert.equal(res.message, 'оркестратор не подтвердил запуск попытки');
 });
 
+// Ложная тревога, ради которой окно подтверждения и появилось: реестр не успевал
+// получить ATTEMPT_ID/ORCH_PID за окно быстрых отказов, и GrigDesk писал «прогон не
+// поехал» над идущим прогоном. Живой замер: возврат курсора в 10:55:14, заход узла
+// в 10:55:33 — девятнадцать секунд, львиная доля на preflight исполнителей.
+test('поздняя запись реестра — не отказ: identity опрашивается после окна', async () => {
+  let reads = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      reads += 1;
+      // Первые снимки — движок ещё не дописал реестр.
+      if (reads < 4) return { attempt: '', alive: false };
+      return { attempt: ATTEMPT, alive: true };
+    },
+    unitAlive: async () => true,
+    reason: async () => 'причины нет, прогон идёт',
+    settleMs: 8, stepMs: 2, confirmMs: 400,
+  });
+  assert.deepEqual(res, { ok: true, outcome: 'running' });
+  assert.ok(reads >= 4, 'реестр перечитывается, а не снимается один раз');
+});
+
+test('нечитаемый реестр в окне подтверждения тоже дожидается движка', async () => {
+  let reads = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      reads += 1;
+      return reads < 3 ? null : { attempt: ATTEMPT, alive: true };
+    },
+    unitAlive: async () => true,
+    reason: async () => '',
+    settleMs: 8, stepMs: 2, confirmMs: 400,
+  });
+  assert.equal(res.ok, true);
+});
+
+// Lifecycle полностью проверяется до публикации identity: 20 секунд могло не хватить.
+// Часы зависят от опросов юнита, поэтому тест не ждёт реальные две минуты.
+test('окно по умолчанию дожидается identity на 60-й и 125-й секундах', async (t) => {
+  let clockMs = 0;
+
+  t.mock.method(Date, 'now', () => clockMs);
+
+  for (const readyAt of [60_000, 125_000]) {
+    clockMs = 0;
+
+    const identityReads = [];
+    const res = await confirmRouteResume({
+      attempt: ATTEMPT,
+      identity: async () => {
+        identityReads.push(clockMs);
+
+        return { attempt: ATTEMPT, alive: clockMs >= readyAt };
+      },
+      unitAlive: async () => {
+        clockMs += 1000;
+
+        return true;
+      },
+      reason: async () => '',
+      stepMs: 1,
+    });
+
+    assert.deepEqual(res, { ok: true, outcome: 'running' }, `identity готова на ${readyAt} мс`);
+    assert.equal(identityReads[0], 6000, 'identity читается после окна быстрых отказов');
+  }
+});
+
+// Второй deadline создаётся после settle; точное равенство проверяет только fake clock.
+// Асинхронные callbacks в production могут добавить время к номинальной сумме окон.
+test('неопределённая identity исчерпывает 6 плюс 120 секунд по умолчанию', async (t) => {
+  let clockMs = 0;
+  const identityReads = [];
+
+  t.mock.method(Date, 'now', () => clockMs);
+
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      identityReads.push(clockMs);
+
+      return { attempt: ATTEMPT, alive: false };
+    },
+    unitAlive: async () => {
+      clockMs += 1000;
+
+      return true;
+    },
+    reason: async () => '',
+    stepMs: 1,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'unconfirmed');
+  assert.equal(res.message, 'оркестратор не подтвердил запуск попытки');
+  assert.equal(clockMs, 126_000);
+  assert.equal(identityReads[0], 6000, 'identity читается после окна быстрых отказов');
+});
+
+test('чужая попытка отвечает сразу, не выбирая окно подтверждения', async () => {
+  // Ждать тут нечего: реестр назвал ДРУГУЮ попытку, и от времени это не изменится.
+  const started = Date.now();
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => ({ attempt: 'a_ffffffffffffffffffffffffffffffff', alive: true }),
+    unitAlive: async () => true,
+    reason: async () => '',
+    settleMs: 8, stepMs: 2, confirmMs: 5000,
+  });
+  assert.equal(res.outcome, 'unconfirmed');
+  assert.ok(Date.now() - started < 2000, 'авторитетный ответ не ждёт окна подтверждения');
+});
+
+test('юнит, умерший уже в окне подтверждения, — отказ с причиной', async () => {
+  let polls = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => ({ attempt: '', alive: false }),
+    unitAlive: async () => { polls += 1; return polls < 4; },
+    reason: async () => 'route: контракт попытки разошёлся с профилем',
+    settleMs: 8, stepMs: 2, confirmMs: 5000,
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.match(res.message, /контракт попытки разошёлся/);
+});
+
 test('мёртвый оркестратор при живом юните — тоже не подтверждение', async () => {
   const res = await confirmRouteResume({
     attempt: ATTEMPT,
     identity: async () => ({ attempt: ATTEMPT, alive: false }),
     unitAlive: async () => true,
     reason: async () => 'route: прогон завершён',
-    settleMs: 8, stepMs: 4,
+    settleMs: 8, stepMs: 4, confirmMs: 20,
   });
   assert.equal(res.ok, false);
   assert.equal(res.outcome, 'unconfirmed');
@@ -70,9 +207,9 @@ test('мёртвый оркестратор при живом юните — т�
 });
 
 test('в причину попадает только дописанное после запуска, и не в байтах', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-resume-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 't7802.stages.log');
+  const file = path.join(dir, 't42.stages.log');
   const before = 'старая строка про узел diagnose\n';
   await writeFile(file, before, 'utf8');
 
@@ -86,9 +223,9 @@ test('в причину попадает только дописанное по�
 });
 
 test('typed preflight прошлого запуска не типизирует новый несвязанный отказ', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 't7788.launch.log');
+  const file = path.join(dir, 't43.launch.log');
   await writeFile(file,
     'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=kimi\n', 'utf8');
   const from = await logLength(file);
@@ -100,8 +237,53 @@ test('typed preflight прошлого запуска не типизирует 
   assert.equal(routeFailure(current), null);
 });
 
+// Сервер сохраняет охват движка: после оверрайда цепочки список содержит только
+// проверенных кандидатов, а исполнители остальных этапов профиля в него не добавляются.
+test('отказ resume сохраняет scoped-список исполнителей цепочки', async () => {
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => null,
+    unitAlive: async () => false,
+    reason: async () => 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=codex',
+    settleMs: 20,
+    stepMs: 4,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.deepEqual(routeFailure(res.message), {
+    error: 'runner_preflight_unavailable',
+    runners: ['codex'],
+    message: 'недоступны исполнители профиля: codex',
+  });
+});
+
+// Несовместимость закреплённой поставки движка с фактическим раннером — отдельная
+// typed-причина: по ней resume перепривязывает попытку на текущий рантайм, а не
+// оставляет человеку неразличимое «недоступны исполнители».
+test('несовместимость поставки типизируется отдельно от недоступности', async () => {
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => null,
+    unitAlive: async () => false,
+    reason: async () =>
+      'runner preflight: закреплённая поставка движка несовместима с glm '
+        + '[FACTORY_ERROR=runner_preflight_incompatible RUNNERS=glm]',
+    settleMs: 20,
+    stepMs: 4,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.deepEqual(routeFailure(res.message), {
+    error: 'runner_preflight_incompatible',
+    runners: ['glm'],
+    message: 'закреплённый рантайм попытки несовместим с поставкой исполнителей: glm',
+  });
+});
+
 test('пустой журнал не оставляет отказ без текста', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-resume-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const res = await confirmRouteResume({
     attempt: ATTEMPT,

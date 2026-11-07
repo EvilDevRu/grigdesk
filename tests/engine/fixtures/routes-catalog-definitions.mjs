@@ -1,5 +1,5 @@
 export const PROFILE_ID = 'demo-profile';
-export const ROUTE_IDS = ['debug', 'feature', 'trivial', 'hunt', 'command'];
+export const ROUTE_IDS = ['debug', 'consilium-debug', 'feature', 'trivial', 'hunt', 'command'];
 
 const stop = (target = 'human') => ({ stop: target });
 const next = (target) => ({ next: target });
@@ -151,7 +151,7 @@ const debugRoute = {
       'build',
       'review',
       'measure',
-      'phpcheck',
+      'syntax_check',
       'lint',
       'gate_accept',
     ],
@@ -227,11 +227,11 @@ const debugRoute = {
       id: 'measure',
       runKey: 'MEASURE',
       timeoutClass: 'diagnostic',
-      on: defaultOn(next('phpcheck')),
+      on: defaultOn(next('syntax_check')),
     }),
     agent({
-      id: 'phpcheck',
-      runKey: 'PHPCHECK',
+      id: 'syntax_check',
+      runKey: 'SYNTAX_CHECK',
       timeoutClass: 'check',
       budgetClass: 'small',
       on: defaultOn(next('lint'), { skipped: next('lint') }),
@@ -322,7 +322,7 @@ const trivialRoute = {
   title: 'Fixture trivial v2',
   entry: 'build',
   sequence: {
-    main: ['build', 'review', 'phpcheck', 'lint', 'gate_accept'],
+    main: ['build', 'review', 'syntax_check', 'lint', 'gate_accept'],
     tail: ['ship', 'retro'],
   },
   nodes: [
@@ -338,13 +338,13 @@ const trivialRoute = {
       id: 'review',
       runKey: 'REVIEW',
       timeoutClass: 'review',
-      on: defaultOn(next('phpcheck'), {
+      on: defaultOn(next('syntax_check'), {
         failed: rewind('build', ['build', 'review']),
       }),
     }),
     agent({
-      id: 'phpcheck',
-      runKey: 'PHPCHECK',
+      id: 'syntax_check',
+      runKey: 'SYNTAX_CHECK',
       timeoutClass: 'check',
       budgetClass: 'small',
       on: defaultOn(next('lint'), { skipped: next('lint') }),
@@ -520,7 +520,32 @@ export const ROUTE_DEFINITIONS = {
       'build',
       'review',
       'measure',
-      'phpcheck',
+      'syntax_check',
+      'lint',
+      'ship',
+      'retro',
+    ], { publish: true }),
+  },
+  'consilium-debug': {
+    // Та же машина под другим id — regression fixture для контрактов, которые
+    // обязаны выводиться из topology, а не из исторического имени `debug`.
+    route: {
+      ...debugRoute,
+      id: 'consilium-debug',
+      title: 'Fixture renamed debug v2',
+    },
+    prompts: promptsFor([
+      'repro',
+      'instrument',
+      'diagnose',
+      'hyposkeptic',
+      'proof',
+      'translator',
+      'tests',
+      'build',
+      'review',
+      'measure',
+      'syntax_check',
       'lint',
       'ship',
       'retro',
@@ -533,7 +558,7 @@ export const ROUTE_DEFINITIONS = {
   trivial: {
     route: trivialRoute,
     prompts: promptsFor(
-      ['build', 'review', 'phpcheck', 'lint', 'ship', 'retro'],
+      ['build', 'review', 'syntax_check', 'lint', 'ship', 'retro'],
       { publish: true },
     ),
   },

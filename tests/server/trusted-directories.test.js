@@ -4,61 +4,43 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
-import {
-  TrustedDirectoryInputError,
-  normalizeStoredTrustedDirectories,
-  validateTrustedDirectories,
-} from '../../server/src/lib/trusted-directories.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
+import claudeExecutor from '../../server/src/lib/executors/claude.ts';
+import codexExecutor from '../../server/src/lib/executors/codex.ts';
+import kimiExecutor from '../../server/src/lib/executors/kimi.ts';
+import { resolveWorkdirCapability } from '../../server/src/lib/chat/workdir.ts';
 
-test('доверенные каталоги канонизируются и не дублируются через симлинки', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-trusted-'));
-  try {
-    const directory = path.join(temp, 'workspace');
-    const alias = path.join(temp, 'workspace-link');
-    await fs.mkdir(directory);
-    await fs.symlink(directory, alias);
-
-    assert.deepEqual(
-      await validateTrustedDirectories([directory, alias, `${directory}/`]),
-      [directory],
-    );
-  } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+test('адаптеры объявляют смену папки вместо общего доверенного доступа', async () => {
+  for (const executor of [claudeExecutor, codexExecutor]) {
+    assert.deepEqual(await resolveWorkdirCapability(executor, {}), { switch: 'resume', roots: 'multi' });
+    assert.equal(Object.hasOwn(executor, 'trustedDirectories'), false);
   }
+
+  assert.deepEqual(await resolveWorkdirCapability(kimiExecutor, { kimiLaunchMode: 'host' }), {
+    switch: 'reseed', roots: 'single',
+  });
+  assert.deepEqual(await resolveWorkdirCapability(kimiExecutor, { kimiLaunchMode: 'contained' }), {
+    switch: 'reseed', roots: 'multi',
+  });
 });
 
-test('доверенный путь должен быть существующим абсолютным каталогом, но не корнем', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-trusted-'));
-  try {
-    const file = path.join(temp, 'file.txt');
-    await fs.writeFile(file, 'x');
+test('старые prefs читаются без trustedDirectories и удаляют ключ при следующей записи', async (t) => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-prefs-'));
 
-    for (const value of [['relative'], ['/'], [file], [path.join(temp, 'missing')]]) {
-      await assert.rejects(
-        validateTrustedDirectories(value),
-        TrustedDirectoryInputError,
-      );
-    }
-  } finally {
-    await fs.rm(temp, { recursive: true, force: true });
-  }
-});
+  t.after(() => fs.rm(temp, { recursive: true, force: true }));
 
-test('PrefsStore хранит только нормальный список доверенных каталогов', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-prefs-'));
-  try {
-    const prefs = new PrefsStore({ prefsPath: path.join(temp, 'prefs.json') });
-    const directory = path.join(temp, 'workspace');
-    prefs.write({
-      trustedDirectories: [directory, directory, 'relative', '/', null],
-    });
-    assert.deepEqual(prefs.read().trustedDirectories, [directory]);
-    assert.deepEqual(
-      normalizeStoredTrustedDirectories([directory, `${directory}/`, 'relative']),
-      [directory],
-    );
-  } finally {
-    await fs.rm(temp, { recursive: true, force: true });
-  }
+  const prefsPath = path.join(temp, 'prefs.json');
+  const prefs = new PrefsStore({ prefsPath });
+  const projects = { demo: { title: 'Проект', repos: [] } };
+
+  await fs.writeFile(prefsPath, JSON.stringify({ trustedDirectories: [temp], projects }));
+
+  assert.equal(Object.hasOwn(prefs.read(), 'trustedDirectories'), false);
+  prefs.write({ showAllModels: true, trustedDirectories: [temp] });
+
+  const stored = JSON.parse(await fs.readFile(prefsPath, 'utf8'));
+
+  assert.equal(Object.hasOwn(stored, 'trustedDirectories'), false);
+  assert.deepEqual(stored.projects, projects);
+  assert.equal(stored.showAllModels, true);
 });

@@ -11,7 +11,7 @@ fe_worktree="$root/fe-worktree"
 state="$root/state"
 mkdir -p \
   "$be_source" "$fe_source" \
-  "$be_worktree/app" "$fe_worktree/src" \
+  "$be_worktree/src" "$fe_worktree/src" \
   "$state"
 
 ticket="$root/ticket.json"
@@ -33,9 +33,9 @@ attempt="a_11111111111111111111111111111111"
 catalog="$(printf 'a%.0s' {1..64})"
 route_hash="$(printf 'b%.0s' {1..64})"
 scope="$state/t42.instrumentation-scope.list"
-allowed="$be_worktree/app/Calculation.php"
+allowed="$be_worktree/src/calculation.txt"
 printf '%s\n' "$allowed" >"$scope"
-project_context='{"stack":["PHP 8.4","Vue 3"],"guardrails":["Не применять auto-fix."]}'
+project_context='{"stack":["Runtime A","UI toolkit B"],"guardrails":["Не применять автоматические исправления."]}'
 findings_ledger='{"schema":1,"open":[{"id":"valid-regex-route","sourceNode":"review","owner":"build","summary":"валидный regex возвращает 422","openedSequence":4,"lastSeenSequence":6,"status":"open","closedSequence":null}],"closed":[]}'
 
 common=(
@@ -55,7 +55,7 @@ common=(
   --frontend-worktree "$fe_worktree"
   --state-dir "$state"
   --workspace-mode isolated
-  --container-name demo-sb-t42-application-1
+  --container-name sample-sandbox-t42-service-1
   --frontend-port 5192
   --api-port 8092
   --allowed-file "$allowed"
@@ -95,14 +95,25 @@ assert_eq task-42 "$(jq -r '.delivery.sourceBranch' <<<"$output")" \
   "SHIP receives the exact source branch"
 assert_eq "http://127.0.0.1:5192" "$(jq -r '.services.frontendUrl' <<<"$output")" \
   "validated port becomes a local service URL"
-assert_eq 'PHP 8.4,Vue 3' "$(jq -r '.project.stack | join(",")' <<<"$output")" \
+assert_eq 'Runtime A,UI toolkit B' "$(jq -r '.project.stack | join(",")' <<<"$output")" \
   "project stack comes from the profile-owned context"
-assert_eq 'Не применять auto-fix.' "$(jq -r '.project.guardrails[0]' <<<"$output")" \
+assert_eq 'Не применять автоматические исправления.' "$(jq -r '.project.guardrails[0]' <<<"$output")" \
   "project guardrails are not hardcoded by the engine"
 assert_eq valid-regex-route "$(jq -r '.evidence.findings.open[0].id' <<<"$output")" \
   "typed context carries the open finding from the verified attempt ledger"
 assert_eq build "$(jq -r '.evidence.findings.open[0].owner' <<<"$output")" \
   "finding ownership remains typed data for the receiving node"
+
+# Узла ретро в маршрутах больше нет: адресов урока контекст не несёт, а прежний
+# флаг профиля отвергается как неизвестный — молчаливое принятие вернуло бы мёртвую
+# настройку LESSONS_DIR.
+assert_eq null "$(jq -r '.artifacts.lessons' <<<"$output")" \
+  "lessons artifact is gone together with the retro node"
+assert_eq null "$(jq -r '.artifacts.lessonsRepo' <<<"$output")" \
+  "lessonsRepo artifact is gone together with the retro node"
+stale_lessons=("${common[@]}" --lessons-dir docs/lessons)
+"$tool" "${stale_lessons[@]}" >/dev/null 2>&1
+assert_rc 2 "$?" "stale --lessons-dir flag is rejected"
 
 bad_findings=("${common[@]}")
 for index in "${!bad_findings[@]}"; do
@@ -170,19 +181,19 @@ assert_rc 78 "$?" "ticket cannot inject an unknown context field"
 outside=("${common[@]}")
 for index in "${!outside[@]}"; do
   [[ "${outside[$index]}" == "$allowed" ]] &&
-    outside[$index]="$root/outside.php"
+    outside[$index]="$root/outside.txt"
 done
 "$tool" "${outside[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "transaction scope cannot escape the task worktrees"
 
 # Однорепозиторный профиль не обязан выдумывать frontend-worktree: typed context
 # хранит ровно объявленный repo и проектную метаинформацию.
-single_source="$root/rdesigner-source"
-single_worktree="$root/rdesigner-worktree"
+single_source="$root/sample-source"
+single_worktree="$root/sample-worktree"
 mkdir -p "$single_source" "$single_worktree/webapp"
 single=(
   --task 42
-  --profile rdesigner
+  --profile sample-profile
   --attempt "$attempt"
   --catalog-hash "$catalog"
   --route feature
@@ -190,68 +201,97 @@ single=(
   --node browser
   --run-key BROWSER
   --ticket-json "$ticket"
-  --project-context-json '{"stack":["Python 3.11","Three.js"],"guardrails":["Одна GPU; рендеры только последовательно."]}'
-  --repo "rdesigner:$single_worktree:$single_source:factory/t42"
+  --project-context-json '{"stack":["Runtime C","Renderer D"],"guardrails":["Один вычислительный слот; операции только последовательно."]}'
+  --repo "sample-repository:$single_worktree:$single_source:task/42"
   --state-dir "$state"
   --workspace-mode shared
-  --container-name rdesigner-t42
+  --container-name sample-container-t42
   --frontend-port 8831
   --api-port 8831
   --delivery-mode disabled
-  --source-branch factory/t42
+  --source-branch task/42
 )
 single_output=$("$tool" "${single[@]}")
 assert_rc 0 "$?" "single-repository typed context is built"
-assert_eq '["rdesigner"]' "$(jq -c '.workspace.repos' <<<"$single_output")" \
+assert_eq '["sample-repository"]' "$(jq -c '.workspace.repos' <<<"$single_output")" \
   "workspace preserves the exact repository list"
-assert_eq "$single_worktree" "$(jq -r '.workspace.rdesigner.path' <<<"$single_output")" \
+assert_eq "$single_worktree" "$(jq -r '.workspace["sample-repository"].path' <<<"$single_output")" \
   "single repository keeps its declared worktree"
 assert_eq false "$(jq 'has("backend") or has("frontend")' <<<"$(jq '.workspace' <<<"$single_output")")" \
   "single repository context has no synthetic backend/frontend"
-assert_eq 'Python 3.11,Three.js' "$(jq -r '.project.stack | join(",")' <<<"$single_output")" \
+assert_eq 'Runtime C,Renderer D' "$(jq -r '.project.stack | join(",")' <<<"$single_output")" \
   "single repository keeps ordered project metadata"
 
 bad_project=("${single[@]}")
 for index in "${!bad_project[@]}"; do
-  [[ "${bad_project[$index]}" == *'"Python 3.11"'* ]] &&
-    bad_project[$index]='{"stack":["Python"],"guardrails":[],"unexpected":true}'
+  [[ "${bad_project[$index]}" == *'"Runtime C"'* ]] &&
+    bad_project[$index]='{"stack":["Runtime"],"guardrails":[],"unexpected":true}'
 done
 "$tool" "${bad_project[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "project context rejects unknown fields"
 
 "$tool" "${single[@]}" \
-  --repo "rdesigner:$single_worktree:$single_source:factory/t42" >/dev/null 2>&1
+  --repo "sample-repository:$single_worktree:$single_source:task/42" >/dev/null 2>&1
 assert_rc 78 "$?" "single repository context rejects a duplicate repo"
 
 reserved=("${single[@]}")
 for index in "${!reserved[@]}"; do
-  [[ "${reserved[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
-    reserved[$index]="generation:$single_worktree:$single_source:factory/t42"
+  [[ "${reserved[$index]}" == "sample-repository:$single_worktree:$single_source:task/42" ]] &&
+    reserved[$index]="generation:$single_worktree:$single_source:task/42"
 done
 "$tool" "${reserved[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "repository name cannot overwrite typed workspace metadata"
 
 # Ветка своя у каждого репозитория: агент обязан видеть ветку СВОЕГО checkout, иначе
 # в проекте из нескольких репозиториев с разными канонами он читает чужую.
-assert_eq 'factory/t42' "$(jq -r '.workspace.rdesigner.branch' <<<"$single_output")" \
+assert_eq 'task/42' "$(jq -r '.workspace["sample-repository"].branch' <<<"$single_output")" \
   "repository carries its own pinned branch"
 
 short_repo=("${single[@]}")
 for index in "${!short_repo[@]}"; do
-  [[ "${short_repo[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
-    short_repo[$index]="rdesigner:$single_worktree:$single_source"
+  [[ "${short_repo[$index]}" == "sample-repository:$single_worktree:$single_source:task/42" ]] &&
+    short_repo[$index]="sample-repository:$single_worktree:$single_source"
 done
 short_output=$("$tool" "${short_repo[@]}")
 assert_rc 0 "$?" "legacy launcher repo survives a rolling context-builder update"
-assert_eq 'factory/t42' "$(jq -r '.workspace.rdesigner.branch' <<<"$short_output")" \
+assert_eq 'task/42' "$(jq -r '.workspace["sample-repository"].branch' <<<"$short_output")" \
   "legacy repo inherits the explicitly pinned common source branch"
 
 bad_branch=("${single[@]}")
 for index in "${!bad_branch[@]}"; do
-  [[ "${bad_branch[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
-    bad_branch[$index]="rdesigner:$single_worktree:$single_source:../evil"
+  [[ "${bad_branch[$index]}" == "sample-repository:$single_worktree:$single_source:task/42" ]] &&
+    bad_branch[$index]="sample-repository:$single_worktree:$single_source:../escape"
 done
 "$tool" "${bad_branch[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "repository branch name is validated like any other branch"
+
+# Bootstrap не входит в sequence основного ledger и может совпасть по id с main scout.
+# Проверяем реальный context CLI и freshness loop, а не только форму фикстуры.
+bootstrap_ledger=$(jq -c '
+  .schema = 2 |
+  .open |= map(. + {source:{phase:"route"},sourceNode:"scout"}) |
+  .deferred = [{id:"valid-regex-route",sourceNode:"scout",owner:"build",summary:"Проверка целевой среды",
+    openedSequence:null,lastSeenSequence:null,closedSequence:null,status:"deferred",
+    source:{phase:"bootstrap",recordHash:("a" * 64),runId:"fixture-scout",epoch:1}}]
+' <<<"$findings_ledger")
+bootstrap_output=$("$tool" "${common[@]}" --findings-ledger-json "$bootstrap_ledger")
+assert_rc 0 "$?" "context CLI принимает внешнюю findings schema 2"
+assert_eq bootstrap "$(jq -r .evidence.findings.deferred[0].source.phase <<<"$bootstrap_output")" \
+  "context сохраняет источник bootstrap"
+assert_eq null "$(jq -r .evidence.findings.deferred[0].openedSequence <<<"$bootstrap_output")" \
+  "context не подменяет bootstrap sequence"
+invalid_bootstrap=$(jq -c '.deferred[0].openedSequence = 1' <<<"$bootstrap_ledger")
+"$tool" "${common[@]}" --findings-ledger-json "$invalid_bootstrap" >/dev/null 2>&1
+assert_rc 78 "$?" "bootstrap sequence основного ledger отвергнут"
+python3 - "$tool" "$bootstrap_ledger" <<'PYTEST'
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+findings = module["findings_ledger"](sys.argv[2])
+bounded = module["bound_loop_findings"](findings)
+assert bounded["schema"] == 2
+assert bounded["deferred"][0]["source"]["phase"] == "bootstrap"
+assert module["finding_freshness"]("deferred", bounded["deferred"][0]) == (0, 0, 0)
+PYTEST
+assert_rc 0 "$?" "loop-bounding сохраняет schema/source и сортирует null sequence"
 
 finish_tests

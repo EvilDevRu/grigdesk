@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/db/dbContracts.ts",
+    "../shared/plugins/ssh/sshContracts.ts",
+    "src/shared/dbApi.ts",
+    "src/stores/db.ts",
+    "src/actions/db/**/*.ts",
+    "src/views/db/**/*.vue",
+    "src/views/DbView.vue",
+    "../tests/types/db-contract.test.ts"
+  ]
+}

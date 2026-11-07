@@ -1,88 +1,32 @@
 // Выполненный прогон обязан иметь чем уйти с экрана.
 //
-// Кокпит не архивирует задачу сам: реестр в архив переносит человек кнопкой. У задачи
+// GrigDesk не архивирует задачу сам: реестр в архив переносит человек кнопкой. У задачи
 // со СВОЕЙ песочницей это «снести стенд», у задачи без стенда — «закрыть задачу». А у
 // shared-профиля (общий checkout, внешний стенд) не показывалась ни та, ни другая:
-// сносить чужой стенд кокпиту запрещено, а условие «закрыть» требовало отсутствия порта
+// сносить чужой стенд GrigDesk запрещено, а условие «закрыть» требовало отсутствия порта
 // фронта — в shared-режиме порт есть всегда. Доведённый до конца прогон висел на экране
 // навсегда. Тест держит кнопку на месте для всех трёх случаев.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compilePipelineView } from './helpers/pipeline-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/PipelineView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-
-async function compilePipelineView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-pipeline-close-shared-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', 'from "' + VUE_URL + '"')
-    .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__pipelineCloseApi;')
-    .replace("import { useSse } from '../composables/useSse.js';", 'const useSse = () => {};')
-    .replace("import { useUiStore } from '../stores/ui.js';", 'const useUiStore = globalThis.__pipelineCloseUiStore;')
-    .replace("import { useTasksStore } from '../stores/tasks.js';", 'const useTasksStore = globalThis.__pipelineCloseTasksStore;')
-    .replace("import { useBoardStore } from '../stores/board.js';", 'const useBoardStore = globalThis.__pipelineCloseBoardStore;')
-    .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__pipelineCloseChatStore;')
-    .replace(
-      "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const pipelineWorkSec = (tm) => tm?.workSec ?? null; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace("import { mdToHtml } from '../shared/md.js';", 'const mdToHtml = (value) => String(value || "");')
-    // Диалоги отвечают «да» и запоминают текст: подтверждение обязано быть честным про ветки.
-    .replace(
-      "import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async (text) => { globalThis.__pipelineCloseDialogs.push(text); return true; };'
-      + ' const alertDialog = async (text) => { globalThis.__pipelineCloseDialogs.push(text); };',
-    )
-    .replace("import { sandboxUrl } from '../shared/sandbox.js';", 'const sandboxUrl = (port) => "http://sandbox.test:" + port;')
-    .replace("import { agentActivityLabel } from '../shared/agent-activity.js';", 'const agentActivityLabel = () => "";')
-    .replace(
-      "import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';",
-      'const { waitingReason, stripEmoji } = globalThis.__pipelineCloseWait;',
-    )
-    .replace(
-      /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptResultLabel, providerLabel, runnerChainLabel, runnerModelLabel, runnerNodeLabel, runnerReasonLabel }'
-      + ' = globalThis.__pipelineCloseDisplay;',
-    )
-    .replace("import FactoryGraph from './pipeline/FactoryGraph.vue';", 'const FactoryGraph = globalThis.__pipelineCloseFactoryGraph;')
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { props: ["taskId"], template: "<span></span>" };',
-    );
-  compilePipelineView.seq = (compilePipelineView.seq || 0) + 1;
-  return (await import(
-    'data:text/javascript;base64,'
-    + Buffer.from(`${code}\n// compile #${compilePipelineView.seq}`).toString('base64')
-  )).default;
-}
-
 // Доведённая до конца задача: все узлы пройдены, демона нет, попытка терминальна.
-function makeFixture({ workspaceMode = 'shared', fePort = 13000, sandbox = null } = {}) {
+// `daemonAlive` включает второй случай — прогон, который прямо сейчас идёт: кнопка
+// закрытия видна и под ним тоже, и обязана честно сказать, что прервёт работу.
+function makeFixture({
+  workspaceMode = 'shared', fePort = 13000, sandbox = null, daemonAlive = false,
+} = {}) {
   const factoryTask = {
     task: 90002,
-    profile: 'parser',
+    profile: 'project-alpha',
     route: 'feature',
     readOnly: false,
     workspaceMode,
-    daemonAlive: false,
+    daemonAlive,
     attempt: 'a_0ec48def',
-    result: 'completed',
+    result: daemonAlive ? null : 'completed',
     stall: null,
   };
   const graph = {
@@ -90,19 +34,22 @@ function makeFixture({ workspaceMode = 'shared', fePort = 13000, sandbox = null 
     readOnly: false,
     fePort,
     sandbox,
+    daemonAlive,
     nodes: { build: [0, '🔨 Реализация'], retro: [1, '🧾 Ретро'] },
     pos: { build: 0, retro: 1 },
     keys: { build: 'BUILD', retro: 'RETRO' },
-    statuses: { build: 'done', retro: 'done' },
+    statuses: daemonAlive ? { build: 'run', retro: 'pending' } : { build: 'done', retro: 'done' },
     nodeMeta: {},
-    progress: { done: 2, total: 2, current: null },
+    progress: daemonAlive
+      ? { done: 0, total: 2, current: 'build' }
+      : { done: 2, total: 2, current: null },
   };
   return { factoryTask, graph };
 }
 
 async function mountPipeline(t, { factoryTask, graph }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -128,17 +75,41 @@ async function mountPipeline(t, { factoryTask, graph }) {
   ]);
   const posts = [];
   globalThis.__pipelineCloseDialogs = [];
+  // Подпись кнопки подтверждения — часть предупреждения, а не отделка: у прерывания
+  // живого прогона она обязана отличаться от обычного закрытия. Держим её отдельным
+  // списком, чтобы не менять форму записей `dialogs`, по которым читают прежние тесты.
+  globalThis.__pipelineCloseConfirmOptions = [];
+  globalThis.__pipelineCloseConfirmDialog = async (text, options = {}) => {
+    globalThis.__pipelineCloseDialogs.push(text);
+    globalThis.__pipelineCloseConfirmOptions.push(options);
+
+    return true;
+  };
+  globalThis.__pipelineCloseAlertDialog = async (text) => {
+    globalThis.__pipelineCloseDialogs.push(text);
+  };
   globalThis.__pipelineCloseApi = {
+    /**
+     * Список задач отвечает тем же opt-in источников, что запрашивает живой экран.
+     * Граф и каталог исполнителей принадлежат фикстуре и не обращаются к живым задачам.
+     */
     async get(url) {
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners: [] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
+
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: [] };
+      }
+
       return {};
     },
     async post(url) { posts.push(url); return { ok: true, archived: ['pipeline'], branches: [] }; },
   };
-  globalThis.__pipelineCloseWait = await import('../../web/src/shared/pipeline-wait.js');
-  globalThis.__pipelineCloseDisplay = await import('../../web/src/shared/runner-display.js');
   globalThis.__pipelineCloseFactoryGraph = {
     name: 'FactoryGraph',
     props: ['graph', 'loopsOn'],
@@ -152,23 +123,32 @@ async function mountPipeline(t, { factoryTask, graph }) {
   globalThis.__pipelineCloseBoardStore = defineStore('pipeline-close-board', {
     state: () => ({ data: null }), actions: { async load() {} },
   });
-  globalThis.__pipelineCloseChatStore = defineStore('pipeline-close-chat', { actions: { openFor() {} } });
 
-  const wrapper = mount(await compilePipelineView(), {
+  const wrapper = mount(await compilePipelineView('__pipelineClose'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: {
+      plugins: [createPinia()],
+      stubs: { teleport: true },
+    },
   });
   t.after(() => {
     wrapper.unmount();
     browser.close();
     for (const key of [
-      '__pipelineCloseApi', '__pipelineCloseDialogs', '__pipelineCloseWait', '__pipelineCloseDisplay',
-      '__pipelineCloseFactoryGraph', '__pipelineCloseUiStore', '__pipelineCloseTasksStore',
-      '__pipelineCloseBoardStore', '__pipelineCloseChatStore',
+      '__pipelineCloseApi', '__pipelineCloseDialogs', '__pipelineCloseConfirmDialog',
+      '__pipelineCloseConfirmOptions',
+      '__pipelineCloseAlertDialog', '__pipelineCloseFactoryGraph', '__pipelineCloseUiStore',
+      '__pipelineCloseTasksStore', '__pipelineCloseBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
-  return { wrapper, flushPromises, posts, dialogs: globalThis.__pipelineCloseDialogs };
+  return {
+    wrapper,
+    flushPromises,
+    posts,
+    dialogs: globalThis.__pipelineCloseDialogs,
+    confirmOptions: globalThis.__pipelineCloseConfirmOptions,
+  };
 }
 
 test('shared-задача с внешним стендом: «закрыть задачу» есть, «снести стенд» — нет', async (t) => {
@@ -181,7 +161,7 @@ test('shared-задача с внешним стендом: «закрыть з�
   await close.trigger('click');
   await flushPromises();
   assert.deepEqual(posts, ['/api/tasks/90002/close']);
-  // Общий checkout кокпит не трогает — обещать удаление веток нельзя.
+  // Общий checkout GrigDesk не трогает — обещать удаление веток нельзя.
   assert.ok(dialogs.some((text) => /Общий checkout и его ветки не затрагиваются/.test(text)));
 });
 
@@ -203,10 +183,64 @@ test('стенда нет вовсе: кнопка закрытия остаёт
   assert.ok(dialogs.some((text) => /Пустая ветка будет удалена/.test(text)));
 });
 
+test('идущий прогон: подтверждение называет узел и обещает прервать работу', async (t) => {
+  const { wrapper, flushPromises, dialogs, confirmOptions } = await mountPipeline(
+    t, makeFixture({ daemonAlive: true }),
+  );
+
+  await wrapper.get('.sbclose').trigger('click');
+  await flushPromises();
+
+  const text = dialogs.find((line) => /Закрыть задачу/.test(line));
+  assert.ok(text, 'подтверждение закрытия должно быть показано');
+  assert.match(text, /Прогон ИДЁТ — узел «Реализация»/);
+  assert.match(text, /прервёт его/);
+  assert.match(text, /запускать заново/);
+  // Кнопка не имеет права называться просто «Закрыть»: человек читает её последней.
+  assert.equal(confirmOptions.at(-1)?.okText, 'Прервать и закрыть');
+});
+
+test('прогон стоит: предупреждения о прерывании нет', async (t) => {
+  const { wrapper, flushPromises, dialogs, confirmOptions } = await mountPipeline(t, makeFixture());
+
+  await wrapper.get('.sbclose').trigger('click');
+  await flushPromises();
+
+  const text = dialogs.find((line) => /Закрыть задачу/.test(line));
+  assert.ok(text);
+  assert.equal(/Прогон ИДЁТ/.test(text), false);
+  assert.equal(confirmOptions.at(-1)?.okText, 'Закрыть');
+});
+
 test('стенд ещё строится: закрывать нечего — кнопки нет', async (t) => {
   const { wrapper } = await mountPipeline(t, makeFixture({
     fePort: null, sandbox: { step: 3, total: 9, label: 'миграции' },
   }));
 
   assert.equal(wrapper.find('.sbclose').exists(), false);
+});
+
+test('readOnly не предлагает управление', async (t) => {
+  const fixture = makeFixture();
+
+  fixture.factoryTask.readOnly = true;
+  fixture.graph.readOnly = true;
+  fixture.factoryTask.stall = {
+    kind: 'human',
+    stage: 'BUILD',
+    title: 'BUILD: нужно решение человека',
+    hint: 'Откройте узел.',
+    arbitrable: true,
+  };
+  fixture.graph.stall = { ...fixture.factoryTask.stall, node: 'build' };
+
+  const { wrapper } = await mountPipeline(t, fixture);
+
+  assert.equal(wrapper.find('.gwrap').exists(), true);
+
+  for (const selector of [
+    '[data-role="pipeline-stall-answer-open"]', '.sbretry', '.sbresume', '.sbstop', '.sbdown', '.sbclose',
+  ]) {
+    assert.equal(wrapper.find(selector).exists(), false, selector);
+  }
 });

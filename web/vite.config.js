@@ -1,16 +1,24 @@
 import path from 'node:path';
+import os from 'node:os';
+import { parseEnv } from 'node:util';
+import { envFilePath } from '../shared/runtime/dataHome.ts';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import { VitePWA } from 'vite-plugin-pwa';
+import pluginRuntimePlugin from './scripts/pluginRuntimePlugin.mjs';
+import localApiPlugin from './scripts/localApiPlugin.ts';
 
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Номер выпуска приходит из единого build input, локальная сборка читает VERSION.
+ * Git identity остаётся отдельной подписью интерфейса и не заменяет продуктовый номер.
+ */
 function buildMetadata() {
-  let version = process.env.VITE_COCKPIT_VERSION || 'dev';
-  let sha = process.env.VITE_COCKPIT_SHA || 'dev';
+  let version = process.env.GRIGDESK_RELEASE_VERSION || process.env.VITE_GRIGDESK_VERSION || 'dev';
+  let sha = process.env.VITE_GRIGDESK_SHA || 'dev';
   try { if (version === 'dev') version = readFileSync(path.join(envDir, 'VERSION'), 'utf8').trim(); }
   catch { /* dev checkout без VERSION */ }
   try {
@@ -22,67 +30,37 @@ function buildMetadata() {
 // base './' — чтобы собранная статика работала и на корне сервера, и в поддиректории.
 // В dev проксируем API/статику фабрики на настроенный порт сервера, чтобы фронт ходил
 // на тот же origin, что и в проде.
-export default defineConfig(({ mode }) => {
-  const fileEnv = loadEnv(mode, envDir, '');
-  // loadEnv не меняет process.env. Явно сохраняем тот же приоритет, что у `node --env-file`:
-  // уже экспортированная переменная выше значения из корневого .env.
-  const cockpitPort = Number(process.env.COCKPIT_PORT ?? fileEnv.COCKPIT_PORT) || 8140;
-  const proxyTarget = `http://localhost:${cockpitPort}`;
+export default defineConfig(({ command }) => {
+  let fileEnv = {};
+
+  if (command === 'serve') {
+    try {
+      const file = envFilePath({ env: process.env, home: os.homedir() });
+
+      fileEnv = parseEnv(readFileSync(file, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  const effectiveEnv = { ...fileEnv, ...process.env };
+  const grigDeskPort = Number(effectiveEnv.GRIGDESK_PORT) || 8140;
   const metadata = buildMetadata();
 
   return {
-    plugins: [
-      vue(),
-      // PWA: устанавливается на планшет, обновляется через баннер (registerType 'prompt').
-      VitePWA({
-        registerType: 'prompt',
-        manifest: {
-          name: 'Кокпит',
-          short_name: 'Кокпит',
-          description: 'Пульт: доска B24, конвейер фабрики, стенды',
-          theme_color: '#0b0d11',
-          background_color: '#0b0d11',
-          display: 'standalone',
-          lang: 'ru',
-          start_url: './',
-          // Без иконок 192 и 512 Chrome НЕ предложит установку — приложение останется закладкой
-          // в браузере вместо WebAPK со своей иконкой и без адресной строки.
-          // Пути относительные (не с `/`) — резолвятся от манифеста, живут и в поддиректории.
-          // Генерируются `python3 scripts/gen-icons.py` → public/.
-          icons: [
-            { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-            { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-            // maskable — Android режет иконку под форму лончера (круг/сквиркл); рисунок
-            // вписан в safe zone, иначе рамку обрежет по краям.
-            { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          ],
-        },
-        workbox: {
-          globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-          // Обработчик клика по системному уведомлению отдельным файлом: generated SW
-          // остаётся под управлением Workbox, а PWA фокусируется/открывается по нажатию.
-          importScripts: ['notification-sw.js'],
-          // Monaco (диф-редактор) — крупный чанк; поднимаем лимит прекеша (по умолчанию 2 МБ).
-          maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-          // SPA-fallback не должен перехватывать API/статику.
-          navigateFallbackDenylist: [/^\/api/, /^\/shots/],
-        },
-      }),
-    ],
+    plugins: [vue(), pluginRuntimePlugin(), localApiPlugin({ port: grigDeskPort, env: effectiveEnv })],
     base: './',
     define: {
-      __COCKPIT_VERSION__: JSON.stringify(metadata.version),
-      __COCKPIT_SHA__: JSON.stringify(metadata.sha),
+      __GRIGDESK_VERSION__: JSON.stringify(metadata.version),
+      __GRIGDESK_SHA__: JSON.stringify(metadata.sha),
     },
-    // .env лежит в корне репо (общий для сервера и фронта) — читаем оттуда.
+    // envDir — корень репозитория (VERSION, git, VITE_*); .env GrigDesk лежит в папке данных.
     envDir,
     server: {
+      host: '127.0.0.1',
       port: 5180,
-      proxy: {
-        '/api': { target: proxyTarget, changeOrigin: true, ws: false },
-        '/vscode': { target: proxyTarget, changeOrigin: true, ws: true },
-        '/shots': proxyTarget,
-      },
     },
     build: { outDir: 'dist', emptyOutDir: true },
   };

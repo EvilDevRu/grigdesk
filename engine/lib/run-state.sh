@@ -82,11 +82,35 @@ owners = {"build", "tests", "environment", "plan", "human"}
 finding_re = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SUMMARY_LIMIT = 500
 FINDINGS_LIMIT = 32
+PATH_LIMIT = 200
+REVIEWED_LIMIT = 64
+# Метаданные вердикта едут тем же списком, что и замечания: у finding-id формат
+# kebab-case, двоеточия в нём нет, поэтому префикс однозначно отделяет их от
+# `id=summary` и не ломает уже написанные вызовы с одними замечаниями.
+ANCHOR_PREFIX = "anchor:"
+REVIEWED_PREFIX = "reviewed:"
+DEFERRED_PREFIX = "deferred:"
+# Граница этапа цикла: ведущий принимает прежний этап и передаёт следующий. Три части
+# едут вместе — вид границы, закрываемые id прежнего этапа и основание приёмки. Что
+# граница честная, проверяет доверенный коммит по журналу попытки; здесь только форма.
+STAGE_PREFIX = "stage:"
+STAGE_CLOSED_PREFIX = "stage-closed:"
+STAGE_SUMMARY_PREFIX = "stage-summary:"
+STAGE_KINDS = {"next"}
+# Вес замечания. `blocking` — дефолт и единственное, что возвращает работу автору;
+# `deferred` — та самая находка «outside scope / follow-up», которую общий шаблон
+# этапа давно разрешает словами, но выразить машинно было нечем: любой список
+# findings ехал только с `failed`, а `failed` всегда означал возврат. Из-за этого
+# проверяющий, увидев дефект вне цели задачи, был обязан либо развернуть маршрут,
+# либо промолчать. Отсутствие поля читается как `blocking` — старые события в
+# immutable ledger остаются валидными без миграции.
+SEVERITIES = {"blocking", "deferred"}
+DEFAULT_SEVERITY = "blocking"
 
 
-# Отказ обязан называть нарушенное правило. Молчащий код 2 стоил вердикта этапа: на t7802
-# скептик 17 минут не мог отчитаться (summary длиннее лимита), угадывал причину пробными
-# вызовами — и терминальный исход узла закрыл диагностический плейсхолдер, потому что
+# Отказ обязан называть нарушенное правило. Один молчащий код 2 заставлял агента
+# угадывать причину пробными вызовами, а терминальный исход узла затем закрывал
+# диагностический плейсхолдер, потому что
 # повторная фиксация того же run уже отклоняется. Печатаем правило и id, но не текст
 # замечания: то же сообщение уходит в журнал маршрута при trusted-проверке.
 def fail(reason="вердикт отклонён"):
@@ -94,9 +118,49 @@ def fail(reason="вердикт отклонён"):
     raise SystemExit(2)
 
 
+def artifact_path(value):
+    # Якорь замечания и объявленный охват — относительные пути рабочего дерева.
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= PATH_LIMIT
+        and not value.startswith("/")
+        and ".." not in value.split("/")
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
+def validate_stage(stage, findings):
+    # Граница этапа имеет смысл только вместе с работой следующего этапа: без
+    # блокирующей находки передавать исполнителю нечего.
+    if not isinstance(stage, dict) or set(stage) != {"kind", "closes", "summary"}:
+        fail("stage: ровно kind, closes и summary")
+    if stage["kind"] not in STAGE_KINDS:
+        fail(f"stage.kind: допустимо {', '.join(sorted(STAGE_KINDS))}")
+    closes = stage["closes"]
+    if not isinstance(closes, list) or not 1 <= len(closes) <= FINDINGS_LIMIT:
+        count = len(closes) if isinstance(closes, list) else "нет списка"
+        fail(f"stage.closes: id {count}, допустимо 1..{FINDINGS_LIMIT}")
+    if len(set(closes)) != len(closes):
+        fail("stage.closes: id не должны повторяться")
+    for closed_id in closes:
+        if not isinstance(closed_id, str) or not finding_re.fullmatch(closed_id):
+            fail("stage.closes: каждый id — kebab-case до 64 символов")
+    summary = stage["summary"]
+    if not isinstance(summary, str) or not 1 <= len(summary) <= SUMMARY_LIMIT:
+        fail(f"stage.summary: одна строка 1..{SUMMARY_LIMIT} символов")
+    if any(ord(char) < 32 or ord(char) == 127 for char in summary):
+        fail("stage.summary: переводы строки и управляющие символы запрещены")
+    if not any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking" for finding in findings
+    ):
+        fail("stage: граница этапа требует блокирующих находок следующего этапа")
+
+
 def validate(value):
-    if not isinstance(value, dict) or set(value) != {"owner", "findings"}:
-        fail("вердикт должен состоять ровно из owner и findings")
+    if not isinstance(value, dict) or not {"owner", "findings"} <= set(value) or not set(
+        value
+    ) <= {"owner", "findings", "reviewed", "stage"}:
+        fail("вердикт состоит из owner, findings и необязательных reviewed и stage")
     owner = value.get("owner")
     findings = value.get("findings")
     if owner not in owners:
@@ -106,8 +170,13 @@ def validate(value):
         fail(f"замечаний {count}, допустимо 1..{FINDINGS_LIMIT}")
     seen = set()
     for index, finding in enumerate(findings, start=1):
-        if not isinstance(finding, dict) or set(finding) != {"id", "summary"}:
-            fail(f"замечание {index}: допустимы ровно поля id и summary")
+        if not isinstance(finding, dict) or not {"id", "summary"} <= set(
+            finding
+        ) or not set(finding) <= {"id", "summary", "anchor", "severity"}:
+            fail(
+                f"замечание {index}: поля id и summary, "
+                "необязательно anchor и severity"
+            )
         finding_id = finding.get("id")
         summary = finding.get("summary")
         if not isinstance(finding_id, str) or not finding_re.fullmatch(finding_id):
@@ -128,16 +197,45 @@ def validate(value):
                 f"замечание {index} (id={finding_id}): summary — одна строка, "
                 "переводы строки и управляющие символы запрещены"
             )
+        if "anchor" in finding and not artifact_path(finding["anchor"]):
+            fail(
+                f"замечание {index} (id={finding_id}): anchor — относительный путь "
+                f"файла до {PATH_LIMIT} символов, без ведущего / и без .."
+            )
+        if "severity" in finding and finding["severity"] not in SEVERITIES:
+            fail(
+                f"замечание {index} (id={finding_id}): severity — "
+                f"{' или '.join(sorted(SEVERITIES))}"
+            )
         seen.add(finding_id)
+    reviewed = value.get("reviewed")
+    if reviewed is not None:
+        if not isinstance(reviewed, list) or not 1 <= len(reviewed) <= REVIEWED_LIMIT:
+            count = len(reviewed) if isinstance(reviewed, list) else "нет списка"
+            fail(f"reviewed: путей {count}, допустимо 1..{REVIEWED_LIMIT}")
+        if len(set(reviewed)) != len(reviewed):
+            fail("reviewed: пути не должны повторяться")
+        for path in reviewed:
+            if not artifact_path(path):
+                fail(
+                    "reviewed: каждый путь — относительный, до "
+                    f"{PATH_LIMIT} символов, без ведущего / и без .."
+                )
+    if "stage" in value:
+        validate_stage(value["stage"], findings)
     return value
 
 
 if operation == "encode":
     owner = encoded
-    if result != "failed":
+    # `done` несёт вердикт только ради отложенных находок: проверяющий принял работу,
+    # но нашёл дефект вне цели задачи. Прежде такую находку деть было некуда — список
+    # findings движок принимал исключительно с `failed`, то есть ценой возврата в сборку.
+    if result not in {"failed", "done"}:
         if owner or findings_raw:
             fail(
-                f"результат {result}: --failure-owner и --finding допустимы только у failed"
+                f"результат {result}: --failure-owner и --finding "
+                "допустимы только у failed и done"
             )
         print("")
         raise SystemExit(0)
@@ -145,13 +243,90 @@ if operation == "encode":
         # Старые prompts продолжают законно посылать обычный failed без metadata.
         print("")
         raise SystemExit(0)
+    if result == "done" and not findings_raw:
+        fail("результат done: --failure-owner без замечаний не имеет смысла")
     parsed = []
+    anchors = {}
+    reviewed = []
+    stage_kinds = []
+    stage_closes = []
+    stage_summaries = []
     for index, raw in enumerate(findings_raw, start=1):
+        if raw.startswith(REVIEWED_PREFIX):
+            reviewed.append(raw[len(REVIEWED_PREFIX):])
+            continue
+        if raw.startswith(STAGE_CLOSED_PREFIX):
+            stage_closes.append(raw[len(STAGE_CLOSED_PREFIX):])
+            continue
+        if raw.startswith(STAGE_SUMMARY_PREFIX):
+            stage_summaries.append(raw[len(STAGE_SUMMARY_PREFIX):])
+            continue
+        if raw.startswith(STAGE_PREFIX):
+            stage_kinds.append(raw[len(STAGE_PREFIX):])
+            continue
+        if raw.startswith(ANCHOR_PREFIX):
+            body = raw[len(ANCHOR_PREFIX):]
+            if "=" not in body:
+                fail("--finding-anchor: ожидается вид id=путь")
+            anchor_id, anchor_path_value = body.split("=", 1)
+            if anchor_id in anchors:
+                fail(f"--finding-anchor: якорь для id={anchor_id} задан дважды")
+            anchors[anchor_id] = anchor_path_value
+            continue
+        severity = DEFAULT_SEVERITY
+        if raw.startswith(DEFERRED_PREFIX):
+            severity = "deferred"
+            raw = raw[len(DEFERRED_PREFIX):]
         if "=" not in raw:
             fail(f"--finding {index}: ожидается вид id=краткое замечание")
         finding_id, summary = raw.split("=", 1)
-        parsed.append({"id": finding_id, "summary": summary})
-    value = validate({"owner": owner, "findings": parsed})
+        finding = {"id": finding_id, "summary": summary}
+        # Дефолтный вес в payload не пишем: канонический JSON вердикта без отложенных
+        # находок остаётся байт-в-байт прежним, а с ним и хеш события в ledger.
+        if severity != DEFAULT_SEVERITY:
+            finding["severity"] = severity
+        parsed.append(finding)
+    for finding in parsed:
+        if finding["id"] in anchors:
+            finding["anchor"] = anchors.pop(finding["id"])
+    if anchors:
+        fail(
+            "--finding-anchor ссылается на id, которых нет в вердикте: "
+            + ", ".join(sorted(anchors))
+        )
+    blocking = [
+        finding["id"]
+        for finding in parsed
+        if finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+    ]
+    if result == "done" and blocking:
+        fail(
+            "результат done: блокирующие замечания недопустимы — "
+            "верни failed: " + ", ".join(sorted(blocking))
+        )
+    if result == "failed" and not blocking:
+        fail("результат failed: нужны блокирующие находки; автоматического done нет")
+    if result == "done" and not owner:
+        # У отложенной находки владелец нужен воротам, чтобы показать человеку, к кому
+        # она пойдёт follow-up'ом. Отдельного флага у агента для этого не просим.
+        owner = "build"
+    value = {"owner": owner, "findings": parsed}
+    if reviewed:
+        value["reviewed"] = reviewed
+    if stage_kinds or stage_closes or stage_summaries:
+        if result != "failed":
+            fail("граница этапа (--next-stage) допустима только у failed")
+        if len(stage_kinds) != 1 or len(stage_summaries) != 1 or not stage_closes:
+            fail(
+                "граница этапа: нужны вместе --next-stage, хотя бы один "
+                "--stage-closed и ровно один --stage-summary"
+            )
+        value["stage"] = {
+            "kind": stage_kinds[0],
+            "closes": stage_closes,
+            "summary": stage_summaries[0],
+        }
+    value = validate(value)
     payload = json.dumps(
         value,
         ensure_ascii=False,
@@ -164,8 +339,10 @@ elif operation in {"validate", "owner"}:
         if operation == "owner":
             print("")
         raise SystemExit(0)
-    if result != "failed" or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
-        fail(f"результат {result}: typed verdict возможен только у failed")
+    if result not in {"failed", "done"} or not re.fullmatch(
+        r"[A-Za-z0-9+/]+={0,2}", encoded
+    ):
+        fail(f"результат {result}: typed verdict возможен только у failed и done")
     try:
         payload = base64.b64decode(encoded, validate=True)
         if len(payload) > 32 * 1024:
@@ -185,6 +362,18 @@ elif operation in {"validate", "owner"}:
     ).encode("utf-8")
     if canonical != payload:
         fail("вердикт записан не в канонической форме")
+    if result == "done" and any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+        for finding in value["findings"]
+    ):
+        fail("результат done: вердикт содержит блокирующие замечания")
+    if result == "failed" and not any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+        for finding in value["findings"]
+    ):
+        fail("результат failed: нужны блокирующие находки; автоматического done нет")
+    if result != "failed" and "stage" in value:
+        fail(f"результат {result}: граница этапа допустима только у failed")
     if operation == "owner":
         print(value["owner"])
 else:
@@ -206,12 +395,29 @@ run_state_verdict_owner() {
   _run_state_verdict owner "$1" "${2:-}"
 }
 
+# Browser authority проверяет также родителей capability, поэтому umask хоста
+# не должна оставлять runs доступным группе. Закрываем и прежние owned-каталоги.
+_run_state_prepare_directory() {
+  local file=$1 root directory
+  root=$(factory_control_root) || return
+  [[ "$file" == "$root/runs/"* && "$(dirname "$(dirname "$file")")" == "$root/runs" ]] || return 78
+  for directory in "$root/runs" "$(dirname "$file")"; do
+    [[ ! -L "$directory" ]] || return 78
+    mkdir -p -- "$directory" || return
+    [[ -d "$directory" && -O "$directory" && ! -L "$directory" &&
+       "$(realpath -e -- "$directory")" == "$directory" ]] || return 78
+    chmod 700 -- "$directory" || return
+  done
+}
+
+# Capability публикуется только в защищённом дереве, независимо от umask.
+# Ошибка подготовки не должна оставлять успешную проекцию запуска без authority.
 _run_state_write() {
   local file=$1 run_id=$2 epoch=$3 token_hash=$4 state=$5 result=${6:-} comment=${7:-}
   local verdict_b64=${8:-}
   local tmp
-  mkdir -p "$(dirname "$file")"
-  tmp=$(mktemp "$(dirname "$file")/.active.XXXXXX")
+  _run_state_prepare_directory "$file" || return
+  tmp=$(mktemp "$(dirname "$file")/.active.XXXXXX") || return
   {
     printf 'SCHEMA=1\nRUN_ID=%s\nEPOCH=%s\nTOKEN_HASH=%s\nSTATE=%s\n' \
       "$run_id" "$epoch" "$token_hash" "$state"
@@ -240,7 +446,11 @@ run_state_begin() {
     fi
   fi
   token_hash=$(factory_token_hash "$token")
-  _run_state_write "$file" "$run_id" "$epoch" "$token_hash" active
+  _run_state_write "$file" "$run_id" "$epoch" "$token_hash" active || {
+    rc=$?
+    pipeline_lock_release "$lock_fd"
+    return "$rc"
+  }
   pipeline_store_update_unlocked "$task" RUN_PROTOCOL 2 "$stage" running \
     "ACTIVE_RUN_${stage}" "$run_id" "ACTIVE_EPOCH_${stage}" "$epoch"
   rc=$?
@@ -294,7 +504,11 @@ run_state_apply_result() {
     return 75
   }
   _run_state_write "$file" "$run_id" "$epoch" "$expected_hash" committed \
-    "$result" "$comment" "$verdict_b64"
+    "$result" "$comment" "$verdict_b64" || {
+      rc=$?
+      pipeline_lock_release "$lock_fd"
+      return "$rc"
+    }
   pipeline_store_update_unlocked "$task" "$stage" "$result" "${stage}_COMMENT" "$comment" \
     "ACTIVE_RUN_${stage}" ""
   rc=$?
@@ -381,7 +595,11 @@ run_state_control_update() {
       run_id=$(_run_state_get "$file" RUN_ID)
       epoch=$(_run_state_get "$file" EPOCH)
       token_hash=$(_run_state_get "$file" TOKEN_HASH)
-      _run_state_write "$file" "$run_id" "$epoch" "$token_hash" committed "$result" "$comment"
+      _run_state_write "$file" "$run_id" "$epoch" "$token_hash" committed "$result" "$comment" || {
+        rc=$?
+        pipeline_lock_release "$lock_fd"
+        return "$rc"
+      }
     fi
   fi
   pipeline_store_update_unlocked "$task" "$@"

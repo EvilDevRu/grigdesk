@@ -1,62 +1,208 @@
 #!/usr/bin/env bash
-# Установщик кокпита на машину разработчика (host-native, per-machine).
+# Установщик GrigDesk на машину разработчика (host-native, per-machine).
 # Ставит зависимости, собирает web, регистрирует и запускает systemd user-сервис.
 # Идемпотентно: повторный прогон обновляет.
+#
+# Выбор человека: автозапуск при включении машины и ярлык GrigDesk на рабочем столе.
+# Спрашивается в терминале; без терминала или флагами --autostart/--no-autostart и
+# --shortcut/--no-shortcut. Оба решения потом меняются в «Настройки → Сервер».
 set -euo pipefail
 
-COCKPIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_BIN="$(command -v node)"
-NODE_DIR="$(dirname "$NODE_BIN")"   # в PATH сервиса: nvm-каталог node виден только так
+GRIGDESK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UNIT_DIR="$HOME/.config/systemd/user"
-UNIT="cockpit-server.service"
+UNIT="grigdesk-server.service"
 
-# Сообщения после установки должны показывать те же порты, что прочитает сервер.
+# Вопросы — до долгих шагов: после минут сборки их никто не ждёт. Ответы применяются в конце.
+source "$GRIGDESK_DIR/deploy/lib/install-choices.sh"
+grigdesk_install_parse_args "$@"
+if [[ "$INSTALL_UNIT_ONLY" != 1 ]]; then
+  grigdesk_install_choice INSTALL_AUTOSTART "Запускать GrigDesk при включении машины?" 1
+  grigdesk_install_choice INSTALL_SHORTCUT "Создать ярлык GrigDesk на рабочем столе?" 0
+fi
+
+# Сообщения после установки должны показывать тот же порт, что прочитает сервер.
 # .env разбирает Node: его содержимое не исполняется shell'ом.
-source "$COCKPIT_DIR/bin/lib/runtime-env.sh"
-cockpit_load_runtime_env "$COCKPIT_DIR"
-PORT="$COCKPIT_EFFECTIVE_PORT"
-TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
+source "$GRIGDESK_DIR/deploy/lib/runtime-env.sh"
+trap 'grigdesk_release_binary_preparation' EXIT
+grigdesk_require_migrated "$GRIGDESK_DIR"
+NODE_BIN="${_grigdesk_packaged_node:-$(command -v node)}"
+NODE_DIR="$(dirname "$NODE_BIN")"
+DATA_HOME=$(grigdesk_data_home) || exit 1
+ENV_FILE=$(grigdesk_env_file) || exit 1
+HOME_ENV=
+ENV_FILE_ENV=
+if [[ -n "${GRIGDESK_HOME:-}" && "$DATA_HOME" != "${HOME%/}/.grigdesk" ]]; then
+  HOME_ENV="Environment=GRIGDESK_HOME=$DATA_HOME"
+fi
+if [[ -n "${GRIGDESK_ENV_FILE:-}" ]]; then
+  ENV_FILE_ENV="Environment=GRIGDESK_ENV_FILE=$GRIGDESK_ENV_FILE"
+fi
 
-echo "→ Кокпит: $COCKPIT_DIR"
-echo "→ node:   $NODE_BIN ($(node -v))"
+# Путь файла настроек попадает в юнит и в sed: тот же алфавит, что у GRIGDESK_HOME.
+# Пробел разорвал бы Environment=, «%» systemd раскрыл бы как спецификатор, «#» сломал бы sed.
+grigdesk_check_env_file_path() {
+  local LC_ALL=C
 
-echo "→ Зависимости сервера…"
-( cd "$COCKPIT_DIR/server" && npm install --no-audit --no-fund )
+  [[ -z "${GRIGDESK_ENV_FILE:-}" || "$GRIGDESK_ENV_FILE" =~ ^/[A-Za-z0-9._+@,=:/-]+$ ]]
+}
 
-echo "→ Зависимости web + сборка…"
-( cd "$COCKPIT_DIR/web" && npm install --no-audit --no-fund && npm run build )
+if ! grigdesk_check_env_file_path; then
+  echo "GRIGDESK_ENV_FILE должен быть абсолютным путём из латинских букв, цифр и символов . _ + - / @ , = :" >&2
+  exit 1
+fi
 
-echo "→ systemd user-юнит…"
-mkdir -p "$UNIT_DIR"
-sed -e "s|__NODE__|$NODE_BIN|g" -e "s|__NODE_DIR__|$NODE_DIR|g" -e "s|__COCKPIT_DIR__|$COCKPIT_DIR|g" \
-  "$COCKPIT_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
+# Запрещённые ключи в .env проверяются до юнита и до шага речи: EnvironmentFile применил бы
+# GRIGDESK_HOME или GRIGDESK_ENV_FILE из файла раньше, чем сервер успел бы отказать.
+grigdesk_load_runtime_env "$GRIGDESK_DIR" || exit $?
 
-echo "→ CLI b24 в PATH…"
-mkdir -p "$HOME/.local/bin"
-ln -sf "$COCKPIT_DIR/bin/b24" "$HOME/.local/bin/b24"
+# Обновляет только описание службы. Смена запуска и установка зависимостей — отдельные шаги.
+# Один шаблон используется обычной установкой и --unit-only после переноса данных.
+install_unit() {
+  local -a packaged_options=()
+
+  if [[ -n "$_grigdesk_server_binary" ]]; then
+    packaged_options=(
+      -e "s#^ExecStart=.*#ExecStart=\"$_grigdesk_server_binary\"#"
+      -e "s#^ExecStartPre=.*#ExecStartPre=\"$GRIGDESK_DIR/deploy/require-vpn.sh\"#"
+      -e "s#^WorkingDirectory=.*#WorkingDirectory=\"$GRIGDESK_DIR\"#"
+      -e "s#^Environment=PATH=.*#Environment=\"PATH=$GRIGDESK_DIR/bin:$PATH\"#"
+      -e '/^Environment=NODE_ENV=production/a UnsetEnvironment=NODE_OPTIONS'
+      -e '/^Environment=NODE_ENV=production/a Environment=PYTHONDONTWRITEBYTECODE=1'
+    )
+  elif [[ -f "$GRIGDESK_DIR/release.json" ]]; then
+    packaged_options=(
+      -e "s#^ExecStart=.*#ExecStart=\"$GRIGDESK_DIR/server/grigdesk-server\"#"
+      -e "s#^ExecStartPre=.*#ExecStartPre=\"$GRIGDESK_DIR/deploy/require-vpn.sh\"#"
+      -e "s#^WorkingDirectory=.*#WorkingDirectory=\"$GRIGDESK_DIR/server\"#"
+      -e "s#^Environment=PATH=.*#Environment=\"PATH=$PATH\"#"
+      -e '/^Environment=NODE_ENV=production/a UnsetEnvironment=NODE_OPTIONS'
+      -e '/^Environment=NODE_ENV=production/a Environment=PYTHONDONTWRITEBYTECODE=1'
+    )
+  fi
+
+  mkdir -p "$UNIT_DIR"
+  sed -e "s#__NODE__#$NODE_BIN#g" -e "s#__NODE_DIR__#$NODE_DIR#g" \
+    -e "s#__GRIGDESK_DIR__#$GRIGDESK_DIR#g" -e "s#__ENV_FILE__#$ENV_FILE#g" \
+    -e "s#__HOME_ENV__#$HOME_ENV#g" -e "s#__ENV_FILE_ENV__#$ENV_FILE_ENV#g" \
+    "${packaged_options[@]}" \
+    "$GRIGDESK_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
+}
+
+if [[ "$INSTALL_UNIT_ONLY" == 1 ]]; then
+  install_unit
+  systemctl --user daemon-reload
+  exit 0
+fi
+
+# Команда tracker — собранный файл серверной поставки. Отказ сборки (код 1) не прерывает установку:
+# прежняя ссылка остаётся, повторить шаг можно одной командой из предупреждения. Код 2 — сборка
+# прошла, но чужой файл в PATH не тронут; об этом helper уже предупредил сам.
+tracker_status=0
+if [[ -n "$_grigdesk_server_binary" ]]; then
+  echo "→ Отдельные утилиты: готовые ELF в $GRIGDESK_DIR/bin"
+else
+  echo "→ CLI tracker в PATH…"
+  source "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh"
+  grigdesk_install_tracker_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || tracker_status=$?
+fi
+if (( tracker_status == 1 )); then
+  printf '  ⚠ tracker не собран; повтор: bash %q %q %q\n' \
+    "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
+fi
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 
+( umask 077; mkdir -p "$DATA_HOME"; chmod 700 "$DATA_HOME" )
+if [[ ! -f "$GRIGDESK_DIR/release.json" && -z "$_grigdesk_server_binary" ]]; then
+  source "$GRIGDESK_DIR/deploy/lib/media-runtime.sh"
+  grigdesk_install_media "$GRIGDESK_DIR" ${INSTALL_PASSTHRU[@]+"${INSTALL_PASSTHRU[@]}"}
+  grigdesk_load_runtime_env "$GRIGDESK_DIR"
+fi
+PORT="$GRIGDESK_EFFECTIVE_PORT"
+
+echo "→ GrigDesk: $GRIGDESK_DIR"
+echo "→ node:   $NODE_BIN ("$("$NODE_BIN" -v)")"
+
+if [[ ! -f "$GRIGDESK_DIR/release.json" && -z "$_grigdesk_server_binary" ]]; then
+  echo "→ Зависимости сервера…"
+  ( cd "$GRIGDESK_DIR/server" && npm install --no-audit --no-fund )
+  # DeepSeek — один из исполнителей: без компилятора или сети установка GrigDesk продолжается.
+  ( cd "$GRIGDESK_DIR/server" && npm run deepseek:prepare ) || \
+    echo "⚠ DeepSeek не подготовлен; повтор после установки: bin/grigdesk-ctl deps" >&2
+
+  echo "→ Зависимости web + сборка…"
+  ( cd "$GRIGDESK_DIR/web" && npm install --no-audit --no-fund && npm run build )
+fi
+
+echo "→ systemd user-юнит…"
+install_unit
+
+echo "→ Команда grigdesk-ctl в PATH…"
+source "$GRIGDESK_DIR/deploy/lib/cli-link.sh"
+grigdesk_link_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || true
+
+# Порт уже держит GrigDesk (сервер приложения или ручной запуск): юнит рядом с ним ушёл бы
+# в вечный перезапуск, выполняя стартовые хуки на каждом круге. Признак GrigDesk — ответ
+# /api/auth/state с булевыми configured и authenticated за 2 с; чужой HTTP и тишина не в счёт.
+grigdesk_answers_on_port() {
+  local answer
+
+  answer="$("$NODE_BIN" -e '
+    fetch(process.argv[1], { redirect: "error", signal: AbortSignal.timeout(2000) })
+      .then((response) => (response.status === 200 ? response.json() : null))
+      .then((state) => {
+        const flags = [state?.configured, state?.authenticated];
+        process.stdout.write(flags.every((flag) => typeof flag === "boolean") ? "grigdesk" : "");
+      })
+      .catch(() => {});
+  ' -- "http://127.0.0.1:$1/api/auth/state" 2>/dev/null || true)"
+
+  [ "$answer" = grigdesk ]
+}
+
 systemctl --user daemon-reload
-systemctl --user enable --now "$UNIT"
+
+GRIGDESK_ALREADY_RUNNING=0
+if grigdesk_answers_on_port "$PORT"; then
+  GRIGDESK_ALREADY_RUNNING=1
+  echo "→ GrigDesk уже работает на порту $PORT — юнит не запускаю"
+fi
+
+# Автозапуск — это enable юнита плюс linger: без него пользовательский systemd поднимается
+# только при входе в сессию, а GrigDesk и Telegram нужны сразу после включения.
+# Сервер поднимается, если порт ещё не держит GrigDesk; выбор потом переключается в «Настройки → Сервер».
+if [ "$INSTALL_AUTOSTART" = 1 ]; then
+  echo "→ Автозапуск при включении машины…"
+  if [ "$GRIGDESK_ALREADY_RUNNING" = 1 ]; then
+    systemctl --user enable "$UNIT"
+  else
+    systemctl --user enable --now "$UNIT"
+  fi
+  loginctl enable-linger || echo "  ⚠ linger не включился: до входа в систему GrigDesk стартовать не будет"
+else
+  echo "→ Без автозапуска: юнит остаётся, поднимать будут ярлык или systemctl --user start $UNIT"
+  systemctl --user disable "$UNIT" >/dev/null 2>&1 || true
+  if [ "$GRIGDESK_ALREADY_RUNNING" = 0 ]; then
+    systemctl --user start "$UNIT"
+  fi
+fi
+
+if [ "$INSTALL_SHORTCUT" = 1 ]; then
+  echo "→ Ярлык на рабочем столе…"
+  bash "$GRIGDESK_DIR/deploy/shortcut.sh" install || echo "  ⚠ ярлык не создан; позже — кнопка в «Настройки → Сервер»"
+fi
 
 echo "✓ Готово. Статус:"
 systemctl --user --no-pager status "$UNIT" | head -n 6 || true
 echo "  Логи:  journalctl --user -u $UNIT -f"
 echo "  URL:   http://localhost:$PORT"
-echo
-# Вход в кокпит: пароль НЕ генерируем и в файлы не пишем — его задаёт человек при первом
-# открытии (экран первичной настройки). Пока пароль не задан, весь /api закрыт, а `setup`
-# доступен ровно один раз: как только пароль есть, повторно переустановить его нельзя.
-if [ -f "$COCKPIT_DIR/server/.state/auth-account.json" ]; then
-  echo "  Вход:  пароль уже задан (Настройки → Доступ, чтобы сменить)"
+if [ "$INSTALL_AUTOSTART" = 1 ]; then
+  echo "  Старт: при включении машины (переключается в «Настройки → Сервер»)"
 else
-  echo "  Вход:  открой http://localhost:$PORT и задай пароль — до этого API закрыт."
-  echo "         ВАЖНО: сделай это ДО того, как откроешь кокпит из сети: экран первичной"
-  echo "         настройки доступен любому, кто зайдёт первым."
+  echo "  Старт: вручную — ярлык GrigDesk, grigdesk-ctl open или systemctl --user start $UNIT"
 fi
 echo
-echo "  Доступ из сети: нужен HTTPS, иначе пароль уйдёт открытым текстом."
-echo "                  «Настройки → Доступ»: включить режим «Из домашней сети», выпустить"
-echo "                  сертификат, поставить корень на планшет по QR, перезапустить сервер"
-echo "                  (второй порт — $TLS_PORT). Без включённого режима кокпит слушает только $PORT."
-echo "                  Готовый сертификат подключается через COCKPIT_TLS_KEY/COCKPIT_TLS_CERT."
+echo "  Приложение: установи проверенную сборку командой grigdesk-ctl desktop install"
+echo "  Открыть: grigdesk-ctl open или ярлык GrigDesk"
+echo "  Вход: автоматически по локальному ключу этого компьютера."
+echo
+echo "  Сервер: только на этой машине, http://localhost:$PORT"

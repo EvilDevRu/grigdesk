@@ -1,0 +1,36 @@
+{
+  "name": "grigdesk-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "npm run typecheck && NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=2 ../tests/mobile/*.test.js",
+    "visual": "node ../tests/mobile/visual/run.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8",
+    "marked": "14.0.0",
+    "pinia": "^2.2.6",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8",
+    "@capacitor/cli": "^8",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/compiler-sfc": "^3.5.40",
+    "@vue/test-utils": "^2.4.11",
+    "esbuild": "^0.25.12",
+    "happy-dom": "^18.0.1",
+    "playwright-core": "^1.62.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.2.12"
+  }
+}

@@ -1,0 +1,137 @@
+name: Релиз GrigDesk — сборка и публикация
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Канал выпуска
+        type: choice
+        options: [release, dev]
+        default: release
+        required: true
+      publish:
+        description: Опубликовать проверенный выпуск
+        type: boolean
+        default: false
+      notes:
+        description: Описание RU/EN в JSON (необязательно)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grigdesk-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Окружение тестов
+        run: |
+          printf '%s\n' \
+            "GRIGDESK_TEST_DEEPSEEK_ROOT=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_ARTIFACTS_DIR=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-tests/node-cache" >> "$GITHUB_ENV"
+
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+
+      - name: Зависимости сервера
+        run: npm --prefix server ci
+      - name: Зависимости web
+        run: npm --prefix web ci
+      # Сборщик комплекта не вызывает install (tools/bundle.mts), а билдеры всех
+      # пакетов импортируют esbuild из своих node_modules — ставим их явно.
+      - name: Зависимости комплекта
+        run: |
+          npm --prefix tracker ci
+          npm --prefix relay ci
+          npm --prefix deepseek ci
+          npm --prefix desktop ci
+      - name: Подготовка среды тестового исполнителя
+        run: >-
+          npm --prefix deepseek run prepare:runtime --
+          --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
+      - name: Тесты сервера
+        run: npm --prefix server test
+      - name: Тесты web
+        run: npm --prefix web test
+      - name: Тесты shared-контрактов
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+          --test-concurrency=2 tests/shared/*.test.mts
+      - name: Руководство выпуска
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+          --test-concurrency=2 tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs
+      - name: Production-сборка web
+        run: npm --prefix web run build
+
+      - name: Ключ подписи
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/release-signing.pem"
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+
+      - name: Ключ сайта
+        if: ${{ inputs.publish }}
+        env:
+          SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
+          MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/release-site-key"
+          printf '%s' "$SITE_KEY" > "$RUNNER_TEMP/release-site-key"
+          if [ -n "$MIRROR_KEY" ]; then
+            install -m 600 /dev/null "$RUNNER_TEMP/release-site-mirror-key"
+            printf '%s' "$MIRROR_KEY" > "$RUNNER_TEMP/release-site-mirror-key"
+          fi
+
+      - name: Сборка комплекта
+        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
+        env:
+          GRIGDESK_RELEASE_NOTES_JSON: ${{ inputs.notes }}
+
+      - name: Deb-пакет
+        # Bootstrap-пакет для apt: ставит только загрузчик и подписанный installer,
+        # установка и обновления остаются в пределах пользователя.
+        run: node tools/buildDeb.mts
+
+      - name: Артефакты проверочного выпуска
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grigdesk-${{ inputs.channel }}-${{ github.run_number }}
+          path: release-artifacts/
+          if-no-files-found: error
+
+      - name: Публикация на сайт
+        if: ${{ inputs.publish }}
+        # Новый сборщик кладёт installer, компоненты и v2-индекс в release-artifacts/.
+        run: node tools/release-publish.mts "$PWD"
+        env:
+          RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
+          RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
+          RELEASE_SITE_KEY: ${{ runner.temp }}/release-site-key
+          RELEASE_SITE_DIR: ${{ secrets.RELEASE_SITE_DIR }}
+          RELEASE_SITE_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN }}
+          RELEASE_SITE_MIRROR_HOST: ${{ secrets.RELEASE_SITE_MIRROR_HOST }}
+          RELEASE_SITE_MIRROR_USER: ${{ secrets.RELEASE_SITE_MIRROR_USER }}
+          RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
+          RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
+          RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "enabled": { "type": "boolean", "default": false },
+    "count": { "type": "integer", "minimum": 0, "maximum": 10, "multipleOf": 2, "default": 0 },
+    "ratio": { "type": "number", "exclusiveMinimum": 0 },
+    "text": { "type": "string", "minLength": 0, "maxLength": 20, "default": "" },
+    "choice": { "enum": ["1", 1, true, null] },
+    "nullable": { "type": ["string", "null"], "default": null }
+  }
+}

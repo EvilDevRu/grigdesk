@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"t1"}
+{"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":90000,"cache_write_input_tokens":0,"output_tokens":1200,"reasoning_output_tokens":800}}
+{"type":"turn.completed","usage":{"input_tokens":2400000,"cached_input_tokens":2200000,"cache_write_input_tokens":0,"output_tokens":100000,"reasoning_output_tokens":20000}}

@@ -9,7 +9,7 @@ import {
   parseCodexTokenInfoLine,
   readCodexThreadTokenInfo,
   readLatestCodexTokenInfo,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('Codex cumulative input does not count cached input twice', () => {
   assert.equal(codexTotalInputTokens({
@@ -25,30 +25,49 @@ const TOKEN_EVENT = {
   payload: {
     type: 'token_count',
     info: {
-      total_token_usage: { input_tokens: 25_626_388, cached_input_tokens: 25_025_792 },
-      last_token_usage: { input_tokens: 83_286, cached_input_tokens: 80_640 },
-      model_context_window: 258_400,
+      total_token_usage: { input_tokens: 240_000, cached_input_tokens: 220_000 },
+      last_token_usage: { input_tokens: 80_000, cached_input_tokens: 64_000 },
+      model_context_window: 256_000,
     },
   },
 };
 
 test('Codex token_count разделяет активный контекст и накопительный расход', () => {
   assert.deepEqual(parseCodexTokenInfoLine(JSON.stringify(TOKEN_EVENT)), {
-    contextTokens: 83_286,
-    contextWindow: 258_400,
+    contextTokens: 80_000,
+    contextWindow: 256_000,
     contextMetric: 'active-input-v1',
     contextIsEstimate: false,
-    totalInputTokens: 25_626_388,
-    cachedInputTokens: 25_025_792,
+    contextCache: {
+      scope: 'request', status: 'reported', readTokens: 64_000, uncachedTokens: 16_000,
+    },
+    totalInputTokens: 240_000,
+    cachedInputTokens: 220_000,
   });
   assert.equal(parseCodexTokenInfoLine('{"payload":{"type":"other"}}'), null);
 });
 
+test('Codex не выдумывает cache write и помечает отсутствующий cache-read как unavailable', () => {
+  const event = structuredClone(TOKEN_EVENT);
+  delete event.payload.info.last_token_usage.cached_input_tokens;
+  const parsed = parseCodexTokenInfoLine(JSON.stringify(event));
+  assert.deepEqual(parsed.contextCache, { scope: 'request', status: 'unavailable' });
+  assert.equal(Object.hasOwn(parsed.contextCache, 'writeTokens'), false);
+});
+
+test('Codex не превращает пустые и некорректные token usage в точный ноль', () => {
+  for (const input of [null, '', '123', -1, 1.5]) {
+    const event = structuredClone(TOKEN_EVENT);
+    event.payload.info.last_token_usage.input_tokens = input;
+    assert.equal(parseCodexTokenInfoLine(JSON.stringify(event)), null);
+  }
+});
+
 test('Codex rollout читается с конца и находит thread по безопасному UUIDv7', async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-home-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const threadId = '019fbcdd-e900-7773-bc27-cf6a12c3e827';
-  const day = path.join(home, 'sessions', '2026', '08', '01');
+  const threadId = '01b8dac5-b400-7000-8000-000000000042';
+  const day = path.join(home, 'sessions', '2030', '01', '01');
   const file = path.join(day, `rollout-test-${threadId}.jsonl`);
   await mkdir(day, { recursive: true });
   await writeFile(file, [

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/lib/contractDecoders.ts",
+    "../shared/pipeline/analysisContracts.ts",
+    "src/shared/analysisApi.ts",
+    "src/stores/analysis.ts",
+    "src/actions/analysis/**/*.ts",
+    "src/features/analysis/**/*.vue",
+    "src/views/board/TriageBadge.vue",
+    "../tests/types/triage-contract.test.ts"
+  ]
+}

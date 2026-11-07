@@ -10,10 +10,11 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import routesApi from '../../server/src/modules/routes/api.js';
-import routesModule from '../../server/src/modules/routes/index.js';
-import { RoutesError } from '../../server/src/modules/routes/schema.js';
+import routesApi from '../../server/src/modules/routes/api.ts';
+import routesModule from '../../server/src/modules/routes/index.ts';
+import { RoutesError } from '../../server/src/modules/routes/schema.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -161,15 +162,15 @@ function catalogPayload(routeHash, expectedCatalogHash) {
 }
 
 async function fixture(t, { store, viaRoutesModule = false } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-api-'));
   const baseDir = path.join(root, 'routes');
   const app = Fastify({ logger: false });
+
   if (viaRoutesModule) {
     app.register(routesModule, {
       config: {
         routesDir: baseDir,
         profilesDir: path.join(root, 'profiles'),
-        agentsDir: path.join(root, 'agents'),
       },
       prefs: { read: () => ({}), write: () => {} },
     });
@@ -519,7 +520,7 @@ test('ROUTES-API-10: публикация идёт скриптом профил
   assert.equal(validated.statusCode, 200);
   assert.deepEqual(validated.json().result.argv, ['--validate']);
 
-  // Публикация получает ровно два аргумента кокпита: куда писать и поверх чего.
+  // Публикация получает ровно два аргумента GrigDesk: куда писать и поверх чего.
   const publishedEmpty = await app.inject({
     method: 'POST',
     url: `/api/routes/${PROFILE}/publish`,
@@ -567,13 +568,49 @@ test('ROUTES-API-11: провал публикатора — 422 с его же 
   assert.equal(failed.json().message, 'sample routes v2: определение сломано');
 });
 
+test('ROUTES-API-14: скрипт публикации получает путь к набору схемы и хранилища', async (t) => {
+  const { app, root } = await fixture(t);
+  const dir = path.join(root, 'profiles', PROFILE, 'routes');
+  const expected = path.join(
+    path.resolve(fileURLToPath(new URL('../../', import.meta.url))),
+    'server/src/modules/routes/publishKit.ts',
+  );
+
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, 'publish.mjs'), [
+    "import { pathToFileURL } from 'node:url';",
+    'const file = process.env.GRIGDESK_ROUTES_KIT;',
+    'const kit = await import(pathToFileURL(file).href);',
+    'process.stdout.write(JSON.stringify({ file, names: Object.keys(kit).sort() }));',
+    '',
+  ].join('\n'));
+
+  const validated = await app.inject({
+    method: 'POST',
+    url: `/api/routes/${PROFILE}/publish`,
+    payload: { mode: 'validate' },
+  });
+
+  assert.equal(validated.statusCode, 200);
+  assert.equal(validated.json().result.file, expected);
+  assert.deepEqual(validated.json().result.names, [
+    'RoutesStore',
+    'validateBootstrap',
+    'validateCatalog',
+    'validatePromptFiles',
+    'validateRoute',
+  ]);
+  assert.ok(pathToFileURL(expected).href.startsWith('file://'));
+});
+
 test('ROUTES-API-12: схема маршрута строится из машины бандла', async (t) => {
   const { app } = await fixture(t);
   const { routeHash } = (await publishRoute(app)).json();
+  const { catalogHash } = (await publishCatalog(app, routeHash, null)).json();
 
   const response = await app.inject({
     method: 'GET',
-    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph`,
+    url: `/api/routes/${PROFILE}/catalog/${catalogHash}/graph?route=${ROUTE}`,
   });
   assert.equal(response.statusCode, 200);
   // Схема — производная от бандла: после обновления рендера тот же hash обязан отдать
@@ -584,8 +621,14 @@ test('ROUTES-API-12: схема маршрута строится из маши�
   assert.equal(graph.route, ROUTE);
   assert.equal(graph.keys.build, 'BUILD');
   // Узлы схемы — из машины (плюс scout каталога и ромб стенда), чужих этапов нет.
+  // Остановка — исход, а не этап: она описана в данных проекции, но не нарисована.
   assert.deepEqual(Object.keys(graph.pos).sort(), ['build', 'sandbox', 'scout']);
+  assert.equal(graph.nodeOrigins['r:quick:stop:done']?.executable, false);
   assert.ok(graph.edges.some(([from, to]) => from === 'scout' && to === 'build'));
+  const routeOnly = await app.inject({ method: 'GET',
+    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph` });
+  assert.equal(routeOnly.statusCode, 200);
+  assert.equal(routeOnly.json().graph.nodes.scout, undefined);
 });
 
 test('ROUTES-API-13: схема shared-профиля строится без ромба песочницы', async (t) => {
@@ -597,15 +640,18 @@ test('ROUTES-API-13: схема shared-профиля строится без р
     'profile_workspace_mode() { printf \'shared\\n\'; }\n',
   );
   const { routeHash } = (await publishRoute(app)).json();
+  const { catalogHash } = (await publishCatalog(app, routeHash, null)).json();
 
   const response = await app.inject({
     method: 'GET',
-    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph`,
+    url: `/api/routes/${PROFILE}/catalog/${catalogHash}/graph?route=${ROUTE}`,
   });
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['cache-control'], 'private, no-store');
 
   const { graph } = response.json();
   assert.deepEqual(Object.keys(graph.pos).sort(), ['build', 'scout']);
+  assert.equal(graph.nodeOrigins['r:quick:stop:done']?.executable, false);
+  assert.equal(graph.nodes.sandbox, undefined);
   assert.ok(!graph.edges.some(([from, to]) => from === 'sandbox' || to === 'sandbox'));
 });

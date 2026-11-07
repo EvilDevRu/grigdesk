@@ -5,10 +5,14 @@
 #   attempt_stage_state_init_v2 TASK ATTEMPT_ID ROUTE_ID
 #   attempt_stage_state_read_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_latest_event_v2 TASK ATTEMPT_ID
+#   attempt_stage_state_routing_transitions_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
 #     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY] \
-#     [TARGET_BUDGET]
+#     [TARGET_BUDGET] [REJECT_FEEDBACK] [LOOP_MAX_ROUNDS]
+#   attempt_stage_state_loop_continue_v2 TASK ATTEMPT_ID MAX_ROUNDS \
+#     CEILING_SEQUENCE CEILING_EVENT_HASH
+#   attempt_stage_state_loop_state_v2 TASK ATTEMPT_ID
 #
 # Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
@@ -68,10 +72,28 @@ TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 EVENT_RE = re.compile(r"^event\.([0-9]{20})\.([a-f0-9]{64})\.json$")
 DECLARED_STOP_TARGETS = {"human", "failed", "done"}
 FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
+# Вес замечания. Отсутствие поля читается как `blocking`: события, записанные до
+# появления веса, остаются валидными и читаются одинаково — ledger immutable,
+# мигрировать его нельзя.
+SEVERITIES = {"blocking", "deferred"}
+DEFAULT_SEVERITY = "blocking"
 # rewind-limit — не исход опубликованного маршрута, а доверенная остановка движка:
 # схема просила ещё один автоматический rewind, но этот же переход уже дважды не помог.
-CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress"}
-HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress"}
+# loop-ceiling — такая же доверенная остановка, но только у маршрута с `loop`:
+# ведущий передаёт работу исполнителю, а потолок кругов профиля исчерпан.
+CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress", "loop-ceiling"}
+HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress", "loop-ceiling"}
+# Режим «цикл» (поле маршрута `loop`): ведущий ставит задание и проверяет, исполнитель
+# делает. Форма снимка закреплена версией политики: изменить смысл полей можно только
+# новой версией, старые события переинтерпретировать нельзя.
+LOOP_POLICY_VERSION = 1
+LOOP_MAX_ROUNDS_LIMIT = 300
+LOOP_STAGE_REJECTIONS = {
+    "no-transfer", "no-worker-result", "result-used", "closes-mismatch", "ids-reused",
+}
+LOOP_WORKER_RESULTS = {"done", "failed", "skipped"}
+# Остановки, которые кандидат передачи lead → worker получает вместо исполнения.
+LOOP_CANDIDATE_STOPS = {"rewind-limit", "no-progress", "loop-ceiling"}
 # Коммит восстановления: диагностический узел закрыт `failed` не потому, что его
 # исполнили, а потому что при подъёме после обрыва снята инструментация, на которой он
 # стоял. Узел не работал, значит и указание человека к нему не отработано — по этой
@@ -86,6 +108,29 @@ def fail(code=78):
 def exact(value, keys):
     if not isinstance(value, dict) or set(value) != set(keys):
         fail()
+
+
+def shape(value, required, optional=()):
+    # Как exact, но с необязательными ключами: ими вводятся anchor/reviewed, и
+    # вердикты без них обязаны остаться валидными байт-в-байт.
+    if not isinstance(value, dict):
+        fail()
+    keys = set(value)
+    if not set(required) <= keys or not keys <= set(required) | set(optional):
+        fail()
+
+
+def artifact_path(value):
+    # Якорь замечания и объявленный охват — относительные пути рабочего дерева.
+    # Абсолютный путь и `..` отвергаются: путь используется только как метка для
+    # сравнения наборов, но метка, притворяющаяся путём наружу, вводит в заблуждение.
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 200
+        and not value.startswith("/")
+        and ".." not in value.split("/")
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
 
 
 def identifier(value, regexp=ID_RE):
@@ -120,21 +165,101 @@ def timestamp(value):
 
 
 def reason(value):
+    # Границы общие с lib/attempt-state.sh: многострочный текст до 20 000 символов,
+    # из управляющих допустим только перевод строки. Функция валидирует и ЧТЕНИЕ
+    # старых событий, поэтому ослабление обратносовместимо: однострочные причины
+    # прежних журналов проходят как проходили.
     if (
         not isinstance(value, str)
-        or not 1 <= len(value) <= 500
-        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or not 1 <= len(value) <= 20000
+        or any(char != "\n" and (ord(char) < 32 or ord(char) == 127) for char in value)
     ):
         fail()
     return value
 
 
+def is_recovery_commit(event):
+    # У rejected тот же reason несёт человеческое замечание ворот. Даже если человек
+    # дословно ввёл служебную константу восстановления, это всё ещё feedback: исход
+    # однозначно отделяет решение ворот от внутреннего recovery-коммита.
+    return (
+        event.get("kind") == "commit"
+        and event.get("outcome") != "rejected"
+        and event.get("reason") == RECOVERY_COMMIT_REASON
+    )
+
+
+def event_at_sequence(directory, sequence):
+    # runtime.lastCommit называет последовательность, но имя immutable-файла ещё
+    # содержит hash. Для exact-idempotency нужен сам зафиксированный reason: сравнение
+    # только node/outcome превращает повтор rejected с ДРУГИМ текстом в ложный успех.
+    sequence = integer(sequence)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        fail()
+    matches = []
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match and int(match.group(1)) == sequence:
+            matches.append(name)
+    if len(matches) != 1:
+        fail()
+    event = regular_json(os.path.join(directory, matches[0]))
+    if not isinstance(event, dict) or event.get("sequence") != sequence:
+        fail()
+    return event
+
+
+def finding_severity(finding):
+    return finding.get("severity", DEFAULT_SEVERITY)
+
+
+def blocking_findings(value):
+    # Только блокирующие замечания возвращают работу автору и участвуют в сторожах
+    # топтания. Отложенные едут хвостом до ворот приёмки и на маршрут не влияют.
+    if value is None:
+        return []
+    return [
+        finding
+        for finding in value["findings"]
+        if finding_severity(finding) == "blocking"
+    ]
+
+
+def record_finding(findings, node, sequence, verdict, finding, status):
+    # Проекция ledger: одна запись на (узел, id). Повторное появление того же id
+    # обновляет текст и статус, но сохраняет openedSequence — по нему видно, с
+    # какого хода замечание живёт.
+    key = (node, finding["id"])
+    previous = findings.get(key)
+    if previous is None or previous["status"] == "closed":
+        findings[key] = {
+            "id": finding["id"],
+            "sourceNode": node,
+            "owner": verdict["owner"],
+            "summary": finding["summary"],
+            "openedSequence": sequence,
+            "lastSeenSequence": sequence,
+            "status": status,
+            "closedSequence": None,
+        }
+        return
+    previous["owner"] = verdict["owner"]
+    previous["summary"] = finding["summary"]
+    previous["lastSeenSequence"] = sequence
+    previous["status"] = status
+
+
 def validate_verdict(value, outcome):
     if value is None:
         return None
-    if outcome != "failed":
+    # `done` несёт вердикт только с отложенными находками: проверяющий принял работу
+    # и приложил список того, что нашёл вне цели задачи. Блокирующее замечание при
+    # `done` — противоречие, его отвергаем.
+    if outcome not in {"failed", "done"}:
         fail()
-    exact(value, {"owner", "findings"})
+    shape(value, {"owner", "findings"}, {"reviewed", "stage"})
     if value["owner"] not in FAILURE_OWNERS:
         fail()
     findings = value["findings"]
@@ -142,9 +267,11 @@ def validate_verdict(value, outcome):
         fail()
     seen = set()
     for finding in findings:
-        exact(finding, {"id", "summary"})
+        shape(finding, {"id", "summary"}, {"anchor", "severity"})
         finding_id = finding["id"]
         summary = finding["summary"]
+        if "severity" in finding and finding["severity"] not in SEVERITIES:
+            fail()
         if (
             not isinstance(finding_id, str)
             or not FINDING_RE.fullmatch(finding_id)
@@ -154,7 +281,46 @@ def validate_verdict(value, outcome):
             or any(ord(char) < 32 or ord(char) == 127 for char in summary)
         ):
             fail()
+        if "anchor" in finding and not artifact_path(finding["anchor"]):
+            fail()
         seen.add(finding_id)
+    if outcome == "done" and blocking_findings(value):
+        fail()
+    # Охват прохода: что проверяющий фактически просмотрел. Поле необязательное,
+    # но именно оно позволяет отличить первый проход по новому артефакту от
+    # претензии к уже просмотренному — см. scope_expansion_reason.
+    if "reviewed" in value:
+        reviewed = value["reviewed"]
+        if not isinstance(reviewed, list) or not 1 <= len(reviewed) <= 64:
+            fail()
+        if len(set(reviewed)) != len(reviewed):
+            fail()
+        for path in reviewed:
+            if not artifact_path(path):
+                fail()
+    # Граница этапа цикла — только у отказа с работой следующего этапа. Признаёт её
+    # не форма, а коммит по журналу попытки (см. loop_stage_decision).
+    if "stage" in value:
+        stage = value["stage"]
+        exact(stage, {"kind", "closes", "summary"})
+        if outcome != "failed" or stage["kind"] != "next" or not blocking_findings(value):
+            fail()
+        closes = stage["closes"]
+        if (
+            not isinstance(closes, list)
+            or not 1 <= len(closes) <= 32
+            or len(set(closes)) != len(closes)
+        ):
+            fail()
+        for closed_id in closes:
+            identifier(closed_id, FINDING_RE)
+        summary = stage["summary"]
+        if (
+            not isinstance(summary, str)
+            or not 1 <= len(summary) <= 500
+            or any(ord(char) < 32 or ord(char) == 127 for char in summary)
+        ):
+            fail()
     return value
 
 
@@ -192,7 +358,7 @@ def verdict_snapshot(value):
         return None
     return (
         value["owner"],
-        tuple(sorted(finding["id"] for finding in value["findings"])),
+        tuple(sorted(finding["id"] for finding in blocking_findings(value))),
     )
 
 
@@ -350,15 +516,16 @@ def derive_commit_cursor(before, action, node, outcome, sequence):
 
 def human_rewind_note(directory, node):
     # Указание, оставленное человеком при возврате курсора на узел. Живёт в журнале
-    # попытки событием human-rewind и обязано доехать до промпта того захода, ради
-    # которого узел и вернули: иначе человек жмёт «перейти сюда», агент входит с тем
-    # же заданием, что и в прошлый раз, и повторяет ту же ошибку.
+    # попытки событием human-rewind либо причиной rejected-коммита ворот и обязано
+    # доехать до промпта того захода, ради которого узел вернули: иначе человек жмёт
+    # «перейти сюда»/«на доработку», агент входит с тем же заданием, что и в прошлый
+    # раз, и повторяет ту же ошибку.
     # Снимается ПЕРВЫМ ЖЕ коммитом узла: указание отработано, и подсовывать его
     # следующему заходу — врать ему о том, зачем он здесь. Возврат туда же второй раз
     # кладёт новое событие со своей причиной, поэтому «последнее слово» всегда свежее.
     # Исключение — коммит восстановления: узел закрыт из-за снятой инструментации,
     # ни один агент его не открывал, и указание обязано дожить до настоящего захода.
-    # Иначе выходит петля, которую и ловили на t7802: человек прикладывает решение,
+    # Иначе выходит петля: человек прикладывает решение,
     # жмёт «продолжить», подъём закрывает узел `failed` за отсутствующую разметку,
     # маршрут уводит на instrument — и обратно узел входит уже без решения.
     # reason() строгая: события пишутся через ту же валидацию, поэтому непроходной
@@ -377,25 +544,39 @@ def human_rewind_note(directory, node):
     note = ""
     for _, name in events:
         event = regular_json(os.path.join(directory, name))
-        if not isinstance(event, dict) or event.get("node") != node:
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        # Rejected фиксируется на самом gate, но адресовано указание агенту, куда
+        # объявленный маршрутом next/rewind переводит курсор. Mutable gate-comment
+        # при отдельном resume очищается reset-проекцией, поэтому источник здесь
+        # только immutable commit-event.
+        if (
+            event.get("kind") == "commit"
+            and event.get("outcome") == "rejected"
+            and isinstance(action, dict)
+            and (action.get("rewind") == node or action.get("next") == node)
+            and event.get("reason") is not None
+        ):
+            note = reason(event.get("reason"))
+            continue
+        if event.get("node") != node:
             continue
         if event.get("kind") == "human-rewind":
             note = reason(event.get("reason"))
-        elif (
-            event.get("kind") == "commit"
-            and event.get("reason") == RECOVERY_COMMIT_REASON
-        ):
+        elif is_recovery_commit(event):
             continue
-        elif event.get("kind") in {"commit", "rewind-limit", "no-progress"}:
+        elif event.get("kind") in {"commit", "rewind-limit", "no-progress", "loop-ceiling"}:
             note = ""
     return note
 
 
-def automatic_rewind_history(directory, node, target):
+def automatic_rewind_verdicts(directory, node, target):
     # Возвращаем историю ЗАФИКСИРОВАННЫХ возвратов той же автономной дуги после
-    # последнего решения человека. Для typed verdict сохраняем снимок owner +
-    # стабильных finding id: прогрессом считается закрытие замечаний, а повтор
-    # набора, A↔B-осцилляция и неснимаемое общее ядро — нет.
+    # последнего решения человека — целыми вердиктами. Снимок (owner + стабильные
+    # finding id) отвечает на вопрос «что не снялось», а объявленный охват и якоря
+    # замечаний — на вопрос «видел ли проверяющий этот артефакт раньше». Границы
+    # серии считаются здесь один раз, чтобы оба сторожа не разошлись в трактовке.
     identifier(node)
     identifier(target)
     try:
@@ -408,7 +589,7 @@ def automatic_rewind_history(directory, node, target):
         if match:
             events.append((int(match.group(1)), name))
     events.sort()
-    snapshots = []
+    verdicts = []
     for _, name in events:
         event = regular_json(os.path.join(directory, name))
         action = event.get("action")
@@ -429,7 +610,7 @@ def automatic_rewind_history(directory, node, target):
             # И явный goto, и rejected на human gate начинают новую автономную
             # серию: прежние findings не должны остановить исправление по новой
             # человеческой обратной связи.
-            snapshots = []
+            verdicts = []
             continue
         if (
             event.get("kind") == "commit"
@@ -439,8 +620,8 @@ def automatic_rewind_history(directory, node, target):
         ):
             verdict = event.get("verdict")
             validate_verdict(verdict, event.get("outcome"))
-            snapshots.append(verdict_snapshot(verdict))
-    return snapshots
+            verdicts.append(verdict)
+    return verdicts
 
 
 def automatic_rewind_count(directory, target):
@@ -480,6 +661,189 @@ def automatic_rewind_count(directory, target):
     return count
 
 
+def ledger_events(directory):
+    # Все события журнала по возрастанию sequence. Проверку цепочки делает
+    # validate-ledger до любого вызова этой функции под тем же task lock.
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        fail()
+    events = []
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match:
+            events.append((int(match.group(1)), name))
+    events.sort()
+    return [regular_json(os.path.join(directory, name)) for _, name in events]
+
+
+def loop_spec(lead, worker):
+    # Пара цикла из ЗАКРЕПЛЁННОГО маршрута. Пустая пара — обычный маршрут, и тогда
+    # ни одна loop-ветка ниже не исполняется: решения движка остаются прежними.
+    if not lead and not worker:
+        return None
+    identifier(lead)
+    identifier(worker)
+    if lead == worker:
+        fail()
+    return {"lead": lead, "worker": worker}
+
+
+def is_loop_transfer(event, loop):
+    # Исполненная передача задания ведущим исполнителю: коммит ведущего с rewind в
+    # worker и готовым курсором либо продолжение после поднятого потолка кругов.
+    if loop is None or not isinstance(event, dict):
+        return False
+    if event.get("kind") == "loop-continue":
+        return True
+    action = event.get("action")
+    after = event.get("after")
+    return (
+        event.get("kind") == "commit"
+        and event.get("node") == loop["lead"]
+        and isinstance(action, dict)
+        and action.get("rewind") == loop["worker"]
+        and isinstance(after, dict)
+        and after.get("state") == "ready"
+    )
+
+
+def is_loop_candidate_stop(event, loop):
+    # Остановка кандидата передачи: ведущий просил rewind в worker, а доверенный
+    # сторож или потолок передачу не исполнил.
+    if loop is None or not isinstance(event, dict):
+        return False
+    action = event.get("action")
+    return (
+        event.get("kind") in LOOP_CANDIDATE_STOPS
+        and event.get("node") == loop["lead"]
+        and isinstance(action, dict)
+        and action.get("rewind") == loop["worker"]
+    )
+
+
+def blocking_ids(verdict):
+    return {finding["id"] for finding in blocking_findings(verdict)}
+
+
+def loop_ledger_state(events, loop):
+    # Производное состояние цикла: сколько передач исполнено, какой этап идёт, что
+    # было передано последним и ответил ли на это worker. Число кругов считается по
+    # самим передачам, снимок в событии — его проверяемая копия (см. validate-ledger).
+    # Визиты исполнителя внутри круга считаются по его terminal-результатам: ручной
+    # goto или возврат человека на worker круга не прибавляет, и без номера визита
+    # повторный заход получил бы уже закрытый на запись отчёт прошлого визита.
+    # `exhausted` визитом с результатом не считается — повтор после него продолжает
+    # тот же незаконченный отчёт.
+    state = {
+        "rounds": 0,
+        "stage": 0,
+        "lastTransferVerdict": None,
+        "hasTransfer": False,
+        "workerResult": False,
+        "workerResults": 0,
+        "lastReport": None,
+        "leadDecided": False,
+        "leadIds": set(),
+    }
+    for event in events:
+        kind = event.get("kind")
+        node = event.get("node")
+        verdict = event.get("verdict")
+        if node == loop["lead"] and verdict is not None and (
+            kind in {"commit", "loop-continue"} or kind in LOOP_CANDIDATE_STOPS
+        ):
+            state["leadIds"] |= blocking_ids(verdict)
+        if is_loop_transfer(event, loop):
+            state["rounds"] += 1
+            state["stage"] = event["loop"]["stage"]
+            state["lastTransferVerdict"] = verdict
+            state["hasTransfer"] = True
+            state["workerResult"] = False
+            state["workerResults"] = 0
+            state["leadDecided"] = False
+            continue
+        if (
+            kind == "commit"
+            and node == loop["worker"]
+            and event.get("outcome") in LOOP_WORKER_RESULTS
+        ):
+            state["workerResult"] = True
+            state["workerResults"] += 1
+            state["lastReport"] = loop_report_name(state["rounds"], state["workerResults"])
+            state["leadDecided"] = False
+            continue
+        if node == loop["lead"] and (kind == "commit" or kind in LOOP_CANDIDATE_STOPS):
+            state["leadDecided"] = True
+    return state
+
+
+def loop_report_name(round_no, visit):
+    # Отчёт исполнителя — свой файл на каждый визит: первый визит круга сохраняет
+    # простое имя `report.r<круг>.md`, повторные получают `.v<номер>`.
+    if visit <= 1:
+        return f"report.r{round_no}.md"
+    return f"report.r{round_no}.v{visit}.md"
+
+
+def loop_stage_decision(state, verdict):
+    # Граница этапа признаётся только по журналу: ведущий видел свежий результат
+    # worker, закрыл ровно то, что сам передавал последним, и не выдаёт старые id за
+    # новый этап. Иначе вердикт остаётся ремонтом того же этапа и расходует круг.
+    stage = verdict.get("stage") if isinstance(verdict, dict) else None
+    if stage is None:
+        return False, None
+    if not state["hasTransfer"]:
+        return False, "no-transfer"
+    if not state["workerResult"]:
+        return False, "no-worker-result"
+    if state["leadDecided"]:
+        return False, "result-used"
+    previous = state["lastTransferVerdict"]
+    previous_ids = blocking_ids(previous) if previous is not None else set()
+    if set(stage["closes"]) != previous_ids:
+        return False, "closes-mismatch"
+    if blocking_ids(verdict) & state["leadIds"]:
+        return False, "ids-reused"
+    return True, None
+
+
+def loop_next_stage(previous_stage, accepted):
+    if accepted:
+        return previous_stage + 1
+    return max(previous_stage, 1)
+
+
+def validate_loop_snapshot(value, verdict):
+    shape(
+        value,
+        {"policy", "maxRounds", "roundsBefore", "roundsAfter", "stage", "stageAccepted"},
+        {"stageRejected"},
+    )
+    if value["policy"] != LOOP_POLICY_VERSION:
+        fail()
+    max_rounds = integer(value["maxRounds"], 1)
+    before = integer(value["roundsBefore"])
+    after = integer(value["roundsAfter"])
+    integer(value["stage"], 1)
+    if max_rounds > LOOP_MAX_ROUNDS_LIMIT or after not in {before, before + 1}:
+        fail()
+    if not isinstance(value["stageAccepted"], bool):
+        fail()
+    has_stage = isinstance(verdict, dict) and "stage" in verdict
+    if value["stageAccepted"] and not has_stage:
+        fail()
+    if "stageRejected" in value and (
+        value["stageAccepted"]
+        or not has_stage
+        or value["stageRejected"] not in LOOP_STAGE_REJECTIONS
+    ):
+        fail()
+    if has_stage and not value["stageAccepted"] and "stageRejected" not in value:
+        fail()
+    return value
+
+
 def stable_core_reason(window, owner):
     # Замечание, пережившее каждый ремонт окна. Наборы при этом не совпадают,
     # поэтому проверки повтора и осцилляции молчат, — а цикл уже доказал, что
@@ -506,6 +870,118 @@ def stable_core_reason(window, owner):
     if len(names) > 3:
         shown += f" и ещё {len(names) - 3}"
     return f"ремонт не снимает замечания: {shown}"
+
+
+def _arc_already_expanded(typed_history, closed_ids):
+    # Было ли расширение на этой дуге раньше. Считаем по СЫРЫМ наборам id, без якорных
+    # послаблений: послабления отвечают на вопрос «эта находка законна», а здесь вопрос
+    # другой — «сколько раз проверяющий уже выходил за замкнутый набор». Смешать их
+    # значит выдать второй допуск тому, кто первый уже потратил.
+    closed = set(closed_ids)
+    for verdict in typed_history[1:]:
+        _, ids = verdict_snapshot(verdict)
+        if set(ids) - closed:
+            return True
+    return False
+
+
+def scope_expansion_reason(history, candidate, task=None, target=None):
+    # Первый typed verdict после решения человека задаёт бюджет расширений дуги.
+    # Новый доказанный дефект остаётся блокером: guard останавливает только ремонт,
+    # сохраняя failed-verdict и открытые findings, и никогда не объявляет их deferred.
+    # Иначе проверяющий может каждый раз приносить полностью новые id: точный
+    # no-progress fingerprint считает это прогрессом, хотя задача только растёт.
+    # Один ремонт замкнутого набора тоже является пределом автоматической автономии:
+    # если следующий verdict оставил тот же owner + ids, дальнейшее уточнение summary
+    # не доказывает прогресс и требует решения человека.
+    # Причинность нового дефекта ledger доказать не может, поэтому безопасный исход —
+    # остановить автоматический rewind и отдать расширение человеку, не потеряв verdict.
+    # Исключения — ниже: первый проход по артефакту, которого проверяющий раньше не
+    # видел, документ самого ремонтируемого узла и ОДИН допуск на дугу. Аргументы —
+    # целые вердикты, а не снимки: снимок отвечает «что не снялось», а якоря и охват —
+    # «видел ли он этот артефакт».
+    if candidate is None:
+        return None
+    typed_history = [verdict for verdict in history if verdict is not None]
+    if not typed_history:
+        return None
+    candidate_snapshot = verdict_snapshot(candidate)
+    if candidate_snapshot == verdict_snapshot(typed_history[-1]):
+        return "повторяется тот же набор открытых замечаний после одного ремонта"
+    closed_owner, closed_ids = verdict_snapshot(typed_history[0])
+    owner, candidate_ids = candidate_snapshot
+    if owner != closed_owner:
+        return (
+            "замкнутый набор замечаний сменил владельца: "
+            f"{closed_owner} → {owner}"
+        )
+    added = sorted(set(candidate_ids) - set(closed_ids))
+    if not added:
+        return None
+    # Якоря нужны обоим послаблениям ниже, поэтому считаются один раз и до них: раньше
+    # словарь строился внутри ветки `reviewed`, и второе послабление падало на вердикте
+    # без объявленного охвата.
+    anchors = {
+        finding["id"]: finding.get("anchor")
+        for finding in candidate["findings"]
+    }
+    # Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть замечание
+    # «сценарий не покрыт» нельзя, не написав файл. Замечание по такому файлу — первый
+    # проход по новому коду, а не рост охвата: раньше его не могло быть, потому что
+    # файла не существовало. Такой id не удерживает маршрут у человека — возврат
+    # уходит обычным автоматическим, списываясь из общего бюджета попытки.
+    # Отсев работает ТОЛЬКО когда прошлые вердикты серии объявили охват: без него
+    # «не видел раньше» неотличимо от «не потрудился посмотреть», и правило пропускало
+    # бы любой новый id, то есть отменяло бы само себя.
+    reviewed = set()
+    for verdict in typed_history:
+        reviewed.update(verdict.get("reviewed") or ())
+    if reviewed:
+        added = [
+            finding_id
+            for finding_id in added
+            if not (
+                anchors.get(finding_id)
+                and anchors[finding_id] not in reviewed
+            )
+        ]
+        if not added:
+            return None
+    # Документ самого ремонтируемого узла. Отсев по `reviewed` рассчитан на дугу
+    # «автор ↔ проверяющий», где ремонт СОЗДАЁТ файлы: замечание по новому файлу и есть
+    # первый проход. На дуге планирования ремонт файлов не создаёт — он переписывает свой
+    # документ, а замечания указывают на давно существующий код. Поэтому там отсев не
+    # срабатывал НИКОГДА, и допуск на расширение у плановой дуги был ровно нулевой: первый
+    # же новый блокирующий id останавливал маршрут. Замер по журналам всех попыток:
+    # `skeptic → plan` — самая частая дуга типизированных остановок (10 из 31), и ни у
+    # одной находки на ней якорь не указывал на созданный ремонтом файл.
+    # Замечание по документу, который ремонт только что переписал, — первый проход по
+    # новому тексту по построению, а не рост охвата.
+    if task is not None and target is not None:
+        document = f"t{task}.{target}.md"
+        added = [
+            finding_id
+            for finding_id in added
+            if (anchors.get(finding_id) or "") != document
+        ]
+        if not added:
+            return None
+    # Допуск: ПЕРВОЕ расширение на дуге проходит, второе останавливает маршрут.
+    # Прежнее правило звало человека на первом же новом id, и цена этого измерена:
+    # 13 остановок из 31 — «набор расширен новыми id», медиана ожидания человека 15 минут,
+    # сумма 59.7 часа, максимум 13.9 часа простоя стенда и слота. При этом ремонт в этих
+    # сериях РАБОТАЛ: в разобранном живом случае план закрыл два замечания из трёх, а
+    # остановило его одно новое.
+    # Допуск не бесплатный и не безграничный: он списывается из общего бюджета возвратов
+    # попытки (`target_rewind_budget`) и hard-лимита дуги, поэтому серия «каждый круг
+    # приношу новый сценарий нарушения того же контракта» по-прежнему конечна — она просто
+    # стоит на один круг дольше.
+    if not _arc_already_expanded(typed_history, closed_ids):
+        return None
+    shown = ", ".join(added[:3])
+    if len(added) > 3:
+        shown += f" и ещё {len(added) - 3}"
+    return f"замкнутый набор замечаний расширен новыми id: {shown}"
 
 
 def no_progress_reason(history, candidate, limit):
@@ -547,6 +1023,7 @@ def validate_event_static(
     catalog,
     route,
     route_hash,
+    loop=None,
 ):
     required = {
             "schema",
@@ -570,11 +1047,29 @@ def validate_event_static(
         }
     # `verdict` добавлен совместимо: старые immutable events остаются валидны,
     # новые commit-events могут нести проверенную типизацию failed.
-    if not isinstance(event, dict) or frozenset(event) not in {
+    allowed = {
         frozenset(required),
         frozenset(required | {"verdict"}),
-    }:
+        frozenset(required | {"actor"}),
+        frozenset(required | {"verdict", "actor"}),
+    }
+    # Снимок цикла и ссылка продолжения бывают только у маршрута с закреплённым
+    # `loop`: у обычного маршрута такое событие — порча журнала, а не новая форма.
+    if loop is not None:
+        allowed |= {
+            frozenset(required | {"loop"}),
+            frozenset(required | {"verdict", "loop"}),
+            frozenset(required | {"verdict", "loop", "continues"}),
+            frozenset(required | {"loop", "continues"}),
+        }
+    if not isinstance(event, dict) or frozenset(event) not in allowed:
         fail()
+    if "actor" in event:
+        identifier(event["actor"])
+        if event["kind"] != "human-rewind" or event["actor"] == "human":
+            # `human` не пишется вовсе (это умолчание), а у прочих видов событий
+            # исполнителя нет: их вырабатывает сам доверенный рантайм.
+            fail()
     validate_static(
         event,
         task,
@@ -588,10 +1083,24 @@ def validate_event_static(
     timestamp(event["at"])
     identifier(event["node"])
     validate_verdict(event.get("verdict"), event.get("outcome"))
-    if event["kind"] not in {
-        "init", "pause", "commit", "human-rewind", "rewind-limit", "no-progress"
-    }:
+    kinds = {"init", "pause", "commit", "human-rewind", "rewind-limit", "no-progress"}
+    if loop is not None:
+        kinds |= {"loop-ceiling", "loop-continue"}
+    if event["kind"] not in kinds:
         fail()
+    if "loop" in event:
+        validate_loop_snapshot(event["loop"], event.get("verdict"))
+    # Граница этапа — только у ведущего цикла и только на его дуге в worker.
+    verdict = event.get("verdict")
+    if isinstance(verdict, dict) and "stage" in verdict:
+        action = event.get("action")
+        if (
+            loop is None
+            or event["node"] != loop["lead"]
+            or not isinstance(action, dict)
+            or action.get("rewind") != loop["worker"]
+        ):
+            fail()
 
 
 def validate_runtime(
@@ -706,7 +1215,17 @@ if OP == "parse-description":
     machine = value["machine"]
     if not isinstance(machine, dict):
         fail()
-    sys.stdout.write(identifier(machine.get("entry")) + "\n")
+    # Пара цикла читается из закреплённого бандла, а не от вызывающего: роль узла и
+    # дугу доверенный коммит проверяет сам.
+    loop_lead = loop_worker = ""
+    if "loop" in machine:
+        pair = machine["loop"]
+        exact(pair, {"lead", "worker"})
+        loop_lead = identifier(pair["lead"])
+        loop_worker = identifier(pair["worker"])
+    sys.stdout.write(
+        identifier(machine.get("entry")) + "\t" + loop_lead + "\t" + loop_worker + "\n"
+    )
 
 elif OP == "assert-empty":
     (directory,) = ARGS
@@ -826,8 +1345,16 @@ elif OP == "prepare-pause":
     dump(event)
 
 elif OP == "prepare-human-rewind":
-    runtime_path, results_dir, node, reset_csv, rewind_reason, at = ARGS
+    runtime_path, results_dir, node, reset_csv, rewind_reason, at, actor, expected_sequence_raw, expected_hash = ARGS
     runtime = regular_json(runtime_path)
+    # Проверка выполняется внутри task lock до дедупа и append.
+    # Даже повтор того же указания не может подтвердить чужой head.
+    if expected_sequence_raw or expected_hash:
+        expected_sequence = decimal(expected_sequence_raw, 10**12)
+        identifier(expected_hash, HASH_RE)
+        if runtime.get("sequence") != expected_sequence or runtime.get("headEventHash") != expected_hash:
+            print("FACTORY_ERROR=stale_stage", file=sys.stderr)
+            fail(75)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
         fail()
@@ -849,8 +1376,8 @@ elif OP == "prepare-human-rewind":
         fail(75)
     # Возврат несёт ДВЕ вещи: курсор и указание человека. Курсор может уже стоять там,
     # указание — нет, и раньше такой заход считался пустым: событие не ложилось, а
-    # `factory goto` всё равно печатал «курсор возвращён» и отвечал успехом. На t7802
-    # так пропало решение владельца, набранное в «перейти сюда» на текущем узле, —
+    # `factory goto` всё равно печатал «курсор возвращён» и отвечал успехом. Так может
+    # пропасть решение владельца, набранное в «перейти сюда» на текущем узле, —
     # заход диагностики ушёл без него. Гасим только настоящий повтор (тот же узел и
     # ровно то же указание, ещё не отработанное коммитом) — как в prepare-pause.
     if (
@@ -861,6 +1388,14 @@ elif OP == "prepare-human-rewind":
         fail(10)
     sequence = integer(runtime.get("sequence")) + 1
     event = event_base(runtime, sequence, at, "human-rewind", node)
+    # Кто принял решение. Поле пишется ТОЛЬКО когда решал не человек: у обычного `goto`
+    # событие остаётся байт в байт прежним, и уже записанные события остаются валидными.
+    # Это запись аудита, а не рубеж безопасности: GrigDesk работает от того же пользователя
+    # и мог бы назваться человеком. Смысл в другом — машинное решение, записанное как
+    # человеческое, создаёт в журнале ложь «это обдумал человек», а весь план автономности
+    # стоит на том, что предъявленное решение можно отличить от принятого.
+    if actor != "human":
+        event["actor"] = actor
     event.update(
         {
             "outcome": None,
@@ -891,10 +1426,23 @@ elif OP == "prepare-commit":
         no_progress_limit_raw,
         recovery_raw,
         target_budget_raw,
+        feedback_raw,
+        loop_lead,
+        loop_worker,
+        loop_max_rounds_raw,
+        expected_sequence_raw,
+        expected_hash,
     ) = ARGS
     if recovery_raw not in {"0", "1"}:
         fail()
+    loop = loop_spec(loop_lead, loop_worker)
+    loop_max_rounds = decimal(loop_max_rounds_raw, LOOP_MAX_ROUNDS_LIMIT)
     runtime = regular_json(runtime_path)
+    if expected_sequence_raw or expected_hash:
+        expected_sequence = decimal(expected_sequence_raw, 10**12)
+        identifier(expected_hash, HASH_RE)
+        if runtime.get("sequence") != expected_sequence or runtime.get("headEventHash") != expected_hash:
+            fail(75)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
         fail()
@@ -909,17 +1457,34 @@ elif OP == "prepare-commit":
     # агента до потолка шагов — деньгами и часами за отказ записать один факт.
     # После нового коммита узла возврат перестаёт считаться свежим, и повтор упавшего
     # процесса снова гасится идемпотентностью — ровно как задумано.
-    if (
+    same_last_commit = (
         isinstance(last, dict)
         and last.get("node") == node
         and last.get("outcome") == outcome
-        and not human_rewind_note(results_dir, node)
-    ):
+    )
+    if same_last_commit and outcome in {"rejected", "skipped"}:
+        # Crash-retry допустим только пока lastCommit является последним событием и
+        # только с дословно тем же feedback. Иначе UI мог бы показать новый текст,
+        # хотя immutable ledger сохранил старый. Если курсор позже явно вернули на те
+        # же ворота, это уже новое решение, а не retry старого CAS.
+        if integer(runtime.get("sequence")) == integer(last.get("sequence"), 1):
+            committed = event_at_sequence(results_dir, last.get("sequence"))
+            requested_reason = feedback_raw if feedback_raw else None
+            if committed.get("reason") != requested_reason:
+                fail(75)
+            fail(10)
+        if cursor.get("currentNode") != node:
+            fail(75)
+    if same_last_commit and not human_rewind_note(results_dir, node):
         fail(10)
     if cursor.get("state") not in {"ready", "paused"} or cursor.get("currentNode") != node:
         fail(75)
     verdict = decode_verdict(verdict_b64, outcome)
-    failure_owner = verdict["owner"] if verdict is not None else None
+    # Тот же инвариант, что и на стороне bash: владелец участвует в выборе перехода
+    # только у отказа. Вердикт приёмки с отложенным хвостом ветку не меняет.
+    failure_owner = (
+        verdict["owner"] if verdict is not None and outcome == "failed" else None
+    )
     transition = regular_json(transition_path, immutable=False)
     action = validate_transition(
         transition,
@@ -933,21 +1498,66 @@ elif OP == "prepare-commit":
     target_budget = decimal(target_budget_raw, 10)
     sequence = integer(runtime.get("sequence")) + 1
     event_kind = "commit"
-    # Метка восстановления живёт только на обычном коммите: остановки rewind-limit и
-    # no-progress называют себя сами и всё равно зовут человека к журналу.
-    event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
+    action_mode = validate_action(action)
+    # Объяснение skipped и замечание rejected-ворот используют reason, но
+    # взаимоисключаются по исходу. Rejected→stop тоже сохраняет комментарий для
+    # аудита; доставить его следующему узлу можно только при объявленном rewind.
+    if feedback_raw:
+        if outcome not in {"rejected", "skipped"} or recovery_raw != "0":
+            fail(2)
+        event_reason = reason(feedback_raw)
+    else:
+        # Метка восстановления живёт только на обычном коммите: остановки
+        # rewind-limit и no-progress называют себя сами и всё равно зовут человека.
+        event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
     after = derive_commit_cursor(cursor, action, node, outcome, sequence)
-    if validate_action(action) == "rewind":
-        rewind_history = automatic_rewind_history(
-            results_dir,
-            node,
-            action["rewind"],
-        )
-        progress_reason = no_progress_reason(
-            rewind_history,
-            verdict_snapshot(verdict),
-            no_progress_limit,
-        )
+    # Передача lead → worker закреплённого цикла. Граница этапа допустима только на ней;
+    # у остальных узлов и маршрутов без `loop` её появление — нарушение протокола.
+    loop_transfer = (
+        loop is not None
+        and node == loop["lead"]
+        and action_mode == "rewind"
+        and action["rewind"] == loop["worker"]
+    )
+    if isinstance(verdict, dict) and "stage" in verdict and not loop_transfer:
+        fail(2)
+    loop_state = None
+    stage_accepted = False
+    stage_rejection = None
+    if loop_transfer:
+        if loop_max_rounds < 1:
+            fail(2)
+        loop_events = ledger_events(results_dir)
+        loop_state = loop_ledger_state(loop_events, loop)
+        stage_accepted, stage_rejection = loop_stage_decision(loop_state, verdict)
+    if action_mode == "rewind":
+        # В цикле ведущий оценивает прогресс по результату ремонта: прежний id может
+        # означать уже суженный остаток требования. Сравнение id, расширение набора
+        # и лимит серии не подменяют это решение. Все передачи расходуют общий потолок,
+        # который не сбрасывают ни новые id, ни граница этапа, ни решение человека.
+        rewind_verdicts = []
+        if not loop_transfer:
+            rewind_verdicts = automatic_rewind_verdicts(
+                results_dir,
+                node,
+                action["rewind"],
+            )
+        rewind_history = [verdict_snapshot(item) for item in rewind_verdicts]
+        candidate_snapshot = verdict_snapshot(verdict)
+        progress_reason = None
+        if not loop_transfer and no_progress_limit:
+            progress_reason = scope_expansion_reason(
+                rewind_verdicts,
+                verdict,
+                runtime.get("taskId"),
+                action["rewind"],
+            )
+            if progress_reason is None:
+                progress_reason = no_progress_reason(
+                    rewind_history,
+                    candidate_snapshot,
+                    no_progress_limit,
+                )
         if progress_reason is not None:
             event_kind = "no-progress"
             event_reason = (
@@ -965,7 +1575,7 @@ elif OP == "prepare-commit":
                     "sequence": sequence,
                 },
             }
-        elif rewind_limit and len(rewind_history) >= rewind_limit:
+        elif not loop_transfer and rewind_limit and len(rewind_history) >= rewind_limit:
             event_kind = "rewind-limit"
             event_reason = (
                 f"автоматический лимит возвратов исчерпан: {node} → "
@@ -982,7 +1592,27 @@ elif OP == "prepare-commit":
                     "sequence": sequence,
                 },
             }
-        elif target_budget and (
+        elif loop_transfer and loop_state["rounds"] >= loop_max_rounds:
+            # Потолок кругов профиля ограничивает все передачи цикла вместо сторожей
+            # по наборам id и общих пределов 6/10: ещё один ремонт требует бюджета.
+            event_kind = "loop-ceiling"
+            event_reason = (
+                f"потолок кругов цикла исчерпан: {loop_state['rounds']} из "
+                f"{loop_max_rounds} — подними PROFILE_LOOP_MAX_ROUNDS в профиле "
+                "и продолжи задачу"
+            )
+            after = {
+                "state": "stopped",
+                "currentNode": None,
+                "stop": "loop-ceiling",
+                "pauseReason": None,
+                "lastCommit": {
+                    "node": node,
+                    "outcome": outcome,
+                    "sequence": sequence,
+                },
+            }
+        elif not loop_transfer and target_budget and (
             automatic_rewind_count(results_dir, action["rewind"]) >= target_budget
         ):
             # Последний предохранитель: срабатывает после no-progress и лимита
@@ -1015,7 +1645,133 @@ elif OP == "prepare-commit":
     )
     if verdict is not None:
         event["verdict"] = verdict
+    if loop_transfer:
+        executed = event_kind == "commit"
+        snapshot = {
+            "policy": LOOP_POLICY_VERSION,
+            "maxRounds": loop_max_rounds,
+            "roundsBefore": loop_state["rounds"],
+            "roundsAfter": loop_state["rounds"] + (1 if executed else 0),
+            "stage": loop_next_stage(loop_state["stage"], stage_accepted),
+            "stageAccepted": stage_accepted,
+        }
+        if stage_rejection is not None:
+            snapshot["stageRejected"] = stage_rejection
+        event["loop"] = snapshot
     dump(event)
+
+elif OP == "prepare-loop-continue":
+    # Продолжение после поднятого потолка кругов. Исполняет ТОТ ЖЕ кандидат, что
+    # остановился на потолке: это не human-rewind, серия сторожей, находки и счёт
+    # кругов не обнуляются, а сама передача списывает круг.
+    (
+        runtime_path,
+        results_dir,
+        loop_lead,
+        loop_worker,
+        max_rounds_raw,
+        expected_sequence_raw,
+        expected_hash,
+        at,
+    ) = ARGS
+    loop = loop_spec(loop_lead, loop_worker)
+    if loop is None:
+        fail(2)
+    max_rounds = decimal(max_rounds_raw, LOOP_MAX_ROUNDS_LIMIT)
+    expected_sequence = decimal(expected_sequence_raw, 10**12)
+    identifier(expected_hash, HASH_RE)
+    if max_rounds < 1 or expected_sequence < 1:
+        fail(2)
+    runtime = regular_json(runtime_path)
+    cursor = runtime.get("cursor")
+    if not isinstance(cursor, dict):
+        fail()
+    head_sequence = integer(runtime.get("sequence"))
+    continues = {"sequence": expected_sequence, "eventHash": expected_hash}
+    if head_sequence == expected_sequence + 1:
+        # Повтор после сбоя: продолжение уже легло этим же CAS — второго круга нет.
+        head = event_at_sequence(results_dir, head_sequence)
+        if head.get("kind") == "loop-continue" and head.get("continues") == continues:
+            fail(10)
+        fail(75)
+    if head_sequence != expected_sequence or runtime.get("headEventHash") != expected_hash:
+        fail(75)
+    if cursor.get("state") != "stopped" or cursor.get("stop") != "loop-ceiling":
+        fail(75)
+    ceiling = event_at_sequence(results_dir, expected_sequence)
+    if ceiling.get("kind") != "loop-ceiling" or not is_loop_candidate_stop(ceiling, loop):
+        fail(75)
+    snapshot = ceiling.get("loop")
+    validate_loop_snapshot(snapshot, ceiling.get("verdict"))
+    rounds = snapshot["roundsBefore"]
+    if max_rounds <= rounds:
+        # Потолок не поднят: исполнять нечем, событие не пишется.
+        fail(11)
+    sequence = head_sequence + 1
+    event = event_base(runtime, sequence, at, "loop-continue", ceiling["node"])
+    event.update(
+        {
+            "outcome": ceiling["outcome"],
+            "reason": f"продолжение после поднятого потолка кругов: {max_rounds}",
+            "action": ceiling["action"],
+            "before": cursor,
+            "after": {
+                "state": "ready",
+                "currentNode": ceiling["action"]["rewind"],
+                "stop": None,
+                "pauseReason": None,
+                "lastCommit": cursor.get("lastCommit"),
+            },
+            "continues": continues,
+        }
+    )
+    continued = {
+        "policy": LOOP_POLICY_VERSION,
+        "maxRounds": max_rounds,
+        "roundsBefore": rounds,
+        "roundsAfter": rounds + 1,
+        "stage": snapshot["stage"],
+        "stageAccepted": snapshot["stageAccepted"],
+    }
+    if "stageRejected" in snapshot:
+        continued["stageRejected"] = snapshot["stageRejected"]
+    event["loop"] = continued
+    if ceiling.get("verdict") is not None:
+        event["verdict"] = ceiling["verdict"]
+    dump(event)
+
+elif OP == "loop-state":
+    # Витрина цикла для контекста узла и реестра: число кругов, этап, потолок
+    # последнего снимка. Читает только проверенную цепочку.
+    directory, loop_lead, loop_worker = ARGS
+    loop = loop_spec(loop_lead, loop_worker)
+    if loop is None:
+        dump({"schema": 1, "loop": None})
+    else:
+        events = ledger_events(directory)
+        state = loop_ledger_state(events, loop)
+        max_rounds = None
+        for event in events:
+            if isinstance(event.get("loop"), dict):
+                max_rounds = event["loop"]["maxRounds"]
+        dump(
+            {
+                "schema": 1,
+                "loop": {
+                    "lead": loop["lead"],
+                    "worker": loop["worker"],
+                    "rounds": state["rounds"],
+                    "stage": state["stage"],
+                    "maxRounds": max_rounds,
+                    # Куда пишет следующий визит исполнителя и что последним сдано с
+                    # результатом: это читает ведущий, это закрывается на запись.
+                    "workerReport": loop_report_name(
+                        state["rounds"], state["workerResults"] + 1
+                    ),
+                    "lastReport": state["lastReport"],
+                },
+            }
+        )
 
 elif OP == "event-sequence":
     (event_path,) = ARGS
@@ -1059,7 +1815,10 @@ elif OP == "human-note":
         sys.stdout.write(note + "\n")
 
 elif OP == "findings-ledger":
-    (directory,) = ARGS
+    # Пара цикла приходит третьим и вторым аргументом только у маршрута с `loop`;
+    # без неё проекция побайтно прежняя.
+    directory, *loop_args = ARGS
+    loop = loop_spec(*loop_args) if loop_args else None
     try:
         names = sorted(
             name for name in os.listdir(directory) if EVENT_RE.fullmatch(name)
@@ -1067,9 +1826,12 @@ elif OP == "findings-ledger":
     except OSError:
         fail()
     findings = {}
+    kinds = {"commit", "rewind-limit", "no-progress"}
+    if loop is not None:
+        kinds |= {"loop-ceiling", "loop-continue"}
     for name in names:
         event = regular_json(os.path.join(directory, name))
-        if event.get("kind") not in {"commit", "rewind-limit", "no-progress"}:
+        if event.get("kind") not in kinds:
             continue
         node = identifier(event.get("node"))
         outcome = event.get("outcome")
@@ -1081,40 +1843,50 @@ elif OP == "findings-ledger":
             for key, finding in findings.items()
             if finding["sourceNode"] == node and finding["status"] == "open"
         }
+        def record(finding, status):
+            record_finding(findings, node, sequence, verdict, finding, status)
+
+        # Исполненное продуктовое решение ведущего цикла — полный набор блокеров
+        # задания: находки исполнителя он разобрал, а нерешённое перенёс в свои.
+        # Остановка сторожем и вердикт с environment/plan/human этого не означают.
+        if loop is not None and node == loop["lead"] and (
+            (event.get("kind") == "commit" and outcome == "done")
+            or is_loop_transfer(event, loop)
+        ):
+            for key, finding in findings.items():
+                if finding["sourceNode"] == loop["worker"] and finding["status"] == "open":
+                    finding["status"] = "closed"
+                    finding["closedSequence"] = sequence
+
         if outcome == "done":
             for key in open_for_node:
                 findings[key]["status"] = "closed"
                 findings[key]["closedSequence"] = sequence
+            # Приёмка с хвостом: работа принята, но проверяющий приложил список
+            # находок вне цели задачи. Их нельзя ни закрывать (никто не чинил),
+            # ни держать открытыми (возврат по ним запрещён) — отдельный статус.
+            if verdict is not None:
+                for finding in verdict["findings"]:
+                    record(finding, "deferred")
             continue
         if outcome != "failed" or verdict is None:
             # Legacy failed не несёт полного набора замечаний: по нему нельзя
             # доказать ни открытие, ни закрытие finding.
             continue
+        # Закрытие по исчезновению из набора считаем только по блокирующим: они
+        # и есть предмет ремонта. Отложенная находка из набора не «пропадает».
         current_keys = {
             (node, finding["id"])
-            for finding in verdict["findings"]
+            for finding in blocking_findings(verdict)
         }
         for key in open_for_node - current_keys:
             findings[key]["status"] = "closed"
             findings[key]["closedSequence"] = sequence
         for finding in verdict["findings"]:
-            key = (node, finding["id"])
-            previous = findings.get(key)
-            if previous is None or previous["status"] == "closed":
-                findings[key] = {
-                    "id": finding["id"],
-                    "sourceNode": node,
-                    "owner": verdict["owner"],
-                    "summary": finding["summary"],
-                    "openedSequence": sequence,
-                    "lastSeenSequence": sequence,
-                    "status": "open",
-                    "closedSequence": None,
-                }
-            else:
-                previous["owner"] = verdict["owner"]
-                previous["summary"] = finding["summary"]
-                previous["lastSeenSequence"] = sequence
+            record(
+                finding,
+                "open" if finding_severity(finding) == "blocking" else "deferred",
+            )
     ordered = sorted(
         findings.values(),
         key=lambda item: (item["sourceNode"], item["id"]),
@@ -1124,6 +1896,7 @@ elif OP == "findings-ledger":
             "schema": 1,
             "open": [item for item in ordered if item["status"] == "open"],
             "closed": [item for item in ordered if item["status"] == "closed"],
+            "deferred": [item for item in ordered if item["status"] == "deferred"],
         }
     )
 
@@ -1154,9 +1927,11 @@ elif OP == "work-time":
             .replace(tzinfo=datetime.timezone.utc)
             .timestamp()
         )
+        # loop-ceiling закрывает заход ведущего так же, как остановки сторожей;
+        # loop-continue — решение человека после потолка, интервала узла у него нет.
         if (
-            event.get("kind") in {"commit", "rewind-limit", "no-progress"}
-            and event.get("reason") != RECOVERY_COMMIT_REASON
+            event.get("kind") in {"commit", "rewind-limit", "no-progress", "loop-ceiling"}
+            and not is_recovery_commit(event)
             and previous_at is not None
         ):
             node = identifier(event.get("node"))
@@ -1165,8 +1940,70 @@ elif OP == "work-time":
         last_at = at
     dump({"schema": 1, "nodes": per_node, "lastEventAt": last_at})
 
+elif OP == "routing-transitions":
+    # Эту проекцию вызывают только под task-state lock и после того, как validate-ledger
+    # принял полную неизменяемую цепочку. Сохраняем точный байтовый хеш stage-события:
+    # это долговечный ключ соединения, которым пользуется reconciler двойной записи
+    # журнала жизненного цикла.
+    (directory,) = ARGS
+    try:
+        names = sorted(
+            name for name in os.listdir(directory) if EVENT_RE.fullmatch(name)
+        )
+    except OSError:
+        fail()
+    if len(names) > 1_000_000:
+        fail()
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match is None:
+            fail()
+        path = os.path.join(directory, name)
+        event = regular_json(path)
+        kind = event.get("kind")
+        if kind not in {
+            "commit", "human-rewind", "rewind-limit", "no-progress",
+            "loop-ceiling", "loop-continue",
+        }:
+            continue
+        try:
+            raw = open(path, "rb").read()
+        except OSError:
+            fail()
+        stage_hash = hashlib.sha256(raw).hexdigest()
+        if stage_hash != match.group(2):
+            fail()
+        after = event.get("after")
+        action = event.get("action")
+        if not isinstance(after, dict) or not isinstance(action, dict):
+            fail()
+        if after.get("state") == "stopped":
+            mode = "stop"
+            target = None
+        elif after.get("state") == "ready" and "rewind" in action:
+            mode = "rewind"
+            target = identifier(action.get("rewind"))
+        elif after.get("state") == "ready" and "next" in action:
+            mode = "next"
+            target = identifier(action.get("next"))
+        else:
+            fail()
+        stage_at = timestamp(event.get("at"))
+        projection = {
+            "action": mode,
+            "sequence": integer(event.get("sequence"), 1),
+            "stageAt": stage_at[:-1] + ".000Z",
+            "stageEventHash": stage_hash,
+            "targetNodeId": target,
+            "transitionId": "tr_" + stage_hash[:32],
+        }
+        sys.stdout.buffer.write(canonical_bytes(projection))
+
 elif OP == "validate-ledger":
-    directory, task, attempt, profile, catalog, route, route_hash, entry = ARGS
+    # Пара цикла — необязательный хвост аргументов: у маршрута без `loop` её нет, и
+    # проверка побайтно прежняя.
+    directory, task, attempt, profile, catalog, route, route_hash, entry, *loop_args = ARGS
+    loop = loop_spec(*loop_args) if loop_args else None
     identifier(task, TASK_RE)
     identifier(attempt, ATTEMPT_RE)
     identifier(profile, PROFILE_RE)
@@ -1213,6 +2050,9 @@ elif OP == "validate-ledger":
 
     previous_hash = None
     cursor = None
+    previous_event = None
+    loop_rounds = 0
+    loop_stage = 0
     for expected_sequence, (sequence, file_hash, name) in enumerate(event_names):
         if sequence != expected_sequence:
             fail()
@@ -1232,8 +2072,11 @@ elif OP == "validate-ledger":
             catalog,
             route,
             route_hash,
+            loop,
         )
         if event["sequence"] != sequence or event["previousEventHash"] != previous_hash:
+            fail()
+        if ("continues" in event) != (event["kind"] == "loop-continue"):
             fail()
         if sequence == 0:
             expected_cursor = {
@@ -1258,8 +2101,12 @@ elif OP == "validate-ledger":
                 fail()
             validate_cursor(cursor, sequence - 1)
             # Человеческий возврат — единственное событие, которое законно
-            # УКАЗЫВАЕТ на другой узел: остальные описывают текущий.
-            if event["kind"] != "human-rewind" and event["node"] != cursor["currentNode"]:
+            # УКАЗЫВАЕТ на другой узел: остальные описывают текущий. Продолжение
+            # цикла описывает остановленное решение ведущего — курсора на узле нет.
+            if (
+                event["kind"] not in {"human-rewind", "loop-continue"}
+                and event["node"] != cursor["currentNode"]
+            ):
                 fail()
             if event["kind"] == "human-rewind":
                 # Возврат допустим из живого курсора и из остановки «ждёт человека»:
@@ -1303,16 +2150,21 @@ elif OP == "validate-ledger":
                 if event["after"] != expected_cursor:
                     fail()
             elif event["kind"] == "commit":
-                # Коммит объясняет себя исходом, а не текстом, поэтому свободного
-                # reason у него нет — ровно одно исключение — метка восстановления:
-                # она константа, её пишет только движок и по ней указание человека
-                # переживает закрытие узла за снятую инструментацию.
-                if (
-                    cursor["state"] not in {"ready", "paused"}
-                    or event["reason"] not in (None, RECOVERY_COMMIT_REASON)
-                ):
+                # Обычно коммит объясняет себя исходом. Два строго различимых
+                # исключения: recovery и reason у rejected/skipped. При
+                # rewind это ещё и замечание человека целевому узлу; при stop —
+                # неизменяемый аудит причины остановки.
+                if cursor["state"] not in {"ready", "paused"}:
                     fail()
                 identifier(event["outcome"])
+                commit_mode = validate_action(event["action"])
+                if event["reason"] is not None:
+                    if event["reason"] == RECOVERY_COMMIT_REASON:
+                        pass
+                    elif event["outcome"] in {"rejected", "skipped"}:
+                        reason(event["reason"])
+                    else:
+                        fail()
                 expected_cursor = derive_commit_cursor(
                     cursor,
                     event["action"],
@@ -1322,7 +2174,7 @@ elif OP == "validate-ledger":
                 )
                 if event["after"] != expected_cursor:
                     fail()
-            elif event["kind"] in {"rewind-limit", "no-progress"}:
+            elif event["kind"] in {"rewind-limit", "no-progress", "loop-ceiling"}:
                 if cursor["state"] not in {"ready", "paused"}:
                     fail()
                 identifier(event["outcome"])
@@ -1342,11 +2194,78 @@ elif OP == "validate-ledger":
                 }
                 if event["after"] != expected_cursor:
                     fail()
+            elif event["kind"] == "loop-continue":
+                # Продолжение исполняет ровно остановленный кандидат: то же решение,
+                # тот же вердикт и этап, ссылка на предыдущее событие цепочки.
+                previous_loop = (previous_event or {}).get("loop")
+                current_loop = event.get("loop")
+                if (
+                    cursor["state"] != "stopped"
+                    or cursor.get("stop") != "loop-ceiling"
+                    or previous_event is None
+                    or previous_event.get("kind") != "loop-ceiling"
+                    or event["continues"] != {
+                        "sequence": sequence - 1,
+                        "eventHash": previous_hash,
+                    }
+                    or event["node"] != previous_event["node"]
+                    or event["outcome"] != previous_event["outcome"]
+                    or event["action"] != previous_event["action"]
+                    or event.get("verdict") != previous_event.get("verdict")
+                    or not isinstance(previous_loop, dict)
+                    or not isinstance(current_loop, dict)
+                    or current_loop["stage"] != previous_loop["stage"]
+                    or current_loop["stageAccepted"] != previous_loop["stageAccepted"]
+                    or current_loop.get("stageRejected")
+                    != previous_loop.get("stageRejected")
+                    or current_loop["maxRounds"] <= current_loop["roundsBefore"]
+                ):
+                    fail()
+                reason(event["reason"])
+                expected_cursor = {
+                    "state": "ready",
+                    "currentNode": event["action"]["rewind"],
+                    "stop": None,
+                    "pauseReason": None,
+                    "lastCommit": cursor["lastCommit"],
+                }
+                if event["after"] != expected_cursor:
+                    fail()
             else:
                 fail()
+        # Снимок цикла — проверяемая копия счёта по самой цепочке: число передач,
+        # этап и потолок сверяются здесь, а не принимаются на веру от писателя.
+        if loop is not None and is_loop_transfer(event, loop):
+            snapshot = event.get("loop")
+            if (
+                not isinstance(snapshot, dict)
+                or snapshot["roundsBefore"] != loop_rounds
+                or snapshot["roundsAfter"] != loop_rounds + 1
+                or snapshot["roundsAfter"] > snapshot["maxRounds"]
+                or snapshot["stage"] != loop_next_stage(loop_stage, snapshot["stageAccepted"])
+            ):
+                fail()
+            loop_rounds += 1
+            loop_stage = snapshot["stage"]
+        elif loop is not None and is_loop_candidate_stop(event, loop):
+            snapshot = event.get("loop")
+            if (
+                not isinstance(snapshot, dict)
+                or snapshot["roundsBefore"] != loop_rounds
+                or snapshot["roundsAfter"] != loop_rounds
+                or snapshot["stage"] != loop_next_stage(loop_stage, snapshot["stageAccepted"])
+                or (
+                    event["kind"] == "loop-ceiling"
+                    and snapshot["roundsBefore"] < snapshot["maxRounds"]
+                )
+            ):
+                fail()
+        elif "loop" in event or event["kind"] in {"loop-ceiling", "loop-continue"}:
+            fail()
         validate_cursor(event["after"], sequence)
         cursor = event["after"]
         previous_hash = file_hash
+        previous_event = event
 
     pointer = regular_json(os.path.join(directory, "runtime.json"))
     exact(pointer, {"checksum", "runtime"})
@@ -1379,13 +2298,12 @@ PY
 # Заполняет глобальные ASTAGE_* после проверки активной попытки, неизменяемых пинов,
 # терминального состояния, выбранного маршрута и самого закреплённого бандла.
 _attempt_stage_state_load_locked() {
-  local task=$1 attempt=$2 expected_route=${3:-}
+  local task=$1 attempt=$2 expected_route=${3:-} read_terminal=${4:-0}
   local root dir profile routes catalog route_pin route route_hash
   local terminal_rc description entry rc
 
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_protocol_locked "$root" || return
-  _attempt_state_require_active_locked "$root" "$task" "$attempt" >/dev/null || return
   dir=$(_attempt_state_validate_attempt_locked "$root" "$task" "$attempt") || return
   profile=$(_attempt_state_json get "$dir/attempt.json" profile) || return
   routes=$(_attempt_state_json get "$dir/attempt.json" routesDir) || return
@@ -1397,9 +2315,11 @@ _attempt_stage_state_load_locked() {
   _attempt_state_terminal_locked "$dir" "$task" "$attempt" >/dev/null
   terminal_rc=$?
   if (( terminal_rc == 0 )); then
-    return 75
+    [[ "$read_terminal" == 1 ]] || return 75
   elif (( terminal_rc != 3 )); then
     return "$terminal_rc"
+  else
+    _attempt_state_require_active_locked "$root" "$task" "$attempt" >/dev/null || return
   fi
 
   route_pin=$(_attempt_state_route_pin_locked \
@@ -1423,15 +2343,21 @@ _attempt_stage_state_load_locked() {
     --catalog-hash "$catalog" \
     --route "$route" >"$description"
   rc=$?
+  local parsed="" loop_lead="" loop_worker=""
   if (( rc == 0 )); then
-    entry=$(_attempt_stage_state_json parse-description \
+    parsed=$(_attempt_stage_state_json parse-description \
       "$description" "$profile" "$catalog" "$route" "$route_hash")
     rc=$?
   fi
   rm -f -- "$description"
   (( rc == 0 )) || return "$rc"
+  IFS=$'\t' read -r entry loop_lead loop_worker <<<"$parsed"
+  [[ -n "$entry" ]] || return 78
 
   ASTAGE_ROOT=$root
+  # Пара цикла закреплённого маршрута; пустая у обычного маршрута.
+  ASTAGE_LOOP_LEAD=$loop_lead
+  ASTAGE_LOOP_WORKER=$loop_worker
   ASTAGE_ATTEMPT_DIR=$dir
   ASTAGE_RESULTS_DIR="$dir/stage-results"
   ASTAGE_PROFILE=$profile
@@ -1444,10 +2370,12 @@ _attempt_stage_state_load_locked() {
 }
 
 _attempt_stage_state_validate_internal_locked() {
+  local -a loop_args=()
+  [[ -z "$ASTAGE_LOOP_LEAD" ]] || loop_args=("$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER")
   _attempt_stage_state_json validate-ledger \
     "$ASTAGE_RESULTS_DIR" \
     "$1" "$2" "$ASTAGE_PROFILE" "$ASTAGE_CATALOG_HASH" \
-    "$ASTAGE_ROUTE" "$ASTAGE_ROUTE_HASH" "$ASTAGE_ENTRY"
+    "$ASTAGE_ROUTE" "$ASTAGE_ROUTE_HASH" "$ASTAGE_ENTRY" "${loop_args[@]}"
 }
 
 _attempt_stage_state_validate_locked() {
@@ -1613,19 +2541,61 @@ attempt_stage_state_latest_event_v2() {
   return "$rc"
 }
 
+# Печатает одну каноническую строку NDJSON для каждого авторитетного routing-перехода.
+# Проверка и проекция работают под одним task lock, поэтому reconciliation не увидит
+# голову stage из другого поколения, чем проверенная цепочка. init/pause намеренно
+# отсутствуют: ни один из них не коммитит ребро маршрута.
+attempt_stage_state_routing_transitions_v2() {
+  local task attempt root lock_fd runtime_tmp rc has_entries=""
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  root=$(attempt_state_v2_task_root "$task") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  # Выбранную попытку восстановления можно abandon до инициализации её stage-курсора.
+  # Её настоящий приватный каталог stage-results тогда пуст и в нём нет авторитетных
+  # переходов для reconciliation. Но любая запись всё равно проходит через строгий
+  # валидатор полного ledger ниже.
+  if (( rc == 0 )); then
+    has_entries=$(find "$ASTAGE_RESULTS_DIR" -mindepth 1 -maxdepth 1 -printf x -quit) || rc=78
+  fi
+  if (( rc == 0 )) && [[ -z "$has_entries" ]]; then
+    _attempt_state_unlock "$lock_fd"
+    return 0
+  fi
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.routing-transitions.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json routing-transitions "$ASTAGE_RESULTS_DIR"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
 # Человеческий возврат курсора на пройденный узел маршрута. Это НЕ подделка
 # исхода агента: в журнал ложится отдельное событие kind=human-rewind с
 # обязательной причиной, а пройденные узлы сбрасываются, как при обычном rewind.
-# Появился из кнопки «перейти сюда» кокпита: у v1 она форсировала статус этапа
+# Появился из кнопки «перейти сюда» GrigDesk: у v1 она форсировала статус этапа
 # напрямую в реестре, в v2 такой путь закрыт — нужен доверенный эквивалент.
 attempt_stage_state_human_rewind_v2() {
-  local task attempt node reset reason root lock_fd runtime_tmp event_tmp now rc
+  local task attempt node reset reason actor root lock_fd runtime_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   node=$(_attempt_stage_state_node_id "${3:-}") || return
   reset=${4:-}
   reason=${5:-}
+  # Кто решил. Умолчание `human` в событие не пишется вовсе — см. prepare-human-rewind.
+  actor=${6:-human}
   [[ -n "$reset" ]] || return 2
+  [[ "$actor" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || return 2
   _attempt_state_reason "$reason" || return
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
@@ -1645,7 +2615,9 @@ attempt_stage_state_human_rewind_v2() {
   fi
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-human-rewind \
-      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" >"$event_tmp"
+      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" "$actor" \
+      "${7:-}" "${8:-}" \
+      >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$runtime_tmp"
@@ -1692,25 +2664,46 @@ attempt_stage_state_human_note_v2() {
 # Производная проекция immutable events: какие typed findings ещё открыты и какие
 # уже закрыты повторной проверкой того же узла. Ничего отдельно не мутируется — при
 # повреждении hash-chain чтение падает до построения проекции.
+# Locked helper не берёт task lock повторно и допускает только пустой ledger до init.
+# Терминальная попытка доступна для экспорта, но не для мутаций cursor.
+_attempt_stage_state_findings_locked() {
+  local task=$1 attempt=$2 ledger rc=0
+  ledger=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-findings.XXXXXX") || return 1
+  if [[ ! -e "$ASTAGE_RESULTS_DIR/runtime.json" && ! -L "$ASTAGE_RESULTS_DIR/runtime.json" &&
+        -z "$(find "$ASTAGE_RESULTS_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    printf '%s\n' '{"schema":1,"open":[],"closed":[],"deferred":[]}' >"$ledger"
+  else
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >/dev/null
+    rc=$?
+    if (( rc == 0 )); then
+      local -a loop_args=()
+      [[ -z "$ASTAGE_LOOP_LEAD" ]] || loop_args=("$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER")
+      _attempt_stage_state_json findings-ledger "$ASTAGE_RESULTS_DIR" "${loop_args[@]}" >"$ledger"
+      rc=$?
+    fi
+  fi
+  if (( rc == 0 )); then
+    python3 "$FACTORY_HOME/lib/bootstrap_state.py" findings \
+      "$ASTAGE_ATTEMPT_DIR/artifacts/bootstrap.json" "$task" "$attempt" \
+      "$ASTAGE_PROFILE" "$ASTAGE_CATALOG_HASH" "$ASTAGE_ROUTE" "$ASTAGE_ROUTE_HASH" \
+      "$ASTAGE_ROUTES_DIR" <"$ledger"
+    rc=$?
+  fi
+  rm -f -- "$ledger"
+  return "$rc"
+}
+
 attempt_stage_state_findings_v2() {
-  local task attempt lock_fd runtime_tmp rc
+  local task attempt lock_fd rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   _attempt_state_lock "$task" lock_fd || return
-  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  _attempt_stage_state_load_locked "$task" "$attempt" "" 1
   rc=$?
   if (( rc == 0 )); then
-    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-findings.XXXXXX") || rc=1
-  fi
-  if (( rc == 0 )); then
-    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    _attempt_stage_state_findings_locked "$task" "$attempt"
     rc=$?
   fi
-  if (( rc == 0 )); then
-    _attempt_stage_state_json findings-ledger "$ASTAGE_RESULTS_DIR"
-    rc=$?
-  fi
-  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
   _attempt_state_unlock "$lock_fd"
   return "$rc"
 }
@@ -1793,7 +2786,7 @@ attempt_stage_state_pause_v2() {
 
 attempt_stage_state_commit_v2() {
   local task attempt node outcome rewind_limit verdict_b64 no_progress_limit recovery
-  local target_budget failure_owner root lock_fd
+  local target_budget reject_feedback failure_owner root lock_fd
   local runtime_tmp transition_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -1809,12 +2802,31 @@ attempt_stage_state_commit_v2() {
   # последний предохранитель после no-progress и лимита дуги, решением человека
   # не обнуляется.
   target_budget=${9:-0}
+  # Десятый — замечание rejected-ворот либо объяснение skipped агента.
+  # Оба сохраняются в reason; только rejected передаёт human note следующему узлу.
+  reject_feedback=${10:-}
+  # Одиннадцатый — потолок кругов цикла из профиля (1..300). Нужен только передаче
+  # lead → worker маршрута с `loop`; у остальных коммитов не читается.
+  local loop_max_rounds=${11:-0}
+  # Телефон адресует exact заход ворот, а не только повторяющееся имя узла.
+  # Сверка sequence/hash происходит внутри этого же task lock до commit/idempotency.
+  local expected_sequence=${12:-} expected_hash=${13:-}
+  [[ -z "$expected_sequence" || "$expected_sequence" =~ ^(0|[1-9][0-9]{0,11})$ ]] || return 2
+  [[ -z "$expected_hash" || "$expected_hash" =~ ^[a-f0-9]{64}$ ]] || return 2
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$target_budget" =~ ^(0|[1-9]|10)$ ]] || return 2
+  [[ "$loop_max_rounds" =~ ^(0|[1-9][0-9]?|[12][0-9]{2}|300)$ ]] || return 2
   [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
+  [[ -z "$reject_feedback" ]] || _attempt_state_reason "$reject_feedback" || return
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
-  failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
+  # Владелец выбирает ВЕТКУ ВОЗВРАТА, поэтому нужен только отказу. У приёмки с
+  # отложенным хвостом вердикт есть, а возврата нет: переход берётся по одному
+  # исходу, и owner в запрос перехода не идёт (factory-route его там запрещает).
+  failure_owner=""
+  if [[ "$outcome" == failed ]]; then
+    failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
+  fi
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
   _attempt_stage_state_load_locked "$task" "$attempt" ""
@@ -1853,7 +2865,9 @@ attempt_stage_state_commit_v2() {
     _attempt_stage_state_json prepare-commit \
       "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
       "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" \
-      "$target_budget" >"$event_tmp"
+      "$target_budget" "$reject_feedback" \
+      "$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER" "$loop_max_rounds" \
+      "$expected_sequence" "$expected_hash" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"
@@ -1875,6 +2889,96 @@ attempt_stage_state_commit_v2() {
     _attempt_stage_state_validate_locked "$task" "$attempt"
     rc=$?
   fi
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
+# Продолжение цикла после поднятого потолка кругов. Исполняет тот же кандидат, что
+# остановился на `loop-ceiling`, и списывает один круг. CAS — точное событие остановки
+# (sequence + hash): устаревшее продолжение отвергается, повтор после сбоя — no-op.
+# Коды: 0 — продолжено или уже было продолжено этим CAS; 11 — потолок не поднят,
+# событие не пишется; прочие — как у остальных операций модуля.
+attempt_stage_state_loop_continue_v2() {
+  local task attempt max_rounds expected_sequence expected_hash root lock_fd
+  local runtime_tmp event_tmp now rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  max_rounds=${3:-}
+  expected_sequence=${4:-}
+  expected_hash=${5:-}
+  [[ "$max_rounds" =~ ^([1-9][0-9]?|[12][0-9]{2}|300)$ ]] || return 2
+  [[ "$expected_sequence" =~ ^[1-9][0-9]*$ ]] || return 2
+  [[ "$expected_hash" =~ ^[a-f0-9]{64}$ ]] || return 2
+  root=$(attempt_state_v2_task_root "$task") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc == 0 )) && [[ -z "$ASTAGE_LOOP_LEAD" ]]; then
+    rc=2
+  fi
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-read.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    chmod 400 "$runtime_tmp" || rc=1
+    now=$(_attempt_stage_state_now) || rc=$?
+    event_tmp=$(mktemp "$ASTAGE_RESULTS_DIR/.event.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json prepare-loop-continue \
+      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER" \
+      "$max_rounds" "$expected_sequence" "$expected_hash" "$now" >"$event_tmp"
+    rc=$?
+    if (( rc == 10 )); then
+      rm -f -- "$event_tmp" "$runtime_tmp"
+      _attempt_stage_state_validate_locked "$task" "$attempt" >/dev/null
+      rc=$?
+      _attempt_state_unlock "$lock_fd"
+      return "$rc"
+    fi
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_append_locked "$event_tmp"
+    rc=$?
+  else
+    [[ -z "${event_tmp:-}" ]] || rm -f -- "$event_tmp"
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_locked "$task" "$attempt" >/dev/null
+    rc=$?
+  fi
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
+# Витрина цикла: JSON {"schema":1,"loop":null} у обычного маршрута, иначе пара,
+# число исполненных передач, этап и потолок последнего снимка. Только чтение
+# проверенной цепочки.
+attempt_stage_state_loop_state_v2() {
+  local task attempt lock_fd runtime_tmp rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-loop.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json loop-state \
+      "$ASTAGE_RESULTS_DIR" "$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
   _attempt_state_unlock "$lock_fd"
   return "$rc"
 }

@@ -1,86 +1,551 @@
-<script setup>
-import { ref, computed, nextTick } from 'vue';
-import { useChatStore } from '../../stores/chat.js';
-import { useProvidersStore } from '../../stores/providers.js';
+<template>
+  <aside class="cl"
+    :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
+    :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined">
+    <div class="top">
+      <div class="tools">
+        <div class="search">
+          <UiSearchInput
+            v-model="q"
+            size="compact"
+            :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'"
+          />
+        </div>
+        <UiCreateButton
+          class="new"
+          label="Новый чат"
+          :disabled="!chat.loaded"
+          @click="newChat"
+        />
+      </div>
+      <div class="archive-toggle">
+        <UiSwitch v-model="showArchived">{{ archiveLabel }}</UiSwitch>
+      </div>
+    </div>
+
+    <div ref="rowsHost" class="rows" @scroll.passive="onRowsScroll">
+      <div v-if="!chat.loaded" class="list-pending">
+        <section class="load-state" :class="{ 'load-state-error': chat.loadError }">
+          <div class="load-status" role="status" aria-live="polite" aria-atomic="true">
+            <span class="load-mark" aria-hidden="true">
+              <UiSpinner v-if="!chat.loadError || chat.loading" decorative />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M12 8v5m0 3v.1" stroke-linecap="round" />
+                <circle cx="12" cy="12" r="9" />
+              </svg>
+            </span>
+            <div class="load-copy">
+              <strong class="load-title" :class="{ 'ui-loading-state__hidden': !chat.loadError }">
+                {{ t(chat.loadError ? 'core.chatListLoadFailed' : 'core.chatListLoading') }}
+              </strong>
+              <p v-if="chat.loadError" class="load-reason">
+                {{ resolveUiText(chat.loadErrorMessage || '') }}
+              </p>
+              <p v-if="chat.loadError && chat.loading" class="load-retry-status">
+                {{ t('core.chatListLoading') }}
+              </p>
+            </div>
+          </div>
+          <p class="load-hint">{{ t('core.chatStoreNotLoaded') }}</p>
+          <UiButton v-if="chat.loadError" :disabled="chat.loading" @click="chat.retryLoad()">
+            {{ t('core.chatListRetry') }}
+          </UiButton>
+        </section>
+
+        <div v-if="!chat.loadError" class="list-skeleton" aria-hidden="true">
+          <div v-for="index in 6" :key="index" class="skeleton-row">
+            <UiSkeleton shape="circle" class="skeleton-avatar"
+                        width="var(--chat-avatar-size)" height="var(--chat-avatar-size)" />
+            <span class="skeleton-copy">
+              <UiSkeleton class="skeleton-title" height="9px" />
+              <UiSkeleton class="skeleton-snippet" height="7px" />
+            </span>
+            <UiSkeleton class="skeleton-time" height="6px" />
+          </div>
+        </div>
+      </div>
+      <div v-else-if="!paging.loaded" class="load-state" role="status">
+        <p>{{ paging.error || t('core.chatPageLoading') }}</p>
+        <UiButton v-if="paging.error" :disabled="paging.loading"
+                  @click="chat.ensureChatPage(q, showArchived)">{{ t('core.chatPageRetry') }}</UiButton>
+      </div>
+      <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
+        <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
+        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived)">
+          {{ t('core.chatListRetry') }}
+        </UiButton>
+      </div>
+      <div v-else-if="!rows.length && !paging.hasMore" class="none muted">{{ emptyLabel }}</div>
+      <div
+        v-for="r in rows"
+        :key="r.id"
+        :data-chat-id="r.id"
+        v-memo="[
+          r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
+          r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
+          r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
+        ]"
+        class="row"
+        :class="{
+          archived: r.archived,
+          cur: r.id === chat.activeId,
+          wait: r.waiting,
+        }"
+      >
+        <template v-if="editId === r.id">
+          <span
+            class="ava"
+            :class="{
+              live: r.sending,
+              brand: Boolean(r.provider?.color),
+            }"
+            :style="r.provider?.color ? { '--prov': r.provider.color } : null"
+            v-tooltip="avatarTitle(r)"
+          >
+            <ProviderIcon
+              v-if="r.provider"
+              :provider="r.provider"
+              :size="19"
+            />
+            <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
+            <span
+              v-if="r.unread"
+              class="udot"
+              v-tooltip="'непрочитанный ответ'"
+            />
+          </span>
+          <span class="mid">
+            <UiInput
+              ref="editEl"
+              v-model="editVal"
+              class="edit"
+              aria-label="Название чата"
+              @keydown.enter="commitEdit"
+              @keydown.esc="editId = null"
+              @blur="commitEdit"
+            />
+          </span>
+        </template>
+
+        <UiPressable
+          v-else
+          class="row-hit"
+          :pressed="r.id === chat.activeId"
+          @click="select(r)"
+          @dblclick="startEdit(r)"
+        >
+          <!-- Аватар показывает исполнителя; кольцо работы вращается отдельно от знака. -->
+          <span
+            class="ava"
+            :class="{
+              live: r.sending,
+              brand: Boolean(r.provider?.color),
+            }"
+            :style="r.provider?.color ? { '--prov': r.provider.color } : null"
+            v-tooltip="avatarTitle(r)"
+          >
+            <ProviderIcon
+              v-if="r.provider"
+              :provider="r.provider"
+              :size="19"
+            />
+            <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
+            <span
+              v-if="r.unread"
+              class="udot"
+              v-tooltip="'непрочитанный ответ'"
+            />
+          </span>
+
+          <span class="mid">
+            <span class="t1">
+              <span class="name">{{ r.title }}</span>
+              <span
+                v-if="r.waiting"
+                class="wchip"
+                v-tooltip="'агент ждёт твоего ответа — работа стоит'"
+              >
+                ждёт ответа
+              </span>
+              <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
+              <span class="ago muted">{{ ago(r.ts) }}</span>
+            </span>
+            <span class="t2 muted">
+              <span v-if="r.draft" class="dr">черновик:</span>{{
+                r.snippet || 'Пустой чат'
+              }}
+            </span>
+          </span>
+        </UiPressable>
+
+        <span v-if="editId !== r.id" class="acts">
+          <!-- Мышь: кнопки появляются при наведении, действие — одним нажатием. -->
+          <span class="acts-quick">
+            <UiIconButton
+              v-if="r.archived"
+              data-context="chat-list-action"
+              role="rail"
+              label="Достать чат из архива"
+              v-tooltip="'Достать из архива'"
+              tone="accent"
+              @click="restore(r)"
+            >
+              ↩
+            </UiIconButton>
+            <UiIconButton
+              data-context="chat-list-action"
+              role="rail"
+              label="Переименовать чат"
+              v-tooltip="'Переименовать'"
+              @click="startEdit(r)"
+            >
+              ✎
+            </UiIconButton>
+            <UiIconButton
+              data-context="chat-list-action"
+              role="rail"
+              :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
+              v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+              :tone="r.archived ? 'danger' : 'accent'"
+              @click="del(r)"
+            >
+              ✕
+            </UiIconButton>
+          </span>
+          <!-- Палец: наведения нет, поэтому действия собраны в меню с полными подписями. -->
+          <span class="acts-menu">
+            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
+              <template #trigger>
+                <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
+                  ⋯
+                </UiIconButton>
+              </template>
+              <template #default="{ close }">
+                <div class="ui-action-menu">
+                  <UiButton v-if="r.archived" role="menuitem" variant="ghost"
+                            @click="close('action'); restore(r)">Достать из архива</UiButton>
+                  <UiButton role="menuitem" variant="ghost"
+                            @click="close('action'); startEdit(r)">Переименовать</UiButton>
+                  <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
+                            @click="close('action'); del(r)">
+                    {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
+                  </UiButton>
+                </div>
+              </template>
+            </UiPopover>
+          </span>
+        </span>
+      </div>
+      <div v-if="chat.loaded && paging.loaded && (paging.loading || paging.error || paging.hasMore)"
+           class="load-state" role="status" aria-live="polite">
+        <p v-if="paging.loading">{{ t('core.chatPageLoading') }}</p>
+        <p v-else-if="paging.error">{{ paging.error }}</p>
+        <UiButton v-if="paging.needsRefresh" :disabled="paging.loading"
+                  @click="chat.refreshChatPage(q, showArchived)">{{ t('core.chatPageRefresh') }}</UiButton>
+        <UiButton v-else :disabled="paging.loading" @click="chat.loadChatPage(q, showArchived)">
+          {{ t(paging.error ? 'core.chatPageRetry' : 'core.chatPageMore') }}
+        </UiButton>
+      </div>
+    </div>
+  </aside>
+</template>
+
+<script setup lang="ts">
+import { UiSkeleton } from '../../ui';
+
+import type { ChatListRow } from '../../shared/chatContracts.ts';
+import type { UiFieldHandle } from '../../ui.ts';
+import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
+
+import { onUnmounted, computed, nextTick, ref, watch } from 'vue';
+import { captureChatScrollAnchor } from '../../shared/chatScrollAnchor.ts';
+import { useChatStore } from '../../stores/chat.ts';
+import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
-import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';
-import { confirmDialog } from '../../shared/ui/confirm.js';
+import ChatSleepBadge from './ChatSleepBadge.vue';
+import { useChatSleeping } from '../../composables/useChatSleeping.ts';
+import {
+  confirmDialog,
+  UiButton,
+  UiPopover,
+  UiIconButton,
+  UiCreateButton,
+  UiInput,
+  UiPressable,
+  UiSearchInput,
+  UiSpinner,
+  UiSwitch,
+  t,
+  resolveUiText,
+  vTooltip,
+} from '../../ui';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
+type ListRow = ChatListRow & { modelName: string; sleep?: ChatSleepingSession };
+
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
 // колонку: следить за activeId там мало — повторный тык по уже активному чату его не меняет.
 const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
-prov.load();
+const { sessions: sleepingSessions } = useChatSleeping();
+
+prov.load(false, { cached: true, reason: 'mount' });
 
 const q = ref('');
 const showArchived = ref(false);
-const archiveLabel = computed(() => `Показывать архив${chat.archived.length ? ` · ${chat.archived.length}` : ''}`);
+const rowsHost = ref<HTMLElement | null>(null);
+const paging = computed(() => chat.pageFor(q.value, showArchived.value));
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let scopeEpoch = 0;
+let restoringScope = false;
+
+watch([q, showArchived], ([query, archived], previous) => {
+  clearTimeout(searchTimer ?? undefined);
+
+  const epoch = ++scopeEpoch;
+
+  if (previous?.[0] !== undefined && rowsHost.value) {
+    chat.pageFor(previous[0], previous[1]).scrollTop = rowsHost.value.scrollTop;
+  }
+
+  restoringScope = true;
+  chat.beginChatSearch(query, archived);
+
+  /**
+   * Возврат к scope восстанавливает его scroll только после принятой порции.
+   * Быстрый переход к другому поиску отменяет применение прежнего положения.
+   */
+  const load = async () => {
+    await chat.searchChats(query, archived);
+    await nextTick();
+
+    if (epoch === scopeEpoch) {
+      if (rowsHost.value) {
+        rowsHost.value.scrollTop = paging.value.scrollTop;
+      }
+
+      restoringScope = false;
+    }
+  };
+
+  if (query.trim()) {
+    searchTimer = setTimeout(() => void load(), 250);
+  } else {
+    void load();
+  }
+}, { immediate: true });
+
+onUnmounted(() => clearTimeout(searchTimer ?? undefined));
+
+/**
+ * Контейнер сообщает собственную прокрутку и загружает одну следующую порцию.
+ * Кнопка продолжения остаётся доступной, когда строк недостаточно для overflow.
+ */
+function onRowsScroll() {
+  const element = rowsHost.value;
+  const page = paging.value;
+
+  if (!element || restoringScope) {
+    return;
+  }
+
+  page.scrollTop = element.scrollTop;
+
+  if (page.loaded && page.hasMore && !page.loading && !page.error
+    && element.scrollHeight - element.clientHeight - element.scrollTop <= 240) {
+    void chat.loadChatPage(q.value, showArchived.value);
+  }
+}
+
+const archiveLabel = computed(() => (
+  `Показывать архив${chat.archivedChatCount ? ` · ${chat.archivedChatCount}` : ''}`
+));
 const emptyLabel = computed(() => {
-  if (q.value.trim()) return 'Ничего не найдено';
+  if (q.value.trim()) {
+    return 'Ничего не найдено';
+  }
+
   return showArchived.value ? 'Архив пуст' : 'Нет активных чатов';
 });
+
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
-const rows = computed(() => chat.list(q.value, showArchived.value).map((r) => {
-  const { model, provider } = prov.modelOf(r.modelRef || r.model);
-  return { ...r, provider, modelName: model?.name || '' };
-}));
+const rows = computed(() => {
+  if (!chat.loaded) {
+    return [];
+  }
+
+  return chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
+    const { model, provider } = prov.modelOf(r.modelRef || r.model);
+
+    return {
+      ...r,
+      provider,
+      modelName: model?.name || '',
+      sleep: sleepingSessions.value[r.id],
+    };
+  });
+});
+
+watch(() => rows.value.map((row) => row.id).join('\0'), async () => {
+  if (!rowsHost.value || restoringScope) {
+    return;
+  }
+
+  const restore = captureChatScrollAnchor(rowsHost.value, '[data-chat-id]');
+  const atTop = rowsHost.value.scrollTop <= 1;
+  const epoch = scopeEpoch;
+
+  await nextTick();
+
+  if (!rowsHost.value || restoringScope || epoch !== scopeEpoch) {
+    return;
+  }
+  if (atTop) {
+    rowsHost.value.scrollTop = 0;
+  } else {
+    restore();
+  }
+});
+
+// Memo строки перечисляет всё, что рисует её поддерево, включая выбор и инлайн-редактор.
+// Копия строки при обновлении другого чата не должна пересоздавать все controls списка.
+
+// Отправка из архивного разговора сама возвращает его в активные. В этот момент
+// переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает
+// показывать архив, из которого его строка только что исчезла.
+watch(
+  () => chat.archived.some((session: { id: string }) => session.id === chat.activeId),
+  (archived, wasArchived) => {
+    if (showArchived.value && wasArchived && !archived) {
+      showArchived.value = false;
+    }
+  },
+);
 
 // Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
-function letter(r) { return r.taskId ? '#' : (r.title[0] || '?').toUpperCase(); }
-
-// Относительное время как в телеге
-function ago(ts) {
-  if (!ts) return '';
-  const d = Date.now() - ts;
-  if (d < 60e3) return 'сейчас';
-  if (d < 3600e3) return `${Math.floor(d / 60e3)}м`;
-  if (d < 86400e3) return `${Math.floor(d / 3600e3)}ч`;
-  if (d < 7 * 86400e3) return `${Math.floor(d / 86400e3)}д`;
-  return new Date(ts).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+function letter(row: ListRow) {
+  return row.taskId ? '#' : (row.title[0] || '?').toUpperCase();
 }
 
-// Инлайн-переименование по карандашу (или двойному клику по строке)
-const editId = ref(null);
+/**
+ * Заголовок аватара называет модель и текущее состояние чата.
+ * Сжатие имеет отдельную подпись при том же индикаторе занятости.
+ */
+function avatarTitle(row: ListRow) {
+  const modelName = row.modelName || 'Модель по умолчанию';
+
+  if (row.compacting) {
+    return `${modelName} · сжимаю контекст`;
+  }
+  if (row.sending) {
+    return `${modelName} · агент работает`;
+  }
+
+  return modelName;
+}
+
+/**
+ * Относительное время сохраняет компактный телеграмный формат строки.
+ * После недели календарная дата устойчивее постоянно растущего числа дней.
+ */
+const calendarDate = new Intl.DateTimeFormat('ru', { day: '2-digit', month: '2-digit' });
+
+/**
+ * Форматтер принадлежит смонтированному списку и создаётся один раз, а не для каждой строки.
+ * При пересортировке сохраняется прежний календарный и относительный формат времени.
+ */
+function ago(ts: number) {
+  if (!ts) {
+    return '';
+  }
+
+  const elapsed = Date.now() - ts;
+
+  if (elapsed < 60e3) {
+    return 'сейчас';
+  }
+  if (elapsed < 3600e3) {
+    return `${Math.floor(elapsed / 60e3)}м`;
+  }
+  if (elapsed < 86400e3) {
+    return `${Math.floor(elapsed / 3600e3)}ч`;
+  }
+  if (elapsed < 7 * 86400e3) {
+    return `${Math.floor(elapsed / 86400e3)}д`;
+  }
+
+  return calendarDate.format(new Date(ts));
+}
+
+const editId = ref<string | null>(null);
 const editVal = ref('');
-const editEl = ref(null);
-async function startEdit(r) {
+const editEl = ref<UiFieldHandle<HTMLInputElement> | UiFieldHandle<HTMLInputElement>[] | null>(null);
+
+/**
+ * Инлайн-редактор заменяет primary pressable, поэтому после рендера фокусируем
+ * exposed handle поля из текущей строки и выделяем прежнее название целиком.
+ */
+async function startEdit(r: ListRow) {
   editId.value = r.id;
   editVal.value = r.title;
+
   await nextTick();
+
   // ref внутри v-for собирается в массив
   const el = Array.isArray(editEl.value) ? editEl.value[0] : editEl.value;
+
   el?.focus();
-  el?.select();
+  el?.select?.();
 }
+
 function commitEdit() {
-  if (editId.value) chat.renameChat(editId.value, editVal.value.trim());
+  if (editId.value) {
+    chat.renameChat(editId.value, editVal.value.trim());
+  }
+
   editId.value = null;
 }
 
+/**
+ * Создание разрешено только после подтверждённого списка с сервера.
+ * Мобильная область открывается, когда стор действительно создал разговор.
+ */
 function newChat() {
+  if (!chat.loaded || !chat.newSession()) {
+    return;
+  }
+
   showArchived.value = false;
-  chat.newSession();
   emit('open');
 }
 
-function select(r) {
+function select(r: ListRow) {
   chat.selectChat(r.id);
-  // Выбор архивного чата восстанавливает его, поэтому возвращаемся к активному списку.
-  if (r.archived) showArchived.value = false;
   emit('open');
 }
 
-function restore(r) {
+function restore(r: ListRow) {
   chat.restoreArchived(r.id);
   showArchived.value = false;
 }
 
-async function del(r) {
+/**
+ * Активный чат сначала архивируется, архивный удаляется безвозвратно.
+ * Диалог сохраняет эту разницу в тексте и danger-семантике до мутации store.
+ */
+async function del(r: ListRow) {
   const permanent = r.archived;
   const ok = await confirmDialog(
     permanent
@@ -92,121 +557,192 @@ async function del(r) {
       danger: permanent,
     },
   );
-  if (ok) chat.deleteChat(r.id);
+
+  if (ok) {
+    chat.deleteChat(r.id);
+  }
 }
 </script>
 
-<template>
-  <aside class="cl">
-    <div class="top">
-      <div class="tools">
-        <input v-model="q" class="q" :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'" />
-        <button class="new" title="Новый чат" @click="newChat">＋</button>
-      </div>
-      <ToggleSwitch v-model="showArchived" :label="archiveLabel" />
-    </div>
-    <div class="rows">
-      <div v-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
-      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived, wait: r.waiting }"
-           @click="select(r)" @dblclick="startEdit(r)">
-        <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
-             Во время работы цвет меняется целиком, а вращается только внешнее кольцо. -->
-        <span class="ava" :class="{ live: r.sending }"
-              :title="r.compacting
-                ? `${r.modelName || 'Модель по умолчанию'} · сжимаю контекст`
-                : r.sending
-                  ? `${r.modelName || 'Модель по умолчанию'} · агент работает`
-                  : (r.modelName || 'Модель по умолчанию')">
-          <ProviderIcon v-if="r.provider" :provider="r.provider" :size="19" />
-          <template v-else>{{ letter(r) }}</template>
-          <!-- Точка «непрочитано»: бейджи на кнопке и в сайдбаре считают именно такие чаты -->
-          <span v-if="r.unread" class="udot" title="непрочитанный ответ"></span>
-        </span>
-        <div class="mid">
-          <input v-if="editId === r.id" ref="editEl" v-model="editVal" class="edit"
-                 @click.stop @keydown.enter="commitEdit" @keydown.esc="editId = null" @blur="commitEdit" />
-          <template v-else>
-            <div class="t1">
-              <span class="name">{{ r.title }}</span>
-              <!-- Агент упёрся в вопрос и стоит: чип важнее подписи модели, поэтому вместо неё -->
-              <span v-if="r.waiting" class="wchip" title="агент ждёт твоего ответа — работа стоит">ждёт ответа</span>
-              <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
-              <span class="ago muted">{{ ago(r.ts) }}</span>
-            </div>
-            <div class="t2 muted">
-              <span v-if="r.draft" class="dr">черновик:</span>{{ r.snippet || 'Пустой чат' }}
-            </div>
-          </template>
-        </div>
-        <span v-if="editId !== r.id" class="acts">
-          <button v-if="r.archived" class="restore"
-                  title="Восстановить из архива"
-                  aria-label="Восстановить чат из архива"
-                  @click.stop="restore(r)">↩</button>
-          <button title="Переименовать" @click.stop="startEdit(r)">✎</button>
-          <button :class="{ danger: r.archived }"
-                  :title="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
-                  :aria-label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
-                  @click.stop="del(r)">✕</button>
-        </span>
-      </div>
-    </div>
-  </aside>
-</template>
-
 <style scoped>
-.cl { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+/* Ширину задаёт раскладка страницы: `--chat-list-w` ставит ChatsView, когда человек
+   двигал разделитель. Пока не двигал — переменной нет, и ширину целиком решает CSS
+   вместе со своими медиазапросами (второго источника правды о ширине экрана не заводим). */
+.cl { width: var(--chat-list-w, 300px); flex: none; display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--line); }
 
 /* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
    центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
-.top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
-  height: var(--chat-head-h); padding: 0 10px; border-bottom: 1px solid var(--line); }
-.tools { display: flex; gap: 7px; }
-.top :deep(.tsw) { align-self: flex-start; }
-.q { flex: 1; min-width: 0; height: 32px; background: var(--ground); border: 1px solid var(--line); border-radius: 16px;
-  color: var(--ink); padding: 0 13px; font-size: 12.5px; outline: none; font-family: inherit; }
-.q::placeholder { color: var(--ink-mid); }
-.q:focus { border-color: var(--line-2); }
-.new { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line);
-  color: var(--ink-mid); font-size: 16px; line-height: 1; cursor: pointer; }
-.new:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.top { display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.tools { display: flex; align-items: center; gap: 7px; }
+.search { flex: 1; min-width: 0; }
+/* Flex-контейнер убирает место под текстовую базовую линию inline-flex переключателя.
+   Иначе шапка списка перерастает общий минимум и её нижняя граница образует ступеньку. */
+.archive-toggle { display: flex; align-self: flex-start; }
+.new { flex: none; }
 
-.rows { flex: 1; overflow-y: auto; padding: 5px; }
+.rows { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
 
-.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 10px; cursor: pointer; }
-.row:hover { background: var(--surface-2); }
-.row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.list-pending {
+  padding-top: 12px;
+}
+.load-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px 20px;
+}
+.load-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.load-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+.load-mark svg {
+  width: 20px;
+  height: 20px;
+}
+.load-state-error .load-mark {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+.load-copy {
+  min-width: 0;
+}
+.load-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.load-hint,
+.load-reason,
+.load-retry-status {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.load-reason,
+.load-retry-status {
+  margin-top: 3px;
+}
+.list-skeleton {
+  padding: 0 8px;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 15%, transparent 100%);
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--chat-list-row-h);
+  padding: 8px 6px;
+}
+.skeleton-avatar {
+  width: var(--chat-avatar-size);
+  flex: none;
+}
+.skeleton-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+}
+.skeleton-title {
+  width: 68%;
+}
+.skeleton-snippet {
+  width: 90%;
+}
+.skeleton-time {
+  align-self: flex-start;
+  width: 22px;
+  margin-top: 8px;
+}
+.skeleton-row:nth-child(even) .skeleton-title {
+  width: 50%;
+}
+.skeleton-row:nth-child(3n) .skeleton-snippet {
+  width: 65%;
+}
+/* Фон строки — непрозрачный `--row-bg` поверх фона списка (`--surface`): тем же цветом
+   кнопки действий закрывают конец названия и время, не отличаясь от самой строки. */
+.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px;
+  min-height: var(--chat-list-row-h); border-radius: 10px; --row-bg: var(--surface); background: var(--row-bg); }
+.row-hit { display: flex; flex: 1; align-items: center; gap: 9px; width: 100%; min-width: 0; text-align: left; }
+.row:hover { --row-bg: var(--surface-2); }
+.row.cur { --row-bg: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
 /* Чат, где агент ждёт ответа: тёплая полоска слева — видно, что строка требует действия,
    даже когда список длинный (сам чип может уехать под многоточие названия). */
-.row.wait { background: color-mix(in srgb, var(--warn, #e0a33a) 10%, transparent); }
+.row.wait { --row-bg: color-mix(in srgb, var(--warn, #e0a33a) 10%, var(--surface)); }
 .row.wait::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
-.row.wait.cur { background: color-mix(in srgb, var(--warn, #e0a33a) 18%, transparent); }
+.row.wait.cur { --row-bg: color-mix(in srgb, var(--warn, #e0a33a) 18%, var(--surface)); }
 
-.ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+.ava { flex: none; width: var(--chat-avatar-size); height: var(--chat-avatar-size); border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   font-size: 15px; font-weight: 600; position: relative; }
-/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса. */
-.ava.live { color: color-mix(in srgb, var(--accent) 82%, #fff);
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 24%, transparent); }
+/* Знак исполнителя — в цвете исполнителя. Одинаково-серые аватары в списке из двадцати
+   строк не различаются вовсе: чат приходилось искать по подписи модели, а сам знак
+   работал украшением. Фирменные цвета рассчитаны на светлый фон, поэтому на тёмном
+   подмешиваем белый (знак) и фон карточки (заливка с рамкой) — иначе тёмно-фиолетовый
+   Kimi на #1c222c читается пятном. Чат без знака (реестр ещё не приехал, буква-фоллбэк)
+   остаётся нейтральным: `--prov` там не задан. */
+.ava.brand { color: color-mix(in srgb, var(--prov) 72%, #fff);
+  background: color-mix(in srgb, var(--prov) 17%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov) 45%, var(--line)); }
+/* Полную силу цвета получают только чаты, которые сейчас чего-то стоят: открытый,
+   работающий и вставший на вопросе. Остальные приглушены — иначе список из двадцати
+   строк горит ровным ковром и выделять в нём нечего.
+   Приглушаем ОБЕСЦВЕЧИВАНИЕМ (подмешиваем нейтральный `--ink-mid`), а не затемнением
+   и не прозрачностью. Обе «очевидные» альтернативы роняют знак ниже порога графики
+   3:1 к своей заливке, причём первым всегда Kimi — его фиолетовый и так самый тёмный
+   (замер: `opacity: .72` → 2.98, подмешивание тёмной нейтрали → 2.87). Обесцвечивание,
+   наоборот, контраст даже поднимает: нейтраль светлее тёмных фирменных цветов.
+   Текущие числа — знак 3.6–5.6:1 к заливке, отличие от полной силы ΔE 13.5–18.1
+   (рядом видно), различимость исполнителей между собой ΔE ≥ 26.8. */
+.row:not(.cur):not(.wait) .ava.brand:not(.live) {
+  color: color-mix(in srgb, var(--prov) 50%, var(--ink-mid));
+  background: color-mix(in srgb, var(--prov) 9%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov) 26%, var(--line)); }
+/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса.
+   Цвет тут исполнительский (`--prov`), а не общий акцент: иначе работающие чаты снова
+   сливались бы между собой — ровно в тот момент, когда их и различают. */
+.ava.live { color: color-mix(in srgb, var(--prov, var(--accent)) 82%, #fff);
+  background: color-mix(in srgb, var(--prov, var(--accent)) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov, var(--accent)) 62%, var(--line));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--prov, var(--accent)) 24%, transparent); }
 .ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
-  border-top-color: var(--accent);
-  border-right-color: color-mix(in srgb, var(--accent) 68%, transparent);
+  border: 2px solid color-mix(in srgb, var(--prov, var(--accent)) 22%, transparent);
+  border-top-color: var(--prov, var(--accent));
+  border-right-color: color-mix(in srgb, var(--prov, var(--accent)) 68%, transparent);
   animation: chat-live-spin .85s linear infinite; }
 @keyframes chat-live-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--accent) 72%, transparent); }
+  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--prov, var(--accent)) 72%, transparent); }
 }
 /* «Непрочитано» — точка на аватаре: не двигает разметку строки и не спорит с кольцом работы */
 .udot { position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 0 2px var(--surface); }
 
-.mid { flex: 1; min-width: 0; }
+.mid { display: block; flex: 1; min-width: 0; }
 .t1 { display: flex; align-items: baseline; gap: 6px; }
 .name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ago { flex: none; font-size: 11px; }
@@ -219,34 +755,47 @@ async function del(r) {
   background: color-mix(in srgb, var(--warn, #e0a33a) 14%, transparent); white-space: nowrap; }
 /* Неотправленный текст — как в телеграме: пометка цветом, дальше сам текст */
 .dr { color: var(--warn, #e0a33a); margin-right: 4px; }
-.t2 { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
-.edit { width: 100%; height: 30px; background: var(--ground); border: 1px solid var(--line-2); border-radius: 7px;
-  color: var(--ink); font-size: 13px; padding: 0 8px; outline: none; font-family: inherit; }
+.t2 { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; margin-top: 1px; }
+.edit { width: 100%; }
 
-/* Действия — поверх времени, только на ховере */
-.acts { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: none; gap: 3px; }
-.row:hover .acts { display: inline-flex; }
-.row:hover .ago { visibility: hidden; }
-.acts button { width: 24px; height: 24px; border-radius: 6px; border: none; background: var(--ground);
-  color: var(--ink-mid); font-size: 12px; cursor: pointer; display: grid; place-items: center; }
-.acts button:hover { color: var(--ink); background: var(--surface-2); }
-.acts button:last-child:hover { color: var(--accent); }
-.acts button.danger:hover { color: var(--bad); }
+/* Палец: одно постоянное место меню «⋯», ширина названия не меняется при касании и фокусе. */
+.acts { display: flex; flex: none; align-items: center; }
+.acts-quick { display: none; }
 
-/* Пальцем ховера нет — на сенсорном экране действия строки были бы недостижимы.
-   Показываем их всегда, а место под них освобождаем отступом самой строки. */
-@media (hover: none) {
-  .acts { display: inline-flex; }
-  .row { padding-right: 66px; }
-  .ago { display: none; }
+/* Мышь: меню не нужно, три кнопки всплывают при наведении поверх правого края строки
+   (время и подпись модели). Место под них не резервируется и отступ строки не растёт —
+   иначе название сужалось бы и прыгало при каждом проходе курсора по списку.
+   Фокус с клавиатуры показывает кнопки так же, как наведение. */
+@media (hover: hover) and (pointer: fine) {
+  .acts { position: absolute; top: 4px; right: 8px; bottom: 4px; pointer-events: none; }
+  .acts-menu { display: none; }
+  .acts-quick { display: flex; align-items: center; gap: 3px; height: 100%; padding-left: 14px;
+    background: linear-gradient(to right, transparent, var(--row-bg) 12px); opacity: 0; }
+  .row:hover .acts-quick, .row:focus-within .acts-quick { opacity: 1; }
+  /* Кликабельны только сами кнопки: полоса растушёвки слева пропускает нажатие в строку. */
+  .row:hover .acts-quick > *, .row:focus-within .acts-quick > * { pointer-events: auto; }
 }
 
 /* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
-@media (min-width: 900px) and (max-width: 1099px) { .cl { width: 232px; } }
+@media (min-width: 900px) and (max-width: 1099px) { .cl { width: var(--chat-list-w, 232px); } }
 
 /* Узкий экран: список занимает всю колонку (чат показывается вместо него — см. ChatsView) */
 @media (max-width: 899px) {
   .cl { width: 100%; border-right: none; }
   .rows { padding: 5px 5px calc(6px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (max-width: 600px) {
+  .top {
+    min-height: 0;
+    padding: 6px 12px;
+    gap: 4px;
+  }
+  .rows { padding: 4px 6px; }
+  .row { gap: 8px; padding: 8px 6px; }
+  .name { font-size: 15px; }
+  .t2 { font-size: 13px; margin-top: 4px; }
+  .mdl { max-width: 72px; }
 }
 </style>

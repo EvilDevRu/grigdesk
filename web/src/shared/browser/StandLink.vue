@@ -1,0 +1,112 @@
+<template>
+  <span class="stand-link" :data-size="size">
+    <UiActionLink
+        v-bind="$attrs" :href="href" :size="size" target="_blank" rel="noopener noreferrer"
+        @click="click" @auxclick="aux">
+      <slot>{{ href }}</slot>
+    </UiActionLink>
+    <UiPopover v-if="browser.available" has-popup="menu" :trigger-label="t('core.browserOpenWith')">
+      <template v-if="size === 'compact'" #trigger="{ toggle }">
+        <UiIconButton
+            role="embedded"
+            data-context="workspace-toolbar"
+            variant="outline"
+            :label="t('core.browserOpenWith')"
+            v-tooltip="t('core.browserOpenWith')"
+            @click="toggle"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </UiIconButton>
+      </template>
+      <template #default="{ close }">
+        <UiButton role="menuitem" variant="ghost" @click="override('internal', close)">
+          {{ t('settings.browserInternal') }}
+        </UiButton>
+        <UiButton role="menuitem" variant="ghost" @click="override('external', close)">
+          {{ t('settings.browserExternal') }}
+        </UiButton>
+      </template>
+    </UiPopover>
+    <span v-if="failed" role="alert">{{ t('core.browserRequestFailed') }}</span>
+  </span>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { UiActionLink, UiButton, UiIconButton, UiPopover, t, vTooltip } from '../../ui.ts';
+import type { UiActionSize } from '../../ui.ts';
+import { useBrowserStore } from '../../stores/browser.ts';
+import { openStand } from './openStand.ts';
+
+const props = withDefaults(defineProps<{
+  href: string;
+  size?: UiActionSize;
+}>(), {
+  size: 'default',
+});
+
+defineOptions({ inheritAttrs: false });
+
+const browser = useBrowserStore();
+const router = useRouter();
+const failed = ref(false);
+
+/**
+ * Только наличие main bridge позволяет отменить обычный переход ссылки.
+ * Контракт открытия один — openStand шага 8; Native отказ не вызывает
+ * второй внешний запуск или browser fallback.
+ */
+async function open(target: 'internal' | 'external', deduplicate = true): Promise<void> {
+  failed.value = false;
+
+  try {
+    await openStand({
+      available: browser.available,
+      preferences: browser.preferences,
+      native: (value) => browser.control(value),
+    }, props.href, target, deduplicate);
+
+    if (target === 'internal') {
+      await router.push('/browser');
+    }
+  } catch {
+    failed.value = true;
+  }
+}
+
+function click(event: MouseEvent): void {
+  if (browser.available && event.button === 0) {
+    event.preventDefault();
+    void open(browser.preferences.open);
+  }
+}
+
+function aux(event: MouseEvent): void {
+  if (browser.available && event.button === 1) {
+    event.preventDefault();
+    void open(browser.preferences.open, false);
+  }
+}
+
+function override(target: 'internal' | 'external', close: () => void): void {
+  close();
+  void open(target);
+}
+</script>
+
+<style scoped>
+.stand-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stand-link[data-size='compact'] {
+  gap: 2px;
+}
+</style>

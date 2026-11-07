@@ -7,6 +7,20 @@ FACTORY_HOME="$PROJECT_ROOT/engine"
 FACTORY_TESTS_HOME="$PROJECT_ROOT/tests/engine"
 HOST_NODE_BIN=$(command -v node 2>/dev/null || true)
 
+# Очистка действует и в родителе очереди, а env -i ниже изолирует каждого воркера.
+# Старый префикс читается из общего модуля совместимости без доступа к настройкам.
+LEGACY_ENV_PREFIX=$("$HOST_NODE_BIN" -e '
+  const path = require("node:path");
+  const legacy = require(path.resolve(process.argv[1]));
+  process.stdout.write(legacy.LEGACY.envPrefix);
+' "$PROJECT_ROOT/shared/runtime/legacyBrand.ts") || exit $?
+while IFS= read -r key; do
+  if [[ "$key" == "$LEGACY_ENV_PREFIX"* ]]; then
+    unset "$key"
+  fi
+done < <(compgen -e)
+unset GRIGDESK_ENV_FILE GRIGDESK_UI_RELEASES_DIR GRIGDESK_LOG
+
 # Режим воркера: скрипт запускает сам себя по одному файлу на процесс. Изоляция
 # та же, что была у последовательного прогона (свой TEST_ROOT + `env -i`), поэтому
 # файлы не видят друг друга и порядок между ними ничего не значит.
@@ -20,12 +34,14 @@ if [[ "${1:-}" == "--one" ]]; then
   }
   trap cleanup_worker EXIT INT TERM
   mkdir -p "$test_root/config" "$test_root/state" "$test_root/xdg-config" \
-    "$test_root/xdg-state" "$test_root/xdg-cache" "$test_root/work"
+    "$test_root/xdg-state" "$test_root/xdg-cache" "$test_root/work" \
+    "$test_root/profiles"
   env -i \
     PATH="$FACTORY_TESTS_HOME/fakes/bin:/usr/bin:/bin" \
     LC_ALL=C \
+    GRIGDESK_HOME="$test_root/grigdesk-home" \
     FACTORY_HOME="$FACTORY_HOME" \
-    FACTORY_PROFILES_DIR="$PROJECT_ROOT/profiles" \
+    FACTORY_PROFILES_DIR="$test_root/profiles" \
     FACTORY_TESTS_HOME="$FACTORY_TESTS_HOME" \
     FACTORY_TESTING=1 \
     FACTORY_FORBID_LIVE=1 \
@@ -38,8 +54,19 @@ if [[ "${1:-}" == "--one" ]]; then
     XDG_CACHE_HOME="$test_root/xdg-cache" \
     TEST_ROOT="$test_root" \
     NODE_BIN="$HOST_NODE_BIN" \
+    GRIGDESK_PROVIDER_PREFS_PATH="$test_root/provider-prefs.json" \
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE=installed \
     bash --noprofile --norc "$test_file" >"$out_buf" 2>&1
   test_rc=$?
+
+  # Одиночный запуск из профильных test.sh/verify.py не передаёт lock.
+  # Блокировка вывода нужна только параллельной очереди.
+  if [[ -z "${OFFLINE_OUT_LOCK:-}" ]]; then
+    printf '── %s\n' "${test_file#"$PROJECT_ROOT/"}"
+    cat -- "$out_buf"
+    exit "$test_rc"
+  fi
+
   # Вывод файла печатается одним куском под общим flock: иначе строки соседних
   # прогонов перемешались бы и TAP стал бы нечитаемым.
   {

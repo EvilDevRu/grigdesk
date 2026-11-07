@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/docker/dockerContracts.ts",
+    "src/stores/docker.ts",
+    "src/shared/dockerApi.ts",
+    "src/views/docker/**/*.vue",
+    "src/views/docker/**/*.ts",
+    "src/views/DockerView.vue",
+    "../tests/types/docker-contract.test.ts"
+  ]
+}

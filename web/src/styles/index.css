@@ -1,0 +1,9 @@
+/* Единственная production-точка входа CSS. Порядок слоёв является частью UI-контракта. */
+@layer tokens, vendor, base, components, utilities, runtime;
+
+@import './tokens.css' layer(tokens);
+@import './vendor.css' layer(vendor);
+@import './base.css' layer(base);
+@import './components/index.css' layer(components);
+@import './utilities.css' layer(utilities);
+@import './runtime.css' layer(runtime);

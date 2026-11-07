@@ -6,12 +6,16 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RC=0
 
 for required in \
-  docs/cockpit \
+  docs/grigdesk \
   docs/engine \
   tests/docs \
   tests/engine \
   tests/server \
-  tests/web; do
+  tests/web \
+  tests/relay \
+  tests/tracker \
+  tests/mobile \
+  tests/desktop; do
   if [[ -d "$PROJECT_ROOT/$required" ]]; then
     printf 'ok - %s\n' "$required"
   else
@@ -28,7 +32,15 @@ for forbidden in \
   server/test \
   server/tests \
   web/test \
-  web/tests; do
+  web/tests \
+  relay/test \
+  relay/tests \
+  tracker/test \
+  tracker/tests \
+  mobile/test \
+  mobile/tests \
+  desktop/test \
+  desktop/tests; do
   if [[ ! -e "$PROJECT_ROOT/$forbidden" ]]; then
     printf 'ok - нет устаревшего %s\n' "$forbidden"
   else

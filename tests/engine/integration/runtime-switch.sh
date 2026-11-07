@@ -37,6 +37,22 @@ assert_eq codex "$target" "matching request is consumed once"
 runtime_switch_consume "$task" "$stage" run-a 1 request-a >/dev/null
 assert_rc 75 "$?" "consumed request cannot replay"
 
+task_deepseek=87
+pipeline_store_route_init "$task_deepseek" "$stage"
+run_state_begin "$task_deepseek" "$stage" run-deepseek 1 token-deepseek
+runtime_switch_request "$task_deepseek" "$stage" run-deepseek 1 deepseek request-deepseek
+assert_rc 0 "$?" "runtime switch accepts DeepSeek as an opaque runner id"
+target=$(runtime_switch_consume "$task_deepseek" "$stage" run-deepseek 1 request-deepseek)
+assert_eq deepseek "$target" "manual switch preserves the DeepSeek target"
+
+task_glm=86
+pipeline_store_route_init "$task_glm" "$stage"
+run_state_begin "$task_glm" "$stage" run-glm 1 token-glm
+runtime_switch_request "$task_glm" "$stage" run-glm 1 glm request-glm
+assert_rc 0 "$?" "runtime switch accepts GLM as an opaque runner id"
+target=$(runtime_switch_consume "$task_glm" "$stage" run-glm 1 request-glm)
+assert_eq glm "$target" "manual switch preserves the GLM target"
+
 task_done=89
 pipeline_store_route_init "$task_done" "$stage"
 assert_rc 0 "$?" "completed switch fixture initializes an exact route registry"

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.docker.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/showcase/showcaseContracts.ts",
+    "src/lib/showcase/**/*.ts",
+    "src/modules/showcase/**/*.ts",
+    "scripts/showcaseWorker.mts",
+    "scripts/showcaseRehearsal.mts",
+    "scripts/showcaseVoiceBench.mts",
+    "scripts/showcaseVoiceInstall.mts",
+    "../tests/types/showcase-server-contract.test.mts"
+  ]
+}

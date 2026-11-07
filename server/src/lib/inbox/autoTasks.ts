@@ -1,0 +1,1084 @@
+// Один provider-neutral auto-worker общего Inbox. Он читает server-only snapshot,
+// но любые решения проводит через тот же InboxTaskService, что и HTTP-кнопки.
+
+import { lexical } from '../../../../shared/lib/text.ts';
+
+import { safeInboxSourceUrl, visibleInboxMessages } from './draft.ts';
+import {
+  buildInboxAutoTask,
+  countInboxAutoTasks,
+  decideInboxAutoAction,
+  decideInboxAutoPlan,
+  inboxAutoNote,
+  normalizeInboxTriageModel,
+  resolveInboxTriageTarget,
+  runInboxTriage,
+} from './triage.ts';
+import type {
+  InboxTriageItem,
+  InboxTriageModelRef,
+  InboxTriagePlan,
+  InboxTriageRun,
+  InboxTriageStatement,
+  InboxTriageTarget,
+} from './triage.ts';
+import type { InboxChannelState, InternalInboxItem } from './coordinator.ts';
+
+type Payload = Record<string, unknown>;
+
+// Соседи автомата объявлены ровно тем, что он зовёт. Координатор и служба решений
+// приходят снаружи готовыми: автомат не создаёт задачи в обход общего рубежа, он
+// нажимает те же кнопки, что и человек.
+interface CoordinatorPort {
+  workerSnapshot: (options: { nowMs: number }) => Promise<unknown>;
+  workerGate: (ref: string, options: { generation: unknown }) => Promise<unknown>;
+  resolveItem: (ref: string, options: { nowMs: number }) => Promise<ResolvedItem>;
+}
+
+interface ResolvedItem {
+  generation: unknown;
+  channelState: InboxChannelState;
+  item: InternalInboxItem;
+  context: {
+    materializeAttachments?: (attachments: unknown) => Promise<unknown>;
+    isCurrent?: () => Promise<unknown> | unknown;
+    sourceUrl: (options: Payload) => Promise<unknown> | unknown;
+  };
+  release: () => Promise<unknown> | unknown;
+}
+
+interface TaskServicePort {
+  task: (ref: string, body: Payload, options: Payload) => Promise<{ taskId?: unknown } | null>;
+  dismiss: (ref: string, body: Payload, options: Payload) => Promise<unknown>;
+}
+
+interface TrackerPort {
+  isConfigured: () => boolean;
+}
+
+interface AttachmentAnalyzerPort {
+  analyze: (options: Payload) => Promise<AttachmentAnalysisResult>;
+}
+
+// Итог подготовки вложений. `complete` отдельно от `ok`: разбор мог пройти, но не
+// покрыть все файлы, и это разные исходы с разными следующими шагами.
+interface AttachmentAnalysisResult {
+  ok?: boolean;
+  complete?: boolean;
+  error?: string;
+  entries?: unknown[];
+  release?: () => Promise<unknown> | unknown;
+}
+
+interface BlockedAttachment {
+  label: string;
+  reason: string;
+}
+
+interface AnalysisBlock {
+  revision: string;
+  code: string;
+  attachments: BlockedAttachment[];
+  checkedAtMs: number;
+  retryAtMs: number;
+}
+
+// Очередь одного канала внутри тика: снимок его состояния, решения для квоты и
+// сами карточки. `halted` ставится на месте — канал, изменившийся посреди обхода,
+// дальше не трогают.
+interface ChannelQueue {
+  id: string;
+  state: Partial<InboxChannelState>;
+  generation: unknown;
+  decisions: unknown[];
+  items: InternalInboxItem[];
+  error: { code?: string } | null;
+  halted?: boolean;
+}
+
+interface TickOutcome {
+  ran: boolean;
+  judged: number;
+  created: { ref: string; channel: string; taskId: unknown }[];
+  dismissed: { ref: string; channel: string }[];
+  failed: { ref: string; channel: string; code: string }[];
+  analysisRequired: { ref: string; channel: string; code: string }[];
+  left: number;
+  haltedReason?: string;
+}
+
+// Чем закончился разбор одной карточки. Строка означает «канал снят с обхода»:
+// ни продолжения, ни остановки всего тика из неё не следует.
+type HandleOutcome = { haltAll?: string; advance?: boolean } | 'channel_halted' | undefined;
+
+interface AutoCandidate {
+  item: InternalInboxItem;
+  scopeRef: string | undefined;
+  createdToday: number;
+}
+
+interface FairCursor {
+  generation: unknown;
+  ref: string;
+  lastAt: number;
+}
+
+type LogPort = {
+  info?: (details: unknown, message: string) => void;
+  warn?: (details: unknown, message: string) => void;
+  error?: (details: unknown, message: string) => void;
+};
+
+export const INBOX_AUTO_TICK = Object.freeze({
+  perTick: 5,
+  idleMs: 60_000,
+  errorMs: 300_000,
+  attachmentRetryMs: 6 * 60 * 60 * 1000,
+});
+
+const DAY_MS = 86_400_000;
+
+const autoItemOrder = (a: { lastAt: number; ref: string }, b: { lastAt: number; ref: string }) => (
+  b.lastAt - a.lastAt
+  || lexical(a.ref, b.ref)
+);
+const QUIET_MUTATION_ERRORS = new Set([
+  'account_changed',
+  'attachment_analysis_required',
+  'attachments_skipped',
+  'channel_disabled',
+  'channel_deactivated',
+  'channel_disconnected',
+  'inbox_disabled',
+  'no_b24',
+  'stale_item',
+  'stale_policy',
+]);
+const ATTACHMENT_TRIAGE_ERRORS = new Set([
+  'attachment_media_limit',
+  'invalid_attachment_media',
+  'invalid_attachment_path',
+  'unsupported_media',
+]);
+const safeCode = (error: unknown, fallback = 'worker_failed'): string => {
+  const code = (error as { code?: unknown } | null)?.code;
+
+  return typeof code === 'string' && /^[a-z0-9_]{1,80}$/u.test(code) ? code : fallback;
+};
+
+const MAX_BLOCKED_ATTACHMENTS = 12;
+const MAX_BLOCKED_TEXT = 240;
+const publicLine = (value: unknown, limit = MAX_BLOCKED_TEXT) => String(value ?? '')
+  .replace(/[\u0000-\u001f\u007f]/gu, ' ')
+  .replace(/\s+/gu, ' ')
+  .trim()
+  .slice(0, limit);
+
+/**
+ * Какие именно вложения остались неразобранными и почему.
+ *
+ * Без этого списка человек видел «не удалось полностью разобрать» и не мог
+ * отличить потолок Telegram (файл больше 20 МБ бот не скачает никогда) от
+ * временной поломки — то есть не знал, ждать ли повтора или разбираться руками.
+ * Наружу идут только те подписи, которые и так есть в карточке обращения:
+ * тип, имя файла и наша же строка причины.
+ */
+function blockedAttachments(
+  attachmentAnalysis: AttachmentAnalysisResult | null,
+): BlockedAttachment[] {
+  const entries = Array.isArray(attachmentAnalysis?.entries)
+    ? attachmentAnalysis.entries as Payload[]
+    : [];
+
+  return entries
+    .filter((value) => value?.complete !== true)
+    .slice(0, MAX_BLOCKED_ATTACHMENTS)
+    // Формат тот же, что у отказа ручного создания: карточка рисует оба списка
+    // одним компонентом, и второй формы для той же мысли заводить незачем.
+    .map((value) => ({
+      label: publicLine(
+        [value?.displayLabel, value?.name].map((part) => String(part || '').trim())
+          .filter(Boolean).join(' · '),
+        200,
+      ) || 'вложение',
+      reason: publicLine(value?.reason),
+    }));
+}
+
+async function releaseAttachmentAnalysis(
+  analysis: AttachmentAnalysisResult | null,
+  log: LogPort,
+): Promise<void> {
+  try {
+    await analysis?.release?.();
+  } catch (error) {
+    // Сбой cleanup не должен ронять весь worker tick и закрывать остальную очередь.
+    log.warn?.({ code: safeCode(error, 'attachment_release_failed') },
+      'inbox: auto visual lease не удалось освободить');
+  }
+}
+
+function positiveInteger(value: unknown, where: string, max = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > max) {
+    throw new TypeError(`InboxAutoTasks: ${where} должен быть положительным целым.`);
+  }
+
+  return value as number;
+}
+
+function validNow(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new TypeError('InboxAutoTasks: nowMs должен быть неотрицательным safe integer.');
+  }
+
+  return value as number;
+}
+
+export class InboxAutoTasks {
+  coordinator: CoordinatorPort;
+
+  taskService: TaskServicePort;
+
+  tracker: TrackerPort;
+
+  attachmentAnalyzer: AttachmentAnalyzerPort | null;
+
+  triage: (options: Payload) => Promise<InboxTriageRun>;
+
+  triageReadiness: (options: Payload) => Promise<InboxTriageTarget>;
+
+  modelRef: () => Promise<unknown> | unknown;
+
+  isEnabled: () => Promise<unknown> | unknown;
+
+  config: Payload;
+
+  providerSettings: Payload | (() => Promise<unknown> | unknown);
+
+  perTick: number;
+
+  idleMs: number;
+
+  errorMs: number;
+
+  attachmentRetryMs: number;
+
+  now: () => number;
+
+  onChanged: (event: { reason: string }) => unknown;
+
+  log: LogPort;
+
+  running: boolean;
+
+  timer: ReturnType<typeof setTimeout> | null;
+
+  controller: AbortController | null;
+
+  tickQueue: Promise<unknown>;
+
+  lastTickAt: number | null;
+
+  lastReason: string;
+
+  lastError: string | null;
+
+  judging: { ref: string; channel: string; startedAtMs: number } | null;
+
+  created: number;
+
+  dismissed: number;
+
+  failed: number;
+
+  blockedChannels: Set<string>;
+
+  analysisBlocks: Map<string, AnalysisBlock>;
+
+  fairCursors: Map<string, FairCursor>;
+
+  fairChannelCursor: string | null;
+
+  loopGeneration: number;
+
+  constructor({
+    coordinator,
+    taskService,
+    tracker,
+    attachmentAnalyzer = null,
+    triage = runInboxTriage,
+    triageReadiness = resolveInboxTriageTarget,
+    modelRef,
+    isEnabled,
+    config = {},
+    providerSettings = {},
+    perTick = INBOX_AUTO_TICK.perTick,
+    idleMs = INBOX_AUTO_TICK.idleMs,
+    errorMs = INBOX_AUTO_TICK.errorMs,
+    attachmentRetryMs = INBOX_AUTO_TICK.attachmentRetryMs,
+    now = Date.now,
+    onChanged = () => {},
+    log = console,
+  }: {
+    coordinator?: CoordinatorPort;
+    taskService?: TaskServicePort;
+    tracker?: TrackerPort;
+    attachmentAnalyzer?: AttachmentAnalyzerPort | null;
+    triage?: (options: Payload) => Promise<InboxTriageRun>;
+    triageReadiness?: (options: Payload) => Promise<InboxTriageTarget>;
+    modelRef?: () => Promise<unknown> | unknown;
+    isEnabled?: () => Promise<unknown> | unknown;
+    config?: Payload;
+    providerSettings?: Payload | (() => Promise<unknown> | unknown);
+    perTick?: number;
+    idleMs?: number;
+    errorMs?: number;
+    attachmentRetryMs?: number;
+    now?: () => number;
+    onChanged?: (event: { reason: string }) => unknown;
+    log?: LogPort;
+  } = {}) {
+    if (!coordinator || typeof coordinator.workerSnapshot !== 'function'
+        || typeof coordinator.workerGate !== 'function'
+        // resolveItem нужен не только вложениям: разбитая карточка перечитывает
+        // revision и ссылку источника перед каждым решением плана.
+        || typeof coordinator.resolveItem !== 'function'
+        || !taskService || typeof taskService.task !== 'function'
+        || typeof taskService.dismiss !== 'function'
+        || !tracker || typeof tracker.isConfigured !== 'function'
+        || typeof triage !== 'function'
+        || typeof triageReadiness !== 'function'
+        || typeof modelRef !== 'function'
+        || typeof isEnabled !== 'function'
+        || (attachmentAnalyzer !== null && typeof attachmentAnalyzer?.analyze !== 'function')
+        || !['object', 'function'].includes(typeof providerSettings)
+        || typeof now !== 'function'
+        || typeof onChanged !== 'function') {
+      throw new TypeError('InboxAutoTasks получил неполный dependency contract.');
+    }
+    this.coordinator = coordinator as CoordinatorPort;
+    this.taskService = taskService as TaskServicePort;
+    this.tracker = tracker as TrackerPort;
+    this.attachmentAnalyzer = attachmentAnalyzer;
+    this.triage = triage;
+    this.triageReadiness = triageReadiness;
+    this.modelRef = modelRef as () => Promise<unknown> | unknown;
+    this.isEnabled = isEnabled as () => Promise<unknown> | unknown;
+    this.config = config;
+    this.providerSettings = providerSettings;
+    this.perTick = positiveInteger(perTick, 'perTick', 100);
+    this.idleMs = positiveInteger(idleMs, 'idleMs');
+    this.errorMs = positiveInteger(errorMs, 'errorMs');
+    this.attachmentRetryMs = positiveInteger(
+      attachmentRetryMs,
+      'attachmentRetryMs',
+      7 * DAY_MS,
+    );
+    this.now = now;
+    this.onChanged = onChanged;
+    this.log = log;
+
+    this.running = false;
+    this.timer = null;
+    this.controller = null;
+    this.tickQueue = Promise.resolve();
+    this.lastTickAt = null;
+    this.lastReason = '';
+    this.lastError = null;
+    // Карточка, которую модель разбирает ПРЯМО СЕЙЧАС. Между обратным отсчётом
+    // тишины и готовым решением проходят минуты (Whisper + model call), и без
+    // этого поля человек смотрел на карточку без единого признака работы.
+    this.judging = null;
+    this.created = 0;
+    this.dismissed = 0;
+    this.failed = 0;
+    this.blockedChannels = new Set();
+    this.analysisBlocks = new Map();
+    // `perTick` ограничивает model calls, а не видимую worker-у глубину очереди.
+    // Cursor привязан к runtime generation: нерешённые первые items не могут
+    // навсегда закрыть хвост, а account switch всегда начинает новый обход.
+    this.fairCursors = new Map();
+    this.fairChannelCursor = null;
+    this.loopGeneration = 0;
+  }
+
+  status() {
+    return {
+      running: this.running,
+      lastTickAt: this.lastTickAt,
+      lastReason: this.lastReason,
+      lastError: this.lastError,
+      judging: this.judging ? { ...this.judging } : null,
+      created: this.created,
+      dismissed: this.dismissed,
+      failed: this.failed,
+      blockedChannels: [...this.blockedChannels].sort(),
+      analysisRequired: [...this.analysisBlocks.entries()]
+        .map(([ref, value]) => ({ ref, ...value }))
+        .sort((left, right) => lexical(left.ref, right.ref)),
+    };
+  }
+
+  /** Живые ворота для UI: lastReason после смены настройки может быть уже устаревшим. */
+  async publicStatus() {
+    let readiness = 'unavailable';
+    try {
+      const gates = await this._liveGates();
+      readiness = gates.reason || (this.running ? 'ready' : 'stopped');
+    } catch {
+      readiness = 'unavailable';
+    }
+    return { ...this.status(), readiness };
+  }
+
+  tick({ nowMs = this.now(), signal = this.controller?.signal }: {
+    nowMs?: number;
+    signal?: AbortSignal;
+  } = {}) {
+    const operation = () => this._tick({ nowMs: validNow(nowMs), signal });
+    const result = this.tickQueue.then(operation, operation);
+    this.tickQueue = result.catch(() => {});
+    return result;
+  }
+
+  async _liveGates(
+    expectedRef: InboxTriageModelRef | null = null,
+    signal: AbortSignal | null = null,
+  ): Promise<{ reason: string; ref: InboxTriageModelRef | null }> {
+    if (signal?.aborted) return { reason: 'stopped', ref: null };
+    if (!await this.isEnabled()) return { reason: 'plugin_disabled', ref: null };
+    const ref = normalizeInboxTriageModel(await this.modelRef());
+    if (!ref) return { reason: 'no_model', ref: null };
+    if (expectedRef
+        && (ref.provider !== expectedRef.provider || ref.model !== expectedRef.model)) {
+      return { reason: 'model_changed', ref: null };
+    }
+    const readiness = await this.triageReadiness({
+      modelRef: ref,
+      config: this.config,
+      requireImages: true,
+    });
+    if (!readiness?.ok) {
+      return { reason: safeCode({ code: readiness?.error }, 'model_unavailable'), ref: null };
+    }
+    if (!this.tracker.isConfigured()) {
+      return { reason: 'no_b24', ref: null };
+    }
+    return { reason: '', ref };
+  }
+
+  async _tick({ nowMs, signal = null }: {
+    nowMs: number;
+    signal?: AbortSignal | null;
+  }): Promise<TickOutcome | { ran: false; reason: string }> {
+    const gates = await this._liveGates(null, signal);
+
+    if (gates.reason) return this._quiescent(gates.reason);
+
+    const ref = gates.ref as InboxTriageModelRef;
+    let snapshot: { channels?: unknown } | undefined;
+
+    try {
+      snapshot = await this.coordinator.workerSnapshot({ nowMs }) as { channels?: unknown };
+    } catch (error) {
+      const code = safeCode(error, 'snapshot_failed');
+      this.lastReason = 'snapshot_failed';
+      this.lastError = code;
+      this.log.error?.({ code }, 'inbox: auto snapshot failed');
+      return { ran: false, reason: 'snapshot_failed' };
+    }
+    const channels = Array.isArray(snapshot?.channels) ? snapshot.channels as Payload[] : [];
+    let queues = channels.map((channel) => ({
+      id: (channel?.state as Payload | undefined)?.id,
+      state: (channel?.state || {}) as Partial<InboxChannelState>,
+      generation: channel?.generation,
+      decisions: Array.isArray(channel?.decisions) ? channel.decisions as unknown[] : [],
+      items: Array.isArray(channel?.items) ? [...channel.items as InternalInboxItem[]] : [],
+      error: (channel?.error || null) as { code?: string } | null,
+    })).filter((channel): channel is ChannelQueue => typeof channel.id === 'string');
+    this._pruneAnalysisBlocks(queues);
+    for (const channel of queues) this._rotateAfterCursor(channel);
+    const lastChannel = queues.findIndex((channel) => channel.id === this.fairChannelCursor);
+    if (lastChannel >= 0 && queues.length > 1) {
+      const next = (lastChannel + 1) % queues.length;
+      queues = [...queues.slice(next), ...queues.slice(0, next)];
+    }
+
+    const made = new Map<string | undefined, number>();
+    const sinceMs = Math.max(0, nowMs - DAY_MS);
+    const out: TickOutcome = {
+      ran: true,
+      judged: 0,
+      created: [],
+      dismissed: [],
+      failed: [],
+      analysisRequired: [],
+      left: 0,
+    };
+
+    let progress = true;
+    let halted = false;
+    let haltedReason = '';
+    while (progress && !halted) {
+      progress = false;
+      for (const channel of queues) {
+        if (!this._channelRunnable(channel)) continue;
+        const candidate = this._nextCandidate(channel, made, sinceMs, nowMs);
+        if (!candidate) continue;
+        progress = true;
+        if (out.judged >= this.perTick) {
+          out.left += 1;
+          continue;
+        }
+        const judgedBefore = out.judged;
+        // SSE на входе и выходе: пока карточка у модели, все окна показывают
+        // «разбирается сейчас», а не тишину после сгоревшего обратного отсчёта.
+        this.judging = {
+          ref: candidate.item.ref,
+          channel: channel.id,
+          startedAtMs: this.now(),
+        };
+        this._notifyStatusChanged('judging');
+        let handled: HandleOutcome;
+
+        try {
+          handled = await this._handle({
+            channel, candidate, ref, made, out, nowMs, signal,
+          });
+        } finally {
+          this.judging = null;
+          this._notifyStatusChanged('judging-done');
+        }
+
+        // Снятый канал возвращает строку: ни продолжения обхода, ни остановки
+        // всего тика из неё не следует, поэтому решения читаются только у объекта.
+        const outcome = typeof handled === 'object' ? handled : null;
+
+        if (out.judged > judgedBefore || outcome?.advance) {
+          this._advanceCursor(channel, candidate.item);
+          this.fairChannelCursor = channel.id;
+        }
+        if (outcome?.haltAll) {
+          halted = true;
+          haltedReason = outcome.haltAll;
+          break;
+        }
+      }
+    }
+
+    this.lastTickAt = nowMs;
+    const reasonChanged = this.lastReason !== haltedReason;
+    this.lastReason = haltedReason;
+    this.lastError = out.failed[0]?.code || null;
+    if (haltedReason) out.haltedReason = haltedReason;
+    if (reasonChanged) this._notifyStatusChanged('worker-state');
+    return out;
+  }
+
+  _quiescent(reason: string): { ran: false; reason: string } {
+    this.lastReason = reason;
+    this.lastError = null;
+    return { ran: false, reason };
+  }
+
+  _channelRunnable(channel: ChannelQueue): boolean {
+    if (this.blockedChannels.has(channel.id) || channel.halted) return false;
+    if (channel.error) {
+      this.log.warn?.({ channel: channel.id, code: channel.error.code }, 'inbox: auto channel unreadable');
+      channel.halted = true;
+      return false;
+    }
+    return channel.state.plugin === 'enabled'
+      && channel.state.connection === 'connected'
+      && channel.state.participation === 'active'
+      && channel.state.readOnly === false;
+  }
+
+  _rotateAfterCursor(channel: ChannelQueue): void {
+    const cursor = this.fairCursors.get(channel.id);
+    if (!cursor || cursor.generation !== channel.generation || channel.items.length < 2) {
+      if (cursor && cursor.generation !== channel.generation) this.fairCursors.delete(channel.id);
+      return;
+    }
+
+    const exact = channel.items.findIndex((item) => item.ref === cursor.ref);
+    let next = exact >= 0
+      ? (exact + 1) % channel.items.length
+      : channel.items.findIndex((item) => autoItemOrder(item, cursor) > 0);
+    if (next < 0) next = 0;
+    if (next > 0) {
+      channel.items = [...channel.items.slice(next), ...channel.items.slice(0, next)];
+    }
+  }
+
+  _advanceCursor(channel: ChannelQueue, item: InternalInboxItem): void {
+    this.fairCursors.set(channel.id, {
+      generation: channel.generation,
+      ref: item.ref,
+      lastAt: item.lastAt,
+    });
+  }
+
+  _pruneAnalysisBlocks(channels: ChannelQueue[]): void {
+    const live = new Map<string, InternalInboxItem>();
+    for (const channel of channels) {
+      for (const item of channel.items) live.set(item.ref, item);
+    }
+    let changed = false;
+    for (const [ref, block] of this.analysisBlocks) {
+      const item = live.get(ref);
+      if (!item || item.status !== 'new' || item.revision !== block.revision
+          || !Array.isArray(item.attachments) || item.attachments.length === 0) {
+        this.analysisBlocks.delete(ref);
+        changed = true;
+      }
+    }
+    if (changed) this._notifyStatusChanged('attachment-analysis-cleared');
+  }
+
+  _notifyStatusChanged(reason: string): void {
+    try {
+      Promise.resolve(this.onChanged({ reason })).catch(() => {
+        this.log.warn?.({ reason }, 'inbox: worker status SSE не отправлен');
+      });
+    } catch {
+      this.log.warn?.({ reason }, 'inbox: worker status SSE не отправлен');
+    }
+  }
+
+  _nextCandidate(
+    channel: ChannelQueue,
+    made: Map<string | undefined, number>,
+    sinceMs: number,
+    nowMs: number,
+  ): AutoCandidate | null {
+    while (channel.items.length) {
+      const item = channel.items.shift() as InternalInboxItem;
+      const analysisBlock = this.analysisBlocks.get(item?.ref);
+
+      if (analysisBlock?.revision === item?.revision && analysisBlock.retryAtMs > nowMs) continue;
+
+      const scopeRef = item?.policy?.scopeRef;
+      const createdToday = countInboxAutoTasks(channel.decisions, { scopeRef, sinceMs })
+        + (made.get(scopeRef) || 0);
+      const pre = decideInboxAutoAction({
+        item: item as unknown as InboxTriageItem,
+        createdToday,
+        nowMs,
+      });
+
+      if (pre.action === 'judge') return { item, scopeRef, createdToday };
+    }
+
+    return null;
+  }
+
+  async _settings(): Promise<Payload> {
+    const value = typeof this.providerSettings === 'function'
+      ? await this.providerSettings()
+      : this.providerSettings;
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Payload : {};
+  }
+
+  async _materializeForAnalysis(
+    item: InternalInboxItem,
+    channel: ChannelQueue,
+  ): Promise<unknown> {
+    const resolved = await this.coordinator.resolveItem(item.ref, { nowMs: this.now() });
+    try {
+      if (resolved.generation !== channel.generation
+          || resolved.item.revision !== item.revision
+          || resolved.item.status !== 'new') {
+        throw Object.assign(new Error('Inbox item изменился до подготовки вложений.'), {
+          code: 'stale_item',
+        });
+      }
+      if (resolved.channelState.readOnly
+          || resolved.channelState.connection !== 'connected'
+          || resolved.channelState.participation !== 'active') {
+        throw Object.assign(new Error('Канал больше не готов к автоматическому разбору.'), {
+          code: 'channel_deactivated',
+        });
+      }
+      if (typeof resolved.context.materializeAttachments !== 'function') {
+        throw Object.assign(new Error('Канал не умеет подготовить вложения для разбора.'), {
+          code: 'channel_materialize_failed',
+        });
+      }
+
+      const prepared = await resolved.context.materializeAttachments(resolved.item.attachments);
+
+      if (resolved.context.isCurrent && !await resolved.context.isCurrent()) {
+        throw Object.assign(new Error('Account generation изменилась при подготовке вложений.'), {
+          code: 'account_changed',
+        });
+      }
+      return prepared;
+    } finally {
+      await resolved.release();
+    }
+  }
+
+  async _analyzeAttachments(
+    item: InternalInboxItem,
+    channel: ChannelQueue,
+    signal: AbortSignal | null | undefined,
+  ): Promise<AttachmentAnalysisResult | null> {
+    if (!Array.isArray(item.attachments) || item.attachments.length === 0) return null;
+    if (!this.attachmentAnalyzer) {
+      return { ok: false, complete: false, error: 'attachment_analysis_unavailable' };
+    }
+    try {
+      return await this.attachmentAnalyzer.analyze({
+        item,
+        signal,
+        materialize: () => this._materializeForAnalysis(item, channel),
+      });
+    } catch (error) {
+      return { ok: false, complete: false, error: safeCode(error, 'attachment_analysis_failed') };
+    }
+  }
+
+  async _handle({ channel, candidate, ref, made, out, nowMs, signal }: {
+    channel: ChannelQueue;
+    candidate: AutoCandidate;
+    ref: InboxTriageModelRef;
+    made: Map<string | undefined, number>;
+    out: TickOutcome;
+    nowMs: number;
+    signal?: AbortSignal | null;
+  }): Promise<HandleOutcome> {
+    const { item, scopeRef, createdToday } = candidate;
+    let gates = await this._liveGates(ref, signal);
+    if (gates.reason) return { haltAll: gates.reason };
+    try {
+      await this.coordinator.workerGate(item.ref, { generation: channel.generation });
+    } catch (error) {
+      channel.halted = true;
+      this.log.info?.({ channel: channel.id, itemRef: item.ref, code: safeCode(error) },
+        'inbox: auto channel gate changed before model');
+      return 'channel_halted';
+    }
+    gates = await this._liveGates(ref, signal);
+    if (gates.reason) return { haltAll: gates.reason };
+    const attachmentAnalysis = await this._analyzeAttachments(item, channel, signal);
+    let triaged: InboxTriageRun | undefined;
+
+    try {
+      if (attachmentAnalysis && (!attachmentAnalysis.ok || !attachmentAnalysis.complete)) {
+        // Подготовка медиа тоже дорогая операция. Считаем её попыткой текущего tick,
+        // чтобы очередь с неподдержанными файлами оставалась bounded и fair.
+        out.judged += 1;
+        const code = safeCode(
+          { code: attachmentAnalysis.error },
+          'attachment_analysis_required',
+        );
+        const attachments = blockedAttachments(attachmentAnalysis);
+        out.analysisRequired.push({ ref: item.ref, channel: channel.id, code });
+        this.analysisBlocks.set(item.ref, {
+          revision: item.revision,
+          code,
+          attachments,
+          checkedAtMs: nowMs,
+          retryAtMs: nowMs + this.attachmentRetryMs,
+        });
+        this._notifyStatusChanged('attachment-analysis-required');
+        this.log.info?.({
+          channel: channel.id,
+          itemRef: item.ref,
+          code,
+          // Причина каждого вложения — первое, что спросят при разборе жалобы
+          // «висит и не объясняет»; без неё в журнале остаётся один общий код.
+          attachments: attachments.map((value) => `${value.label}: ${value.reason}`),
+        }, 'inbox: attachment analysis left item for human');
+        return { advance: true };
+      }
+      if (attachmentAnalysis) {
+        gates = await this._liveGates(ref, signal);
+        if (gates.reason) return { haltAll: gates.reason };
+        try {
+          await this.coordinator.workerGate(item.ref, { generation: channel.generation });
+        } catch (error) {
+          channel.halted = true;
+          this.log.info?.({ channel: channel.id, itemRef: item.ref, code: safeCode(error) },
+            'inbox: auto channel gate changed after attachment analysis');
+          return 'channel_halted';
+        }
+      }
+      try {
+        triaged = await this.triage({
+          item,
+          attachmentAnalysis,
+          modelRef: ref,
+          config: this.config,
+          providerSettings: await this._settings(),
+          log: this.log,
+          signal,
+          mode: 'plan',
+        });
+      } catch (error) {
+        triaged = { ok: false, error: safeCode(error, 'triage_failed') };
+      }
+    } finally {
+      // Модель уже получила visualPaths; дальнейшее решение использует лишь текст
+      // анализа, поэтому lease можно отпустить до внешней mutation.
+      await releaseAttachmentAnalysis(attachmentAnalysis, this.log);
+    }
+    out.judged += 1;
+    gates = await this._liveGates(ref, signal);
+    if (gates.reason) return { haltAll: gates.reason };
+    if (!triaged?.ok) {
+      const code = safeCode({ code: triaged?.error }, 'triage_failed');
+      if (attachmentAnalysis && ATTACHMENT_TRIAGE_ERRORS.has(code)) {
+        this.analysisBlocks.set(item.ref, {
+          revision: item.revision,
+          code,
+          // Разбор прошёл, не потянула модель: перечислять нечего, объясняет код.
+          attachments: [],
+          checkedAtMs: nowMs,
+          retryAtMs: nowMs + this.attachmentRetryMs,
+        });
+        this._notifyStatusChanged('attachment-analysis-required');
+        out.analysisRequired.push({ ref: item.ref, channel: channel.id, code });
+        this.log.info?.({ channel: channel.id, itemRef: item.ref, code },
+          'inbox: attachment model compatibility left item for human');
+        return { advance: true };
+      }
+      this.log.warn?.({ channel: channel.id, itemRef: item.ref, code: triaged?.error },
+        'inbox: auto triage returned no verdict');
+      if (['executor_unavailable', 'unsafe_model_provider'].includes(code)) {
+        return { haltAll: code };
+      }
+
+      return undefined;
+    }
+    if (this.analysisBlocks.delete(item.ref)) {
+      this._notifyStatusChanged('attachment-analysis-ready');
+    }
+    try {
+      await this.coordinator.workerGate(item.ref, { generation: channel.generation });
+    } catch (error) {
+      channel.halted = true;
+      this.log.info?.({ channel: channel.id, itemRef: item.ref, code: safeCode(error) },
+        'inbox: auto channel gate changed after model');
+
+      return undefined;
+    }
+    gates = await this._liveGates(ref, signal);
+    if (gates.reason) return { haltAll: gates.reason };
+
+    const plan = (triaged.plan ?? null) as InboxTriagePlan | null;
+    const outcome = decideInboxAutoPlan({
+      item: item as unknown as InboxTriageItem,
+      plan,
+      createdToday,
+      nowMs,
+    });
+    const model = triaged.model || `${ref.provider}/${ref.model}`;
+    if (outcome.action !== 'run') {
+      this.log.info?.({ channel: channel.id, itemRef: item.ref, action: outcome.action },
+        'inbox: auto оставил обращение человеку');
+
+      return undefined;
+    }
+
+    // Номера плана считаются по тому же списку, что видела модель в transcript.
+    const visible = visibleInboxMessages(item.messages);
+    for (const entry of outcome.statements) {
+      if (!['create', 'dismiss'].includes(entry.action)) continue;
+      const messageRefs = entry.statement.messages.map((index) => (
+        (visible[index - 1] as { messageRef?: string } | undefined)?.messageRef
+      ));
+
+      if (messageRefs.some((value) => typeof value !== 'string')) {
+        this.log.warn?.({ channel: channel.id, itemRef: item.ref },
+          'inbox: номер сообщения из плана не разрешился в messageRef');
+        continue;
+      }
+      const stop = await this._decideStatement({
+        channel,
+        item,
+        entry,
+        messageRefs: messageRefs as string[],
+        whole: messageRefs.length === visible.length,
+        model,
+        made,
+        out,
+        scopeRef,
+      });
+      if (stop) return undefined;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Одно решение плана. Возвращает `true`, когда карточку дальше трогать нельзя:
+   * оставшиеся поводы честно уходят человеку вместо попытки проехать по уже
+   * изменившемуся состоянию.
+   */
+  async _decideStatement({
+    channel, item, entry, messageRefs, whole, model, made, out, scopeRef,
+  }: {
+    channel: ChannelQueue;
+    item: InternalInboxItem;
+    entry: { statement: InboxTriageStatement; action: string; reason: string };
+    messageRefs: string[];
+    whole: boolean;
+    model: string;
+    made: Map<string | undefined, number>;
+    out: TickOutcome;
+    scopeRef: string | undefined;
+  }): Promise<boolean> {
+    const note = inboxAutoNote({ model, verdict: entry.statement, reason: entry.reason });
+    let revision = item.revision;
+    let sourceUrl = item.sourceUrl;
+    if (!whole) {
+      // Каждое решение меняет revision карточки, а ссылка задачи обязана вести на
+      // первое сообщение ИМЕННО этого повода. И то и другое известно только из
+      // свежего снимка, поэтому разбитая карточка перечитывается перед каждым шагом.
+      try {
+        const context = await this._statementContext(item, channel, messageRefs);
+        revision = context.revision;
+        sourceUrl = context.sourceUrl;
+      } catch (error) {
+        this.log.info?.({
+          channel: channel.id,
+          itemRef: item.ref,
+          code: safeCode(error, 'statement_context_failed'),
+        }, 'inbox: остаток обращения оставлен человеку — состояние изменилось');
+        return true;
+      }
+    }
+    const body = { revision, messageRefs };
+
+    try {
+      if (entry.action === 'create') {
+        const draft = buildInboxAutoTask({
+          item: item as unknown as InboxTriageItem,
+          verdict: entry.statement,
+          sourceUrl,
+        });
+        const created = await this.taskService.task(item.ref, {
+          ...body,
+          title: draft.title,
+          description: draft.description,
+        }, {
+          by: 'auto',
+          note,
+          requireAllAttachments: true,
+        });
+        made.set(scopeRef, (made.get(scopeRef) || 0) + 1);
+        this.created += 1;
+        out.created.push({ ref: item.ref, channel: channel.id, taskId: created?.taskId ?? null });
+      } else {
+        await this.taskService.dismiss(item.ref, body, { by: 'auto', note });
+        this.dismissed += 1;
+        out.dismissed.push({ ref: item.ref, channel: channel.id });
+      }
+    } catch (error) {
+      const code = safeCode(error);
+      if (QUIET_MUTATION_ERRORS.has(code)) {
+        this.log.info?.({ channel: channel.id, itemRef: item.ref, code },
+          'inbox: auto result became stale or unsafe');
+        return true;
+      }
+      if (code === 'indeterminate_task_commit') {
+        this.blockedChannels.add(channel.id);
+        this.log.error?.({
+          channel: channel.id,
+          itemRef: item.ref,
+          taskId: (error as { details?: { taskId?: unknown } } | null)?.details?.taskId ?? null,
+          code,
+        }, 'inbox: auto channel blocked after indeterminate трекер commit');
+      } else {
+        this.log.error?.({ channel: channel.id, itemRef: item.ref, code },
+          'inbox: auto mutation failed');
+      }
+      this.failed += 1;
+      out.failed.push({ ref: item.ref, channel: channel.id, code });
+      return true;
+    }
+    return false;
+  }
+
+  /** Свежие revision и ссылка на источник для подмножества сообщений карточки. */
+  async _statementContext(
+    item: InternalInboxItem,
+    channel: ChannelQueue,
+    messageRefs: string[],
+  ): Promise<{ revision: string; sourceUrl: string | null }> {
+    const resolved = await this.coordinator.resolveItem(item.ref, { nowMs: this.now() });
+    try {
+      if (resolved.generation !== channel.generation) {
+        throw Object.assign(new Error('Account generation изменилась.'), { code: 'account_changed' });
+      }
+      if (resolved.channelState.readOnly
+          || resolved.channelState.connection !== 'connected'
+          || resolved.channelState.participation !== 'active') {
+        throw Object.assign(new Error('Канал больше не участвует в разборе.'), {
+          code: 'channel_deactivated',
+        });
+      }
+      const byRef = new Map(resolved.item.messages.map((message) => [message.messageRef, message]));
+      const messages = messageRefs.map((messageRef) => byRef.get(messageRef));
+      if (messages.some((message) => !message || message.decision !== null)) {
+        throw Object.assign(new Error('Сообщения повода уже решены.'), { code: 'stale_item' });
+      }
+      const head = messages[0] as InternalInboxItem['messages'][number];
+      let sourceUrl = item.sourceUrl;
+
+      try {
+        sourceUrl = safeInboxSourceUrl(
+          await resolved.context.sourceUrl({ source: head.source, message: head }),
+        ) || item.sourceUrl;
+      } catch {
+        // Небезопасная или несобранная ссылка не отменяет задачу: остаётся ссылка карточки.
+      }
+      return { revision: resolved.item.revision, sourceUrl };
+    } finally {
+      await resolved.release();
+    }
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    const generation = ++this.loopGeneration;
+    const controller = new AbortController();
+    this.controller = controller;
+    const loop = async () => {
+      if (!this.running || generation !== this.loopGeneration) return;
+      let pause = this.idleMs;
+
+      try {
+        const result = await this.tick({ signal: controller.signal });
+        // Отсутствие настройки — штатное изменяемое состояние. После выбора
+        // модели/подключения трекера автомат должен проснуться максимум через минуту,
+        // а не ждать пятиминутный backoff настоящей ошибки.
+        if (result.ran === false && 'reason' in result && result.reason === 'snapshot_failed') {
+          pause = this.errorMs;
+        }
+      } catch (error) {
+        const code = safeCode(error);
+        this.lastError = code;
+        this.lastReason = 'tick_failed';
+        this.log.error?.({ code }, 'inbox: auto tick failed');
+        pause = this.errorMs;
+      }
+      if (!this.running || generation !== this.loopGeneration) return;
+      this.timer = setTimeout(loop, pause);
+      (this.timer as { unref?: () => void }).unref?.();
+    };
+    void loop();
+  }
+
+  stop() {
+    this.running = false;
+    this.loopGeneration += 1;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.controller?.abort();
+    this.controller = null;
+  }
+}

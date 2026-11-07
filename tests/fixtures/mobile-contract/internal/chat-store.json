@@ -1,0 +1,72 @@
+{
+  "sessions": [
+    {
+      "id": "chat-alpha",
+      "title": "Тестовый разговор",
+      "model": "test-model",
+      "modelRef": {
+        "provider": "test",
+        "model": "test-model"
+      },
+      "effort": "medium",
+      "updatedAt": 1760000000000,
+      "taskId": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "Покажи схему",
+          "sentAt": 1760000000000,
+          "turnId": "turn-alpha-001",
+          "attachments": [
+            {
+              "file": "test-image.png",
+              "name": "Схема"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "text": "![схема](screens/test.png)",
+          "pid": "turn-alpha-001",
+          "turnId": "turn-alpha-001",
+          "runId": "run-alpha",
+          "steps": [
+            {
+              "k": "tool",
+              "id": "toolu-read-alpha",
+              "name": "Read",
+              "title": "test.png",
+              "sub": "screens/test.png",
+              "at": 1760000000100
+            },
+            {
+              "k": "res",
+              "id": "toolu-read-alpha",
+              "ok": true,
+              "text": "[изображение]",
+              "lines": 1,
+              "at": 1760000000110
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat-beta",
+      "title": "Ждёт решения",
+      "taskId": "101",
+      "messages": []
+    }
+  ],
+  "archived": [
+    {
+      "id": "chat-archive",
+      "title": "Архив",
+      "archived": true,
+      "messages": []
+    }
+  ],
+  "turnProtocol": 1,
+  "inTurnProtocol": 1,
+  "workdirProtocol": 1
+}

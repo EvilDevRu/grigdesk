@@ -1,22 +1,45 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { factoryLaunchEnv } from '../../server/src/lib/factory-launch.js';
-import { routeStartArgs } from '../../server/src/lib/factory-route-cli.js';
+import { factoryLaunchEnv } from '../../server/src/lib/factoryLaunch.ts';
+import { routeStartArgs, stageAutoCompactEnv } from '../../server/src/lib/factoryRouteCli.ts';
 
-test('Cockpit passes every factory runtime root into the detached pipeline scope', () => {
+test('GrigDesk passes every factory runtime root into the detached pipeline scope', () => {
   assert.deepEqual(factoryLaunchEnv({
+    dataHome: '/data/grigdesk',
     factoryHome: '/engine',
     profilesDir: '/profiles',
     stateDir: '/state',
     factoryConfigRoot: '/config',
   }, { FACTORY_SB_K: '7' }), {
     FACTORY_SB_K: '7',
+    GRIGDESK_HOME: '/data/grigdesk',
     FACTORY_HOME: '/engine',
     FACTORY_PROFILES_DIR: '/profiles',
     FACTORY_STATE: '/state',
     STATE_DIR: '/state',
     FACTORY_CONFIG_ROOT: '/config',
+  });
+});
+
+test('порог автосжатия этапа уезжает движку всегда, включая осознанный ноль', () => {
+  assert.deepEqual(stageAutoCompactEnv({ stageAutoCompactWindow: 200000 }), {
+    FACTORY_STAGE_AUTO_COMPACT: '200000',
+  });
+  // Ноль — это «не вмешиваться», и он обязан ДОЕХАТЬ: пустое значение движок читает как
+  // «спроси профиль» (AUTO_COMPACT_WINDOW в его runners.env), то есть выбор человека
+  // молча проиграл бы настройке проекта.
+  assert.deepEqual(stageAutoCompactEnv({ stageAutoCompactWindow: 0 }), {
+    FACTORY_STAGE_AUTO_COMPACT: '0',
+  });
+  // Мусор и отсутствие настройки — тот же ноль, а не строка «NaN» в окружении юнита.
+  for (const prefs of [{}, undefined, { stageAutoCompactWindow: 'много' }, { stageAutoCompactWindow: -5 }]) {
+    assert.deepEqual(stageAutoCompactEnv(prefs), { FACTORY_STAGE_AUTO_COMPACT: '0' });
+  }
+  // Дробное значение из ручного правки файла настроек не уезжает дробным: движок
+  // сверяет его регуляркой ^[0-9]+$ и «200000.5» отбросил бы в ноль целиком.
+  assert.deepEqual(stageAutoCompactEnv({ stageAutoCompactWindow: 200000.5 }), {
+    FACTORY_STAGE_AUTO_COMPACT: '200001',
   });
 });
 

@@ -1,0 +1,103 @@
+// Каналы доставки: что раздел умеет отправить сегодня и чего ему для этого не хватает.
+//
+// Ядро доставки (план, решение, этапы, неизвестный исход) готово и проверено. Здесь
+// живёт другая часть — подключение к конкретным каналам, и она НЕ притворяется
+// готовой:
+//
+//  • Битрикс24: файл на диск портала GrigDesk загружать умеет, а прикрепить его
+//    комментарием к задаче — нет: такого запроса в клиенте портала пока не
+//    существует. Загрузить и не прикрепить хуже, чем не начинать: файл повиснет
+//    на диске, а человек будет считать, что отправил.
+//  • Telegram: текущий клиент шлёт боту JSON, а файл требует multipart с лимитом
+//    размера, таймаутом, отменой и вычисткой токена из текстов ошибок. Публиковать
+//    ролик по открытой ссылке ради обхода — не вариант.
+//
+// Поэтому каждый канал объявляет готовность сам, а раздел показывает причину
+// словами. Появится контракт — появится и отправка, без правки ядра.
+import { ShowcaseError } from './errors.ts';
+import type { DeliveryChannel, DeliveryPlan, DeliverySender } from './delivery.ts';
+
+export interface ChannelStatus {
+  id: DeliveryChannel;
+  name: string;
+  ready: boolean;
+  reason: string;
+  // Чего именно не хватает. Это не задача человеку, а объяснение: канал появится,
+  // когда появится названный контракт.
+  missing: string;
+}
+
+export interface DeliveryChannelDeps {
+  // Клиент портала приходит извне: сессией владеет сервер, и раздел не заводит
+  // вторую. Отсутствие клиента — обычное состояние установки без портала.
+  //
+  // Форма клиента разделу неизвестна намеренно: ему нужен ровно один метод, которого
+  // у портала пока и нет. Объявить здесь готовый интерфейс значило бы сказать, что
+  // такой метод существует.
+  tracker?: unknown;
+  telegramConnected?: () => boolean;
+}
+
+/**
+ * Умеет ли клиент портала загрузить файл на диск. Проверяется наличие метода, а не
+ * тип клиента: раздел не знает его формы и не должен требовать её знать.
+ */
+function canUploadDiskFile(client: unknown): boolean {
+  return typeof (client as { uploadDiskFile?: unknown } | null)?.uploadDiskFile === 'function';
+}
+
+/**
+ * Канал объявляет фактическую готовность перед предложением отправки пользователю.
+ * Переданный фасад трекера не означает наличия неподдерживаемой загрузки на диск.
+ */
+export function deliveryChannelStatuses(deps: DeliveryChannelDeps): ChannelStatus[] {
+  const trackerReady = canUploadDiskFile(deps.tracker);
+
+  return [
+    {
+      id: 'b24',
+      name: 'Битрикс24',
+      ready: false,
+      reason: trackerReady
+        ? 'Файл загрузить можно, но прикрепить его к задаче пока нечем.'
+        : 'Портал не подключён.',
+      missing: 'запрос прикрепления файла к задаче, проверенный на живом портале',
+    },
+    {
+      id: 'telegram',
+      name: 'Telegram',
+      ready: false,
+      reason: deps.telegramConnected?.()
+        ? 'Аккаунт подключён, но бинарная отправка ещё не реализована.'
+        : 'Аккаунт Telegram не подключён.',
+      missing: 'multipart-отправка файла с лимитом, таймаутом и отменой',
+    },
+  ];
+}
+
+/**
+ * Исполнитель отправки для канала. Пока ни один канал не готов, поэтому вызов даёт
+ * отказ с точной причиной — вместо наполовину выполненной отправки, после которой
+ * непонятно, дошло что-нибудь или нет.
+ */
+export function senderFor(channel: DeliveryChannel, deps: DeliveryChannelDeps): DeliverySender {
+  const status = deliveryChannelStatuses(deps).find((item) => item.id === channel);
+
+  return {
+    upload: async (_attachment, plan: DeliveryPlan) => {
+      throw new ShowcaseError(
+        'channel_not_ready',
+        `${status?.name ?? plan.channel}: ${status?.reason ?? 'канал не подключён'} `
+        + `Нужен ${status?.missing ?? 'контракт отправки'}.`,
+        503,
+      );
+    },
+    attach: async () => {
+      throw new ShowcaseError(
+        'channel_not_ready',
+        `${status?.name ?? channel}: ${status?.reason ?? 'канал не подключён'}`,
+        503,
+      );
+    },
+  };
+}

@@ -1,9 +1,11 @@
+import { loadProductModule } from './helpers/compile-vue.js';
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const STORE_PATH = fileURLToPath(new URL('../../web/src/stores/task-favorites.js', import.meta.url));
+const STORE_PATH = fileURLToPath(migrationUrl('src/stores/taskFavorites.ts'));
 const PINIA_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
 )).href;
@@ -12,18 +14,17 @@ const apiHarness = {};
 globalThis.__taskFavoritesApi = apiHarness;
 let actualStoreModule;
 
+/**
+ * Компилятор стирает типы, сохраняя отдельный модуль и прежний транспорт теста.
+ * Действия и проверки снимков исполняются из настоящего стора.
+ */
 async function loadActualStore() {
-  if (actualStoreModule) return actualStoreModule;
-  let code = await readFile(STORE_PATH, 'utf8');
-  code = code
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__taskFavoritesApi;',
-    );
-  actualStoreModule = await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  );
+  if (!actualStoreModule) {
+    actualStoreModule = await loadProductModule('src/stores/taskFavorites.ts', {
+      '../shared/apiClient.ts': 'export const api = globalThis.__taskFavoritesApi;',
+    });
+  }
+
   return actualStoreModule;
 }
 

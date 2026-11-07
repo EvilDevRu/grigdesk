@@ -1,0 +1,84 @@
+/* Копия web/src/styles/tokens.css от 39f9c29; дальше живёт отдельно. */
+/* Глобальные стили и токены.
+   Палитра — точная тёмная тема со старого дашборда фабрики (factory/lib/dashboard.py,
+   :root стр. 982–992). GrigDesk коммитится в ТЁМНУЮ тему (как и старый дашборд). */
+:root {
+  --ground: #0a0c10; /* фон контента (самый тёмный слой) */
+  --sidebar: #0f141c; /* панель сайдбара (слой выше) */
+  --topbar: #0d1016; /* полоса топбара */
+  --surface: #151b24; /* фон карточки (--card) */
+  --surface-2: #1c222c; /* вторичный фон: чипы, счётчики (--card2) */
+  --line: #232a34; /* границы (--cardline) */
+  --line-2: #2e3742; /* акцентная граница (ховер/фокус) */
+  --ink: #e7eaf0; /* основной текст */
+  --ink-mid: #8a93a3; /* приглушённый текст (--ink2) */
+  /* Третичный текст: ярлыки, мета и подвалы карточек. Тон подобран по замеру — 4.6:1
+     к --surface, то есть всё ещё AA для мелкого кегля, но заметно тише --ink-mid.
+     Без него у карточки был один цвет на все вторичные роли, и иерархия не читалась. */
+  --ink-low: #7b8494;
+
+  --accent: #5aa2ff; /* «идёт» / основной акцент (--info) */
+  --good: #3fb950; /* «сделано» (--good) */
+  --warn: #e0a33a; /* «ждёт человека» (--serious) */
+  --bad: #f0564c; /* «сломано» (--critical) */
+  --idle: #39424f; /* неактивные рёбра/узлы (--edge) */
+
+  /* Типы узлов конвейера (контуры, оттенки и значки) */
+  --node-agent: #e0873f;
+  --node-human: #d9c04a;
+  --node-code: #37b7c3;
+  --edge-on: #3fb950;
+  --edge-fail: #7c4038;
+
+  /* Высота шапок обеих колонок «Чатов» (список слева и открытый чат справа).
+     Токен общий, потому что иначе их разделительные линии расходятся: слева высоту
+     задаёт поиск с тумблером архива, справа — название, задача и ряд настроек. */
+  --chat-head-h: 82px;
+
+  /* Каноническая геометрия обычных контролов. Одноранговые кнопки, поля и select
+     обязаны брать один токен; адаптив меняет раскладку, а не высоту контролов. */
+  --control-height: 36px;
+  --control-radius: 9px;
+
+  /* Семантические токены общего control skin. Значения только ссылаются на исходную
+     палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
+  --control-background: var(--ground);
+  --control-background-hover: var(--surface-2);
+  --control-background-readonly: color-mix(in srgb, var(--surface-2) 58%, var(--ground));
+  --control-border: var(--line);
+  --control-border-hover: var(--line-2);
+  --control-text: var(--ink);
+  --control-placeholder: var(--ink-mid);
+  --control-focus-color: var(--accent);
+  --control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --control-disabled-opacity: 0.48;
+  --control-motion-duration: 150ms;
+  --control-motion-easing: ease;
+  --control-thumb-shadow: 0 1px 3px #00000080;
+
+  --overlay-scrim: #000000aa;
+  --overlay-popover-shadow: 0 14px 40px #000000aa;
+  --overlay-dialog-shadow: 0 24px 70px #000000cc;
+
+  --radius: 12px;
+  --shadow: inset 0 1px 0 #ffffff0a, 0 1px 2px #00000050, 0 6px 22px #00000055;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+
+  /* Подсветка кода в ответах: shiki (тема css-variables) пишет цвета как var(--md-code-*).
+     Тона — тёмная тема GitHub, приглушённые роли — из палитры GrigDesk. */
+  --md-code-foreground: var(--ink);
+  --md-code-background: transparent;
+  --md-code-token-comment: var(--ink-low);
+  --md-code-token-keyword: #ff7b72;
+  --md-code-token-string: #a5d6ff;
+  --md-code-token-string-expression: #a5d6ff;
+  --md-code-token-constant: #79c0ff;
+  --md-code-token-function: #d2a8ff;
+  --md-code-token-parameter: #ffa657;
+  --md-code-token-punctuation: var(--ink-mid);
+  --md-code-token-link: var(--accent);
+  --md-code-token-inserted: var(--good);
+  --md-code-token-deleted: var(--bad);
+  --md-code-token-changed: var(--warn);
+}

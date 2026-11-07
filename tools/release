@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+# Выпуск стабильного релиза GrigDesk одной командой.
+#
+#   tools/release patch|minor|major   поднять VERSION, сделать release-коммит, прогнать тесты и
+#                                   production-сборку, поставить аннотированный тег vX.Y.Z
+#   tools/release X.Y.Z               то же с явной версией; версия, равная текущему VERSION,
+#                                   выпускается без нового коммита (первый baseline, повтор
+#                                   после исправления)
+#   tools/release publish             отправить подготовленный релиз: main и тег одним атомарным
+#                                   push, затем GitHub Release через gh
+#
+# Флаги: --push (сразу publish после подготовки), --notes FILE (текст тега и Release вместо
+# списка коммитов с прошлого релиза), --dry-run (только план), --no-github (без Release).
+#
+# До publish наружу ничего не уходит. Отказ тестов не ставит тег: release-коммит остаётся
+# локально, скрипт печатает команду отката. Проверки те же, что у read-only tools/release-check.
+# GRIGDESK_RELEASE_CHECK_COMMAND подменяет тесты и сборку — нужно только тестам самого скрипта.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+TAG_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+# Ни один шаг не должен повиснуть на вопросе пароля: доступ к origin только по ключу.
+export GIT_TERMINAL_PROMPT=0
+
+MODE=""
+KIND=""
+TARGET=""
+PUSH=0
+DRY_RUN=0
+NO_GITHUB=0
+NOTES_FILE=""
+
+fail() { echo "✗ $*" >&2; exit 1; }
+say() { echo "→ $*"; }
+ok() { echo "✓ $*"; }
+git_root() { git -C "$ROOT" "$@"; }
+
+usage() {
+  cat <<'EOF'
+Использование:
+  tools/release patch|minor|major [--push] [--notes FILE] [--dry-run] [--no-github]
+  tools/release X.Y.Z             [--push] [--notes FILE] [--dry-run] [--no-github]
+  tools/release publish           [--no-github]
+EOF
+}
+
+set_mode() {
+  [ -z "$MODE" ] || fail "режим уже задан: $MODE"
+  MODE="$1"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    patch|minor|major)
+      set_mode bump
+      KIND="$1"
+      ;;
+    publish)
+      set_mode publish
+      ;;
+    --push) PUSH=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+    --no-github) NO_GITHUB=1 ;;
+    --notes)
+      shift
+      NOTES_FILE="${1:-}"
+      [ -n "$NOTES_FILE" ] || fail "--notes требует путь к файлу"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ "$1" =~ $SEMVER_RE ]]; then
+        set_mode explicit
+        TARGET="$1"
+      else
+        usage >&2
+        fail "неизвестный аргумент: $1"
+      fi
+      ;;
+  esac
+  shift
+done
+
+if [ -z "$MODE" ]; then
+  usage >&2
+  exit 2
+fi
+
+# ── Проверки состояния ────────────────────────────────────────────────────────────
+
+# Релиз делается только из чистой main с валидным VERSION: это те же условия, что и у
+# tools/release-check, чтобы тег всегда ставился на проверяемое и воспроизводимое состояние.
+require_release_checkout() {
+  command -v git >/dev/null 2>&1 || fail "git не найден в PATH"
+  [ "$(git_root branch --show-current)" = "main" ] || fail "релиз разрешён только из ветки main"
+  [ -z "$(git_root status --porcelain=v1 --untracked-files=all)" ] \
+    || fail "рабочее дерево должно быть чистым"
+
+  CURRENT="$(tr -d '\r\n' < "$ROOT/VERSION")"
+  [[ "$CURRENT" =~ $SEMVER_RE ]] || fail "VERSION должен иметь строгий формат MAJOR.MINOR.PATCH"
+}
+
+# Один опрос origin даёт и главную ветку, и теги; локальные refs при этом не меняются.
+read_remote() {
+  local refs
+
+  refs="$(git_root ls-remote --heads --tags origin 2>/dev/null)" || fail "не удалось опросить origin"
+  REMOTE_MAIN="$(printf '%s\n' "$refs" | awk '$2 == "refs/heads/main" { print $1 }')"
+  [ -n "$REMOTE_MAIN" ] || fail "в origin нет ветки main"
+  REMOTE_TAGS="$(printf '%s\n' "$refs" \
+    | awk '$2 ~ /^refs\/tags\// { sub("refs/tags/", "", $2); print $1, $2 }')"
+}
+
+# SHA объекта remote-тега по точному имени; строки `^{}` с peeled commit не подходят.
+remote_tag_sha() { printf '%s\n' "$REMOTE_TAGS" | awk -v tag="$1" '$2 == tag { print $1 }'; }
+
+# Publish делает fast-forward main, поэтому origin/main обязана быть предком HEAD.
+require_fast_forward() {
+  git_root cat-file -e "$REMOTE_MAIN^{commit}" 2>/dev/null \
+    || fail "origin/main содержит коммиты, которых нет локально: сначала git pull --ff-only"
+  git_root merge-base --is-ancestor "$REMOTE_MAIN" HEAD \
+    || fail "локальная main разошлась с origin/main: нужен git pull --ff-only или rebase"
+  AHEAD="$(git_root rev-list --count "$REMOTE_MAIN..HEAD")"
+}
+
+# Печатает lt/eq/gt для пары строгих версий.
+compare_versions() {
+  if [ "$1" = "$2" ]; then
+    echo eq
+    return
+  fi
+  if [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]; then
+    echo lt
+  else
+    echo gt
+  fi
+}
+
+bump_version() {
+  local major minor patch
+
+  IFS=. read -r major minor patch <<<"$1"
+  case "$2" in
+    major) echo "$((major + 1)).0.0" ;;
+    minor) echo "$major.$((minor + 1)).0" ;;
+    patch) echo "$major.$minor.$((patch + 1))" ;;
+  esac
+}
+
+# Самая старшая стабильная версия среди локальных и remote-тегов; пусто, если тегов нет.
+max_stable_version() {
+  { git_root tag -l; printf '%s\n' "$REMOTE_TAGS" | awk '{ print $2 }'; } \
+    | grep -E "$TAG_RE" | sed 's/^v//' | sort -V | tail -n 1 || true
+}
+
+# Ближайший стабильный тег в истории HEAD — от него считаются заметки релиза.
+previous_release() {
+  git_root tag -l --merged HEAD | grep -E "$TAG_RE" | sort -V | tail -n 1 || true
+}
+
+# ── Заметки релиза ───────────────────────────────────────────────────────────────
+
+# Текст тега и GitHub Release: файл --notes или список коммитов с прошлого релиза.
+# Служебные release-коммиты из списка убираются: они не рассказывают об изменениях.
+build_notes() {
+  local prev
+
+  if [ -n "$NOTES_FILE" ]; then
+    [ -s "$NOTES_FILE" ] || fail "файл заметок пуст или не найден: $NOTES_FILE"
+    cat "$NOTES_FILE"
+    return
+  fi
+
+  prev="$(previous_release)"
+  if [ -z "$prev" ]; then
+    echo "Первый стабильный релиз GrigDesk."
+    return
+  fi
+
+  echo "Изменения с $prev:"
+  echo
+  git_root log --no-merges --format='- %s' "$prev..HEAD" | grep -v '^- GrigDesk: релиз v' || true
+}
+
+# ── Тесты, тег и публикация ──────────────────────────────────────────────────────
+
+# Тот же набор, что в tools/release-check. Каждый шаг возвращает отказ явно: внутри условия
+# errexit не действует, и без return сборка web пошла бы после упавших тестов сервера.
+run_checks() {
+  if [ -n "${GRIGDESK_RELEASE_CHECK_COMMAND:-}" ]; then
+    ( cd "$ROOT" && bash -c "$GRIGDESK_RELEASE_CHECK_COMMAND" ) || return 1
+    return 0
+  fi
+  ( cd "$ROOT/server" && npm test ) || return 1
+  ( cd "$ROOT/web" && npm test && npm run build ) || return 1
+}
+
+# GitHub Release не влияет на обнаружение релиза GrigDesk (он смотрит теги), но входит в
+# штатный процесс выпуска. Повторный вызов существующий Release не трогает.
+github_release() {
+  local tmp
+
+  if [ "$NO_GITHUB" = 1 ]; then
+    say "GitHub Release пропущен (--no-github)"
+    return 0
+  fi
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+    echo "! gh недоступен или не авторизован. Тег уже опубликован; Release создай вручную:" >&2
+    echo "  gh release create $TAG --title \"GrigDesk $TAG\" --notes-file <файл заметок>" >&2
+    return 1
+  fi
+  if ( cd "$ROOT" && gh release view "$TAG" >/dev/null 2>&1 ); then
+    ok "GitHub Release $TAG уже есть"
+    return 0
+  fi
+
+  tmp="$(mktemp)"
+  git_root for-each-ref "refs/tags/$TAG" --format='%(contents:body)' > "$tmp"
+  [ -s "$tmp" ] || printf 'GrigDesk %s\n' "$TAG" > "$tmp"
+  if ! ( cd "$ROOT" && gh release create "$TAG" --title "GrigDesk $TAG" --notes-file "$tmp" ); then
+    rm -f "$tmp"
+    fail "GitHub Release не создан; тег уже опубликован — повтори tools/release publish"
+  fi
+  rm -f "$tmp"
+  ok "GitHub Release $TAG создан"
+}
+
+# Отправка main и тега одним атомарным push: либо уходит всё, либо ничего.
+# Уже опубликованный тег с тем же объектом считается сделанным шагом, чужой — ошибкой.
+do_publish() {
+  local tag_sha remote_sha
+
+  tag_sha="$(git_root rev-parse "refs/tags/$TAG")"
+  [ "$(git_root cat-file -t "$tag_sha")" = "tag" ] \
+    || fail "тег $TAG не аннотированный: GrigDesk его не увидит"
+  [ "$(git_root rev-parse "$TAG^{commit}")" = "$(git_root rev-parse HEAD)" ] \
+    || fail "тег $TAG указывает не на HEAD"
+
+  remote_sha="$(remote_tag_sha "$TAG")"
+  if [ -z "$remote_sha" ]; then
+    say "Отправляю main и $TAG одним атомарным push…"
+    git_root push --atomic origin "refs/heads/main:refs/heads/main" "refs/tags/$TAG:refs/tags/$TAG"
+    ok "main и $TAG отправлены"
+  elif [ "$remote_sha" = "$tag_sha" ]; then
+    ok "Тег $TAG уже опубликован"
+  else
+    fail "в origin уже есть другой тег $TAG; опубликованный тег не переиспользуется"
+  fi
+
+  github_release
+  echo "Релиз $TAG опубликован."
+  echo "GrigDesk найдёт его при плановой проверке или по кнопке «Проверить обновления»."
+}
+
+# ── Режим publish ────────────────────────────────────────────────────────────────
+
+if [ "$MODE" = "publish" ]; then
+  require_release_checkout
+  TARGET="$CURRENT"
+  TAG="v$TARGET"
+  git_root show-ref --verify --quiet "refs/tags/$TAG" \
+    || fail "локального тега $TAG нет: сначала tools/release patch|minor|major|$CURRENT"
+  read_remote
+  require_fast_forward
+  do_publish
+  exit 0
+fi
+
+# ── Подготовка релиза ────────────────────────────────────────────────────────────
+
+require_release_checkout
+read_remote
+require_fast_forward
+
+if [ "$MODE" = "bump" ]; then
+  TARGET="$(bump_version "$CURRENT" "$KIND")"
+fi
+
+case "$(compare_versions "$TARGET" "$CURRENT")" in
+  lt) fail "версия $TARGET ниже текущей $CURRENT" ;;
+  eq) NEEDS_COMMIT=0 ;;
+  gt) NEEDS_COMMIT=1 ;;
+esac
+TAG="v$TARGET"
+
+if git_root show-ref --verify --quiet "refs/tags/$TAG"; then
+  fail "тег $TAG уже существует и не должен перемещаться"
+fi
+[ -z "$(remote_tag_sha "$TAG")" ] || fail "тег $TAG уже опубликован и не должен переиспользоваться"
+
+MAX="$(max_stable_version)"
+if [ -n "$MAX" ] && [ "$(compare_versions "$TARGET" "$MAX")" != gt ]; then
+  fail "версия $TARGET не выше последнего стабильного тега v$MAX"
+fi
+
+PREV="$(previous_release)"
+NOTES="$(build_notes)"
+
+REMOTE_SHORT="$(git_root rev-parse --short "$REMOTE_MAIN")"
+echo "Ветка main чистая · origin/main $REMOTE_SHORT · локальных коммитов к отправке: $AHEAD"
+if [ "$NEEDS_COMMIT" = 1 ]; then
+  echo "Версия: $CURRENT → $TARGET${KIND:+ ($KIND)} · предыдущий релиз: ${PREV:-нет}"
+else
+  echo "Версия: $TARGET уже в VERSION, новый коммит не нужен · предыдущий релиз: ${PREV:-нет}"
+fi
+echo "Заметки релиза:"
+printf '%s\n' "$NOTES" | sed 's/^/  /'
+
+if [ "$DRY_RUN" = 1 ]; then
+  PLAN="тесты и сборка → тег $TAG"
+  if [ "$NEEDS_COMMIT" = 1 ]; then
+    PLAN="коммит «GrigDesk: релиз $TAG» → $PLAN"
+  fi
+  if [ "$PUSH" = 1 ]; then
+    PLAN="$PLAN → publish"
+  fi
+  echo "План: $PLAN"
+  echo "Пробный запуск: ничего не изменено."
+  exit 0
+fi
+
+BASE_SHA="$(git_root rev-parse HEAD)"
+if [ "$NEEDS_COMMIT" = 1 ]; then
+  printf '%s\n' "$TARGET" > "$ROOT/VERSION"
+  git_root add VERSION
+  git_root commit -q -m "GrigDesk: релиз $TAG"
+  ok "Release-коммит «GrigDesk: релиз $TAG» создан"
+fi
+HEAD_SHA="$(git_root rev-parse HEAD)"
+
+say "Тесты и production-сборка…"
+if ! run_checks; then
+  echo "✗ Проверки не прошли: тег $TAG не создан, наружу ничего не ушло." >&2
+  if [ "$NEEDS_COMMIT" = 1 ]; then
+    echo "  Откат release-коммита: git reset --hard $BASE_SHA" >&2
+    echo "  Либо исправь причину и продолжи: tools/release $TARGET" >&2
+  fi
+  exit 1
+fi
+
+# Тег ставится только на тот commit и то дерево, которые прошли проверку.
+[ "$(git_root rev-parse HEAD)" = "$HEAD_SHA" ] || fail "HEAD сдвинулся во время проверок; тег не ставлю"
+[ -z "$(git_root status --porcelain=v1 --untracked-files=all)" ] \
+  || fail "после проверок рабочее дерево стало грязным; тег не ставлю"
+
+MESSAGE_FILE="$(mktemp)"
+trap 'rm -f "$MESSAGE_FILE"' EXIT
+printf 'GrigDesk %s\n\n%s\n' "$TAG" "$NOTES" > "$MESSAGE_FILE"
+git_root tag -a "$TAG" -F "$MESSAGE_FILE"
+ok "Аннотированный тег $TAG поставлен на $(git_root rev-parse --short HEAD)"
+
+if [ "$PUSH" = 1 ]; then
+  do_publish
+  exit 0
+fi
+
+echo "Релиз $TAG подготовлен локально. Отправить: tools/release publish"
+if [ "$NEEDS_COMMIT" = 1 ]; then
+  echo "Отменить: git tag -d $TAG && git reset --hard $BASE_SHA"
+else
+  echo "Отменить: git tag -d $TAG"
+fi

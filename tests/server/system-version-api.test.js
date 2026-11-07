@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-import systemModule from '../../server/src/modules/system/index.js';
+import systemModule from '../../server/src/modules/system/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -23,7 +23,7 @@ test('system version endpoints delegate local status and explicit remote check',
   t.after(() => app.close());
   await app.register(systemModule, {
     system: { read: () => ({}) },
-    config: { rootDir: '/tmp/noop', cockpitUpdateStatePath: '/tmp/noop-state' },
+    config: { rootDir: '/tmp/noop', grigDeskUpdateStatePath: '/tmp/noop-state' },
     releases,
     updates: {
       async getJob() { jobGets += 1; return null; },
@@ -71,7 +71,7 @@ test('web rebuild runs in background and blocks conflicting lifecycle actions', 
   t.after(() => app.close());
   await app.register(systemModule, {
     system: { read: () => ({}) },
-    config: { rootDir: '/tmp/noop', cockpitUpdateStatePath: '/tmp/noop-state' },
+    config: { rootDir: '/tmp/noop', grigDeskUpdateStatePath: '/tmp/noop-state' },
     releases,
     updates: {
       async getJob() { return null; },

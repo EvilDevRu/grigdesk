@@ -16,7 +16,10 @@ printf '{"permissions":{"allow":[],"deny":["Read(%s)","Read(%s/**)","Edit(%s)","
   "$tool_control" "$tool_control" "$tool_control" "$tool_control" >"$settings"
 chmod 400 "$settings"
 
-FAKE_CLAUDE_VERSION='2.1.220 (Claude Code)'
+# Этот файл подменяет claude фейком, поэтому доказывает только то, что раннер ПЕРЕДАЁТ
+# нужные флаги. Соблюдает ли их живой CLI — вопрос к самому бинарю: на него отвечает
+# tools/claude-contract-smoke.mjs, который гоняется после обновления CLI и периодически.
+FAKE_CLAUDE_VERSION='2.1.241 (Claude Code)'
 CAPTURE_FILE="$TEST_ROOT/claude-argv.tsv"
 factory_exec() {
   local kind=$1
@@ -37,18 +40,34 @@ factory_exec() {
 
 probe=$(runner_claude_probe)
 probe_rc=$?
-assert_rc 0 "$probe_rc" "audited Claude CLI version is available"
-assert_contains "$probe" '2.1.220' "probe returns the audited CLI version"
+assert_rc 0 "$probe_rc" "установленный Claude CLI доступен раннеру"
+assert_contains "$probe" '2.1.241' "probe отдаёт версию установленного CLI"
 
-FAKE_CLAUDE_VERSION='2.1.221 (Claude Code)'
+# Списка разрешённых версий больше нет намеренно: он дописывался руками на каждое
+# обновление, до правки regex весь конвейер стоял недоступным, а изоляцию всё это время
+# держали флаги запуска, а не список. Новая версия обязана быть доступной сразу.
+FAKE_CLAUDE_VERSION='2.2.0 (Claude Code)'
 runner_claude_probe >/dev/null 2>&1
-assert_rc 4 "$?" "unaudited Claude CLI version is fail-closed unavailable"
-FAKE_CLAUDE_VERSION='2.1.220 (Claude Code)'
+assert_rc 0 "$?" "новая версия CLI не блокируется списком аудита"
+
+# Осмысленность ответа проверять всё равно надо: без номера версии probe нечего положить
+# ни в телеметрию запуска, ни в диалект аналитики.
+FAKE_CLAUDE_VERSION='(Claude Code)'
+runner_claude_probe >/dev/null 2>&1
+assert_rc 4 "$?" "ответ без номера версии остаётся fail-closed"
+FAKE_CLAUDE_VERSION='2.1.241 (Claude Code)'
 
 export RUNNER_CLAUDE_CONTROL_DIR="$control"
 export RUNNER_CLAUDE_SETTINGS="$settings"
 runner_claude_run 42 prompt BUILD opus high 30 "$run_dir"
 assert_rc 0 "$?" "Claude argv can be inspected without a model call"
+
+# Регрессия 07.11.2026: имя CLI подставляет factory_external_launch, args его не
+# содержат — сдвоенное «claude claude» стало бы чужим позиционным аргументом.
+grep -Fxq $'4\tclaude' "$CAPTURE_FILE"
+assert_rc 0 "$?" "launch puts the CLI binary exactly once before its arguments"
+grep -Fxq $'5\t-p' "$CAPTURE_FILE"
+assert_rc 0 "$?" "provider flags follow the CLI without a duplicate name"
 
 argv=$(cut -f2- "$CAPTURE_FILE")
 assert_contains "$argv" '--settings' "Claude receives only the trusted settings file"
@@ -56,10 +75,12 @@ settings_arg=$(awk -F '\t' '$2 == "--settings" { getline; sub(/^[^\t]*\t/, ""); 
 assert_eq "$settings" "$settings_arg" "--settings points inside the trusted control root"
 source_arg=$(awk -F '\t' '$2 == "--setting-sources" { getline; sub(/^[^\t]*\t/, ""); print; exit }' "$CAPTURE_FILE")
 assert_eq '' "$source_arg" "empty --setting-sources disables user, project and local settings"
-for flag in --strict-mcp-config --disable-slash-commands --safe-mode; do
+for flag in --strict-mcp-config --disable-slash-commands; do
   grep -Fxq -- "$flag" <<<"$argv"
   assert_rc 0 "$?" "Claude route argv includes $flag"
 done
+grep -Fxq -- '--safe-mode' <<<"$argv"
+assert_rc 1 "$?" "safe-mode снят: агентам конвейера нужна память CLAUDE.md из worktree"
 grep -Fxq -- '--mcp-config' <<<"$argv"
 assert_rc 1 "$?" "strict MCP mode loads no filesystem MCP configuration"
 grep -Fxq -- '--bare' <<<"$argv"

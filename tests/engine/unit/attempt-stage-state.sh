@@ -37,6 +37,71 @@ assert_rc 0 "$?" "immutable route fixture is published"
 catalog_hash=$(json_field "$published" catalogHash)
 route_hash=$(json_field "$published" routeHash)
 
+# Свободный текст ворот нельзя молча адресовать автоматическому command: он не читает
+# промпт и первым же коммитом погасил бы указание. Stop при этом законен — текст
+# остаётся аудитом решения, а не обещанием следующему агенту.
+feedback_description="$TEST_ROOT/feedback-description.json"
+cat >"$feedback_description" <<'JSON'
+{
+  "machine": {
+    "nodes": [
+      {"id":"verify","executor":"command"},
+      {"id":"author","executor":"agent"},
+      {
+        "id":"gate_command","executor":"gate",
+        "on":{"rejected":{"rewind":"verify","reset":["verify","gate_command"]}}
+      },
+      {
+        "id":"gate_next_command","executor":"gate",
+        "on":{"rejected":{"next":"verify"}}
+      },
+      {
+        "id":"gate_next_agent","executor":"gate",
+        "on":{"rejected":{"next":"author"}}
+      },
+      {
+        "id":"gate_stop","executor":"gate",
+        "on":{"rejected":{"stop":"human"}}
+      }
+    ]
+  }
+}
+JSON
+feedback_guard=$(_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_command 'исправь проверку' 2>&1)
+assert_rc 78 "$?" "feedback-bearing gate refuses a command rewind target"
+assert_contains "$feedback_guard" 'executor=command' \
+  "command target refusal explains why feedback cannot be delivered"
+_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_next_command 'перепроверь дальше' >/dev/null 2>&1
+assert_rc 78 "$?" "feedback-bearing rejected next also refuses a command target"
+_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_next_agent 'исправь по пути дальше'
+assert_rc 0 "$?" "feedback-bearing rejected next accepts an agent target"
+_route_v2_gate_feedback_guard "$feedback_description" gate_stop 'остановить работу'
+assert_rc 0 "$?" "rejected stop may retain feedback as immutable audit"
+
+next_feedback_dir="$TEST_ROOT/next-feedback-events"
+mkdir -p "$next_feedback_dir"
+next_feedback='переделай следующий агентский узел'
+next_feedback_event="$next_feedback_dir/event.00000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+cat >"$next_feedback_event" <<JSON
+{"kind":"commit","node":"gate_next_agent","outcome":"rejected","reason":"$next_feedback","action":{"next":"author"}}
+JSON
+chmod 400 "$next_feedback_event"
+assert_eq "$next_feedback" \
+  "$(_attempt_stage_state_json human-note "$next_feedback_dir" author)" \
+  "rejected next addresses feedback to its agent target"
+assert_eq "" "$(_attempt_stage_state_json human-note "$next_feedback_dir" verify)" \
+  "rejected next feedback remains target-specific"
+next_feedback_commit="$next_feedback_dir/event.00000000000000000002.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json"
+cat >"$next_feedback_commit" <<'JSON'
+{"kind":"commit","node":"author","outcome":"done","reason":null,"action":{"next":"retro"}}
+JSON
+chmod 400 "$next_feedback_commit"
+assert_eq "" "$(_attempt_stage_state_json human-note "$next_feedback_dir" author)" \
+  "agent commit clears feedback delivered through rejected next"
+
 # Рядом с управляющим состоянием существует старый реестр; он должен остаться побайтно неизменным.
 printf 'PROFILE=legacy\nROUTE=feature\nBUILD=done\n' >"$STATE_DIR/t51.pipeline"
 legacy_before=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
@@ -44,6 +109,12 @@ legacy_before=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 attempt=$(begin_selected 51 a_11111111111111111111111111111111)
 assert_rc 0 "$?" "selected v2 attempt is prepared"
 attempt_dir="$(attempt_state_v2_task_root 51)/attempts/$attempt"
+
+preinit_transitions="$TEST_ROOT/preinit-routing-transitions.ndjson"
+attempt_stage_state_routing_transitions_v2 51 "$attempt" >"$preinit_transitions"
+assert_rc 0 "$?" "routing projection accepts a selected attempt before cursor initialization"
+assert_eq 0 "$(wc -c <"$preinit_transitions" | tr -d ' ')" \
+  "an uninitialized stage ledger has no authoritative routing transitions"
 
 initial=$(attempt_stage_state_init_v2 51 "$attempt" debug)
 assert_rc 0 "$?" "execution cursor initializes from the verified route entry"
@@ -132,7 +203,9 @@ assert_rc 0 "$?" "command-node transition commits"
 assert_eq gate_plan "$(json_field "$after_check" currentNode)" \
   "command outcome advances to the pinned gate"
 
-rewound=$(attempt_stage_state_commit_v2 51 "$attempt" gate_plan rejected)
+gate_feedback='сначала уточни план по замечанию приёмки'
+rewound=$(attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 "$gate_feedback")
 assert_rc 0 "$?" "gate rejection commits the verified rewind"
 assert_eq instrument "$(json_field "$rewound" currentNode)" \
   "rewind target is derived from the route transition"
@@ -145,6 +218,24 @@ assert_eq instrument "$(json_field "$(cat "$rewind_event")" action rewind)" \
 assert_eq instrument,check,gate_plan \
   "$("$NODE_BIN" -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.action.reset.join(","));' "$(cat "$rewind_event")")" \
   "rewind ledger event preserves the exact reset interval"
+assert_eq "$gate_feedback" "$(json_field "$(cat "$rewind_event")" reason)" \
+  "rejected gate feedback is durable in the immutable event"
+assert_eq "$gate_feedback" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "rejected gate feedback is addressed to the declared rewind target"
+rewind_events=$(event_count "$attempt_dir")
+rewound_again=$(attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 "$gate_feedback")
+assert_rc 0 "$?" "exact rejected feedback retry is idempotent"
+assert_eq "$rewound" "$rewound_again" \
+  "exact rejected feedback retry returns the committed cursor"
+assert_eq "$rewind_events" "$(event_count "$attempt_dir")" \
+  "exact rejected feedback retry appends no event"
+attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 'уже другое замечание' \
+  >/dev/null 2>&1
+assert_rc 75 "$?" "changed feedback cannot masquerade as an idempotent retry"
+assert_eq "$gate_feedback" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "conflicting retry preserves the originally committed feedback"
 latest_rewind=$(attempt_stage_state_latest_event_v2 51 "$attempt")
 assert_rc 0 "$?" "latest-event API verifies the immutable ledger before projection"
 assert_eq 4 "$(json_field "$latest_rewind" sequence)" \
@@ -159,6 +250,8 @@ assert_eq check "$(json_field "$after_replay" currentNode)" \
   "replayed node advances normally"
 assert_eq 5 "$(json_field "$after_replay" eventSequence)" \
   "replay is a new append-only event rather than history mutation"
+assert_eq "" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "target commit clears rejected gate feedback after it was handled"
 
 read_back=$(attempt_stage_state_read_v2 51 "$attempt")
 assert_rc 0 "$?" "read verifies the complete hash chain and pointer checksum"
@@ -299,12 +392,11 @@ assert_eq "$note_text" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" i
 assert_eq "" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" check)" \
   "указание адресное — соседний узел его не получает"
 
-# Возврат на узел, где курсор УЖЕ стоит, — основной путь кокпита: человек жмёт
+# Возврат на узел, где курсор УЖЕ стоит, — основной путь GrigDesk: человек жмёт
 # «перейти сюда» на текущем этапе именно затем, чтобы приложить к нему указание.
 # Раньше такой заход считался пустым (курсор двигать некуда), событие не ложилось, а
 # `factory goto` печатал «курсор возвращён» и отвечал успехом: указание пропадало
-# молча. На t7802 так потерялось решение владельца, и следующий заход диагностики
-# ушёл без него.
+# молча: решение владельца терялось, и следующий заход диагностики уходил без него.
 note_same=$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")
 attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
   instrument,check,gate_plan,retro "$note_text" >/dev/null
@@ -348,7 +440,7 @@ assert_eq "$note_events" \
 # Коммит восстановления узел НЕ исполнял: подъём после обрыва снимает инструментацию,
 # на которой стоял диагностический узел, и закрывает его `failed`, чтобы маршрут
 # переразметил заново. Указание человека такой коммит снимать не имеет права — иначе
-# получается петля t7802: решение владельца приложено, «продолжить» закрывает узел за
+# получается петля: решение владельца приложено, «продолжить» закрывает узел за
 # отсутствующую разметку, и обратно узел входит уже без решения.
 note_recovery='смотри на обе ветки записи, не только на restore'
 attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
@@ -467,24 +559,24 @@ assert_eq closed "$(json_field "$findings_closed" closed 0 status)" \
   "проекция явно маркирует закрытый finding"
 
 # Typed-цикл останавливается по наблюдаемому отсутствию прогресса раньше общего
-# hard ceiling: третий одинаковый fingerprint уже доказал, что BUILD↔CHECK застрял.
+# hard ceiling: после одного ремонта второй одинаковый fingerprint уже требует человека.
 no_progress_attempt=$(begin_selected 61 a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
 assert_rc 0 "$?" "попытка для no-progress guard подготовлена"
 no_progress_dir="$(attempt_state_v2_task_root 61)/attempts/$no_progress_attempt"
 attempt_stage_state_init_v2 61 "$no_progress_attempt" debug >/dev/null
-for round in 1 2; do
-  attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
-  repeated=$(attempt_stage_state_commit_v2 \
-    61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
-  assert_eq ready "$(json_field "$repeated" state)" \
-    "одинаковый typed rewind $round ещё допускает исправление"
-done
 attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
-no_progress=$(attempt_stage_state_commit_v2 \
+first_repair=$(attempt_stage_state_commit_v2 \
   61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
-assert_rc 0 "$?" "третий одинаковый typed rewind фиксируется атомарно"
+assert_eq ready "$(json_field "$first_repair" state)" \
+  "первый typed verdict допускает один автоматический ремонт"
+attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
+reworded_verdict=$(run_state_verdict_encode failed build \
+  'check-contract=то же замечание с уточнённой формулировкой после ремонта')
+no_progress=$(attempt_stage_state_commit_v2 \
+  61 "$no_progress_attempt" check failed 6 "$reworded_verdict" 2)
+assert_rc 0 "$?" "повтор id после одного ремонта фиксируется атомарно"
 assert_eq stopped "$(json_field "$no_progress" state)" \
-  "повторяющиеся findings останавливают автоматический цикл"
+  "тот же набор findings не запускает второй автоматический ремонт"
 assert_eq no-progress "$(json_field "$no_progress" stop)" \
   "причина остановки — отсутствие прогресса, не hard ceiling"
 no_progress_event=$(find "$no_progress_dir/stage-results" -maxdepth 1 -type f \
@@ -507,31 +599,31 @@ attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/nul
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" check done >/dev/null
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" gate_plan rejected >/dev/null
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/null
+after_feedback_verdict=$(run_state_verdict_encode failed build \
+  'after-human-feedback=новое замечание после решения человека')
 after_gate_feedback=$(attempt_stage_state_commit_v2 \
-  62 "$gate_reset_attempt" check failed 6 "$typed_verdict" 1)
+  62 "$gate_reset_attempt" check failed 6 "$after_feedback_verdict" 1)
 assert_rc 0 "$?" "typed failed после rejected ворот коммитится"
 assert_eq ready "$(json_field "$after_gate_feedback" state)" \
-  "rejected ворот начинает новую автономную серию findings"
+  "rejected ворот разрешает новый замкнутый набор findings"
 assert_eq instrument "$(json_field "$after_gate_feedback" currentNode)" \
   "после человеческой обратной связи исправление снова разрешено"
 
-# Набор замечаний меняется от захода к заходу, но одно и то же переживает каждый
-# ремонт. Полное совпадение отпечатка такое не ловит: смена одного finding из двух
-# читается прогрессом, и цикл ходит вокруг неснятой причины, пока сопутствующие
-# замечания тасуются. Останавливает именно ПЕРЕСЕЧЕНИЕ наборов.
+# Набор строго сужается, но одно и то же замечание переживает каждый ремонт.
+# Расширения scope тут нет; третий проход останавливает прежний guard устойчивого ядра.
 core_attempt=$(begin_selected 63 a_dddddddddddddddddddddddddddddddd)
 assert_rc 0 "$?" "попытка для устойчивого ядра подготовлена"
 core_dir="$(attempt_state_v2_task_root 63)/attempts/$core_attempt"
 attempt_stage_state_init_v2 63 "$core_attempt" debug >/dev/null
 core_first=$(run_state_verdict_encode failed build \
   'shared-cause=причина не отделена от места проявления' \
-  'first-side=побочное замечание первого захода')
+  'closed-second=побочное замечание, закрытое вторым' \
+  'closed-first=побочное замечание, закрытое первым')
 core_second=$(run_state_verdict_encode failed build \
   'shared-cause=причина не отделена от места проявления' \
-  'second-side=побочное замечание второго захода')
+  'closed-second=побочное замечание, закрытое вторым')
 core_third=$(run_state_verdict_encode failed build \
-  'shared-cause=причина не отделена от места проявления' \
-  'third-side=побочное замечание третьего захода')
+  'shared-cause=причина не отделена от места проявления')
 for verdict in "$core_first" "$core_second"; do
   attempt_stage_state_commit_v2 63 "$core_attempt" instrument done >/dev/null
   moving=$(attempt_stage_state_commit_v2 \
@@ -593,25 +685,218 @@ assert_file_exists "$shrink_event" \
 assert_contains "$(json_field "$(cat "$shrink_event")" reason)" 'kept-finding' \
   "журнал называет замечание, пережившее все ремонты серии"
 
-# Наборы вообще не пересекаются: каждый заход находит новое. Ядра нет, значит и
-# повода останавливать цикл раньше hard ceiling тоже нет.
+# Первый typed verdict замыкает блокирующий scope дуги. Полностью новый набор на
+# повторе раньше считался прогрессом и именно поэтому критик мог растить задачу до
+# hard ceiling; теперь verdict остаётся в ledger, но автоматический rewind прекращается.
 fresh_attempt=$(begin_selected 65 a_ffffffffffffffffffffffffffffffff)
 assert_rc 0 "$?" "попытка для непересекающихся наборов подготовлена"
+fresh_dir="$(attempt_state_v2_task_root 65)/attempts/$fresh_attempt"
 attempt_stage_state_init_v2 65 "$fresh_attempt" debug >/dev/null
-for finding in first second third; do
-  fresh_verdict=$(run_state_verdict_encode failed build \
-    "only-$finding=замечание, найденное только в этом заходе")
-  attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
-  fresh=$(attempt_stage_state_commit_v2 \
-    65 "$fresh_attempt" check failed 6 "$fresh_verdict" 2)
-  assert_eq ready "$(json_field "$fresh" state)" \
-    "полностью новый набор замечаний прогрессом и остаётся"
-done
+fresh_first=$(run_state_verdict_encode failed build \
+  'only-first=замечание первого прохода')
+fresh_second=$(run_state_verdict_encode failed build \
+  'only-second=новое замечание повторного прохода')
+fresh_third=$(run_state_verdict_encode failed build \
+  'only-third=и снова полностью новое замечание')
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_first" 2)
+assert_eq ready "$(json_field "$fresh" state)" \
+  "первый набор замечаний разрешает исправление"
+# ПЕРВОЕ расширение проходит по допуску дуги. Прежнее правило звало человека уже здесь,
+# и цена измерена: 13 остановок из 31 — «набор расширен новыми id», сумма ожидания
+# 59.7 часа. При этом ремонт в таких сериях работал: в разобранном живом случае автор
+# закрыл два замечания из трёх, а остановило маршрут одно новое.
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh_allowed=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_second" 2)
+assert_eq ready "$(json_field "$fresh_allowed" state)" \
+  "первое расширение набора проходит по допуску дуги"
+# ВТОРОЕ останавливает: допуск на дугу один, и он уже потрачен.
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh_stop=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_third" 2)
+assert_eq stopped "$(json_field "$fresh_stop" state)" \
+  "второе расширение не запускает ещё один автоматический ремонт"
+assert_eq no-progress "$(json_field "$fresh_stop" stop)" \
+  "расширение scope останавливается у человека"
+fresh_event=$(find "$fresh_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_contains "$(json_field "$(cat "$fresh_event")" reason)" \
+  'замкнутый набор замечаний расширен новыми id: only-third' \
+  "журнал называет новый id, разомкнувший scope"
 
-# Суммарный бюджет возвратов в target: ловит серию, где ни один per-arc сторож
-# не срабатывает (замечания каждый раз свежие, лимит дуги далеко), а круги
-# копятся. Бюджет решением человека НЕ обнуляется — иначе «вернул курсор»
-# выдавало бы новую порцию кругов.
+# Поздно обнаруженный дефект остаётся блокером даже при остановке расширения.
+# Guard ограничивает число ремонтов, но не повышает failed и не теряет finding.
+assert_eq failed "$(json_field "$(cat "$fresh_event")" outcome)" \
+  "поздний блокер на no-progress не превращается в успешную приёмку"
+fresh_findings=$(attempt_stage_state_findings_v2 65 "$fresh_attempt")
+assert_eq only-third "$(json_field "$fresh_findings" open 0 id)" \
+  "последний подтверждённый блокер остаётся открытым для человека"
+assert_eq 0 "$(json_field "$fresh_findings" deferred length)" \
+  "рост списка не переводит дефект в deferred"
+
+# Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть «сценарий не
+# покрыт» нельзя, не написав файл. Замечание по такому файлу — первый проход по
+# новому коду, а не рост охвата, и человека для него звать незачем: раньше этого
+# замечания не могло быть, потому что артефакта не существовало.
+unseen_attempt=$(begin_selected 71 a_11223344556677881122334455667788)
+assert_rc 0 "$?" "попытка для первого прохода по новому артефакту подготовлена"
+attempt_stage_state_init_v2 71 "$unseen_attempt" debug >/dev/null
+unseen_first=$(run_state_verdict_encode failed build \
+  'scenario-not-covered=сценарий не покрыт ни одной проверкой' \
+  'anchor:scenario-not-covered=tests/first.spec.js' \
+  'reviewed:tests/first.spec.js')
+unseen_second=$(run_state_verdict_encode failed build \
+  'fresh-file-defect=дефект в файле, дописанном этим же ремонтом' \
+  'anchor:fresh-file-defect=tests/second.spec.js' \
+  'reviewed:tests/first.spec.js' 'reviewed:tests/second.spec.js')
+attempt_stage_state_commit_v2 71 "$unseen_attempt" instrument done >/dev/null
+unseen_run=$(attempt_stage_state_commit_v2 \
+  71 "$unseen_attempt" check failed 6 "$unseen_first" 2)
+assert_eq ready "$(json_field "$unseen_run" state)" \
+  "первый набор замечаний с объявленным охватом разрешает ремонт"
+attempt_stage_state_commit_v2 71 "$unseen_attempt" instrument done >/dev/null
+unseen_next=$(attempt_stage_state_commit_v2 \
+  71 "$unseen_attempt" check failed 6 "$unseen_second" 2)
+assert_eq ready "$(json_field "$unseen_next" state)" \
+  "замечание по не просмотренному раньше артефакту не останавливает маршрут"
+assert_eq check "$(json_field "$unseen_next" lastCommit node)" \
+  "возврат уходит обычным коммитом, а не остановкой"
+
+# Обратная сторона того же правила: артефакт объявлен просмотренным, значит новое
+# замечание по нему — либо круг, либо регрессия после ремонта. И то и другое решает
+# человек, поведение прежнее.
+seen_attempt=$(begin_selected 72 a_22334455667788992233445566778899)
+assert_rc 0 "$?" "попытка для повторной претензии подготовлена"
+seen_dir="$(attempt_state_v2_task_root 72)/attempts/$seen_attempt"
+attempt_stage_state_init_v2 72 "$seen_attempt" debug >/dev/null
+seen_first=$(run_state_verdict_encode failed build \
+  'first-defect=первое замечание по проверенному файлу' \
+  'anchor:first-defect=src/grid.js' 'reviewed:src/grid.js')
+seen_second=$(run_state_verdict_encode failed build \
+  'another-defect=ещё одно замечание по тому же файлу' \
+  'anchor:another-defect=src/grid.js' 'reviewed:src/grid.js')
+seen_third=$(run_state_verdict_encode failed build \
+  'third-defect=третье замечание по тому же файлу' \
+  'anchor:third-defect=src/grid.js' 'reviewed:src/grid.js')
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_first" 2 >/dev/null
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+seen_allowed=$(attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_second" 2)
+assert_eq ready "$(json_field "$seen_allowed" state)" \
+  "первая новая претензия к просмотренному артефакту проходит по допуску"
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+seen_stop=$(attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_third" 2)
+assert_eq stopped "$(json_field "$seen_stop" state)" \
+  "вторая новая претензия к просмотренному артефакту останавливается у человека"
+assert_eq no-progress "$(json_field "$seen_stop" stop)" \
+  "остановка по просмотренному артефакту остаётся no-progress"
+seen_event=$(find "$seen_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_contains "$(json_field "$(cat "$seen_event")" reason)" \
+  'замкнутый набор замечаний расширен новыми id: third-defect' \
+  "журнал называет id, разомкнувший scope по проверенному файлу"
+
+# Якорь без объявленного охвата ничего не доказывает: «не видел раньше»
+# неотличимо от «не потрудился посмотреть». Без reviewed правило обязано молчать,
+# иначе один якорь отменял бы весь сторож расширения.
+noscope_attempt=$(begin_selected 73 a_33445566778899aa33445566778899aa)
+assert_rc 0 "$?" "попытка для якоря без охвата подготовлена"
+attempt_stage_state_init_v2 73 "$noscope_attempt" debug >/dev/null
+noscope_first=$(run_state_verdict_encode failed build \
+  'only-anchor-first=замечание первого прохода' \
+  'anchor:only-anchor-first=tests/first.spec.js')
+noscope_second=$(run_state_verdict_encode failed build \
+  'only-anchor-second=замечание по другому файлу' \
+  'anchor:only-anchor-second=tests/second.spec.js')
+noscope_third=$(run_state_verdict_encode failed build \
+  'only-anchor-third=замечание по третьему файлу' \
+  'anchor:only-anchor-third=tests/third.spec.js')
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_first" 2 >/dev/null
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+noscope_allowed=$(attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_second" 2)
+assert_eq ready "$(json_field "$noscope_allowed" state)" \
+  "якорь без охвата тоже получает общий допуск дуги, а не своё послабление"
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+noscope_stop=$(attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_third" 2)
+assert_eq stopped "$(json_field "$noscope_stop" state)" \
+  "без объявленного охвата якорь не разрешает второй автоматический возврат"
+assert_eq no-progress "$(json_field "$noscope_stop" stop)" \
+  "поведение без охвата остаётся прежним"
+
+# Документ САМОГО ремонтируемого узла. Отсев по `reviewed` рассчитан на дугу, где ремонт
+# СОЗДАЁТ файлы: замечание по новому файлу и есть первый проход. На дуге планирования ремонт
+# файлов не создаёт — он переписывает свой документ, а замечания указывают на давно
+# существующий код, поэтому отсев не срабатывал никогда и допуск дуги был нулевой. Замер по
+# журналам всех попыток: `skeptic → plan` — самая частая дуга типизированных остановок
+# (10 из 31), и ни у одной находки на ней якорь не указывал на созданный ремонтом файл.
+doc_attempt=$(begin_selected 74 a_44556677889900bb44556677889900bb)
+assert_rc 0 "$?" "попытка для замечания по документу ремонта подготовлена"
+attempt_stage_state_init_v2 74 "$doc_attempt" debug >/dev/null
+doc_first=$(run_state_verdict_encode failed build \
+  'plan-misses-criterion=план не покрывает критерий 3' \
+  'anchor:plan-misses-criterion=src/core.py' 'reviewed:src/core.py')
+doc_second=$(run_state_verdict_encode failed build \
+  'new-plan-step-unproven=новый шаг плана ничем не доказан' \
+  'anchor:new-plan-step-unproven=t74.instrument.md' 'reviewed:src/core.py')
+doc_third=$(run_state_verdict_encode failed build \
+  'another-plan-step-unproven=и следующая редакция плана тоже' \
+  'anchor:another-plan-step-unproven=t74.instrument.md' 'reviewed:src/core.py')
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_first" 2 >/dev/null
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+doc_run=$(attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_second" 2)
+assert_eq ready "$(json_field "$doc_run" state)" \
+  "замечание по переписанному документу ремонта не останавливает маршрут"
+# И не тратит допуск дуги: каждая новая редакция документа — новый текст, а не рост охвата.
+# Серию всё равно ограничивают hard-лимит дуги и общий бюджет возвратов попытки.
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+doc_again=$(attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_third" 2)
+assert_eq ready "$(json_field "$doc_again" state)" \
+  "следующая редакция того же документа тоже остаётся первым проходом"
+
+# Граница послабления: документ ДРУГОГО узла ремонт не переписывал, поэтому замечание по
+# нему остаётся обычным расширением и тратит допуск дуги.
+other_doc_attempt=$(begin_selected 75 a_5566778899aabbcc5566778899aabbcc)
+assert_rc 0 "$?" "попытка для чужого документа подготовлена"
+attempt_stage_state_init_v2 75 "$other_doc_attempt" debug >/dev/null
+other_first=$(run_state_verdict_encode failed build \
+  'first-code-defect=замечание по коду' \
+  'anchor:first-code-defect=src/core.py' 'reviewed:src/core.py')
+other_second=$(run_state_verdict_encode failed build \
+  'foreign-doc-defect=замечание по отчёту соседнего узла' \
+  'anchor:foreign-doc-defect=t75.report.md' 'reviewed:src/core.py' 'reviewed:t75.report.md')
+other_third=$(run_state_verdict_encode failed build \
+  'foreign-doc-defect-2=ещё одно замечание по тому же отчёту' \
+  'anchor:foreign-doc-defect-2=t75.report.md' 'reviewed:src/core.py' 'reviewed:t75.report.md')
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_first" 2 >/dev/null
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+other_run=$(attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_second" 2)
+assert_eq ready "$(json_field "$other_run" state)" \
+  "первое замечание по чужому документу проходит по общему допуску"
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+other_stop=$(attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_third" 2)
+assert_eq stopped "$(json_field "$other_stop" state)" \
+  "чужой документ послабления не получает и останавливает маршрут вторым расширением"
+
+# Суммарный бюджет возвратов в target тестируется отдельно, с выключенным
+# no-progress у примитива: в живом typed runtime свежие id раньше остановит scope guard.
+# Бюджет решением человека НЕ обнуляется — иначе «вернул курсор» выдавало бы новую порцию.
 budget_attempt=$(begin_selected 67 a_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6)
 assert_rc 0 "$?" "попытка для суммарного бюджета подготовлена"
 budget_dir="$(attempt_state_v2_task_root 67)/attempts/$budget_attempt"
@@ -621,7 +906,7 @@ for round in 1 2 3; do
     "budget-finding-$round=свежее замечание круга $round")
   attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
   budget_run=$(attempt_stage_state_commit_v2 \
-    67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+    67 "$budget_attempt" check failed 6 "$budget_verdict" 0 0 3)
   assert_eq ready "$(json_field "$budget_run" state)" \
     "возврат $round укладывается в суммарный бюджет"
 done
@@ -629,7 +914,7 @@ budget_verdict=$(run_state_verdict_encode failed build \
   'budget-finding-4=свежее замечание четвёртого круга')
 attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
 budget_stop=$(attempt_stage_state_commit_v2 \
-  67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+  67 "$budget_attempt" check failed 6 "$budget_verdict" 0 0 3)
 assert_rc 0 "$?" "четвёртый возврат при бюджете трёх фиксируется атомарно"
 assert_eq stopped "$(json_field "$budget_stop" state)" \
   "исчерпанный суммарный бюджет останавливает курсор"
@@ -731,8 +1016,77 @@ assert_eq 0 "$("$NODE_BIN" -e \
 assert_eq "$(date -u -d '2026-01-01 03:00:00' +%s)" "$(json_field "$rec_wt" lastEventAt)" \
   "lastEventAt still tracks the newest event"
 
+# Отложенная находка: дефект настоящий, но вне цели задачи. Возврата не вызывает,
+# в сторожах топтания не участвует и живёт до ворот приёмки отдельной секцией.
+deferred_attempt=$(begin_selected 69 a_dddddddddddddddddddddddddddddddd)
+assert_rc 0 "$?" "попытка для отложенных находок подготовлена"
+attempt_stage_state_init_v2 69 "$deferred_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 69 "$deferred_attempt" instrument done >/dev/null
+deferred_verdict=$(run_state_verdict_encode done build \
+  'deferred:side-defect=спиннер не гаснет при отказе сети, к цели задачи не относится')
+assert_rc 0 "$?" "done принимает вердикт из одних отложенных находок"
+deferred_commit=$(attempt_stage_state_commit_v2 \
+  69 "$deferred_attempt" check done 6 "$deferred_verdict" 2)
+assert_rc 0 "$?" "приёмка с отложенным хвостом коммитится"
+assert_eq ready "$(json_field "$deferred_commit" state)" \
+  "отложенная находка не останавливает маршрут"
+deferred_projection=$(attempt_stage_state_findings_v2 69 "$deferred_attempt")
+assert_eq 0 "$(json_field "$deferred_projection" open length)" \
+  "отложенная находка не попадает в набор к ремонту"
+assert_eq 1 "$(json_field "$deferred_projection" deferred length)" \
+  "отложенная находка видна отдельной секцией"
+assert_eq side-defect "$(json_field "$deferred_projection" deferred 0 id)" \
+  "проекция сохраняет id отложенной находки"
+
+# Блокирующее замечание при done — противоречие: движок обязан отвергнуть вердикт,
+# иначе «принято» молча увозило бы нечинёный блокер мимо ворот.
+run_state_verdict_encode done build 'hard-defect=цель задачи не выполнена' >/dev/null 2>&1
+assert_rc 2 "$?" "done с блокирующим замечанием отклоняется"
+
+# Отложенные находки не маскируют топтание: сторож смотрит только на блокирующие.
+mask_attempt=$(begin_selected 70 a_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)
+assert_rc 0 "$?" "попытка для проверки маскировки подготовлена"
+attempt_stage_state_init_v2 70 "$mask_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 70 "$mask_attempt" instrument done >/dev/null
+mask_first=$(run_state_verdict_encode failed build \
+  'check-contract=проверяемый контракт не выполнен' \
+  'deferred:noise-one=побочная находка первого прохода')
+attempt_stage_state_commit_v2 \
+  70 "$mask_attempt" check failed 6 "$mask_first" 2 >/dev/null
+attempt_stage_state_commit_v2 70 "$mask_attempt" instrument done >/dev/null
+mask_second=$(run_state_verdict_encode failed build \
+  'check-contract=тот же блокер после ремонта' \
+  'deferred:noise-two=другая побочная находка')
+mask_stop=$(attempt_stage_state_commit_v2 \
+  70 "$mask_attempt" check failed 6 "$mask_second" 2)
+assert_eq stopped "$(json_field "$mask_stop" state)" \
+  "смена отложенных находок не выдаётся за прогресс по блокирующему"
+assert_eq no-progress "$(json_field "$mask_stop" stop)" \
+  "сторож топтания считает только блокирующие замечания"
+
 legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \
   "all stage-ledger operations leave legacy STATE_DIR byte-for-byte untouched"
+
+# Старая identity не принимает решение даже на том же текущем узле после новой паузы.
+# Достоверная revision проверяется в том же lock, что append commit.
+cas_attempt=$(begin_selected 81 a_81818181818181818181818181818181)
+attempt_stage_state_init_v2 81 "$cas_attempt" debug >/dev/null
+cas_dir="$(factory_control_root)/protocol-v2/tasks/t81/attempts/$cas_attempt"
+cas_envelope=$(cat "$cas_dir/stage-results/runtime.json")
+cas_sequence=$(json_field "$cas_envelope" runtime sequence)
+cas_hash=$(json_field "$cas_envelope" runtime headEventHash)
+attempt_stage_state_pause_v2 81 "$cas_attempt" instrument 'новая пауза' >/dev/null
+cas_before=$(event_count "$cas_dir")
+attempt_stage_state_commit_v2 81 "$cas_attempt" instrument done 0 '' 0 0 0 '' 0 \
+  "$cas_sequence" "$cas_hash" >/dev/null 2>&1
+assert_rc 75 "$?" "старая revision на том же узле отвергнута"
+assert_eq "$cas_before" "$(event_count "$cas_dir")" "stale CAS не пишет событие"
+cas_envelope=$(cat "$cas_dir/stage-results/runtime.json")
+cas_sequence=$(json_field "$cas_envelope" runtime sequence)
+cas_hash=$(json_field "$cas_envelope" runtime headEventHash)
+attempt_stage_state_commit_v2 81 "$cas_attempt" instrument done 0 '' 0 0 0 '' 0 \
+  "$cas_sequence" "$cas_hash" >/dev/null
+assert_rc 0 "$?" "точная revision разрешает единственный commit"
 
 finish_tests

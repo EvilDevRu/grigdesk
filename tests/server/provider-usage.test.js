@@ -10,20 +10,22 @@ import {
   mergeProviderUsage,
   normalizeProviderUsage,
   unsupportedProviderUsage,
-} from '../../server/src/lib/provider-usage.js';
+} from '../../server/src/lib/providerUsage.ts';
 import {
   classifyClaudeUsageResponse,
   fetchClaudeUsage,
   parseClaudeUsagePayload,
   parseClaudeUsageResources,
-} from '../../server/src/lib/executors/claude.js';
-import { claudeOauthMetadata } from '../../server/src/lib/executors/_claude-catalog.js';
+} from '../../server/src/lib/executors/claude.ts';
+import { claudeOauthMetadata } from '../../server/src/lib/executors/_claudeCatalog.ts';
+import { classifyKimiUsageResponse } from '../../server/src/lib/kimi/usage.ts';
 import {
   classifyCodexUsageResponse,
   consumeCodexRateLimitReset,
   parseCodexRateLimits,
   parseCodexUsageResources,
-} from '../../server/src/lib/executors/codex.js';
+  readCodexRateLimits,
+} from '../../server/src/lib/executors/codex.ts';
 
 test('usage contract never turns an executor error into an empty popup', () => {
   const status = normalizeProviderUsage({
@@ -76,6 +78,74 @@ test('last successful account resources also survive a temporary usage failure',
   assert.equal(merged.stale, true);
   assert.equal(merged.resources[0].summary, '10');
   assert.equal(merged.dataCheckedAt, 100);
+});
+
+test('Новый ответ Kimi и Codex без кошелька заменяет прежний баланс справочной карточкой', () => {
+  const cases = [
+    {
+      classify: classifyKimiUsageResponse,
+      result: {
+        kind: 'ok',
+        summary: { used: 40, limit: 100 },
+        extra_usage: null,
+      },
+      key: 'kimi-extra-usage',
+      summary: 'Не включено или не пополнено',
+    },
+    {
+      classify: classifyCodexUsageResponse,
+      result: { rateLimits: { primary: { usedPercent: 40 }, credits: null } },
+      key: 'chatgpt-credits',
+      summary: 'Нет данных о кредитах',
+    },
+  ];
+
+  for (const { classify, result, key, summary } of cases) {
+    const previous = normalizeProviderUsage({
+      state: 'ok',
+      resources: [{
+        key,
+        label: 'Доплата',
+        summary: 'Баланс: 10',
+        controls: [],
+      }],
+    }, { checkedAt: 100 });
+    const current = normalizeProviderUsage(classify({ result }), { checkedAt: 200 });
+    const merged = mergeProviderUsage(previous, current);
+
+    assert.equal(merged.state, 'ok');
+    assert.equal(merged.stale, false);
+    assert.equal(merged.resources.find((resource) => resource.key === key).summary, summary);
+    assert.equal(merged.dataCheckedAt, 200);
+  }
+});
+
+test('При сбое Kimi и Codex не создают заглушки и сохраняют последний снимок ресурсов', () => {
+  const failures = [
+    classifyKimiUsageResponse({ result: { kind: 'error', status: 503 } }),
+    classifyCodexUsageResponse({ error: { message: 'Service unavailable' } }),
+  ];
+
+  for (const failure of failures) {
+    const current = normalizeProviderUsage(failure, { checkedAt: 200 });
+    const previous = normalizeProviderUsage({
+      state: 'ok',
+      resources: [{
+        key: 'balance',
+        label: 'Баланс',
+        summary: '10',
+        controls: [],
+      }],
+    }, { checkedAt: 100 });
+    const merged = mergeProviderUsage(previous, current);
+
+    assert.deepEqual(current.resources, []);
+    assert.equal(mergeProviderUsage(null, current).resources.length, 0);
+    assert.equal(merged.state, 'unavailable');
+    assert.equal(merged.stale, true);
+    assert.deepEqual(merged.resources, previous.resources);
+    assert.equal(merged.dataCheckedAt, 100);
+  }
 });
 
 test('provider without a usage API is explicit instead of blank', () => {
@@ -209,11 +279,150 @@ test('Codex app-server rate limits become generic and model-family bars', () => 
   });
 
   assert.deepEqual(bars.map((bar) => [bar.key, bar.label, bar.pct]), [
-    ['codex:primary', 'Сессия (5ч)', 18],
-    ['codex:secondary', 'Неделя (7д)', 37],
+    ['codex:primary', 'Сессия (5ч)', 18.4],
+    ['codex:secondary', 'Неделя (7д)', 36.6],
     ['codex_spark:primary', 'Неделя · GPT-5.3-Codex-Spark', 7],
   ]);
   assert.equal(bars[0].resetsAt, '2026-08-05T03:20:00.000Z');
+});
+
+test('Codex bar order is owned by GrigDesk, not by the service key order', () => {
+  // `rateLimitsByLimitId` — объект, и OpenAI перетасовывает ключи от ответа к ответу
+  // (замер: шесть запросов подряд дали три разных порядка). Без своей сортировки
+  // полосы в шапке скакали на каждом минутном обновлении реестра.
+  const buckets = {
+    base_model_inference: {
+      limitId: 'base_model_inference',
+      limitName: 'gpt-reserve',
+      primary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_788_323_408 },
+    },
+    codex_bengalfox: {
+      limitId: 'codex_bengalfox',
+      limitName: 'GPT-5.3-Codex-Spark',
+      primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 1_787_736_608 },
+      secondary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_788_323_408 },
+    },
+    codex: {
+      limitId: 'codex',
+      primary: { usedPercent: 2, windowDurationMins: 10_080, resetsAt: 1_788_272_122 },
+    },
+  };
+
+  const shuffled = (keys) => parseCodexRateLimits({
+    rateLimitsByLimitId: Object.fromEntries(keys.map((key) => [key, buckets[key]])),
+  }).map((bar) => [bar.key, bar.group, bar.label]);
+
+  // Общая квота аккаунта первой, затем именованные вёдра по видимой подписи.
+  const expected = [
+    ['codex:primary', 'codex', 'Неделя (7д)'],
+    ['codex_bengalfox:primary', 'codex_bengalfox', 'Сессия · GPT-5.3-Codex-Spark'],
+    ['codex_bengalfox:secondary', 'codex_bengalfox', 'Неделя · GPT-5.3-Codex-Spark'],
+    ['base_model_inference:primary', 'base_model_inference', 'Неделя · gpt-reserve'],
+  ];
+
+  assert.deepEqual(shuffled(['codex', 'codex_bengalfox', 'base_model_inference']), expected);
+  assert.deepEqual(shuffled(['base_model_inference', 'codex_bengalfox', 'codex']), expected);
+  assert.deepEqual(shuffled(['codex_bengalfox', 'base_model_inference', 'codex']), expected);
+});
+
+test('An unknown window slot shows up instead of being silently dropped', () => {
+  // Схема app-server знает сегодня ровно primary и secondary, но перечислять их
+  // списком — значит потерять третий слот молча, как терялось бы новое ведро при
+  // allowlist по id. Окном считается любое поле с числовым usedPercent; `credits`
+  // и `individualLimit` под это не подходят и в полосы не превращаются.
+  const bars = parseCodexRateLimits({
+    rateLimitsByLimitId: {
+      codex: {
+        limitId: 'codex',
+        secondary: { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_788_272_122 },
+        tertiary: { usedPercent: 10, windowDurationMins: 43_200, resetsAt: 1_790_000_000 },
+        primary: { usedPercent: 5, windowDurationMins: 300, resetsAt: 1_787_736_608 },
+        credits: { hasCredits: false, unlimited: false, balance: '0' },
+        individualLimit: { limit: '10', used: '1', remainingPercent: 90, resetsAt: 1_790_000_000 },
+        spendControlReached: false,
+        planType: 'pro',
+      },
+    },
+  });
+
+  // Порядок — по длительности окна, а не по имени слота: имена придумывает сервис.
+  assert.deepEqual(bars.map((bar) => [bar.key, bar.label, bar.pct]), [
+    ['codex:primary', 'Сессия (5ч)', 5],
+    ['codex:secondary', 'Неделя (7д)', 40],
+    ['codex:tertiary', 'Окно (30д)', 10],
+  ]);
+});
+
+test('Claude spend limit reached is stated, not inferred from numbers', () => {
+  // Сервис сообщает это отдельным полем. Выводить из `used >= limit` нельзя:
+  // у выключенной доплаты и у режима «без потолка» чисел может не быть вовсе.
+  const [calm] = parseClaudeUsageResources({
+    extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 100, currency: 'EUR' },
+  });
+  assert.equal(calm.tone, 'ok');
+  assert.doesNotMatch(calm.note, /потолок/i);
+
+  const [reached] = parseClaudeUsageResources({
+    extra_usage: {
+      is_enabled: true,
+      monthly_limit: 2000,
+      used_credits: 2000,
+      currency: 'EUR',
+      spend_limit_reached: true,
+    },
+  });
+  assert.equal(reached.tone, 'bad');
+  assert.match(reached.note, /Месячный потолок доплаты выбран/);
+});
+
+test('Claude bars name their bucket so scoped families stay separable', () => {
+  const bars = parseClaudeUsagePayload({
+    limits: [
+      { kind: 'session', percent: 2 },
+      { kind: 'weekly_all', percent: 60 },
+      { kind: 'weekly_scoped', percent: 0, scope: { model: { display_name: 'Fable' } } },
+    ],
+  });
+
+  assert.deepEqual(bars.map((bar) => bar.group), [
+    'subscription',
+    'subscription',
+    'scoped:Fable',
+  ]);
+});
+
+test('Codex spend control surfaces instead of stopping the account silently', () => {
+  // Поля приходили с самого начала и не показывались нигде: исчерпанный денежный
+  // потолок выглядел как «всё молча встало» без подсказки во всплывашке.
+  const quiet = parseCodexUsageResources({
+    rateLimits: { limitId: 'codex', individualLimit: null, spendControlReached: false },
+  });
+  assert.equal(quiet.find((resource) => resource.key === 'spend-control'), undefined);
+
+  const reached = parseCodexUsageResources({
+    rateLimits: {
+      limitId: 'codex',
+      individualLimit: { limit: '50.00', used: '50.00', remainingPercent: 0, resetsAt: 1_790_000_000 },
+      spendControlReached: true,
+      rateLimitReachedType: 'workspace_owner_usage_limit_reached',
+    },
+  });
+  const resource = reached.find((item) => item.key === 'spend-control');
+
+  assert.equal(resource.tone, 'bad');
+  // Деньги остаются строками как пришли: Number на них молча теряет точность.
+  assert.equal(resource.summary, '50.00 из 50.00');
+  assert.equal(resource.percent, 100);
+  assert.match(resource.note, /Лимит трат исчерпан/);
+  assert.match(resource.note, /лимит расхода владельца/);
+});
+
+test('An unknown reached reason is shown as the service word, not invented', () => {
+  const resources = parseCodexUsageResources({
+    rateLimits: { limitId: 'codex', rateLimitReachedType: 'some_future_reason' },
+  });
+
+  assert.match(resources.find((item) => item.key === 'spend-control').note, /some_future_reason/);
 });
 
 test('Codex usage distinguishes login, old CLI and an empty service response', () => {
@@ -232,6 +441,74 @@ test('Codex usage distinguishes login, old CLI and an empty service response', (
   const empty = classifyCodexUsageResponse({ result: { rateLimits: null } });
   assert.equal(empty.state, 'unavailable');
   assert.match(empty.message, /не вернул/i);
+});
+
+test('Codex без состояния кредитов показывает серую карточку с прежней ссылкой покупки', () => {
+  for (const credits of [null, undefined]) {
+    for (const result of [
+      { rateLimits: { primary: { usedPercent: 40 }, credits } },
+      { rateLimitsByLimitId: { codex: { primary: { usedPercent: 40 }, credits } } },
+    ]) {
+      const usage = classifyCodexUsageResponse({ result });
+
+      assert.equal(usage.state, 'ok');
+      assert.equal(usage.bars.length, 1);
+      assert.deepEqual(usage.resources, [{
+        key: 'chatgpt-credits',
+        label: 'Дополнительные кредиты',
+        summary: 'Нет данных о кредитах',
+        tone: 'muted',
+        note: 'Покупка и автопополнение управляются в ChatGPT.',
+        controls: [{
+          id: 'manage-credits',
+          kind: 'link',
+          label: 'Купить / управлять кредитами',
+          href: 'https://chatgpt.com/codex/settings/usage',
+        }],
+      }]);
+    }
+  }
+});
+
+test('Codex не считает карточку кредитов данными пустого или неудачного ответа', () => {
+  for (const result of [
+    {},
+    { rateLimits: null },
+    {
+      rateLimitsByLimitId: {},
+      credits: null,
+      rateLimitResetCredits: { availableCount: 0 },
+    },
+  ]) {
+    const usage = classifyCodexUsageResponse({ result });
+
+    assert.equal(usage.state, 'unavailable');
+    assert.match(usage.message, /OpenAI не вернул данные о лимитах Codex/);
+    assert.deepEqual(usage.resources, []);
+    assert.deepEqual(parseCodexUsageResources(result), []);
+  }
+
+  const failed = normalizeProviderUsage(classifyCodexUsageResponse({
+    result: { rateLimits: { primary: { usedPercent: 40 } } },
+    error: { message: 'Service unavailable' },
+  }));
+
+  assert.equal(failed.state, 'unavailable');
+  assert.deepEqual(failed.resources, []);
+});
+
+test('Codex показывает кредиты и когда получен только контроль трат или заработанный сброс', () => {
+  for (const result of [
+    { rateLimits: { spendControlReached: true } },
+    { rateLimitResetCredits: { availableCount: 1 } },
+    { credits: { hasCredits: true, unlimited: true } },
+  ]) {
+    const usage = classifyCodexUsageResponse({ result });
+
+    assert.equal(usage.state, 'ok');
+    assert.deepEqual(usage.bars, []);
+    assert.ok(usage.resources.some((resource) => resource.key === 'chatgpt-credits'));
+  }
 });
 
 test('Codex exposes purchased credits and earned resets through generic resources', () => {
@@ -271,6 +548,20 @@ test('Codex exposes purchased credits and earned resets through generic resource
   assert.deepEqual(usage.resources, resources);
 });
 
+test('Codex credit balance is rounded to hundredths with grouped thousands', () => {
+  const summaryOf = (balance) => parseCodexUsageResources({
+    credits: {
+      hasCredits: true,
+      unlimited: false,
+      balance,
+    },
+  })[0].summary;
+
+  assert.equal(summaryOf('62420.0214700000'), 'Баланс: 62 420,02');
+  assert.equal(summaryOf(1500), 'Баланс: 1 500');
+  assert.equal(summaryOf('не число'), 'Баланс: не число');
+});
+
 test('Codex reset consumption forwards a stable idempotency key and maps outcomes', async () => {
   const calls = [];
   const reset = await consumeCodexRateLimitReset('codex', {
@@ -302,7 +593,7 @@ test('Codex reset consumption forwards a stable idempotency key and maps outcome
 });
 
 test('Claude usage refreshes an expired CLI token instead of asking for login', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;
@@ -359,7 +650,7 @@ test('Claude usage refreshes an expired CLI token instead of asking for login', 
 });
 
 test('temporary Claude token refresh failure is not reported as logout', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;
@@ -388,7 +679,7 @@ test('temporary Claude token refresh failure is not reported as logout', async (
 });
 
 test('OAuth-пара Claude извлекается из установленного бинаря единым источником', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-bin-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-bin-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const bin = path.join(dir, 'claude-fixture');
   await writeFile(bin, Buffer.from([
@@ -404,7 +695,7 @@ test('OAuth-пара Claude извлекается из установленно
 });
 
 test('без полной OAuth-пары refresh завершается до сетевого запроса', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const bin = path.join(dir, 'claude-without-oauth');
@@ -441,9 +732,10 @@ test('Claude usage payload is converted to subscription and scoped family bars',
       },
     ],
   });
+
   assert.deepEqual(bars.map((bar) => [bar.label, bar.pct]), [
-    ['Сессия (5ч)', 12],
-    ['Неделя · Opus', 92],
+    ['Сессия (5ч)', 12.4],
+    ['Неделя · Opus', 91.6],
   ]);
 });
 
@@ -516,4 +808,233 @@ test('successful but empty Claude payload is visible instead of a blank popup', 
   assert.equal(empty.state, 'unavailable');
   assert.match(empty.message, /не вернул/i);
   assert.deepEqual(empty.bars, []);
+});
+
+// --- моргнувшая сеть не должна выглядеть как «лимиты недоступны» ---------------
+// Живой случай 22.08.2026: VPN-туннель моргает секундами, и одиночный (у Codex) либо
+// мгновенно повторённый (у Claude) запрос попадает в то же моргание. В шапке появлялось
+// «Не удалось получить лимиты», хотя аккаунт исправен. Отсюда пауза между попытками:
+// повтор без неё удваивает трафик, не увеличивая шанс на ответ.
+
+test('Claude usage survives a blinking tunnel: retries with a pause, not instantly', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-usage-retry-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'live-access',
+      refreshToken: 'live-refresh',
+      expiresAt: now + 3_600_000,
+      refreshTokenExpiresAt: now + 86_400_000,
+      scopes: ['user:profile', 'user:inference'],
+      subscriptionType: 'max',
+    },
+  }), { mode: 0o600 });
+
+  const naps = [];
+  let attempts = 0;
+  const usage = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    sleep: async (ms) => { naps.push(ms); },
+    fetchImpl: async () => {
+      attempts += 1;
+      // Два первых запроса попали в моргание, третий доехал.
+      if (attempts < 3) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify({
+        limits: [{ name: 'weekly_all', utilization: 41, resets_at: null }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  assert.equal(attempts, 3, 'до успеха дошли третьей попыткой');
+  assert.deepEqual(naps, [400, 1200], 'между попытками была нарастающая пауза');
+  assert.equal(usage.status, 200, 'человек видит лимиты, а не отказ');
+});
+
+test('Claude usage does not retry a refusal the network cannot fix', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-usage-403-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'live-access',
+      refreshToken: 'live-refresh',
+      expiresAt: now + 3_600_000,
+      refreshTokenExpiresAt: now + 86_400_000,
+      scopes: ['user:profile', 'user:inference'],
+      subscriptionType: 'max',
+    },
+  }), { mode: 0o600 });
+
+  let attempts = 0;
+  const naps = [];
+  const usage = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    sleep: async (ms) => { naps.push(ms); },
+    fetchImpl: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify({ error: { message: 'forbidden' } }), { status: 403 });
+    },
+  });
+
+  assert.equal(attempts, 1, 'отказ аккаунта повторять нечем — он не про сеть');
+  assert.deepEqual(naps, [], 'и задерживать человека паузой тоже не за чем');
+  assert.equal(usage.status, 403);
+});
+
+test('Codex usage retries transport failures but accepts a permanent answer at once', async () => {
+  const naps = [];
+  let attempts = 0;
+  const recovered = await readCodexRateLimits('codex', {
+    sleep: async (ms) => { naps.push(ms); },
+    request: async () => {
+      attempts += 1;
+      if (attempts < 3) return { error: { message: 'Codex app-server не ответил за отведённое время' } };
+      return {
+        result: {
+          rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: null } },
+        },
+      };
+    },
+  });
+
+  assert.equal(attempts, 3, 'таймаут app-server лечится повтором');
+  assert.deepEqual(naps, [400, 1200], 'повтор идёт с нарастающей паузой');
+  assert.equal(classifyCodexUsageResponse(recovered).state, 'ok');
+
+  for (const [label, error] of [
+    ['неавторизован', { message: 'Please run codex login first' }],
+    ['устаревший CLI', { code: -32601, message: 'method not found' }],
+  ]) {
+    let tries = 0;
+    const response = await readCodexRateLimits('codex', {
+      sleep: async () => { throw new Error('паузы быть не должно'); },
+      request: async () => { tries += 1; return { error }; },
+    });
+    assert.equal(tries, 1, `${label}: ожиданием не лечится, повтор не нужен`);
+    assert.notEqual(classifyCodexUsageResponse(response).state, 'ok');
+  }
+});
+
+// Фоновый тик читает по требованию, а не по TTL, и не теряет прошлый снимок: слияние
+// при сбое держит старые полосы, только если ему есть что держать.
+test('usage read cache: refresh перечитывает до истечения TTL и отдаёт load прошлый снимок', async () => {
+  let currentTime = 100;
+  const seen = [];
+  const cache = createUsageReadCache(async (previous) => {
+    seen.push(previous);
+    return { generation: seen.length };
+  }, { maxAgeMs: 60, now: () => currentTime });
+
+  assert.equal(cache.ageMs(), Number.POSITIVE_INFINITY, 'без снимка возраст бесконечен');
+  assert.deepEqual(await cache.read(), { generation: 1 });
+  assert.equal(cache.ageMs(), 0);
+
+  currentTime = 130;
+  assert.equal(cache.ageMs(), 30);
+  assert.deepEqual(await cache.read(), { generation: 1 }, 'TTL не вышел — read молчит');
+  assert.deepEqual(await cache.refresh(), { generation: 2 }, 'refresh ходит, не дожидаясь TTL');
+  assert.deepEqual(seen, [null, { generation: 1 }]);
+
+  currentTime = 150;
+  assert.deepEqual(await cache.read(), { generation: 2 }, 'снимок refresh обновил и TTL');
+});
+
+test('usage read cache: refresh не дублирует уже начатое чтение', async () => {
+  let finishFirst;
+  let calls = 0;
+  const cache = createUsageReadCache(async () => {
+    calls += 1;
+    return new Promise((resolve) => { finishFirst = resolve; });
+  }, { maxAgeMs: 60, now: () => 100 });
+
+  const reading = cache.read();
+  const refreshing = cache.refresh();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+
+  finishFirst({ generation: 1 });
+  assert.deepEqual(await Promise.all([reading, refreshing]), [
+    { generation: 1 },
+    { generation: 1 },
+  ]);
+});
+
+test('usage cache: clear перенаправляет старый результат и отказ к актуальному чтению', async () => {
+  for (const rejected of [false, true]) {
+    let finishOld;
+    let rejectOld;
+    let finishNew;
+    let calls = 0;
+    const cache = createUsageReadCache(() => {
+      calls += 1;
+
+      return new Promise((resolve, reject) => {
+        if (calls === 1) {
+          finishOld = resolve;
+          rejectOld = reject;
+        } else {
+          finishNew = resolve;
+        }
+      });
+    });
+    const old = cache.read();
+
+    await Promise.resolve();
+    cache.clear();
+
+    const reading = cache.read();
+    const refreshing = cache.refresh();
+
+    await Promise.resolve();
+
+    finishNew('B');
+    assert.deepEqual(await Promise.all([old, reading, refreshing]), ['B', 'B', 'B']);
+
+    if (rejected) {
+      rejectOld(new Error('old failure'));
+    } else {
+      finishOld('A');
+    }
+
+    assert.equal(await cache.read(), 'B');
+    assert.equal(calls, 2);
+  }
+});
+
+
+test('проценты Claude и Codex сохраняют дробь и ограничивают верхнюю границу', () => {
+  for (const [value, expected] of [[99.6, 99.6], [0, 0], [6, 6], [28, 28], [100, 100], [130, 100]]) {
+    const window = { usedPercent: value, windowDurationMins: 300 };
+    const variants = [
+      parseClaudeUsagePayload({ limits: [{ kind: 'session', percent: value }] }),
+      parseClaudeUsagePayload({ five_hour: { utilization: value } }),
+      parseCodexRateLimits({ rateLimits: { primary: window } }),
+      parseCodexRateLimits({ rateLimitsByLimitId: { codex: { primary: window } } }),
+    ];
+
+    for (const bars of variants) {
+      assert.equal(bars.length, 1);
+      assert.ok(Math.abs(bars[0].pct - expected) < 1e-9, `${value}: ${bars[0].pct}`);
+    }
+  }
+});
+
+
+test('нечисловые и отрицательные замеры Claude и Codex не создают полосу', () => {
+  for (const value of [undefined, null, '', true, '42', NaN, Infinity, -5]) {
+    const variants = [
+      [parseClaudeUsagePayload({ limits: [{ kind: 'session', percent: value }] }), 'session'],
+      [parseClaudeUsagePayload({ five_hour: { utilization: value } }), 'five_hour'],
+      [parseCodexRateLimits({ rateLimits: { primary: { usedPercent: value } } }), 'codex:primary'],
+    ];
+
+    for (const [bars, key] of variants) {
+      assert.equal(bars.some((bar) => bar.key === key), false, String(value));
+    }
+  }
 });

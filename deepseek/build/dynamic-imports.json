@@ -1,0 +1,62 @@
+[
+  {
+    "file": "native/system/packages/entry/src/flock.ts",
+    "expression": "require.resolve(`@deepseek-ai/node-addon-system-${platform}-${arch}/package.json`)",
+    "reason": "Native package определяется process.platform/arch и libc; host manifest и addon включаются явно."
+  },
+  {
+    "file": "native/system/packages/entry/src/flock.ts",
+    "expression": "require(join(dirname(manifest), 'bin', filename))",
+    "reason": "Native package определяется process.platform/arch и libc; host manifest и addon включаются явно."
+  },
+  {
+    "file": "packages/typert/loader/src/index.ts",
+    "expression": "import(pathToFileURL(path).href)",
+    "reason": "Registry загружает typert export только из package manifest выбранного host plugin; generated exports проверяются после сборки."
+  },
+  {
+    "file": "packages/typert/loader/src/index.ts",
+    "expression": "require.resolve(`${pkgName}/package.json`)",
+    "reason": "Registry загружает typert export только из package manifest выбранного host plugin; generated exports проверяются после сборки."
+  },
+  {
+    "file": "vendor/include/src/index.ts",
+    "expression": "import(/* @vite-ignore */ this.filename)",
+    "reason": "Include разрешает host-owned composition относительно boot baseUrl; штатные и GrigDesk overlays передаются явными путями."
+  },
+  {
+    "file": "vendor/loader/src/config/tree.ts",
+    "expression": "import(/* @vite-ignore */name)",
+    "reason": "Cordis Loader разрешает plugin из YAML/preset map и host baseUrl; все shipped plugin names замкнуты manifests."
+  },
+  {
+    "file": "vendor/loader/src/config/tree.ts",
+    "expression": "import(/* @vite-ignore */new URL(name, this.ctx.baseUrl).href)",
+    "reason": "Cordis Loader разрешает plugin из YAML/preset map и host baseUrl; все shipped plugin names замкнуты manifests."
+  },
+  {
+    "file": "vendor/loader/src/internal.ts",
+    "expression": "require(id)",
+    "reason": "Cordis loader importRequire получает идентификатор из разрешения plugin; package map принадлежит host, не модели."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/env-api-keys.js",
+    "expression": "import(__rewriteRelativeImportExtension(specifier))",
+    "reason": "Только node:fs, node:os и node:path из констант shipped кода; обращений к сети нет."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/auth/context.js",
+    "expression": "import(__rewriteRelativeImportExtension(specifier))",
+    "reason": "Только node:fs/promises и node:os для auth context; GLM передаёт явный служебный ключ."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/auth/oauth/load.js",
+    "expression": "import(__rewriteRelativeImportExtension(runtimeSpecifier))",
+    "reason": "Относительные OAuth-модули перечислены в shipped loaders и сохранены в dist; GLM не использует OAuth."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
+    "expression": "import(__rewriteRelativeImportExtension(runtimeSpecifier))",
+    "reason": "Относительный bedrock-converse-stream.js сохранён вместе с exact AWS closure; GLM использует zai."
+  }
+]

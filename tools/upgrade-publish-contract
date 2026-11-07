@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Переход пропустившей промежуточный релиз установки на проверенный tag/SHA.
+# Checkout сохраняется при dirty/diverged; restart остаётся отдельной командой оператора.
+set -euo pipefail
+
+ROOT=${GRIGDESK_UPGRADE_ROOT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}
+[[ "$#" == 4 && "$1" == --tag && "$3" == --sha ]] || {
+  echo 'Использование: tools/upgrade-publish-contract --tag vX.Y.Z --sha <40 hex>' >&2
+  exit 2
+}
+TAG=$2
+TARGET_SHA=$4
+[[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ &&
+   "$TARGET_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 2
+[[ "$(git -C "$ROOT" branch --show-current)" == main &&
+   -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ]] || {
+  echo 'Требуется чистая ветка main; изменения сохранены, переход остановлен.' >&2
+  exit 1
+}
+git -C "$ROOT" fetch --no-tags origin "refs/tags/$TAG"
+[[ "$(git -C "$ROOT" cat-file -t FETCH_HEAD)" == tag &&
+   "$(git -C "$ROOT" rev-list -n 1 FETCH_HEAD)" == "$TARGET_SHA" ]] || {
+  echo 'Тег не аннотирован или SHA не совпадает.' >&2
+  exit 1
+}
+git -C "$ROOT" merge-base --is-ancestor HEAD "$TARGET_SHA" || {
+  echo 'Checkout diverged: переход без fast-forward остановлен.' >&2
+  exit 1
+}
+git -C "$ROOT" show "$TARGET_SHA:server/deepseek-runtime-contract.json" |
+  node --input-type=module -e '
+    let data = "";
+    for await (const chunk of process.stdin) data += chunk;
+    const contract = JSON.parse(data);
+    if (contract.format !== 1 || contract.publishContract !== 1 || contract.mode !== "installed") {
+      throw new Error("Тег должен быть промежуточным installed-релизом с publish contract 1");
+    }
+  '
+git -C "$ROOT" merge --ff-only "$TARGET_SHA"
+bash "$ROOT/bin/grigdesk-ctl" deps
+bash "$ROOT/bin/grigdesk-ctl" build
+echo 'Промежуточный релиз подготовлен. Перезапусти GrigDesk вручную, затем обновись штатной кнопкой.'

@@ -1,0 +1,15 @@
+{
+  "attemptId": "a_90829082908290829082908290829082",
+  "catalogHash": "17bc69db988f5c174f484063523f6a59321223d073c11a007f0f846ebe5877eb",
+  "node": "scout",
+  "profile": "demo-profile",
+  "protocolVersion": 2,
+  "result": "done",
+  "routeHash": "f1c1d4f8c688f047cd8874b9b412e3780a45503de7425c6c5ba93e46f5f6c499",
+  "routeId": "debug",
+  "runId": "legacy-fixture",
+  "runKey": "SCOUT",
+  "schema": 1,
+  "taskId": "9082",
+  "transitionHash": "635379f990fb392e2b61773e13b8b32a16acbad519ab57ea65f780067a8800fa"
+}

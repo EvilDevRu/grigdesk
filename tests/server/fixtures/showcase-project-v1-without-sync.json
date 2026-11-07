@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "id": "legacy000001",
+  "title": "Старый ролик",
+  "revision": 4,
+  "ref": {
+    "kind": "project",
+    "id": "demo-profile"
+  },
+  "target": {
+    "status": "blocked",
+    "ref": {
+      "kind": "project",
+      "id": "demo-profile"
+    },
+    "reason": "Стенд временно недоступен.",
+    "nextAction": null
+  },
+  "brief": [
+    "Показать готовый результат"
+  ],
+  "scenes": [
+    {
+      "id": "scene-legacy",
+      "order": 1,
+      "title": "Ручная запись",
+      "screenId": "overview",
+      "startState": null,
+      "readyCondition": null,
+      "actions": [
+        {
+          "kind": "click",
+          "targetId": "open"
+        }
+      ],
+      "narration": "Открываем з+амок.",
+      "caption": "Открываем замок",
+      "subtitleText": "Открываем замок.",
+      "direction": {
+        "tone": null,
+        "pace": null,
+        "emphasis": [],
+        "pauses": [],
+        "stresses": []
+      },
+      "timing": null,
+      "audioSource": {
+        "kind": "recorded",
+        "voiceRef": null,
+        "artifactId": "audio-old"
+      },
+      "audio": {
+        "id": "audio-old",
+        "kind": "audio",
+        "inputHash": "audio-content-old",
+        "contentHash": "audio-content-old",
+        "producerVersion": "imported-1",
+        "durationMs": 1200,
+        "byteSize": 4096
+      },
+      "clip": null,
+      "frame": null,
+      "checks": [],
+      "stale": false
+    }
+  ],
+  "decisions": [],
+  "latestFinal": {
+    "video": {
+      "id": "final-old",
+      "kind": "final",
+      "inputHash": "final-input-old",
+      "contentHash": "final-content-old",
+      "producerVersion": "assembler-1",
+      "durationMs": 2400,
+      "byteSize": 8192
+    },
+    "subtitles": {
+      "id": "subtitles-old",
+      "kind": "subtitles",
+      "inputHash": "final-input-old",
+      "contentHash": "subtitles-content-old",
+      "producerVersion": "assembler-1",
+      "durationMs": null,
+      "byteSize": 256
+    },
+    "manifestId": "final-input-old",
+    "builtAt": "2026-08-01T10:00:00.000Z",
+    "current": false
+  },
+  "createdAt": "2026-08-01T09:00:00.000Z",
+  "updatedAt": "2026-08-01T10:00:00.000Z"
+}

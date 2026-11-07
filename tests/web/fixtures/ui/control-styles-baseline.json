@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "findings": {
+    "web/src/views/InboxView.vue": {
+      ".section-tab span": {
+        "padding": {
+          "1px 6px": 1
+        },
+        "border-radius": {
+          "999px": 1
+        },
+        "background": {
+          "var(--surface-2)": 1
+        },
+        "font-size": {
+          "11px": 1
+        }
+      }
+    },
+    "web/src/views/code/CodePanel.vue": {
+      ".tree .trow": {
+        "padding-left": {
+          "calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step))": 1
+        }
+      },
+      ".search-result": {
+        "min-height": {
+          "30px": 1
+        },
+        "height": {
+          "auto": 1
+        },
+        "padding-block": {
+          "5px": 1
+        }
+      }
+    },
+    "web/src/views/code/PatchReview.vue": {
+      ".patch-file-head": {
+        "padding": {
+          "7px 12px": 1
+        },
+        "background": {
+          "var(--surface)": 1
+        }
+      },
+      ".patch-line": {
+        "min-height": {
+          "20px": 1
+        },
+        "line-height": {
+          "20px": 1
+        },
+        "cursor": {
+          "pointer": 1
+        }
+      },
+      ".patch-line.add": {
+        "background": {
+          "color-mix(in srgb, var(--good) 14%, transparent)": 1
+        }
+      },
+      ".patch-line.del": {
+        "background": {
+          "color-mix(in srgb, var(--bad) 14%, transparent)": 1
+        }
+      },
+      ".patch-line.meta": {
+        "color": {
+          "var(--ink-mid)": 1
+        }
+      }
+    },
+    "web/src/views/diff/DiffPanel.vue": {
+      ".trow": {
+        "background": {
+          "none": 1
+        },
+        "border": {
+          "none": 1
+        },
+        "color": {
+          "var(--ink)": 1
+        },
+        "padding": {
+          "5px 8px": 1
+        },
+        "border-radius": {
+          "7px": 1
+        },
+        "cursor": {
+          "pointer": 1
+        },
+        "font-size": {
+          "12.5px": 1
+        }
+      },
+      ".trow:hover": {
+        "background": {
+          "var(--surface)": 1
+        }
+      },
+      ".trow.dir": {
+        "color": {
+          "var(--ink-mid)": 1
+        }
+      },
+      ".frow.sel": {
+        "background": {
+          "color-mix(in srgb, var(--accent) 16%, transparent)": 1
+        }
+      }
+    },
+    "web/src/styles/base.css": {
+      "button": {
+        "font-family": {
+          "inherit": 1
+        }
+      }
+    },
+    "web/src/styles/utilities.css": {
+      ".mono": {
+        "font-family": {
+          "var(--mono)": 1
+        }
+      }
+    }
+  }
+}

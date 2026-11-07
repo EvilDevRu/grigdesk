@@ -6,54 +6,103 @@
 #   {language, language_probability, duration, model, segments:[{start,end,text}]}
 # Любые логи/прогресс — только в stderr, чтобы не ломать парсинг на стороне Node.
 #
-# Модель скачивается автоматически при первом запуске и кэшируется
-# в HF_HOME (см. Dockerfile — /data/models; medium ~1.5 ГБ). На CPU работает в режиме int8.
+# Обычная транскрипция работает только с уже подготовленной моделью в HF_HOME.
+# Сеть и скачивание разрешаются отдельному model-job, а не этому процессу.
 
 import os
 import sys
 import json
 import argparse
+import math
+
+
+def resolve_snapshot(snapshot_download, args):
+    """Находит canonical или разрешённый сервером alias только на pinned revision."""
+    errors = []
+    for repo in [args.model_repo, *getattr(args, 'model_alias', [])]:
+        try:
+            return snapshot_download(
+                repo_id=repo,
+                revision=args.model_revision,
+                local_files_only=True,
+            )
+        except Exception as error:
+            errors.append(error)
+    if errors:
+        raise errors[-1]
+    raise RuntimeError('для модели не задан разрешённый репозиторий')
+
+
+def measure_hotwords(model, hotwords):
+    """Повторяет точную токенизацию и границу среза faster-whisper 1.2.1."""
+    if not hotwords:
+        return {'hotwordsTokens': 0, 'hotwordsTruncated': False}
+    encoded = model.hf_tokenizer.encode(
+        ' ' + hotwords.strip(),
+        add_special_tokens=False,
+    )
+    tokens = len(encoded.ids)
+    limit = model.max_length // 2 - 1
+    return {
+        'hotwordsTokens': tokens,
+        'hotwordsTruncated': tokens > limit,
+    }
 
 
 def load_model(WhisperModel, args):
     """
-    Загрузка модели офлайн-first.
-
-    faster-whisper при каждом запуске обращается к HuggingFace Hub, чтобы
-    проверить ревизию модели. Если сеть к huggingface.co недоступна (прокси/VPN,
-    офлайн-окружение), это валит распознавание с LocalEntryNotFoundError даже
-    тогда, когда модель уже целиком лежит в кэше HF_HOME.
-
-    Поэтому: сначала пробуем взять модель из кэша без сети (local_files_only),
-    а ходить в интернет за скачиванием будем только если в кэше её реально нет.
+    Fail-closed загрузка: первая диктовка никогда не начинает скрыто скачивать гигабайты.
+    Отсутствующая модель должна дойти до Node как явная ошибка model missing.
     """
-    # args.model может быть как именем (medium), так и путём к локальной модели —
-    # local_files_only безопасен в обоих случаях.
+    from huggingface_hub import snapshot_download
+    snapshot = resolve_snapshot(snapshot_download, args)
+    return WhisperModel(
+        snapshot,
+        device=args.device,
+        compute_type=args.compute_type,
+        local_files_only=True,
+    )
+
+
+def timestamp_value(value):
+    """Сохраняет недоверенную границу для строгой проверки на Node-стороне."""
     try:
-        return WhisperModel(
-            args.model,
-            device=args.device,
-            compute_type=args.compute_type,
-            local_files_only=True,
-        )
-    except Exception:
-        # В кэше модели нет — качаем (нужна сеть). Лог в stderr, чтобы не ломать JSON в stdout.
-        print(f'модель {args.model} не найдена в кэше, скачиваю с HuggingFace…', file=sys.stderr)
-        return WhisperModel(
-            args.model,
-            device=args.device,
-            compute_type=args.compute_type,
-            local_files_only=False,
-        )
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(result, 3) if math.isfinite(result) else None
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='faster-whisper транскрипция аудио в JSON')
     parser.add_argument('audio', help='путь к аудиофайлу (16 кГц mono wav и т.п.)')
     parser.add_argument('--model', default='medium', help='размер модели: tiny|base|small|medium|large-v3')
+    parser.add_argument('--model-repo', required=True, help='HF repo из серверного allowlist')
+    parser.add_argument('--model-revision', required=True, help='полный pinned commit SHA')
+    parser.add_argument('--model-alias', action='append', default=[], help='разрешённый alias того же pinned snapshot')
     parser.add_argument('--lang', default='ru', help="язык речи; 'auto' — автоопределение")
     parser.add_argument('--device', default='cpu', help='cpu|cuda')
     parser.add_argument('--compute-type', default='int8', help='int8|int8_float16|float16|float32')
+    parser.add_argument('--beam-size', default=5, type=int, help='ширина beam search')
+    parser.add_argument('--hotwords', default=None, help='термины-подсказки для распознавания')
+    parser.add_argument(
+        '--no-condition-previous',
+        dest='condition_on_previous_text',
+        action='store_false',
+        help='не использовать текст предыдущего сегмента как контекст',
+    )
+    parser.set_defaults(condition_on_previous_text=True)
+    parser.add_argument('--vad-silence-ms', default=500, type=int, help='минимальная пауза VAD, мс')
+    parser.add_argument(
+        '--initial-prompt',
+        default=None,
+        help='стилевая подсказка первому окну: задаёт пунктуацию, регистр и разбивку на предложения',
+    )
+    parser.add_argument(
+        '--word-timestamps',
+        action='store_true',
+        help='вернуть временные границы отдельных слов',
+    )
     parser.add_argument('--progress-file', default=None, help='куда писать прогресс {done,total} по ходу распознавания')
     args = parser.parse_args()
 
@@ -62,13 +111,26 @@ def main() -> None:
     from faster_whisper import WhisperModel
 
     model = load_model(WhisperModel, args)
+    hotwords_measure = measure_hotwords(model, args.hotwords)
 
     language = None if args.lang == 'auto' else args.lang
+    initial_prompt = args.initial_prompt or None
+    word_timestamps = bool(initial_prompt) or args.word_timestamps
+    # Связка обязательна и проверена замером на этой же модели: голый initial_prompt
+    # при condition_on_previous_text уводит модель в петлю — она повторяет текст самой
+    # подсказки вместо речи (три одинаковых сегмента на 79 секунд записи). Выравнивание
+    # по словам включает подавление повторов и снимает петлю. Явный запрос может
+    # включить метки и без промпта, но промпт всегда сохраняет прежнее условие.
     segments, info = model.transcribe(
         args.audio,
         language=language,
+        beam_size=args.beam_size,
+        hotwords=args.hotwords,
+        condition_on_previous_text=args.condition_on_previous_text,
+        initial_prompt=initial_prompt,
+        word_timestamps=word_timestamps,
         vad_filter=True,                                   # отсекаем тишину/паузы
-        vad_parameters={'min_silence_duration_ms': 500},
+        vad_parameters={'min_silence_duration_ms': args.vad_silence_ms},
     )
 
     total = round(info.duration or 0, 2)
@@ -91,8 +153,16 @@ def main() -> None:
     # segments — ленивый генератор: материализация здесь и запускает распознавание.
     # Тайм-код конца последнего сегмента / общая длительность = доля готовности.
     out_segments = []
+    out_words = []
     processed = 0
     for s in segments:
+        if word_timestamps:
+            for word in list(getattr(s, 'words', None) or []):
+                out_words.append({
+                    'start': timestamp_value(getattr(word, 'start', None)),
+                    'end': timestamp_value(getattr(word, 'end', None)),
+                    'text': str(getattr(word, 'word', '') or '').strip(),
+                })
         text = s.text.strip()
         if text:
             out_segments.append({
@@ -112,6 +182,9 @@ def main() -> None:
         'duration': round(info.duration, 2),
         'model': args.model,
         'segments': out_segments,
+        'words': out_words,
+        'word_timestamps': word_timestamps,
+        **hotwords_measure,
     }
     json.dump(result, sys.stdout, ensure_ascii=False)
 

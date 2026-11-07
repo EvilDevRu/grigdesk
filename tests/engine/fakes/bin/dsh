@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "OFFLINE_GUARD: real dsh invocation is forbidden" >&2
+exit 97

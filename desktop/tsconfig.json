@@ -1,0 +1,7 @@
+{
+  "extends": "../server/tsconfig.base.json",
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.mts"
+  ]
+}

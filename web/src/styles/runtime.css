@@ -1,0 +1,29 @@
+html,
+body,
+#app {
+  height: 100%;
+}
+
+/* Пока открыт диф-модал — гасим blur нижних оверлеев (приёмка/задача): они под непрозрачным
+   дифом, но их перерисовка под Monaco даёт мерцание. Класс ставит DiffModal. */
+html.diff-modal-open .soverlay,
+html.diff-modal-open .overlay {
+  backdrop-filter: none !important;
+}
+
+.ui-dialog-overlay[data-ui-layer='diff-workspace'] {
+  backdrop-filter: none;
+}
+
+body.ui-modal-scroll-lock {
+  overflow: hidden;
+}
+
+/* Видимая высота меняется с клавиатурой, а края учитывают системные вырезы устройства.
+   Скролл остаётся у рабочих панелей и не уносит поле ввода за экран. */
+#app {
+  height: var(--app-viewport-height, 100dvh);
+  min-width: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}

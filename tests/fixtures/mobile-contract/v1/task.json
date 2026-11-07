@@ -1,0 +1,30 @@
+{
+  "task": {
+    "id": "101",
+    "title": "Ждёт ворот",
+    "state": "waiting",
+    "stage": "GATE_PLAN",
+    "needsHuman": {
+      "kind": "gate",
+      "gate": "GATE_PLAN",
+      "text": "утвердить план работ",
+      "actionToken": "cccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "updatedAt": 1760000000000,
+    "stages": [
+      {
+        "key": "PLAN",
+        "title": "План",
+        "status": "done"
+      },
+      {
+        "key": "GATE_PLAN",
+        "title": "Утверждение плана",
+        "status": "waiting"
+      }
+    ],
+    "actions": {
+      "resume": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}

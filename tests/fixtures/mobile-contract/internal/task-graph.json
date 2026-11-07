@@ -1,0 +1,35 @@
+{
+  "task": "101",
+  "route": "feature",
+  "attempt": "attempt-alpha",
+  "profile": "test-profile",
+  "executable": true,
+  "keys": {
+    "plan": "PLAN",
+    "gate_plan": "GATE_PLAN"
+  },
+  "statuses": {
+    "plan": "done",
+    "gate_plan": "wait"
+  },
+  "pos": {
+    "plan": [
+      0,
+      0
+    ],
+    "gate_plan": [
+      0,
+      1
+    ]
+  },
+  "nodes": {
+    "plan": [
+      "agent",
+      "План"
+    ],
+    "gate_plan": [
+      "gate",
+      "Утверждение плана"
+    ]
+  }
+}

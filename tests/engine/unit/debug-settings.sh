@@ -45,11 +45,33 @@ assert_contains "$value" "SOURCE=profile" "profile source is reported"
 debug_settings_task_write 71 verbose 200
 assert_rc 0 "$?" "task debug override is stored through task state"
 value=$(debug_settings_resolve fixture 71 100)
-assert_contains "$value" "LEVEL=verbose" "live task override has highest priority"
-assert_contains "$value" "SOURCE=task" "task source is reported"
+assert_contains "$value" "LEVEL=decisions" "global level caps a stronger task override"
+assert_contains "$value" "SOURCE=global_cap" "global cap source is reported"
 value=$(debug_settings_resolve fixture 71 201)
 assert_contains "$value" "LEVEL=errors" "expired task override is ignored"
 assert_contains "$value" "SOURCE=profile" "expired task falls back to profile"
+
+revision=$(debug_settings_get "$global_file" CONFIG_REVISION)
+debug_settings_write "$global_file" "$revision" off 0
+assert_rc 0 "$?" "global off is a master switch"
+value=$(debug_settings_resolve fixture 71 100)
+assert_contains "$value" "LEVEL=off" "task override cannot bypass global off"
+assert_contains "$value" "SOURCE=global_cap" "disabled task names the global cap"
+revision=$(debug_settings_get "$global_file" CONFIG_REVISION)
+debug_settings_write "$global_file" "$revision" decisions 0
+assert_rc 0 "$?" "global decisions restores scoped limits"
+
+revision=$(debug_settings_get "$global_file" CONFIG_REVISION)
+debug_settings_write "$global_file" "$revision" verbose 150
+assert_rc 0 "$?" "global level can have a TTL"
+value=$(debug_settings_resolve fixture 71 100)
+assert_contains "$value" "LEVEL=verbose" "task can use verbose within global cap"
+assert_contains "$value" "EXPIRES_AT=150" "scoped view names earlier global expiry"
+value=$(debug_settings_resolve fixture 71 151)
+assert_contains "$value" "LEVEL=off" "expired global level disables scoped trace"
+revision=$(debug_settings_get "$global_file" CONFIG_REVISION)
+debug_settings_write "$global_file" "$revision" decisions 0
+assert_rc 0 "$?" "global decisions restores following cases"
 
 revision=$(debug_settings_get "$profile_file" CONFIG_REVISION)
 debug_settings_write "$profile_file" "$revision" off 0

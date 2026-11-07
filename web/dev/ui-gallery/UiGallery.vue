@@ -1,0 +1,547 @@
+<template>
+  <main class="ui-gallery" :data-ui-touch="touch ? '' : undefined">
+    <header class="ui-gallery__header">
+      <p class="muted">Dev/test entry · без store, API и авторизации</p>
+      <h1>UI-kit GrigDesk</h1>
+    </header>
+
+    <section class="ui-gallery__section">
+      <h2>Actions</h2>
+      <div
+        v-for="variant in variants"
+        :key="variant"
+        class="ui-gallery__row"
+        data-geometry-row="peer"
+      >
+        <UiButton
+          v-for="tone in tones"
+          :key="tone"
+          :variant="variant"
+          :tone="tone"
+        >{{ variant }} · {{ tone }}</UiButton>
+      </div>
+      <div class="ui-gallery__row" data-geometry-row="peer">
+        <UiButton data-geometry-loading="idle">Стабильная загрузка</UiButton>
+        <UiButton data-geometry-loading="active" loading>
+          Стабильная загрузка
+        </UiButton>
+        <UiButton disabled>Disabled</UiButton>
+        <UiButton aria-disabled>Aria disabled</UiButton>
+        <UiButton pressed>Pressed</UiButton>
+        <UiIconButton label="Обновить"><UiRefreshIcon /></UiIconButton>
+        <UiActionLink href="#gallery-fields">Action link</UiActionLink>
+      </div>
+    </section>
+
+    <section class="ui-gallery__section" data-button-loading-states>
+      <h2>Загрузка кнопок</h2>
+      <p class="muted">Все варианты и тоны: loading вместе с disabled.</p>
+      <div
+        v-for="variant in variants"
+        :key="variant"
+        class="ui-gallery__row"
+        data-geometry-row="peer"
+      >
+        <UiButton
+          v-for="tone in tones"
+          :key="tone"
+          :variant="variant"
+          :tone="tone"
+          :loading-label="`${variant} · ${tone}`"
+          loading
+          disabled
+        >{{ variant }} · {{ tone }}</UiButton>
+      </div>
+      <div class="ui-gallery__row">
+        <UiButton size="compact" tone="success" variant="solid" loading disabled>
+          ✓ Принять
+        </UiButton>
+        <UiIconButton label="Обновляю" loading disabled><UiRefreshIcon /></UiIconButton>
+      </div>
+    </section>
+
+    <section id="gallery-fields" class="ui-gallery__section">
+      <h2>Fields</h2>
+      <div class="ui-gallery__grid">
+        <UiField label="Обычное поле" hint="Подсказка связана через aria-describedby">
+          <UiInput v-model="text" placeholder="Текст" />
+        </UiField>
+        <UiField label="Ошибка" error="Значение нужно исправить" required>
+          <UiInput v-model="invalidText" />
+        </UiField>
+        <UiField label="Пароль"><UiPasswordInput v-model="password" /></UiField>
+        <UiField label="Поиск"><UiSearchInput v-model="search" /></UiField>
+        <UiField label="Число"><UiNumberField v-model="number" :min="0" :max="10" /></UiField>
+        <UiField label="Select">
+          <UiSelect v-model="selectValue">
+            <option value="one">Первый вариант</option>
+            <optgroup label="Группа"><option value="two">Второй вариант</option></optgroup>
+          </UiSelect>
+        </UiField>
+        <UiField label="Многострочный текст">
+          <UiTextarea v-model="longText" rows="4" />
+        </UiField>
+        <UiField label="Файл"><UiFilePicker multiple /></UiField>
+      </div>
+    </section>
+
+    <section class="ui-gallery__section">
+      <h2>Product compositions</h2>
+      <form data-select-demo-form>
+        <article data-select-demo data-ui-workspace>
+          <UiControlGroup label="Поля выбора">
+            <UiField label="Каталог моделей" required>
+              <UiSelect
+                v-model="selectDemoValue"
+                compact
+                name="demoModel"
+                data-select-demo-trigger
+                aria-label="Каталог моделей"
+                @change="selectDemoChanges += 1"
+                @update:model-value="selectDemoUpdates += 1"
+              >
+                <option value="">Без выбора</option>
+                <optgroup label="Первый провайдер">
+                  <option v-for="index in 12" :key="index" :value="'demo-' + index">
+                    {{ 'Длинная модель ' + index + ' · название полностью видно в списке' }}
+                  </option>
+                </optgroup>
+                <optgroup label="Второй провайдер — недоступен">
+                  <option value="repo/special" title="Полное пояснение модели">Особая модель</option>
+                  <option value="locked" disabled>Настоящий disabled</option>
+                </optgroup>
+                <template #actions>
+                  <UiButton size="compact" @click="selectDemoActions += 1">Обновить</UiButton>
+                </template>
+                <template #footer="{ close }">
+                  <UiButton size="compact" @click="addSelectDemoOption(close)">Добавить</UiButton>
+                </template>
+              </UiSelect>
+            </UiField>
+            <UiField label="Приоритет">
+              <UiSelect v-model="selectDemoPriority" compact data-select-secondary-trigger>
+                <option value="low">Низкий</option>
+                <option value="high">Высокий</option>
+              </UiSelect>
+            </UiField>
+            <UiButton data-select-common-action @click="selectDemoCommon += 1">Применить группу</UiButton>
+          </UiControlGroup>
+          <output data-select-demo-value>{{ selectDemoValue }}</output>
+          <output data-select-demo-priority>{{ selectDemoPriority }}</output>
+          <output data-select-demo-actions>{{ selectDemoActions }}</output>
+          <output data-select-demo-common>{{ selectDemoCommon }}</output>
+          <output data-select-demo-changes>{{ selectDemoChanges }}</output>
+          <output data-select-demo-updates>{{ selectDemoUpdates }}</output>
+        </article>
+      </form>
+      <UiButton data-select-open-dialog @click="selectDemoDialog = true">Открыть тест выбора</UiButton>
+      <UiDialog v-model:open="selectDemoDialog" title="Тест выбора в диалоге">
+        <UiField label="Вложенное поле">
+          <UiSelect v-model="selectDialogValue" searchable data-select-dialog-trigger>
+            <option value="">Без выбора</option>
+            <option value="dialog-model">Модель диалога</option>
+          </UiSelect>
+        </UiField>
+      </UiDialog>
+      <article class="ui-gallery__ssh-card" data-geometry-ssh-card>
+        <strong>Боевой код — server.internal:22</strong>
+        <span>Пользователь: root · sudo</span>
+        <pre data-geometry-ssh-command>{{ 'x'.repeat(10_000) + 'SSH_COMMAND_TAIL' }}</pre>
+        <div class="ui-gallery__ssh-actions" data-geometry-ssh-actions>
+          <UiButton variant="solid" tone="accent">Разрешить</UiButton>
+          <UiButton tone="danger">Отказать</UiButton>
+        </div>
+      </article>
+      <div class="ui-gallery__composer" data-geometry-composer>
+        <UiTextarea
+          v-model="composerText"
+          aria-label="Сообщение агенту"
+          data-role="chat-composer"
+          data-geometry-composer-input
+          rows="2"
+        />
+        <UiIconButton
+          data-context="chat-context"
+          data-geometry-context-ring
+          label="Контекст: 44 процента"
+          role="embedded"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle
+              class="rbg"
+              cx="12"
+              cy="12"
+              r="9"
+              fill="none"
+              stroke-width="3"
+            />
+            <circle
+              class="rfg"
+              cx="12"
+              cy="12"
+              r="9"
+              fill="none"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-dasharray="56.5487"
+              stroke-dashoffset="31.0918"
+              transform="rotate(-90 12 12)"
+            />
+          </svg>
+        </UiIconButton>
+      </div>
+      <div class="ui-gallery__toolbar-select-fixture">
+        <UiSelect
+          v-model="chatToolbarSelect"
+          compact
+          data-context="chat-session-toolbar"
+          data-geometry-chat-toolbar-select
+          aria-label="Модель чата"
+        >
+          <option value="gpt">GPT-5.6 Codex</option>
+          <option value="claude">Claude Opus</option>
+        </UiSelect>
+      </div>
+      <div
+        class="ui-gallery__dock-actions"
+        data-geometry-row="compact"
+        data-geometry-dock-actions
+      >
+        <UiButton
+          data-context="tool-dock-navigator"
+          data-geometry-dock-action="navigator"
+          variant="ghost"
+        >
+          <template #leading>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="3" width="15" height="14" rx="2" />
+              <path d="M7 3v14" />
+            </svg>
+          </template>
+          Дерево
+        </UiButton>
+        <UiIconButton
+          data-context="tool-dock-expand"
+          data-geometry-dock-action="expand"
+          label="Во весь экран"
+          role="embedded"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 3H3v5 M16 3h5v5 M8 21H3v-5 M16 21h5v-5" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton
+          data-context="tool-dock-hide"
+          data-geometry-dock-action="hide"
+          label="Скрыть панель"
+          role="embedded"
+          tone="danger"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12 M18 6 6 18" />
+          </svg>
+        </UiIconButton>
+      </div>
+      <div class="ui-gallery__chat-list-actions">
+        <UiIconButton
+          data-context="chat-list-new"
+          data-geometry-chat-list-button="new"
+          label="Новый чат"
+          tone="accent"
+        >
+          ＋
+        </UiIconButton>
+        <UiIconButton
+          data-context="chat-list-action"
+          data-geometry-chat-list-button="rename"
+          label="Переименовать чат"
+          role="rail"
+        >
+          ✎
+        </UiIconButton>
+        <UiIconButton
+          data-context="chat-list-action"
+          data-geometry-chat-list-button="archive"
+          label="Переместить чат в архив"
+          role="rail"
+          tone="accent"
+        >
+          ✕
+        </UiIconButton>
+      </div>
+      <div class="ui-gallery__task-footer">
+        <UiButton
+          data-context="task-footer-action"
+          data-geometry-task-footer-action="timer"
+          tone="accent"
+          variant="solid"
+        >
+          ▶ Начать учёт
+        </UiButton>
+        <UiButton
+          data-context="task-footer-action"
+          data-geometry-task-footer-action="complete"
+          tone="success"
+          variant="solid"
+        >
+          ✓ Завершить
+        </UiButton>
+        <UiButton
+          data-context="task-footer-action"
+          data-geometry-task-footer-action="diff"
+        >
+          ± Диф
+        </UiButton>
+      </div>
+      <div class="ui-gallery__topbar-popover-actions">
+        <UiButton
+          data-context="topbar-popover-action"
+          data-geometry-topbar-action
+          variant="outline"
+        >
+          Использовать сброс лимита
+        </UiButton>
+        <UiButton
+          block
+          data-context="topbar-popover-footer"
+          data-geometry-topbar-footer
+          variant="outline"
+        >
+          Настройки исполнителей
+        </UiButton>
+      </div>
+    </section>
+
+    <section class="ui-gallery__section">
+      <h2>Selection and patterns</h2>
+      <div class="ui-gallery__row" data-geometry-row="flow">
+        <UiCheckbox v-model="checked">Checkbox</UiCheckbox>
+        <UiSwitch v-model="switched">Switch</UiSwitch>
+        <UiToggleButton v-model="toggled">Toggle</UiToggleButton>
+      </div>
+      <UiDiscreteSlider v-model="slider" :min="0" :max="2" :labels="sliderLabels" />
+      <UiSegmentedControl v-model="segment" label="Режим" :options="segmentOptions" />
+      <UiTabs v-model="tab" label="Пример вкладок">
+        <UiTab value="first">Первая</UiTab>
+        <UiTab value="second">Вторая</UiTab>
+        <UiTab value="disabled" disabled>Недоступная</UiTab>
+      </UiTabs>
+      <UiChoiceList
+        v-model="choice"
+        label="Длинные варианты"
+        :options="choiceOptions"
+        selection-indicator
+      />
+      <UiDisclosureButton
+        v-model:open="disclosureOpen"
+        class="ui-gallery__disclosure"
+        data-geometry-disclosure
+        controls="gallery-disclosure-body"
+        density="compact"
+      >
+        <span>
+          Bash · полноширинная строка инструмента с длинным недоверенным заголовком
+        </span>
+      </UiDisclosureButton>
+      <p v-if="disclosureOpen" id="gallery-disclosure-body">
+        Содержимое раскрытой строки.
+      </p>
+      <UiProgress :value="62" label="Пример прогресса" value-text="62 процента" />
+      <UiProgress
+        :value="3"
+        :max="7"
+        tone="warning"
+        label="Пример прогресса на остановке"
+        value-text="3 из 7"
+      />
+      <UiProgress indeterminate size="line" label="Пример тонкой линии под шапкой" />
+      <div class="ui-gallery__row">
+        <UiSkeleton data-loading-example="line" width="120px" />
+        <UiSkeleton data-loading-example="block" shape="block" width="120px" />
+        <UiSkeleton data-loading-example="circle" shape="circle" />
+      </div>
+      <UiSkeletonLayout data-loading-example="list" layout="list" />
+      <UiSkeletonLayout data-loading-example="form" layout="form" />
+      <UiSkeletonLayout data-loading-example="text" layout="text" />
+      <UiLoadingState data-loading-example="chat">
+        <div class="ui-gallery__loading-chat">
+          <UiSkeleton height="48px" />
+          <UiSkeleton shape="block" width="64%" />
+          <UiSkeleton shape="block" width="48%" style="align-self: flex-end" />
+          <UiSkeleton height="64px" />
+        </div>
+      </UiLoadingState>
+      <UiLoadingState data-loading-example="columns">
+        <div class="ui-gallery__loading-columns">
+          <UiSkeletonLayout v-for="index in 3" :key="index" />
+        </div>
+      </UiLoadingState>
+      <UiLoadingState data-loading-example="show-label" show-label />
+      <UiLoadingState data-loading-example="reduce" class="ui-gallery__loading-reduce" />
+      <UiLoadingState label="Загрузка списка…" />
+      <UiLoadingState label="Загрузка карточек…" variant="cards" />
+      <UiLoadingState label="Открываю документ…" variant="document" />
+      <UiLoadingState label="Обновляю сведения…" variant="inline" />
+      <UiInlineMessage tone="warning">
+        Busy региона не блокирует вложенные controls автоматически.
+      </UiInlineMessage>
+    </section>
+
+    <section class="ui-gallery__section">
+      <h2>Overlays</h2>
+      <div class="ui-gallery__row" data-geometry-row="peer">
+        <UiPopover
+          class="ui-gallery__popover"
+          data-geometry-provider-popover
+          placement="bottom-end"
+        >
+          <template #trigger>
+            <UiButton data-geometry-popover-trigger>Открыть popover</UiButton>
+          </template>
+
+          <div
+            class="ui-gallery__provider-resource"
+            data-geometry-popover-content
+          >
+            <span>Extra usage (доплата)</span>
+            <UiSwitch
+              v-model="providerUsageEnabled"
+              data-geometry-provider-switch
+            >
+              доплата выключена
+            </UiSwitch>
+            <UiActionLink
+              data-context="topbar-popover-resource-link"
+              data-geometry-provider-link
+              href="https://claude.ai/settings/billing"
+              target="_blank"
+              variant="text"
+            >
+              Карта, история и доплата без потолка — на claude.ai
+            </UiActionLink>
+          </div>
+        </UiPopover>
+        <UiButton
+          data-geometry-dialog-trigger
+          @click="dialogOpen = true"
+        >
+          Открыть диалог
+        </UiButton>
+      </div>
+
+      <UiDialog
+        v-model:open="dialogOpen"
+        data-geometry-dialog
+        :data-ui-touch="touch ? '' : undefined"
+        title="Проверка геометрии"
+        description="Диалог должен помещаться в каждый viewport матрицы."
+        size="content"
+      >
+        <template #default="{ close }">
+          <p class="ui-gallery__dialog-copy">
+            Длинное содержимое не создаёт горизонтальный scroll и не обрезает focus ring.
+          </p>
+          <UiButton @click="close('action')">Закрыть</UiButton>
+        </template>
+      </UiDialog>
+    </section>
+  </main>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+
+import {
+  UiRefreshIcon,
+  UiActionLink,
+  UiButton,
+  UiCheckbox,
+  UiControlGroup,
+  UiChoiceList,
+  UiDiscreteSlider,
+  UiDisclosureButton,
+  UiDialog,
+  UiField,
+  UiFilePicker,
+  UiIconButton,
+  UiInlineMessage,
+  UiLoadingState,
+  UiSkeleton,
+  UiSkeletonLayout,
+  UiInput,
+  UiNumberField,
+  UiPasswordInput,
+  UiProgress,
+  UiPopover,
+  UiSearchInput,
+  UiSegmentedControl,
+  UiSelect,
+  UiSwitch,
+  UiTab,
+  UiTabs,
+  UiTextarea,
+  UiToggleButton,
+  type UiActionTone,
+  type UiActionVariant,
+  type UiSelectionOption,
+} from '../../src/ui';
+
+const touch = new URLSearchParams(location.search).has('touch');
+
+const variants: UiActionVariant[] = ['solid', 'outline', 'ghost', 'text', 'link'];
+const tones: UiActionTone[] = ['neutral', 'accent', 'success', 'warning', 'danger'];
+const text = ref('GrigDesk');
+const invalidText = ref('');
+const password = ref('секрет');
+const search = ref('длинная строка поиска');
+const number = ref<number | '' | null>(4);
+const selectValue = ref<string | number | null>('one');
+const selectDemoValue = ref<string | number | null>('');
+const selectDemoPriority = ref<string | number | null>('low');
+const selectDemoActions = ref(0);
+const selectDemoCommon = ref(0);
+const selectDemoChanges = ref(0);
+const selectDemoUpdates = ref(0);
+const selectDemoDialog = ref(false);
+const selectDialogValue = ref<string | number | null>('');
+
+/**
+ * Действие демонстрирует расширение popup, не меняя выбранный вариант.
+ * Закрытие приходит из слота, галерея не обращается к внутренним refs.
+ */
+function addSelectDemoOption(close: () => void): void {
+  selectDemoActions.value += 1;
+  close();
+}
+
+const longText = ref('Многострочное содержимое остаётся многострочным.');
+const composerText = ref('Внутри составного composer-а нет второй рамки фокуса.');
+const chatToolbarSelect = ref<string | number | null>('gpt');
+const checked = ref(true);
+const switched = ref(true);
+const toggled = ref(false);
+const slider = ref(1);
+const sliderLabels = { 0: 'Быстро', 1: 'Обычно', 2: 'Глубоко' };
+const segment = ref<'one' | 'two'>('one');
+const segmentOptions: Array<UiSelectionOption<'one' | 'two'>> = [
+  { value: 'one', label: 'Один' },
+  { value: 'two', label: 'Два' },
+];
+const tab = ref<string | number>('first');
+const choice = ref<string | null>(null);
+const disclosureOpen = ref(false);
+const dialogOpen = ref(false);
+const providerUsageEnabled = ref(false);
+const choiceOptions: Array<UiSelectionOption<string>> = [
+  {
+    value: 'approve',
+    label: 'Подтвердить план',
+    description: 'Продолжить выполнение по предложенным шагам',
+  },
+  {
+    value: 'revise',
+    label: 'Вернуть агенту',
+    description: 'Добавить подробное замечание, которое может занимать несколько строк',
+  },
+];
+</script>

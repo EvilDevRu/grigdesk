@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "findings": {
+    "web/dev/ui-gallery/UiGallery.vue": {
+      "packed-members": {
+        "{ 0: 'Быстро', 1: 'Обычно', 2: 'Глубоко' }": 1
+      }
+    },
+    "web/src/composables/useUiFieldContext.ts": {
+      "function-explanation": {
+        "export function provideUiFieldContext(context: UiFieldContext): void { provide(UI_FIELD_CONTEXT, context); }": 1,
+        "export function useUiFieldContext(): UiFieldContext | null { return inject(UI_FIELD_CONTEXT, null); }": 1,
+        "export function mergeUiDescribedBy(...values: Array<string | null | undefined>): string | undefined { const ids = values.flatMap((value) => String(value || '').split(/\\s+/)).filter": 1,
+        "export function useResolvedFieldState(options: { id?: MaybeRefOrGetter<string | undefined>; describedBy?: MaybeRefOrGetter<string | undefined>; invalid?: MaybeRefOrGetter<boolean |": 1
+      },
+      "logical-spacing": {
+        "declaration->exit: return ids.length ? [...new Set(ids)].join(' ') : undefined;": 1,
+        "declaration->exit: return { id: computed(() => toValue(options.id) || field?.controlId.value), describedBy: computed(() => mergeUiDescribedBy(toValue(options.describedBy), field?.describedBy.value)),": 1
+      }
+    },
+    "web/src/composables/useUiLayer.ts": {
+      "function-explanation": {
+        "export function useUiLayer( requestedName: MaybeRefOrGetter<UiLayerName>, options: UseUiLayerOptions = {}, ) { const instanceId = options.id ?? `ui-layer-${++layerInstanceSequence}": 1,
+        "function register(): void { unregister(); if (!enabled.value) return; handle = registerUiLayer(instanceId, { name: name.value, close: (event) => options.onEscape ? options.onEscape": 1
+      },
+      "logical-spacing": {
+        "effect->branch: if (options.element !== undefined) { watch(() => toValue(options.element), refreshLayerStack, { flush: 'post' }); }": 1,
+        "function->branch: if (getCurrentScope()) onScopeDispose(dispose);": 1,
+        "effect->branch: if (!enabled.value) return;": 1,
+        "branch->effect: handle = registerUiLayer(instanceId, { name: name.value, close: (event) => options.onEscape ? options.onEscape(event) : false, enabled: () => enabled.value, element: options.elemen": 1
+      },
+      "unbraced-control": {
+        "if (!enabled.value) return;": 1,
+        "if (getCurrentScope()) onScopeDispose(dispose);": 1
+      }
+    },
+    "web/src/composables/useUiTabsContext.ts": {
+      "function-explanation": {
+        "export function provideUiTabsContext(context: UiTabsContext): void { provide(UI_TABS_CONTEXT, context); }": 1,
+        "export function useUiTabsContext(): UiTabsContext { const context = inject(UI_TABS_CONTEXT, null); if (!context) throw new Error('UiTab должен находиться внутри UiTabs'); return co": 1
+      },
+      "logical-spacing": {
+        "declaration->branch: if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1,
+        "branch->exit: return context;": 1
+      },
+      "unbraced-control": {
+        "if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1
+      }
+    },
+    "web/src/services/dialogs.ts": {
+      "logical-spacing": {
+        "branch->effect: pumpQueued = true;": 1,
+        "branch->effect: active = queue.shift() ?? null;": 1,
+        "effect->branch: if (active) host.controller.show(active.request);": 1,
+        "declaration->effect: host = { token, controller };": 1,
+        "effect->branch: if (active) controller.show(active.request); else pump();": 1,
+        "branch->effect: host = null;": 1,
+        "declaration->branch: if (!item || item.request.id !== requestId) return false;": 1,
+        "effect->branch: if (isConfirmItem(item)) item.resolve(result as boolean); else if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 1,
+        "branch->effect: schedulePump();": 1,
+        "effect->exit: return true;": 1,
+        "declaration->effect: enqueue({ request, resolve });": 3
+      },
+      "unbraced-control": {
+        "if (pumpQueued) return;": 1,
+        "if (!host || active || queue.length === 0) return;": 1,
+        "if (active) host.controller.show(active.request);": 1,
+        "if (active) controller.show(active.request); else pump();": 2,
+        "if (host?.token !== token) return;": 1,
+        "if (!item || item.request.id !== requestId) return false;": 1,
+        "if (isConfirmItem(item) && typeof result !== 'boolean') return false;": 1,
+        "if (isPromptItem(item) && result !== null && typeof result !== 'string') return false;": 1,
+        "if (!isConfirmItem(item) && !isPromptItem(item) && result !== undefined) return false;": 1,
+        "if (isConfirmItem(item)) item.resolve(result as boolean); else if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 1,
+        "if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 2
+      },
+      "function-explanation": {
+        "function pump(): void { if (!host || active || queue.length === 0) return; active = queue.shift() ?? null; if (active) host.controller.show(active.request); }": 1,
+        "export function registerDialogHost(controller: DialogHostController): () => void { const token = Symbol('ui-dialog-host'); host = { token, controller }; if (active) controller.show": 1,
+        "export function completeDialogRequest(requestId: number, result: DialogResult): boolean { const item = active; if (!item || item.request.id !== requestId) return false; if (isConfi": 1,
+        "export function confirmDialog(text: string, options: ConfirmDialogOptions = {}): Promise<boolean> { return new Promise<boolean>((resolve) => { const request: ConfirmDialogRequest =": 1,
+        "export function promptDialog(options: PromptDialogOptions = {}): Promise<string | null> { return new Promise<string | null>((resolve) => { const request: PromptDialogRequest = Obje": 1,
+        "export function alertDialog(text: string, options: AlertDialogOptions = {}): Promise<void> { return new Promise<void>((resolve) => { const request: AlertDialogRequest = Object.free": 1,
+        "export function pendingDialogCount(): number { return queue.length + (active ? 1 : 0); }": 1
+      }
+    },
+    "web/src/services/layers/modalEnvironment.ts": {
+      "logical-spacing": {
+        "declaration->exit: return isUiLayerName(value) ? value : null;": 1,
+        "declaration->exit: return name ? uiLayerPriority(name) : null;": 1,
+        "branch->effect: element.inert = true;": 1,
+        "declaration->branch: if (!saved) return;": 1,
+        "branch->effect: element.inert = saved.inert;": 1,
+        "effect->branch: if (saved.ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', saved.ariaHidden);": 1,
+        "branch->effect: forcedElements.delete(element);": 1,
+        "declaration->loop: for (const child of [...body.children]) { if (!(child instanceof HTMLElement)) continue; if (child === top.root) continue; if (entries.some((entry) => entry.root === child)) contin": 1,
+        "loop->exit: return desired;": 1,
+        "declaration->branch: if (priority !== null && priority > top.priority) continue;": 1,
+        "branch->effect: desired.add(child);": 1,
+        "branch->effect: unlockBody();": 1,
+        "declaration->branch: if (scrollbarWidth > 0 && view) { const currentPadding = Number.parseFloat(view.getComputedStyle(body).paddingRight) || 0; body.style.paddingRight = `${currentPadding + scrollbarWi": 1,
+        "branch->effect: body.style.overflow = 'hidden';": 1,
+        "declaration->effect: body.style.paddingRight = `${currentPadding + scrollbarWidth}px`;": 1,
+        "effect->branch: if (!observedBody) return;": 1,
+        "branch->effect: observedBody.style.overflow = savedBodyOverflow;": 1,
+        "effect->branch: if (!bodyHadLockClass) observedBody.classList.remove('ui-modal-scroll-lock');": 1,
+        "branch->effect: observedBody = null;": 1,
+        "branch->effect: refreshQueued = true;": 1,
+        "declaration->branch: if (!top) { for (const element of [...forcedElements.keys()]) restoreElement(element); unlockBody(); notify(); return; }": 1,
+        "effect->declaration: const desired = desiredInertElements(top);": 1,
+        "declaration->loop: for (const element of [...forcedElements.keys()]) { if (!desired.has(element)) restoreElement(element); }": 1,
+        "loop->effect: notify();": 1,
+        "loop->effect: unlockBody();": 1,
+        "effect->exit: return;": 1,
+        "effect->exit: return () => listeners.delete(listener);": 1,
+        "declaration->effect: modals.set(token, entry);": 1,
+        "declaration->exit: return { token, root, isTop: () => registered && isTopModal(token), refresh: refreshModalEnvironment, unregister: () => { if (!registered) return; registered = false; restoreElemen": 1,
+        "branch->effect: registered = false;": 1,
+        "effect->loop: for (const element of [...forcedElements.keys()]) restoreElement(element);": 1,
+        "loop->effect: sequence = 0;": 1
+      },
+      "function-explanation": {
+        "function restoreElement(element: HTMLElement): void { const saved = forcedElements.get(element); if (!saved) return; element.inert = saved.inert; if (saved.ariaHidden === null) ele": 1,
+        "function desiredInertElements(top: ModalEntry): Set<HTMLElement> { const desired = new Set<HTMLElement>(); const entries = connectedEntries(); for (const entry of entries) { if (en": 1,
+        "function lockBody(body: HTMLElement): void { if (observedBody === body) return; unlockBody(); observedBody = body; savedBodyOverflow = body.style.overflow; savedBodyPaddingRight = ": 1,
+        "function unlockBody(): void { observer?.disconnect(); observer = null; if (!observedBody) return; observedBody.style.overflow = savedBodyOverflow; observedBody.style.paddingRight =": 1,
+        "export function refreshModalEnvironment(): void { const top = topEntry(); if (!top) { for (const element of [...forcedElements.keys()]) restoreElement(element); unlockBody(); notif": 1,
+        "export function subscribeModalEnvironment(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
+        "export function isTopModal(token: symbol): boolean { return topEntry()?.token === token; }": 1,
+        "export function activeModalElement(): HTMLElement | null { return topEntry()?.root ?? null; }": 1,
+        "export function registerModalEnvironment( root: HTMLElement, layer: UiLayerName = 'dialog', ): ModalEnvironmentHandle { const token = Symbol(`modal-${layer}`); const entry: ModalEn": 1,
+        "export function resetModalEnvironmentForTests(): void { modals.clear(); for (const element of [...forcedElements.keys()]) restoreElement(element); sequence = 0; unlockBody(); notif": 1
+      },
+      "unbraced-control": {
+        "if (!saved) return;": 1,
+        "if (saved.ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', saved.ariaHidden);": 2,
+        "if (entry.token !== top.token) desired.add(entry.root);": 1,
+        "if (!(child instanceof HTMLElement)) continue;": 1,
+        "if (child === top.root) continue;": 1,
+        "if (entries.some((entry) => entry.root === child)) continue;": 1,
+        "if (priority !== null && priority > top.priority) continue;": 1,
+        "if (observedBody === body) return;": 1,
+        "if (!observedBody) return;": 1,
+        "if (!bodyHadLockClass) observedBody.classList.remove('ui-modal-scroll-lock');": 1,
+        "if (refreshQueued) return;": 1,
+        "for (const listener of [...listeners]) listener();": 1,
+        "for (const element of [...forcedElements.keys()]) restoreElement(element);": 2,
+        "if (!desired.has(element)) restoreElement(element);": 1,
+        "for (const element of desired) saveAndForce(element);": 1,
+        "if (!registered) return;": 1
+      }
+    },
+    "web/src/services/layers/priorities.ts": {
+      "function-explanation": {
+        "export function isUiLayerName(value: unknown): value is UiLayerName { return typeof value === 'string' && UI_LAYER_NAMES.has(value as UiLayerName); }": 1,
+        "export function normalizeUiLayerName(value: unknown, fallback: UiLayerName = 'dialog'): UiLayerName { return isUiLayerName(value) ? value : fallback; }": 1,
+        "export function uiLayerPriority(name: UiLayerName): number { return UI_LAYER_PRIORITIES[name]; }": 1,
+        "export function uiLayerProps(name: UiLayerName): UiLayerRootProps { return { 'data-ui-layer': name, style: { '--ui-layer-z': String(uiLayerPriority(name)) }, }; }": 1
+      }
+    },
+    "web/src/services/layers/stack.ts": {
+      "function-explanation": {
+        "export function refreshLayerStack(): void { notify(); }": 1,
+        "export function subscribeLayerStack(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
+        "export function activeLayerId(): string | null { return topLayer()?.id ?? null; }": 1,
+        "export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle { ensureListener(); const token = Symbol(id); const entry: LayerEntry = { token, id,": 1,
+        "export function resetLayerStackForTests(): void { layers.clear(); listeners.clear(); sequence = 0; removeListenerWhenIdle(); }": 1
+      }
+    },
+    "web/src/types/uiActions.ts": {
+      "function-explanation": {
+        "export function normalizeActionVariant(value: unknown): UiActionVariant { return UI_ACTION_VARIANTS.includes(value as UiActionVariant) ? value as UiActionVariant : 'outline'; }": 1,
+        "export function normalizeActionTone(value: unknown): UiActionTone { return UI_ACTION_TONES.includes(value as UiActionTone) ? value as UiActionTone : 'neutral'; }": 1
+      }
+    },
+    "web/src/types/uiFields.ts": {
+      "line-length": {
+        "48:| { type: 'button'; label: string; description?: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }": 1
+      },
+      "packed-members": {
+        "{ type: 'toggle'; label: string; description?: string }": 1,
+        "{ type: 'text'; label: string; description?: string; placeholder?: string }": 1,
+        "{ type: 'number'; label: string; description?: string; min?: number; max?: number; step?: number }": 1,
+        "{ type: 'select'; label: string; description?: string; options: UiSettingOption[] }": 1,
+        "{ type: 'button'; label: string; description?: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }": 1,
+        "{ type: 'link'; label: string; description?: string; href: string; external?: boolean }": 1
+      }
+    }
+  }
+}

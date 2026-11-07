@@ -1,0 +1,2 @@
+{"event":"tool_call","name":"write","toolCallId":"tool-1"}
+{"event":"agent_message_chunk","text":"частичная работа"}

@@ -1,13 +1,100 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readActivity, readAgentLive, readRunSilence } from '../../server/src/lib/factory-cli.js';
+import { readActivity, readAgentLive, readRunSilence } from '../../server/src/lib/factoryCli.ts';
+import { readProcessIdentity } from '../../server/src/lib/speech/modelJobsProcess.ts';
+
+test('лента GLM показывает инструменты, завершение и конкретный отказ wrapper-а', async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity-glm.'));
+
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const runDir = path.join(stateDir, 'logs', 'runs', 't46', 'BUILD', 'run-glm');
+  const registry = {
+    RUN_PROTOCOL: '2',
+    BUILD: 'running',
+    ACTIVE_RUN_BUILD: 'run-glm',
+  };
+  const modelRef = '["zai","glm-5.3"]';
+  const input = {
+    stateDir,
+    task: '46',
+    registry,
+  };
+
+  await mkdir(runDir, { recursive: true });
+  await writeFile(path.join(runDir, 'meta.env'), `RUNNER=glm\nMODEL=${modelRef}\n`);
+  await writeFile(path.join(runDir, 'events.jsonl'), '');
+
+  // Даже до первой записи wrapper-а подпись модели приходит из meta.env.
+  assert.equal(readAgentLive(input).model, 'glm-5.3');
+
+  const events = [
+    { event: 'glm_start', model: modelRef },
+    { event: 'tool_result' },
+    { event: 'tool_call', name: 'read' },
+    { event: 'tool_call', name: 'shell' },
+    { event: 'tool_result' },
+  ];
+  const writeEvents = () => writeFile(path.join(runDir, 'events.jsonl'),
+    events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+
+  await writeEvents();
+
+  assert.deepEqual(readAgentLive(input).actions.map(({ name, status }) => ({ name, status })), [
+    { name: 'read', status: 'run' },
+    { name: 'shell', status: 'done' },
+  ]);
+
+  events.push(
+    { event: 'tool_result' },
+    {
+      event: 'wrapper_error',
+      code: 'glm_key_missing',
+      message: 'GLM недоступен: проверь карточку',
+    },
+  );
+  await writeEvents();
+
+  const live = readAgentLive(input);
+
+  assert.equal(live.model, 'glm-5.3');
+  assert.deepEqual(live.actions, [
+    {
+      type: 'tool',
+      ts: null,
+      name: 'read',
+      status: 'done',
+    },
+    {
+      type: 'tool',
+      ts: null,
+      name: 'shell',
+      status: 'done',
+    },
+    {
+      type: 'error',
+      ts: null,
+      status: 'error',
+      text: 'GLM недоступен: проверь карточку (glm_key_missing)',
+    },
+  ]);
+
+  // Начальное событие называет модель и в окне между созданием run и записью meta.env.
+  await rm(path.join(runDir, 'meta.env'));
+  assert.equal(readAgentLive(input).model, 'glm-5.3');
+
+  events.push({ event: 'result', stopReason: 'end_turn' });
+  await writeEvents();
+  assert.equal(readAgentLive(input).actions.length, 3);
+});
 
 test('activity follows the active run and renders Codex JSONL events', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runId = 'run-codex-1';
@@ -91,7 +178,7 @@ test('activity follows the active run and renders Codex JSONL events', async (t)
 // с него свежесть журнала нельзя. Иначе на штатной паузе у ворот модалка показывает
 // давнюю запись BUILD отменённой попытки, и это читается как «агент завис».
 test('a stale ACTIVE_RUN of a finished stage is not mistaken for live activity', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity-stale.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity-stale.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const staleDir = path.join(stateDir, 'logs', 'runs', 't42', 'BUILD', 'run-abandoned');
@@ -131,6 +218,62 @@ test('a stale ACTIVE_RUN of a finished stage is not mistaken for live activity',
   assert.equal(live.journalAgeSec < 2, true);
 });
 
+// TERM (выключили машину, остановили прогон) оставляет этап `running`, а ACTIVE_RUN —
+// ссылкой на убитый ход, пока следующий не зарегистрируется. Утром после «Продолжить»
+// возраст журнала убитого хода звенел «молчит 599 мин» над ходом, который только стартует.
+// Молчать может лишь ход, чей раннер жив: PID и STARTTIME из meta.env совпали с /proc.
+test('a run whose runner is gone is not read as silence', async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence-gone.'));
+
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const runDir = path.join(stateDir, 'logs', 'runs', 't45', 'SOL_BUILD', 'run-killed');
+  const eventsFile = path.join(runDir, 'events.jsonl');
+  const killedAt = new Date(Date.now() - 600 * 60 * 1000);
+
+  await mkdir(runDir, { recursive: true });
+  await writeFile(eventsFile, `${JSON.stringify({ type: 'item.completed' })}\n`);
+  await utimes(eventsFile, killedAt, killedAt);
+
+  const registry = {
+    WF_STATUS: 'running',
+    RUN_PROTOCOL: '2',
+    SOL_BUILD: 'running',
+    ACTIVE_RUN_SOL_BUILD: 'run-killed',
+  };
+  const read = {
+    stateDir,
+    task: '45',
+    registry,
+  };
+  const self = readProcessIdentity(process.pid);
+  const passport = (pid, starttime) => writeFile(path.join(runDir, 'meta.env'), [
+    'SCHEMA=2',
+    'RUNNER=codex',
+    `PID=${pid}`,
+    `STARTTIME=${starttime}`,
+    '',
+  ].join('\n'));
+
+  // Раннер завершился: процесса с этим номером больше нет.
+  await passport(spawnSync('true').pid, self.starttime);
+  assert.equal(readRunSilence(read), null);
+
+  // Машину перезагрузили: номер достался другому процессу, время старта не совпало.
+  await passport(process.pid, `${self.starttime}0`);
+  assert.equal(readRunSilence(read), null);
+  assert.equal(readActivity(read).journalAgeSec, null);
+
+  // Тот же ход с живым раннером молчит честно — по возрасту журнала.
+  await passport(process.pid, self.starttime);
+
+  const silence = readRunSilence(read);
+
+  assert.equal(silence?.stage, 'SOL_BUILD');
+  assert.equal(silence.sec >= 600 * 60, true);
+  assert.equal(silence.tool, null);
+});
+
 /** Хартбит Claude CLI: печатается раз в 30 секунд на КАЖДЫЙ висящий вызов. */
 function heartbeat(id, tool, sec) {
   return JSON.stringify({
@@ -144,11 +287,11 @@ function heartbeat(id, tool, sec) {
 }
 
 // Хартбиты обновляют mtime журнала, поэтому свежесть файла перестала значить «агент
-// работает»: в t8165 браузерная приёмка полтора часа простояла на мёртвой странице, а
-// кокпит всё это время писал «агент пишет». Молчание считаем по последней осмысленной
+// работает»: в регрессионном сценарии браузерная приёмка долго стояла на мёртвой странице, а
+// GrigDesk всё это время писал «агент пишет». Молчание считаем по последней осмысленной
 // записи, длительность берём из самого хартбита — он её и сообщает.
 test('a tail of heartbeats reads as silence and names the hanging tool', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-silence.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runDir = path.join(stateDir, 'logs', 'runs', 't43', 'BROWSER', 'run-browser-1');
@@ -187,7 +330,7 @@ test('a tail of heartbeats reads as silence and names the hanging tool', async (
 // Обратная сторона того же правила: вызов ответил, ход снова заговорил — молчание
 // обнулилось, хотя хартбиты никуда из журнала не делись.
 test('a meaningful record after the heartbeats ends the silence', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-silence-over.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence-over.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runDir = path.join(stateDir, 'logs', 'runs', 't44', 'BROWSER', 'run-browser-2');

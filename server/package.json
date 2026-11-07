@@ -1,26 +1,65 @@
 {
-  "name": "cockpit-server",
+  "name": "grigdesk-server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Кокпит: API-сервер (Fastify). Host-native, читает состояние фабрики и командует ей.",
-  "main": "src/app.js",
+  "description": "GrigDesk: API-сервер (Fastify). Host-native, читает состояние фабрики и командует ей.",
+  "main": "src/app.ts",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "node --watch src/app.js",
-    "test": "node --test ../tests/server/*.test.js"
+    "build:binary": "node scripts/buildBinary.mts",
+    "install:binary": "node scripts/installBinary.mts",
+    "build:sea": "node scripts/buildSea.mts",
+    "test:sea": "node scripts/testSea.mts",
+    "start": "node src/app.ts",
+    "dev": "node --watch src/app.ts",
+    "test": "npm run typecheck && npm run typecheck:tests && GRIGDESK_RELEASE_PUBLISH_CONTRACT=2 NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=6144 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=6 ../tests/server/*.test.js ../tests/server/help-*.test.mts ../tests/shared/help-*.test.mts ../tests/server/codex-scoped-workspace-profile.test.mts ../tests/server/triage-scoped-tools.test.mts ../tests/server/triage-scoped-runners.test.mts ../tests/server/loopback-only.test.mts ../tests/server/data-home-boot.test.mts ../tests/server/data-home.test.mts ../tests/server/brand-move.test.mts ../tests/server/brand-env.test.mts ../tests/server/factory-stand-restore.test.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
+    "typecheck:code": "tsc -p tsconfig.code.json --noEmit",
+    "typecheck:sandboxes": "tsc -p tsconfig.sandboxes.json --noEmit",
+    "typecheck:showcase": "tsc -p tsconfig.showcase.json --noEmit",
+    "typecheck:shelf": "tsc -p tsconfig.shelf.json --noEmit",
+    "typecheck:video": "tsc -p tsconfig.video.json --noEmit",
+    "typecheck:triage": "tsc -p tsconfig.triage.json --noEmit",
+    "typecheck:ssh": "tsc -p tsconfig.ssh.json --noEmit",
+    "typecheck:github": "tsc -p tsconfig.github.json --noEmit",
+    "typecheck:db": "tsc -p tsconfig.db.json --noEmit",
+    "typecheck:inbox": "tsc -p tsconfig.inbox.json --noEmit",
+    "typecheck:telegram": "tsc -p tsconfig.telegram.json --noEmit",
+    "typecheck:media": "tsc -p tsconfig.media.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
+    "deepseek:prepare": "node scripts/prepareDeepSeekRuntime.mts",
+    "deepseek:build": "node scripts/prepareDeepSeekRuntime.mts",
+    "deepseek:verify": "node scripts/verifyDeepSeekCandidate.mts --vendor-dir ../deepseek/vendor/deepseek-harness"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "dependencies": {
+    "@clickhouse/client": "^1.23.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/http-proxy": "^11.6.0",
     "@fastify/multipart": "^10.1.0",
     "@fastify/static": "^8.0.3",
     "@fastify/websocket": "^11.3.0",
+    "ajv": "^8.20.0",
     "fastify": "^5.2.0",
     "fastify-plugin": "^5.0.1",
-    "qrcode-generator": "^2.0.4"
+    "ioredis": "^6.0.0",
+    "mysql2": "^3.24.3",
+    "playwright-core": "^1.62.1",
+    "qrcode-generator": "^2.0.4",
+    "smol-toml": "1.4.2",
+    "ssh2": "^1.17.0",
+    "ws": "^8.21.1",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.25.12",
+    "fflate": "0.8.3",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "5.9.3"
   }
 }

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "capacitor": "8.5.3",
+  "jdk": {
+    "version": "21.0.12.1+1",
+    "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz",
+    "sha256": "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94"
+  },
+  "commandLineTools": {
+    "version": "19.0",
+    "url": "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip",
+    "sha256": "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee"
+  },
+  "gradle": "8.14.3",
+  "agp": "8.13.0",
+  "minSdk": 30,
+  "compileSdk": 36,
+  "targetSdk": 36,
+  "buildTools": "36.0.0",
+  "platformTools": "37.0.1",
+  "platformRevision": 2,
+  "okhttp": "4.12.0",
+  "zxing": "4.3.0",
+  "biometric": "1.1.0",
+  "gradleDistribution": {
+    "url": "https://github.com/gradle/gradle-distributions/releases/download/v8.14.3/gradle-8.14.3-bin.zip",
+    "sha256": "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531"
+  },
+  "gradleWrapperJar": {
+    "sha256": "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
+  }
+}

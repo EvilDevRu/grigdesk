@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Локальная сборка и отдельная SEA-приёмка; тегов, push и установки здесь нет.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ $# == 0 ]]; then
+  CHECK_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/grigdesk-server-sea-check.XXXXXX")
+  OUT_DIR=${GRIGDESK_SEA_RELEASE_DIR:-"$CHECK_ROOT/release"}
+  CACHE_DIR=${GRIGDESK_SEA_CACHE_DIR:-"$CHECK_ROOT/cache"}
+elif [[ $# == 2 && -n "$1" && -n "$2" ]]; then
+  OUT_DIR=$1
+  CACHE_DIR=$2
+else
+  echo 'Использование: bash tools/server-sea-check [<out-dir> <cache-dir>]' >&2
+  exit 2
+fi
+
+OUT_DIR=$(realpath -m -- "$OUT_DIR")
+CACHE_DIR=$(realpath -m -- "$CACHE_DIR")
+export npm_config_cache=${npm_config_cache:-"$CACHE_DIR/npm"}
+
+npm --prefix "$ROOT/server" run build:sea -- --out-dir "$OUT_DIR" --cache-dir "$CACHE_DIR"
+RELEASE_DIRECTORY=$(node --input-type=module - "$OUT_DIR/build-result.json" <<'NODE'
+import { readFile } from 'node:fs/promises';
+
+const result = JSON.parse(await readFile(process.argv[2], 'utf8'));
+
+if (typeof result.directory !== 'string' || !result.directory) {
+  throw new Error('Сборка не вернула каталог комплекта');
+}
+
+process.stdout.write(result.directory);
+NODE
+)
+npm --prefix "$ROOT/server" run test:sea -- --release-dir "$RELEASE_DIRECTORY"
+printf 'Проверенный SEA-комплект: %s\n' "$RELEASE_DIRECTORY"

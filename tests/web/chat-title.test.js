@@ -7,7 +7,7 @@ import {
   firstMessageTitle,
   provisionalChatTitle,
   shouldRequestChatTitle,
-} from '../../web/src/shared/chat-title.js';
+} from '../../web/src/shared/chatTitle.ts';
 
 test('первый запрос даёт название из трёх значимых слов', () => {
   assert.equal(

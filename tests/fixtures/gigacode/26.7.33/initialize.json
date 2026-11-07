@@ -1,0 +1,55 @@
+{
+  "protocolVersion": 1,
+  "agentInfo": {
+    "name": "gigacode",
+    "title": "GigaCode",
+    "version": "0.13.1"
+  },
+  "authMethods": [
+    {
+      "id": "openai",
+      "name": "Use OpenAI API key",
+      "description": "Requires setting the `OPENAI_API_KEY` environment variable",
+      "_meta": {
+        "type": "terminal",
+        "args": [
+          "--auth-type=openai"
+        ]
+      }
+    },
+    {
+      "id": "qwen-oauth",
+      "name": "Qwen OAuth",
+      "description": "OAuth authentication for Qwen models with free daily requests",
+      "_meta": {
+        "type": "terminal",
+        "args": [
+          "--auth-type=qwen-oauth"
+        ]
+      }
+    },
+    {
+      "id": "gigacode",
+      "name": "GigaCode",
+      "description": "Corporate authentication via device code",
+      "_meta": {
+        "type": "terminal",
+        "args": [
+          "--auth-type=gigacode"
+        ]
+      }
+    }
+  ],
+  "agentCapabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": true,
+      "embeddedContext": true
+    },
+    "sessionCapabilities": {
+      "list": {},
+      "resume": {}
+    }
+  }
+}

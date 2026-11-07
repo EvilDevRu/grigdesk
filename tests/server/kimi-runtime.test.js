@@ -6,20 +6,29 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
+import { kimiUsageWire } from '../helpers/kimiUsageWire.mjs';
+
 import {
   parseStatus,
   permissionPresentation,
   runContainedKimi,
   selectPermissionOutcome,
-} from '../../server/src/lib/kimi/runtime.js';
+} from '../../server/src/lib/kimi/runtime.ts';
+import {
+  KIMI_SANDBOX_NODE,
+  KIMI_SANDBOX_WORK_MCP,
+  KIMI_SANDBOX_WORK_SOCKET,
+} from '../../server/src/lib/kimi/sandbox.ts';
 
 class FakeAcpProcess extends EventEmitter {
-  constructor() {
+  constructor({ localCommands } = {}) {
     super();
     this.stdout = new PassThrough();
     this.stderr = new PassThrough();
     this.messages = [];
     this.pendingPrompt = null;
+    // Подменённые ответы локальных команд вида { '/status': '...', '/usage': '...' }.
+    this.localCommands = localCommands || null;
     let input = '';
     this.stdin = new Writable({
       write: (chunk, _encoding, done) => {
@@ -82,10 +91,13 @@ class FakeAcpProcess extends EventEmitter {
     }
     if (message.method === 'session/prompt') {
       const text = message.params?.prompt?.[0]?.text || '';
-      if (text === '/status') {
+      const localReply = this.localCommands
+        ? this.localCommands[text]
+        : (text === '/status' ? 'Session status:\n- Model: kimi-code/k3\n- Context: 12,345 / 1,048,576 (1.2%)' : undefined);
+      if (localReply !== undefined) {
         this.send({ method: 'session/update', params: { sessionId: 'session-1', update: {
           sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: 'Session status:\n- Model: kimi-code/k3\n- Context: 12,345 / 1,048,576 (1.2%)' },
+          content: { type: 'text', text: localReply },
         } } });
         this.send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else {
@@ -116,7 +128,7 @@ class FakeAcpProcess extends EventEmitter {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-runtime-test-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-runtime-test-'));
   const cwd = path.join(root, 'workspace');
   const chatsDir = path.join(root, 'chats');
   await Promise.all([cwd, chatsDir].map((dir) => fs.mkdir(dir, { recursive: true })));
@@ -135,10 +147,11 @@ async function fixture(t) {
   };
 }
 
-test('contained runtime соблюдает lifecycle, permission и session durability без реального model call', async (t) => {
+test('contained runtime даже при false сохраняет сетевую границу и ACP lifecycle', async (t) => {
   const f = await fixture(t);
   const process = new FakeAcpProcess();
   const order = [];
+  const progress = [];
   let launchConfig;
   let launchOptions;
   const out = await runContainedKimi({
@@ -149,7 +162,9 @@ test('contained runtime соблюдает lifecycle, permission и session dura
     model: 'kimi-code/k3',
     effort: 'high',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onSessionCreated: async (id) => { order.push(`bound:${id}`); },
+    onProgress: (_tokens, info) => progress.push(info),
     onPermission: async (presentation) => {
       order.push(`permission:${presentation.tool}`);
       return { allow: true };
@@ -161,7 +176,7 @@ test('contained runtime соблюдает lifecycle, permission и session dura
       buildLaunch: async (options) => {
         launchOptions = options;
         launchConfig = options.config;
-        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'cockpit-kimi-fake.service' };
+        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'grigdesk-kimi-fake.service' };
       },
       spawn: () => process,
       stopUnit: async () => {},
@@ -171,7 +186,11 @@ test('contained runtime соблюдает lifecycle, permission и session dura
   assert.equal(out.sessionId, 'session-1');
   assert.equal(out.contextTokens, 12_345);
   assert.equal(out.contextWindow, 1_048_576);
+  assert.equal(progress.at(-1).contextTokens, out.contextTokens);
+  assert.equal(progress.at(-1).contextWindow, out.contextWindow);
+  assert.equal(progress.at(-1).contextMetric, 'kimi-session-status');
   assert.equal(out.contextIsEstimate, false);
+  assert.deepEqual(out.contextCache, { scope: 'request', status: 'unavailable' });
   assert.equal(out.retryState, 'post_prompt');
   assert.deepEqual(order, ['bound:session-1', 'permission:Read']);
   assert.deepEqual(process.permissionResponse, { outcome: { outcome: 'selected', optionId: 'approve_once' } });
@@ -183,6 +202,57 @@ test('contained runtime соблюдает lifecycle, permission и session dura
   assert.equal(launchConfig.kimiRuntimeHome.includes('chat-private-a'), false);
   assert.ok(Buffer.byteLength(launchOptions.egressSocketPath) <= 107);
   assert.match(launchOptions.egressSocketPath, /\/broker\/r\/[a-f0-9]{20}\/e\.sock$/);
+});
+
+test('contained runtime объявляет сессии рабочий MCP по путям внутри песочницы', async (t) => {
+  const f = await fixture(t);
+  const child = new FakeAcpProcess();
+  const hostScript = path.join(f.root, 'work-mcp.js');
+  const hostSocket = path.join(f.root, 'work.sock');
+  let launchOptions;
+  await runContainedKimi({
+    config: f.config,
+    chatKey: 'chat-work-mcp',
+    cwd: f.cwd,
+    message: 'offline fake prompt',
+    model: 'kimi-code/k3',
+    permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
+    mcpServers: [
+      { name: 'other', command: 'node', args: ['keep-me.js'] },
+      {
+        name: 'grigdesk-work',
+        command: process.execPath,
+        args: [hostScript, '--socket', hostSocket, '--nonce', 'nonce-42'],
+      },
+    ],
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      assertVersion: async () => '0.31.1',
+      createProxy: () => ({ async start() {}, async close() {} }),
+      preflight: async () => ({ decision: 'GO_CONTAINED_MVP', checks: {} }),
+      buildLaunch: async (options) => {
+        launchOptions = options;
+        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'grigdesk-kimi-fake.service' };
+      },
+      spawn: () => child,
+      stopUnit: async () => {},
+    },
+  });
+
+  // Сборке запуска отдаются ХОСТОВЫЕ пути: она их и монтирует.
+  assert.deepEqual(launchOptions.workMcp, { scriptPath: hostScript, socketPath: hostSocket });
+  const opened = child.messages.find((message) => message.method === 'session/new');
+  const servers = opened.params.mcpServers;
+  // Чужая запись не переписывается: подменяется ровно мост GrigDesk.
+  assert.deepEqual(servers[0], { name: 'other', command: 'node', args: ['keep-me.js'] });
+  assert.equal(servers[1].command, KIMI_SANDBOX_NODE);
+  assert.deepEqual(servers[1].args, [
+    KIMI_SANDBOX_WORK_MCP, '--socket', KIMI_SANDBOX_WORK_SOCKET, '--nonce', 'nonce-42',
+  ]);
+  // Хостовые пути и флаги снятия типов внутрь сессии не уезжают.
+  assert.equal(servers[1].args.includes(hostScript), false);
+  assert.equal(servers[1].args.some((value) => /strip-types|transform-types/.test(value)), false);
 });
 
 test('permission mapper выбирает только allow_once/reject и ACP question option', () => {
@@ -207,6 +277,96 @@ test('permission mapper выбирает только allow_once/reject и ACP q
   assert.equal(permissionPresentation(question).isQuestion, true);
   assert.deepEqual(selectPermissionOutcome(question, { selected: ['A'] }), { outcome: { outcome: 'selected', optionId: 'q0_opt_0' } });
   assert.deepEqual(selectPermissionOutcome(question, { selected: [] }), { outcome: { outcome: 'selected', optionId: 'q0_skip' } });
+
+  // «Не спрашивать до конца сессии» — это allow_always самого ACP: без передачи
+  // галка жила только в памяти вкладки, и Kimi спрашивал снова.
+  assert.deepEqual(selectPermissionOutcome(approval, { allow: true, remember: true }),
+    { outcome: { outcome: 'selected', optionId: 'always' } });
+});
+
+// Запрос разрешения не несёт ни kind, ни аргументов вызова: buildPermissionToolCallUpdate
+// кладёт только title и content. Всё остальное GrigDesk восстанавливает по toolCallId —
+// без этого всплывашка показывала голый JSON, а «Авто» спрашивал на каждое действие.
+test('permission presentation: команда, путь и дифф разбираются в читаемые поля', () => {
+  const params = {
+    options: [
+      { optionId: 'approve_once', name: 'Approve once', kind: 'allow_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+    toolCall: {
+      title: 'Bash',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Соберу проект и прогоню тесты' } },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to run a command' } },
+      ],
+    },
+  };
+  const out = permissionPresentation(params, { kind: 'execute', rawInput: { command: 'npm test' } });
+  assert.equal(out.isQuestion, false);
+  assert.equal(out.acceptsComment, false); // ACP-outcome текста не несёт
+  assert.equal(out.tool, 'Bash');
+  assert.equal(out.input.kind, 'execute');
+  assert.equal(out.input.command, 'npm test');
+  assert.equal(out.input.description, 'Requesting approval to run a command');
+  assert.equal(out.input.details, 'Соберу проект и прогоню тесты');
+  assert.equal(out.input.plan, undefined);
+
+  const edit = permissionPresentation({
+    options: params.options,
+    toolCall: {
+      title: 'Edit file',
+      content: [
+        { type: 'diff', path: 'server/src/app.js', oldText: 'a\n', newText: 'b\n' },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to edit a file' } },
+      ],
+    },
+  }, { kind: 'edit' });
+  assert.deepEqual(edit.input.diff, { old: 'a\n', new: 'b\n' });
+  assert.equal(edit.input.file_path, 'server/src/app.js');
+});
+
+test('permission presentation: план отдаётся текстом и своими вариантами ответа', () => {
+  const out = permissionPresentation({
+    options: [
+      { optionId: 'plan_approve', name: 'Approve plan', kind: 'allow_once' },
+      { optionId: 'plan_revise', name: 'Revise plan', kind: 'reject_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+    toolCall: {
+      title: 'Plan',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Шаг 1. Изучить\nШаг 2. Починить' } },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to proceed' } },
+      ],
+    },
+  }, {});
+  assert.match(out.input.plan, /Шаг 2\. Починить/);
+  // Кнопками идут только специфические варианты плана: обычную тройку
+  // allow/allow_always/reject всплывашка рисует сама.
+  assert.deepEqual(out.input.choices, [
+    { id: 'plan_approve', label: 'Approve plan', kind: 'allow_once' },
+    { id: 'plan_revise', label: 'Revise plan', kind: 'reject_once' },
+  ]);
+});
+
+// Мост ACP сводит вопрос к одному варианту без пояснений и без своего текста.
+// Врать человеку чекбоксами и полем ввода нельзя — ограничение объявляется полями.
+test('question presentation честно объявляет ограничения ACP-моста', () => {
+  const out = permissionPresentation({
+    options: [
+      { optionId: 'q0_opt_0', name: 'Вариант А', kind: 'allow_once' },
+      { optionId: 'q0_opt_1', name: 'Вариант Б', kind: 'allow_once' },
+      { optionId: 'q0_skip', name: 'Skip', kind: 'reject_once' },
+    ],
+    toolCall: { title: 'AskUserQuestion', content: [{ type: 'content', content: { type: 'text', text: 'Что делаем?' } }] },
+  }, {});
+  assert.equal(out.isQuestion, true);
+  assert.equal(out.acceptsText, false);
+  const [question] = out.questions;
+  assert.equal(question.multiSelect, false);
+  assert.equal(question.allowFreeText, false);
+  assert.ok(question.hint, 'ограничение канала названо словами');
+  assert.deepEqual(question.options.map((option) => option.label), ['Вариант А', 'Вариант Б']);
 });
 
 test('status parser не подменяет точное измерение оценкой', () => {
@@ -218,6 +378,64 @@ test('status parser не подменяет точное измерение оц
     actualModel: 'k3',
   });
   assert.equal(parseStatus('broken', 262144).contextIsEstimate, true);
+  assert.equal(parseStatus('Context: 123 / 0', 262144).contextMetric, 'unavailable');
+  assert.equal(parseStatus('Context: 99999999999999999 / 262144', 262144).contextMetric, 'unavailable');
+});
+
+test('status parser понимает формат 0.33+: /usage с размером, /status без маркеров', () => {
+  assert.deepEqual(parseStatus('Context: 0 / 1,048,576 tokens (0%)\nSession total: no LLM calls yet', 10), {
+    contextTokens: 0,
+    contextWindow: 1048576,
+    contextMetric: 'kimi-session-status',
+    contextIsEstimate: false,
+    actualModel: '',
+  });
+  // Реальный ход: склеенные ответы /status (модель с суффиксом thinking) и /usage.
+  const combined = 'Session: session-1\nModel: kimi-code/k3 (thinking: on)\nMode: default\nWorking directory: /tmp'
+    + 'Context: 45,678 / 262,144 tokens (17%)\nSession total: 50,000 input tokens';
+  assert.deepEqual(parseStatus(combined, 10), {
+    contextTokens: 45678,
+    contextWindow: 262144,
+    contextMetric: 'kimi-session-status',
+    contextIsEstimate: false,
+    actualModel: 'kimi-code/k3',
+  });
+});
+
+test('host runtime: CLI без Context в /status добирает размер через /usage', async (t) => {
+  const f = await fixture(t);
+  const process = new FakeAcpProcess({
+    localCommands: {
+      '/status': 'Session: session-1\nModel: kimi-code/k3 (thinking: on)\nMode: default\nWorking directory: /tmp',
+      '/usage': 'Context: 45,678 / 262,144 tokens (17%)\nSession total: 50,000 input tokens',
+    },
+  });
+  const out = await runContainedKimi({
+    config: { ...f.config, kimiLaunchMode: 'host' },
+    chatKey: 'chat-host-usage',
+    cwd: f.cwd,
+    env: {},
+    message: 'offline fake prompt',
+    model: 'kimi-code/k3',
+    permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      assertVersion: async () => { throw new Error('host: версия не пинится'); },
+      buildHostLaunch: async () => ({ command: 'fake-host', args: ['acp'], env: {}, cwdReal: f.cwd, unit: null }),
+      spawn: () => process,
+      stopUnit: async () => {},
+    },
+  });
+  assert.equal(out.reply, 'Готово.');
+  assert.equal(out.contextTokens, 45_678);
+  assert.equal(out.contextWindow, 262_144);
+  assert.equal(out.contextIsEstimate, false);
+  assert.equal(out.actualModel, 'kimi-code/k3');
+  const prompts = process.messages
+    .filter((message) => message.method === 'session/prompt')
+    .map((message) => message.params.prompt[0].text);
+  assert.deepEqual(prompts.slice(1), ['/status', '/usage']);
 });
 
 test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-ход и permissions без изменений', async (t) => {
@@ -234,6 +452,7 @@ test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-хо�
     model: 'kimi-code/k3',
     effort: 'high',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onPermission: async () => ({ allow: true }),
     deps: {
       // Host-режим: расхождение pinned версии — предупреждение, а не падение хода.
@@ -270,6 +489,86 @@ test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-хо�
   assert.deepEqual(calls, { preflight: 0, proxy: 0, buildLaunch: 0, buildHost: 1, stopUnit: 0 });
 });
 
+test('host runtime при default-on запрете отказывает до сборки запуска и spawn', async (t) => {
+  const snapshots = [];
+  for (const providerSettings of [undefined, { blockDirectSsh: true }]) {
+    const f = await fixture(t);
+    const calls = { buildHost: 0, spawn: 0 };
+    let error;
+    try {
+      await runContainedKimi({
+        config: { ...f.config, kimiLaunchMode: 'host' },
+        chatKey: 'chat-host-blocked',
+        cwd: f.cwd,
+        message: 'offline fake prompt',
+        model: 'kimi-code/k3',
+        effort: 'high',
+        providerSettings,
+        deps: {
+          assertVersion: async () => {},
+          buildHostLaunch: async () => {
+            calls.buildHost += 1;
+            throw new Error('host launch не должен собираться');
+          },
+          spawn: () => {
+            calls.spawn += 1;
+            throw new Error('process не должен запускаться');
+          },
+        },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    snapshots.push({ code: error?.code, calls });
+  }
+
+  assert.deepEqual(snapshots, [
+    { code: 'direct_ssh_policy_unavailable', calls: { buildHost: 0, spawn: 0 } },
+    { code: 'direct_ssh_policy_unavailable', calls: { buildHost: 0, spawn: 0 } },
+  ]);
+});
+
+test('host runtime при DB-политике отказывает до запуска во всех режимах прав', async (t) => {
+  const snapshots = [];
+  for (const permissionMode of ['default', 'auto', 'plan', 'bypassPermissions']) {
+    const f = await fixture(t);
+    const calls = { buildHost: 0, spawn: 0 };
+    let error;
+    try {
+      await runContainedKimi({
+        config: { ...f.config, kimiLaunchMode: 'host' },
+        chatKey: `chat-host-db-${permissionMode}`,
+        cwd: f.cwd,
+        message: 'offline fake prompt',
+        model: 'kimi-code/k3',
+        permissionMode,
+        providerSettings: { blockDirectSsh: false, blockDirectDb: true },
+        deps: {
+          assertVersion: async () => {},
+          buildHostLaunch: async () => {
+            calls.buildHost += 1;
+            throw new Error('host launch не должен собираться');
+          },
+          spawn: () => {
+            calls.spawn += 1;
+            throw new Error('process не должен запускаться');
+          },
+        },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    snapshots.push({ permissionMode, code: error?.code, calls });
+  }
+
+  assert.deepEqual(snapshots, ['default', 'auto', 'plan', 'bypassPermissions']
+    .map((permissionMode) => ({
+      permissionMode,
+      code: 'direct_db_policy_unavailable',
+      calls: { buildHost: 0, spawn: 0 },
+    })));
+});
+
 test('host runtime: вложения идут по исходным путям, чужой корень отклоняется', async (t) => {
   const f = await fixture(t);
   const attachments = [path.join(f.config.chatsDir, 'attachments', 'note.txt')];
@@ -283,6 +582,7 @@ test('host runtime: вложения идут по исходным путям, 
     attachmentPaths: attachments,
     model: 'kimi-code/k3',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onPermission: async () => ({ allow: true }),
     deps: {
       assertVersion: async () => '0.31.1',
@@ -305,6 +605,7 @@ test('host runtime: вложения идут по исходным путям, 
       message: 'x',
       attachmentPaths: ['/etc/passwd'],
       model: 'kimi-code/k3',
+      providerSettings: { blockDirectSsh: false },
       deps: {
         assertVersion: async () => '0.31.1',
         buildHostLaunch: async () => { throw new Error('до launch недоходим'); },
@@ -313,4 +614,364 @@ test('host runtime: вложения идут по исходным путям, 
     }),
     /kimi_attachment_outside_root/,
   );
+});
+
+
+test('server runtime сохраняет контекст и берёт окно из каталога при отсутствии в статусе', async (t) => {
+  for (const window of [undefined, 262144]) {
+    const f = await fixture(t);
+    const metadata = [];
+    const wire = await kimiUsageWire(t, [(send) => {
+      send({
+        type: 'agent.status.updated',
+        model: 'kimi-code/k3',
+        contextTokens: 6000,
+        maxContextTokens: window
+      });
+      send({ type: 'turn.ended', reason: 'completed' });
+    }]);
+    const out = await runContainedKimi({
+      config: f.config,
+      chatKey: 'usage-runtime',
+      cwd: f.cwd,
+      message: 'Синтетический ход',
+      model: 'kimi-code/k3',
+      transport: 'server',
+      onRunMetadata: (event) => metadata.push(event),
+      deps: {
+        assertVersion: async () => '0.33.0',
+        createProxy: () => ({ async start() {}, async close() {} }),
+        preflight: async () => ({ decision: 'GO_CONTAINED_MVP', checks: {} }),
+        buildLaunch: async () => ({
+          command: 'fake',
+          args: [],
+          cwdReal: f.cwd
+        }),
+        stopUnit: async () => {},
+        startServer: wire.startServer,
+      },
+    });
+
+    assert.equal(out.contextTokens, 6000);
+    assert.equal(out.contextWindow, window ?? 1048576);
+    assert.equal(out.contextMetric, 'kimi-agent-status-v1');
+    assert.equal(out.actualModel, 'kimi-code/k3');
+    assert.deepEqual(metadata, [{ actualModelId: 'kimi-code/k3', modelSource: 'session' }]);
+  }
+});
+
+test('server runtime переводит структурные разрешения в поля карточки и сохраняет ответы', async (t) => {
+  const f = await fixture(t);
+  const scenarios = [
+    {
+      tool: 'Bash',
+      kind: 'execute',
+      action: 'Запустить проверку',
+      display: {
+        kind: 'command',
+        command: 'npm test\n',
+        description: 'Проверить проект',
+      },
+      input: {
+        kind: 'execute',
+        description: 'Проверить проект',
+        command: 'npm test\n',
+      },
+      answer: {
+        allow: true,
+        remember: true,
+      },
+      response: {
+        decision: 'approved',
+        scope: 'session',
+      },
+    },
+    {
+      tool: 'Write',
+      action: 'Записать файл',
+      display: {
+        kind: 'file_io',
+        operation: 'write',
+        path: ' notes.md ',
+        content: '# Итог\n',
+      },
+      input: {
+        kind: 'Записать файл',
+        description: 'Записать файл',
+        file_path: ' notes.md ',
+        details: '# Итог\n',
+      },
+      answer: {
+        allow: false,
+        comment: 'Уточни вывод',
+      },
+      response: {
+        decision: 'rejected',
+        feedback: 'Уточни вывод',
+      },
+    },
+    {
+      tool: 'Edit',
+      action: 'Удалить строку',
+      display: {
+        kind: 'diff',
+        path: 'notes.md',
+        before: 'лишнее\n',
+        after: '',
+      },
+      input: {
+        kind: 'Удалить строку',
+        description: 'Удалить строку',
+        file_path: 'notes.md',
+        diff: {
+          old: 'лишнее\n',
+          new: '',
+        },
+      },
+      answer: { allow: true },
+      response: { decision: 'approved' },
+    },
+    {
+      tool: 'Edit',
+      action: 'Изменить файл',
+      display: {
+        kind: 'file_io',
+        operation: 'edit',
+        path: 'notes.md',
+        before: '',
+        after: 'новое\n',
+      },
+      input: {
+        kind: 'Изменить файл',
+        description: 'Изменить файл',
+        file_path: 'notes.md',
+        diff: {
+          old: '',
+          new: 'новое\n',
+        },
+      },
+    },
+    {
+      tool: 'MCP',
+      action: 'Выполнить действие',
+      display: {
+        kind: 'generic',
+        summary: 'Запрос инструмента',
+        detail: { nested: { value: 1 } },
+      },
+      input: {
+        kind: 'Выполнить действие',
+        description: 'Запрос инструмента',
+        details: '{\n  "nested": {\n    "value": 1\n  }\n}',
+      },
+    },
+    {
+      tool: 'Bash',
+      display: 'npm test',
+      input: {
+        kind: '',
+        description: 'npm test',
+        command: 'npm test',
+      },
+    },
+    {
+      tool: 'Unknown',
+      action: 'Новый формат',
+      display: {
+        kind: 'future',
+        value: { flag: true },
+      },
+      input: {
+        kind: 'Новый формат',
+        description: 'Новый формат',
+        details: '{\n  "kind": "future",\n  "value": {\n    "flag": true\n  }\n}',
+      },
+    },
+    {
+      tool: 'Unknown',
+      action: 'Нет предпросмотра',
+      display: null,
+      input: {
+        kind: 'Нет предпросмотра',
+        description: 'Нет предпросмотра',
+      },
+    },
+  ];
+  const asks = [];
+  const responses = [];
+  let publish;
+  let index = 0;
+  const next = () => {
+    const scenario = scenarios[index];
+
+    if (!scenario) {
+      publish({
+        type: 'turn.ended',
+        reason: 'completed',
+      });
+
+      return;
+    }
+
+    publish({
+      type: 'approval.requested',
+      approval_id: `approval-${index}`,
+      tool_name: scenario.tool,
+      kind: scenario.kind,
+      action: scenario.action,
+      tool_input_display: scenario.display,
+    });
+  };
+  const wire = await kimiUsageWire(t, [(send) => {
+    publish = send;
+    next();
+  }]);
+
+  await runContainedKimi({
+    config: f.config,
+    chatKey: 'approval-runtime',
+    cwd: f.cwd,
+    model: 'kimi-code/k3',
+    message: 'Синтетические разрешения',
+    transport: 'server',
+    onPermission: async (ask) => {
+      asks.push(ask);
+
+      return scenarios[index].answer;
+    },
+    deps: {
+      assertVersion: async () => '0.33.0',
+      createProxy: () => ({
+        async start() {},
+        async close() {},
+      }),
+      preflight: async () => ({
+        decision: 'GO_CONTAINED_MVP',
+        checks: {},
+      }),
+      buildLaunch: async () => ({
+        command: 'fake',
+        args: [],
+        cwdReal: f.cwd,
+      }),
+      stopUnit: async () => {},
+      startServer: async () => {
+        const server = await wire.startServer();
+
+        server.client.respondApproval = async (_sessionId, approvalId, response) => {
+          responses.push({
+            approvalId,
+            response,
+          });
+          publish({
+            type: 'approval.resolved',
+            approval_id: approvalId,
+          });
+          index += 1;
+          next();
+
+          return {};
+        };
+
+        return server;
+      },
+    },
+  });
+
+  assert.deepEqual(asks.map((ask) => ({
+    tool: ask.tool,
+    input: ask.input,
+  })), scenarios.map((scenario) => ({
+    tool: scenario.tool,
+    input: scenario.input,
+  })));
+  assert.ok(asks.every((ask) => ask.acceptsComment === true && ask.canRemember === true));
+  assert.deepEqual(responses, scenarios.map((scenario, position) => ({
+    approvalId: `approval-${position}`,
+    response: scenario.response || { decision: 'rejected' },
+  })));
+});
+
+test('host server отвечает при DB-политике и сохраняет закрытый Bash в каждом режиме', async (t) => {
+  const scenarios = [
+    ...['manual', 'auto', 'plan', 'yolo'].map((permissionMode) => ({ permissionMode, brokerFails: false })),
+    { permissionMode: 'yolo', brokerFails: true },
+    {
+      permissionMode: 'yolo',
+      brokerFails: false,
+      invalidMatcher: true,
+    },
+  ];
+
+  for (const { permissionMode, brokerFails, invalidMatcher } of scenarios) {
+    const f = await fixture(t);
+
+    await fs.mkdir(path.join(f.config.kimiHome, 'sessions'), { recursive: true });
+
+    const originalSource = invalidMatcher
+      ? 'telemetry = false\n[[hooks]]\nevent = "PreToolUse"\nmatcher = "["\ncommand = "true"\n'
+      : 'telemetry = false\n';
+
+    await fs.writeFile(path.join(f.config.kimiHome, 'config.toml'), originalSource);
+    await fs.writeFile(path.join(f.config.kimiHome, 'mcp.json'), JSON.stringify({
+      mcpServers: { 'grigdesk-command': { command: '/must-not-run' } },
+    }));
+
+    const wire = await kimiUsageWire(t, [(send) => {
+      send({ type: 'assistant.delta', delta: 'Ответ.' });
+      send({ type: 'turn.ended', reason: 'completed' });
+    }]);
+    let launchHome = '';
+    let mcp;
+    const out = await runContainedKimi({
+      config: { ...f.config, kimiLaunchMode: 'host' },
+      chatKey: 'fixture-host-command',
+      cwd: f.cwd,
+      message: 'Можно сделать плагин?',
+      model: 'kimi-code/k3',
+      permissionMode,
+      providerSettings: { blockDirectSsh: true, blockDirectDb: true },
+      transport: 'server',
+      deps: {
+        assertVersion: async () => '0.33.0',
+        createCommandChannel: brokerFails ? async () => {
+          throw new Error('Канал недоступен');
+        } : undefined,
+        buildHostLaunch: async () => ({
+          command: 'fake',
+          args: [],
+          cwdReal: f.cwd,
+          env: {},
+          unit: null,
+        }),
+        startServer: async (input) => {
+          launchHome = input.home;
+
+          const source = await fs.readFile(path.join(input.home, 'config.toml'), 'utf8');
+
+          assert.match(source, /Bash/);
+          mcp = JSON.parse(await fs.readFile(path.join(input.home, 'mcp.json'), 'utf8'));
+
+          const server = await wire.startServer();
+
+          server.client.tools = async () => ({ tools: [{ name: 'Bash', active: false }] });
+
+          return server;
+        },
+      },
+    });
+
+    assert.equal(out.reply, 'Ответ.');
+
+    if (brokerFails) {
+      assert.equal(mcp.mcpServers['grigdesk-command'], undefined);
+    } else {
+      assert.equal(mcp.mcpServers['grigdesk-command'].toolTimeoutMs, 2_147_483_647);
+    }
+
+    const originalConfig = await fs.readFile(path.join(f.config.kimiHome, 'config.toml'), 'utf8');
+
+    assert.equal(originalConfig, originalSource);
+    await assert.rejects(fs.access(launchHome), { code: 'ENOENT' });
+  }
 });

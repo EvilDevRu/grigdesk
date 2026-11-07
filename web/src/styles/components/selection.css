@@ -1,0 +1,432 @@
+.ui-checkbox,
+.ui-radio,
+.ui-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--control-text);
+  cursor: pointer;
+}
+
+/* Выбор в рабочей форме имеет ту же площадку, что соседние поля и кнопки.
+   Токен сохраняет 44 px на touch, включая подпись репозитория по умолчанию. */
+.ui-workspace .ui-radio {
+  min-height: var(--control-height);
+}
+
+/* Компактная дорожка сохраняет плотность toolbar, а подпись использует шрифт интерфейса.
+   Моноширинное начертание остаётся у кода и технических значений, не у обычных действий. */
+.ui-switch {
+  gap: 7px;
+  padding: 4px 2px;
+  color: var(--ink-mid);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.ui-switch:hover:not(.is-disabled) {
+  color: var(--ink);
+}
+
+.ui-switch.is-checked {
+  color: var(--accent);
+}
+
+.ui-checkbox__input,
+.ui-radio__input,
+.ui-switch__input,
+.ui-checkbox__native,
+.ui-radio__native,
+.ui-switch__native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ui-checkbox__control,
+.ui-radio__control,
+.ui-checkbox__mark,
+.ui-radio__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--control-border-hover);
+  background: var(--control-background);
+  color: var(--ground);
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-checkbox__control,
+.ui-checkbox__mark {
+  border-radius: 5px;
+}
+
+.ui-radio__control,
+.ui-radio__mark {
+  border-radius: 50%;
+}
+
+.ui-checkbox__input:focus-visible + .ui-checkbox__control,
+.ui-radio__input:focus-visible + .ui-radio__control,
+.ui-switch__input:focus-visible + .ui-switch__track,
+.ui-checkbox__native:focus-visible + .ui-checkbox__mark,
+.ui-radio__native:focus-visible + .ui-radio__mark,
+.ui-switch__native:focus-visible + .ui-switch__track {
+  border-color: var(--control-focus-color);
+  box-shadow: var(--control-focus-ring);
+}
+
+.ui-checkbox__input:checked + .ui-checkbox__control,
+.ui-checkbox__input:indeterminate + .ui-checkbox__control,
+.ui-radio__input:checked + .ui-radio__control,
+.ui-checkbox__native:checked + .ui-checkbox__mark,
+.ui-checkbox__native:indeterminate + .ui-checkbox__mark,
+.ui-radio__native:checked + .ui-radio__mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ui-checkbox__control::after,
+.ui-checkbox__mark::after {
+  width: 8px;
+  height: 4px;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  content: '';
+  opacity: 0;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+.ui-checkbox__input:checked + .ui-checkbox__control::after,
+.ui-checkbox__native:checked + .ui-checkbox__mark::after {
+  opacity: 1;
+}
+
+.ui-checkbox__input:indeterminate + .ui-checkbox__control::after,
+.ui-checkbox__native:indeterminate + .ui-checkbox__mark::after {
+  width: 8px;
+  height: 2px;
+  border: 0;
+  background: currentColor;
+  opacity: 1;
+  transform: none;
+}
+
+.ui-radio__control::after,
+.ui-radio__mark::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+  opacity: 0;
+}
+
+.ui-radio__input:checked + .ui-radio__control::after,
+.ui-radio__native:checked + .ui-radio__mark::after {
+  opacity: 1;
+}
+
+.ui-checkbox__label,
+.ui-radio__label,
+.ui-switch__label {
+  min-width: 0;
+}
+
+/* Рамка выключенного переключателя держит контраст не ниже 3:1 к фону панели,
+   иначе от элемента остаётся одна серая точка. */
+.ui-switch__track {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 17px;
+  border: 1px solid var(--ink-low);
+  border-radius: 999px;
+  background: var(--surface-2);
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+  transition:
+    background var(--control-motion-duration) var(--control-motion-easing),
+    transform var(--control-motion-duration) var(--control-motion-easing);
+}
+
+/* Включённое состояние — залитая акцентом дорожка и светлая точка: отличие от
+   выключенного видно по заливке, а не только по цвету точки. */
+.ui-switch__input:checked + .ui-switch__track,
+.ui-switch__native:checked + .ui-switch__track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ui-switch__input:checked + .ui-switch__track .ui-switch__thumb,
+.ui-switch__native:checked + .ui-switch__track .ui-switch__thumb {
+  background: var(--ink);
+  transform: translateX(13px);
+}
+
+.ui-checkbox.is-disabled,
+.ui-radio.is-disabled,
+.ui-switch.is-disabled,
+.ui-checkbox:has(.ui-checkbox__native[aria-disabled='true']),
+.ui-radio:has(.ui-radio__native[aria-disabled='true']),
+.ui-switch:has(.ui-switch__native[aria-disabled='true']),
+.ui-checkbox:has(.ui-checkbox__input:disabled),
+.ui-radio:has(.ui-radio__input:disabled),
+.ui-switch:has(.ui-switch__input:disabled),
+.ui-checkbox:has(.ui-checkbox__native:disabled),
+.ui-radio:has(.ui-radio__native:disabled),
+.ui-switch:has(.ui-switch__native:disabled) {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+/* Переключатель amend живёт в компактном popover композера, а не в обычной форме. */
+.ui-switch:has(.ui-switch__native[data-context='code-commit-amend']) {
+  font-size: 11.5px;
+}
+
+.ui-range {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ui-range[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+.ui-radio-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-discrete-slider {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ui-discrete-slider__labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.ui-discrete-slider__points {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.ui-discrete-slider__points .is-active {
+  color: var(--accent);
+}
+
+/* Пустой выбор не изображает первую ступень: трек повторяет незаполненный нативный.
+   После выбора ступени оформление снова нативное и не зависит от прошлых значений. */
+.ui-discrete-slider--unselected .ui-range {
+  appearance: none;
+  background: transparent;
+}
+
+.ui-discrete-slider--unselected .ui-range::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 8px;
+  border: 1px solid #858585;
+  border-radius: 4px;
+  background: #3b3b3b;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-track {
+  box-sizing: border-box;
+  height: 8px;
+  border: 1px solid #858585;
+  border-radius: 4px;
+  background: #3b3b3b;
+}
+
+.ui-discrete-slider--unselected .ui-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-progress {
+  background: transparent;
+}
+
+/* Компактные риски располагаются под нативным треком и не добавляют второй ряд.
+   Отступ равен половине ширины бегунка: крайние риски совпадают с его центром. */
+.ui-discrete-slider--ticks {
+  position: relative;
+  gap: 0;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points {
+  position: absolute;
+  top: calc(50% + 6px);
+  right: 7px;
+  left: 7px;
+  gap: 0;
+  height: 4px;
+  opacity: .65;
+  pointer-events: none;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points > span {
+  flex: none;
+  width: 1px;
+  height: 4px;
+  background: currentColor;
+  font-size: 0;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points > span:only-child {
+  margin-inline: auto;
+}
+
+/* Тонкий вариант сохраняет нативный range для мыши, касаний и клавиатуры.
+   Бегунок невидим: выбранную ступень отмечает высокая риска поверх трека. */
+.ui-discrete-slider--thin .ui-range {
+  height: var(--toolbar-control-h);
+  appearance: none;
+  background: transparent;
+}
+
+.ui-discrete-slider--thin .ui-range::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: linear-gradient(to right,
+    var(--accent) var(--ui-slider-fill), var(--idle) var(--ui-slider-fill));
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-track {
+  box-sizing: border-box;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: linear-gradient(to right,
+    var(--accent) var(--ui-slider-fill), var(--idle) var(--ui-slider-fill));
+}
+
+.ui-discrete-slider--thin .ui-range::-webkit-slider-thumb {
+  width: 6px;
+  height: 12px;
+  margin-top: -5px;
+  appearance: none;
+  border: 0;
+  opacity: 0;
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-thumb {
+  width: 6px;
+  height: 12px;
+  border: 0;
+  opacity: 0;
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-progress {
+  background: transparent;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points {
+  top: calc(50% - 3px);
+  right: 3px;
+  left: 3px;
+  height: 6px;
+  opacity: 1;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points > span {
+  width: 1px;
+  height: 6px;
+  color: var(--ink-low);
+  border-radius: 1px;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points > .is-active {
+  width: 2px;
+  height: 10px;
+  color: color-mix(in srgb, var(--accent) 65%, var(--ink));
+  transform: translateY(-2px);
+}
+
+.ui-checkbox.is-invalid .ui-checkbox__mark,
+.ui-radio.is-invalid .ui-radio__mark {
+  border-color: var(--bad);
+}
+
+/* Карточки выбора в настройках остаются целиком кликабельными: primitive
+   растягивает собственный label по поверхности consumer-карточки. */
+.speech-choice > .ui-radio,
+.speech-quality > .ui-radio,
+.speech-check > .ui-checkbox,
+.plugcheck > .ui-checkbox {
+  align-items: flex-start;
+  width: 100%;
+}
+
+.speech-choice > .ui-radio .ui-radio__mark,
+.speech-quality > .ui-radio .ui-radio__mark,
+.speech-check > .ui-checkbox .ui-checkbox__mark,
+.plugcheck > .ui-checkbox .ui-checkbox__mark {
+  margin-top: 2px;
+}
+
+.ui-workspace .ui-radio__label {
+  font-size: 12px;
+}
+
+.ui-workspace .ui-radio__mark {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-workspace .ui-radio__mark::after {
+  width: 6px;
+  height: 6px;
+}

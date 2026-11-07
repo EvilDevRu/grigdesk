@@ -12,20 +12,26 @@ source "$FACTORY_HOME/lib/coverage.sh"
 structural="$TEST_ROOT/structural.env"
 host="$TEST_ROOT/host.env"
 cat >"$structural" <<'EOF'
-SCHEMA=1
+SCHEMA=2
 KIND=structural
 HASH=s-hash
 CATALOG_REVISION=r2
 UNAVAILABLE=0
+PROVIDERS=alpha,beta
+PROVIDER_alpha=native
+PROVIDER_beta=adapted
 EOF
 cat >"$host" <<'EOF'
-SCHEMA=1
+SCHEMA=2
 KIND=host
 HASH=h-hash
 STRUCTURAL_HASH=s-hash
 CATALOG_REVISION=r2
 UNAVAILABLE=0
 EXPIRES_AT=300
+PROVIDERS=alpha,beta
+PROVIDER_alpha=ready
+PROVIDER_beta=ready
 EOF
 
 catalog_state="$TEST_ROOT/catalog-state"
@@ -40,16 +46,29 @@ coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" 400 >/dev/nul
 assert_rc 77 "$?" "expired host artifact blocks promotion"
 assert_eq r1 "$(cat "$catalog_state/active")" "failed promotion keeps previous active revision"
 
-sed -i 's/UNAVAILABLE=0/UNAVAILABLE=1/' "$structural"
+sed -i 's/PROVIDER_beta=adapted/PROVIDER_beta=unavailable/' "$structural"
 coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" 200 >/dev/null 2>&1
 assert_rc 77 "$?" "structural unavailable blocks promotion"
 
-sed -i 's/UNAVAILABLE=1/UNAVAILABLE=0/' "$structural"
+coverage_gate "$structural" "$host" r2 200 alpha
+assert_rc 0 "$?" "runtime цепочки alpha допускается при недоступном beta вне цепочки"
+assert_eq r1 "$(cat "$catalog_state/active")" "runtime допуск не публикует каталог"
+
+sed -i 's/PROVIDER_beta=unavailable/PROVIDER_beta=adapted/' "$structural"
+sed -i 's/PROVIDER_beta=ready/PROVIDER_beta=unavailable/' "$host"
+coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" 200 >/dev/null 2>&1
+assert_rc 77 "$?" "публикация требует готовности даже резервного провайдера"
+sed -i 's/PROVIDER_beta=unavailable/PROVIDER_beta=ready/' "$host"
 sed -i 's/STRUCTURAL_HASH=s-hash/STRUCTURAL_HASH=other-hash/' "$host"
 coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" 200 >/dev/null 2>&1
 assert_rc 77 "$?" "host artifact for another structural hash blocks promotion"
 
 coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" not-a-time >/dev/null 2>&1
 assert_rc 77 "$?" "non-numeric gate clock fails closed"
+
+sed -i 's/STRUCTURAL_HASH=other-hash/STRUCTURAL_HASH=s-hash/' "$host"
+sed -i 's/SCHEMA=2/SCHEMA=1/' "$structural" "$host"
+coverage_catalog_promote "$catalog_state" r2 "$structural" "$host" 200 >/dev/null 2>&1
+assert_rc 77 "$?" "SCHEMA=1 не разрешает публикацию каталога"
 
 finish_tests

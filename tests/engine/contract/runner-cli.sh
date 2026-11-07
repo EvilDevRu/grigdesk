@@ -44,6 +44,15 @@ assert_eq "" "$(awk -F= '$1=="RUNNER_OVERRIDE_STAGE_REVIEW"{print $2}' "$STATE_D
 assert_rc 0 "$?" "task effective runner policy is readable"
 assert_contains "$(cat "$TEST_ROOT/show")" "primary: alpha" "task show reports effective primary"
 
+"$FACTORY_HOME/bin/factory" profile fixture runner set deepseek --failover alpha
+assert_rc 0 "$?" "DeepSeek can be selected as project primary"
+"$FACTORY_HOME/bin/factory" profile fixture runner set CHECK alpha --failover deepseek
+assert_rc 0 "$?" "DeepSeek can be selected as stage failover"
+"$FACTORY_HOME/bin/factory" 77 runner set deepseek --failover beta
+assert_rc 0 "$?" "DeepSeek can be selected by task override"
+"$FACTORY_HOME/bin/factory" 77 runner set CHECK beta --failover deepseek
+assert_rc 0 "$?" "DeepSeek can be selected by task-stage override"
+
 printf 'PROFILE_NAME=escape\n' >"$TEST_ROOT/escape.sh"
 "$FACTORY_HOME/bin/factory" profile ../escape runner set alpha >/dev/null 2>&1
 assert_rc 2 "$?" "profile name cannot escape profiles directory"

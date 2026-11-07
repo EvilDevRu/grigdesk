@@ -1,0 +1,15 @@
+{
+  "options": [
+    {
+      "id": "feature",
+      "title": "Разработка"
+    },
+    {
+      "id": "trivial",
+      "title": "Небольшая правка"
+    }
+  ],
+  "defaultId": "feature",
+  "actionToken": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+  "reason": null
+}

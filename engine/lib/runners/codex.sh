@@ -2,12 +2,17 @@
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/executor.sh"
+source "$FACTORY_HOME/lib/browser-runner-access.sh"
 
 runner_codex_probe() {
-  command -v codex >/dev/null 2>&1 || return 4
-  factory_exec provider codex --version
+  local cli
+  cli=$(factory_external_bin codex codex)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  factory_external_exec codex codex --version
 }
 
+# Нормализуем локальный каталог без запроса к модели. Числовая версия может быть
+# целой или дробной; требование точки скрывает новое поколение и искажает latest.
 runner_codex_catalog() {
   local cache
   if [[ -n "${FACTORY_CODEX_MODEL_CACHE:-}" ]]; then
@@ -35,7 +40,7 @@ for model in payload.get('models', []):
     priority = model.get('priority')
     if model.get('visibility') != 'list' or not isinstance(slug, str):
         continue
-    match = re.fullmatch(r'gpt-(\d+(?:\.\d+)+)-([a-z][a-z0-9-]*)', slug)
+    match = re.fullmatch(r'gpt-(\d+(?:\.\d+)*)-([a-z][a-z0-9-]*)', slug)
     if not match or not isinstance(priority, int) or priority < 0:
         continue
     fields = (
@@ -63,7 +68,11 @@ runner_codex_capabilities() {
 runner_codex_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local sandbox=${RUNNER_CODEX_SANDBOX:-workspace-write}
-  local -a args=(codex exec --json --skip-git-repo-check)
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама.
+  # Сдвоенный лишний позиционный аргумент Codex CLI молча проглатывает, но другие
+  # CLI на «unknown command» падают до модели — контракт один для всех раннеров.
+  local -a args=(exec --json --skip-git-repo-check)
+  factory_browser_runner_roots || return 4
   if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
     # Shared checkout не должен наследовать доступ пользователя к Docker socket.
     # Permission profile — реальная process boundary; PreToolUse ниже лишь даёт
@@ -83,7 +92,7 @@ runner_codex_run() {
     local codex_native codex_alias_dir
     local -a codex_native_candidates
     # Не наследуем :workspace: у него широкое host-read, а same-UID
-    # bearer Cockpit превращает localhost в косвенный Docker/worktree lifecycle.
+    # bearer GrigDesk превращает localhost в косвенный Docker/worktree lifecycle.
     # Custom profile видит только runtime minimum, workspace roots и
     # точные trusted tools; .git/.codex остаются read-only. Deny для
     # существующего каталога на Linux bwrap непереносим; read даёт ту же
@@ -101,18 +110,31 @@ runner_codex_run() {
     codex_alias_dir="$FACTORY_HOME/lib/runners/codex-path"
     [[ -x "$codex_alias_dir/codex-linux-sandbox" &&
        ! -L "$codex_alias_dir/codex-linux-sandbox" ]] || return 4
-    for read_dir in "$FACTORY_HOME" "$codex_runtime" ${RUNNER_CODEX_READ_DIRS:-}; do
+    for read_dir in "$FACTORY_HOME" "$codex_runtime" ${RUNNER_CODEX_READ_DIRS:-} \
+        ${FACTORY_BROWSER_CODEX_READ_DIRS:-}; do
       [[ "$read_dir" == /* && "$read_dir" =~ ^[A-Za-z0-9_@+.,/=-]+$ &&
          -d "$read_dir" && ! -L "$read_dir" &&
          "$(realpath -e -- "$read_dir" 2>/dev/null)" == "$read_dir" ]] || return 4
       filesystem_policy+=', "'"$read_dir"'" = "read"'
     done
+    if [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
+      local browser_mailbox=${FACTORY_BROWSER_REQUEST_DIR:-}
+      [[ "$browser_mailbox" =~ ^/[A-Za-z0-9_@+.,/=-]+$ &&
+         "$browser_mailbox" == "$STATE_DIR/"* && -d "$browser_mailbox" &&
+         ! -L "$browser_mailbox" &&
+         "$(realpath -e -- "$browser_mailbox")" == "$browser_mailbox" ]] || return 4
+      filesystem_policy+=', "'"$browser_mailbox"'" = "write"'
+    fi
     filesystem_policy+=', "'"$control_dir"'" = "read"'
     filesystem_policy+=' }'
     # Командному sandbox не нужен network transport: ни localhost/TCP, ни AF_UNIX.
     # FIFO I/O и flock работают через read-only bind exact control directory.
     permission_policy='{ filesystem = '"$filesystem_policy"', network = { enabled = false } }'
-    hook_policy='[{ matcher = "^Bash$", hooks = [{ type = "command", command = "/usr/bin/python3 '"$policy_hook"' shared-stand", timeout = 5 }] }]'
+    local browser_policy_args=""
+    if [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
+      browser_policy_args=" $GRIGDESK_BROWSER_NODE $GRIGDESK_BROWSER_HELPER"
+    fi
+    hook_policy='[{ matcher = "^Bash$", hooks = [{ type = "command", command = "/usr/bin/python3 '"$policy_hook"' shared-stand'"$browser_policy_args"'", timeout = 5 }] }]'
     args+=(
       --ignore-user-config
       --strict-config
@@ -123,13 +145,28 @@ runner_codex_run() {
       -c "hooks.PreToolUse=$hook_policy"
     )
   else
-    args+=(--sandbox "$sandbox")
+    # Auto-review не меняет права неизвестной route policy или explicit sandbox.
+    # Флаг сам выбирает workspace-write и конфликтует с legacy --sandbox.
+    if [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" == workspace-write &&
+          "$sandbox" == workspace-write ]]; then
+      args+=(--approve-for-me)
+    else
+      args+=(--sandbox "$sandbox")
+      if [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" == state-only ]]; then
+        args+=(-c 'approval_policy="never"')
+      fi
+    fi
     if [[ "$sandbox" == workspace-write ]]; then
       args+=(-c 'sandbox_workspace_write.network_access=true')
     fi
   fi
   [[ -z "$model" ]] || args+=(-m "$model")
   [[ -z "$effort" ]] || args+=(-c "model_reasoning_effort=\"$effort\"")
+  # Диалект автосжатия у codex — config override, а не переменная окружения
+  # (см. runners/claude.sh). `0`/пусто — не вмешиваться.
+  if [[ "${RUNNER_AUTO_COMPACT_WINDOW:-0}" =~ ^[1-9][0-9]*$ ]]; then
+    args+=(-c "model_auto_compact_token_limit=$RUNNER_AUTO_COMPACT_WINDOW")
+  fi
   local add_dir
   for add_dir in ${RUNNER_CODEX_ADD_DIRS:-}; do
     if [[ -d "$add_dir" ]]; then
@@ -149,101 +186,139 @@ runner_codex_run() {
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
   if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
+    # Ограниченный стенд идёт мимо descriptor-а через alias-каталог PATH, поэтому
+    # имя CLI здесь ставится в команду явно: args его по контракту не содержат.
     PATH="$codex_alias_dir:$PATH" CODEX_NATIVE_BIN="$codex_native" \
-      factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+      factory_exec provider timeout -k 30 "$timeout_s" codex "${args[@]}" <<<"$prompt"
   else
-    factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+    factory_external_launch codex codex "${args[@]}" || return $?
+    factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}" <<<"$prompt"
   fi
 }
 
-_runner_codex_meta() {
-  local run_dir=$1 key=$2
-  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' \
-    "$run_dir/meta.env" 2>/dev/null
+# Версия CLI не определяет смысл терминальной ошибки. Общий разбор JSONL
+# отделяет отказ провайдера от вывода инструментов и сохраняет запреты failover.
+runner_codex_classify() {
+  local run_dir=$1 rc=$2 node_bin=${NODE_BIN:-}
+  [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
+  [[ "$rc" == 124 ]] && { printf 'timeout\n'; return; }
+
+  [[ -n "$node_bin" && -x "$node_bin" ]] || node_bin=$(command -v node 2>/dev/null)
+  [[ -n "$node_bin" ]] || { printf 'unknown\n'; return; }
+  "$node_bin" "$FACTORY_HOME/lib/codex-failure.mjs" "$run_dir" "$rc" 2>/dev/null || printf 'unknown\n'
 }
 
-_runner_codex_no_model_activity() {
+runner_codex_limit_until() {
+  # Опциональный метод контракта: до какого времени провайдер отказывает.
+  # Машинного поля со сроком у codex 0.145 нет вовсе — он печатает его человеку
+  # той же фразой отказа: «… or try again at Aug 8th, 2026 2:32 PM.». Разбираем
+  # её, потому что альтернатива — общий cooldown, который держит живой провайдер
+  # выключенным дольше самого лимита.
+  local run_dir=$1 phrase stamp
+  phrase=$(grep -ohiE 'try again at [^".\\]+' \
+    "$run_dir/events.jsonl" "$run_dir/stderr.log" 2>/dev/null | tail -1)
+  phrase=${phrase#*[Aa]t }
+  # Порядковый суффикс («8th») и запятая ломают `date -d`: он разбирает такую
+  # строку либо неверно, либо не разбирает вовсе. Часовой пояс в тексте не
+  # указан — время локальное, тем же его читает и `date`.
+  phrase=$(printf '%s' "$phrase" | sed -E 's/([0-9]+)(st|nd|rd|th)/\1/g; s/,//g')
+  [[ -n "$phrase" && ${#phrase} -le 64 ]] || return 1
+  stamp=$(date -d "$phrase" +%s 2>/dev/null) || return 1
+  [[ "$stamp" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$stamp"
+}
+
+runner_codex_fanout_count() {
+  local run_dir=$1 out
+  local events="$run_dir/events.jsonl"
+  # Делегирование codex публикует ПРЯМО В ПОТОК (в отличие от kimi, где работа
+  # субагентов не видна в stdout вовсе — KIMI.md): item типа `collab_tool_call`
+  # несёт sender_thread_id и receiver_thread_ids. Проверенная выборка телеметрии
+  # содержала только вызовы без получателей и по одному треду на ход — то есть
+  # делегирований не было и прежняя константа `0` не врала. Но врать она
+  # начала бы молча, как только codex делегирует впервые, поэтому считаем:
+  # сколько РАЗНЫХ тредов-получателей встретилось за ход. Разбором JSON, а не
+  # грепом: имена инструментов встречаются и в аргументах, и в снимках.
+  if [[ -f "$events" ]] && command -v python3 >/dev/null 2>&1; then
+    out=$(python3 -c '
+import json
+import sys
+
+seen = set()
+with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+        for thread_id in item.get("receiver_thread_ids") or []:
+            if isinstance(thread_id, str) and thread_id:
+                seen.add(thread_id)
+print(len(seen))
+' "$events" 2>/dev/null) && [[ "$out" =~ ^[0-9]+$ ]] && {
+      printf '%s\n' "$out"
+      return 0
+    }
+  fi
+  printf '0\n'
+}
+
+runner_codex_usage() {
+  # Опциональный метод контракта: расход токенов завершённого хода.
+  # `turn.completed.usage` у codex НАКОПИТЕЛЬНЫЙ по всему thread: после каждого
+  # вызова инструмента он снова прибавляет весь вход. Поэтому берём ПОСЛЕДНЕЕ
+  # такое событие, а не сумму — сумма завысила бы расход в разы и тем громче,
+  # чем больше инструментов позвал агент.
   command -v python3 >/dev/null 2>&1 || return 1
   python3 - "$1/events.jsonl" <<'PYTHON'
 import json
 import sys
+
+# reasoning_output_tokens у codex входит в output_tokens и отдельным ключом не
+# едет: набор полей общий для всех раннеров, иначе GrigDesk пришлось бы знать,
+# какой вендор какими словами называет свой расход.
+FIELDS = (
+    ("TOKENS_IN", "input_tokens"),
+    ("TOKENS_OUT", "output_tokens"),
+    ("TOKENS_CACHE_READ", "cached_input_tokens"),
+    ("TOKENS_CACHE_WRITE", "cache_write_input_tokens"),
+)
 
 try:
     source = open(sys.argv[1], encoding="utf-8", errors="replace")
 except OSError:
     raise SystemExit(1)
 
-for line in source:
-    if not line.strip():
-        continue
-    try:
-        event = json.loads(line)
-    except (TypeError, ValueError):
-        raise SystemExit(1)
-    kind = event.get("type", "")
-    item = event.get("item") or {}
-    if kind in {"item.started", "item.completed"} and item.get("type") in {
-        "agent_message", "command_execution", "file_change", "mcp_tool_call",
-    }:
-        raise SystemExit(1)
-    usage = event.get("usage") or {}
-    if kind == "turn.completed" and any(
-        isinstance(value, (int, float)) and value > 0 for value in usage.values()
-    ):
-        raise SystemExit(1)
-raise SystemExit(0)
+final = None
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if event.get("type") != "turn.completed":
+            continue
+        usage = event.get("usage")
+        if isinstance(usage, dict):
+            final = usage
+
+if final is None:
+    raise SystemExit(1)
+
+out = []
+for name, key in FIELDS:
+    value = final.get(key)
+    out.append(f"{name}={value if isinstance(value, int) and value >= 0 else 0}")
+print("\n".join(out))
 PYTHON
-}
-
-runner_codex_classify() {
-  local run_dir=$1 rc=$2 version verified source_kind
-  [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
-  [[ "$rc" == 124 ]] && { printf 'timeout\n'; return; }
-  version=$(_runner_codex_meta "$run_dir" CLI_VERSION)
-  verified=$(_runner_codex_meta "$run_dir" FIXTURE_VERIFIED)
-  source_kind=$(_runner_codex_meta "$run_dir" SOURCE)
-  [[ "$version" =~ ^0\.145\. ]] || { printf 'unknown\n'; return; }
-  if grep -qiE 'sandbox[_ ]denied|permission denied' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'denied\n'
-    return
-  fi
-  if [[ "$verified" != 1 && "$source_kind" != runtime ]]; then
-    printf 'unknown\n'
-    return
-  fi
-  if grep -qiE -e '(^|[^0-9])413([^0-9]|$)' -e 'request too large' \
-      -e 'context[_ -]length[_ -]exceeded' -e 'context window.*exceed' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'context_overflow\n'
-    return
-  fi
-  if grep -q '"type":"usage_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
-     grep -qiE '429.*(weekly|subscription|usage).*(limit|reached)|\
-(weekly|subscription|usage).*limit.*(reached|reset)' \
-       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'limited\n'
-    return
-  fi
-  if grep -qiE '(^|[^0-9])429([^0-9]|$)|"type":"rate_limit_error"|too many requests' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'transient\n'
-    return
-  fi
-  if grep -qiE -e '(^|[^0-9])(401|403)([^0-9]|$)' -e 'unauthorized' \
-      -e 'authentication.*(expired|required)' -e 'request not allowed' \
-      -e 'run codex login' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    if _runner_codex_no_model_activity "$run_dir"; then
-      printf 'provider_unavailable\n'
-      return
-    fi
-  fi
-  printf 'unknown\n'
-}
-
-runner_codex_fanout_count() {
-  printf '0\n'
 }
 
 runner_codex_dialect() {

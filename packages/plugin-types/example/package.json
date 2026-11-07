@@ -1,0 +1,21 @@
+{
+  "name": "grigdesk-types-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.server.json && vue-tsc -p tsconfig.web.json",
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@grigdesk/plugin-types": "file:../sdk",
+    "@types/node": "^22.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "esbuild": "^0.25.12",
+    "fastify": "^5.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.5",
+    "vue": "~3.5.40",
+    "vue-tsc": "^2.2.12"
+  }
+}

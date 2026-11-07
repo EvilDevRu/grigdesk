@@ -5,14 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { DocumentReader } from '../../server/src/lib/documents/reader.js';
-import documentsModule from '../../server/src/modules/documents/index.js';
+import { DocumentReader } from '../../server/src/lib/documents/reader.ts';
+import documentsModule from '../../server/src/modules/documents/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t, { maxBytes = 1024 } = {}) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-'));
+async function fixture(t, { maxBytes = 1024, deps = {} } = {}) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-'));
   const root = path.join(dir, 'root');
   const outside = path.join(dir, 'outside');
   await fs.mkdir(root);
@@ -20,6 +20,7 @@ async function fixture(t, { maxBytes = 1024 } = {}) {
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const reader = new DocumentReader({
     maxBytes,
+    deps,
     rootProviders: [() => [{ id: 'test', label: 'Тест', path: root }]],
   });
   return { dir, root, outside, reader };
@@ -152,4 +153,191 @@ test('DOC-06: локальные растровые изображения до�
   assert.equal(response.headers['x-content-type-options'], 'nosniff');
   assert.equal(response.headers['cache-control'], 'private, no-store');
   assert.deepEqual(response.rawPayload, png);
+});
+
+test('DOC-07: отсутствие проверки открытого fd закрывает чтение типизированным отказом', async (t) => {
+  const { root, reader } = await fixture(t, {
+    deps: {
+      resolveOpenedPath: async () => {
+        const error = new Error('proc недоступен');
+        error.code = 'ENOENT';
+        throw error;
+      },
+    },
+  });
+  await fs.writeFile(path.join(root, 'note.txt'), 'заметка');
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'note.txt' }),
+    { code: 'document_unsafe_path', statusCode: 403, message: 'Не удалось подтвердить путь открытого файла' },
+  );
+});
+
+test('DOC-08: hardlink отвергается, даже если его имя находится внутри source', async (t) => {
+  const { root, outside, reader } = await fixture(t);
+  const original = path.join(outside, 'original.txt');
+  await fs.writeFile(original, 'содержимое');
+  await fs.link(original, path.join(root, 'hardlink.txt'));
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'hardlink.txt' }),
+    { code: 'document_unsafe_file', statusCode: 403 },
+  );
+});
+
+test('DOC-09: изменение уже открытого файла после read не публикует смешанный snapshot', async (t) => {
+  let file = '';
+  let statCalls = 0;
+  const { root, reader } = await fixture(t, {
+    deps: {
+      statOpenedFile: async (handle) => {
+        statCalls += 1;
+        if (statCalls === 2) await fs.appendFile(file, '!');
+        return handle.stat({ bigint: true });
+      },
+    },
+  });
+  file = path.join(root, 'changing.txt');
+  await fs.writeFile(file, 'первая версия');
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'changing.txt' }),
+    { code: 'document_changed', statusCode: 409 },
+  );
+  assert.equal(statCalls, 2);
+});
+
+test('DOC-10: generic text reader ограничен максимумом 16 MiB', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-limit-'));
+  const root = path.join(dir, 'root');
+  await fs.mkdir(root);
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const reader = new DocumentReader({
+    maxBytes: 32 * 1024 * 1024,
+    rootProviders: [() => [{ id: 'test', label: 'Тест', path: root }]],
+  });
+  const large = path.join(root, 'large.txt');
+  const handle = await fs.open(large, 'w');
+  await handle.truncate((16 * 1024 * 1024) + 1);
+  await handle.close();
+
+  assert.equal(reader.maxBytes, 16 * 1024 * 1024);
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'large.txt' }),
+    { code: 'document_too_large', statusCode: 413 },
+  );
+});
+
+test('DOC-11: самый узкий root владеет document и asset при вложенных sources', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-nested-'));
+  const outer = path.join(dir, 'outer');
+  const inner = path.join(outer, 'inner');
+  await fs.mkdir(inner, { recursive: true });
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(inner, 'secret.md'), '# Только inner\n');
+  await fs.writeFile(path.join(inner, 'secret.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+  const reader = new DocumentReader({
+    rootProviders: [() => [
+      { id: 'outer', label: 'Внешний', path: outer },
+      { id: 'inner', label: 'Вложенный', path: inner },
+    ]],
+  });
+
+  assert.equal((await reader.resolveAbsolute(path.join(inner, 'secret.md'))).ref.source, 'inner');
+  await assert.rejects(
+    () => reader.read({ source: 'outer', path: 'inner/secret.md' }),
+    { code: 'document_source_mismatch', statusCode: 403 },
+  );
+  await assert.rejects(
+    () => reader.readAsset({ source: 'outer', path: 'inner/secret.png' }),
+    { code: 'document_source_mismatch', statusCode: 403 },
+  );
+  assert.equal((await reader.read({ source: 'inner', path: 'secret.md' })).content,
+    '# Только inner\n');
+  assert.equal((await reader.readAsset({ source: 'inner', path: 'secret.png' })).size, 4);
+});
+
+test('DOC-12: папки области видны только ссылке, назвавшей эту область', async (t) => {
+  const { dir, root, reader } = await fixture(t);
+  const game = path.join(dir, 'game');
+  const other = path.join(dir, 'other');
+  const file = path.join(game, 'docs', 'hero.md');
+  const folders = { a1: [path.join(dir, 'missing'), game, root], b2: [other] };
+
+  await fs.mkdir(path.join(game, 'docs'), { recursive: true });
+  await fs.mkdir(other);
+  await fs.writeFile(file, '# Герой\n');
+  await fs.writeFile(path.join(game, 'docs', 'hero.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await fs.writeFile(path.join(other, 'secret.md'), 'секрет');
+  await fs.writeFile(path.join(root, 'own.md'), '# Свой\n');
+  reader.addScopeProvider('chat', (id) => (folders[id] || []).map((folder) => ({
+    label: 'Чат',
+    path: folder,
+  })));
+
+  await assert.rejects(() => reader.resolveAbsolute(file), { code: 'document_outside_roots' });
+  await assert.rejects(() => reader.resolveAbsolute(file, 'chat:b2'), { code: 'document_outside_roots' });
+  await assert.rejects(() => reader.resolveAbsolute(file, 'chat:../a1'), { code: 'document_outside_roots' });
+
+  const resolved = await reader.resolveAbsolute(file, 'chat:a1');
+  const document = await reader.read(resolved.ref);
+  const asset = await reader.readAsset({ source: 'chat:a1:1', path: 'docs/hero.png' });
+
+  assert.deepEqual(resolved.ref, { source: 'chat:a1:1', path: 'docs/hero.md' });
+  assert.equal(document.content, '# Герой\n');
+  assert.equal(asset.contentType, 'image/png');
+
+  // Общий корень с тем же путём побеждает: документ GrigDesk остаётся ссылкой `test`.
+  const own = await reader.resolveAbsolute(path.join(root, 'own.md'), 'chat:a1');
+
+  assert.deepEqual(own.ref, { source: 'test', path: 'own.md' });
+  await assert.rejects(() => reader.read({ source: 'chat:a1:2', path: 'own.md' }), {
+    code: 'document_unknown_source',
+  });
+  await assert.rejects(() => reader.read({ source: 'chat:b2:0', path: '../game/docs/hero.md' }), {
+    code: 'document_outside_roots',
+  });
+});
+
+test('DOC-13: сбой поставщика области не расширяет и не ломает общие корни', async (t) => {
+  const { root, reader } = await fixture(t);
+
+  await fs.writeFile(path.join(root, 'plan.md'), '# План\n');
+  reader.addScopeProvider('chat', () => {
+    throw new Error('нет чата');
+  });
+
+  const resolved = await reader.resolveAbsolute(path.join(root, 'plan.md'), 'chat:x');
+
+  assert.deepEqual(resolved.ref, { source: 'test', path: 'plan.md' });
+  assert.throws(() => reader.addScopeProvider('chat', () => []), TypeError);
+});
+
+test('DOC-14: HTTP resolve передаёт область поставщику', async (t) => {
+  const { dir, reader } = await fixture(t);
+  const game = path.join(dir, 'game');
+  const app = Fastify();
+
+  t.after(() => app.close());
+  await fs.mkdir(game);
+  await fs.writeFile(path.join(game, 'hero.md'), '# Герой\n');
+  reader.addScopeProvider('chat', (id) => (id === 'a1' ? [{ label: 'game', path: game }] : []));
+  await app.register(documentsModule, { reader });
+
+  const outside = await app.inject({
+    method: 'POST',
+    url: '/api/documents/resolve',
+    payload: { path: path.join(game, 'hero.md') },
+  });
+  const scoped = await app.inject({
+    method: 'POST',
+    url: '/api/documents/resolve',
+    payload: { path: path.join(game, 'hero.md'), scope: 'chat:a1' },
+  });
+
+  assert.equal(outside.statusCode, 403);
+  assert.equal(scoped.statusCode, 200);
+  assert.deepEqual(scoped.json().ref, { source: 'chat:a1:0', path: 'hero.md' });
+  assert.deepEqual(scoped.json().source, { id: 'chat:a1:0', label: 'game' });
 });

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "src/modules/code/**/*.ts",
+    "src/lib/codeCommitMessage.ts",
+    "src/lib/git.ts",
+    "../shared/plugins/code/codeContracts.ts",
+    "../tests/types/code-server-contract.test.mts"
+  ]
+}

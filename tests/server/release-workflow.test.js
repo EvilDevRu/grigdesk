@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+
+const repository = path.resolve(import.meta.dirname, '../..');
+
+test('RW-1: workflow релиза запускается вручную, собирает комплект и публикует на сайт', async () => {
+  const text = await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
+  );
+
+  assert.match(text, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(text, /^  push:/m);
+  assert.match(text, /tests\/docs\/help-guide\.test\.mts/);
+  assert.match(text, /group: grigdesk-release\s*\n/);
+  assert.match(text, /node-version:\s*24\.21\.0/);
+  assert.match(text, /npm --prefix server test/);
+  assert.match(text, /npm --prefix web test/);
+  assert.match(text, /npm --prefix tracker ci/);
+  assert.match(text, /npm --prefix relay ci/);
+  assert.match(text, /npm --prefix deepseek ci/);
+  assert.match(text, /npm --prefix desktop ci/);
+  assert.match(text, /tools\/bundle\.mts/);
+  assert.match(text, /tools\/buildDeb\.mts/);
+  assert.match(text, /tools\/release-publish\.mts "\$PWD"/);
+  assert.match(text, /secrets\.RELEASE_SIGNING_KEY/);
+  assert.match(text, /secrets\.RELEASE_SITE_KEY/);
+  assert.doesNotMatch(text, /GLM|glm-smoke|API_KEY/i);
+});
+
+test('RW-2: отдельный relay-workflow удалён', async () => {
+  await assert.rejects(
+    fs.stat(path.join(repository, '.github/workflows/relay-release.yml')),
+    (error) => {
+      return error.code === 'ENOENT';
+    },
+  );
+});
+
+test('RW-CHANNELS: ручной выпуск выбирает release/dev и по умолчанию только проверяет', async () => {
+  const source = await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
+  );
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = yaml.parse(source);
+  const inputs = workflow.on.workflow_dispatch?.inputs;
+
+  assert.ok(inputs?.channel, 'ручной workflow должен объявлять выбор канала');
+  assert.deepEqual(inputs.channel.options, ['release', 'dev']);
+  assert.equal(inputs.channel.default, 'release');
+  assert.equal(inputs.publish.type, 'boolean');
+  assert.equal(inputs.publish.default, false);
+  assert.equal(workflow.on.push, undefined);
+
+  const publish = workflow.jobs.release.steps.find((step) =>
+    step.run?.includes('tools/release-publish.mts'));
+
+  assert.ok(publish, 'publisher остаётся отдельным шагом');
+  assert.match(publish.if ?? '', /inputs\.publish/u);
+});

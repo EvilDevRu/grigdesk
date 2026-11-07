@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "product": "GigaCode CLI GitVerse",
+  "distribution": {
+    "version": "26.7.33",
+    "manifestUrl": "https://gigacode.ru/jarvis/versions",
+    "downloadUrl": "https://gigacode.ru/plugins/gigacode-cli-26.7.33.tar.gz",
+    "bytes": 14532232,
+    "sha256": "8b4d04ac3d7f825f6cdc73a47def62836cb921ee44e1932dec1efc11aa61404c"
+  },
+  "package": {
+    "name": "@gigacode/gigacode",
+    "version": "0.13.1"
+  },
+  "transport": "ACP NDJSON JSON-RPC 2.0",
+  "fixtures": [
+    "initialize.json",
+    "session-new.json",
+    "tool-update.json",
+    "shell-readonly.json",
+    "network-policy.json"
+  ],
+  "limitations": [
+    "Каталог в capture настроен синтетически; корпоративные модели не выдумываются.",
+    "Live-вызов корпоративной модели не включён в эти fixtures.",
+    "Resume, effort, images, in-turn, delegation и billing не объявлены."
+  ],
+  "observed": [
+    "initialize",
+    "session/new",
+    "session/set_config_option",
+    "session/prompt/end_turn",
+    "tool_call_update",
+    "permission",
+    "host-owned MCP stage_result",
+    "external bwrap readonly write rejection",
+    "production profile corporate metadata",
+    "native report outside cwd requires include-directories",
+    "native registry excludes web_fetch and shell while retaining file tools"
+  ],
+  "syntheticBackend": "Локальный HTTP backend; fixtures не задают продуктовые модели.",
+  "paidModelCalls": 0,
+  "localSyntheticBackendCalls": true
+}

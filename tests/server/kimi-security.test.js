@@ -5,33 +5,35 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { stageKimiAttachments } from '../../server/src/lib/kimi/attachments.js';
-import { assertKimiRuntimeEnv, buildKimiRuntimeEnv } from '../../server/src/lib/kimi/env.js';
+import { stageKimiAttachments } from '../../server/src/lib/kimi/attachments.ts';
+import { assertKimiRuntimeEnv, buildKimiRuntimeEnv } from '../../server/src/lib/kimi/env.ts';
 import {
   assertResolvedEgressAddresses,
   isBlockedEgressIp,
   validateEgressTarget,
-} from '../../server/src/lib/kimi/egress-policy.js';
+} from '../../server/src/lib/kimi/egressPolicy.ts';
 import {
   assertUnixSocketPath,
   createKimiEgressProxy,
   MAX_UNIX_SOCKET_PATH_BYTES,
   parseConnectTarget,
-} from '../../server/src/lib/kimi/egress-proxy.js';
+} from '../../server/src/lib/kimi/egressProxy.ts';
 import {
   cgroupPathFromProc,
   inspectKimiRuntimeHost,
-} from '../../server/src/lib/kimi/runtime-preflight.js';
+} from '../../server/src/lib/kimi/runtimePreflight.ts';
 import {
   buildKimiSandboxLaunch,
   KIMI_EGRESS_SOCKET_FILE,
+  KIMI_SANDBOX_NODE,
+  KIMI_SANDBOX_WORK_MCP,
   resolveVisibleProjectRoot,
   WORKSPACE_LOCAL_TOML_FILE,
   WORKSPACE_MASK_DIR,
-} from '../../server/src/lib/kimi/sandbox.js';
+} from '../../server/src/lib/kimi/sandbox.ts';
 
 async function attachmentFixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-attachments-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-attachments-'));
   const allowed = path.join(root, 'allowed');
   const staging = path.join(root, 'staging');
   const outside = path.join(root, 'outside');
@@ -116,7 +118,7 @@ test('egress policy отклоняет IP literals, localhost/LAN/metadata и no
 });
 
 test('CONNECT proxy допускает только точный host:443', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-proxy-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-proxy-'));
   const upstream = net.createServer((socket) => socket.pipe(socket));
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const upstreamPort = upstream.address().port;
@@ -162,8 +164,8 @@ test('слишком длинный Unix socket path отклоняется до
   );
 });
 
-test('sandbox argv не bind-mount-ит host root/control state и хранит trusted assets вне KIMI home', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-sandbox-'));
+test('KS-DH sandbox закрывает control state и хранит trusted assets вне KIMI home', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-sandbox-'));
   const workspace = path.join(root, 'workspace');
   const safeExtra = path.join(root, 'safe-extra');
   const chatsDir = path.join(root, 'chats');
@@ -199,6 +201,12 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     kimiSystemdRunBin: '/usr/bin/systemd-run',
     kimiCaBundle: '/etc/ssl/certs/ca-certificates.crt',
   };
+
+  config.dataHome = path.join(root, 'data');
+  config.envPath = path.join(config.dataHome, '.env');
+  await fs.mkdir(path.join(config.dataHome, 'state'), { recursive: true });
+  await fs.writeFile(config.envPath, 'FAKE=1');
+
   const envFile = path.join(config.rootDir, '.env');
   await fs.mkdir(path.join(config.rootDir, 'server', '.state'), { recursive: true });
   await fs.writeFile(envFile, 'SECRET=1\n', { mode: 0o600 });
@@ -210,7 +218,7 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     // как отдельный extra по-прежнему отклоняется — после масок он пуст.
     extraDirs: [root, safeExtra, chatsDir],
     egressSocketPath: proxy.socketPath,
-    unit: 'cockpit-kimi-test.service',
+    unit: 'grigdesk-kimi-test.service',
   });
   const pairs = launch.args.slice(0, -1).map((value, index) => [value, launch.args[index + 1]]);
   assert.equal(pairs.some(([a, b]) => a === '--ro-bind' && b === '/'), false);
@@ -222,8 +230,8 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   assert.equal(pairs.some(([a, b]) => a === broker && b === '/kimi-home'), false);
   assert.ok(launch.args.some((value) => value.startsWith(path.join(broker, 'scripts'))));
   const wrapper = await fs.readFile(path.join(broker, 'scripts', 'run-kimi'), 'utf8');
-  assert.match(wrapper, /UNIX-CONNECT:\/run\/cockpit-egress\/e\.sock/);
-  assert.doesNotMatch(wrapper, /UNIX-CONNECT:\/run\/cockpit-egress\/proxy\.sock/);
+  assert.match(wrapper, /UNIX-CONNECT:\/run\/grigdesk-egress\/e\.sock/);
+  assert.doesNotMatch(wrapper, /UNIX-CONNECT:\/run\/grigdesk-egress\/proxy\.sock/);
   assert.equal(launch.args.includes(path.join(hostHome, 'config.toml')), false);
   assert.deepEqual(launch.rejectedExtraDirs, [{
     path: chatsDir,
@@ -235,7 +243,9 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   const emptyDir = path.join(broker, 'empty', 'agents');
   const roMaskOver = (source, destination) => launch.args.some((value, index) => value === '--ro-bind'
     && launch.args[index + 1] === source && launch.args[index + 2] === destination);
+
   for (const masked of [
+    config.dataHome,
     path.join(root, 'state'),
     chatsDir,
     hostHome,
@@ -246,6 +256,28 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   assert.ok(roMaskOver(path.join(broker, 'empty', 'EMPTY'), envFile), 'ожидалась file-маска поверх .env');
   assert.ok(launch.maskedWorkspacePaths.includes(chatsDir));
   assert.ok(launch.maskedWorkspacePaths.includes(envFile));
+  assert.equal(launch.maskedWorkspacePaths.includes(config.envPath), false);
+
+  const buildAgain = () => buildKimiSandboxLaunch({
+    config,
+    cwd: workspace,
+    extraDirs: [root, safeExtra, chatsDir],
+    egressSocketPath: proxy.socketPath,
+    unit: 'grigdesk-kimi-test.service',
+  });
+
+  config.envPath = path.join(root, 'outside.env');
+  await fs.writeFile(config.envPath, 'FAKE=1');
+  assert.ok((await buildAgain()).maskedWorkspacePaths.includes(config.envPath));
+  await fs.rename(envFile, envFile + '.original');
+  await fs.rename(path.join(config.rootDir, 'server/.state'), path.join(root, 'old-state'));
+  await fs.symlink(path.join(config.dataHome, '.env'), envFile);
+  await fs.symlink(path.join(config.dataHome, 'state'), path.join(config.rootDir, 'server/.state'));
+
+  const linked = await buildAgain();
+
+  assert.equal(linked.maskedWorkspacePaths.includes(envFile), false);
+  assert.equal(linked.maskedWorkspacePaths.includes(path.join(config.rootDir, 'server/.state')), false);
   // Parity с codex --add-dir: дополнительные каталоги объявляются сессии
   // через server-owned local.toml внутри per-run каталога-маски, который заменяет
   // <projectRoot>/.kimi-code целиком (workspace без .git → projectRoot = cwd).
@@ -261,11 +293,33 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     config,
     cwd: workspace,
     egressSocketPath: proxy.socketPath,
-    unit: 'cockpit-kimi-plain.service',
+    unit: 'grigdesk-kimi-plain.service',
   });
   const plainPairs = plainLaunch.args.slice(0, -1).map((value, index) => [value, plainLaunch.args[index + 1]]);
   assert.ok(plainPairs.some(([a, b]) => a === path.join(broker, 'empty', 'agents') && b === path.join(workspace, '.kimi-code')));
   assert.equal(plainPairs.some(([a]) => a === maskDir), false);
+  const webControl = path.join(egressDir, 'c');
+  const webMcp = path.join(egressDir, 'mcp.json');
+  await fs.mkdir(webControl, { recursive: true });
+  await fs.writeFile(webMcp, '{"mcpServers":{}}', { mode: 0o600 });
+  const webLaunch = await buildKimiSandboxLaunch({
+    config,
+    cwd: workspace,
+    egressSocketPath: proxy.socketPath,
+    serverControlDir: webControl,
+    serverMcpFile: webMcp,
+    unit: 'grigdesk-kimi-web.service',
+  });
+  assert.ok(webLaunch.args.some((value, index) => value === '--bind'
+    && webLaunch.args[index + 1] === webControl
+    && webLaunch.args[index + 2] === '/run/grigdesk-control'));
+  assert.ok(webLaunch.args.some((value, index) => value === '--ro-bind'
+    && webLaunch.args[index + 1] === webMcp
+    && webLaunch.args[index + 2] === '/kimi-home/mcp.json'));
+  assert.deepEqual(webLaunch.args.slice(-6), [
+    'web', '--port', '58627', '--host', '127.0.0.1', '--no-open',
+  ]);
+  assert.match(wrapper, /UNIX-LISTEN:\/run\/grigdesk-control\/s/);
   // Доверенный предок cwd с .git становится projectRoot kimi: маска с local.toml
   // подменяет .kimi-code предка (проектный local.toml предка в sandbox не виден),
   // а собственный .kimi-code cwd прячется за общей пустой маской.
@@ -278,7 +332,7 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     cwd: nestedCwd,
     extraDirs: [ancestor],
     egressSocketPath: proxy.socketPath,
-    unit: 'cockpit-kimi-nested.service',
+    unit: 'grigdesk-kimi-nested.service',
   });
   const nestedPairs = nestedLaunch.args.slice(0, -1).map((value, index) => [value, nestedLaunch.args[index + 1]]);
   assert.ok(nestedPairs.some(([a, b]) => a === maskDir && b === path.join(ancestor, '.kimi-code')));
@@ -289,12 +343,74 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     config,
     cwd: path.join(root, 'host-home'),
     egressSocketPath: proxy.socketPath,
-    unit: 'cockpit-kimi-broad.service',
+    unit: 'grigdesk-kimi-broad.service',
   }), /kimi_workspace_mount_contains_control_state/);
 });
 
+test('рабочий MCP получает Node самого GrigDesk, а не хостовый /usr/bin/node', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-worknode-'));
+  const workspace = path.join(root, 'workspace');
+  const chatsDir = path.join(root, 'chats');
+  const hostHome = path.join(root, 'host-home', '.kimi-code');
+  const binDir = path.join(root, 'bin');
+  const profile = path.join(root, 'state', 'chats', 'hash');
+  const broker = path.join(root, 'state', 'broker');
+  const egressDir = path.join(root, 'egress');
+  const workDir = path.join(root, 'work');
+  await Promise.all([
+    workspace, chatsDir, path.join(hostHome, 'credentials'), binDir, profile, broker,
+    egressDir, workDir,
+  ].map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })));
+  const kimiBin = path.join(binDir, 'kimi');
+  await fs.writeFile(kimiBin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await fs.writeFile(path.join(hostHome, 'credentials', 'kimi-code.json'), 'не читать', { mode: 0o600 });
+  const scriptPath = path.join(root, 'work-mcp.js');
+  await fs.writeFile(scriptPath, '// bridge\n', { mode: 0o600 });
+
+  const proxy = createKimiEgressProxy({
+    socketPath: path.join(egressDir, KIMI_EGRESS_SOCKET_FILE),
+  });
+  await proxy.start();
+  const workSocketPath = path.join(workDir, 'work.sock');
+  const workServer = net.createServer();
+  await new Promise((resolve) => { workServer.listen(workSocketPath, resolve); });
+  t.after(async () => {
+    await new Promise((resolve) => { workServer.close(resolve); });
+    await proxy.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const launch = await buildKimiSandboxLaunch({
+    config: {
+      kimiRuntimeHome: profile,
+      kimiRuntimeBroker: broker,
+      kimiBin,
+      kimiHome: hostHome,
+      chatsDir,
+      chatBindingsDir: path.join(chatsDir, '.bindings'),
+      rootDir: path.join(root, 'repo'),
+      kimiBwrapBin: '/usr/bin/bwrap',
+      kimiSystemdRunBin: '/usr/bin/systemd-run',
+      kimiCaBundle: '/etc/ssl/certs/ca-certificates.crt',
+    },
+    cwd: workspace,
+    egressSocketPath: proxy.socketPath,
+    workMcp: { socketPath: workSocketPath, scriptPath },
+    unit: 'grigdesk-kimi-worknode.service',
+  });
+
+  const roBind = (source, destination) => launch.args.some((value, index) => value === '--ro-bind'
+    && launch.args[index + 1] === source && launch.args[index + 2] === destination);
+  assert.ok(roBind(await fs.realpath(scriptPath), KIMI_SANDBOX_WORK_MCP));
+  // Именно исполняемый файл текущего процесса: хостового /usr/bin/node может не быть.
+  assert.ok(roBind(await fs.realpath(process.execPath), KIMI_SANDBOX_NODE));
+  assert.equal(launch.args.includes('/usr/bin/node'), false);
+  // Снятие типов встроено в Node 22.18+: флагов в argv песочницы быть не должно.
+  assert.equal(launch.args.some((value) => /strip-types|transform-types/.test(value)), false);
+});
+
 test('resolveVisibleProjectRoot повторяет findProjectRoot kimi по видимым каталогам', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-proot-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-proot-'));
   const cwd = path.join(root, 'cwd');
   const ancestor = path.join(root, 'ancestor');
   const nested = path.join(ancestor, 'deep', 'cwd');

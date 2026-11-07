@@ -1,0 +1,26 @@
+{
+  "protocolVersion": 1,
+  "providerId": "future-provider",
+  "state": "ready",
+  "scope": { "id": "grigdesk-chats", "label": "Для чатов GrigDesk" },
+  "source": {
+    "kind": "synthetic",
+    "version": "1",
+    "checkedAt": 1000,
+    "coverage": [{ "path": [], "coverage": "complete" }]
+  },
+  "schemaRevision": "schema-v1",
+  "revision": "0",
+  "fields": [{
+    "id": "[\"enabled\"]",
+    "path": ["enabled"],
+    "label": "Новая настройка",
+    "kind": "boolean",
+    "writable": true,
+    "constraints": {},
+    "default": { "state": "known", "value": true },
+    "base": { "state": "known", "value": true },
+    "override": { "state": "unset" }
+  }],
+  "inactiveOverrides": []
+}

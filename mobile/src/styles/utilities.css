@@ -1,0 +1,8 @@
+/* Копия web/src/styles/utilities.css от 39f9c29; дальше живёт отдельно. */
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  color: var(--ink-mid);
+}

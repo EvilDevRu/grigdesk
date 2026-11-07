@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/pipeline/analysisContracts.ts",
+    "src/lib/analysis/**/*.ts",
+    "src/modules/analysis/**/*.ts",
+    "../tests/types/triage-server-contract.test.mts"
+  ]
+}

@@ -8,37 +8,60 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import factoryModule from '../../server/src/modules/factory/index.js';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
+async function fixture(t, {
+  analysisRepos = null,
+  twinProfile = false,
+  analysisExtra = null,
+  answered = { ids: new Set(), keys: new Set() },
+} = {}) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
-  await Promise.all([
-    mkdir(path.join(profilesDir, 'arsenkin'), { recursive: true }),
-    mkdir(path.join(profilesDir, 'rdesigner'), { recursive: true }),
-  ]);
-  await writeFile(path.join(profilesDir, 'arsenkin', 'graph.json'), JSON.stringify({
+  const installed = ['project-alpha', 'project-beta', ...(twinProfile ? ['project-gamma'] : [])];
+  await Promise.all(installed.map(
+    (name) => mkdir(path.join(profilesDir, name), { recursive: true }),
+  ));
+  await writeFile(path.join(profilesDir, 'project-alpha', 'graph.json'), JSON.stringify({
     capabilities: [],
     default_route: 'feature',
     routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
   }));
-  await writeFile(path.join(profilesDir, 'rdesigner', 'graph.json'), JSON.stringify({
+  await writeFile(path.join(profilesDir, 'project-beta', 'graph.json'), JSON.stringify({
     capabilities: [],
     default_route: 'feature',
     routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
   }));
-  await writeFile(path.join(profilesDir, 'rdesigner', 'profile.sh'), `
-PROFILE_TRIAGE_REPOS="app:/srv/rdesigner"
-profile_repositories() { printf 'rdesigner\\t/srv/rdesigner\\t/srv/rdesigner\\n'; }
-profile_delivery_targets() { printf 'rdesigner\\tmaster\\n'; }
+  await writeFile(path.join(profilesDir, 'project-beta', 'profile.sh'), `
+PROFILE_TRIAGE_REPOS="app:/srv/project-beta"
+profile_repositories() { printf 'project-beta\\t/srv/project-beta\\t/srv/project-beta\\n'; }
+profile_delivery_targets() { printf 'project-beta\\tmaster\\n'; }
 `);
+  // Профиль-двойник на тех же репозиториях: законная схема, но выбор между ними —
+  // решение человека, а не сопоставления по триажу.
+  if (twinProfile) {
+    await writeFile(path.join(profilesDir, 'project-gamma', 'graph.json'), JSON.stringify({
+      capabilities: [],
+      default_route: 'feature',
+      routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
+    }));
+    await writeFile(path.join(profilesDir, 'project-gamma', 'profile.sh'), `
+PROFILE_TRIAGE_REPOS="app:/srv/project-beta"
+profile_repositories() { printf 'project-gamma\\t/srv/project-beta\\t/srv/project-beta\\n'; }
+profile_delivery_targets() { printf 'project-gamma\\tmaster\\n'; }
+`);
+  }
   const factoryBin = path.join(root, 'factory');
   await writeFile(factoryBin, `#!/bin/sh
 if [ "$1" = check ]; then
-  echo "OK profile=rdesigner catalog=${'b'.repeat(64)} route=feature delivery=publish"
+  case "$*" in
+    *"--route consilium-debug"*) instrumentation=explicit; route=consilium-debug ;;
+    *) instrumentation=disabled; route=feature ;;
+  esac
+  echo "OK profile=project-beta catalog=${'b'.repeat(64)} route=$route delivery=publish instrumentation=$instrumentation"
   exit 0
 fi
 exit 99
@@ -48,18 +71,24 @@ exit 99
   const app = Fastify({ logger: false });
   await app.register(factoryModule, {
     factoryState: {
-      discoverProfiles() { return ['arsenkin', 'rdesigner']; },
-      async primaryProfile() { return 'arsenkin'; },
-      async readRegistry() { throw new Error('задача ещё не запускалась'); },
+      discoverProfiles() { return installed; },
+      async primaryProfile() { return 'project-alpha'; },
+      async readRegistry() {
+        throw Object.assign(new Error('задача ещё не запускалась'), { code: 'ENOENT' });
+      },
       isDaemonAlive() { return false; },
       async catalog(profile) {
-        return profile === 'rdesigner'
+        return profile === 'project-beta' || profile === 'project-gamma'
           ? {
-            routes: ['debug', 'feature'],
+            routes: ['consilium-debug', 'feature'],
             catalogHash: 'b'.repeat(64),
             routeOptions: {
-              debug: { deliveryMode: 'publish', instrumentationRequired: true },
-              feature: { deliveryMode: 'publish', instrumentationRequired: false },
+              'consilium-debug': {
+                deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
+              },
+              feature: {
+                deliveryMode: 'publish', instrumentationMode: 'disabled', instrumentationRequired: false,
+              },
             },
           }
           : null;
@@ -77,16 +106,20 @@ exit 99
       factoryProfile: '',
     },
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: {
       readClarifications: async () => null,
+      readOpenQuestions: async () => null,
+      answeredQuestions: async () => answered,
       async get() {
         return {
           analysis: {
-            route_guess: 'debug',
+            route_guess: 'consilium-debug',
             areas: ['data-migration'],
-            files: ['app:webapp/pipeline.py'],
-            title: 'Экспорт удваивает сущности',
+            files: ['app:src/diagnostics.py'],
+            title: 'Повторный запуск создаёт дубликаты',
+            ...(analysisRepos ? { repos: analysisRepos } : {}),
+            ...(analysisExtra || {}),
           },
         };
       },
@@ -108,29 +141,120 @@ test('launch-options отдаёт профили и fail-closed каталог �
     url: '/api/tasks/9123/launch-options',
   });
   assert.equal(defaults.statusCode, 200);
-  assert.equal(defaults.json().profile, 'arsenkin');
+  assert.equal(defaults.json().profile, 'project-alpha');
   assert.equal(defaults.json().error, 'no_catalog');
   assert.equal('generation' in defaults.json(), false);
-  assert.deepEqual(defaults.json().profiles, ['arsenkin', 'rdesigner']);
+  assert.deepEqual(defaults.json().profiles, ['project-alpha', 'project-beta']);
 
   const selected = await app.inject({
     method: 'GET',
-    url: '/api/tasks/9123/launch-options?profile=rdesigner',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
   });
   assert.equal(selected.statusCode, 200);
-  assert.equal(selected.json().profile, 'rdesigner');
-  assert.deepEqual(selected.json().profiles, ['rdesigner']);
+  assert.equal(selected.json().profile, 'project-beta');
+  assert.deepEqual(selected.json().profiles, ['project-beta']);
   assert.equal('generation' in selected.json(), false);
-  assert.deepEqual(selected.json().routes, ['debug', 'feature']);
-  assert.equal(selected.json().defaultRoute, 'debug');
-  assert.deepEqual(selected.json().repositories, [{ name: 'rdesigner', targetBranch: 'master' }]);
-  assert.deepEqual(selected.json().instrumentationSuggestions, ['rdesigner:webapp/pipeline.py']);
+  assert.deepEqual(selected.json().routes, ['consilium-debug', 'feature']);
+  assert.equal(selected.json().defaultRoute, 'consilium-debug');
+  assert.deepEqual(selected.json().repositories, [{ name: 'project-beta', targetBranch: 'master' }]);
+  assert.deepEqual(selected.json().instrumentationSuggestions, ['project-beta:src/diagnostics.py']);
   assert.deepEqual(selected.json().diagnosisSuggestion, {
-    kind: 'data', signal: 'Экспорт удваивает сущности',
+    kind: 'data', signal: 'Повторный запуск создаёт дубликаты',
   });
-  assert.deepEqual(selected.json().routeOptions.debug, {
-    deliveryMode: 'publish', instrumentationRequired: true,
+  // Объём триажа едет в форму независимо от каталога: и у fail-closed профиля тоже
+  assert.deepEqual(selected.json().scopeSuggestion, { criteria: [], skip: [] });
+  assert.deepEqual(defaults.json().scopeSuggestion, { criteria: [], skip: [] });
+  assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
+    deliveryMode: 'publish',
+    instrumentationMode: 'explicit',
+    instrumentationRequired: true,
+    // Подпись маршрута приходит из бандла профиля; фикстура её не задаёт.
+    title: '',
   });
+});
+
+// Дефолт формы «профиль первого незакрытого реестра» открывал задачу чужого проекта
+// на постороннем профиле: алиасы триажа не сопоставлялись с его репозиториями, поле
+// инструментации оставалось пустым, и explicit-маршрут было нечем запустить.
+test('launch-options открывает профиль, чьи репозитории читал триаж задачи', async (t) => {
+  const app = await fixture(t, { analysisRepos: { app: { dir: '/srv/project-beta' } } });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-beta');
+  assert.equal(response.json().error, undefined);
+  assert.deepEqual(response.json().instrumentationSuggestions, ['project-beta:src/diagnostics.py']);
+});
+
+test('launch-options отдаёт объём триажа: критерии из scope.do и «не делаем» из scope.skip', async (t) => {
+  const app = await fixture(t, {
+    analysisExtra: {
+      scope: {
+        do: ['Пустая ячейка подсказывает, как снять тип', 'Окно называет тип и число фраз'],
+        skip: ['Раздел «Частота» — по ответу человека'],
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().scopeSuggestion, {
+    criteria: ['Пустая ячейка подсказывает, как снять тип', 'Окно называет тип и число фраз'],
+    skip: ['Раздел «Частота» — по ответу человека'],
+  });
+});
+
+test('явно выбранный профиль сильнее подсказки триажа', async (t) => {
+  const app = await fixture(t, { analysisRepos: { app: { dir: '/srv/project-beta' } } });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-alpha',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-alpha');
+  assert.equal(response.json().error, 'no_catalog');
+});
+
+test('неоднозначный триаж не выбирает профиль за человека', async (t) => {
+  const app = await fixture(t, {
+    analysisRepos: { app: { dir: '/srv/project-beta' } },
+    twinProfile: true,
+  });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-alpha');
+  assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta', 'project-gamma']);
+});
+
+test('переименованный explicit-маршрут требует scope до ticket и provisioning', async (t) => {
+  const app = await fixture(t);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/9123/launch',
+    payload: {
+      profile: 'project-beta',
+      route: 'consilium-debug',
+      title: 'Проверка scope',
+      description: 'Имя маршрута не должно отключать контракт инструментации.',
+      sourceUrl: 'https://example.test/tasks/9123',
+      acceptanceCriteria: [],
+      instrumentationFiles: [],
+    },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, 'bad_launch_contract');
+  assert.match(response.json().message, /хотя бы один instrumentation file/);
 });
 
 test('launch профиля без каталога отказывает до запуска factoryBin', async (t) => {
@@ -139,7 +263,7 @@ test('launch профиля без каталога отказывает до з
     method: 'POST',
     url: '/api/tasks/9123/launch',
     payload: {
-      profile: 'arsenkin',
+      profile: 'project-alpha',
       route: 'feature',
       title: 'Проверка fail closed',
       description: 'Движок не должен запускаться без опубликованного каталога.',
@@ -156,7 +280,7 @@ test('launch не принимает старую строковую форму 
   const response = await app.inject({
     method: 'POST',
     url: '/api/tasks/9123/launch',
-    payload: { profile: 'rdesigner', route: 'feature', ticket: 'старый payload' },
+    payload: { profile: 'project-beta', route: 'feature', ticket: 'старый payload' },
   });
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error, 'bad_ticket_shape');
@@ -168,13 +292,13 @@ test('launch отклоняет подмену настроенной ветки
     method: 'POST',
     url: '/api/tasks/9123/launch',
     payload: {
-      profile: 'rdesigner',
+      profile: 'project-beta',
       route: 'feature',
       title: 'Проверка ветки',
       description: 'Браузер не должен менять целевую ветку профиля.',
       sourceUrl: 'https://example.test/tasks/9123',
       acceptanceCriteria: [],
-      deliveryTargets: ['rdesigner=release'],
+      deliveryTargets: ['project-beta=release'],
       instrumentationFiles: [],
     },
   });
@@ -185,20 +309,20 @@ test('launch отклоняет подмену настроенной ветки
 
 test('launch-options отклоняет неизвестный и синтаксически опасный profile query', async (t) => {
   const app = await fixture(t);
-  for (const profile of ['unknown', '../rdesigner', 'RDESIGNER']) {
+  for (const profile of ['unknown', '../project-beta', 'PROJECT-BETA']) {
     const response = await app.inject({
       method: 'GET',
       url: '/api/tasks/9123/launch-options?profile=' + encodeURIComponent(profile),
     });
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error, 'bad_profile');
-    assert.deepEqual(response.json().profiles, ['arsenkin', 'rdesigner']);
+    assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta']);
   }
 });
 
 test('launch не принимает profile в обход опубликованного списка', async (t) => {
   const app = await fixture(t);
-  for (const profile of ['unknown', '../rdesigner', 'RDESIGNER']) {
+  for (const profile of ['unknown', '../project-beta', 'PROJECT-BETA']) {
     const response = await app.inject({
       method: 'POST',
       url: '/api/tasks/9123/launch',
@@ -206,6 +330,75 @@ test('launch не принимает profile в обход опубликова�
     });
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error, 'bad_profile');
-    assert.deepEqual(response.json().profiles, ['arsenkin', 'rdesigner']);
+    assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta']);
   }
+});
+
+// Оценка триажа живёт дольше каталога: маршруты переиздают, и подсказка на снятый или
+// переопубликованный маршрут увела бы запуск в гарантированный отказ движка.
+test('рекомендация маршрута принимается только от текущего каталога', async (t) => {
+  const current = await fixture(t, {
+    analysisExtra: {
+      route_catalog_hash: 'b'.repeat(64),
+      route_depth: 'full',
+      route_reason: 'риск 4 — цена ошибки требует полного маршрута',
+    },
+  });
+  const response = await current.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(response.json().defaultRoute, 'consilium-debug');
+  assert.deepEqual(response.json().routeSuggestion, {
+    route: 'consilium-debug',
+    depth: 'full',
+    reason: 'риск 4 — цена ошибки требует полного маршрута',
+  });
+
+  const stale = await fixture(t, {
+    analysisExtra: { route_catalog_hash: 'c'.repeat(64), route_depth: 'full', route_reason: 'старая' },
+  });
+  const ignored = await stale.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(ignored.json().routeSuggestion, null);
+  assert.equal(ignored.json().defaultRoute, 'feature');
+});
+
+// Глубину политика считает в момент триажа, когда вопросы ещё открыты, и кладёт в файл
+// оценки. Человек отвечает уже после — и форма продолжала предлагать маршрут «с
+// открытыми вопросами», хотя открытых не осталось: ответы на маршрут не влияли вовсе.
+test('ответы человека пересчитывают глубину маршрута прямо в форме запуска', async (t) => {
+  const analysisExtra = {
+    complexity: 2,
+    risk: 2,
+    diff_size: 'S',
+    confidence: 'high',
+    needs_clarification: true,
+    questions: [{ id: 'q-mode', text: 'Какой режим оставить?', options: [] }],
+    route_depth: 'mid',
+    route_reason: 'сложность 2, риск 2, размер S — план не нужен (есть открытые вопросы, поэтому не лёгкий)',
+  };
+  const url = '/api/tasks/9123/launch-options?profile=project-beta';
+
+  const open = await (await fixture(t, { analysisExtra })).inject({ method: 'GET', url });
+  const closed = await (await fixture(t, {
+    analysisExtra,
+    // Вопрос переформулирован следующим заходом, поэтому совпал ключ текста, а не id.
+    answered: { ids: new Set(), keys: new Set(['какой режим оставить']) },
+  })).inject({ method: 'GET', url });
+
+  assert.deepEqual({
+    open: open.json().routeSuggestion.depth,
+    closed: closed.json().routeSuggestion.depth,
+    reason: closed.json().routeSuggestion.reason,
+    route: closed.json().routeSuggestion.route,
+  }, {
+    open: 'mid',
+    closed: 'light',
+    reason: 'сложность 2, риск 2, размер S, уверенность высокая, вопросов нет'
+      + ' — с учётом ответов человека',
+    route: 'consilium-debug',
+  });
 });

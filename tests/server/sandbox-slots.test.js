@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { reserveSlot } from '../../server/src/lib/sandbox-slots.js';
+import { reserveSlot } from '../../server/src/lib/sandboxSlots.ts';
 
 async function fixture(t, script) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-slots-single-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-slots-single-'));
   const stateDir = path.join(root, 'state');
   const factoryBin = path.join(root, 'factory');
   await mkdir(stateDir, { recursive: true });

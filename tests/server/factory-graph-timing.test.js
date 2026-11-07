@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 
 // Legacy-карточка читает движковую проекцию, route-v2 поверх неё использует
 // длительности реально стартовавших runner-процессов текущей trusted attempt.
@@ -15,7 +15,7 @@ async function makeFixture(t, {
   review = 'done', ship = 'waiting', alive = false,
   workTimeReader = null, trusted = false, routeV2 = false, runDurationSec = null,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-timing-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-graph-timing-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');
@@ -42,7 +42,7 @@ async function makeFixture(t, {
     `GATE_WAIT_S=${gateWaitSec}`,
     `WORK_TIMER_SINCE=${lastEventSec}`,
   ];
-  await writeFile(path.join(stateDir, 't7379.pipeline'), [
+  await writeFile(path.join(stateDir, 't49.pipeline'), [
     'PROFILE=demo',
     'ROUTE=feature',
     ...(routeV2 ? [
@@ -81,11 +81,11 @@ async function makeFixture(t, {
     });
   }
   if (runDurationSec !== null) {
-    const runDir = path.join(stateDir, 'logs', 'runs', 't7379', 'REVIEW', 'run-review');
+    const runDir = path.join(stateDir, 'logs', 'runs', 't49', 'REVIEW', 'run-review');
     await mkdir(runDir, { recursive: true });
     const meta = path.join(runDir, 'meta.env');
     await writeFile(meta, [
-      'SCHEMA=1', 'TASK=7379', 'STAGE=REVIEW', 'RUN_ID=run-review',
+      'SCHEMA=1', 'TASK=49', 'STAGE=REVIEW', 'RUN_ID=run-review',
       'RESULT_CLASS=ok', 'RC=0', '',
     ].join('\n'));
     const started = (await stat(runDir)).birthtimeMs;
@@ -96,7 +96,7 @@ async function makeFixture(t, {
 }
 
 test('graph exposes pure work and gate wait as separate counters', async (t) => {
-  const graph = await (await makeFixture(t)).getTaskGraph('7379');
+  const graph = await (await makeFixture(t)).getTaskGraph('49');
 
   assert.deepEqual(graph.timing, {
     workSec: 14400,
@@ -111,7 +111,7 @@ test('live non-human node ticks from the latest ledger event', async (t) => {
   const graph = await (await makeFixture(t, {
     workSec: '7200', gateWaitSec: '3600', lastEventSec: '1785243600',
     review: 'running', ship: 'pending', alive: true,
-  })).getTaskGraph('7379');
+  })).getTaskGraph('49');
 
   assert.deepEqual(graph.timing, {
     workSec: 7200,
@@ -123,7 +123,7 @@ test('live non-human node ticks from the latest ledger event', async (t) => {
 });
 
 test('human gate never ticks the work counter even while daemon is briefly alive', async (t) => {
-  const graph = await (await makeFixture(t, { alive: true })).getTaskGraph('7379');
+  const graph = await (await makeFixture(t, { alive: true })).getTaskGraph('49');
 
   assert.equal(graph.timing.runningSinceMs, null);
 });
@@ -134,7 +134,7 @@ test('route-v2 ignores a 32-hour ledger gap and sums actual runner spans', async
     workSec: '117109',
     gateWaitSec: '4622',
     runDurationSec: 8 * 60,
-  })).getTaskGraph('7379');
+  })).getTaskGraph('49');
 
   assert.deepEqual(graph.timing, {
     workSec: 8 * 60,
@@ -155,8 +155,8 @@ test('old active run restores exact timing through the verified engine ledger', 
       return { workSec: 14157, gateWaitSec: 232, lastEventSec: 1785748665 };
     },
   });
-  const first = await adapter.getTaskGraph('7379');
-  const second = await adapter.getTaskGraph('7379');
+  const first = await adapter.getTaskGraph('49');
+  const second = await adapter.getTaskGraph('49');
 
   assert.deepEqual(first.timing, {
     workSec: 14157,
@@ -170,7 +170,7 @@ test('old active run restores exact timing through the verified engine ledger', 
 });
 
 test('graph timing is null when neither projection nor trusted ledger is available', async (t) => {
-  const graph = await (await makeFixture(t, { workSec: null })).getTaskGraph('7379');
+  const graph = await (await makeFixture(t, { workSec: null })).getTaskGraph('49');
 
   assert.equal(graph.timing, null);
 });

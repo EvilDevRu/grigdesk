@@ -4,13 +4,21 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_claude_probe() {
-  local version
-  command -v claude >/dev/null 2>&1 || return 4
-  version=$(factory_exec provider claude --version) || return
-  # Empty --setting-sources is an audited fail-closed contract of this exact
-  # native CLI. A future release stays unavailable until its parsing and sandbox
-  # schema have been reviewed instead of silently re-enabling disk settings.
-  [[ "$version" =~ ^2\.1\.220([[:space:]]|$) ]] || return 4
+  local version cli
+  cli=$(factory_external_bin claude claude)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  version=$(factory_external_exec claude claude --version) || return
+  # Границу диска держат флаги запуска (пустой --setting-sources, --strict-mcp-config
+  # без конфига, --disable-slash-commands), а НЕ список разрешённых версий CLI.
+  # Список приходилось дописывать руками на каждое обновление: он успел разойтись с
+  # документацией за сутки, а до правки regex весь конвейер стоял недоступным — то есть
+  # стоил дорого и в обмен доказывал только то, что кто-то однажды прогнал эксперимент.
+  # Теперь эксперимент автоматизирован: tools/claude-contract-smoke.mjs запускает
+  # УСТАНОВЛЕННЫЙ CLI на фикстуре с хуками, .mcp.json, CLAUDE.md и приватным --settings
+  # и доказывает четыре вещи разом — hooks и MCP закрыты, память проекта жива, переданный
+  # --settings всё ещё применяется. Гонять после обновления CLI и периодически;
+  # argv-тест на фейковом claude этого доказать не может по устройству.
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || return 4
   printf '%s\n' "$version"
 }
 
@@ -131,14 +139,21 @@ PYTHON
 runner_claude_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   _runner_claude_trusted_settings || return
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама
+  # (дескрипторный или PATH). Сдвоенное «claude claude» у парсера CLI — это
+  # чужой позиционный аргумент до реальных флагов, ход так не начинается.
   local -a args=(
-    claude -p "$prompt" --output-format stream-json --verbose
+    -p "$prompt" --output-format stream-json --verbose
     --settings "$RUNNER_CLAUDE_SETTINGS"
     --setting-sources ""
     --strict-mcp-config
     --disable-slash-commands
-    --safe-mode
   )
+  # --safe-mode сознательно снят: конвейерным агентам нужна память проекта
+  # (CLAUDE.md с @-импортами знаний) из cwd-ворктри. Границу держат оставшиеся
+  # флаги: с пустым --setting-sources hooks/плагины/проектным агентам неоткуда
+  # загрузиться, --strict-mcp-config без --mcp-config не поднимает MCP,
+  # --disable-slash-commands глушит skills.
   [[ -z "$model" ]] || args+=(--model "$model")
   [[ -z "$effort" ]] || args+=(--effort "$effort")
   local add_dir
@@ -146,11 +161,20 @@ runner_claude_run() {
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
   args+=(--permission-mode acceptEdits)
+  # Порог автосжатия — диалект этого CLI. Движок отдаёт нейтральный
+  # RUNNER_AUTO_COMPACT_WINDOW, перевод в переменную окружения принадлежит раннеру.
+  # `0`/пусто — не вмешиваться: у CLI остаётся собственный порог от окна модели.
+  if [[ "${RUNNER_AUTO_COMPACT_WINDOW:-0}" =~ ^[1-9][0-9]*$ ]]; then
+    export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$RUNNER_AUTO_COMPACT_WINDOW"
+  else
+    unset CLAUDE_CODE_AUTO_COMPACT_WINDOW
+  fi
   # -k: голый timeout шлёт только TERM и уходит. Провайдер, застрявший в необрываемом
   # вызове, пережил бы его и остался висеть с занятым слотом; KILL через 30 с закрывает
   # эту дыру. Код возврата остаётся 124 (GNU timeout не меняет его из-за KILL), поэтому
   # классификация timeout в runner_claude_classify работает как прежде.
-  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
+  factory_external_launch claude claude "${args[@]}" || return $?
+  factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}"
 }
 
 _runner_fixture_meta() {
@@ -221,9 +245,16 @@ runner_claude_classify() {
     printf 'context_overflow\n'
     return
   fi
+  # Отказ по лимиту подписки CLI объявляет машинным событием `rate_limit_event`
+  # со `status: rejected` — и это единственный прицельный признак: у пятичасового
+  # окна текст другой («You've hit your session limit · resets 9:30pm»), а
+  # словесные шаблоны ниже совпадали на нём случайно, за счёт соседнего блока
+  # `"usage":{…}` в той же строке результата. Тип окна (`five_hour`/`seven_day`)
+  # значения не имеет: отказ есть отказ, срок разбирает `limit_until`.
   if grep -qiE \
       -e '"type":"subscription_limit_reached"' \
-      -e '"type":"rate_limit_event".*"status":"rejected".*"rateLimitType":"seven_day"' \
+      -e '"type":"rate_limit_event".*"status":"rejected"' \
+      -e "hit your (session|weekly|monthly|usage) limit" \
       -e '429.*(weekly|subscription|usage).*(limit|reached)' \
       -e '(weekly|subscription|usage).*limit.*(reached|reset)' \
       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
@@ -247,6 +278,144 @@ runner_claude_classify() {
     fi
   fi
   printf 'unknown\n'
+}
+
+runner_claude_limit_until() {
+  # Опциональный метод контракта: до какого времени провайдер отказывает.
+  # Claude называет срок машинным полем `resetsAt` (unix) внутри
+  # `rate_limit_event`; берём ПОСЛЕДНЕЕ событие со `status: rejected` — ранние
+  # `allowed_warning` того же окна описывают ещё разрешённые запросы.
+  local run_dir=$1 value
+  value=$(grep -o '"rate_limit_info":{[^}]*}' "$run_dir/events.jsonl" 2>/dev/null |
+    grep '"status":"rejected"' |
+    grep -o '"resetsAt":[0-9]\+' |
+    tail -1)
+  value=${value##*:}
+  [[ "$value" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$value"
+}
+
+runner_claude_usage() {
+  # Опциональный метод контракта: расход токенов завершённого хода.
+  # Событие `result` несёт уже сложенный по всему ходу usage — берём его, чтобы
+  # не повторять арифметику CLI. Если хода оборвали (timeout, KILL, падение), то
+  # `result` не будет вовсе, а токены уже потрачены: тогда складываем usage
+  # assistant-событий, у каждого из которых он свой на обращение к модели.
+  # Именно оборванный ход и есть самый дорогой случай, ради которого замер нужен.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+# Кэш-чтение и кэш-запись остаются отдельными полями: они тарифицируются
+# по-разному, и без них «дорогой этап» не отличить от длинного, но целиком
+# прочитанного из кэша.
+FIELDS = (
+    ("TOKENS_IN", "input_tokens"),
+    ("TOKENS_OUT", "output_tokens"),
+    ("TOKENS_CACHE_READ", "cache_read_input_tokens"),
+    ("TOKENS_CACHE_WRITE", "cache_creation_input_tokens"),
+)
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+final = None
+cost = None
+partial = {key: 0 for _, key in FIELDS}
+seen_partial = False
+
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        kind = event.get("type")
+        if kind == "result":
+            usage = event.get("usage")
+            if isinstance(usage, dict):
+                final = usage
+            value = event.get("total_cost_usd")
+            if isinstance(value, (int, float)):
+                cost = value
+        elif kind == "assistant":
+            usage = (event.get("message") or {}).get("usage")
+            if not isinstance(usage, dict):
+                continue
+            seen_partial = True
+            for _, key in FIELDS:
+                value = usage.get(key)
+                if isinstance(value, int) and value > 0:
+                    partial[key] += value
+
+if final is None and not seen_partial:
+    raise SystemExit(1)
+
+out = []
+for name, key in FIELDS:
+    if final is not None:
+        value = final.get(key)
+        value = value if isinstance(value, int) and value >= 0 else 0
+    else:
+        value = partial[key]
+    out.append(f"{name}={value}")
+if isinstance(cost, (int, float)) and cost > 0:
+    out.append(f"COST_USD={cost:.4f}")
+print("\n".join(out))
+PYTHON
+}
+
+# Отказы политики прав внутри завершившегося хода. CLI кладёт их в `permission_denials`
+# события `result`, но движок не читал это поле вовсе — и отказ был виден только грепом
+# по потоку внутри каталога прогона.
+#
+# Опасен не потраченный вызов, а ПОДМЕНА проверки: в живом прогоне нужный запуск «был
+# заблокирован политикой», и агент в тот же ход написал «проверю через прямой запуск
+# скриптов». Результат подменённой проверки уехал дальше как требуемое доказательство.
+# Правило «нет замены — зафиксируй проверку как не выполненную» в промпте уже стояло и
+# было нарушено, поэтому нужен машинный признак, а не ещё одна строка регламента.
+#
+# Отсутствие события `result` — это ОБОРВАННЫЙ ход (таймаут, KILL, падение), а не ход без
+# отказов. Такой случай возвращает ненулевой код: движок не запишет ключ вовсе, и «не
+# знаем» не превратится в честный ноль.
+runner_claude_denial_count() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+seen_result = False
+total = 0
+
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if event.get("type") != "result":
+            continue
+        seen_result = True
+        denials = event.get("permission_denials")
+        if isinstance(denials, list):
+            total += len(denials)
+
+if not seen_result:
+    raise SystemExit(1)
+print(total)
+PYTHON
 }
 
 runner_claude_fanout_count() {

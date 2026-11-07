@@ -3,7 +3,7 @@
 // Тикет движок читает НЕ на старте, а при сборке bootstrap-контекста — то есть уже
 // после подъёма песочницы. Кривое поле обернулось бы отказом 78 через 20–25 минут
 // провижининга и потерянным слотом стенда, поэтому правила валидатора продублированы
-// в кокпите. Этот файл держит копию честной: он повторяет ровно те же правила, что
+// в GrigDesk. Этот файл держит копию честной: он повторяет ровно те же правила, что
 // engine/bin/factory-context (read_ticket), и падает, если они разъедутся.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,11 +13,11 @@ import path from 'node:path';
 
 import {
   TICKET_LIMITS, TicketError, buildTicket, serializeTicket, validateTicket, writeTicketFile,
-} from '../../server/src/lib/factory-ticket.js';
+} from '../../server/src/lib/factoryTicket.ts';
 import {
   parseRouteWorkTime, routeAbandonArgs, routeCheckArgs, routeGateArgs, routeGotoArgs,
   routeFailure, routeMessage, routeResumeArgs, routeStartArgs, routeWorkTimeArgs, startRegistryIdentity,
-} from '../../server/src/lib/factory-route-cli.js';
+} from '../../server/src/lib/factoryRouteCli.ts';
 
 const CONFIG = {
   factoryBin: '/engine/bin/factory',
@@ -28,20 +28,20 @@ const CONFIG = {
 
 const BASE = {
   task: '8200',
-  title: 'Починить экспорт',
-  description: 'Экспорт падает на больших выборках.',
+  title: 'Починить обработку данных',
+  description: 'Операция падает на больших выборках.',
   sourceUrl: 'https://portal.example.ru/company/personal/user/1/tasks/task/view/8200/',
 };
 
 test('TICKET-01: собранный тикет — ровно шесть полей валидатора движка', () => {
-  const ticket = buildTicket({ ...BASE, acceptanceCriteria: ['экспорт не падает'] });
+  const ticket = buildTicket({ ...BASE, acceptanceCriteria: ['операция не падает'] });
   assert.deepEqual(Object.keys(ticket).sort(), [
     'acceptanceCriteria', 'description', 'schema', 'sourceUrl', 'taskId', 'title',
   ]);
   assert.equal(ticket.schema, 1);
   // taskId именно строкой: TASK_RE валидатора работает по строке, число он отвергнет.
   assert.equal(ticket.taskId, '8200');
-  assert.deepEqual(ticket.acceptanceCriteria, ['экспорт не падает']);
+  assert.deepEqual(ticket.acceptanceCriteria, ['операция не падает']);
   // Сериализация ровно та, что уедет в файл: лишних полей объекта в ней нет.
   assert.equal(JSON.parse(serializeTicket({ ...ticket, лишнее: 1 })).лишнее, undefined);
 });
@@ -79,7 +79,7 @@ test('TICKET-05: уточнения и комментарии уезжают в 
       { title: '[Пусто]', text: '' },
     ],
   });
-  assert.match(ticket.description, /^Экспорт падает на больших выборках\./);
+  assert.match(ticket.description, /^Операция падает на больших выборках\./);
   assert.match(ticket.description, /\[Внутренние уточнения человека\]\nскрин в задаче неактуален/);
   assert.match(ticket.description, /\[Комментарии к задаче из трекера\]\n— Пётр: только для админов/);
   assert.doesNotMatch(ticket.description, /\[Пусто\]/);
@@ -92,12 +92,12 @@ test('TICKET-06: файл обрезается по 256 КиБ, а не толь
   const ticket = buildTicket({ ...BASE, description: 'я'.repeat(TICKET_LIMITS.description) });
   const size = Buffer.byteLength(serializeTicket(ticket), 'utf8');
   assert.ok(size <= TICKET_LIMITS.fileBytes, `${size} байт при потолке ${TICKET_LIMITS.fileBytes}`);
-  assert.match(ticket.description, /описание обрезано кокпитом/);
+  assert.match(ticket.description, /описание обрезано GrigDesk/);
   assert.equal(ticket.title, BASE.title);
 });
 
-test('TICKET-07: файл пишется абсолютным путём в хранилище кокпита, режимом 600', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ticket-'));
+test('TICKET-07: файл пишется абсолютным путём в хранилище GrigDesk, режимом 600', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ticket-'));
   t.after(async () => rm(dir, { recursive: true, force: true }));
   const file = await writeTicketFile({ dir, task: '8200', ticket: buildTicket(BASE) });
 
@@ -152,19 +152,19 @@ test('ARGS-01c: work-time разбирается только как безоп�
 
 test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs явными аргументами', () => {
   const args = routeStartArgs(CONFIG, {
-    task: '7802',
-    profile: 'arsenkin',
+    task: '42',
+    profile: 'project-alpha',
     route: 'debug',
-    ticketFile: '/state/tickets/t7802.ticket.json',
-    instrumentationFiles: ['backend:app/Api/Actions/Keywords/RestoreKeywordsAction.php'],
+    ticketFile: '/state/tickets/t42.ticket.json',
+    instrumentationFiles: ['service-a:src/handlers/restore-item.js'],
     diagnosisKind: 'data',
-    diagnosisSignal: 'после восстановления число фраз удваивается',
+    diagnosisSignal: 'после повторной операции число элементов удваивается',
     deliveryTargets: ['backend=master', 'frontend=main'],
   });
   assert.deepEqual(args.slice(-10), [
-    '--instrumentation-file', 'backend:app/Api/Actions/Keywords/RestoreKeywordsAction.php',
+    '--instrumentation-file', 'service-a:src/handlers/restore-item.js',
     '--diagnosis-kind', 'data',
-    '--diagnosis-signal', 'после восстановления число фраз удваивается',
+    '--diagnosis-signal', 'после повторной операции число элементов удваивается',
     '--delivery-target', 'backend=master',
     '--delivery-target', 'frontend=main',
   ]);
@@ -172,10 +172,10 @@ test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs я
 
 test('ARGS-01d: publish launch разрешает task-comment явным флагом движку', () => {
   const args = routeStartArgs(CONFIG, {
-    task: '8166',
-    profile: 'arsenkin',
+    task: '47',
+    profile: 'project-alpha',
     route: 'feature',
-    ticketFile: '/state/tickets/t8166.ticket.json',
+    ticketFile: '/state/tickets/t47.ticket.json',
     deliveryTargets: ['backend=master', 'frontend=main'],
     taskComment: true,
   });
@@ -187,8 +187,8 @@ test('ARGS-01d: publish launch разрешает task-comment явным фла
     '--task-comment',
   ]);
   assert.equal(routeStartArgs(CONFIG, {
-    task: '8166', profile: 'arsenkin', route: 'hunt',
-    ticketFile: '/state/tickets/t8166.ticket.json',
+    task: '47', profile: 'project-alpha', route: 'hunt',
+    ticketFile: '/state/tickets/t47.ticket.json',
   }).includes('--task-comment'), false);
 });
 
@@ -201,6 +201,44 @@ test('ARGS-02: check не имеет побочных эффектов, gate в�
   });
   assert.ok(gate.includes('--commit-only'), 'без него gate тянет за собой весь следующий этап');
   assert.ok(!gate.includes('--comment'), 'пустой комментарий не передаётся');
+});
+
+test('EC-01: catalog hash проходит через check/start, queue dispatch — только через start', () => {
+  const catalogHash = 'c'.repeat(64);
+  const dispatchId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  assert.deepEqual(routeCheckArgs(CONFIG, {
+    profile: 'demo', route: 'feature', expectedCatalogHash: catalogHash,
+  }), [
+    'check', '--profile', 'demo', '--route', 'feature',
+    '--expected-catalog-hash', catalogHash,
+    '--routes-dir', CONFIG.routesDir,
+  ]);
+  const started = routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash,
+    queueDispatchId: dispatchId,
+  });
+  assert.deepEqual(started.slice(8, 12), [
+    '--expected-catalog-hash', catalogHash, '--queue-dispatch-id', dispatchId,
+  ]);
+  assert.throws(() => routeCheckArgs(CONFIG, {
+    profile: 'demo', route: 'feature', expectedCatalogHash: 'ABC',
+  }), /sha256/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json', queueDispatchId: dispatchId,
+  }), /expectedCatalogHash/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash, queueDispatchId: 'not-a-uuid',
+  }), /UUID/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash, queueDispatchId: dispatchId.toUpperCase(),
+  }), /UUID/);
 });
 
 test('ARGS-03: коды отказа движка объясняются человеку', () => {
@@ -219,6 +257,17 @@ test('ARGS-03: коды отказа движка объясняются чел�
   assert.equal(routeFailure('обычная shell-ошибка с кодом 1'), null,
     'голый код 1 не выдаётся за preflight');
   assert.equal(routeMessage(0, ' готово \n'), 'готово');
+
+  const expectedCatalogHash = 'c'.repeat(64);
+  const actualCatalogHash = 'd'.repeat(64);
+  assert.deepEqual(routeFailure(
+    `FACTORY_ERROR=catalog_changed EXPECTED=${expectedCatalogHash} ACTUAL=${actualCatalogHash}`,
+  ), {
+    error: 'catalog_changed',
+    expectedCatalogHash,
+    actualCatalogHash,
+    message: 'опубликованный каталог изменился после выбора маршрута; поставь задачу заново',
+  });
 });
 
 test('ARGS-04: запуск подтверждается только полной и не stalled identity маршрута', () => {
@@ -249,4 +298,33 @@ test('ARGS-04: запуск подтверждается только полно
       profile: 'demo', route: 'hunt',
     }), null, JSON.stringify(patch));
   }
+});
+
+test('EC-04: queue launch требует точную catalog/dispatch/runner registry identity', () => {
+  const expectedCatalogHash = 'b'.repeat(64);
+  const dispatchId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const complete = {
+    ATTEMPT_ID: 'a_0123456789abcdef0123456789abcdef',
+    ROUTE_HASH: 'a'.repeat(64),
+    CATALOG_HASH: expectedCatalogHash,
+    QUEUE_DISPATCH_ID: dispatchId,
+    RUNNER_OVERRIDE_PRIMARY: 'codex',
+    ORCH_PID: '12345',
+    PROFILE: 'demo',
+    ROUTE: 'feature',
+    RUN_PROTOCOL: '2',
+    CATALOG_PROTOCOL: 'route-v2',
+    DELIVERY_MODE: 'disabled',
+    STALLED_HUMAN: '0',
+  };
+  const options = {
+    profile: 'demo', route: 'feature', expectedCatalogHash,
+    queueDispatchId: dispatchId, runnerPrimaryOverride: 'codex',
+  };
+  assert.ok(startRegistryIdentity(complete, options));
+  for (const patch of [
+    { CATALOG_HASH: 'c'.repeat(64) },
+    { QUEUE_DISPATCH_ID: '00000000-0000-4000-8000-000000000002' },
+    { RUNNER_OVERRIDE_PRIMARY: 'claude' },
+  ]) assert.equal(startRegistryIdentity({ ...complete, ...patch }, options), null);
 });

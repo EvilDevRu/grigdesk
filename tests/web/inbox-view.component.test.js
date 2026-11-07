@@ -1,0 +1,841 @@
+import { measured } from './helpers/performance-surface.js';
+import { migrationUrl } from './helpers/compile-vue.js';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import ts from '../../web/node_modules/typescript/lib/typescript.js';
+
+import { apiError, mountChannelView } from './helpers/channel-views.js';
+
+process.env.NODE_ENV = 'test';
+
+const REF_NEW = '[1,"item","github","acc","issue-9"]';
+const REF_SKIPPED = '[1,"item","github","acc","issue-10"]';
+const MESSAGE_A = '[1,"message","github","acc","repo","9:a"]';
+const MESSAGE_B = '[1,"message","github","acc","repo","9:b"]';
+const MESSAGE_SKIPPED = '[1,"message","github","acc","repo","10"]';
+const MESSAGE_TASK = '[1,"message","github","acc","repo","11"]';
+
+// Полное состояние канала, как его отдаёт сервер: границу приёма он присылает
+// всегда, даже когда её ещё не было — тогда полями стоит null.
+const channel = (over = {}) => ({
+  id: 'github',
+  label: 'GitHub',
+  plugin: 'enabled',
+  connection: 'connected',
+  participation: 'active',
+  activationVersion: 3,
+  currentEpoch: 1,
+  startedAtMs: 1_786_172_000_000,
+  endedAtMs: null,
+  endReason: null,
+  reason: null,
+  readOnly: false,
+  truncated: false,
+  ...over,
+});
+
+const message = (messageRef, over = {}) => ({
+  messageRef,
+  occurredAt: 1_786_172_300,
+  editedAt: null,
+  author: { name: 'Алиса' },
+  text: 'Проверьте точный subset',
+  attachments: [],
+  decision: null,
+  ...over,
+});
+
+const item = (over = {}) => ({
+  ref: REF_NEW,
+  revision: `v1_${'a'.repeat(43)}`,
+  channel: { id: 'github', label: 'GitHub' },
+  source: { title: 'example-org/example-repo #9', url: 'https://github.com/example-org/example-repo/issues/9' },
+  project: 'grigdesk',
+  kind: 'bug',
+  status: 'new',
+  decision: null,
+  firstAt: 1_786_172_300,
+  lastAt: 1_786_172_301,
+  cold: true,
+  autoTask: { enabled: true, readyAtMs: 1_786_172_301_000 },
+  title: 'Ошибка Inbox',
+  description: 'Два сообщения',
+  truncated: false,
+  messages: [message(MESSAGE_A), message(MESSAGE_B, { author: { name: 'Боб' } })],
+  attachments: [],
+  ...over,
+});
+
+function response(over = {}) {
+  return {
+    items: [item()], channels: [channel()], errors: [], truncated: false,
+    worker: { running: true, readiness: 'ready', lastReason: '', lastError: null },
+    ...over,
+  };
+}
+
+function button(wrapper, text) {
+  const found = wrapper.findAll('button').find((entry) =>
+    entry.text() === text || entry.attributes('aria-label') === text);
+  assert.ok(found, `не найдена кнопка «${text}»`);
+  return found;
+}
+
+test('Inbox показывает source/channel/status и отправляет exact message subset', async (t) => {
+  const calls = [];
+  const api = {
+    async get(url) { calls.push(['GET', url]); return response(); },
+    async post(url, body) { calls.push(['POST', url, body]); return { ok: true }; },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+
+  const card = wrapper.get('[data-status="new"]');
+  assert.match(card.text(), /GitHub/);
+  assert.match(card.text(), /example-org\/example-repo #9/);
+  assert.match(card.text(), /К разбору/);
+  const checks = card.findAll('input[type="checkbox"]');
+  assert.equal(checks.length, 2);
+  assert.equal(checks.every((entry) => entry.element.checked), true, 'по умолчанию выбран весь new item');
+  await checks[1].setValue(false);
+  await button(card, 'Создать задачу').trigger('click');
+  await settle();
+
+  assert.deepEqual(calls[1], [
+    'POST',
+    `/api/inbox/items/${encodeURIComponent(REF_NEW)}/task`,
+    { revision: `v1_${'a'.repeat(43)}`, messageRefs: [MESSAGE_A] },
+  ]);
+});
+
+test('обновление входящих сохраняет готовые обращения до следующего снимка', async (t) => {
+  const pending = Promise.withResolvers();
+  let reads = 0;
+  const api = {
+    get() {
+      reads += 1;
+
+      return reads === 1 ? Promise.resolve(response()) : pending.promise;
+    },
+    async post() {
+      return { ok: true };
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+
+  await button(wrapper, 'Обновить').trigger('click');
+  assert.equal(reads, 2);
+  assert.equal(wrapper.find('[data-status="new"]').exists(), true);
+  assert.equal(wrapper.find('[data-ui-loading]').exists(), false);
+  pending.resolve(response({ items: [item({ title: 'Обновлённое обращение' })] }));
+  await settle();
+  assert.ok(wrapper.text().includes('Обновлённое обращение'));
+});
+
+test('выбор new/skipped не смешивается, действия контекстны, вложения и message taskUrl видны', async (t) => {
+  const skippedDecision = {
+    decisionId: 'decision_0000000000000002', version: 2, status: 'skipped',
+    taskId: null, taskUrl: '', by: 'human', note: null, decidedAtMs: 1_786_172_400_000,
+  };
+  const taskDecision = {
+    decisionId: 'decision_0000000000000003', version: 1, status: 'task',
+    taskId: '501', taskUrl: 'https://example.test/tasks/501', by: 'human', note: null,
+    decidedAtMs: 1_786_172_500_000,
+  };
+  const mixed = item({
+    status: 'mixed',
+    decision: null,
+    messages: [
+      message(MESSAGE_A, {
+        attachments: [{
+          kind: 'voice', displayLabel: 'голосовое сообщение', name: '', size: 2048,
+          attachmentAnalysis: { status: 'processing' },
+        }],
+      }),
+      message(MESSAGE_B, { decision: skippedDecision }),
+      message(MESSAGE_TASK, { decision: taskDecision }),
+    ],
+  });
+  const calls = [];
+  const api = {
+    async get() { return response({ items: [mixed] }); },
+    async post(url, body) { calls.push([url, body]); return { ok: true }; },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+  const card = wrapper.get('[data-status="mixed"]');
+  const checks = card.findAll('input[type="checkbox"]');
+
+  assert.equal(checks.length, 2, 'task message не выбирается для повторного решения');
+  assert.equal(checks[0].element.checked, true);
+  assert.equal(checks[1].element.checked, false);
+  assert.ok(button(card, 'Создать задачу'));
+  assert.ok(button(card, 'Пропустить'));
+  assert.equal(card.findAll('a').some((entry) => entry.attributes('href') === taskDecision.taskUrl), true);
+  assert.match(card.get('.attachment-chip').text(), /голосовое сообщение · 2 КБ/);
+  assert.match(card.get('.attachment-chip').text(), /Разбирается/);
+  assert.match(card.get('.attachment-note').text(), /Без полного разбора автозадача не создастся/);
+
+  await checks[1].setValue(true);
+  assert.equal(checks[0].element.checked, false, 'выбор skipped очищает несовместимый new');
+  assert.equal(checks[1].element.checked, true);
+  assert.equal(card.findAll('button').some((entry) => entry.text() === 'Создать задачу'), false);
+  assert.equal(card.findAll('button').some((entry) => entry.text() === 'Пропустить'), false);
+  await button(card, 'Вернуть на разбор').trigger('click');
+  await settle();
+
+  assert.deepEqual(calls[0], [
+    `/api/inbox/items/${encodeURIComponent(REF_NEW)}/reset`,
+    {
+      revision: `v1_${'a'.repeat(43)}`,
+      messageRefs: [MESSAGE_B],
+      decisionId: skippedDecision.decisionId,
+      decisionVersion: skippedDecision.version,
+    },
+  ]);
+});
+
+test('переключатель отделяет историю, reset передаёт decision CAS, inbox-changed перечитывает API', async (t) => {
+  const decision = {
+    decisionId: 'decision_0000000000000001', version: 4, status: 'skipped',
+    taskId: null, taskUrl: '', by: 'manual', note: null, decidedAtMs: 1_786_172_400_000,
+  };
+  const skipped = item({
+    ref: REF_SKIPPED,
+    revision: `v1_${'b'.repeat(43)}`,
+    status: 'skipped',
+    title: 'Уже решено',
+    decision,
+    messages: [message(MESSAGE_SKIPPED, { decision })],
+  });
+  const offline = item({
+    ref: `${REF_NEW}-offline`,
+    status: 'mixed',
+    channel: { id: 'telegram', label: 'Telegram' },
+    source: { title: 'Чат поддержки', url: '' },
+  });
+  const data = response({
+    items: [offline, skipped],
+    channels: [channel(), channel({ id: 'telegram', label: 'Telegram', connection: 'disconnected', readOnly: true })],
+  });
+  const calls = [];
+  const api = {
+    async get(url) { calls.push(['GET', url]); return data; },
+    async post(url, body) { calls.push(['POST', url, body]); return { ok: true }; },
+  };
+  const { wrapper, emitSse, settle } = await mountChannelView(t, 'inbox', { api });
+
+  assert.match(wrapper.get('[data-section="review"]').text(), /К разбору\s+1/u);
+  assert.match(wrapper.get('[data-section="history"]').text(), /История\s+1/u);
+  const mixed = wrapper.get('[data-status="mixed"]');
+  assert.match(mixed.text(), /Частично разобрано/);
+  assert.match(mixed.text(), /только для чтения/);
+  assert.equal(mixed.get('input[type="checkbox"]').attributes('disabled'), '');
+  assert.equal(wrapper.find('[data-status="skipped"]').exists(), false, 'история скрыта по умолчанию');
+  await wrapper.get('[data-section="history"]').trigger('click');
+  const skippedCard = wrapper.get('[data-status="skipped"]');
+  assert.match(skippedCard.text(), /Пропущено/);
+  assert.match(skippedCard.text(), /Созданные задачи не изменятся/);
+  assert.equal(wrapper.text().includes('Снять решение'), false);
+  await button(skippedCard, 'Вернуть на разбор').trigger('click');
+  await settle();
+  assert.deepEqual(calls[1], [
+    'POST', `/api/inbox/items/${encodeURIComponent(REF_SKIPPED)}/reset`, {
+      revision: `v1_${'b'.repeat(43)}`,
+      messageRefs: [MESSAGE_SKIPPED],
+      decisionId: decision.decisionId,
+      decisionVersion: 4,
+    },
+  ]);
+
+  const reads = () => calls.filter(([method, url]) => method === 'GET' && url === '/api/inbox').length;
+  const before = reads();
+  emitSse('inbox-changed', { channel: 'github' });
+  await settle();
+  assert.equal(reads(), before + 1);
+});
+
+test('разобранная по частям карточка уходит в историю, а не висит в очереди', async (t) => {
+  const taskDecision = {
+    decisionId: 'decision_0000000000000010', version: 1, status: 'task',
+    taskId: '8300', taskUrl: 'https://portal.test/task/8300', by: 'auto', note: null,
+    decidedAtMs: 1_786_172_400_000,
+  };
+  const skipDecision = {
+    ...taskDecision, decisionId: 'decision_0000000000000011', status: 'skipped',
+    taskId: null, taskUrl: '',
+  };
+  // Итог автоматического разбиения: одно сообщение стало задачей, другое пропущено.
+  const split = item({
+    status: 'mixed',
+    decision: null,
+    messages: [
+      message(MESSAGE_A, { decision: taskDecision }),
+      message(MESSAGE_B, { decision: skipDecision }),
+    ],
+  });
+  const api = { async get() { return response({ items: [split] }); } };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+
+  assert.match(wrapper.get('[data-section="review"]').text(), /К разбору\s+0/u);
+  assert.match(wrapper.get('[data-section="history"]').text(), /История\s+1/u);
+  assert.equal(wrapper.find('[data-status="mixed"]').exists(), false, 'очередь пуста');
+
+  await wrapper.get('[data-section="history"]').trigger('click');
+  const card = wrapper.get('[data-status="mixed"]');
+  assert.match(card.text(), /Разобрано по частям/);
+  assert.doesNotMatch(card.text(), /Частично разобрано/);
+  assert.doesNotMatch(card.text(), /Выберите новые сообщения/);
+});
+
+test('task в истории показывает ссылку и никогда не предлагает возврат', async (t) => {
+  const decision = {
+    decisionId: 'decision_0000000000000004', version: 1, status: 'task',
+    taskId: '777', taskUrl: 'https://example.test/tasks/777', by: 'auto', note: null,
+    decidedAtMs: 1_786_172_600_000,
+  };
+  const taskItem = item({
+    ref: `${REF_NEW}-task`,
+    status: 'task',
+    decision,
+    messages: [message(MESSAGE_TASK, {
+      decision,
+      attachments: [{
+        kind: 'video', displayLabel: 'видео', name: 'bug.mp4', size: 4096,
+      }],
+    })],
+  });
+  const api = {
+    async get() { return response({ items: [taskItem] }); },
+    async post() { assert.fail('созданная задача не допускает повторного решения'); },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+
+  assert.match(wrapper.get('[data-state="section-empty"]').text(), /Всё разобрано/);
+  await wrapper.get('[data-section="history"]').trigger('click');
+  const card = wrapper.get('[data-status="task"]');
+  assert.match(card.text(), /Задача создана/);
+  assert.equal(card.get('a.task-link').attributes('href'), decision.taskUrl);
+  assert.match(card.get('.attachment-chip').text(), /Содержимое разобрано/u);
+  assert.equal(card.get('.attachment-chip').attributes('data-analysis'), 'ready');
+  assert.equal(card.text().includes('Вернуть на разбор'), false);
+  assert.equal(card.find('input[type="checkbox"]').exists(), false);
+});
+
+test('stale decision перечитывает карточку, сообщает об обновлении и не повторяет POST', async (t) => {
+  let reads = 0;
+  const updated = item({
+    revision: `v1_${'c'.repeat(43)}`,
+    title: 'Обновлённое обращение',
+  });
+  const calls = [];
+  const api = {
+    async get(url) {
+      calls.push(['GET', url]);
+      reads += 1;
+      return reads === 1 ? response() : response({ items: [updated] });
+    },
+    async post(url, body) {
+      calls.push(['POST', url, body]);
+      throw apiError(409, {
+        error: 'stale_decision',
+        message: 'Решение изменилось; перечитайте Inbox.',
+      });
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+
+  await button(wrapper.get('[data-status="new"]'), 'Создать задачу').trigger('click');
+  await settle();
+
+  assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'GET').length, 2);
+  const card = wrapper.get('[data-status="new"]');
+  assert.match(card.text(), /Обновлённое обращение/);
+  assert.match(card.get('.item-alert').text(), /Обращение изменилось — данные обновлены/);
+});
+
+test('смена аккаунта во время действия тоже обновляет карточку без повторного POST', async (t) => {
+  let reads = 0;
+  const calls = [];
+  const api = {
+    async get(url) {
+      calls.push(['GET', url]);
+      reads += 1;
+      return response({ items: [item({ title: reads === 1 ? 'Старые данные' : 'Новый аккаунт' })] });
+    },
+    async post(url, body) {
+      calls.push(['POST', url, body]);
+      throw apiError(409, {
+        error: 'account_changed',
+        message: 'Подключённый аккаунт канала изменился.',
+      });
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+
+  await button(wrapper.get('[data-status="new"]'), 'Пропустить').trigger('click');
+  await settle();
+
+  assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'GET').length, 2);
+  assert.match(wrapper.get('[data-status="new"]').text(), /Новый аккаунт/);
+});
+
+test('карточка показывает «разбирается сейчас», пока воркер держит её у модели', async (t) => {
+  const api = {
+    async get() {
+      return response({
+        worker: {
+          running: true,
+          readiness: 'ready',
+          lastReason: '',
+          lastError: null,
+          judging: { ref: REF_NEW, channel: 'github', startedAtMs: 1_786_172_301_500 },
+        },
+      });
+    },
+    async post() { return { ok: true }; },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  const state = wrapper.get('[data-status="new"] .auto-state');
+  assert.match(state.text(), /Разбирается прямо сейчас/u);
+  assert.ok(state.classes().includes('judging'), 'живое состояние воркера сильнее расписания');
+});
+
+test('незавершённый авторазбор вложений виден человеку и блокирует обещание автозадачи', async (t) => {
+  const media = item({
+    messages: [message(MESSAGE_A, {
+      attachments: [{
+        kind: 'voice', displayLabel: 'голосовое сообщение', name: '', size: 4096,
+      }],
+    })],
+  });
+  const api = {
+    async get() {
+      return response({
+        items: [media],
+        worker: {
+          running: true,
+          readiness: 'ready',
+          lastReason: '',
+          lastError: null,
+          analysisRequired: [{
+            ref: media.ref,
+            code: 'speech_unavailable',
+            retryAtMs: Date.now() + 60_000,
+          }],
+        },
+      });
+    },
+    async post() { assert.fail('действие не ожидалось'); },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  const card = wrapper.get('[data-status="new"]');
+
+  assert.match(card.get('.auto-state').text(), /Вложения не удалось полностью разобрать/u);
+  assert.match(card.get('.auto-state').text(), /Автозадача не создастся/u);
+  assert.match(card.get('.attachment-chip').text(), /Не удалось разобрать/u);
+});
+
+test('неполный разбор вложений просит у человека пояснение и отправляет его задачей', async (t) => {
+  for (const failureCode of ['attachment_analysis_required', 'attachments_skipped']) {
+    await t.test(failureCode, async (subtest) => {
+      const posts = [];
+      const prompts = [];
+      const api = {
+        async get() { return response(); },
+        async post(url, body) {
+          posts.push([url, body]);
+          if (posts.length === 1) {
+            throw apiError(409, {
+              error: failureCode,
+              message: 'Содержимое вложений разобрано не полностью.',
+              attachments: [
+                { label: 'видео · bug.mp4', reason: 'файл 53 МБ — бот не может скачать больше 20 МБ' },
+              ],
+            });
+          }
+          return { ok: true };
+        },
+      };
+      const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
+        api,
+        prompt: async (options) => {
+          prompts.push(options);
+          return 'На видео чекбокс появляется через две секунды.';
+        },
+      });
+      const card = wrapper.get('[data-status="new"]');
+
+      await button(card, 'Создать задачу').trigger('click');
+      await settle();
+
+      // Отдельной кнопки «Создать без разбора» больше нет: отказ сервера сразу
+      // открывает поле пояснения — решение о постановке человек уже принял.
+      assert.equal(prompts.length, 1);
+      assert.match(prompts[0].text, /Содержимое вложений разобрано не полностью/u);
+      // Человек обязан видеть, ЧТО описывать и лечится ли это ожиданием.
+      assert.match(prompts[0].text, /видео · bug\.mp4/u);
+      assert.match(prompts[0].text, /больше 20 МБ/u);
+      assert.equal(posts.length, 2);
+      assert.deepEqual(posts[1], [
+        `/api/inbox/items/${encodeURIComponent(REF_NEW)}/task`,
+        {
+          revision: `v1_${'a'.repeat(43)}`,
+          messageRefs: [MESSAGE_A, MESSAGE_B],
+          operatorNote: 'На видео чекбокс появляется через две секунды.',
+        },
+      ]);
+    });
+  }
+});
+
+test('пустое пояснение задачу не создаёт, а отмена модалки ничего не отправляет', async (t) => {
+  const failing = (posts) => ({
+    async get() { return response(); },
+    async post(url, body) {
+      posts.push([url, body]);
+      throw apiError(409, {
+        error: 'attachment_analysis_required',
+        message: 'Содержимое вложений разобрано не полностью.',
+        attachments: [],
+      });
+    },
+  });
+
+  await t.test('пустая строка', async (subtest) => {
+    const posts = [];
+    const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
+      api: failing(posts),
+      prompt: async () => '   ',
+    });
+    const card = wrapper.get('[data-status="new"]');
+    await button(card, 'Создать задачу').trigger('click');
+    await settle();
+    assert.equal(posts.length, 1, 'пустое пояснение не уходит на сервер');
+    assert.match(card.get('.item-alert').text(), /Без пояснения задача потеряет суть/u);
+  });
+
+  await t.test('отмена', async (subtest) => {
+    const posts = [];
+    const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
+      api: failing(posts),
+      prompt: async () => null,
+    });
+    const card = wrapper.get('[data-status="new"]');
+    await button(card, 'Создать задачу').trigger('click');
+    await settle();
+    assert.equal(posts.length, 1);
+  });
+});
+
+test('карточка называет неразобранные вложения автоматического блока поимённо', async (t) => {
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return response({
+          worker: {
+            running: true,
+            readiness: 'ready',
+            lastReason: '',
+            lastError: null,
+            analysisRequired: [{
+              ref: REF_NEW,
+              code: 'attachment_analysis_required',
+              attachments: [
+                { label: 'видео · bug.mp4', reason: 'файл 53 МБ — бот не может скачать больше 20 МБ' },
+              ],
+              checkedAtMs: 1_786_172_400_000,
+              retryAtMs: 1_786_194_000_000,
+            }],
+          },
+        });
+      },
+      async post() { return { ok: true }; },
+    },
+  });
+  const card = wrapper.get('[data-status="new"]');
+  const blocked = card.get('.blocked-attachments');
+  assert.match(blocked.text(), /видео · bug\.mp4/u);
+  assert.match(blocked.text(), /больше 20 МБ/u);
+});
+
+test('activation CAS передаёт только version, deactivate явно предупреждает о gap', async (t) => {
+  const prompts = [];
+  const calls = [];
+  const data = response({
+    items: [],
+    channels: [
+      channel({ id: 'github', participation: 'never_activated', activationVersion: 0 }),
+      channel({ id: 'telegram', label: 'Telegram', participation: 'active', activationVersion: 7 }),
+    ],
+  });
+  const api = {
+    async get() { return data; },
+    async post(url, body) { calls.push([url, body]); return { ok: true }; },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', {
+    api,
+    confirm: async (text) => { prompts.push(text); return true; },
+  });
+  const githubCard = wrapper.get('[data-channel="github"]');
+  assert.match(githubCard.text(), /Подключение/);
+  assert.match(githubCard.text(), /Приём новых/);
+  await button(wrapper, 'Начать принимать новые').trigger('click');
+  await settle();
+  await button(wrapper, 'Остановить приём').trigger('click');
+  await settle();
+  assert.deepEqual(calls, [
+    ['/api/inbox/channels/github/activate', { activationVersion: 0 }],
+    ['/api/inbox/channels/telegram/deactivate', { activationVersion: 7 }],
+  ]);
+  assert.match(prompts[0], /не попадут в очередь/);
+});
+
+test('Inbox объясняет окно тишины, отсутствие модели и выключенный autoTask', async (t) => {
+  const readyAtMs = Date.now() + 65_000;
+  const waiting = item({ autoTask: { enabled: true, readyAtMs } });
+  const manual = item({
+    ref: `${REF_NEW}-manual`,
+    autoTask: { enabled: false, readyAtMs },
+  });
+  const api = {
+    async get() {
+      return response({
+        items: [waiting, manual],
+        worker: { running: true, readiness: 'no_model', lastReason: 'no_model' },
+      });
+    },
+    async post() { assert.fail('тест состояния ничего не меняет'); },
+  };
+  const { wrapper, settingsRequests } = await mountChannelView(t, 'inbox', { api });
+
+  const notice = wrapper.get('[data-state="automation-notice"]');
+  assert.match(notice.text(), /не выбрана модель/);
+  assert.match(wrapper.get(`[data-status="new"] .auto-state`).text(), /Авторазбор через/);
+  await wrapper.findAll('[data-inbox-row]')[1].trigger('click');
+  assert.match(wrapper.get('.item-card .auto-state').text(), /Автосоздание выключено/);
+
+  await notice.get('a').trigger('click');
+  assert.deepEqual(settingsRequests, [{ pageId: 'automation.inbox' }]);
+});
+
+test('очередь открывает одну переписку и сохраняет её выбор при навигации и SSE', async (t) => {
+  let data = response({ items: [item(), item({ ref: REF_SKIPPED, title: 'Второе обращение' })] });
+  const { wrapper, emitSse, settle } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return data;
+      },
+    },
+  });
+
+  assert.equal(wrapper.findAll('.item-card').length, 1);
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 2);
+  await wrapper.findAll('.item-card input[type="checkbox"]')[1].setValue(false);
+  await wrapper.findAll('[data-inbox-row]')[1].trigger('click');
+  assert.equal(wrapper.get('.item-card h2').text(), 'Второе обращение');
+  assert.equal(wrapper.get('.inbox-workspace').attributes('data-panel'), 'detail');
+  await button(wrapper, '← К обращениям').trigger('click');
+  assert.equal(wrapper.get('.inbox-workspace').attributes('data-panel'), 'list');
+  await wrapper.findAll('[data-inbox-row]')[0].trigger('click');
+  assert.equal(wrapper.findAll('.item-card input[type="checkbox"]')[1].element.checked, false);
+
+  data = response({ items: [item({ ref: REF_SKIPPED }), item({ title: 'Новая версия первого' })] });
+  emitSse('inbox-changed', {});
+  await settle();
+  assert.equal(wrapper.get('.item-card h2').text(), 'Новая версия первого');
+  assert.equal(wrapper.findAll('.item-card input[type="checkbox"]')[1].element.checked, false);
+  assert.equal(wrapper.findAll('[data-inbox-row]')[1].attributes('aria-current'), 'page');
+});
+
+test('поиск находит автора и содержимое, фильтр канала и история работают вместе', async (t) => {
+  const telegram = item({
+    ref: REF_SKIPPED,
+    channel: { id: 'telegram', label: 'Telegram' },
+    title: 'Проверка формы',
+    messages: [message(MESSAGE_SKIPPED, { author: { name: 'Василий' }, text: 'Пропадает сортировка' })],
+  });
+  const data = response({
+    items: [item(), telegram],
+    channels: [channel(), channel({ id: 'telegram', label: 'Telegram' })],
+  });
+  let reads = 0;
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        reads += 1;
+
+        return data;
+      },
+    },
+  });
+  const search = wrapper.get('input[type="search"]');
+
+  await search.setValue('ВАСИЛИЙ');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 1);
+  assert.equal(wrapper.get('.item-card h2').text(), telegram.title);
+  await search.setValue('сортировка');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 1);
+  await wrapper.get('select').setValue('github');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 0);
+  assert.equal(wrapper.find('.item-card').exists(), false);
+  assert.match(wrapper.get('[data-state="section-empty"]').text(), /Ничего не найдено/);
+  await button(wrapper, 'Сбросить фильтры').trigger('click');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 2);
+  await wrapper.get('[data-section="history"]').trigger('click');
+  assert.match(wrapper.get('[data-state="section-empty"]').text(), /История пуста/);
+  assert.equal(reads, 1, 'локальный поиск и навигация не перечитывают API');
+});
+
+test('после разбора открывается соседнее обращение, описание источника свёрнуто', async (t) => {
+  const url = 'https://example.test/ticket/42';
+  const first = item({
+    title: url,
+    messages: [message(MESSAGE_A, { text: `${url}\n\nПосле сохранения пропадает фильтр` })],
+  });
+  const second = item({ ref: REF_SKIPPED, title: 'Следующая просьба' });
+  let data = response({ items: [first, second] });
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return data;
+      },
+      async post() {
+        data = response({ items: [second] });
+
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(wrapper.get('.item-card h2').text(), 'После сохранения пропадает фильтр');
+  assert.equal(wrapper.get('.source-description').element.open, false);
+  assert.ok(wrapper.get('.message-text').text().includes(url), 'ссылка сохранена в сообщении');
+  await button(wrapper.get('.item-card'), 'Пропустить').trigger('click');
+  await settle();
+  assert.equal(wrapper.get('.item-card h2').text(), second.title);
+});
+
+test('Inbox явно показывает несовместимую с безопасным разбором модель', async (t) => {
+  const api = {
+    async get() {
+      return response({
+        worker: { running: true, readiness: 'unsafe_model_provider', lastReason: '' },
+      });
+    },
+    async post() { assert.fail('тест состояния ничего не меняет'); },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  assert.match(
+    wrapper.get('[data-state="automation-notice"]').text(),
+    /не поддерживает безопасный разбор входящих/u,
+  );
+});
+
+test('404 plugin_disabled при version skew — состояние, а не красная ошибка', async (t) => {
+  const api = {
+    async get() { throw apiError(404, { error: 'plugin_disabled', message: 'Плагин выключен.' }); },
+    async post() { assert.fail('недоступный Inbox ничего не меняет'); },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  assert.equal(wrapper.get('[data-state="plugin-disabled"]').exists(), true);
+  assert.match(wrapper.text(), /Настройки → Плагины/);
+  assert.equal(wrapper.find('[role="alert"]').exists(), false);
+});
+
+test('недоставленный ответ в чат виден человеку, доставленный молчит', async (t) => {
+  const notifications = [
+    { enabled: true, sent: false, reason: 'unreachable' },
+    { enabled: true, sent: true, reason: '' },
+    // Правило без галки ответа не обещало сообщения — предупреждать не о чем.
+    { enabled: false, sent: false, reason: '' },
+  ];
+  const api = {
+    async get() { return response(); },
+    async post() { return { taskId: '8422', notification: notifications.shift() }; },
+  };
+  const { wrapper, settle, toasts } = await mountChannelView(t, 'inbox', { api });
+  const create = async () => {
+    await button(wrapper.get('[data-status="new"]'), 'Создать задачу').trigger('click');
+    await settle();
+
+    return toasts.at(-1);
+  };
+
+  // Повтора у ответа нет по замыслу, поэтому сообщить в чат придётся человеку —
+  // раньше он узнавал об этом только из журнала сервера.
+  const warned = await create();
+
+  assert.match(warned.title, /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
+  assert.match(warned.title, /сообщите там сами/u);
+  assert.equal(warned.tone, 'warning');
+  assert.equal(warned.durationMs, 0);
+
+  for (const quiet of ['доставленный ответ', 'выключенное правило']) {
+    const toast = await create();
+
+    assert.equal(toast.title, 'Задача создана', quiet);
+    assert.equal(toast.tone, 'accent', quiet);
+  }
+});
+
+test('router регистрирует lazy /inbox и /github', async () => {
+  const source = await readFile(migrationUrl('src/router.ts'), 'utf8');
+  const ast = ts.createSourceFile('router.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const objects = [];
+
+  // Связываем поля в пределах одного объекта маршрута:
+  // компонент соседнего маршрута не должен подтверждать проверяемый путь.
+  function visit(node) {
+    if (ts.isObjectLiteralExpression(node)) {
+      objects.push(node);
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(ast);
+
+  for (const [path, component] of [
+    ['/inbox', './views/InboxView.vue'],
+    ['/github', './views/GitHubView.vue'],
+  ]) {
+    const matches = objects.filter((object) => object.properties.some((property) => (
+      ts.isPropertyAssignment(property) && property.name.getText(ast) === 'path'
+      && ts.isStringLiteral(property.initializer) && property.initializer.text === path
+    )));
+
+    assert.equal(matches.length, 1, path);
+
+    const property = matches[0].properties.find((entry) => (
+      ts.isPropertyAssignment(entry) && entry.name.getText(ast) === 'component'
+    ));
+
+    assert.ok(property && ts.isPropertyAssignment(property), path);
+    assert.ok(ts.isArrowFunction(property.initializer), `${path}: lazy component`);
+
+    const body = property.initializer.body;
+
+    assert.ok(ts.isCallExpression(body), path);
+    assert.equal(body.expression.kind, ts.SyntaxKind.ImportKeyword, path);
+    assert.equal(body.arguments.length, 1, path);
+    assert.ok(ts.isStringLiteral(body.arguments[0]), path);
+    assert.equal(body.arguments[0].text, component, path);
+  }
+});
+
+test('PERF: первый отказ очереди даёт error, не ready', async (t) => {
+  const failure = apiError(503, { error: 'inbox down' });
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: { get: async () => {
+      throw failure;
+    }, post: async () => {
+      throw failure;
+    } },
+  });
+  const f = measured(t, wrapper, 'inbox', 'route');
+
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'error');
+});

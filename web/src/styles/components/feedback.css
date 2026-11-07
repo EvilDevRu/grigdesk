@@ -1,0 +1,777 @@
+.ui-spinner {
+  display: inline-block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  color: var(--accent);
+  animation: ui-spinner-rotate 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+.ui-spinner--inline,
+.ui-spinner[data-role='inline'] {
+  width: 13px;
+  height: 13px;
+}
+
+.ui-spinner--standalone,
+.ui-spinner[data-role='standalone'] {
+  width: 18px;
+  height: 18px;
+}
+
+.ui-spinner--large,
+.ui-spinner[data-role='large'] {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+/* Загрузка сохраняет форму будущего содержимого; декоративные строки не изображают
+   прогресс и не попадают в дерево доступности. Размер задаёт контейнер потребителя. */
+.ui-loading-state {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+  width: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.ui-loading-state__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-loading-state__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+
+.ui-loading-state__copy {
+  min-width: 0;
+}
+
+.ui-loading-state__label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ui-loading-state__description {
+  max-width: 480px;
+  margin: 5px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ui-loading-state__skeleton {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  pointer-events: none;
+
+}
+
+.ui-loading-state[data-variant='inline'] {
+  gap: 0;
+  padding: 8px 12px;
+}
+
+.ui-loading-state[data-variant='inline'] .ui-loading-state__mark {
+  width: 20px;
+  height: 24px;
+  background: transparent;
+}
+
+@keyframes ui-skeleton-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
+
+
+/* Скрытая подпись остаётся частью единственного статуса и не занимает строку.
+   Композиция экрана самостоятельно задаёт отступы и размеры заменяемой области. */
+.ui-loading-state__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ui-loading-state__status:not(:has(.ui-loading-state__description)):has(.ui-loading-state__hidden) {
+  position: absolute;
+}
+.ui-loading-state--custom {
+  display: block;
+  padding: 0;
+}
+.ui-loading-state--custom > .ui-loading-state__skeleton {
+  max-width: none;
+  height: 100%;
+}
+.ui-skeleton {
+  display: block;
+  flex-shrink: 0;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink-mid) 13%, transparent);
+  animation: ui-skeleton-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.ui-skeleton[data-shape='block'] {
+  height: 64px;
+}
+.ui-skeleton[data-shape='circle'] {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.ui-skeleton-layout {
+  display: grid;
+  gap: var(--skeleton-list-gap, 16px);
+  min-width: 0;
+}
+.ui-skeleton-layout__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--skeleton-row-height, 48px);
+}
+.ui-skeleton-layout__copy {
+  display: grid;
+  flex: 1;
+  gap: var(--skeleton-copy-gap, 10px);
+  min-width: 0;
+}
+.ui-skeleton-layout__row > .ui-skeleton[data-shape='circle'] {
+  display: var(--skeleton-avatar-display, block);
+  width: var(--skeleton-avatar-size, 32px);
+  height: var(--skeleton-avatar-size, 32px);
+}
+.ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__row {
+  min-height: var(--skeleton-form-row-height, 57px);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ui-skeleton-layout[data-layout='form'] {
+  container: skeleton-form / inline-size;
+  gap: 0;
+}
+.ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__copy {
+  gap: 6px;
+}
+/* Широкая форма повторяет строку «название — поле», узкая переносит поле вниз.
+   Паспорт проекта передаёт размеры своих колонок без изменения общего оформления. */
+@container skeleton-form (min-width: 480px) {
+  .ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__copy {
+    grid-template-columns: var(--skeleton-form-columns, minmax(0, 1fr) minmax(160px, 260px));
+    align-items: center;
+    column-gap: var(--skeleton-form-column-gap, 24px);
+  }
+}
+.ui-skeleton-layout[data-layout='text'] .ui-skeleton-layout__row {
+  min-height: 40px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton,
+  .ui-loading-state .ui-spinner {
+    animation: none;
+  }
+}
+
+.ui-inline-message {
+  --ui-message-tone: var(--ink-mid);
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--ui-message-tone) 38%, var(--line));
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--ui-message-tone) 7%, var(--surface));
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.ui-inline-message[data-tone='neutral'],
+.ui-inline-message--neutral {
+  --ui-message-tone: var(--ink-mid);
+}
+
+.ui-inline-message[data-tone='accent'],
+.ui-inline-message--accent {
+  --ui-message-tone: var(--accent);
+}
+
+.ui-inline-message[data-tone='success'],
+.ui-inline-message--success {
+  --ui-message-tone: var(--good);
+}
+
+.ui-inline-message[data-tone='warning'],
+.ui-inline-message--warning {
+  --ui-message-tone: var(--warn);
+}
+
+.ui-inline-message[data-tone='danger'],
+.ui-inline-message--danger {
+  --ui-message-tone: var(--bad);
+}
+
+.ui-inline-message__title {
+  color: var(--ui-message-tone);
+  font-weight: 650;
+}
+
+.ui-inline-message__body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Развёрнутое оповещение отделяет короткий итог от причины и следующего действия.
+   Значок и закрытие сохраняют свои колонки при переносе длинного серверного текста. */
+.ui-inline-message[data-structured] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border-color: var(--line);
+  border-inline-start: 3px solid var(--ui-message-tone);
+  background: color-mix(in srgb, var(--ui-message-tone) 5%, var(--surface));
+  font-size: 12px;
+  line-height: 18px;
+}
+.ui-inline-message[data-structured]:has(> .ui-inline-message__dismiss) {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+.ui-inline-message[data-structured] > .ui-inline-message__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--ui-message-tone);
+}
+.ui-inline-message[data-structured] .ui-inline-message__title {
+  margin-bottom: 3px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ui-inline-message[data-structured] .ui-inline-message__detail {
+  color: var(--ink-mid);
+}
+.ui-inline-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Отказ загрузки истории остаётся под шапкой, а действие читается рядом с причиной.
+   Узкая колонка переносит кнопку под текст без уменьшения области нажатия. */
+.ui-inline-message[data-context='chat-message-load'] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.ui-inline-message[data-context='chat-message-load'] > .ui-inline-message__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-message-tone);
+}
+
+.ui-inline-message[data-context='chat-message-load'] > .ui-inline-message__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ui-inline-message[data-context='chat-message-load'] .ui-inline-message__title {
+  display: block;
+  color: var(--ink);
+}
+
+.ui-inline-message[data-context='chat-message-load'] .ui-inline-message__detail {
+  margin: 3px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+@container (max-width: 480px) {
+  .ui-inline-message[data-context='chat-message-load'] {
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .ui-inline-message[data-context='chat-message-load'] > .ui-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* Сообщение Git делит 34-пиксельный нижний ряд с fetch/push и может переноситься. */
+.ui-inline-message[data-context='code-git-notice'] {
+  padding: 5px 7px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+/* Сохранённый выбор обозначается одинаково в каталоге и в заголовке редактора. */
+.ui-status-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ui-status-chip[data-tone='success'] {
+  border-color: color-mix(in srgb, var(--good) 40%, var(--line));
+  background: color-mix(in srgb, var(--good) 10%, var(--surface));
+  color: var(--good);
+}
+
+/* Стадия зрелости продукта единообразно читается рядом с названием инструмента. */
+.ui-maturity-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 17px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+  color: var(--warn);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Дорожка задаётся примесью, а не готовым слоем: --surface-2 поверх карточки давал
+   контраст 1.08:1, и незалитый остаток полосы был не виден вовсе — долю «сколько
+   осталось» по форме прочитать было нельзя. Примесь считается от того, что под полосой,
+   поэтому одинаково работает и на карточке, и на фоне контента. */
+.ui-progress {
+  min-width: 0;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-mid) 38%, transparent);
+}
+
+/* Линия под шапкой окна: занимает место разделителя, поэтому дорожка совпадает с линией границ. */
+.ui-progress--line {
+  height: 2px;
+  border-radius: 0;
+  background: var(--line);
+}
+
+/* Дубль контекста в шапке телефона совпадает с однопиксельным разделителем.
+   Заполнение и анимация остаются общими с основным индикатором контекста. */
+.ui-progress[data-context='chat-header-context'] {
+  height: 1px;
+}
+
+/* Контекст чата — компактная шкала внутри кнопки с процентом и общей подсказкой.
+   Её высота не влияет на площадку действия и не меняет обычные полосы прогресса. */
+.ui-progress[data-context='chat-context'] {
+  flex: none;
+  width: 56px;
+  height: 3px;
+  background: var(--line-2);
+}
+
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .ui-progress[data-context='chat-context'] {
+    flex: 1;
+    width: auto;
+    height: 5px;
+  }
+}
+
+.ui-progress__value,
+.ui-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--control-motion-duration) var(--control-motion-easing);
+}
+
+/* Тон полосы — то же состояние, что и у остальных сигналов: цвет назначает kit, а не consumer. */
+.ui-progress--neutral .ui-progress__bar {
+  background: var(--ink-mid);
+}
+
+.ui-progress--success .ui-progress__bar {
+  background: var(--good);
+}
+
+.ui-progress--warning .ui-progress__bar {
+  background: var(--warn);
+}
+
+.ui-progress--danger .ui-progress__bar {
+  background: var(--bad);
+}
+
+/* Цвет исполнителя приходит из каталога, без отдельной палитры для телефона.
+   Полупрозрачной становится только заливка: линия разделителя сохраняет свой контраст. */
+.ui-progress[data-context='chat-header-context'] .ui-progress__bar {
+  background: var(--chat-context-color, var(--ink-mid));
+  opacity: 0.5;
+}
+
+.ui-progress__label {
+  color: var(--ink-mid);
+  font-size: 11.5px;
+}
+
+.ui-progress__bar.is-indeterminate {
+  width: 42%;
+  animation: ui-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes ui-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ui-progress-indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner {
+    animation-duration: 2s;
+  }
+
+  .ui-progress__value {
+    transition-duration: 0.01ms;
+  }
+
+  .ui-progress__bar.is-indeterminate {
+    animation-duration: 3s;
+  }
+}
+
+/* Стопка оповещений: под верхней панелью, справа. Снизу тост закрывал бы кнопку отправки
+   в чате, а срочный тост висит, пока человек не ответит. */
+.ui-toast-host {
+  position: fixed;
+  top: calc(62px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 80px);
+  padding: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+
+.ui-toast-host > * {
+  pointer-events: auto;
+}
+
+/* С 900 px справа стоит рейка дока шириной 44 px: тост не закрывает её кнопки. */
+@media (min-width: 900px) {
+  .ui-toast-host {
+    right: 56px;
+  }
+}
+
+/* Узкое окно занимает доступную ширину; телефон дополнительно учитывает полосу статуса.
+   Тосты начинаются под обеими строками шапки и оставляют место нижней навигации. */
+@media (max-width: 759px) {
+  .ui-toast-host {
+    top: calc(var(--app-topbar-h) + 8px + env(safe-area-inset-top, 0px));
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-toast-host {
+    top: calc(var(--app-topbar-h) + var(--app-phone-status-h) + 8px + env(safe-area-inset-top, 0px));
+    max-height: calc(100dvh - var(--app-topbar-h) - var(--app-phone-status-h) - 80px);
+  }
+}
+
+/* Спокойная поверхность и цветная кромка отделяют уведомление от рабочего документа.
+   Сдвиг принадлежит карточке, направление ухода задаёт только подтверждённый свайп. */
+.ui-toast {
+  --ui-toast-tone: var(--accent);
+  position: relative;
+  display: grid;
+  flex: none;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding: 10px 12px 10px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--ui-toast-tone);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 6px 18px #00000066;
+  touch-action: pan-y pinch-zoom;
+  transform: translateX(var(--ui-toast-swipe-x, 0px));
+  opacity: var(--ui-toast-swipe-opacity, 1);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.ui-toast[data-swiping='true'] {
+  transition: none;
+  user-select: none;
+}
+
+.ui-toast[data-tone='warning'] {
+  --ui-toast-tone: var(--warn);
+}
+
+.ui-toast[data-tone='danger'] {
+  --ui-toast-tone: var(--bad);
+}
+
+.ui-toast__icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--ui-toast-tone);
+}
+
+.ui-toast__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ui-toast__content {
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.ui-toast__title {
+  display: block;
+  padding-right: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast__body {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  padding-right: 20px;
+  overflow: hidden;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+  line-height: 18px;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ui-toast__detail {
+  max-height: 14em;
+  margin: 6px 0 0;
+  padding: 5px 7px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+
+.ui-toast-host__more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 2px 6px 2px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 11.5px;
+  box-shadow: 0 8px 22px #0000007a;
+}
+
+/* Появление — въезд справа, уход — туда же; соседи доезжают на место плавно. */
+.ui-toast-enter-active,
+.ui-toast-leave-active,
+.ui-toast-move {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.ui-toast-enter-from,
+.ui-toast-leave-to {
+  opacity: 0;
+  transform: translateX(var(--ui-toast-exit-x, 24px));
+}
+
+.ui-toast-leave-active {
+  position: absolute;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast,
+  .ui-toast-enter-active,
+  .ui-toast-leave-active,
+  .ui-toast-move {
+    transition: none;
+  }
+}
+
+/* Видимая плашка отделена от площадки нажатия: на touch остаются удобные 44 px,
+   но фон и рамка занимают 28 px. Длинная подпись переносится без обрезания. */
+.ui-button[data-context='toast-action'] {
+  height: auto;
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.ui-button[data-context='toast-action']::before {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ui-action-border);
+  border-radius: inherit;
+  background: var(--ui-action-background);
+  content: '';
+  pointer-events: none;
+}
+
+.ui-button[data-context='toast-action'] > .ui-button__content {
+  position: relative;
+}
+
+.ui-button[data-context='toast-action'][data-variant='outline'] {
+  --ui-action-color: color-mix(in srgb, var(--ui-action-tone) 75%, var(--ink));
+  --ui-action-background: color-mix(in srgb, var(--ui-action-tone) 6%, var(--surface));
+  --ui-action-background-hover: color-mix(in srgb, var(--ui-action-tone) 12%, var(--surface));
+  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 24%, var(--line));
+}
+
+.ui-button[data-context='toast-action'][data-tone='neutral'] {
+  --ui-action-color: var(--ink);
+}
+
+.ui-button[data-context='toast-action']:hover:not(:disabled):not([aria-disabled='true']) {
+  background: transparent;
+}
+
+.ui-button[data-context='toast-action']:hover:not(:disabled):not([aria-disabled='true'])::before {
+  border-color: color-mix(in srgb, var(--ui-action-tone) 48%, var(--control-border-hover));
+  background: var(--ui-action-background-hover);
+}
+
+/* Дополнительные 16 px прозрачны и не конкурируют с текстом карточки.
+   Крестик тоже получает отдельные 44 px, для него зарезервирован конец заголовка. */
+html:root[data-ui-touch] .ui-button[data-context='toast-action'] {
+  padding-block: 14px;
+}
+
+html:root[data-ui-touch] .ui-button[data-context='toast-action']::before {
+  inset-block: 8px;
+}
+
+html:root[data-ui-touch] :is(.ui-toast__title, .ui-toast__body) {
+  padding-right: 32px;
+}
+
+.ui-icon-button[data-context='toast-close'] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='toast-close']:hover {
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='toast-close'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Прозрачный угол не закрывает заголовок и остаётся удобным для касания. */
+html:root[data-ui-touch] .ui-icon-button[data-context='toast-close'] {
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+}

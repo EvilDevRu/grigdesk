@@ -7,6 +7,17 @@
 # своим up.sh, shared-профиль использует только заранее существующие checkout и стенд.
 set -uo pipefail
 
+# Read-only возможности доступны до загрузки профиля и открытия любого state.
+# Старый закреплённый runtime честно откажет на этой команде вместо чужого probe сервера.
+if [[ "${1:-}" == capabilities ]]; then
+  if [[ $# -ne 3 || "${2:-}" != --format || "${3:-}" != json ]]; then
+    printf '%s\n' 'factory: capabilities требует --format json' >&2
+    exit 78
+  fi
+  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1"]}'
+  exit 0
+fi
+
 FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
 FACTORY_RUNNERS_DIR="${FACTORY_RUNNERS_DIR:-$FACTORY_HOME/lib/runners}"
@@ -15,13 +26,18 @@ export FACTORY_HOME FACTORY_PROFILES_DIR FACTORY_RUNNERS_DIR
 usage() {
   cat <<'EOF'
 Использование:
+  factory capabilities --format json
+
   factory check --profile PROFILE [--route ROUTE]
+                   [--expected-catalog-hash SHA256]
                    [--routes-dir ABS]
 
   factory TASK start --profile PROFILE --route ROUTE --ticket-json ABS
                    [--routes-dir ABS]
                    [--state-dir ABS] [--control-dir ABS]
                    [--runner-primary RUNNER]
+                   [--expected-catalog-hash SHA256]
+                   [--queue-dispatch-id UUID]
                    [--instrumentation-file REPO:PATH]...
                    [--diagnosis-kind functional|performance|data|integration]
                    [--diagnosis-signal TEXT]
@@ -41,7 +57,14 @@ usage() {
   factory TASK recover --attempt a_<32hex> --reason TEXT
                    --route ROUTE [те же общие пути]
 
-  factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT
+  factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT [--actor ID]
+                   [те же общие пути]
+
+  factory TASK findings-export --attempt a_<32hex> --format json|markdown
+                   [те же общие пути]
+
+  factory TASK bootstrap-answer --attempt a_<32hex> --node scout
+                   --visit b_<32hex> --stop-hash SHA256 --answer-file ABS
                    [те же общие пути]
 
   factory TASK work-time --attempt a_<32hex>
@@ -56,11 +79,12 @@ capability "route-v2" в graph.json и реализовать route-хуки к�
   state:            ~/.factory/state
   trusted control:  ~/.factory/control
 
-Debug требует хотя бы один --instrumentation-file при start. В feature тесты
-замораживаются после TESTS, а доверенный VERIFY проверяет неизменность тестов,
-синтаксис и линтеры без отдельного модельного этапа. SHIP выполняет commit, push
-и PR после approved GATE_ACCEPT; --task-comment дополнительно разрешает
-комментарий во внешней задаче.
+Маршрут с транзакционным узлом instrument требует хотя бы один
+--instrumentation-file при start. Имя маршрута на этот контракт не влияет. В feature
+тесты замораживаются после TESTS, а доверенный VERIFY проверяет неизменность тестов,
+синтаксис и линтеры без отдельного модельного этапа. SHIP выполняет commit, push и PR
+после approved GATE_ACCEPT; --task-comment дополнительно разрешает комментарий во
+внешней задаче.
 
 --runner-primary фиксирует исполнителя на весь прогон задачи: выбор пишется
 task-level override в реестр и выигрывает у project policy профиля, а failover
@@ -76,7 +100,7 @@ route pin). Продолжение после recover — обычный resume 
 
 Gate по умолчанию не только фиксирует решение, но и ведёт маршрут дальше — то
 есть держит оркестратор столько, сколько работает следующий узел. Вызывающему,
-который ждёт ответа синхронно (кокпит — по HTTP), нужен --commit-only: решение
+который ждёт ответа синхронно (GrigDesk — по HTTP), нужен --commit-only: решение
 уходит в журнал попытки, команда выходит, а продолжение запускается отдельным
 resume. Иначе фиксация упирается в чужой таймаут: TERM убивает оркестратор,
 раннер остаётся сиротой, а человек видит «Command failed» на уже принятом
@@ -87,15 +111,24 @@ Goto — человеческий возврат курсора на ПРОЙД�
 kind=human-rewind с причиной. Вперёд по маршруту прыгать нельзя: исход узла
 получается только его исполнением. После goto продолжай обычным resume.
 
+Resume после остановки «исчерпан бюджет повторов» (stop=human, исход exhausted)
+делает такой же human-rewind сам, без goto: раннер результата не зафиксировал
+(лежал провайдер или окружение), разбирать исход агента нечего, а бюджет
+повторов заводится заново самим заходом в узел. Остановки rewind-limit/
+no-progress и исход failed по-прежнему требуют goto с новой гипотезой.
+
 Work-time — read-only сводка учтённого времени попытки: work_time_s (работа
 узлов без ворот), gate_wait_s (ожидание решений на воротах) и last_event_at
 (эпоха последнего события журнала). Журнал sealed (попытка терминальна) —
 читается последняя проекция из реестра.
 
---reason у abandon, recover и goto — ОДНА строка 1..500 символов без переводов
-строки: причина идёт в доверенный журнал и в промпт следующего агента. Разбор
-кладётся в файл этапа, в причину — ссылка на него. Нарушение отклоняется кодом 2
-с названной границей ДО локов и записи в журнал.
+--reason у abandon, recover и goto и --comment у gate проходят один валидатор:
+1..20000 символов, переводы строки РАЗРЕШЕНЫ. Текст идёт в доверенный журнал и
+целиком цитируется в промпте следующего агента, поэтому развёрнутый разбор пишется
+прямо в него, а не ссылкой на файл. Возврат каретки и прочие управляющие символы
+отклоняются кодом 2 с названной позицией ДО локов и записи в журнал. В построчный
+реестр многострочный текст не помещается: витрина GATE_*_COMMENT получает выжимку
+до 300 символов, полный текст остаётся в журнале.
 EOF
 }
 
@@ -174,6 +207,32 @@ else:
 ' "$path"
 }
 
+# Производные launch-контракты принадлежат машине маршрута, а не её изменяемому id.
+# `instrument` открывает длинную явную транзакцию до `proof`; прочие исторические
+# transactional-write узлы получают scope из уже сделанного diff непосредственно
+# перед своим коротким transaction lifecycle.
+route_machine_contract() {
+  python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+nodes = machine["nodes"]
+delivery = "publish" if any(node.get("id") == "ship" for node in nodes) else "disabled"
+transactional = [
+    node for node in nodes
+    if (node.get("policy") or {}).get("filesystem") == "transactional-write"
+]
+if any(node.get("id") == "instrument" for node in transactional):
+    instrumentation = "explicit"
+elif transactional:
+    instrumentation = "derived"
+else:
+    instrumentation = "disabled"
+print(f"{delivery}\t{instrumentation}")
+'
+}
+
 # Из failover-цепочки профиля убирает выбранный primary: task override с цепочкой
 # вида codex,codex routing отклонил бы как invalid, а дубль не несёт смысла.
 runner_failover_without() {
@@ -188,6 +247,10 @@ runner_failover_without() {
 
 TASK=""
 MODE=""
+EXPORT_FORMAT=""
+BOOTSTRAP_VISIT=""
+BOOTSTRAP_STOP_HASH=""
+BOOTSTRAP_ANSWER_FILE=""
 PROFILE=""
 ROUTE=""
 FACTORY_USER_HOME="${HOME:-/nonexistent}"
@@ -197,11 +260,15 @@ V2_STATE="${STATE_DIR:-${FACTORY_STATE:-$FACTORY_USER_HOME/.factory/state}}"
 CONTROL_ROOT="${FACTORY_CONTROL_ROOT:-$FACTORY_USER_HOME/.factory/control}"
 TICKET_JSON=""
 EXPECTED_ATTEMPT=""
+EXPECTED_STAGE=""
 REASON=""
+ACTOR=""
 DIAGNOSIS_KIND=""
 DIAGNOSIS_SIGNAL=""
 RUNNER_PRIMARY_OVERRIDE=""
 RUNNER_FAILOVER_OVERRIDE=""
+EXPECTED_CATALOG_HASH=""
+QUEUE_DISPATCH_ID=""
 GATE_NODE=""
 GATE_DECISION=""
 GATE_COMMENT=""
@@ -282,7 +349,7 @@ fi
 
 while (( $# > 0 )); do
   case "$1" in
-    check|start|resume|gate|abandon|recover|goto|work-time)
+    check|start|resume|gate|abandon|recover|goto|work-time|findings-export|bootstrap-answer)
       [[ -z "$MODE" ]] || die "режим указан повторно"
       MODE=$1
       shift
@@ -323,10 +390,22 @@ while (( $# > 0 )); do
       EXPECTED_ATTEMPT=$2
       shift 2
       ;;
+    --expected-stage)
+      (( $# >= 2 )) || die "после --expected-stage нужен sequence:sha256"
+      [[ -z "$EXPECTED_STAGE" ]] || die "--expected-stage указан повторно"
+      EXPECTED_STAGE=$2
+      shift 2
+      ;;
     --reason)
       (( $# >= 2 )) || die "после --reason нужен текст"
       [[ -z "$REASON" ]] || die "--reason указан повторно"
       REASON=$2
+      shift 2
+      ;;
+    --actor)
+      (( $# >= 2 )) || die "после --actor нужен идентификатор"
+      [[ -z "$ACTOR" ]] || die "--actor указан повторно"
+      ACTOR=$2
       shift 2
       ;;
     --diagnosis-kind)
@@ -343,6 +422,19 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || die "после --runner-primary нужен id исполнителя"
       [[ -z "$RUNNER_PRIMARY_OVERRIDE" ]] || die "--runner-primary указан повторно"
       RUNNER_PRIMARY_OVERRIDE=$2
+      shift 2
+      ;;
+    --expected-catalog-hash)
+      (( $# >= 2 )) || die "после --expected-catalog-hash нужен sha256"
+      [[ -z "$EXPECTED_CATALOG_HASH" ]] ||
+        die "--expected-catalog-hash указан повторно"
+      EXPECTED_CATALOG_HASH=$2
+      shift 2
+      ;;
+    --queue-dispatch-id)
+      (( $# >= 2 )) || die "после --queue-dispatch-id нужен UUID"
+      [[ -z "$QUEUE_DISPATCH_ID" ]] || die "--queue-dispatch-id указан повторно"
+      QUEUE_DISPATCH_ID=$2
       shift 2
       ;;
     --node|--gate)
@@ -389,6 +481,20 @@ while (( $# > 0 )); do
       TASK_COMMENT=1
       shift
       ;;
+    --format)
+      (( $# >= 2 )) || die "после --format нужно значение"
+      EXPORT_FORMAT=$2
+      shift 2
+      ;;
+    --visit|--stop-hash|--answer-file)
+      (( $# >= 2 )) || die "после $1 нужно значение"
+      case "$1" in
+        --visit) BOOTSTRAP_VISIT=$2 ;;
+        --stop-hash) BOOTSTRAP_STOP_HASH=$2 ;;
+        --answer-file) BOOTSTRAP_ANSWER_FILE=$2 ;;
+      esac
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -406,12 +512,32 @@ done
 
 [[ "$MODE" == check || "$MODE" == start || "$MODE" == resume ||
    "$MODE" == gate || "$MODE" == abandon || "$MODE" == recover ||
-   "$MODE" == goto || "$MODE" == work-time ]] ||
-  die "укажи check, start, resume, gate, abandon, recover, goto или work-time"
+   "$MODE" == goto || "$MODE" == work-time || "$MODE" == findings-export ||
+   "$MODE" == bootstrap-answer ]] ||
+  die "укажи check, start, resume, gate, abandon, recover, goto или work-time/findings-export"
+# Exact stage CAS адресует gate и goto; старые CLI без флага сохраняют прежний контракт.
+# Значение передаётся durable commit, где сравнивается под task lock.
+if [[ -n "$EXPECTED_STAGE" ]]; then
+  [[ ( "$MODE" == gate || "$MODE" == goto ) &&
+     "$EXPECTED_STAGE" =~ ^(0|[1-9][0-9]{0,11}):[a-f0-9]{64}$ ]] ||
+    die "--expected-stage допустим только у gate и goto, формат sequence:sha256"
+fi
+
 # Task-level override исполнителя рождается только вместе с новой попыткой;
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
   die "--runner-primary допустим только при start"
+[[ "$MODE" == check || "$MODE" == start || -z "$EXPECTED_CATALOG_HASH" ]] ||
+  die "--expected-catalog-hash допустим только при check или start"
+[[ "$MODE" == start || -z "$QUEUE_DISPATCH_ID" ]] ||
+  die "--queue-dispatch-id допустим только при start"
+[[ -z "$EXPECTED_CATALOG_HASH" || "$EXPECTED_CATALOG_HASH" =~ ^[a-f0-9]{64}$ ]] ||
+  die "expected-catalog-hash: нужен sha256 в нижнем регистре"
+[[ -z "$QUEUE_DISPATCH_ID" ||
+   "$QUEUE_DISPATCH_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+  die "queue-dispatch-id: нужен UUID в нижнем регистре"
+[[ -z "$QUEUE_DISPATCH_ID" || -n "$EXPECTED_CATALOG_HASH" ]] ||
+  die "--queue-dispatch-id требует --expected-catalog-hash"
 # Движок не знает ни одного проекта: профиль обязателен, готовность к v2 он
 # заявляет capability в graph.json, а конкретику отдаёт v2-хуками контракта.
 [[ -n "$PROFILE" && "$PROFILE" =~ ^[a-z][a-z0-9_-]{0,40}$ ]] ||
@@ -420,6 +546,52 @@ done
   die "route: недопустимое имя (маршрут валидируется по current-каталогу)"
 
 ROUTES_DIR=$(canonical_existing_dir "$ROUTES_DIR" routes-dir) || exit 78
+if [[ "$MODE" == bootstrap-answer ]]; then
+  [[ "$TASK" =~ ^[1-9][0-9]{0,18}$ && "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ &&
+     "$GATE_NODE" == scout && "$BOOTSTRAP_VISIT" =~ ^b_[a-f0-9]{32}$ &&
+     "$BOOTSTRAP_STOP_HASH" =~ ^[a-f0-9]{64}$ ]] ||
+    die "bootstrap-answer требует exact attempt, node scout, visit и stop hash"
+  [[ -z "$ROUTE" && -z "$TICKET_JSON" && -z "$GATE_DECISION" && -z "$GATE_COMMENT" &&
+     -z "$REASON" && -z "$ACTOR" && -z "$EXPORT_FORMAT" && "$GATE_COMMIT_ONLY" == 0 &&
+     ${#INSTRUMENTATION_SPECS[@]} -eq 0 && ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 ]] ||
+    die "bootstrap-answer не принимает параметры запуска или смены маршрута"
+  BOOTSTRAP_ANSWER_FILE=$(canonical_file "$BOOTSTRAP_ANSWER_FILE" answer-file) || exit 78
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+  unset BASH_ENV ENV
+  source "$FACTORY_HOME/lib/bootstrap-state.sh"
+  attempt_bootstrap_answer_v2 "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" \
+    "$BOOTSTRAP_VISIT" "$BOOTSTRAP_STOP_HASH" "$BOOTSTRAP_ANSWER_FILE"
+  exit $?
+fi
+[[ -z "$BOOTSTRAP_VISIT" && -z "$BOOTSTRAP_STOP_HASH" && -z "$BOOTSTRAP_ANSWER_FILE" ]] ||
+  die "visit, stop-hash и answer-file допустимы только для bootstrap-answer"
+# Чтение sealed attempt не зависит от текущего runners.env или готовности стенда.
+# Exact pins проверяются под task lock; операция не открывает оркестратор/lifecycle.
+if [[ "$MODE" == findings-export ]]; then
+  [[ "$TASK" =~ ^[1-9][0-9]{0,18}$ && "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ ]] ||
+    die "findings-export требует task и exact --attempt"
+  [[ -z "$ROUTE" && -z "$TICKET_JSON" && -z "$REASON" && -z "$ACTOR" &&
+     -z "$GATE_NODE" && -z "$GATE_DECISION" && -z "$GATE_COMMENT" &&
+     "$GATE_COMMIT_ONLY" == 0 && ${#INSTRUMENTATION_SPECS[@]} -eq 0 &&
+     ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 ]] ||
+    die "findings-export не принимает параметры изменения попытки"
+  [[ "${EXPORT_FORMAT:-json}" == json || "$EXPORT_FORMAT" == markdown ]] ||
+    die "findings-export: format должен быть json или markdown"
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+  unset BASH_ENV ENV
+  source "$FACTORY_HOME/lib/findings-export.sh"
+  attempt_findings_export_v2 "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" "${EXPORT_FORMAT:-json}"
+  exit $?
+fi
+[[ -z "$EXPORT_FORMAT" ]] || die "--format допустим только для findings-export"
+
+
 PF_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/profile.sh" profile) || exit 78
 RUNNER_CONFIG_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/runners.env" runners-config) || exit 78
 GRAPH_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/graph.json" graph) || exit 78
@@ -438,6 +610,7 @@ profile_config_validate "$RUNNER_CONFIG_FILE" ||
 CURRENT_CATALOG=""
 CURRENT_ROUTE_JSON=""
 CURRENT_ROUTE_DELIVERY=""
+CURRENT_ROUTE_INSTRUMENTATION=""
 if [[ "$MODE" == check || "$MODE" == start ]]; then
   CURRENT_JSON=$(
     "$FACTORY_HOME/bin/factory-route" \
@@ -445,6 +618,12 @@ if [[ "$MODE" == check || "$MODE" == start ]]; then
   ) || die "current catalog v2 не прошёл проверку"
   CURRENT_CATALOG=$(json_value catalogHash <<<"$CURRENT_JSON") ||
     die "catalog hash не прочитан"
+  if [[ -n "$EXPECTED_CATALOG_HASH" &&
+        "$CURRENT_CATALOG" != "$EXPECTED_CATALOG_HASH" ]]; then
+    printf 'FACTORY_ERROR=catalog_changed EXPECTED=%s ACTUAL=%s\n' \
+      "$EXPECTED_CATALOG_HASH" "$CURRENT_CATALOG" >&2
+    exit 75
+  fi
   if [[ -n "$ROUTE" ]]; then
     CURRENT_ROUTE_JSON=$(
       "$FACTORY_HOME/bin/factory-route" \
@@ -452,12 +631,13 @@ if [[ "$MODE" == check || "$MODE" == start ]]; then
         --catalog-hash "$CURRENT_CATALOG" --route "$ROUTE"
     ) ||
       die "route=$ROUTE отсутствует в current catalog"
-    CURRENT_ROUTE_DELIVERY=$(python3 -c '
-import json
-import sys
-machine = json.load(sys.stdin)["machine"]
-print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
-' <<<"$CURRENT_ROUTE_JSON") || die "delivery topology route=$ROUTE не прочитана"
+    CURRENT_ROUTE_CONTRACT=$(route_machine_contract <<<"$CURRENT_ROUTE_JSON") ||
+      die "launch topology route=$ROUTE не прочитана"
+    IFS=$'\t' read -r CURRENT_ROUTE_DELIVERY CURRENT_ROUTE_INSTRUMENTATION \
+      <<<"$CURRENT_ROUTE_CONTRACT"
+    [[ "$CURRENT_ROUTE_DELIVERY" =~ ^(publish|disabled)$ &&
+       "$CURRENT_ROUTE_INSTRUMENTATION" =~ ^(explicit|derived|disabled)$ ]] ||
+      die "launch topology route=$ROUTE недопустима"
   fi
 fi
 
@@ -466,7 +646,8 @@ if [[ "$MODE" == check ]]; then
     die "check не принимает task, attempt или ticket"
   printf 'OK profile=%s catalog=%s' "$PROFILE" "$CURRENT_CATALOG"
   if [[ -n "$ROUTE" ]]; then
-    printf ' route=%s delivery=%s' "$ROUTE" "$CURRENT_ROUTE_DELIVERY"
+    printf ' route=%s delivery=%s instrumentation=%s' \
+      "$ROUTE" "$CURRENT_ROUTE_DELIVERY" "$CURRENT_ROUTE_INSTRUMENTATION"
   fi
   printf '\n'
   exit 0
@@ -487,11 +668,11 @@ if [[ "$MODE" == start ]]; then
   TICKET_JSON=$(canonical_file "$TICKET_JSON" ticket-json) || exit 78
   [[ -z "$EXPECTED_ATTEMPT" && -z "$GATE_NODE" && -z "$GATE_DECISION" ]] ||
     die "start не принимает attempt или gate decision"
-  if [[ "$ROUTE" == debug ]]; then
+  if [[ "$CURRENT_ROUTE_INSTRUMENTATION" == explicit ]]; then
     (( ${#INSTRUMENTATION_SPECS[@]} > 0 )) ||
-      die "debug start требует --instrumentation-file repo:path"
+      die "route=$ROUTE требует --instrumentation-file repo:path"
   elif (( ${#INSTRUMENTATION_SPECS[@]} > 0 )); then
-    die "--instrumentation-file нужен только маршруту debug"
+    die "route=$ROUTE не принимает явный --instrumentation-file"
   fi
   if [[ -n "$DIAGNOSIS_KIND" ]]; then
     [[ "$DIAGNOSIS_KIND" =~ ^(functional|performance|data|integration)$ ]] ||
@@ -501,7 +682,7 @@ if [[ "$MODE" == start ]]; then
      "$DIAGNOSIS_SIGNAL" != *$'\t'* ]] ||
     die "diagnosis-signal: до 200 символов одной строкой"
   if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
-    [[ "$RUNNER_PRIMARY_OVERRIDE" =~ ^[a-z][a-z0-9_-]*$ ]] ||
+    [[ "$RUNNER_PRIMARY_OVERRIDE" =~ ^[a-z][a-z0-9_-]{0,63}$ ]] ||
       die "runner-primary: недопустимый id исполнителя"
     runners_catalog_list | grep -Fxq "$RUNNER_PRIMARY_OVERRIDE" ||
       die "runner-primary: исполнитель не установлен: $RUNNER_PRIMARY_OVERRIDE"
@@ -526,6 +707,15 @@ if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   [[ -n "$REASON" ]] || die "$MODE требует --reason"
 else
   [[ -z "$REASON" ]] || die "--reason допустим только в abandon, recover и goto"
+fi
+# Кто принял решение. Умолчание — человек, и тогда поле не пишется в событие вовсе.
+# Нужно это для одной вещи: машинное решение, записанное как человеческое, создаёт в
+# журнале ложь «это обдумал человек». Рубежом безопасности поле не является — GrigDesk
+# работает от того же пользователя и мог бы назваться человеком; это запись аудита.
+if [[ -n "$ACTOR" ]]; then
+  [[ "$MODE" == goto ]] || die "--actor допустим только в goto"
+  [[ "$ACTOR" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || die "--actor: недопустимый идентификатор"
+  [[ "$ACTOR" != human ]] || die "--actor human является умолчанием и не указывается"
 fi
 if [[ "$MODE" == goto ]]; then
   [[ "$GATE_NODE" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] ||
@@ -568,6 +758,8 @@ source "$FACTORY_HOME/lib/attempt-state.sh"
 source "$FACTORY_HOME/lib/route-runtime.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/profile-preflight.sh"
+source "$FACTORY_HOME/lib/bootstrap-sandbox.sh"
+source "$FACTORY_HOME/lib/findings-export.sh"
 
 # Форму причины проверяем СРАЗУ после загрузки ledger-библиотеки: до локов, до
 # профиля и до единой строки в журнале. Иначе человек узнаёт о лишних символах
@@ -575,6 +767,13 @@ source "$FACTORY_HOME/lib/profile-preflight.sh"
 # _attempt_state_reason, здесь именно её вызов, а не вторая копия границ.
 if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   _attempt_state_reason "$REASON" || exit $?
+fi
+# Границы общие с reason: rejected-комментарий ворот — доверенное указание следующему
+# агенту, а не подпись к решению. Схлопывание переводов строки убрано: замечание на
+# несколько абзацев склеивалось в одну простыню, и разметка (списки, таблица замеров)
+# переставала читаться ровно там, где она и нужна.
+if [[ "$MODE" == gate && -n "$GATE_COMMENT" ]]; then
+  _attempt_state_reason "$GATE_COMMENT" || exit $?
 fi
 
 # Read-only сводка учтённого времени: журнал попытки и pinned describe-route,
@@ -620,6 +819,18 @@ V2_WORKSPACE_MODE=$(profile_workspace_mode) ||
   die "profile_workspace_mode отказал"
 [[ "$V2_WORKSPACE_MODE" == isolated || "$V2_WORKSPACE_MODE" == shared ]] ||
   die "profile_workspace_mode: допускается только isolated или shared"
+
+# Только явно объявленный hook расширяет pin и допускает пустые порты.
+# Прежние профили сохраняют контракт сервисов без новых строк в манифесте.
+V2_STAND_MODE=services
+V2_STAND_OPT_IN=0
+if declare -F profile_stand_mode >/dev/null; then
+  V2_STAND_OPT_IN=1
+  V2_STAND_MODE=$(profile_stand_mode "$TASK") || die "profile_stand_mode отказал"
+  [[ "$V2_STAND_MODE" == services ||
+     ( "$V2_STAND_MODE" == none && "$V2_WORKSPACE_MODE" == isolated ) ]] ||
+    die "profile_stand_mode: none допускается только для isolated"
+fi
 
 v2_repo_seen() {
   local requested=$1 known
@@ -818,11 +1029,16 @@ fi
 V2_SANDBOX_ENV="$STATE_DIR/t${TASK}.env"
 V2_SCOPE_FILE="$STATE_DIR/t${TASK}.instrumentation-scope.list"
 V2_ATTEMPT=""
+V2_ATTEMPT_SCHEMA=""
+V2_ATTEMPT_CATALOG_HASH=""
+V2_ATTEMPT_QUEUE_DISPATCH_ID=""
+V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE=""
 V2_TRUSTED_TICKET=""
 V2_SCOPE_SPEC=""
 V2_DELIVERY_SPEC=""
 V2_HAS_SHIP=""
 V2_DELIVERY_MODE=""
+V2_INSTRUMENTATION_MODE=""
 V2_SCOPE_EXPECTED_HASH=""
 
 # Агент всегда получает workspace из точного route-контракта профиля.
@@ -997,9 +1213,23 @@ v2_shared_lease_bind() {
 }
 
 v2_shared_lease_release() {
-  local expected_attempt=$1 fd resource file rc=0
+  local expected_attempt=$1 fd resource file rc=0 lifecycle_rc=0 event_rc
+  local cleanup_hash="" lifecycle_active=0 released=0 total=${#V2_SHARED_RESOURCES[@]}
+  local -a released_resources=()
   [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
-  v2_shared_lease_lock fd || return
+  if runtime_lifecycle_enabled_v2; then
+    cleanup_hash=$(printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | sha256sum | awk '{print $1}') || return
+    runtime_lifecycle_cleanup_begin_v2 shared_leases "$cleanup_hash" >/dev/null || return
+    lifecycle_active=1
+  fi
+  v2_shared_lease_lock fd || {
+    rc=$?
+    if (( lifecycle_active )); then
+      runtime_lifecycle_cleanup_finish_v2 shared_leases failed cleanup_failed \
+        0 "$total" "$cleanup_hash" >/dev/null || true
+    fi
+    return "$rc"
+  }
   for resource in "${V2_SHARED_RESOURCES[@]}"; do
     file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
     v2_shared_owner_valid "$file" "$resource" "$expected_attempt" || {
@@ -1010,11 +1240,33 @@ v2_shared_lease_release() {
   if (( rc == 0 )); then
     for resource in "${V2_SHARED_RESOURCES[@]}"; do
       file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
-      rm -f -- "$file" || { rc=1; break; }
+      runtime_analytics_durable_unlink_v2 "$file" || { rc=$?; break; }
+      released_resources+=("$resource")
+      ((released += 1))
     done
   fi
   v2_shared_lease_unlock "$fd"
+  if (( lifecycle_active )); then
+    for resource in "${released_resources[@]}"; do
+      runtime_lifecycle_shared_lease_released_v2 \
+        "$resource" released "$cleanup_hash" >/dev/null || {
+          event_rc=$?
+          (( lifecycle_rc != 0 )) || lifecycle_rc=$event_rc
+        }
+    done
+    if (( rc == 0 && lifecycle_rc == 0 )); then
+      runtime_lifecycle_cleanup_finish_v2 shared_leases succeeded normal \
+        "$released" 0 "$cleanup_hash" >/dev/null || lifecycle_rc=$?
+    else
+      runtime_lifecycle_cleanup_finish_v2 shared_leases failed cleanup_failed \
+        "$released" "$((total - released))" "$cleanup_hash" >/dev/null || {
+          event_rc=$?
+          (( lifecycle_rc != 0 )) || lifecycle_rc=$event_rc
+        }
+    fi
+  fi
   (( rc == 0 )) || return "$rc"
+  (( lifecycle_rc == 0 )) || return "$lifecycle_rc"
   V2_SHARED_LEASE_CLAIMED=0
   V2_SHARED_LEASE_BOUND=0
 }
@@ -1049,6 +1301,35 @@ v2_attempt_artifacts() {
   printf '%s/attempts/%s/artifacts\n' "$root" "$V2_ATTEMPT"
 }
 
+# Queue dispatch и точный task-level runner override входят в trusted identity
+# attempt schema 2. Старые schema 1 не содержат этих полей: queue тогда ещё не
+# существовала, а runner override остаётся в совместимой pipeline-проекции.
+v2_load_attempt_launch_identity() {
+  local attempt=$1 file schema catalog queue="" runner=""
+  file="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt/attempt.json"
+  schema=$(_attempt_state_json get "$file" schema) || return
+  catalog=$(_attempt_state_json get "$file" catalogHash) || return
+  case "$schema" in
+    1)
+      runner=$(get "$TASK" RUNNER_OVERRIDE_PRIMARY)
+      ;;
+    2)
+      queue=$(_attempt_state_json get "$file" queueDispatchId) || return
+      runner=$(_attempt_state_json get "$file" runnerPrimaryOverride) || return
+      ;;
+    *)
+      return 78
+      ;;
+  esac
+  _attempt_state_catalog_hash "$catalog" >/dev/null || return 78
+  [[ -z "$queue" ]] || _attempt_state_dispatch_id "$queue" >/dev/null || return 78
+  _attempt_state_runner_override "$runner" >/dev/null || return 78
+  V2_ATTEMPT_SCHEMA=$schema
+  V2_ATTEMPT_CATALOG_HASH=$catalog
+  V2_ATTEMPT_QUEUE_DISPATCH_ID=$queue
+  V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE=$runner
+}
+
 # Repo/project-часть профиля закрепляется рядом с route pins. Профиль остаётся
 # локальным кодом и может быть отредактирован между командами, но resume не имеет
 # права молча перенести активную попытку в другой worktree или подменить guardrails.
@@ -1075,6 +1356,9 @@ v2_materialize_profile_contract() {
     printf 'schema\t1\n'
     printf 'repos-mode\tgeneric\n'
     printf 'workspace-mode\t%s\n' "$V2_WORKSPACE_MODE"
+    if [[ "$V2_STAND_OPT_IN" == 1 ]]; then
+      printf 'stand-mode\t%s\n' "$V2_STAND_MODE"
+    fi
     printf 'stand-ownership\t%s\n' "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)"
     printf 'source-branch\t%s\n' "$V2_SOURCE_BRANCH"
     printf 'container\t%s\n' "$V2_CONTAINER"
@@ -1173,8 +1457,8 @@ v2_install_profile_contract() {
   cmp -s -- "$manifest_tmp" "$manifest" &&
     cmp -s -- "$project_tmp" "$project_context" || {
       # Расхождение называем полем: без адреса человек получает «нужен человек»
-      # на каждом resume и не знает, что именно уехало в профиле, — на t7802 это
-      # стоило четырёх немых попыток продолжить прогон.
+      # на каждом resume и не знает, что именно уехало в профиле, повторяя немые
+      # попытки продолжить прогон.
       v2_log "контракт попытки разошёлся с профилем — $(attempt_state_contract_drift_v2 \
         "$manifest" "$manifest_tmp" "$project_context" "$project_tmp")"
       rm -f -- "$manifest_tmp" "$project_tmp"
@@ -1304,9 +1588,8 @@ v2_parse_scope_spec() {
 v2_install_scope_spec() {
   local destination tmp spec parsed
   destination="$(v2_attempt_artifacts)/instrumentation-scope.tsv"
-  # Артефакт создаётся только когда scope явно задан (--instrumentation-file, то
-  # есть для debug). Остальные маршруты не должны получать пустой или неуместный
-  # instrumentation scope.
+  # Артефакт создаётся только для топологии с явным scope. Остальные маршруты не
+  # должны получать пустой или неуместный instrumentation contract.
   if [[ "$MODE" == start && ${#INSTRUMENTATION_SPECS[@]} -gt 0 ]]; then
     tmp=$(mktemp "$(dirname "$destination")/.scope-spec.XXXXXX") || return 1
     for spec in "${INSTRUMENTATION_SPECS[@]}"; do
@@ -1327,13 +1610,18 @@ v2_install_scope_spec() {
     chmod 400 "$tmp" || return 1
     mv -- "$tmp" "$destination" || return 1
   fi
-  if [[ "$ROUTE" == debug ]]; then
-    [[ -f "$destination" && ! -L "$destination" &&
-       "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
-    V2_SCOPE_SPEC=$destination
-  elif [[ -e "$destination" || -L "$destination" ]]; then
-    return 78
-  fi
+  case "$V2_INSTRUMENTATION_MODE" in
+    explicit)
+      [[ -f "$destination" && ! -L "$destination" &&
+         "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+      V2_SCOPE_SPEC=$destination
+      ;;
+    derived|disabled)
+      [[ ! -e "$destination" && ! -L "$destination" ]] || return 78
+      V2_SCOPE_SPEC=""
+      ;;
+    *) return 78 ;;
+  esac
 }
 
 v2_delivery_target_valid() {
@@ -1350,21 +1638,17 @@ v2_delivery_target_valid() {
 }
 
 # Источник истины — закреплённая машина попытки, а не имя маршрута. Так новый
-# read-only маршрут автоматически получает disabled, а старые feature/debug/trivial
-# продолжают publish без отдельного case в launcher.
+# read-only маршрут автоматически получает disabled, переименованный диагностический
+# маршрут сохраняет explicit scope, а исторический одиночный transactional-write —
+# derived scope без отдельных case в launcher.
 v2_detect_delivery_contract() {
-  local mode
-  mode=$("$FACTORY_HOME/bin/factory-route" \
+  local contract delivery instrumentation
+  contract=$("$FACTORY_HOME/bin/factory-route" \
     --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
     --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
-    python3 -c '
-import json
-import sys
-
-machine = json.load(sys.stdin)["machine"]
-print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
-') || return 78
-  case "$mode" in
+    route_machine_contract) || return 78
+  IFS=$'\t' read -r delivery instrumentation <<<"$contract"
+  case "$delivery" in
     publish)
       V2_HAS_SHIP=1
       V2_DELIVERY_MODE=publish
@@ -1375,10 +1659,15 @@ print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) el
       ;;
     *) return 78 ;;
   esac
+  case "$instrumentation" in
+    explicit|derived|disabled) V2_INSTRUMENTATION_MODE=$instrumentation ;;
+    *) return 78 ;;
+  esac
 }
 
 v2_install_delivery_spec() {
   local destination tmp action target parsed
+  V2_DELIVERY_STRATEGY=""
   destination="$(v2_attempt_artifacts)/delivery.tsv"
   if [[ "$V2_HAS_SHIP" == 0 ]]; then
     # У no-ship маршрута нет даже пустого delivery-контракта: отсутствие файла,
@@ -1402,7 +1691,15 @@ v2_install_delivery_spec() {
       return 2
     fi
     tmp=$(mktemp "$(dirname "$destination")/.delivery.XXXXXX") || return 1
-    for action in commit push pull-request; do
+    local -a delivery_actions=(commit push pull-request)
+    if declare -F profile_delivery_strategy >/dev/null; then
+      V2_DELIVERY_STRATEGY=$(profile_delivery_strategy "$TASK") || return 78
+      parsed=$(python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY") || return 78
+      mapfile -t delivery_actions <<<"$parsed"
+      printf 'strategy\t%s\n' "$V2_DELIVERY_STRATEGY" >>"$tmp"
+      (( TASK_COMMENT == 0 )) || return 78
+    fi
+    for action in "${delivery_actions[@]}"; do
       printf 'action\t%s\n' "$action" >>"$tmp"
     done
     (( TASK_COMMENT == 0 )) || printf 'action\ttask-comment\n' >>"$tmp"
@@ -1427,7 +1724,8 @@ v2_install_delivery_spec() {
   TASK_COMMENT=0
   while IFS=$'\t' read -r action target; do
     case "$action:$target" in
-      action:commit|action:push|action:pull-request) ;;
+      action:commit|action:push|action:pull-request|action:merge) ;;
+      strategy:*) V2_DELIVERY_STRATEGY=$target ;;
       action:task-comment) TASK_COMMENT=1 ;;
       target:*)
         parsed=$(v2_delivery_target_valid "$target") || return 78
@@ -1439,6 +1737,11 @@ v2_install_delivery_spec() {
     esac
   done <"$destination"
   (( ${#DELIVERY_TARGETS[@]} > 0 )) || return 78
+  if [[ -n "$V2_DELIVERY_STRATEGY" ]]; then
+    python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY" "$destination"
+    return
+  fi
+  ! grep -Fxq $'action\tmerge' "$destination" || return 78
   grep -Fxq $'action\tcommit' "$destination" &&
     grep -Fxq $'action\tpush' "$destination" &&
     grep -Fxq $'action\tpull-request' "$destination"
@@ -1532,16 +1835,25 @@ v2_env_get() {
 }
 
 v2_read_sandbox() {
+  local readiness=${1:-stand} V2_SANDBOX_ENV=${2:-$V2_SANDBOX_ENV}
   local task sb_k source_branch repo_count workspace_mode protocol ownership
   local index name source worktree branch container service_host actual_branch
+  [[ "$readiness" == stand ||
+     ( "$readiness" == workspace && "$V2_WORKSPACE_MODE" == isolated ) ]] || return 78
   [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]] || return 78
   task=$(v2_env_get TASK)
   sb_k=$(v2_env_get SB_K)
   V2_API_PORT=$(v2_env_get API_PORT)
   V2_FE_PORT=$(v2_env_get FE_PORT)
-  [[ "$task" == "$TASK" && "$sb_k" =~ ^[0-9]+$ &&
-     "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
-     "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || return 78
+  [[ "$task" == "$TASK" && "$sb_k" =~ ^[0-9]+$ ]] || return 78
+  if [[ "$V2_STAND_MODE" == none ]]; then
+    [[ -z "$V2_API_PORT" && -z "$V2_FE_PORT" ]] || return 78
+    grep -q '^API_PORT=' "$V2_SANDBOX_ENV" &&
+      grep -q '^FE_PORT=' "$V2_SANDBOX_ENV" || return 78
+  else
+    [[ "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
+       "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || return 78
+  fi
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     protocol=$(v2_env_get PROTOCOL)
     workspace_mode=$(v2_env_get WORKSPACE_MODE)
@@ -1582,7 +1894,9 @@ v2_read_sandbox() {
     fi
   done
   # Только health: решение о start/create shared-стенда движок никогда не принимает.
-  profile_stand_alive "$TASK" || return 73
+  if [[ "$readiness" == stand ]]; then
+    profile_stand_alive "$TASK" || return 73
+  fi
   set_st "$TASK" FE_PORT "$V2_FE_PORT" API_PORT "$V2_API_PORT" SB_K "$sb_k" \
     WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
     STAND_OWNERSHIP "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)" \
@@ -1619,6 +1933,13 @@ v2_sandbox_up() {
       ;;
   esac
   v2_read_sandbox
+}
+
+v2_sandbox_up_lifecycle() {
+  local rc=0
+  v2_sandbox_span_begin || return
+  v2_sandbox_up || rc=$?
+  v2_sandbox_span_finish "$rc"
 }
 
 route_v2_workspace_roots() {
@@ -1664,6 +1985,36 @@ route_v2_sensitive_files() {
     done
   done
   return 0
+}
+
+# Runtime-пути проверочного инструментария (PROFILE-CONTRACT, `profile_route_volatile_paths`):
+# профиль печатает `имя-репозитория<TAB>относительный-путь`, движок разрешает имя в
+# закреплённый worktree задачи. Строка с неизвестным репозиторием, абсолютным путём или `..`
+# — ошибка профиля, и весь список отвергается (78): сторож state-only тогда работает без
+# послаблений, а не с частью объявлений. Без хука список пуст — прежнее поведение.
+route_v2_volatile_paths() {
+  local output line name rel index worktree
+  declare -F profile_route_volatile_paths >/dev/null || return 0
+  output=$(profile_route_volatile_paths "$TASK") || return 78
+  [[ -n "$output" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == *$'\t'* ]] || return 78
+    name=${line%%$'\t'*}
+    rel=${line#*$'\t'}
+    [[ -n "$rel" && "$rel" != *$'\t'* && "$rel" != /* && "$rel" != */ &&
+       "$rel" != .. && "$rel" != ../* && "$rel" != */.. && "$rel" != */../* &&
+       "$rel" != .git && "$rel" != .git/* ]] || return 78
+    worktree=""
+    for index in "${!V2_REPO_NAMES[@]}"; do
+      if [[ "${V2_REPO_NAMES[$index]}" == "$name" ]]; then
+        worktree=${V2_REPO_WORKTREES[$index]}
+        break
+      fi
+    done
+    [[ -n "$worktree" ]] || return 78
+    printf '%s/%s\n' "$worktree" "$rel"
+  done <<<"$output"
 }
 
 v2_scope_candidate() {
@@ -1736,9 +2087,9 @@ v2_scope_from_diff() {
 }
 
 v2_prepare_scope() {
-  case "$ROUTE" in
-    debug) v2_scope_from_spec ;;
-    feature) v2_scope_from_diff ;;
+  case "$V2_INSTRUMENTATION_MODE" in
+    explicit) v2_scope_from_spec ;;
+    derived) v2_scope_from_diff ;;
     *) return 78 ;;
   esac
 }
@@ -1774,10 +2125,10 @@ v2_review_decision() {
 
 route_v2_context_for_node() {
   local context_task=$1 context_attempt=$2 context_node=$3
-  local context_run_key=$4 context_output=$5 cursor event_count=0
+  local context_run_key=$4 context_output=$5 context_phase=${6:-route} cursor event_count=0
   local transaction_id="" instrumentation_phase=not-started scope_arg=""
   local cause review acceptance allowed action target index
-  local ledger_results ledger_line findings_ledger
+  local ledger_results ledger_line findings_file rc
   local -a args=()
 
   cursor=$(attempt_stage_state_read_v2 "$context_task" "$context_attempt" 2>/dev/null || true)
@@ -1786,19 +2137,11 @@ route_v2_context_for_node() {
   fi
   [[ "$event_count" =~ ^[0-9]+$ ]] || return 78
   ledger_results=$(v2_ledger_stage_results "$context_task" "$context_attempt") || return 78
-  # Bootstrap исполняется до рождения stage-ledger и по определению не может иметь
-  # findings. Все узлы закреплённого маршрута получают проекцию только после полной
-  # проверки уже инициализированного hash-chain.
-  if [[ "$context_node" == scout ]]; then
-    findings_ledger='{"schema":1,"open":[],"closed":[]}'
-  else
-    findings_ledger=$(attempt_stage_state_findings_v2 \
-      "$context_task" "$context_attempt") || return 78
-  fi
 
   if [[ "$context_node" == instrument || "$context_node" == trace ]]; then
     v2_prepare_scope || return
-    transaction_id="v2-${context_attempt#*_}-s${event_count}"
+    transaction_id=$(_route_v2_transaction_id \
+      "$context_task" "$context_attempt" "$event_count") || return
     instrumentation_phase=active
   elif [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
     V2_SCOPE_EXPECTED_HASH=$(sha256sum -- "$V2_SCOPE_FILE" | awk '{print $1}') ||
@@ -1836,13 +2179,12 @@ route_v2_context_for_node() {
     --frontend-port "$V2_FE_PORT"
     --api-port "$V2_API_PORT"
     # Имя хоста стенда — слово профиля. Порт свой у каждой песочницы, а вот петля
-    # это или localhost, знает только проект: приложение вправе включать продовую
-    # авторизацию по window.location.hostname (инцидент t8165).
+    # это или localhost, знает только проект: приложение вправе выбирать ветку
+    # авторизации по window.location.hostname.
     --service-host "$V2_SERVICE_HOST"
     --transaction-id "$transaction_id"
     --instrumentation-phase "$instrumentation_phase"
     --event-count "$event_count"
-    --findings-ledger-json "$findings_ledger"
     --cause-decision "$cause"
     --cause-comment "$(get "$TASK" CAUSE_DECISION_COMMENT)"
     --review-decision "$review"
@@ -1861,12 +2203,23 @@ route_v2_context_for_node() {
     )
   done
   # Инструментация обязательна, когда контракт scope попытки непустой
-  # (debug start с --instrumentation-file); признак переживает resume вместе
+  # (explicit start с --instrumentation-file); признак переживает resume вместе
   # с immutable-артефактом scope.
   [[ ! -s "$V2_SCOPE_SPEC" ]] || args+=(--instrumentation-required)
   while IFS= read -r ledger_line; do
     [[ -n "$ledger_line" ]] && args+=(--stage-result "$ledger_line")
   done <<<"$ledger_results"
+  # Режим «цикл»: круг, этап, потолок профиля и свой отчёт на каждый круг. У обычного
+  # маршрута аргумента нет, и контекст побайтно прежний.
+  if [[ "$context_phase" != bootstrap ]]; then
+    local loop_state loop_max
+    loop_state=$(attempt_stage_state_loop_state_v2 "$context_task" "$context_attempt") ||
+      return 78
+    if [[ "$(json_value loop <<<"$loop_state")" != None ]]; then
+      loop_max=$(route_v2_loop_max_rounds) || return 78
+      args+=(--loop-state-json "$loop_state" --loop-max-rounds "$loop_max")
+    fi
+  fi
   if [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
     args+=(--scope-file "$V2_SCOPE_FILE")
     while IFS= read -r allowed || [[ -n "$allowed" ]]; do
@@ -1874,19 +2227,43 @@ route_v2_context_for_node() {
     done <"$V2_SCOPE_FILE"
   fi
   if [[ "$V2_HAS_SHIP" == 1 ]]; then
-    for action in commit push pull-request; do
-      args+=(--delivery-action "$action")
-    done
-    (( TASK_COMMENT == 0 )) || args+=(--delivery-action task-comment)
+    if [[ -n "${V2_DELIVERY_STRATEGY:-}" ]]; then
+      args+=(--delivery-strategy "$V2_DELIVERY_STRATEGY")
+      local selected_actions
+      selected_actions=$(
+        python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY"
+      ) || return 78
+      while IFS= read -r action; do
+        args+=(--delivery-action "$action")
+      done <<<"$selected_actions"
+    else
+      for action in commit push pull-request; do
+        args+=(--delivery-action "$action")
+      done
+      (( TASK_COMMENT == 0 )) || args+=(--delivery-action task-comment)
+    fi
     for target in "${DELIVERY_TARGETS[@]}"; do
       args+=(--delivery-target "$target")
     done
   fi
+  # Проекция находок — файлом в control root: история цикла растёт с каждым этапом, а
+  # одна строка argv в Linux не длиннее 128 КиБ (MAX_ARG_STRLEN). Фаза задаётся явно:
+  # основной узел scout не подменяет bootstrap. Reader проверяет оба immutable источника,
+  # включая законное отсутствие основного ledger до первого узла.
+  findings_file=$(mktemp "$(factory_control_root)/.route-findings.XXXXXX") || return 1
+  attempt_stage_state_findings_v2 "$context_task" "$context_attempt" >"$findings_file" || {
+    rm -f -- "$findings_file"
+    return 78
+  }
+  args+=(--findings-ledger-file "$findings_file")
   "${args[@]}" >"$context_output"
+  rc=$?
+  rm -f -- "$findings_file"
+  return "$rc"
 }
 
 # Скелет этапных ключей реестра — из runKeys закреплённого бандла (bootstrap
-# SCOUT + main + tail + status-узлы), а не из v1-списка: в реестре не должно
+# SCOUT, если требуется, + main + tail + status-узлы), а не из v1-списка: в реестре не должно
 # быть узлов, которых нет в маршруте.
 v2_registry_stage_keys() {
   # Каталог приходит параметром: на start он только что выбран (CURRENT_CATALOG),
@@ -1900,7 +2277,7 @@ import json
 import sys
 
 machine = json.load(sys.stdin)["machine"]
-keys = ["SCOUT"]
+keys = [] if machine.get("bootstrap", "required") == "skip" else ["SCOUT"]
 by_id = {n["id"]: n for n in machine["nodes"] if isinstance(n, dict)}
 for phase in ("main", "tail"):
     for node_id in machine["sequence"][phase]:
@@ -1930,7 +2307,131 @@ v2_gate_pipeline_key() {
   esac
 }
 
-# Переводит exact reset из закреплённого route ledger в вторичный реестр Cockpit.
+# Отложенные находки на ворота. Смысл отложенной находки в том, что маршрут её не
+# чинит, — значит единственный, кто о ней узнает, это человек на воротах. Без этой
+# выгрузки хвост оставался бы только в immutable ledger, то есть был бы потерян:
+# для человека это хуже, чем прежний блокирующий вердикт, который хотя бы кричал.
+# Пишем человекочитаемый файл рядом с прочими артефактами задачи и возвращаем
+# число находок, чтобы вызывающий назвал его в журнале.
+v2_write_deferred_tail() {
+  attempt_findings_export_v2 "$1" "$2" "$PROFILE" write "$3"
+}
+
+# Побочная Markdown-проекция не отменяет durable gate/terminal при ошибке диска.
+# Все исходы, включая пустой хвост и ошибку, явно отражаются в журнале и витрине.
+v2_publish_deferred_tail() {
+  local task=$1 attempt=$2 count rc
+  count=$(v2_write_deferred_tail "$task" "$attempt" "$STATE_DIR/t${task}.deferred.md")
+  rc=$?
+  case "$rc" in
+    0)
+      [[ "$count" =~ ^[1-9][0-9]*$ ]] || rc=1
+      if (( rc == 0 )); then
+        set_st "$task" DEFERRED_EXPORT_ERROR '' DEFERRED_COUNT "$count" || return
+        v2_log "отложено находок: $count — список в t${task}.deferred.md"
+      fi
+      ;;
+    9)
+      set_st "$task" DEFERRED_EXPORT_ERROR '' DEFERRED_COUNT 0 || return
+      ;;
+  esac
+  if (( rc != 0 && rc != 9 )); then
+    set_st "$task" DEFERRED_EXPORT_ERROR "выгрузка замечаний не создана (код $rc)" || return
+    v2_log "выгрузка замечаний не создана (код $rc); повтори findings-export для exact attempt"
+  fi
+  return 0
+}
+
+# Подготовка диспетчера к режиму «цикл». Пара закреплённого маршрута читается один раз.
+# У цикла — признак режима, потолок и состояние цикла ЭТОЙ попытки в реестре (GrigDesk не
+# предлагает арбитра: этапы ведёт ведущая модель) и предел шагов, вмещающий весь потолок
+# кругов: 3 * потолок + число исполняемых узлов + 2. У обычного маршрута — прежние 64,
+# а признаки цикла, оставшиеся в реестре от прошлой попытки задачи (recover сохраняет
+# посторонние поля), гасятся: иначе обычный маршрут терял бы арбитра.
+# Неверный потолок здесь не отказ: первый же шаг диспетчера остановится fail-closed.
+v2_prepare_dispatch() {
+  local attempt=$1 description info lead nodes max_rounds rc key had_loop=""
+  V2_DISPATCH_STEP_LIMIT=64
+  _route_v2_load_attempt "$TASK" "$attempt" || return 0
+  description=$(mktemp "$(factory_control_root)/.route-loop-info.XXXXXX") || return 0
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" --profile "$ROUTE_V2_PROFILE" describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" >"$description" 2>/dev/null
+  rc=$?
+  info=""
+  if (( rc == 0 )); then
+    # Пустой первый столбец bash съел бы (TAB — пробельный IFS): у обычного маршрута
+    # число узлов попадало в `lead`. Поэтому узлы идут первыми, а отсутствие ведущего
+    # выражено явным «-».
+    info=$(python3 - "$description" <<'PY'
+import json
+import sys
+
+machine = json.load(open(sys.argv[1], encoding="utf-8"))["machine"]
+pair = machine.get("loop") or {}
+nodes = len(machine["sequence"]["main"]) + len(machine["sequence"]["tail"])
+print(nodes, pair.get("lead") or "-")
+PY
+    ) || info=""
+  fi
+  rm -f -- "$description"
+  # Описание не прочитано — реестр не трогаем: снять признак цикла по сбою чтения значило
+  # бы отдать попытку цикла арбитру. Первый шаг диспетчера сам остановится fail-closed.
+  [[ -n "$info" ]] || return 0
+  read -r nodes lead <<<"$info"
+  if [[ -z "$lead" || "$lead" == - ]]; then
+    [[ -f "$STATE_DIR/t${TASK}.pipeline" ]] || return 0
+    for key in LOOP_MODE LOOP_MAX_ROUNDS LOOP_ROUND LOOP_STAGE LOOP_REPORT; do
+      [[ -z "$(get "$TASK" "$key")" ]] || had_loop=1
+    done
+    [[ -z "$had_loop" ]] || set_st "$TASK" LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" \
+      LOOP_STAGE "" LOOP_REPORT "" || v2_log "признаки прошлого цикла в реестре не сняты"
+    return 0
+  fi
+  max_rounds=$(route_v2_loop_max_rounds 2>/dev/null) || max_rounds=""
+  if [[ -f "$STATE_DIR/t${TASK}.pipeline" ]]; then
+    set_st "$TASK" LOOP_MODE 1 LOOP_MAX_ROUNDS "$max_rounds" ||
+      v2_log "признак режима «цикл» в реестр не записан"
+    route_v2_project_loop "$TASK" "$attempt" "" "" ||
+      v2_log "состояние цикла в реестр не записано"
+  fi
+  [[ "$max_rounds" =~ ^[1-9][0-9]*$ && "$nodes" =~ ^[0-9]+$ ]] || return 0
+  V2_DISPATCH_STEP_LIMIT=$(( 3 * max_rounds + nodes + 2 ))
+}
+
+# Витрина цикла в реестре задачи: круг, этап, действующий потолок и последний сданный
+# отчёт исполнителя (его показывают ворота приёмки). После terminal-результата
+# исполнителя отчёт этого визита закрывается на запись: следующий визит пишет в свой
+# файл, а прежний остаётся доказательством ровно в том виде, в каком его читал ведущий.
+# `exhausted` результатом не считается: повтор продолжает тот же незаконченный отчёт.
+route_v2_project_loop() {
+  local task=$1 attempt=$2 node=${3:-} outcome=${4:-} state round stage worker last report
+  local max_rounds
+  state=$(attempt_stage_state_loop_state_v2 "$task" "$attempt") || return
+  worker=$(json_value loop.worker <<<"$state" 2>/dev/null) || return 0
+  round=$(json_value loop.rounds <<<"$state") || return
+  stage=$(json_value loop.stage <<<"$state") || return
+  last=$(json_value loop.lastReport <<<"$state") || return
+  [[ "$last" != None ]] || last=""
+  max_rounds=$(route_v2_loop_max_rounds 2>/dev/null) || max_rounds=""
+  [[ "$round" =~ ^[0-9]+$ && "$stage" =~ ^[0-9]+$ ]] || return 78
+  [[ -z "$last" || "$last" =~ ^report\.r[0-9]{1,3}(\.v[0-9]{1,4})?\.md$ ]] || return 78
+  set_st "$task" LOOP_ROUND "$round" LOOP_STAGE "$stage" LOOP_MAX_ROUNDS "$max_rounds" \
+    LOOP_REPORT "${last:+t${task}.$last}" || return
+  [[ "$node" == "$worker" && -n "$last" ]] || return 0
+  case "$outcome" in
+    done|failed|skipped) ;;
+    *) return 0 ;;
+  esac
+  report="$STATE_DIR/t${task}.$last"
+  if [[ -f "$report" && ! -L "$report" ]]; then
+    chmod a-w -- "$report" || return
+  else
+    v2_log "${worker^^}: отчёт визита не записан (${report##*/}) — ведущий увидит отсутствие"
+  fi
+}
+
+# Переводит exact reset из закреплённого route ledger в вторичный реестр GrigDesk.
 # Ни фиксированного списка стадий, ни семантики --replan/--reject-accept здесь нет:
 # набор узлов берётся из immutable event, а runKey — из pinned machine.
 route_v2_project_latest_reset() {
@@ -1972,7 +2473,7 @@ with open(sys.argv[1], encoding="utf-8") as source:
 with open(sys.argv[2], encoding="utf-8") as source:
     description = json.load(source)
 
-if event.get("kind") not in {"commit", "human-rewind"}:
+if event.get("kind") not in {"commit", "human-rewind", "loop-continue"}:
     raise SystemExit(3)
 action = event.get("action")
 if not isinstance(action, dict) or set(action) != {"rewind", "reset"}:
@@ -2044,31 +2545,272 @@ route_v2_project_work_time() {
 }
 
 # Фиксация решения ворот: CAS в журнале попытки плюс проекция в реестр, по
-# которой кокпит рисует ворота. Продолжение маршрута сюда не входит намеренно —
+# которой GrigDesk рисует ворота. Продолжение маршрута сюда не входит намеренно —
 # см. --commit-only в справке.
 v2_gate_commit() {
-  local attempt=$1 gate_key pipeline_gate_key rc
+  local attempt=$1 gate_key pipeline_gate_key rc digest
   gate_key=$(v2_gate_state_key "$GATE_NODE") ||
     die "неизвестный gate node для профиля: $GATE_NODE"
   pipeline_gate_key=$(v2_gate_pipeline_key "$GATE_NODE") ||
     die "нет UI-проекции для gate node: $GATE_NODE"
   route_v2_gate_decide \
-    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" >/dev/null || {
+    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" "$GATE_COMMENT" \
+    "${EXPECTED_STAGE%%:*}" "${EXPECTED_STAGE#*:}" >/dev/null || {
     rc=$?
     v2_log "gate CAS не принят (код $rc)"
     return "$rc"
   }
+  # В реестр едет ВЫЖИМКА, а не весь комментарий: формат реестра построчный
+  # (`KEY=value`, разбор awk), многострочный текст там всё равно схлопнется в
+  # простыню, а 20 КБ в одной строке раздуют файл, который перечитывается на каждый
+  # тик GrigDesk. Источник истины для агента — immutable-событие журнала, реестр же
+  # рисует человеку карточку ворот, и первых строк там достаточно.
+  digest=$(_gate_comment_digest "$GATE_COMMENT")
   set_st "$TASK" "$gate_key" "$GATE_DECISION" \
-    "${gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }" \
+    "${gate_key}_COMMENT" "$digest" \
     "$pipeline_gate_key" "$GATE_DECISION" \
-    "${pipeline_gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }"
+    "${pipeline_gate_key}_COMMENT" "$digest"
   v2_log "gate $GATE_NODE=$GATE_DECISION зафиксирован"
+}
+
+# Выжимка комментария ворот для витрины реестра: одна строка, до 300 символов,
+# с многоточием, если текст длиннее. Символы считает python3 — bash режет байтами
+# и рвёт кириллицу пополам.
+_gate_comment_digest() {
+  local value=${1-}
+  [[ -n "$value" ]] || return 0
+  python3 - "$value" <<'PY'
+import re
+import sys
+
+LIMIT = 300
+value = re.sub(r"\s+", " ", sys.argv[1]).strip()
+if len(value) > LIMIT:
+    value = value[: LIMIT - 1].rstrip() + "…"
+sys.stdout.write(value)
+PY
+}
+
+V2_LIFECYCLE_SESSION_OPEN=0
+V2_LIFECYCLE_EXIT_STATUS=succeeded
+V2_LIFECYCLE_EXIT_REASON=normal
+
+v2_lifecycle_millisecond_instant() {
+  local value=$1
+  [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 78
+  printf '%s.000Z\n' "${value%Z}"
+}
+
+# Пуст ли journal попытки: 0 — ни одного события, 3 — события есть, иначе код ошибки
+# чтения. Различать обязательно: пустой журнал законен (попытка старше самой аналитики),
+# а нечитаемый — это порча, и молчать о ней нельзя.
+v2_lifecycle_ledger_empty() {
+  local attempt=$1 root ledger rc
+  root=$(factory_control_root) || return
+  ledger=$(mktemp "$root/.lifecycle-empty-probe.XXXXXX") || return 1
+  attempt_lifecycle_read_v2 "$TASK" "$attempt" >"$ledger"
+  rc=$?
+  if (( rc == 0 )) && [[ -s "$ledger" ]]; then
+    rc=3
+  fi
+  rm -f -- "$ledger"
+  return "$rc"
+}
+
+v2_lifecycle_begin_session() {
+  local attempt=$1 mode=$2 route_id=${3:-} route_hash=${4:-}
+  local previous="" previous_rc session_reason record record_hash origin previous_attempt
+  local recovery recovery_hash="" root open_event="" open_rc=3 open_hash=""
+  attempt_lifecycle_init_v2 "$TASK" "$attempt" || return
+  previous=$(runtime_lifecycle_previous_session_v2 "$TASK" "$attempt" 2>/dev/null)
+  previous_rc=$?
+  (( previous_rc == 0 || previous_rc == 3 )) || return "$previous_rc"
+  # Попытка, начатая до появления lifecycle-журнала, не имеет в нём ни одного события,
+  # а первым обязан идти route_selected: без него валидатор схемы отвергает любое событие
+  # со scoped route identity («scoped route identity appears before route_selected»).
+  # Дописать этот route_selected задним числом нечем — сессии и её времени в журнале не
+  # было вовсе, — поэтому lifecycle такой попытке просто не ведётся. Иначе abandon, goto
+  # и resume старой попытки падали кодом 78 детерминированно, то есть у человека
+  # переставали работать «снести стенд», «продолжить прогон» и «перейти сюда».
+  # Все события lifecycle стоят за `runtime_lifecycle_enabled_v2`, поэтому невыставленный
+  # контекст означает «ничего не пишем», а не половину журнала.
+  if [[ "$mode" == resume && -z "$previous" ]]; then
+    v2_lifecycle_ledger_empty "$attempt"
+    previous_rc=$?
+    (( previous_rc == 0 || previous_rc == 3 )) || return "$previous_rc"
+    (( previous_rc != 0 )) || return 0
+  fi
+  if [[ "$mode" == resume ]]; then
+    root=$(factory_control_root) || return
+    open_event=$(mktemp "$root/.lifecycle-open-session.XXXXXX") || return 1
+    runtime_lifecycle_previous_open_session_v2 "$TASK" "$attempt" "$open_event"
+    open_rc=$?
+    if (( open_rc == 0 )); then
+      open_hash=$(runtime_analytics_json_get_v2 "$open_event" eventHash) || {
+        previous_rc=$?
+        rm -f -- "$open_event"
+        return "$previous_rc"
+      }
+    elif (( open_rc != 3 )); then
+      rm -f -- "$open_event"
+      return "$open_rc"
+    fi
+  fi
+  runtime_lifecycle_set_context_v2 \
+    "$TASK" "$attempt" "$PROFILE" "$route_id" "$route_hash" >/dev/null || {
+      previous_rc=$?
+      [[ -z "$open_event" ]] || rm -f -- "$open_event"
+      return "$previous_rc"
+    }
+  case "$mode" in
+    fresh) session_reason=initial ;;
+    recovery) session_reason=recovery ;;
+    resume)
+      if [[ -n "$previous" ]]; then session_reason=resume; else session_reason=recovery; fi
+      ;;
+    *) return 2 ;;
+  esac
+  runtime_lifecycle_session_begin_v2 "$session_reason" "$previous" >/dev/null || {
+    previous_rc=$?
+    [[ -z "$open_event" ]] || rm -f -- "$open_event"
+    return "$previous_rc"
+  }
+  V2_LIFECYCLE_SESSION_OPEN=1
+  if (( open_rc == 0 )); then
+    runtime_lifecycle_attempt_interrupted_v2 crash_detected "$open_hash" >/dev/null || {
+      previous_rc=$?
+      rm -f -- "$open_event"
+      return "$previous_rc"
+    }
+  fi
+  [[ -z "$open_event" ]] || rm -f -- "$open_event"
+  if [[ "$mode" == fresh || "$mode" == recovery ]]; then
+    record="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt/attempt.json"
+    record_hash=$(runtime_analytics_hash_file_v2 "$record") || return
+    origin=$(_attempt_state_json get "$record" origin) || return
+    previous_attempt=$(_attempt_state_json get "$record" previousAttemptId) || return
+    recovery=$(_attempt_state_json get "$record" recoveryReason) || return
+    [[ "$previous_attempt" != null ]] || previous_attempt=""
+    [[ "$recovery" != null ]] || recovery=""
+    [[ -z "$recovery" ]] || recovery_hash=$(runtime_analytics_hash_string_v2 "$recovery") || return
+    runtime_lifecycle_attempt_started_v2 \
+      "$origin" "$previous_attempt" "$recovery_hash" "$record_hash" >/dev/null || return
+  elif [[ -n "$previous" ]]; then
+    runtime_lifecycle_attempt_resumed_v2 "$previous" operator '' >/dev/null || return
+  fi
+  if [[ "$mode" == resume ]]; then
+    runtime_lifecycle_reconcile_routing_v2 "$TASK" "$attempt" >/dev/null || return
+    runtime_lifecycle_reconcile_usage_v2 "$TASK" "$attempt" >/dev/null || return
+  fi
+}
+
+v2_lifecycle_route_selected() {
+  local attempt=$1 selected_route_hash=$2 source=${3:-operator_override} root pin selected pin_hash
+  local nullglob_was_off=0
+  runtime_lifecycle_enabled_v2 || return 0
+  root="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt"
+  shopt -q nullglob || nullglob_was_off=1
+  shopt -s nullglob
+  local -a pins=("$root"/route-pin.*.json)
+  (( nullglob_was_off == 0 )) || shopt -u nullglob
+  (( ${#pins[@]} == 1 )) || return 78
+  pin=${pins[0]}
+  [[ -f "$pin" && ! -L "$pin" ]] || return 78
+  pin_hash=$(runtime_analytics_hash_file_v2 "$pin") || return
+  selected=$(_attempt_state_json get "$pin" selectedAt) || return
+  selected=$(v2_lifecycle_millisecond_instant "$selected") || return
+  runtime_lifecycle_set_route_v2 "$ROUTE" "$selected_route_hash" || return
+  runtime_lifecycle_route_selected_v2 \
+    "$V2_ATTEMPT_CATALOG_HASH" "$pin_hash" "$selected" "$source" >/dev/null
+}
+
+v2_lifecycle_terminal_from_file() {
+  local terminal=$1 reason_code=$2 state closed reason record_hash reason_hash=""
+  runtime_lifecycle_enabled_v2 || return 0
+  [[ -f "$terminal" && ! -L "$terminal" ]] || return 78
+  state=$(_attempt_state_json get "$terminal" state) || return
+  closed=$(_attempt_state_json get "$terminal" closedAt) || return
+  closed=$(v2_lifecycle_millisecond_instant "$closed") || return
+  reason=$(_attempt_state_json get "$terminal" reason) || return
+  [[ "$reason" != null ]] || reason=""
+  [[ -z "$reason" ]] || reason_hash=$(runtime_analytics_hash_string_v2 "$reason") || return
+  record_hash=$(runtime_analytics_hash_file_v2 "$terminal") || return
+  runtime_lifecycle_attempt_terminal_v2 \
+    "$state" "$reason_code" "$reason_hash" "$record_hash" "$closed" >/dev/null
+}
+
+v2_lifecycle_latest_stage_hash() {
+  local attempt=$1 root event hash rc
+  root=$(factory_control_root) || return
+  event=$(mktemp "$root/.lifecycle-stage-evidence.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$TASK" "$attempt" >"$event"
+  rc=$?
+  if (( rc == 0 )); then
+    hash=$(runtime_analytics_hash_file_v2 "$event") || rc=$?
+  fi
+  rm -f -- "$event"
+  (( rc == 0 )) || return "$rc"
+  printf '%s\n' "$hash"
+}
+
+v2_lifecycle_resolve_human() {
+  local resolution=$1 evidence=${2:-}
+  runtime_lifecycle_enabled_v2 || return 0
+  if [[ -z "$evidence" ]]; then
+    evidence=$(runtime_analytics_hash_string_v2 \
+      "$resolution:$FACTORY_LIFECYCLE_ATTEMPT_ID:$FACTORY_LIFECYCLE_SESSION_ID") || return
+  fi
+  runtime_lifecycle_resolve_open_human_v2 "$resolution" "$evidence" >/dev/null
+}
+
+# Долговечный вопрос не зависит от успешности побочной проекции или подъёма среды.
+# Owned provisioning завершается и проверяется до штатного выхода без основного cursor.
+v2_bootstrap_pause() {
+  local attempt=$1 journal evidence environment_rc=0 reason
+  journal=$(attempt_bootstrap_journal_v2 read "$TASK" "$attempt" "$PROFILE") || return
+  evidence=$(jq -r .stop.recordHash <<<"$journal") || return 78
+  reason=$(jq -r .stop.reason <<<"$journal") || return 78
+  set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-bootstrap-human || return
+  if runtime_lifecycle_enabled_v2; then
+    export FACTORY_LIFECYCLE_NODE_VISIT_ID=$ROUTE_V2_BOOTSTRAP_LIFECYCLE_VISIT_ID
+    export FACTORY_LIFECYCLE_NODE_ID=scout FACTORY_LIFECYCLE_RUN_KEY=SCOUT
+    runtime_lifecycle_human_begin_v2 manual_resume_required "$evidence" >/dev/null || return
+  fi
+  v2_sandbox_bootstrap_wait || environment_rc=$?
+  if (( environment_rc != 0 )); then
+    set_st "$TASK" BOOTSTRAP_ENV_ERROR "среда не готова (код $environment_rc)" || return
+    v2_log "SCOUT: вопрос сохранён; среда не готова (код $environment_rc)"
+  else
+    set_st "$TASK" BOOTSTRAP_ENV_ERROR '' || return
+  fi
+  v2_log "SCOUT: разведка ждёт ответа человека — $reason"
+  return "$environment_rc"
+}
+
+v2_lifecycle_begin_human_for_stop() {
+  local attempt=$1 stop=$2 reason evidence
+  runtime_lifecycle_enabled_v2 || return 0
+  case "$stop" in
+    # Потолок кругов цикла — тот же исчерпанный бюджет автоматических возвратов:
+    # закрытый словарь аналитики не расширяется ради синонима.
+    rewind-limit|loop-ceiling) reason=rewind_limit ;;
+    no-progress) reason=no_progress ;;
+    human) reason=manual_resume_required ;;
+    *) reason=operator_requested ;;
+  esac
+  evidence=$(v2_lifecycle_latest_stage_hash "$attempt") || return
+  runtime_lifecycle_human_begin_v2 "$reason" "$evidence" >/dev/null
 }
 
 v2_on_signal() {
   local signal=$1 rc=130 stop_rc cleanup_rc
   [[ "$signal" == TERM ]] && rc=143
   trap - TERM INT
+  if runtime_lifecycle_enabled_v2; then
+    runtime_lifecycle_attempt_interrupted_v2 signal '' >/dev/null || true
+    V2_LIFECYCLE_EXIT_STATUS=interrupted
+    V2_LIFECYCLE_EXIT_REASON=signal
+  fi
   v2_log "получен $signal; останавливаю exact active runner"
   runtime_interrupt_trusted_active "$TASK" "" "" "" \
     "${FACTORY_TERM_GRACE_SECONDS:-5}"
@@ -2076,10 +2818,16 @@ v2_on_signal() {
   if (( stop_rc == 0 )) && [[ -n "$V2_ATTEMPT" ]]; then
     route_v2_cleanup_active_instrumentation "$TASK" "$V2_ATTEMPT"
     cleanup_rc=$?
-    (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+    if (( cleanup_rc == 0 || cleanup_rc == 3 )); then
+      # Штатная остановка по сигналу (кнопка «Стоп», systemctl stop, выключение машины):
+      # раннер погашен, инструментация снята, попытка остаётся открытой для resume.
+      # Метка в реестре отличает это от молчаливого обрыва: без неё GrigDesk читал
+      # каждую остановку кнопкой как crashed и звонил «Конвейер оборвался».
+      set_st "$TASK" STOPPED_SIGNAL 1
+    else
       set_st "$TASK" STALLED_HUMAN 1
       v2_log "instrumentation cleanup требует человека (код $cleanup_rc)"
-    }
+    fi
   else
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "quiescence runner не доказана; baseline не изменён (код $stop_rc)"
@@ -2088,8 +2836,23 @@ v2_on_signal() {
 }
 
 v2_on_exit() {
-  local rc=$?
+  local rc=$? lifecycle_rc=0
   trap - EXIT TERM INT
+  v2_sandbox_bootstrap_cancel || {
+    set_st "$TASK" STALLED_HUMAN 1
+    (( rc != 0 )) || rc=73
+  }
+  if [[ "$V2_LIFECYCLE_SESSION_OPEN" == 1 ]]; then
+    if (( rc != 0 )) && [[ "$V2_LIFECYCLE_EXIT_STATUS" == succeeded ]]; then
+      V2_LIFECYCLE_EXIT_STATUS=failed
+      V2_LIFECYCLE_EXIT_REASON=unavailable
+    fi
+    runtime_lifecycle_session_finish_v2 \
+      "$V2_LIFECYCLE_EXIT_STATUS" "$V2_LIFECYCLE_EXIT_REASON" '' \
+      >/dev/null || lifecycle_rc=$?
+    V2_LIFECYCLE_SESSION_OPEN=0
+    (( lifecycle_rc == 0 || rc != 0 )) || rc=76
+  fi
   if [[ "$(get "$TASK" ORCH_PID)" == "$$" ]]; then
     set_st "$TASK" ORCH_PID ""
   fi
@@ -2100,10 +2863,117 @@ v2_on_exit() {
   exit "$rc"
 }
 
+# Проверка использует тот же immutable-каталог, что будет закреплён за попыткой.
+# На resume курсор ограничивает достижимость; уже завершённая разведка не включается.
+v2_runner_preflight_stages() (
+  local description cursor_file catalog routes route scope='*' state node sequence rc
+  description=$(mktemp "$(factory_control_root)/.preflight-route.XXXXXX") || return 78
+  cursor_file=$(mktemp "$(factory_control_root)/.preflight-cursor.XXXXXX") || {
+    rm -f -- "$description"
+    return 78
+  }
+  trap 'rm -f -- "$description" "$cursor_file"' EXIT
+  if [[ "$MODE" == start ]]; then
+    catalog=$CURRENT_CATALOG
+    routes=$ROUTES_DIR
+    route=$ROUTE
+    printf '%s\n' "$CURRENT_ROUTE_JSON" >"$description" || return 78
+  else
+    _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    catalog=$ROUTE_V2_CATALOG
+    routes=$ROUTE_V2_ROUTES_DIR
+    route=$ROUTE_V2_ROUTE
+    "$FACTORY_HOME/bin/factory-route" --routes-dir "$routes" --profile "$PROFILE" \
+      describe-route --catalog-hash "$catalog" --route "$route" >"$description" || return
+    attempt_stage_state_read_v2 "$TASK" "$EXPECTED_ATTEMPT" >"$cursor_file"
+    rc=$?
+    if (( rc == 0 )); then
+      IFS=$'\t' read -r state node sequence < <(_route_v2_json cursor "$cursor_file") || return 78
+      scope=$node
+      [[ "$state" != stopped ]] || scope='-'
+    elif (( rc != 73 )); then
+      return "$rc"
+    fi
+  fi
+  _route_v2_json coverage-stages "$description" "$scope" || return
+  if [[ "$(_route_v2_json bootstrap-policy "$description")" == required &&
+        ( "$MODE" == start || ! -f "$ROUTE_V2_ATTEMPT_DIR/artifacts/bootstrap.json" ) ]]; then
+    "$FACTORY_HOME/bin/factory-route" --routes-dir "$routes" --profile "$PROFILE" \
+      describe-bootstrap --catalog-hash "$catalog" >"$description" || return
+    _route_v2_json coverage-stages "$description" || return
+  fi
+)
+
+# Каждый ли элемент первого CSV-списка входит во второй. Нужна отдельному маркеру
+# несовместимости поставки: миграция закрепления лечит только отказы, целиком
+# перечисленные раннерами с маркером; смесь с прочей недоступностью остаётся
+# общим `runner_preflight_unavailable`.
+_v2_supply_covers_all() {
+  local wanted=$1 have=$2 item
+  [[ -n "$wanted" && -n "$have" ]] || return 1
+  local IFS=,
+  for item in $wanted; do
+    [[ ",$have," == *",$item,"* ]] || return 1
+  done
+  return 0
+}
+
+# Полный опрос остаётся диагностикой профиля, но допуск вычисляется по цепочкам
+# исполняемых узлов с тем же routing_resolve, что использует runtime-диспетчер.
+v2_runner_preflight() {
+  local stages stage route primary failover chain revision rc=0 unavailable=''
+  local coverage_dir="$STATE_DIR/coverage/$PROFILE"
+  V2_PREFLIGHT_UNAVAILABLE_RUNNERS=''
+  stages=$(v2_runner_preflight_stages) || return
+  if [[ "$MODE" != start ]]; then
+    v2_load_attempt_launch_identity "$EXPECTED_ATTEMPT" || return
+  fi
+  profile_runner_host_preflight "$PROFILE" || rc=$?
+  (( rc == 0 || rc == 1 )) || return "$rc"
+  revision=$(sha256sum "$RUNNER_CONFIG_FILE" | awk '{print substr($1,1,16)}')
+  # Даже маршрут без оставшихся агентов требует валидного свежего снимка.
+  coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$revision" "$(date +%s)" '' || return 78
+  while IFS= read -r stage; do
+    [[ -n "$stage" ]] || continue
+    if [[ "$MODE" == start ]]; then
+      # Новый start не наследует оверрайды прежней задачи: реестр ещё не создан.
+      route=$(routing_resolve "$RUNNER_CONFIG_FILE" <(
+        printf 'RUNNER_OVERRIDE_PRIMARY=%s\nRUNNER_OVERRIDE_FAILOVER=%s\n' \
+          "$RUNNER_PRIMARY_OVERRIDE" "$RUNNER_FAILOVER_OVERRIDE"
+      ) "$stage") || return 78
+    else
+      # Resume восстановит primary из trusted launch identity перед запуском узлов.
+      # Сверяем ту же будущую проекцию без записи реестра до успешного preflight.
+      route=$(routing_resolve "$RUNNER_CONFIG_FILE" <(
+        cat -- "$(_pf "$TASK")" 2>/dev/null
+        printf '\nRUNNER_OVERRIDE_PRIMARY=%s\n' "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
+      ) "$stage") || return 78
+    fi
+    primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
+    failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+    chain="$primary${failover:+,$failover}"
+    if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+      "$revision" "$(date +%s)" "$chain"; then
+      [[ "$COVERAGE_GATE_REASON" == unavailable ]] || return 78
+      unavailable+="${unavailable:+,}$COVERAGE_UNAVAILABLE_RUNNERS"
+    fi
+  done <<<"$stages"
+  [[ -n "$unavailable" ]] || return 0
+  V2_PREFLIGHT_UNAVAILABLE_RUNNERS=$(
+    tr ',' '\n' <<<"$unavailable" | LC_ALL=C sort -u | paste -sd,
+  )
+  return 1
+}
+
+# Допуск к исполнению предшествует созданию attempt и любым lifecycle-эффектам.
+# Запись решения ворот остаётся отдельным CAS без проверки готовности исполнителей.
 v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
-  local gate_key pipeline_gate_key gate_node cursor stop stop_node
+  local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node continue_node
+  local stop_reason stop_suffix deferred_file deferred_count terminal_file
+  local bootstrap_journal bootstrap_decision_hash=""
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2122,24 +2992,51 @@ v2_main() {
       die "t${TASK} уже имеет active immutable attempt"
   fi
 
+  # Resume без ответа удерживает тот же визит до runner preflight и любых lifecycle
+  # или provisioning эффектов; нажатие кнопки не заменяет решение человека.
+  if [[ "$MODE" == resume ]]; then
+    _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    bootstrap_journal=$(attempt_bootstrap_journal_v2 read "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE") || return
+    if [[ "$(jq -r .state <<<"$bootstrap_journal")" == waiting ]]; then
+      set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-bootstrap-human || return
+      v2_log "SCOUT: разведка ждёт ответа человека; resume без решения удержан"
+      return 0
+    fi
+    bootstrap_decision_hash=$(jq -r '.decision.recordHash // empty' <<<"$bootstrap_journal") || return 78
+  fi
+
   # Решение человека на воротах в режиме --commit-only не запускает ни одного
   # агента: это CAS в журнале попытки плюс проекция в реестр. Требовать от него
   # готовности ВСЕХ раннеров хоста означало запирать стоящий маршрут при любом
   # отказе чужого CLI: preflight отдавал код 1 — и человек не мог ни принять
-  # ворота, ни отклонить их (t7788: обновление Kimi проявило эту связанность).
+  # ворота, ни отклонить их. Обновление одного из CLI уже проявляло эту связанность.
   # Продолжение маршрута идёт отдельным resume — там preflight на месте, и
   # недоступный раннер по-прежнему не пустит агентов в работу.
   if [[ "$MODE" != gate || "$GATE_COMMIT_ONLY" != 1 ]]; then
-    profile_runner_host_preflight "$PROFILE" || {
+    v2_runner_preflight || {
       rc=$?
       unavailable_runners=""
       # Только rc=1 означает свежий полноценный preflight с недоступным runner.
       # При storage/contract-ошибке старый host.env нельзя выдавать за причину.
       if (( rc == 1 )); then
-        unavailable_runners=$(coverage_artifact_get \
-          "$STATE_DIR/coverage/$PROFILE/host.env" UNAVAILABLE_RUNNERS)
+        unavailable_runners=$V2_PREFLIGHT_UNAVAILABLE_RUNNERS
       fi
       if [[ -n "$unavailable_runners" ]]; then
+        # Несовместимость поставки отличается от прочей недоступности: закреплённый
+        # движок сам сообщил (маркер раннера), что не может работать с фактическим
+        # CLI/ELF исполнителя. Повтор пробы и ожидание тут бессильны, зато смена
+        # закрепления попытки на текущую поставку лечит причину целиком — поэтому
+        # отдаём отдельный типизированный маркер, по которому GrigDesk перепривязывает
+        # runtime и повторяет resume. Требуем покрытие ВСЕХ недоступных раннеров:
+        # смесь «несовместим + нет ключа» миграцией не лечится и остаётся unavailable.
+        if [[ -n "${PREFLIGHT_SUPPLY_INCOMPATIBLE:-}" ]] \
+           && _v2_supply_covers_all "$unavailable_runners" "$PREFLIGHT_SUPPLY_INCOMPATIBLE"; then
+          preflight_message="runner preflight: закреплённая поставка движка несовместима с $unavailable_runners"
+          v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_incompatible RUNNERS=$unavailable_runners] (код $rc)"
+          printf '%s [FACTORY_ERROR=runner_preflight_incompatible RUNNERS=%s]\n' \
+            "$preflight_message" "$unavailable_runners" >&2
+          return "$rc"
+        fi
         preflight_message="runner preflight не пройден: недоступны $unavailable_runners"
         v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=$unavailable_runners] (код $rc)"
         printf '%s [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=%s]\n' \
@@ -2177,23 +3074,41 @@ v2_main() {
   fi
 
   if [[ "$MODE" == start ]]; then
-    set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
-      PROFILE "$PROFILE" \
-      ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
-      ORCH_PID "$$" STALLED_HUMAN 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
-      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
-    # Явный task-level override исполнителя фиксируется в реестре сразу после
-    # его создания: вся дальнейшая маршрутизация читает цепочку из реестра.
-    if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
-      set_st "$TASK" RUNNER_OVERRIDE_PRIMARY "$RUNNER_PRIMARY_OVERRIDE" \
-        RUNNER_OVERRIDE_FAILOVER "$RUNNER_FAILOVER_OVERRIDE" || return
-    fi
-    attempt=$(attempt_state_begin_v2 "$TASK" "$PROFILE" "$ROUTES_DIR") || {
+    # Авторитетная catalog CAS и публикация trusted identity происходят ДО
+    # вторичной registry-проекции. Ранний `factory check` остаётся fast-fail:
+    # current мог смениться после него. При mismatch begin не публикует attempt,
+    # а pending shared lease снимает EXIT-cleanup, поэтому task остаётся чистой.
+    attempt=$(attempt_state_begin_v2 \
+      "$TASK" "$PROFILE" "$ROUTES_DIR" "${EXPECTED_CATALOG_HASH:-$CURRENT_CATALOG}" \
+      "$QUEUE_DISPATCH_ID" "$RUNNER_PRIMARY_OVERRIDE") || {
       rc=$?
       v2_log "attempt не создан (код $rc)"
       return "$rc"
     }
     V2_ATTEMPT=$attempt
+    v2_lifecycle_begin_session "$attempt" fresh '' '' || {
+      rc=$?
+      v2_log "lifecycle новой attempt не инициализирован (код $rc)"
+      return "$rc"
+    }
+    v2_load_attempt_launch_identity "$attempt" || {
+      rc=$?
+      v2_log "launch identity новой attempt не прочитана (код $rc)"
+      return "$rc"
+    }
+    set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
+      PROFILE "$PROFILE" \
+      ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
+      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+      QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
+      RUNNER_OVERRIDE_FAILOVER "$RUNNER_FAILOVER_OVERRIDE" \
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending || return
+    # Черновики ходов принадлежат попытке: новая начинает с чистого листа, иначе первый же
+    # этап прочитал бы заметки прошлого, брошенного прогона как свои.
+    declare -F _stage_checkpoint_clear_task >/dev/null &&
+      _stage_checkpoint_clear_task "$TASK"
     v2_shared_lease_bind "$attempt" || {
       rc=$?
       v2_log "shared lease не закреплён за attempt (код $rc)"
@@ -2204,6 +3119,12 @@ v2_main() {
       v2_log "route pin не создан (код $rc)"
       return "$rc"
     }
+    v2_lifecycle_route_selected "$attempt" "$route_hash" \
+      "$([[ -n "$V2_ATTEMPT_QUEUE_DISPATCH_ID" ]] && printf queue_override || printf operator_override)" || {
+        rc=$?
+        v2_log "route lifecycle pin не записан (код $rc)"
+        return "$rc"
+      }
   else
     attempt=$EXPECTED_ATTEMPT
     V2_ATTEMPT=$attempt
@@ -2221,6 +3142,40 @@ v2_main() {
       die "--route расходится с immutable pin"
     ROUTE=$pinned_route
     route_hash=$ROUTE_V2_ROUTE_HASH
+    if [[ "$MODE" == resume ]]; then
+      # Остановка по потолку кругов без поднятого потолка: отказ до сессии lifecycle,
+      # закрытия вмешательства человека и снятия STALLED_HUMAN — журнал, реестр и
+      # lifecycle продолжают согласованно говорить «ждёт человека». Подсказка — в журнале.
+      route_v2_loop_ceiling_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then
+        return 0
+      elif (( rc != 0 )); then
+        return "$rc"
+      fi
+      # Failed и защитные остановки также ждут goto: пустой resume сохраняет
+      # открытое вмешательство человека и реестр до любых lifecycle-эффектов.
+      route_v2_failed_stop_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then
+        return 0
+      elif (( rc != 0 )); then
+        return "$rc"
+      fi
+    fi
+    v2_lifecycle_begin_session \
+      "$attempt" resume "$ROUTE" "$route_hash" || {
+        rc=$?
+        v2_log "lifecycle resume не открыт (код $rc)"
+        return "$rc"
+      }
+    v2_lifecycle_resolve_human \
+      "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" \
+      "$bootstrap_decision_hash" || {
+      rc=$?
+      v2_log "human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
   fi
 
   # Для start pins появились только что; resume уже загрузил их выше. Проверяем
@@ -2228,6 +3183,11 @@ v2_main() {
   if [[ "$MODE" == start ]]; then
     _route_v2_load_attempt "$TASK" "$attempt" || return
   fi
+  v2_load_attempt_launch_identity "$attempt" || {
+    rc=$?
+    v2_log "launch identity attempt не прочитана (код $rc)"
+    return "$rc"
+  }
   v2_detect_delivery_contract || {
     rc=$?
     v2_log "delivery topology закреплённого маршрута не прочитана (код $rc)"
@@ -2239,13 +3199,17 @@ v2_main() {
   # прогон дальше по маршруту поднимает отдельный resume.
   # STALLED_HUMAN для commit-only снимается ТОЛЬКО после успешного CAS: упавший
   # gate (устаревший узел ворот, код 75) иначе стирал маркер остановки у стоящего
-  # маршрута — кокпит терял «ждёт человека» и дорисовывал ложную паузу на воротах
-  # (t8164: reject на gate_accept при курсоре на lint).
+  # маршрута — GrigDesk терял «ждёт человека» и дорисовывал ложную паузу на воротах,
+  # если решение относилось не к узлу под текущим курсором.
   if [[ "$MODE" == gate && "$GATE_COMMIT_ONLY" == 1 ]]; then
-    set_st "$TASK" ORCH_PID "$$" DELIVERY_MODE "$V2_DELIVERY_MODE"
+    set_st "$TASK" ORCH_PID "$$" DELIVERY_MODE "$V2_DELIVERY_MODE" \
+      INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
     set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
-      ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+      ROUTE "$ROUTE" ROUTE_HASH "$route_hash" \
+      QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
 
     v2_install_profile_contract || {
       rc=$?
@@ -2258,10 +3222,16 @@ v2_main() {
     return 0
   fi
 
-  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE"
+  # Любой новый заход движка стирает метку штатной остановки: после старта демона
+  # мёртвый процесс снова означает обрыв, а не решение человека.
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 \
+    DELIVERY_MODE "$V2_DELIVERY_MODE" INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
-    ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+    CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+    ROUTE "$ROUTE" ROUTE_HASH "$route_hash" \
+    QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+    RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
 
   v2_install_profile_contract || {
     rc=$?
@@ -2290,7 +3260,7 @@ v2_main() {
     return "$rc"
   }
 
-  v2_sandbox_up || {
+  v2_sandbox_bootstrap_prepare || {
     rc=$?
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "среда профиля не готова (код $rc)"
@@ -2303,8 +3273,18 @@ v2_main() {
   _route_v2_load_attempt "$TASK" "$attempt" || return
   route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
     rc=$?
+    if (( rc == 22 )); then
+      v2_bootstrap_pause "$attempt"
+      return $?
+    fi
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "bootstrap не подтверждён (код $rc)"
+    return "$rc"
+  }
+  v2_sandbox_bootstrap_wait || {
+    rc=$?
+    set_st "$TASK" STALLED_HUMAN 1
+    v2_log "среда профиля не готова после разведки (код $rc)"
     return "$rc"
   }
   attempt_stage_state_init_v2 "$TASK" "$attempt" "$ROUTE" >/dev/null || {
@@ -2312,6 +3292,45 @@ v2_main() {
     v2_log "route cursor не инициализирован (код $rc)"
     return "$rc"
   }
+  if [[ "$MODE" == resume ]]; then
+    # Остановка «исчерпан бюджет повторов» (stop=human, исход exhausted): раннер
+    # результата не зафиксировал — чаще всего лежал провайдер — и разбирать исход
+    # агента нечего. Бюджет повторов локален заходу в узел, поэтому «продолжить»
+    # обнуляет его: доверенный human-rewind возвращает курсор на узел без отдельного
+    # goto. Остановки rewind-limit/no-progress и исход failed по-прежнему ждут
+    # явного решения человека с новой гипотезой.
+    rewind_node=$(route_v2_rewind_exhausted_stop "$TASK" "$attempt") || {
+      rc=$?
+      v2_log "resume: возврат после исчерпанного бюджета повторов не принят (код $rc)"
+      return "$rc"
+    }
+    if [[ -n "$rewind_node" ]]; then
+      [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+        set_st "$TASK" RESULT human-rewind || return
+      v2_log "$rewind_node: продолжение после исчерпанного бюджета повторов — узел переигрывается"
+    fi
+    # Остановка по потолку кругов цикла: человек поднял PROFILE_LOOP_MAX_ROUNDS и
+    # нажал «продолжить» — исполняется тот же кандидат ведущего, круг списывается.
+    # Потолок не поднят — остановка остаётся, модель не запускается.
+    continue_node=$(route_v2_continue_loop_ceiling "$TASK" "$attempt")
+    rc=$?
+    if (( rc == 11 )); then
+      # Страховка: ранняя проверка resume уже отказывает без побочных эффектов, но если
+      # потолок не поднят и здесь, остановка возвращается в реестр и lifecycle так же,
+      # как её ставит диспетчер, — модель не запускается.
+      set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-loop-ceiling || return
+      v2_lifecycle_begin_human_for_stop "$attempt" loop-ceiling || return
+      return 0
+    elif (( rc != 0 )); then
+      v2_log "resume: продолжение цикла после потолка кругов не принято (код $rc)"
+      return "$rc"
+    fi
+    if [[ -n "$continue_node" ]]; then
+      [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+        set_st "$TASK" RESULT loop-continue || return
+      v2_log "${continue_node^^}: цикл продолжен после поднятого потолка кругов"
+    fi
+  fi
   if [[ "$MODE" != start ]]; then
     # Если предыдущий процесс умер после ledger CAS, но до UI reset, immutable
     # последнее событие остаётся повторяемым источником проекции.
@@ -2330,7 +3349,8 @@ v2_main() {
     v2_gate_commit "$attempt" || return
   fi
 
-  route_v2_dispatch_until_pause "$TASK" "$attempt" 64
+  v2_prepare_dispatch "$attempt"
+  route_v2_dispatch_until_pause "$TASK" "$attempt" "$V2_DISPATCH_STEP_LIMIT"
   rc=$?
   case "$rc" in
     20)
@@ -2343,13 +3363,15 @@ v2_main() {
       }
       set_st "$TASK" "$pipeline_gate_key" waiting STALLED_HUMAN 1
       v2_log "пауза на human gate $gate_node"
+      v2_publish_deferred_tail "$TASK" "$attempt" || return
       return 0
       ;;
     21)
       cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
       stop=$(json_value stop <<<"$cursor") || return 78
       if [[ "$stop" == done ]]; then
-        attempt_state_finish_v2 "$TASK" "$attempt" >/dev/null || return
+        terminal_file=$(attempt_state_finish_v2 "$TASK" "$attempt") || return
+        v2_lifecycle_terminal_from_file "$terminal_file" completed || return
         v2_shared_lease_release "$attempt" || {
           rc=$?
           set_st "$TASK" STALLED_HUMAN 1 RESULT lease-release-failed
@@ -2357,16 +3379,59 @@ v2_main() {
           return "$rc"
         }
         set_st "$TASK" STALLED_HUMAN 0 RESULT completed
-        v2_log "маршрут завершён; SHIP и RETRO подтверждены"
+        v2_log "маршрут завершён; хвост маршрута подтверждён"
+        v2_publish_deferred_tail "$TASK" "$attempt" || return
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
-      if [[ "$stop" == no-progress || "$stop" == rewind-limit ]]; then
+      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || {
+        rc=$?
+        v2_log "маршрут остановлен: $stop; lifecycle вмешательства человека не открыт (код $rc)"
+        return "$rc"
+      }
+      if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
-        v2_log "${stop_node^^}: маршрут остановлен: $stop"
+        # Движок уже вычислил, ЧЕМ именно кончился автоматический цикл (повтор
+        # набора, осцилляция, расширение области), и положил это в reason события.
+        # Без протяжки в журнал причина оставалась только в immutable ledger, а
+        # человек читал generic «маршрут остановлен» и шёл раскапывать руками.
+        stop_reason=$(attempt_stage_state_latest_event_v2 "$TASK" "$attempt" |
+          json_value reason 2>/dev/null) || stop_reason=""
+        stop_reason=${stop_reason//$'\n'/ }
+        if [[ -n "$stop_reason" ]]; then
+          v2_log "${stop_node^^}: маршрут остановлен: $stop — $stop_reason"
+        else
+          v2_log "${stop_node^^}: маршрут остановлен: $stop"
+        fi
       else
-        v2_log "маршрут остановлен: $stop"
+        # Остальные объявленные маршрутом остановки (на деле это `human`: замер по всем
+        # опубликованным каталогам — 2785 таких переходов против 184 `done`). До
+        # 28.08.2026 они уходили голой строкой без узла, а GrigDesk разбирает журнал
+        # правилами с префиксом этапа — значит не совпадало ни одно, и карточка
+        # отвечала «причина не нашлась в журнале» поверх остановки, у которой и узел,
+        # и вердикт уже лежали в журнале попытки. Имя узла берём тем же способом, что
+        # и ветка выше, но отсутствие имени здесь не отказ: терять остановку из-за
+        # неназванного узла дороже, чем показать её без него.
+        stop_node=$(json_value lastCommit.node <<<"$cursor" 2>/dev/null) || stop_node=""
+        # Два `human`, у которых причина есть и лежит не в вердикте агента, а у runtime
+        # узла: отказ evidence-хука (агент отчитался done) и исчерпанный бюджет повторов
+        # (результата не было ни у одного захода — комментарий узла пишет route-runtime).
+        # GrigDesk читает причину остановки из ПОСЛЕДНЕЙ строки окна, поэтому она едет в
+        # самой строке остановки, а не строкой выше, где её перекрыла бы общая
+        # формулировка. Без суффикса исчерпание показывалось как «узел вернул решение
+        # человеку» с советом прочитать замечание, которого агент не писал (t7989).
+        stop_suffix=""
+        [[ -z "${ROUTE_V2_EVIDENCE_STOP_REASON:-}" ]] ||
+          stop_suffix=" — $ROUTE_V2_EVIDENCE_STOP_REASON"
+        if [[ -z "$stop_suffix" ]]; then
+          stop_suffix=$(route_v2_stop_line_suffix "$TASK" "$attempt") || stop_suffix=""
+        fi
+        if [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]]; then
+          v2_log "${stop_node^^}: маршрут остановлен: ${stop}${stop_suffix}"
+        else
+          v2_log "маршрут остановлен: ${stop}${stop_suffix}"
+        fi
       fi
       return 0
       ;;
@@ -2405,9 +3470,10 @@ v2_quarantine_state_artifacts() {
 # и диспетчеризации. Lock оркестратора берём тот же, что у start/resume, — abandon
 # под живым foreground-прогоном обязан получить отказ, а не резать попытку под ним.
 v2_admin_main() {
-  local rc out
+  local rc out recovery_runner recovery_failover terminal_file stage_hash transition
   mkdir -p "$STATE_DIR/logs"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  trap v2_on_exit EXIT
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     case "$MODE" in
       abandon|goto)
@@ -2426,13 +3492,20 @@ v2_admin_main() {
         ;;
     esac
   fi
-  if [[ "$MODE" == goto ]]; then
+  if [[ "$MODE" == goto || "$MODE" == abandon ]]; then
     # Возврат курсора работает по ЗАКРЕПЛЁННОМУ маршруту попытки, поэтому pins
-    # загружаем так же, как перед диспетчеризацией.
+    # загружаем так же, как перед диспетчеризацией. Abandon нужна та же immutable
+    # route identity для host-owned lifecycle terminal/cleanup событий.
     _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    V2_ATTEMPT=$EXPECTED_ATTEMPT
+    v2_lifecycle_begin_session \
+      "$EXPECTED_ATTEMPT" resume "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || {
+        rc=$?
+        v2_log "$MODE: lifecycle session не открыта (код $rc)"
+        return "$rc"
+      }
   fi
   if [[ "$MODE" == abandon ]]; then
-    V2_ATTEMPT=$EXPECTED_ATTEMPT
     runtime_interrupt_trusted_active "$TASK" "" "" "" \
       "${FACTORY_TERM_GRACE_SECONDS:-5}"
     rc=$?
@@ -2446,12 +3519,24 @@ v2_admin_main() {
       v2_log "abandon: instrumentation cleanup не завершён (код $rc)"
       return "$rc"
     }
-    attempt_state_abandon_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON" || {
+    v2_lifecycle_resolve_human abandon || {
+      rc=$?
+      v2_log "abandon: human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
+    if [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+      runtime_lifecycle_node_visit_finish_v2 \
+        abandoned attempt_terminal attempt_terminal '' '' >/dev/null || return
+    fi
+    runtime_lifecycle_attempt_interrupted_v2 operator_abandon '' >/dev/null || return
+    terminal_file=$(attempt_state_abandon_v2 \
+      "$TASK" "$EXPECTED_ATTEMPT" "$REASON") || {
       rc=$?
       v2_log "abandon $EXPECTED_ATTEMPT не принят (код $rc)"
       return "$rc"
     }
-    # Pipeline-проекция для кокпита — только если реестр v2 уже существует:
+    v2_lifecycle_terminal_from_file "$terminal_file" operator_abandon || return
+    # Pipeline-проекция для GrigDesk — только если реестр v2 уже существует:
     # abandon законен и для попытки, упавшей до первой записи реестра.
     v2_shared_lease_release "$EXPECTED_ATTEMPT" || {
       rc=$?
@@ -2466,32 +3551,55 @@ v2_admin_main() {
   fi
   local route_hash old_artifacts new_artifacts name new_catalog
   if [[ "$MODE" == goto ]]; then
-    local reset
+    local reset guard_message=""
+    # Отказ раньше работы: возврат в зону instrument→proof при закрытой транзакции
+    # оставил бы маршрут неисполнимым, а узнал бы об этом человек только по падению
+    # proof — после того, как промежуточные узлы отработали вхолостую.
+    _route_v2_goto_transaction_guard "$TASK" "$GATE_NODE" guard_message || {
+      v2_log "goto $GATE_NODE отклонён: $guard_message"
+      printf '%s\n' "$guard_message" >&2
+      return 75
+    }
     # Сбрасываем целевой узел и всё, что идёт после него по последовательности
     # маршрута: возврат назад обязан снять результаты пройденного хвоста.
-    reset=$("$FACTORY_HOME/bin/factory-route" \
-      --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
-      --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
-      python3 -c '
-import json
-import sys
-
-machine = json.load(sys.stdin)["machine"]
-target = sys.argv[1]
-chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
-if target not in chain:
-    raise SystemExit(2)
-print(",".join(chain[chain.index(target):]))
-' "$GATE_NODE") || {
+    reset=$(_route_v2_reset_chain "$GATE_NODE") || {
       v2_log "goto: узел $GATE_NODE отсутствует в маршруте"
       return 2
     }
     attempt_stage_state_human_rewind_v2 \
-      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" || {
+      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" "${ACTOR:-human}" \
+      "${EXPECTED_STAGE%%:*}" "${EXPECTED_STAGE#*:}" || {
       rc=$?
       v2_log "goto $GATE_NODE не принят (код $rc)"
       return "$rc"
     }
+    v2_lifecycle_resolve_human goto || {
+      rc=$?
+      v2_log "goto: human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
+    # Телеметрия визита узла идёт ПОСЛЕ решения и не вправе его отменить: событие
+    # human-rewind уже лежит в immutable журнале попытки, курсор сдвинут, lifecycle
+    # человека закрыт. Прежние молчаливые `return` роняли goto после успешной записи —
+    # человек получал отказ поверх сделанной работы, проекция реестра оставалась
+    # старой, и прогон выглядел непродолженным (случай 28.08.2026).
+    # Отказ аналитики называем в журнале и идём дальше: потерянная строка телеметрии
+    # дешевле потерянного решения человека.
+    if [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+      stage_hash=$(v2_lifecycle_latest_stage_hash "$EXPECTED_ATTEMPT")
+      rc=$?
+      if (( rc == 0 )) && [[ -n "$stage_hash" ]]; then
+        transition="tr_${stage_hash:0:32}"
+        runtime_lifecycle_node_visit_finish_v2 \
+          succeeded manual_resume human_rewind "$transition" "$stage_hash" \
+          >/dev/null || {
+            rc=$?
+            v2_log "goto $GATE_NODE записан; визит узла не закрыт в телеметрии (код $rc)"
+          }
+      else
+        v2_log "goto $GATE_NODE записан; hash последнего события этапа не прочитан (код $rc)"
+      fi
+    fi
     route_v2_project_latest_reset "$TASK" "$EXPECTED_ATTEMPT" || {
       rc=$?
       v2_log "goto $GATE_NODE записан, но reset-проекция не завершена (код $rc)"
@@ -2505,7 +3613,12 @@ print(",".join(chain[chain.index(target):]))
     printf 'rewound %s\n' "$GATE_NODE"
     return 0
   fi
-  out=$(attempt_state_recover_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON") || {
+  # У schema 1 runner override существовал только в registry. Schema 2 берёт
+  # trusted значение предшественницы внутри attempt_state_recover_v2 и не
+  # доверяет этой fallback-проекции. Queue dispatch не передаётся никогда.
+  recovery_runner=$(get "$TASK" RUNNER_OVERRIDE_PRIMARY)
+  out=$(attempt_state_recover_v2 \
+    "$TASK" "$EXPECTED_ATTEMPT" "$REASON" "$recovery_runner") || {
     rc=$?
     [[ "$V2_WORKSPACE_MODE" != shared ]] || v2_shared_lease_release pending || true
     v2_log "recover из $EXPECTED_ATTEMPT не принят (код $rc)"
@@ -2521,12 +3634,27 @@ print(",".join(chain[chain.index(target):]))
     v2_log "route pin для recovery $out не создан (код $rc)"
     return "$rc"
   }
+  v2_load_attempt_launch_identity "$out" || {
+    rc=$?
+    v2_log "recovery launch identity не прочитана (код $rc)"
+    return "$rc"
+  }
+  V2_ATTEMPT=$out
+  v2_lifecycle_begin_session "$out" recovery '' '' || {
+    rc=$?
+    v2_log "recovery $out: lifecycle session не открыта (код $rc)"
+    return "$rc"
+  }
+  v2_lifecycle_route_selected "$out" "$route_hash" operator_override || {
+    rc=$?
+    v2_log "recovery $out: route lifecycle pin не записан (код $rc)"
+    return "$rc"
+  }
   # Recovery наследует ВХОДНЫЕ immutable-контракты предшественницы (ticket,
   # delivery, scope, diagnosis) — иначе попытка тупиковая: resume только
   # проверяет артефакты и создавать их не имеет права. Результаты работы
   # (bootstrap.json) намеренно не переносятся: recovery = чистый bootstrap.
   old_artifacts="$(attempt_state_v2_task_root "$TASK")/attempts/$EXPECTED_ATTEMPT/artifacts"
-  V2_ATTEMPT=$out
   new_artifacts=$(v2_attempt_artifacts) || return 78
   [[ -d "$new_artifacts" && ! -L "$new_artifacts" ]] || return 78
   for name in ticket.json delivery.tsv instrumentation-scope.tsv diagnosis.env \
@@ -2539,7 +3667,7 @@ print(",".join(chain[chain.index(target):]))
     }
   done
   v2_quarantine_state_artifacts "$EXPECTED_ATTEMPT" || return
-  # Реестр — проекция для кокпита, но его читают и агенты: PLAN может увидеть в нём
+  # Реестр — проекция для GrigDesk, но его читают и агенты: PLAN может увидеть в нём
   # TESTS=done/TCRITIC=done от отменённой попытки и полезть искать
   # несуществующие тесты. Новая попытка обязана начинать с pending по всем узлам
   # своего маршрута, иначе «чистый bootstrap» врёт и человеку, и агентам.
@@ -2547,10 +3675,30 @@ print(",".join(chain[chain.index(target):]))
     new_catalog=$(_attempt_state_json get \
       "$(attempt_state_v2_task_root "$TASK")/attempts/$out/attempt.json" catalogHash) ||
       return 78
+    if [[ -n "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" ]]; then
+      recovery_failover=$(get "$TASK" RUNNER_OVERRIDE_FAILOVER)
+    else
+      recovery_failover=""
+    fi
+    # Витрина цикла принадлежит попытке: новая начинает без кругов, а признак режима
+    # проставит её собственный диспетчер — иначе recover в обычный маршрут оставил бы
+    # LOOP_MODE прежней попытки, и GrigDesk не пускал бы к ней арбитра. Реестр без
+    # признаков цикла остаётся побайтно прежним.
+    local key
+    local -a loop_reset=()
+    for key in LOOP_MODE LOOP_MAX_ROUNDS LOOP_ROUND LOOP_STAGE LOOP_REPORT; do
+      [[ -z "$(get "$TASK" "$key")" ]] ||
+        loop_reset=(LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" LOOP_STAGE "" LOOP_REPORT "")
+    done
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
-      STALLED_HUMAN 0 RESULT recovered ATTEMPT_ID "$out" \
+      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered ATTEMPT_ID "$out" \
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
-      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
+      QUEUE_DISPATCH_ID "" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
+      RUNNER_OVERRIDE_FAILOVER "$recovery_failover" \
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending \
+      "${loop_reset[@]}"
   fi
   v2_log "recovery attempt $out создан из $EXPECTED_ATTEMPT: $REASON"
   printf '%s\n' "$out"

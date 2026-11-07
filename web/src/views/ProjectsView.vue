@@ -1,211 +1,815 @@
-<script setup>
-// Раздел «Проекты»: реестр проектов с путями репозиториев на диске.
-// Проект — это то же имя, что профиль фабрики и папка базы маршрутов (routes/<id>).
-// Пути фабричного проекта показываются из его bash-профиля (единственный источник,
-// тут они read-only); у кокпитного проекта пути редактируются здесь и живут в prefs.
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { api } from '../shared/api-client.js';
-import { alertDialog } from '../shared/ui/confirm.js';
-import HelpTip from '../shared/ui/HelpTip.vue';
-
-const router = useRouter();
-const projects = ref([]);
-const loading = ref(true);
-const error = ref('');
-const newId = ref('');
-const creating = ref(false);
-// Редактор путей: { id, repos: [{key, dir}], saving, msg } — открыт для одного проекта.
-const edit = ref(null);
-
-const HELP = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта, заведённого здесь, пути хранятся в кокпите.';
-
-async function load() {
-  loading.value = true; error.value = '';
-  try { projects.value = (await api.get('/api/projects')).projects || []; }
-  catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
-}
-onMounted(load);
-
-async function create() {
-  const id = newId.value.trim();
-  if (!id) return;
-  creating.value = true;
-  try {
-    await api.post('/api/profiles', { id });
-    newId.value = '';
-    await load();
-    // Свежезаведённому проекту сразу открываем редактор путей — ради них он и заводился.
-    const p = projects.value.find((x) => x.id === id);
-    if (p) startEdit(p);
-  } catch (e) { alertDialog(`Не удалось создать проект: ${e.message}`); }
-  finally { creating.value = false; }
-}
-
-// Пути правятся у кокпитных проектов И у фабричных БЕЗ путей в профиле (кокпитный фолбэк):
-// сервер в этом случае PUT принимает, прятать кнопку нечестно. Фабричные пути — read-only.
-function canEdit(p) { return !p.factory || !p.repos.some((r) => r.from === 'factory'); }
-
-function startEdit(p) {
-  edit.value = {
-    id: p.id,
-    repos: p.repos.length ? p.repos.map((r) => ({ key: r.key, dir: r.dir })) : [{ key: '', dir: '' }],
-    saving: false,
-    msg: '',
-  };
-}
-function addRow() { edit.value?.repos.push({ key: '', dir: '' }); }
-function delRow(i) { edit.value?.repos.splice(i, 1); }
-
-async function save() {
-  if (!edit.value || edit.value.saving) return;
-  const repos = edit.value.repos
-    .map((r) => ({ key: r.key.trim(), dir: r.dir.trim() }))
-    .filter((r) => r.key || r.dir);
-  edit.value.saving = true; edit.value.msg = '';
-  try {
-    await api.put(`/api/projects/${edit.value.id}`, { repos });
-    edit.value = null;
-    await load();
-  } catch (e) {
-    edit.value.msg = e.message;
-    edit.value.saving = false;
-  }
-}
-
-// Клик по схеме ведёт в «Маршруты» с уже выбранным проектом: раздел читает выбор
-// из localStorage (тот же ключ, что у переключателя проектов).
-function toRoutes(id) {
-  localStorage.setItem('cockpit-project', id);
-  router.push('/routes');
-}
-function toCode(id) {
-  localStorage.setItem('cockpit-project', id);
-  router.push('/code');
-}
-</script>
-
 <template>
-  <div class="page">
-    <p class="hint">
-      Проект = имя + пути репозиториев на диске; схемы конвейера привязаны к нему по имени.
-      <HelpTip :text="HELP" />
-    </p>
-
-    <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Загрузка…</div>
-
-    <template v-else>
-      <div class="cards">
-        <section v-for="p in projects" :key="p.id" class="card">
-          <header class="chead">
-            <span class="cname mono">{{ p.id }}</span>
-            <span class="src" :class="{ fab: p.factory }">{{ p.factory ? 'профиль фабрики' : 'кокпит' }}</span>
-          </header>
-
-          <!-- Репозитории -->
-          <div v-if="edit?.id !== p.id" class="repos">
-            <div v-if="!p.repos.length" class="muted">Пути репозиториев не заданы</div>
-            <div v-for="r in p.repos" :key="r.key" class="repo">
-              <span class="rkey mono">{{ r.key }}</span>
-              <span class="rdir mono" :title="r.dir">{{ r.dir }}</span>
-              <span class="dot" :class="r.exists ? 'ok' : 'no'" :title="r.exists ? 'есть на диске' : 'нет на диске'"></span>
-            </div>
-          </div>
-
-          <!-- Редактор путей (кокпитные проекты и фабричные без путей в профиле) -->
-          <div v-else class="editbox">
-            <div v-for="(r, i) in edit.repos" :key="i" class="erow">
-              <input v-model="r.key" class="ekey mono" placeholder="be" title="Метка репозитория (be, fe…)" />
-              <input v-model="r.dir" class="edir mono" placeholder="/home/…/Workspace/проект/be" title="Абсолютный путь к корню git-репозитория" />
-              <button class="act" title="Убрать строку" @click="delRow(i)">✕</button>
-            </div>
-            <div class="ebtns">
-              <button class="act" @click="addRow">+ репозиторий</button>
-              <span class="grow"></span>
-              <span v-if="edit.msg" class="emsg">{{ edit.msg }}</span>
-              <button class="act" @click="edit = null">Отмена</button>
-              <button class="act pri" :disabled="edit.saving" @click="save">{{ edit.saving ? 'Сохраняю…' : 'Сохранить' }}</button>
-            </div>
-          </div>
-
-          <!-- Схемы конвейера проекта -->
-          <div class="routes">
-            <span class="muted">Схемы:</span>
-            <template v-if="p.routes.length">
-              <button v-for="r in p.routes" :key="r" class="rchip mono" title="Открыть в «Маршрутах»" @click="toRoutes(p.id)">{{ r }}</button>
-            </template>
-            <span v-else class="muted">нет</span>
-          </div>
-
-          <footer class="cfoot">
-            <button v-if="canEdit(p) && edit?.id !== p.id" class="act" @click="startEdit(p)">Пути…</button>
-            <HelpTip v-else-if="!canEdit(p)" text="Пути задаёт профиль фабрики (PROFILE_TRIAGE_REPOS в profiles/<имя>/profile.sh) — здесь они только показываются." />
-            <span class="grow"></span>
-            <button v-if="p.repos.length" class="act" @click="toCode(p.id)">Код →</button>
-          </footer>
-        </section>
-
-        <!-- Новый проект -->
-        <section class="card newcard">
-          <header class="chead"><span class="cname">Новый проект</span></header>
-          <p class="muted sm">Появится в «Маршрутах» и здесь; пути репозиториев задаются после создания.</p>
-          <div class="erow">
-            <input v-model="newId" class="edir mono" placeholder="id: строчные латиница/цифры/-/_" @keyup.enter="create" />
-            <button class="act pri" :disabled="creating || !newId.trim()" @click="create">{{ creating ? '…' : 'Создать' }}</button>
-          </div>
-        </section>
+  <div class="page projects ui-page ui-workspace" data-ui-workspace>
+    <UiInlineMessage v-if="registrationDeleted" tone="warning">
+      Регистрация проекта удалена.
+    </UiInlineMessage>
+    <div ref="workspace" class="workspace" :class="{ 'single-pane': !splitView }">
+      <!--
+        На широком экране список и паспорт стоят рядом: так видно, куда вернёшься.
+        На узком остаётся одна область, и обратно ведёт кнопка «Проекты».
+      -->
+      <div v-show="listVisible" class="pane list-pane">
+        <ProjectList
+          :items="store.items"
+          :loading="store.loading"
+          :error="store.error"
+          :selected-id="creating ? '' : openedId"
+          @open="openProject"
+          @retry="retry"
+        >
+          <template #actions>
+            <UiButton
+              v-if="!creating"
+              data-role="project-create"
+              data-context="workspace-toolbar"
+              variant="ghost"
+              aria-label="Новый проект"
+              v-tooltip="'Новый проект'"
+              @click="createProject"
+            >
+              <template #leading><ProjectIcon name="plus" /></template>Новый
+            </UiButton>
+          </template>
+        </ProjectList>
       </div>
-    </template>
+
+      <section v-if="formVisible" class="pane form-pane" data-role="project-form">
+        <UiPaneHeader inset="content">
+          <template v-if="!splitView" #navigation>
+            <UiButton variant="ghost" data-context="workspace-toolbar"
+              data-role="project-back" @click="backToList">
+              <template #leading><ProjectIcon name="back" /></template>Проекты
+            </UiButton>
+          </template>
+          <template #title><h2>{{ formTitle }}</h2></template>
+          <template v-if="!creating && currentDetail" #meta>
+            <span class="project-status">
+              <span :class="['status-dot', { archived: currentDetail.archivedAt }]" />
+              {{ currentDetail.archivedAt ? 'В архиве' : 'Активный' }}
+            </span>
+          </template>
+          <template v-if="!creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted" #actions>
+            <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
+              aria-label="Чат с проектом" :disabled="!chat.loaded" @click="openChat">
+              <template #leading><ProjectIcon name="chat" /></template>
+              <span class="chat-full">Чат с проектом</span><span class="chat-short">Чат</span>
+            </UiButton>
+          </template>
+        </UiPaneHeader>
+
+        <div class="form-content">
+          <UiInlineMessage
+            v-if="!chat.loaded && !creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted"
+            :tone="chat.loadError ? 'warning' : 'neutral'"
+          >
+            <template v-if="chat.loadError">
+              <strong>{{ t('core.chatListLoadFailed') }}</strong>
+              <div>{{ resolveUiText(chat.loadErrorMessage || '') }}</div>
+              <UiButton :disabled="chat.loading" @click="chat.retryLoad()">
+                {{ t('core.chatListRetry') }}
+              </UiButton>
+            </template>
+            <div v-if="!chat.loadError || chat.loading">{{ t('core.chatListLoading') }}</div>
+            <div>{{ t('core.chatStoreNotLoaded') }}</div>
+          </UiInlineMessage>
+          <ProjectForm
+            v-if="currentDraft && store.draft"
+            v-model="store.draft"
+            :detail="creating ? null : currentDetail"
+            :creating="creating"
+            :saving="saving"
+            :dirty="dirty"
+            :server-errors="fieldErrors"
+            :checks="store.checks"
+            :busy="lifecycleBusy"
+            :readonly="registrationDeleted"
+            :lifecycle-failure="lifecycleFailure"
+            :dependencies="store.dependencies"
+            @save="submit"
+            @cancel="cancelChanges"
+            @check="check"
+            @select-repo="selectRepo"
+            @open-routes="openRoutes"
+            @archive="archive"
+            @restore="restore"
+            @remove="remove"
+            @retry-dependencies="retryDependencies"
+            @open-rules="openRules"
+          >
+            <template #notices>
+              <div
+                v-if="store.error && !store.conflict && saveFailure !== 'exists'"
+                class="form-notice"
+                role="alert"
+              >
+                <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
+                <UiButton
+                  v-if="!creating && !currentDetail"
+                  data-role="project-detail-retry"
+                  @click="retryProject"
+                >
+                  Повторить
+                </UiButton>
+              </div>
+              <ProjectConflict
+                v-if="currentDraft && store.conflict"
+                class="form-notice"
+                :conflict="store.conflict"
+                :busy="saving"
+                @reload="reloadFromServer"
+                @overwrite="overwriteServer"
+              />
+
+              <div v-if="saveFailure === 'exists'" class="form-notice" data-role="project-save-failure">
+                <UiInlineMessage tone="warning">
+                  <p class="sub">Проект с таким идентификатором уже есть. Правки не потеряны.</p>
+                  <UiButton data-role="project-open-found" variant="text" @click="openFound">
+                    Открыть найденный проект
+                  </UiButton>
+                </UiInlineMessage>
+              </div>
+
+            </template>
+          </ProjectForm>
+          <div v-else class="form-notice">
+            <template v-if="store.error">
+              <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
+              <UiButton v-if="!creating" data-role="project-detail-retry" @click="retryProject">
+                Повторить
+              </UiButton>
+            </template>
+            <UiLoadingState v-else label="Загрузка проекта…" variant="document">
+              <div class="passport-loading">
+                <UiSkeletonLayout layout="form" :header="false" />
+              </div>
+            </UiLoadingState>
+          </div>
+        </div>
+      </section>
+
+      <section
+        v-else-if="splitView && (store.items.length || (!store.loading && !store.error))"
+        class="welcome"
+      >
+        <div class="welcome-symbol" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.4">
+            <rect x="8" y="10" width="32" height="28" rx="5" />
+            <path d="M8 19h32M19 19v19M24 25h10M24 30h7" />
+          </svg>
+        </div>
+        <h2>{{ store.items.length ? 'Выберите проект' : 'Создайте первый проект' }}</h2>
+        <p>{{ store.items.length
+          ? 'Здесь будут его настройки, репозитории и связи с фабрикой.'
+          : 'Объедините рабочие копии кода под одним названием.' }}</p>
+        <UiButton variant="outline" @click="createProject">Создать проект</UiButton>
+      </section>
+    </div>
   </div>
 </template>
 
+<script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
+// Раздел «Проекты»: список паспортов слева, паспорт открытого проекта справа.
+//
+// Страница — только каркас: она читает адрес (`/projects/:id?`, `?create=1`),
+// зовёт операции раздела и раскладывает две области по ширине окна. Ни сети,
+// ни правил формы здесь нет.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
+
+import {
+  UiButton,
+  UiInlineMessage,
+  UiPaneHeader,
+  confirmDialog,
+  vTooltip,
+  t,
+  resolveUiText,
+  UiLoadingState,
+} from '../ui';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useDockViewport } from '../shared/tools/viewport.ts';
+import { useChatStore } from '../stores/chat.ts';
+import {
+  archiveProject,
+  checkRepositories,
+  loadDependencies,
+  loadProject,
+  loadProjects,
+  restoreProject,
+  saveProject,
+  useProjectsStore,
+  watchProjects,
+} from '../actions/projects';
+import * as projectActions from '../actions/projects';
+import type { ProjectDetail } from '../../../shared/runtime/projectsContracts';
+import { createDraft, isDirty } from './projects/projectDraft';
+import ProjectConflict from './projects/ProjectConflict.vue';
+import ProjectForm from './projects/ProjectForm.vue';
+import ProjectList from './projects/ProjectList.vue';
+import ProjectIcon from './projects/ProjectIcon.vue';
+
+const route = useRoute();
+const router = useRouter();
+const store = useProjectsStore();
+const chat = useChatStore();
+const { dockCapable } = useDockViewport();
+const projectsContext = useUiContextSource('projects', { layer: 'page', active: false });
+
+const fieldErrors = ref<Array<{ path: string; message: string }>>([]);
+// Код отказа сохранения: по нему показывается «проект уже есть» и расхождение ревизий.
+const saveFailure = ref('');
+const saving = ref(false);
+// Операция жизненного цикла: кнопки архива и возврата выключены на её время,
+// а отказ сервера показывается рядом с ними текстом.
+const lifecycleBusy = ref(false);
+const lifecycleFailure = ref('');
+const registrationDeleted = ref(false);
+const removedDetail = ref<ProjectDetail | null>(null);
+// Выбранный человеком репозиторий: живёт до конца открытого паспорта.
+const selectedRepo = ref('');
+const workspace = ref<HTMLElement | null>(null);
+const workspaceWidth = ref(Number.POSITIVE_INFINITY);
+let workspaceObserver: ResizeObserver | null = null;
+
+// Адрес — единственный источник того, что открыто: прямая ссылка на паспорт
+// и возврат «назад» в браузере обязаны работать одинаково.
+const openedId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''));
+const creating = computed(() => route.query.create === '1');
+const formVisible = computed(() => creating.value || openedId.value !== '');
+const splitView = computed(() => dockCapable.value && workspaceWidth.value >= 760);
+const listVisible = computed(() => splitView.value || !formVisible.value);
+const currentDetail = computed(() => {
+  const detail = store.opened ?? removedDetail.value;
+
+  return detail?.id === openedId.value ? detail : null;
+});
+const currentDraft = computed(() => creating.value || store.draft?.id === openedId.value);
+const formTitle = computed(() => (
+  creating.value ? 'Новый проект' : currentDetail.value?.title || openedId.value
+));
+
+/**
+ * Чат запоминает явный проект и выбранный репозиторий паспорта.
+ * Рабочую папку перед первым сохранением проверяет общий серверный resolver.
+ */
+async function openChat() {
+  await chat._load();
+
+  if (!chat.loaded) {
+    return;
+  }
+
+  const id = chat.newSession({
+    workdir: {
+      kind: 'project',
+      projectId: openedId.value,
+      repoKey: selectedRepo.value || null
+    },
+    title: `Проект · ${formTitle.value}`,
+  });
+
+  if (!id) {
+    return;
+  }
+
+  await router.push('/chats');
+}
+
+const snapshot = computed(() => (
+  store.opened ? createDraft(store.opened)
+    : removedDetail.value ? createDraft(removedDetail.value) : null
+));
+
+// Правки относительно снимка: один ответ и для кнопки сохранения, и для защиты ухода.
+// У нового проекта снимка нет — правкой считается всё, что человек уже назвал.
+const dirty = computed(() => {
+  if (!store.draft) {
+    return false;
+  }
+  if (!snapshot.value) {
+    return Boolean(store.draft.id.trim() || store.draft.title.trim());
+  }
+
+  return isDirty(store.draft, snapshot.value);
+});
+
+let pageGeneration = 0;
+
+watch(openedId, (id) => {
+  pageGeneration += 1;
+
+  if (id) {
+    registrationDeleted.value = false;
+    removedDetail.value = null;
+  }
+
+  if (id && !creating.value) {
+    void loadProject(id);
+    void loadDependencies(id);
+  }
+}, { immediate: true, flush: 'sync' });
+
+// Удаление приходит и до первого паспорта: адрес сверяется с реактивным запретом.
+// Загруженный снимок нужен только для сохранения локальных правок в режиме чтения.
+watch([
+  () => store.opened,
+  openedId,
+  () => store.deletedIds?.has(openedId.value) === true,
+], ([detail, id, deleted], [previous]) => {
+  if (!id || creating.value) {
+    return;
+  }
+
+  if (detail?.id === id && !deleted) {
+    registrationDeleted.value = false;
+    removedDetail.value = null;
+
+    return;
+  }
+
+  const retained = previous?.id === id ? previous
+    : removedDetail.value?.id === id ? removedDetail.value : null;
+
+  if (!deleted && !retained) {
+    return;
+  }
+
+  registrationDeleted.value = true;
+
+  if (retained && store.draft?.id === id && isDirty(store.draft, createDraft(retained))) {
+    removedDetail.value = retained;
+  } else {
+    if (store.draft?.id === id) {
+      store.setDraft(null);
+    }
+
+    void router.replace('/projects');
+  }
+}, { immediate: true });
+
+// Форма создания начинается с пустого черновика: его же правит человек.
+watch(creating, (value) => {
+  if (value) {
+    store.setOpened(null);
+    store.setDraft(createDraft(null));
+    store.setConflict(null);
+    saveFailure.value = '';
+  }
+}, { immediate: true });
+
+/**
+ * Уход со страницы с несохранёнными правками: спрашиваем один раз и одинаково —
+ * и при переходе по ссылке, и при смене открытого проекта в адресе.
+ */
+async function canLeave(): Promise<boolean> {
+  if (!dirty.value) {
+    return true;
+  }
+
+  return confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+}
+
+onBeforeRouteLeave(() => canLeave());
+onBeforeRouteUpdate(() => canLeave());
+
+// Закрытие вкладки браузер подтверждает своим диалогом: текст ему не передать,
+// поэтому важно само наличие обработчика — и важно снять его, когда правок нет.
+function beforeUnload(event: BeforeUnloadEvent): void {
+  event.preventDefault();
+  event.returnValue = '';
+}
+
+watch(dirty, (value) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (value) {
+    window.addEventListener('beforeunload', beforeUnload);
+  } else {
+    window.removeEventListener('beforeunload', beforeUnload);
+  }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', beforeUnload);
+  workspaceObserver?.disconnect();
+});
+
+// В UI-контекст уходит только выбор человека: id открытого проекта и — если он
+// выбирал репозиторий по умолчанию — ключ этого репозитория. Путей здесь нет:
+// `dir` — машинная конкретика, и в чат она не попадает. Форма создания ничего
+// не публикует: открытого паспорта у неё ещё нет.
+watch([() => store.opened?.id ?? '', selectedRepo], ([id, repo]) => {
+  if (!id || creating.value) {
+    projectsContext.blur();
+
+    return;
+  }
+
+  projectsContext.focus({ details: { project: id, repo: repo || undefined } });
+}, { immediate: true });
+
+onMounted(() => {
+  // Док может сузить страницу при широком окне: две колонки зависят и от её реальной ширины.
+  if (workspace.value && typeof ResizeObserver === 'function') {
+    workspaceObserver = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) {
+        workspaceWidth.value = entry.contentRect.width;
+      }
+    });
+    workspaceObserver.observe(workspace.value);
+  }
+
+  watchProjects();
+  void loadProjects();
+});
+
+/**
+ * Сохранение паспорта. Подсказки сервера по полям остаются здесь и уходят в форму:
+ * она показывает их там же, где свои, — у того поля, о котором говорит сервер.
+ */
+async function submit(): Promise<void> {
+  const draft = store.draft;
+
+  if (!draft || saving.value || lifecycleBusy.value || registrationDeleted.value) {
+    return;
+  }
+
+  saving.value = true;
+  fieldErrors.value = [];
+  saveFailure.value = '';
+
+  try {
+    const result = await saveProject(creating.value ? null : openedId.value, draft);
+
+    fieldErrors.value = result.fieldErrors;
+    saveFailure.value = result.ok ? '' : result.error;
+
+    if (result.ok && creating.value && store.opened) {
+      await router.push(`/projects/${store.opened.id}`);
+    }
+  } finally {
+    saving.value = false;
+  }
+}
+
+/**
+ * «Перечитать серверную версию»: черновик уступает серверному снимку, поэтому
+ * спрашиваем подтверждение — правки после этого не вернуть.
+ */
+async function reloadFromServer(): Promise<void> {
+  const confirmed = await confirmDialog(
+    'Перечитать серверную версию? Несохранённые правки будут потеряны.',
+    { okText: 'Перечитать' },
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const id = openedId.value;
+
+  store.setConflict(null);
+  saveFailure.value = '';
+  fieldErrors.value = [];
+
+  if (id) {
+    await loadProject(id);
+  }
+}
+
+/**
+ * «Сохранить мой черновик поверх свежей ревизии»: пишем ровно с той ревизией,
+ * которую сервер назвал в отказе. Если и она устарела, конфликт покажется снова.
+ */
+async function overwriteServer(): Promise<void> {
+  const draft = store.draft;
+
+  if (!draft || saving.value || lifecycleBusy.value || registrationDeleted.value) {
+    return;
+  }
+
+  saving.value = true;
+  fieldErrors.value = [];
+
+  try {
+    const result = await saveProject(openedId.value, draft, {
+      expectedRevision: store.conflict?.currentRevision ?? store.opened?.revision ?? 0,
+    });
+
+    fieldErrors.value = result.fieldErrors;
+    saveFailure.value = result.ok ? '' : result.error;
+  } finally {
+    saving.value = false;
+  }
+}
+
+/**
+ * Архив и возврат из архива. Ревизия — та, что у открытого паспорта; отказ (например,
+ * живые правила Telegram) показывается текстом, а сводка связей перечитывается, чтобы
+ * человек увидел, что именно помешало.
+ */
+async function changeLifecycle(action: 'archive' | 'restore'): Promise<void> {
+  const id = openedId.value;
+  const revision = store.opened?.revision;
+
+  if (!id || revision === undefined || lifecycleBusy.value) {
+    return;
+  }
+
+  lifecycleBusy.value = true;
+  lifecycleFailure.value = '';
+
+  try {
+    const result = action === 'archive'
+      ? await archiveProject(id, { expectedRevision: revision })
+      : await restoreProject(id, { expectedRevision: revision });
+
+    lifecycleFailure.value = result.ok ? '' : result.message;
+  } finally {
+    lifecycleBusy.value = false;
+  }
+}
+
+/**
+ * Общее подтверждение относится только к регистрации: файлы остаются на диске.
+ * Busy выставляется до диалога, поэтому повторное нажатие не запускает второй DELETE.
+ */
+async function remove(): Promise<void> {
+  const detail = store.opened;
+  const generation = pageGeneration;
+
+  if (!detail?.archivedAt || dirty.value || lifecycleBusy.value || saving.value) {
+    return;
+  }
+
+  lifecycleBusy.value = true;
+  lifecycleFailure.value = '';
+
+  try {
+    const confirmed = await confirmDialog(
+      `Удалить регистрацию «${detail.title}»? Файлы проекта останутся на диске.`,
+      { okText: 'Удалить регистрацию' },
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await projectActions.removeProject(detail.id, { expectedRevision: detail.revision });
+
+    if (generation !== pageGeneration || openedId.value !== detail.id) {
+      return;
+    }
+
+    lifecycleFailure.value = result.ok ? '' : result.message;
+
+    if (result.ok) {
+      if (store.draft?.id === detail.id && isDirty(store.draft, createDraft(detail))) {
+        removedDetail.value = detail;
+        registrationDeleted.value = true;
+
+        return;
+      }
+
+      store.setDraft(null);
+      await router.replace('/projects');
+    }
+  } finally {
+    lifecycleBusy.value = false;
+  }
+}
+
+function retryDependencies(): void {
+  void loadDependencies(openedId.value);
+}
+
+function archive(): void {
+  void changeLifecycle('archive');
+}
+
+function restore(): void {
+  void changeLifecycle('restore');
+}
+
+function openRules(path: string): void {
+  if (path) {
+    void router.push(path);
+  }
+}
+
+function openFound(): void {
+  const id = store.draft?.id ?? '';
+
+  if (id) {
+    openProject(id);
+  }
+}
+
+function check(dirs: string[]): void {
+  void checkRepositories(dirs);
+}
+
+function openRoutes(): void {
+  void router.push('/routes');
+}
+
+function selectRepo(key: string): void {
+  selectedRepo.value = key;
+}
+
+function openProject(id: string): void {
+  fieldErrors.value = [];
+  selectedRepo.value = '';
+  void router.push(`/projects/${id}`);
+}
+
+function backToList(): void {
+  void router.push('/projects');
+}
+
+function createProject(): void {
+  void router.push({ path: '/projects', query: { create: '1' } });
+}
+
+/**
+ * Явная отмена возвращает паспорт к загруженному снимку без запроса к серверу.
+ * Общий черновик и выбранный для чата репозиторий сбрасываются вместе.
+ */
+function cancelChanges(): void {
+  if (saving.value) {
+    return;
+  }
+
+  store.setDraft(createDraft(creating.value ? null : currentDetail.value));
+  fieldErrors.value = [];
+  saveFailure.value = '';
+  selectedRepo.value = '';
+}
+
+function retry(): void {
+  void loadProjects();
+}
+
+function retryProject(): void {
+  void loadProject(openedId.value);
+  void loadDependencies(openedId.value);
+}
+</script>
+
 <style scoped>
-.page { max-width: 1100px; }
-.hint { margin: 0 0 16px; color: var(--ink-mid); font-size: 13px; display: flex; align-items: center; gap: 6px; }
-.err { color: var(--bad); margin-bottom: 12px; }
-.empty { color: var(--ink-mid); padding: 30px 0; text-align: center; }
-.muted { color: var(--ink-mid); font-size: 12.5px; }
-.sm { font-size: 12px; margin: 0 0 10px; }
-.grow { flex: 1; }
+.projects {
+  height: 100%;
+  min-height: 0;
+  container: projects-page / inline-size;
+}
 
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
-  display: flex; flex-direction: column; gap: 10px; }
-.newcard { border-style: dashed; background: none; }
-.chead { display: flex; align-items: center; gap: 10px; }
-.cname { font-size: 15px; font-weight: 650; }
-.src { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-mid); }
-.src.fab { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.workspace {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
 
-.repos { display: flex; flex-direction: column; gap: 5px; }
-.repo { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; }
-.rkey { flex: none; min-width: 26px; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--accent); font-size: 11.5px; }
-.rdir { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.dot.ok { background: var(--good); }
-.dot.no { background: var(--bad); }
+.workspace.single-pane {
+  grid-template-columns: minmax(0, 1fr);
+}
 
-.editbox { display: flex; flex-direction: column; gap: 7px; }
-.erow { display: flex; align-items: center; gap: 7px; }
-.erow input { padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface-2);
-  color: var(--ink); font-size: 12px; }
-.erow input:focus { outline: none; border-color: var(--accent); }
-.ekey { width: 58px; flex: none; }
-.edir { flex: 1; min-width: 0; }
-.ebtns { display: flex; align-items: center; gap: 7px; }
-.emsg { color: var(--bad); font-size: 11.5px; }
+.pane {
+  min-width: 0;
+  min-height: 0;
+}
 
-.routes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.rchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 999px;
-  padding: 2px 10px; font-size: 11.5px; cursor: pointer; }
-.rchip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.list-pane {
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
 
-.cfoot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
-.act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 4px 11px; font-size: 12.5px; cursor: pointer; flex: none; }
-.act:hover { color: var(--ink); border-color: var(--line-2); }
-.act.pri { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.act:disabled { opacity: .5; cursor: default; }
+.single-pane .list-pane {
+  border-right: 0;
+}
+
+.form-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  container: project-detail / inline-size;
+}
+
+.project-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-round);
+  background: var(--good);
+}
+
+.status-dot.archived {
+  background: var(--ink-low);
+}
+
+.form-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.form-notice {
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
+}
+
+.form-content > .form-notice {
+  padding: 20px;
+  overflow: auto;
+}
+
+.passport-loading {
+  --skeleton-form-columns: var(--workspace-label-column) minmax(0, 1fr);
+  --skeleton-form-column-gap: var(--workspace-column-gap);
+  max-width: calc(940px - var(--workspace-selection-column) - var(--workspace-actions-column)
+    - 2 * var(--workspace-column-gap));
+  width: calc(100% - var(--workspace-selection-column) - var(--workspace-actions-column)
+    - 2 * var(--workspace-column-gap));
+}
+
+.passport-loading :deep(.ui-skeleton-layout__copy) {
+  grid-template-columns: var(--skeleton-form-columns);
+  column-gap: var(--skeleton-form-column-gap);
+}
+
+@container project-detail (max-width: 660px) {
+  .passport-loading {
+    width: 100%;
+  }
+}
+
+@container project-detail (max-width: 480px) {
+  .passport-loading {
+    --skeleton-form-columns: minmax(0, 1fr);
+  }
+
+  .form-content > .form-notice:has(.passport-loading) {
+    padding: 16px 12px;
+  }
+}
+
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  background: var(--surface);
+}
+
+.welcome-symbol {
+  color: var(--accent);
+}
+
+.welcome-symbol svg {
+  width: 40px;
+  height: 40px;
+}
+
+.welcome h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.welcome p {
+  max-width: 340px;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+
+.chat-short {
+  display: none;
+}
+
+@container project-detail (max-width: 320px) {
+  .chat-full {
+    display: none;
+  }
+
+  .chat-short {
+    display: inline;
+  }
+
+}
 </style>

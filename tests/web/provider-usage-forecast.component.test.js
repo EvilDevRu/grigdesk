@@ -1,0 +1,144 @@
+// Блок прогноза во всплывашке исполнителя: темп и вердикт по полосам;
+// у исполнителя без данных блока нет.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
+import {
+  barRowOf,
+  idleRow,
+  momentOf,
+} from '../../web/src/features/providers/usageForecastText.ts';
+
+const NOW = new Date(2026, 8, 15, 12, 0).getTime();
+
+const STORE_STUB = `
+  export const useUsageForecastStore = () => globalThis.__usageForecastStore;
+`;
+const WATCH_STUB = `
+  export const watchUsageForecast = () => { globalThis.__usageForecastWatched += 1; };
+`;
+
+function bar(overrides = {}) {
+  return {
+    providerId: 'codex',
+    barKey: 'codex:primary',
+    label: 'Сессия (5ч)',
+    pct: 63,
+    resetsAt: new Date(2026, 8, 19, 18, 30).toISOString(),
+    ratePerHour: 6.2,
+    spanMinutes: 120,
+    exhaustAt: new Date(2026, 8, 15, 18, 0).toISOString(),
+    verdict: 'short',
+    sampledAt: new Date(NOW).toISOString(),
+    windowMinutes: 300,
+    averagePerHour: null,
+    projectedPct: null,
+    basis: 'current',
+    ...overrides,
+  };
+}
+
+test('ряды прогноза: момент, давность, темп с вердиктом и стоящий расход', () => {
+  assert.equal(momentOf(new Date(2026, 8, 15, 18, 0).toISOString(), NOW), 'сегодня 18:00');
+  assert.equal(momentOf(new Date(2026, 8, 14, 15, 9).toISOString(), NOW), 'вчера 15:09');
+  assert.equal(momentOf(new Date(2026, 8, 12, 15, 9).toISOString(), NOW), '12 сен 15:09');
+  assert.equal(momentOf(null, NOW), '');
+
+  assert.deepEqual(barRowOf(bar(), NOW), {
+    key: 'codex:primary',
+    label: 'Сессия (5ч)',
+    value: '6.2 %/ч',
+    tone: 'bad',
+    sub: { label: '100 % — сегодня 18:00', text: 'до сброса не хватит', tone: 'bad' },
+  });
+  assert.deepEqual(barRowOf(bar({ verdict: 'enough', ratePerHour: 12 }), NOW).sub, {
+    label: '100 % — сегодня 18:00',
+    text: 'до сброса хватит',
+    tone: 'ok',
+  });
+  assert.equal(barRowOf(bar({ verdict: 'idle', ratePerHour: 0, exhaustAt: null }), NOW), null);
+
+  // Неделя судится по среднему: справа средний темп, под ним ожидаемый процент и текущий темп.
+  const weekly = bar({
+    label: 'Неделя (7д)',
+    windowMinutes: 10_080,
+    basis: 'average',
+    averagePerHour: 0.58,
+    projectedPct: 97,
+    ratePerHour: 1.7,
+    verdict: 'enough',
+  });
+
+  assert.deepEqual(barRowOf(weekly, NOW), {
+    key: 'codex:primary',
+    label: 'Неделя (7д)',
+    value: 'в среднем 0.6 %/ч',
+    tone: 'warn',
+    sub: { label: 'к сбросу ~97 % · сейчас 1.7 %/ч', text: 'впритык', tone: 'warn' },
+  });
+  assert.deepEqual(barRowOf(bar({ ...weekly, projectedPct: 62, ratePerHour: 0 }), NOW).sub, {
+    label: 'к сбросу ~62 % · сейчас стоит',
+    text: 'до сброса хватит',
+    tone: 'ok',
+  });
+  assert.deepEqual(barRowOf(bar({ ...weekly, projectedPct: 212, verdict: 'short' }), NOW).sub, {
+    label: 'к сбросу ~212 % · сейчас 1.7 %/ч',
+    text: 'до сброса не хватит',
+    tone: 'bad',
+  });
+  assert.equal(barRowOf(bar({ verdict: 'unknown', ratePerHour: null, exhaustAt: null }), NOW), null);
+  assert.deepEqual(idleRow(), { key: 'idle', label: 'Темп', value: 'расход стоит', tone: 'muted', sub: null });
+});
+
+test('компонент показывает блок своему исполнителю и молчит у чужого', async (t) => {
+  const browser = await installUiBrowser(t);
+
+  globalThis.__usageForecastWatched = 0;
+  globalThis.__usageForecastStore = {
+    barsOf: (id) => (id === 'codex' ? [bar()] : []),
+  };
+
+  const [{ mount }, ProviderUsageForecast] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/features/providers/ProviderUsageForecast.vue'), {
+      stubs: {
+        '../../stores/usageForecast.ts': STORE_STUB,
+        '../../actions/usageForecast/watchUsageForecast.ts': WATCH_STUB,
+      },
+    }),
+  ]);
+
+  const codex = mount(ProviderUsageForecast, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { providerId: 'codex' },
+  });
+
+  t.after(() => codex.unmount());
+
+  assert.match(codex.text(), /Прогноз/);
+  assert.match(codex.text(), /5 часов\s*6.2 %\/ч/);
+  assert.match(codex.text(), /до сброса не хватит/);
+  assert.doesNotMatch(codex.text(), /Сброс окна|сбросил вендор/);
+  assert.doesNotMatch(codex.text(), /расход стоит/);
+  assert.equal(codex.findAll('a').length, 0);
+  assert.equal(globalThis.__usageForecastWatched, 1);
+
+  const fake = mount(ProviderUsageForecast, { props: { providerId: 'fake' } });
+
+  t.after(() => fake.unmount());
+
+  assert.equal(fake.text(), '');
+
+  // Полосы есть, но все стоят: один общий ряд вместо трёх одинаковых.
+  globalThis.__usageForecastStore.barsOf = (id) => (id === 'claude'
+    ? [bar({ providerId: 'claude', verdict: 'idle', ratePerHour: 0, exhaustAt: null }),
+      bar({ providerId: 'claude', barKey: 'claude:5h', label: 'Сессия (5ч)', verdict: 'idle', ratePerHour: 0, exhaustAt: null })]
+    : []);
+  const claude = mount(ProviderUsageForecast, { props: { providerId: 'claude' } });
+
+  t.after(() => claude.unmount());
+
+  assert.equal(claude.text().match(/расход стоит/g).length, 1);
+});

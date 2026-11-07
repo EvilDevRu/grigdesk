@@ -1,0 +1,871 @@
+[data-ui-layer] {
+  z-index: var(--ui-layer-z);
+}
+
+.ui-tooltip,
+.ui-popover,
+.ui-floating-dialog {
+  position: fixed;
+  max-width: min(360px, calc(100vw - 20px));
+  max-height: min(560px, calc(100dvh - 20px));
+  border: 1px solid var(--line-2);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--overlay-popover-shadow), var(--shadow);
+}
+
+.ui-tooltip {
+  width: max-content;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.ui-tooltip__disabled-trigger {
+  display: inline-flex;
+  max-width: 100%;
+  border-radius: var(--control-radius);
+}
+
+.ui-tooltip__fallback-trigger,
+.ui-popover__fallback-trigger {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.ui-tooltip__disabled-trigger:focus-visible {
+  outline: 1px solid transparent;
+  box-shadow: var(--control-focus-ring);
+}
+
+.ui-popover,
+.ui-floating-dialog {
+  min-width: min(260px, calc(100vw - 20px));
+  padding: 10px;
+  overflow: auto;
+}
+
+/* Меню действий повторяют плоские строки UiSelect, включая опасные команды.
+   Нулевая ширина рамки не даёт общим hover/pressed-стилям кнопки вернуть обводку. */
+.ui-popover[role='menu'] {
+  padding: 4px;
+}
+
+.ui-popover .ui-button,
+.ui-button[data-role='chat-command'] {
+  border: 0;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']) {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: var(--surface-2);
+
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: max(32px, var(--toolbar-control-h));
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action'])
+  > .ui-button__content {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']):is(
+  :hover, :focus-visible, [aria-pressed='true'], [aria-checked='true']
+):not(:disabled):not([aria-disabled='true']) {
+  background: var(--surface-2);
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.ui-floating-dialog__header {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+/* Плитка продолжает топбар: её позиция и доступная высота приходят от UiPopover.
+   Skin живёт у общей поверхности, поскольку Teleport выносит её из AppShell. */
+.ui-popover.ui-topbar-panel {
+  width: min(352px, calc(100vw - 16px));
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  background: var(--topbar-panel);
+  box-shadow: none;
+  font-size: 12px;
+  line-height: 1.45;
+  overscroll-behavior: contain;
+}
+
+.ui-topbar-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ui-popover.ui-topbar-panel--wide {
+  width: min(1008px, calc(100vw - 16px));
+}
+
+.ui-topbar-panel--wide .ui-topbar-panel__body {
+  container-type: inline-size;
+}
+
+.ui-topbar-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ui-topbar-panel__meta,
+.ui-topbar-panel__actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.ui-topbar-panel__body {
+  min-width: 0;
+}
+
+.ui-topbar-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+/* Псевдоэлемент заполняет высоту полосы без изменения размеров кнопки и оси значков.
+   Отрицательный z-index остаётся внутри собственного stacking context триггера. */
+[data-ui-topbar-trigger] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-ui-topbar-trigger][aria-expanded='true']::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: var(--ui-topbar-trigger-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--ui-topbar-trigger-height, 100%);
+  background: var(--topbar-panel);
+  pointer-events: auto;
+}
+
+.ui-floating-dialog__body {
+  min-width: 0;
+}
+
+.ui-floating-dialog {
+  width: min(420px, calc(100vw - 20px));
+}
+
+.ui-floating-dialog.companion-floating-dialog {
+  width: min(390px, calc(100vw - 28px));
+  max-height: min(620px, calc(100dvh - 110px));
+  padding: 15px;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 88% 0,
+      color-mix(in srgb, var(--accent) 11%, transparent),
+      transparent 38%
+    ),
+    var(--surface);
+  box-shadow: 0 22px 62px #000c, inset 0 1px 0 #ffffff0d;
+}
+
+@media (max-width: 759px) {
+  .ui-floating-dialog.companion-floating-dialog {
+    width: calc(100vw - 20px);
+    max-height: min(66dvh, 570px);
+  }
+}
+
+@media (max-width: 430px) {
+  .ui-floating-dialog.companion-floating-dialog {
+    padding: 13px;
+    border-radius: 16px;
+  }
+}
+
+.ui-floating-dialog__title,
+.ui-dialog__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  font-weight: var(--panel-header-font-weight);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ui-floating-dialog__description,
+.ui-dialog__description {
+  margin: 4px 0 0;
+  color: var(--ink-mid);
+  font-size: 12.5px;
+}
+
+.ui-dialog__overlay,
+.ui-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(4px);
+}
+
+.ui-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, calc(100vw - 40px));
+  max-width: 100%;
+  max-height: calc(100dvh - 40px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--overlay-dialog-radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--overlay-dialog-shadow);
+}
+
+.ui-dialog--compact,
+.ui-dialog[data-size='compact'],
+.ui-dialog-overlay[data-size='compact'] .ui-dialog {
+  width: min(440px, calc(100vw - 40px));
+}
+
+.ui-dialog--content,
+.ui-dialog[data-size='content'],
+.ui-dialog-overlay[data-size='content'] .ui-dialog {
+  width: min(680px, calc(100vw - 40px));
+}
+
+/* Выбор каталога использует общую модальную оболочку и нижнюю панель телефона.
+   В низком окне тело прокручивается целиком, сохраняя доступ к поиску и вводу пути. */
+.ui-dialog-overlay .ui-dialog[data-role='workdir-picker'] {
+  width: min(480px, calc(100vw - 40px));
+}
+
+/* Создание задачи остаётся короткой формой: ширина поддерживает длину строки,
+   а действия живут в footer и доступны при прокрутке тела в низком окне. */
+.ui-dialog-overlay .ui-dialog[data-role='new-grigdesk-task'] {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] > .ui-dialog__description {
+  padding-top: 8px;
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] .ui-dialog__body {
+  padding-top: 24px;
+}
+
+/* Настройки драйверов используют каталог рядом с редактором и постоянные действия.
+   На узком экране общий полноэкранный диалог вмещает мобильный выбор драйвера. */
+.ui-dialog-overlay .ui-dialog[data-role='tracker-settings'] {
+  width: min(980px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='tracker-settings'] .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog[data-role='tracker-settings'] .ui-dialog__body {
+  padding-top: 22px;
+}
+
+/* Установщик трекеров сохраняет шапку и действия вне прокручиваемой формы.
+   На телефоне его размеры заменяет общая полноэкранная оболочка ниже. */
+.ui-dialog-overlay .ui-dialog[data-role='tracker-install'] {
+  width: min(640px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='tracker-install'] .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog[data-role='tracker-install'] .ui-dialog__body {
+  padding-top: 22px;
+}
+
+.ui-dialog[data-role='workdir-picker'][data-body-inset='false'] .ui-dialog__body {
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.ui-dialog--workspace,
+.ui-dialog[data-size='workspace'],
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog {
+  width: min(1480px, calc(100vw - 40px));
+  height: calc(100dvh - 40px);
+}
+
+/* Просмотр медиа: окно — сам экран. Поверхности, рамки и тени нет, затемнение глубже,
+   чтобы картинка читалась без отвлечения на интерфейс под ней. Поверхность прозрачна
+   для кликов: пустое место закрывает окно через затемнение, а потребитель включает
+   pointer-events только у своих панелей, картинки и кнопок. */
+.ui-dialog-overlay[data-size='media'] {
+  padding: 0;
+  background: rgb(4 6 9 / 93%);
+  backdrop-filter: blur(10px);
+}
+
+.ui-dialog-overlay[data-size='media'] .ui-dialog {
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+/* Шапка повторяет рабочую полосу задачи на всех размерах окна.
+   Подвал и прокрутка остаются отдельными областями общей модальной поверхности. */
+.ui-dialog__header,
+.ui-dialog__footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+}
+
+.ui-dialog__header {
+  min-width: 0;
+  min-height: calc(var(--toolbar-control-h) + var(--panel-header-inset-top)
+    + var(--panel-header-inset-bottom) + 1px);
+  padding: var(--panel-header-inset-top) 20px var(--panel-header-inset-bottom);
+  border-bottom: 1px solid var(--line);
+  background: var(--topbar);
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  font-weight: var(--panel-header-font-weight);
+  line-height: 18px;
+}
+
+.ui-dialog__header :is(h1, h2, h3) {
+  min-width: 0;
+  margin: 0;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  font-weight: var(--panel-header-font-weight);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog__footer {
+  padding: 14px 20px 18px;
+}
+
+.ui-dialog > .ui-dialog__description {
+  margin: 0;
+  padding: 4px 20px 0;
+}
+
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog__footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.ui-dialog-host__message,
+.ui-dialog-host__prompt,
+.ui-dialog-host__error {
+  margin: 0;
+}
+
+.ui-dialog-host__message {
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Длинная команда прокручивается внутри плашки: подтверждение не растягивается
+   на всю высоту экрана и сохраняет кнопки рядом с текстом. */
+.ui-dialog-host__code {
+  display: block;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Общие подтверждения короткие: значок без подложки, заголовок и строка пояснения как у окна
+   установки исполнителя; высота кнопок — в tokens.css. На телефоне окно остаётся карточкой. */
+.ui-dialog-host__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-dialog-host__icon {
+  --ui-dialog-host-icon: var(--accent);
+
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: color-mix(in srgb, var(--ui-dialog-host-icon) 78%, var(--ink));
+}
+
+.ui-dialog-host__icon[data-tone='danger'] {
+  --ui-dialog-host-icon: var(--bad);
+}
+
+.ui-dialog-host__glyph {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-dialog-host__heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog-host__subtitle {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.ui-dialog.ui-dialog-host .ui-dialog__body {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  padding-bottom: 0;
+}
+
+.ui-dialog.ui-dialog-host .ui-dialog__footer {
+  padding-top: 18px;
+  font-size: 13px;
+}
+
+.ui-dialog-host__prompt {
+  width: 100%;
+  min-height: 110px;
+}
+
+.ui-dialog-host__error {
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.ui-dialog-host__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-dialog__heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog__body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.ui-dialog[data-body-inset='false'] .ui-dialog__body {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ui-dialog-overlay[data-size='workspace']
+  .ui-dialog[data-role='pipeline-stage'] {
+  width: min(1240px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
+}
+
+.ui-dialog-overlay[data-size='workspace']
+  .ui-dialog[data-role='task-modal'] {
+  width: min(1240px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
+}
+
+.ui-dialog[data-role='pipeline-stage'] .ui-dialog__body,
+.ui-dialog[data-role='task-modal'] .ui-dialog__body {
+  flex-direction: column;
+}
+
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='settings-modal'] {
+  width: min(1120px, calc(100vw - 40px));
+  height: min(780px, calc(100dvh - 40px));
+}
+.ui-dialog[data-role='settings-modal'] .ui-dialog__footer {
+  padding: 11px 18px;
+  background: var(--sidebar);
+}
+
+/* Модалка плагина с блоком готовности: список приходит с сервера после открытия,
+   и высота по содержимому прыгала бы. Высота задана по окну, тело прокручивается. */
+.ui-dialog[data-role='plugin-settings'][data-setup='true'] {
+  height: min(920px, calc(100dvh - 40px));
+}
+
+/* Поиск версий, подготовка и итог меняют только прокручиваемое тело установки.
+   Размер окна и нижние действия остаются на месте, включая первый запрос current. */
+.ui-dialog[data-role='plugin-install-dialog'] {
+  height: min(520px, calc(100dvh - 40px));
+}
+
+/* Фазы, итог и раскрытый вывод установки меняют только прокручиваемое тело.
+   Постоянная высота удерживает окно и нижние действия на месте. */
+.ui-dialog[data-role='provider-install-dialog'] {
+  height: min(480px, calc(var(--app-viewport-height, 100dvh) - 40px));
+}
+
+/* Доступ, выпуск QR и подтверждение меняют только тело диалога телефона.
+   Высота и нижнее действие сохраняются с первого запроса до завершения привязки. */
+.ui-dialog[data-role='phone-connect'] {
+  height: min(720px, calc(100dvh - 40px));
+}
+
+.ui-dialog__footer {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.ui-layer-fade-enter-active,
+.ui-layer-fade-leave-active,
+.ui-dialog-fade-enter-active,
+.ui-dialog-fade-leave-active {
+  transition: opacity var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-layer-fade-enter-from,
+.ui-layer-fade-leave-to,
+.ui-dialog-fade-enter-from,
+.ui-dialog-fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 600px) {
+  /* Общая высота следует visualViewport: экранная клавиатура не перекрывает
+     footer настроек, карточки задачи или формы любого другого раздела. */
+  .ui-dialog-overlay,
+  .ui-dialog__overlay {
+    bottom: auto;
+    height: var(--app-viewport-height, 100dvh);
+  }
+
+  .ui-dialog { max-height: calc(var(--app-viewport-height, 100dvh) - 24px); }
+
+  /* UiDialog выставляет пустой boolean-атрибут. Проверяем наличие: сравнение с
+     'true' оставляло внешний отступ вокруг панели высотой в целый экран. */
+  .ui-dialog__overlay,
+  .ui-dialog-overlay[data-mobile-fullscreen] {
+    padding: 0;
+  }
+
+  .ui-dialog__overlay .ui-dialog,
+  .ui-dialog-overlay[data-mobile-fullscreen] .ui-dialog {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-width: 0;
+    border-radius: 0;
+  }
+
+  .ui-dialog__header {
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .ui-dialog__header,
+  .ui-dialog__footer,
+  .ui-dialog__body {
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+
+  .ui-dialog__footer {
+    padding-top: 8px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .ui-dialog__body {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  /* Телефонные диалоги используют ту же служебную полосу, что просмотр задачи.
+     Крупное название документа остаётся в теле, высота растёт при переносе шапки. */
+  .ui-dialog-overlay .ui-dialog .ui-dialog__header {
+    padding: var(--panel-header-inset-top) 12px var(--panel-header-inset-bottom);
+    padding-top: max(var(--panel-header-inset-top), env(safe-area-inset-top));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
+    background: var(--topbar);
+    color: var(--panel-header-title-color);
+    font-size: var(--panel-header-font-size);
+    font-weight: var(--panel-header-font-weight);
+    line-height: 18px;
+  }
+
+  .ui-dialog .ui-dialog__title,
+  .ui-dialog .ui-dialog__title :is(h1, h2, h3),
+  .ui-dialog-overlay .ui-dialog .ui-dialog__header :is(h1, h2, h3),
+  .ui-dialog-overlay .ui-dialog .ui-dialog__title .new-task-title {
+    min-width: 0;
+    margin: 0;
+    color: var(--panel-header-title-color);
+    font-size: var(--panel-header-font-size);
+    font-weight: var(--panel-header-font-weight);
+    line-height: 18px;
+  }
+
+  .ui-dialog .ui-dialog__title {
+    flex: 1;
+  }
+
+  .ui-dialog > .ui-dialog__description {
+    padding-top: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .ui-dialog-overlay[data-size='workspace']
+    .ui-dialog[data-role='pipeline-stage'],
+  .ui-dialog-overlay[data-size='workspace']
+    .ui-dialog[data-role='task-modal'],
+  .ui-dialog-overlay[data-size='workspace']
+    .ui-dialog[data-role='settings-modal'] {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-width: 0;
+    border-radius: 0;
+  }
+}
+
+/* Короткие действия машины остаются нижней панелью и используют общий modal stack. */
+@media (max-width: 600px) {
+  .ui-dialog-overlay[data-mobile-sheet] {
+    align-items: end;
+    padding: max(12px, env(safe-area-inset-top)) 0 0;
+  }
+
+  .ui-dialog-overlay[data-mobile-sheet] .ui-dialog {
+    width: 100%;
+    height: auto;
+    max-height: calc(var(--app-viewport-height, 100dvh) - max(12px, env(safe-area-inset-top)));
+    border-radius: 14px 14px 0 0;
+    border-bottom: 0;
+  }
+
+  .ui-dialog-overlay[data-mobile-sheet] .ui-dialog[data-role='workdir-picker'] {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-layer-fade-enter-active,
+  .ui-layer-fade-leave-active,
+  .ui-dialog-fade-enter-active,
+  .ui-dialog-fade-leave-active {
+    transition-duration: 0.01ms;
+  }
+}
+
+.ui-tooltip.ui-tooltip--plain {
+  white-space: pre-line;
+  overflow: hidden;
+}
+
+/* Слот заголовка машины занимает всю шапку, чтобы закрытие оставалось у правого края. */
+.ui-dialog:is(
+  [data-role='add-machine'],
+  [data-role='machine-actions'],
+  [data-role='workdir-picker']
+) .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* «Разделы» открываются рабочим окном, как просмотр задачи.
+   Поиск и группы прокручиваются в теле, закрытие всегда доступно в шапке. */
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='phone-sections'] {
+  width: min(680px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
+}
+
+.ui-dialog[data-role='phone-sections'] .ui-dialog__title {
+  flex: 1;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='phone-sections'] {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-width: 0;
+    border-radius: 0;
+  }
+}
+
+.ui-dialog[data-role='system-resources'] .ui-dialog__title {
+  flex: 1;
+  margin: 0;
+}
+
+.ui-dialog[data-role='system-resources'] .ui-dialog__body {
+  flex-direction: column;
+}
+
+.ui-dialog[data-role='system-resources'] .computer-resources-loading {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+}
+
+@media (min-width: 601px) {
+  .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='system-resources'] {
+    width: min(920px, calc(100vw - 40px));
+    height: min(640px, calc(100dvh - 40px));
+    max-height: min(640px, calc(100dvh - 40px));
+  }
+}
+
+/* Контекстное меню окна использует общую поверхность и палитру приложения.
+   Колонки иконок и сочетаний сохраняют одну ось для всех команд. */
+.ui-context-menu {
+  position: fixed;
+  width: max-content;
+  min-width: min(264px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--overlay-popover-shadow);
+}
+
+.ui-context-menu__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-context-menu__item:hover,
+.ui-context-menu__item.is-active,
+.ui-context-menu__item:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+
+.ui-context-menu__item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--ink-mid);
+}
+
+.ui-context-menu__item kbd {
+  margin-left: 16px;
+  color: var(--ink-mid);
+  font: inherit;
+  font-size: 11px;
+}
+
+.ui-context-menu__separator {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--line-2);
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/media/mediaContracts.ts",
+    "src/modules/media/**/*.ts",
+    "../tests/types/video-server-contract.test.mts"
+  ]
+}

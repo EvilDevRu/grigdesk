@@ -1,0 +1,1775 @@
+.ui-page {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+/* Панель задаёт общую геометрию разделов, каталогов и редакторов.
+   Слоты содержат семантические заголовки, состояния и настоящие controls экрана. */
+.ui-pane-header {
+  flex: none;
+  min-width: 0;
+  background: var(--topbar);
+  border-bottom: 1px solid var(--line);
+  container: ui-pane-header / inline-size;
+}
+
+.ui-pane-header[data-ui-host-actions] {
+  padding-right: var(--tool-dock-actions-space, 0px);
+}
+
+.ui-pane-header__layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: calc(var(--toolbar-control-h) + var(--panel-header-inset-top)
+    + var(--panel-header-inset-bottom));
+  padding: var(--panel-header-inset-top) 12px var(--panel-header-inset-bottom);
+}
+
+.ui-pane-header[data-inset='content'] .ui-pane-header__layout {
+  padding-left: 20px;
+}
+
+.ui-pane-header:is([data-ui-task-header], [data-ui-detail-header]) .ui-pane-header__layout {
+  padding-inline: 20px;
+}
+
+.ui-pane-header__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-pane-header__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.ui-pane-header__title {
+  min-width: 0;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  font-weight: var(--panel-header-font-weight);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ui-pane-header__title :is(h1, h2, h3) {
+  margin: 0;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  line-height: 18px;
+  font-weight: var(--panel-header-font-weight);
+}
+
+.ui-pane-header__meta {
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ui-pane-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--toolbar-control-h);
+  max-width: 100%;
+}
+
+/* Шапка остаётся на полной ширине, содержимое прокручивается под ней.
+   Одинаковые поля не зависят от наличия карточек или пустого состояния раздела. */
+.ui-workspace-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+.ui-workspace-page__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--page-gutter);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.ui-workspace-page__body > * {
+  flex-shrink: 0;
+}
+
+.ui-workspace-intro {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.ui-pane-header__navigation {
+  display: flex;
+}
+
+@container ui-pane-header (max-width: 480px) {
+  .ui-pane-header[data-inset='content'] .ui-pane-header__layout {
+    padding-left: 12px;
+  }
+
+  .ui-pane-header:is([data-ui-task-header], [data-ui-detail-header]) .ui-pane-header__layout {
+    padding-inline: 12px;
+  }
+
+  .ui-pane-header__navigation {
+    flex-basis: 100%;
+  }
+
+}
+
+.ui-workspace {
+  font-size: var(--workspace-text-size);
+  line-height: 20px;
+  color: var(--ink);
+}
+
+.ui-workspace-title {
+  margin: 0;
+  font-size: var(--workspace-title-size);
+  overflow-wrap: anywhere;
+}
+
+/* Группа отделяет рабочие поля от соседних задач, сохраняя компактную шапку панели.
+   Раскрываемые подгруппы используют тот же фон; закрытие не размонтирует содержимое. */
+.ui-workspace-section,
+.ui-workspace-disclosure {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.ui-workspace-section > .ui-pane-header {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.ui-workspace-section__body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.ui-workspace-disclosure > summary {
+  min-height: var(--control-height);
+  padding: calc((var(--control-height) - 20px) / 2) 10px;
+  border-radius: var(--radius-sm);
+  background: var(--sidebar);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.ui-workspace-disclosure > summary::marker {
+  color: var(--ink-mid);
+}
+
+.ui-workspace-disclosure > summary:hover {
+  background: var(--surface-2);
+}
+
+.ui-workspace-disclosure > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ui-workspace-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line-2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+/* В плоском списке раскрытие не добавляет вложенные рамки и новые оси отступов. */
+.ui-workspace-disclosure[data-context='workspace-inline'] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > summary {
+  padding-inline: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* Вложенные раскрытия наследуют поля родителя, а полоса у края страницы задаёт их сама.
+   Вертикальные поля summary центрируют текст и нативный маркер в сенсорной строке. */
+.ui-workspace-disclosure[data-inset='content'] > summary {
+  padding-inline: 12px;
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > summary:hover {
+  color: var(--accent);
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'][open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > .ui-workspace-section__body {
+  padding: 8px 0 0;
+}
+
+/* Справка — отдельный текстовый слой: цветная кромка и значок отличают её от формы.
+   Она не получает роль alert и не забирает внимание при изменении черновика. */
+.ui-workspace-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ui-workspace-guide > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.ui-workspace-guide strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ui-workspace-guide p {
+  margin: 4px 0 0;
+}
+
+.ui-workspace .ui-field__label {
+  color: var(--workspace-label-color);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.ui-workspace .ui-field__hint {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ui-workspace .ui-field__control {
+  display: grid;
+  align-content: start;
+}
+
+/* Одна ось подписей для обычных полей, репозиториев и справочных значений.
+   Привязку label, hint и error к полю по-прежнему обеспечивает UiField. */
+.ui-field[data-context='workspace-property'] {
+  display: grid;
+  grid-template-columns: var(--workspace-label-column) minmax(0, 1fr);
+  gap: 0 var(--workspace-column-gap);
+  align-items: start;
+}
+
+.ui-field[data-context='workspace-property'] > .ui-field__label {
+  grid-column: 1;
+  padding-top: 7px;
+}
+
+.ui-field[data-context='workspace-property'] > .ui-field__control {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ui-field[data-context='workspace-property'] > :is(.ui-field__error, .ui-field__hint) {
+  grid-column: 2;
+}
+
+.ui-field[data-context='workspace-property'][data-hint-inline='true'] {
+  align-items: center;
+}
+
+.ui-field[data-hint-inline='true'] > .ui-field__label {
+  padding-top: 0;
+}
+
+.ui-field[data-context='workspace-property'][data-hint-inline='true'] > .ui-field__hint {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.ui-field[data-hint-inline='true'] > .ui-field__control {
+  grid-row: 1 / span 2;
+}
+
+@container project-detail (min-width: 661px) {
+  .ui-field[data-context='workspace-repo'] > .ui-field__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+}
+
+@container project-detail (max-width: 480px) {
+  .ui-field[data-context='workspace-property'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .ui-field[data-context='workspace-property'] > .ui-field__label {
+    grid-row: 1;
+    padding: 0;
+  }
+
+  .ui-field[data-context='workspace-property'] > .ui-field__control {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .ui-field[data-context='workspace-property'] > :is(.ui-field__error, .ui-field__hint) {
+    grid-column: 1;
+  }
+
+  .ui-field[data-context='workspace-property'][data-hint-inline='true'] > .ui-field__hint {
+    grid-row: 1;
+    justify-self: end;
+  }
+
+}
+
+.ui-control-group,
+.ui-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-control-group[data-block='true'] > .ui-button,
+.ui-control-group[data-block='true'] > .ui-action-link,
+.ui-control-group[data-block='true'] > .ui-input,
+.ui-control-group[data-block='true'] > .ui-number-input,
+.ui-control-group[data-block='true'] > .ui-select,
+.ui-control-group--block > .ui-button,
+.ui-control-group--block > .ui-action-link,
+.ui-control-group--block > .ui-input,
+.ui-control-group--block > .ui-number-input,
+.ui-control-group--block > .ui-select-wrap {
+  flex: 1 1 0;
+}
+
+.ui-form-actions {
+  justify-content: flex-end;
+}
+
+/* Сегменты соединены общей рамкой: выбранный заполняет свою часть без внутренней плашки.
+   Низкая специфичность геометрии вкладок оставляет оформление навигационных полос их контекстам. */
+.ui-segmented-control,
+.ui-tabs,
+.ui-tabs__list {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--ground);
+}
+
+.ui-segmented-control > :where(.ui-toggle-button, .ui-button),
+.ui-tab {
+  height: calc(var(--control-height) - 2px);
+  min-height: calc(var(--control-height) - 2px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-segmented-control > :where(.ui-toggle-button, .ui-button) + :where(.ui-toggle-button, .ui-button),
+:where(.ui-tabs, .ui-tabs__list) > .ui-tab + :where(.ui-tab) {
+  border-inline-start: 1px solid var(--control-border);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):where(:first-child) {
+  border-start-start-radius: calc(var(--control-radius) - 1px);
+  border-end-start-radius: calc(var(--control-radius) - 1px);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):where(:last-child) {
+  border-start-end-radius: calc(var(--control-radius) - 1px);
+  border-end-end-radius: calc(var(--control-radius) - 1px);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):hover:where(:not(:disabled):not([aria-disabled='true'])) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-segmented-control .ui-toggle-button[aria-pressed='true'],
+.ui-segmented-control .ui-toggle-button.is-pressed,
+.ui-segmented-control > .ui-button[aria-pressed='true'],
+.ui-segmented-control > .ui-button.is-pressed,
+.ui-tab[aria-selected='true'],
+.ui-tab.is-active {
+  background: var(--surface-2);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+/* Внутренний фокус остаётся видимым и в прокручиваемом списке вкладок.
+   Его правило идёт после выбранного состояния, чтобы заливка не скрывала клавиатурный фокус. */
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):focus-visible {
+  outline: 2px solid var(--control-focus-color);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+/* Размер выбирается общим параметром, как у UiButton, и действует также на slot-кнопки.
+   Два пикселя внешней рамки входят в общую высоту 28 px на desktop и 44 px на touch. */
+.ui-segmented-control[data-size='compact'] > .ui-button {
+  height: auto;
+  min-height: calc(var(--toolbar-control-h) - 2px);
+  padding: 3px 7px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ui-tabs {
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ui-tabs__list {
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ui-tabs__panel {
+  min-width: 0;
+}
+
+/* Подписанные вкладки 3D занимают одну полосу в доке и в развёрнутой студии.
+   Общий UI-kit владеет состояниями control, экран задаёт только место навигации. */
+.ui-tabs[data-ui-studio-tabs] {
+  width: 100%;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 8px;
+  min-height: var(--control-height);
+  height: auto;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab:hover {
+  background: var(--surface);
+}
+
+/* Фильтры каталога переносятся целиком: различие между включёнными и выключенными
+   плагинами должно читаться и на узком экране, без многоточий в каждом варианте. */
+.ui-segmented-control[data-context='plugin-state-filter'] {
+  flex-wrap: wrap;
+}
+
+.ui-segmented-control[data-context='plugin-state-filter'] > .ui-button {
+  flex: 1 0 auto;
+}
+
+/* Источник и набор параметров могут переноситься внутри узкого дока.
+   Высота каждого действия по-прежнему принадлежит общей геометрии controls. */
+.ui-segmented-control[data-ui-studio-choice] {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.ui-segmented-control[data-ui-studio-choice] > .ui-button {
+  flex: 1 1 auto;
+}
+
+/* Шейдинг — компактный выбор в toolbar холста, с той же активной кнопкой UI-kit.
+   Это не меняет размер полей генерации и остальных segmented controls. */
+.ui-segmented-control[data-context='studio-view-mode'] {
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--ground);
+}
+
+.ui-segmented-control[data-context='studio-view-mode'] > .ui-button {
+  min-height: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Вкладки Docker занимают свою область рядом со сводкой.
+   Границу всей навигационной полосы задаёт её контейнер, а не каждый блок отдельно. */
+.ui-tabs[data-ui-docker-tabs] {
+  flex: none;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 4px;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab {
+  display: inline-flex;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+@container docker-panel (max-width: 560px) {
+  .ui-tabs[data-ui-docker-tabs] {
+    gap: 0;
+  }
+
+  .ui-tabs[data-ui-docker-tabs] > .ui-tab {
+    flex: 1 0 auto;
+    padding-inline: 9px;
+    gap: 5px;
+    font-size: 12px;
+  }
+}
+
+@container docker-panel (max-width: 360px) {
+  .ui-tabs[data-ui-docker-tabs] > .ui-tab {
+    flex-basis: 50%;
+  }
+}
+
+/* Вкладки браузера используют общую геометрию toolbar и отдельное закрытие.
+   Содержимое документа располагается под одной полосой, без рамки вокруг tablist. */
+.ui-tabs[data-ui-browser-tabs] {
+  display: flex;
+  width: max-content;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+  gap: 4px;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab] {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 140px;
+  max-width: 240px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-selected='true'] {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab]:hover {
+  background: var(--surface-2);
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-dragging='true'] {
+  opacity: 0.5;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-drop='before'] {
+  border-left-color: var(--accent);
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-drop='after'] {
+  border-right-color: var(--accent);
+}
+
+.ui-tabs[data-ui-browser-tabs] .ui-tab {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: var(--toolbar-control-h);
+  height: auto;
+  padding: 0 8px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  gap: 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.ui-tabs[data-ui-browser-tabs] .browser-tab-agent {
+  color: var(--accent);
+}
+
+.ui-tabs[data-ui-browser-tabs] .browser-tab-agent[data-agent-state='working'] {
+  animation: browser-agent-pulse 1.2s ease-in-out infinite;
+}
+
+.ui-tabs[data-ui-browser-tabs] .browser-tab-agent[data-agent-state='paused'] {
+  color: var(--ink-mid);
+  opacity: var(--control-disabled-opacity);
+}
+
+@keyframes browser-agent-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-tabs[data-ui-browser-tabs] .browser-tab-agent[data-agent-state='working'] {
+    animation: none;
+  }
+}
+
+.ui-tabs[data-ui-browser-tabs] .ui-icon-button {
+  flex: none;
+}
+
+.ui-choice-list__option {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-selectable-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-selectable-row.is-disabled {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+.ui-selectable-row:hover:not(.is-disabled),
+.ui-choice-list__option:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+
+.ui-selectable-row[aria-selected='true'],
+.ui-selectable-row.is-selected,
+.ui-choice-list__option[aria-selected='true'],
+.ui-choice-list__option.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+
+.ui-selectable-row__primary {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  padding: 9px 11px;
+  color: inherit;
+  text-align: left;
+}
+
+/* Компактный каталог использует ту же плоскую строку, что рабочие списки.
+   Контекст применяется к составной строке без локального skin у потребителя. */
+.ui-selectable-row[data-context='workspace-catalog'] {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.ui-selectable-row[data-context='workspace-catalog'] .ui-selectable-row__primary {
+  min-height: var(--control-height);
+  padding: 7px 10px;
+  font-size: var(--workspace-text-size);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.ui-selectable-row[data-context='workspace-catalog'].is-selected {
+  background: color-mix(in srgb, var(--accent) 13%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ui-selectable-row[data-context='workspace-catalog']:hover:not(.is-disabled) {
+  background: var(--surface-2);
+}
+
+/* Установленный плагин использует общую плоскую строку с отдельным флажком.
+   Иконка и подпись принадлежат кнопке выбора, флажок остаётся соседним действием. */
+.ui-selectable-row[data-ui-settings-plugin-row] {
+  border-radius: 0;
+}
+.ui-selectable-row[data-ui-settings-plugin-row] .ui-selectable-row__primary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+/* Строка исполнителя наследует выбор, наведение и фокус общей составной строки.
+   Контекст задаёт только место параметров справа и их перенос на узком экране. */
+.ui-selectable-row[data-context='pipeline-executor'] {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__primary {
+  padding: 8px 10px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px 8px 0;
+}
+
+@media (max-width: 700px) {
+  .ui-selectable-row[data-context='pipeline-executor'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+    padding: 0 10px 10px;
+  }
+}
+
+.ui-control-group[data-context='workspace-project'] { flex-wrap: nowrap; align-items: center; }
+.ui-control-group[data-context='workspace-project'] > .ui-select-wrap { flex: 1; width: 0; min-width: 0; }
+
+.ui-selectable-row__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding-right: 7px;
+}
+
+.ui-choice-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-choice-list__option {
+  display: grid;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: var(--control-height);
+  padding: 8px 11px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-choice-list[data-selection-indicator='true'] .ui-choice-list__option {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.ui-choice-list__content {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.ui-choice-list__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.ui-choice-list__description {
+  flex: 1 1 28ch;
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Вопрос задачи читается как список решений: пояснение идёт под названием.
+   Общий control сохраняет перенос текста и одинаковую ось вариантов на любой ширине. */
+.ui-choice-list[data-role='task-clarification-options'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ui-choice-list[data-role='task-clarification-options'] .ui-choice-list__content {
+  display: grid;
+  gap: 4px;
+}
+
+@container task-detail (max-width: 700px) {
+  .ui-choice-list[data-role='task-clarification-options'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ui-choice-list__indicator {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--ground);
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-choice-list__indicator[data-mode='multiple'] {
+  border-radius: 4px;
+}
+
+.ui-choice-list__indicator::after {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--ground);
+  content: '';
+  opacity: 0;
+}
+
+.ui-choice-list__indicator[data-mode='multiple']::after {
+  inset: 2px 3px 4px;
+  border: solid var(--ground);
+  border-width: 0 0 1.5px 1.5px;
+  border-radius: 0;
+  background: transparent;
+  transform: rotate(-45deg);
+}
+
+.ui-choice-list__option[aria-selected='true'] .ui-choice-list__indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ui-choice-list__option[aria-selected='true'] .ui-choice-list__indicator::after {
+  opacity: 1;
+}
+
+.ui-inline-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, var(--line));
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+
+.ui-inline-confirm__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ui-setting-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(min-content, auto);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-setting-control__content {
+  min-width: 0;
+}
+
+.ui-form-actions--start {
+  justify-content: flex-start;
+}
+
+.ui-form-actions--end {
+  justify-content: flex-end;
+}
+
+.ui-form-actions--between {
+  justify-content: space-between;
+}
+
+.ui-form-actions--stack {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.ui-setting-control__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-setting-control__label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ui-setting-control__description {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 600px) {
+  .ui-control-group,
+  .ui-form-actions {
+    align-items: stretch;
+  }
+
+  .ui-setting-control {
+    grid-template-columns: 1fr;
+  }
+}
+/* Полка — плоский список многострочных задач с самостоятельными действиями.
+   Кромка внимания не меняет ось текста: место под неё зарезервировано у всех строк. */
+[data-ui-task-shelf-row] {
+  height: 100%;
+  align-items: stretch;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-ui-task-shelf-row] .ui-selectable-row__primary {
+  display: block;
+  min-width: 0;
+  padding: 12px 6px 12px 12px;
+  color: inherit;
+  text-align: left;
+}
+
+[data-ui-task-shelf-row] .ui-selectable-row__actions {
+  flex-direction: column;
+  align-self: flex-start;
+  padding: 8px 8px 0 0;
+}
+
+[data-ui-task-shelf-row][data-shelf-attention='true'] {
+  border-left-color: var(--warn);
+}
+
+[data-ui-task-shelf-row][data-shelf-state='lit'] {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 4%, var(--ground));
+}
+
+[data-ui-task-shelf-row][data-shelf-completed='true'] {
+  opacity: .72;
+  transition: opacity .15s ease;
+}
+
+[data-ui-task-shelf-row][data-shelf-completed='true']:hover,
+[data-ui-task-shelf-row][data-shelf-completed='true']:focus-within {
+  opacity: .82;
+}
+
+[data-ui-task-shelf-row] .ui-icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-action-menu { display: flex; flex-direction: column; gap: 4px; }
+.ui-action-menu > .ui-button { justify-content: flex-start; text-align: left; white-space: normal; }
+
+/* Рабочие вкладки меняют только раскладку: общая рамка сегментов остаётся непрерывной.
+   Равные доли и перенос текста удерживают навигацию в одной строке узкой панели. */
+.ui-tabs[data-ui-workspace-tabs] {
+  flex: none;
+  width: 100%;
+  gap: 0;
+}
+
+.ui-tabs[data-ui-workspace-tabs] > .ui-tab {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  height: auto;
+  min-height: calc(var(--control-height) - 2px);
+  padding: 4px 10px;
+  white-space: normal;
+}
+
+/* Общий компактный размер перенесён с навигации доски на публичный UiTabs.
+   Внешние поля резервируют прозрачную площадку, чтобы соседние controls её не перекрывали. */
+.ui-tabs[data-size='compact'] {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+.ui-tabs[data-size='compact'] > .ui-tab {
+  position: relative;
+  min-width: 0;
+  height: auto;
+  min-height: 32px;
+  padding: 4px 6px;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+}
+
+.ui-tabs[data-size='compact'] > .ui-tab::after {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+
+@container studio (max-width: 440px) {
+  .ui-tabs[data-ui-studio-tabs] { gap: 2px; }
+  .ui-tabs[data-ui-studio-tabs] > .ui-tab { flex: 1; padding-inline: 4px; gap: 4px; }
+  .ui-tabs[data-ui-studio-tabs] > .ui-tab > svg { display: none; }
+}
+
+/* Контексты настроек: дерево, строки формы и каталог используют общий UI-kit.
+   Визуальный вес обозначает навигацию и редактирование; рамки принадлежат controls. */
+[data-ui-settings-node] {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+[data-ui-settings-node][aria-level='1'] {
+  margin-top: 9px;
+  padding-block: 8px;
+  color: var(--ink);
+  font-weight: 500;
+}
+[data-ui-settings-node]:first-child {
+  margin-top: 0;
+}
+[data-ui-settings-node]:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+[data-ui-settings-node][aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  box-shadow: inset 2px 0 var(--accent);
+}
+[data-ui-settings-result] {
+  width: 100%;
+  padding: 11px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  white-space: normal;
+}
+[data-ui-settings-result]:hover {
+  background: var(--surface);
+}
+[data-ui-settings-field] {
+  container: settings-field / inline-size;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+[data-ui-settings-field] > .ui-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'label' 'control' 'hint';
+  gap: 6px;
+  min-width: 0;
+}
+[data-ui-settings-field] > .ui-field > .ui-field__label {
+  grid-area: label;
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+[data-ui-settings-field] > .ui-field > .ui-field__hint,
+[data-ui-settings-field] > .ui-field > .ui-field__error {
+  grid-area: hint;
+  align-self: start;
+  max-width: 78ch;
+  font-size: 12px;
+  line-height: 16px;
+}
+[data-ui-settings-field] > .ui-field > .ui-field__control {
+  display: grid;
+  align-content: start;
+  grid-area: control;
+  gap: 8px;
+  min-width: 0;
+}
+[data-ui-settings-field] .ui-field__control > p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+[data-ui-settings-field] .ui-field__control > .ui-number-input {
+  width: 100%;
+}
+[data-ui-settings-field] .ui-field__control > .ui-button {
+  justify-self: start;
+}
+/* Название и пояснение — один блок слева, одиночное поле стоит по центру этого блока.
+   Сложные значения сохраняют свою высоту и начинают содержимое у названия. */
+@container settings-field (min-width: 480px) {
+  [data-ui-settings-field][data-layout='row'] > .ui-field {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 260px);
+    grid-template-areas: 'label control' 'hint hint';
+    gap: 4px 24px;
+  }
+  [data-ui-settings-field][data-layout='row']:not(:has(.ui-textarea)) > .ui-field:has(
+    > :is(.ui-field__hint, .ui-field__error)
+  ) {
+    grid-template-areas: 'label control' 'hint control';
+    row-gap: 2px;
+  }
+  [data-ui-settings-field][data-layout='row'] > .ui-field > .ui-field__label {
+    display: flex;
+    align-items: center;
+    align-self: start;
+    min-height: var(--control-height);
+  }
+  [data-ui-settings-field][data-layout='row'] .ui-field__control:has(> :only-child) {
+    align-self: center;
+  }
+  [data-ui-settings-field][data-layout='row'] > .ui-field:has(
+    > .ui-field__control > :only-child
+  ) > .ui-field__label {
+    align-self: center;
+  }
+  [data-ui-settings-field][data-layout='row']:not(:has(.ui-textarea)) > .ui-field:has(
+    > .ui-field__control > :only-child
+  ):has(> :is(.ui-field__hint, .ui-field__error)) > .ui-field__label {
+    align-self: end;
+    min-height: 0;
+  }
+  [data-ui-settings-field]:has(.ui-textarea) > .ui-field {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'label' 'control' 'hint';
+    gap: 6px;
+  }
+  [data-ui-settings-field]:has(.ui-textarea) > .ui-field > .ui-field__label {
+    min-height: 0;
+  }
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'label control' 'hint hint' 'status status';
+  gap: 4px 16px;
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field:has(> :is(.ui-field__hint, .ui-field__error)) {
+  grid-template-areas: 'label control' 'hint control' 'status status';
+  row-gap: 2px;
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field > .ui-field__label {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field:has(> :is(.ui-field__hint, .ui-field__error)) > .ui-field__label {
+  align-self: end;
+  min-height: 0;
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) .ui-field__control {
+  display: contents;
+}
+[data-ui-settings-field] .ui-field__control > :is(.ui-switch, .ui-checkbox:only-child) {
+  min-height: var(--control-height);
+  align-self: center;
+  justify-self: end;
+  grid-area: control;
+}
+[data-ui-settings-field] .ui-field__control > .ui-switch:not(:has(.ui-switch__label)) {
+  padding-inline: 0;
+}
+[data-ui-settings-field] .ui-field__control > .ui-switch ~ p {
+  grid-area: status;
+  margin-top: 4px;
+}
+/* Подписанная кнопка сама объясняет действие, сохраняя адрес, ошибки и конфликты поля.
+   Такой вариант не добавляет к шапке сущности отдельную строку названия параметра. */
+[data-ui-settings-field][data-presentation='action'] {
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  container-type: normal;
+}
+[data-ui-settings-field][data-presentation='action'] > .ui-field {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'control';
+  row-gap: 0;
+}
+[data-ui-settings-field][data-presentation='action'] > .ui-field:has(
+  > :is(.ui-field__hint, .ui-field__error)
+) {
+  grid-template-areas: 'control' 'hint';
+  row-gap: 6px;
+}
+/* Внутри менеджера вкладка уже задаёт границу секции, строки остаются обычной формой.
+   Ошибки, подсветка раскрытого поля и controls сохраняют общие состояния. */
+[data-ui-plugin-form] [data-ui-settings-field] {
+  padding-block: 8px;
+  border-bottom: 0;
+}
+[data-ui-settings-catalog] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  white-space: normal;
+  text-align: start;
+}
+[data-ui-settings-catalog]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+[data-ui-settings-catalog][aria-pressed='true'] {
+  border-color: var(--line-2);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--ink);
+}
+[data-ui-settings-catalog] > .ui-button__content {
+  justify-content: flex-start;
+  gap: 9px;
+}
+[data-ui-settings-catalog] .ui-settings-catalog-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+[data-ui-settings-catalog] .ui-settings-catalog-title {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+[data-ui-settings-catalog] .ui-settings-catalog-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 0;
+}
+[data-ui-settings-catalog] .ui-settings-catalog-status {
+  color: var(--ink-low);
+  font-size: 10px;
+  line-height: 1.4;
+}
+[data-ui-settings-catalog] .ui-settings-catalog-status[data-available='true'] {
+  color: var(--good);
+}
+/* Каталоги настроек разделяют строки и сохраняют общую высоту текста. */
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) {
+  border-color: var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  color: var(--ink);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+)[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) .ui-settings-catalog-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) :is(small, .ui-settings-catalog-description,
+  .ui-settings-catalog-status) {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) .ui-settings-catalog-status[data-available='true'] {
+  color: var(--good);
+}
+.ui-action-link[data-context='plugin-repository'] {
+  display: inline;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+[data-ui-settings-sidebar-action] {
+  justify-content: flex-start;
+  min-height: var(--control-height);
+  height: auto;
+  padding: 7px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: start;
+  white-space: normal;
+}
+/* Раскрывашка в форме настроек начинается на оси названий параметров. */
+[data-ui-settings-workspace] .ui-disclosure-button {
+  padding-inline: 0;
+}
+[data-ui-settings-sidebar-action] .ui-button__label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+[data-ui-settings-tabs] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  border-radius: 0;
+  background: transparent;
+}
+[data-ui-settings-tabs] > .ui-tab {
+  flex: 0 1 auto;
+  height: auto;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 11px;
+  white-space: normal;
+}
+[data-ui-settings-tabs] > .ui-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--ink);
+}
+[data-ui-settings-tabs] > .ui-tab:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+[data-ui-settings-workspace] [data-ui-settings-tabs] > .ui-tab,
+[data-plugins-workspace] [data-ui-settings-tabs] > .ui-tab {
+  min-height: var(--control-height);
+  padding-block: 6px;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  [data-ui-settings-node] {
+    min-height: 36px;
+  }
+  [data-ui-settings-tabs] > .ui-tab {
+    flex: 1 1 auto;
+  }
+}
+
+/* Заголовок не сжимается до буквенного столбца: длинные actions переносятся целиком.
+   Короткое действие остаётся рядом, когда обоим хватает собственной ширины. */
+@media (max-width: 600px) {
+  .board {
+    --board-secondary-color: color-mix(in srgb, var(--ink-low) 70%, var(--surface));
+  }
+
+  .board-phone-footer [data-role='board-snapshot-status'] {
+    color: var(--board-secondary-color);
+  }
+
+  .ui-segmented-control[data-context='board-triage-mode'] > .ui-button {
+    grid-column: auto;
+    height: auto;
+    min-height: 44px;
+    padding: 6px 8px;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: normal;
+  }
+
+  .ui-tab[data-context='board-page-tab'] .board-page-count,
+  .ui-tab[data-context='board-related-tab'] .cnt {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    background: var(--ground);
+    color: var(--ink-mid);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .ui-pane-header__layout {
+    gap: 4px 8px;
+  }
+
+  .ui-pane-header__navigation {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .ui-workspace-section__body {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  [data-ui-settings-field] {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .ui-pane-header__main {
+    flex: 1 0 auto;
+    max-width: 100%;
+  }
+
+  .ui-pane-header[data-layout='controls'] .ui-pane-header__main {
+    flex: 1;
+  }
+
+  .ui-pane-header__actions {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .ui-pane-header__title :is(h1, h2, h3) {
+    font-size: var(--panel-header-font-size);
+    line-height: 18px;
+  }
+
+  .ui-pane-header__meta {
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .ui-workspace-page {
+    background: var(--surface);
+  }
+}
+
+@media (min-width: 601px) {
+  @container board-primary (max-width: 560px) {
+    .ui-segmented-control[data-context='board-triage-mode'] > .ui-button:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+/* Каталог разделов использует предметные группы из общего каталога плагинов.
+   Заголовок отделяет строки, а фон и активный пункт остаются общими для списка. */
+:is([data-ui-tools], [data-ui-phone-sections]) .tools-grid__group-title {
+  margin: 0;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-low);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+/* Вторая полоса телефона отделяется спокойным промежуточным фоном от обеих областей.
+   Метрики остаются краткими, а исполнители используют прежние панели лимитов. */
+[data-ui-phone-status] {
+  display: none;
+}
+
+[data-ui-phone-sections] {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+[data-ui-phone-sections] .phone-sections-actions {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 600px) {
+  [data-ui-phone-status] {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    align-self: end;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    height: var(--app-phone-status-h);
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--topbar) 35%, var(--surface));
+    color: var(--ink-mid);
+    font-size: 11px;
+    line-height: 16px;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics-host {
+    display: flex;
+    flex: none;
+    min-width: 0;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics b {
+    font-weight: 500;
+  }
+
+  [data-ui-phone-status] .phone-status-providers {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin-left: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+}
+
+[data-ui-phone-status] .lv-ok { color: var(--ink); }
+[data-ui-phone-status] .lv-warn { color: var(--warn); }
+[data-ui-phone-status] .lv-bad { color: var(--bad); }
+
+/* Настройки чата разделены по смыслу; Teleport переносит прежние controls в секции.
+   Оформление находится в kit, чтобы правила шапки не перекрашивали поля диалога. */
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .options-section {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .ui-dialog[data-ui-chat-options] .options-section + .options-section {
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+
+  .ui-dialog[data-ui-chat-options] .options-section > h2 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .ui-dialog[data-ui-chat-options] .session-workspace,
+  .ui-dialog[data-ui-chat-options] .session-controls {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .ui-dialog[data-ui-chat-options] .session-option,
+  .ui-dialog[data-ui-chat-options] .sel {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    padding: 0;
+  }
+
+  .ui-dialog[data-ui-chat-options] .task-tip,
+  .ui-dialog[data-ui-chat-options] .ui-select-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .ui-dialog[data-ui-chat-options] .sel .lbl,
+  .ui-dialog[data-ui-chat-options] .option-label {
+    display: block;
+    color: var(--ink-mid);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
+  }
+
+  .ui-dialog[data-ui-chat-options] .option-help {
+    margin: 0;
+    color: var(--ink-mid);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .ui-dialog[data-ui-chat-options] .context-option > .option-label,
+  .ui-dialog[data-ui-chat-options] .ctx-meter-cap {
+    display: none;
+  }
+
+  .ui-dialog[data-ui-chat-options] .context-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-dialog__footer {
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 12px;
+  }
+}
