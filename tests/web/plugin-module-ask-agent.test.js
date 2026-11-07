@@ -7,6 +7,7 @@ import { ApiError } from '../../web/src/shared/apiClient.ts';
 import { chatAppFixture, TEST_MODEL_REF } from '../server/helpers/chat-turns.js';
 import { resolveChatWorkdir, validateWorkdirPath } from '../../server/src/lib/chat/workdir.ts';
 import { chatStoreFixture } from './helpers/chat-store.js';
+import { loadApi } from './helpers/chat-load.js';
 import { serviceFixture } from './helpers/pluginModuleServices.js';
 import { deferred, settle } from './helpers/pluginRuntimeUnit.js';
 
@@ -253,28 +254,19 @@ for (const changed of ['model', 'logout']) {
 
 test('PM-ASK-NOT-LOADED: ensure загружает чужую сессию до нового черновика', async (t) => {
   const f = await askFixture(t);
-  const requests = [];
   const serverState = {
     sessions: [{
       id: 'server-chat',
       messages: [],
       createdAt: 1
     }],
+    archived: [],
     activeId: 'server-chat',
     defModelRef: TEST_MODEL_REF,
   };
-  const chat = await chatStoreFixture({}, { api: {
-    get: async (url) => {
-      requests.push(['GET', url]);
+  const { api, calls: requests } = loadApi(async () => serverState);
+  const chat = await chatStoreFixture({}, { api, unloaded: true });
 
-      return url === '/api/chat/store' ? serverState : {};
-    },
-    post: async (url) => requests.push(['POST', url]),
-    put: async () => ({}),
-    del: async () => ({}),
-  } });
-
-  chat.loaded = false;
   t.mock.method(chat, '_persist', () => {});
 
   const id = await f.askAgent(request, {
@@ -286,6 +278,9 @@ test('PM-ASK-NOT-LOADED: ensure загружает чужую сессию до 
   });
 
   assert.equal(chat.loaded, true);
+  assert.deepEqual(chat.defModelRef, TEST_MODEL_REF);
+  assert.equal(requests.some(([method, url]) => method === 'GET'
+    && url.startsWith('/api/chat/store/list?')), true);
   assert.deepEqual(chat.sessions.map((session) => session.id).sort(), ['server-chat', id].sort());
   assert.equal(await chat.revealChat(id), true);
   assert.equal(requests.some(([method, url]) => method === 'POST' && url === '/api/chat'), false);
