@@ -55,6 +55,28 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.equal(inputs.publish.default, false);
   assert.equal(workflow.on.push, undefined);
 
+  const steps = workflow.jobs.release.steps;
+  const gate = steps.find((step) => step.name === 'Подтверждение всех проверок');
+  const production = steps.findIndex((step) => step.run === 'npm --prefix web run build');
+
+  assert.equal(workflow.jobs.release['timeout-minutes'], 180);
+  assert.ok(steps.indexOf(gate) < production);
+  assert.equal(gate.if, '${{ !cancelled() }}');
+
+  for (const [id, result] of [
+    ['server_tests', 'SERVER_RESULT'],
+    ['web_tests', 'WEB_RESULT'],
+    ['shared_tests', 'SHARED_RESULT'],
+    ['guide_tests', 'GUIDE_RESULT'],
+  ]) {
+    const step = steps.find((entry) => entry.id === id);
+
+    assert.equal(step?.['continue-on-error'], true);
+    assert.ok(steps.indexOf(step) < steps.indexOf(gate));
+    assert.equal(gate.env[result], '${{ steps.' + id + '.outcome }}');
+    assert.ok(gate.run.includes(`test "$${result}" = success`));
+  }
+
   const serverTests = workflow.jobs.release.steps.find((step) =>
     step.run?.includes('npm --prefix server test'));
 
@@ -68,6 +90,12 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
     step.run === 'npm --prefix server ci');
 
   assert.ok(browser > serverDependencies && browser < workflow.jobs.release.steps.indexOf(serverTests));
+
+  const media = workflow.jobs.release.steps.findIndex((step) =>
+    step.run?.includes('apt-get install -y --no-install-recommends ffmpeg'));
+
+  assert.ok(media >= 0 && media < workflow.jobs.release.steps.indexOf(serverTests));
+  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
 
   const sandbox = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));
@@ -103,7 +131,6 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   const cleanup = workflow.jobs.release.steps.find((step) =>
     step.name === 'Освобождение тестовых артефактов');
-  const steps = workflow.jobs.release.steps;
 
   assert.ok(steps.indexOf(cleanup) > steps.findIndex((step) =>
     step.run?.includes('npm --prefix web run build')));
