@@ -209,7 +209,10 @@ test('WEB-08: после разрыва связи история сверяет
 
   chat.sessions.push(removed);
   chat._markSent();
-  chat._applyChatHead(protocolHead(removed), false);
+
+  const removedHead = protocolHead(removed);
+
+  chat._applyChatHead(removedHead, false);
   sse('hello', {});
   await new Promise(setImmediate);
   await new Promise(setImmediate);
@@ -225,7 +228,7 @@ test('WEB-08: после разрыва связи история сверяет
       steps: [],
       archived: false,
     }).version,
-    c0: protocolHead(removed).version,
+    c0: removedHead.version,
   });
   assert.deepEqual(chat.sessions.map((s) => s.id), ['c1', 'c2']);
   assert.equal(chat.sessions[0].title, 'Переименован там');

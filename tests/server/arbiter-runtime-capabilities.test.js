@@ -6,14 +6,24 @@ import { test } from 'node:test';
 import { probeFactoryGotoCapability } from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import { readExistingFactoryRuntimePin } from '../../server/src/lib/factoryRuntimePins.ts';
 
-test('probe запускает выбранный A с его окружением, а не текущий B; unknown не кэшируется', async () => {
+test('probe запускает выбранный A с его окружением, а не текущий B; unknown не кэшируется', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'arbiter-capability-a-'));
+  const helpers = path.join(root, 'server/runtime/helpers');
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(helpers, { recursive: true });
+  await fs.writeFile(path.join(helpers, 'helpers.json'), JSON.stringify({
+    schema: 1,
+    helpers: [{ id: 'factory-runtime-pin', entry: 'pin.ts' }],
+  }));
+
   let calls = 0;
   const selected = {
     packageId: 'capability-test-a',
-    runtimeRoot: '/runtime-a',
-    engineHome: '/runtime-a/engine',
-    engineBin: '/runtime-a/engine/bin/factory',
-    node: '/runtime-a/node'
+    runtimeRoot: root,
+    engineHome: path.join(root, 'engine'),
+    engineBin: path.join(root, 'engine/bin/factory'),
+    node: path.join(root, 'node')
   };
   const config = {
     factoryBin: '/runtime-b/factory',

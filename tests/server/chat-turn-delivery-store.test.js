@@ -339,7 +339,7 @@ test('20 завершённых блоков с серверными запис�
 
   assert.equal(writes, 20);
   assert.ok(puts.length >= 20);
-  assert.equal(puts.every((entry) => entry.url === '/api/chat/store/chat/step-reuse'), true);
+  assert.equal(puts.every((entry) => entry.url === '/api/chat/store/chat/window'), true);
   assert.equal(puts.every((entry) => entry.status === 200), true);
   assert.deepEqual((await serverChat(w.app, id)).messages[0].steps, historical[0].steps);
   t.diagnostic(`sparse ACK: n=${durations.length}, p95=${durations[Math.ceil(durations.length * 0.95) - 1]
