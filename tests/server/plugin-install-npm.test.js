@@ -216,7 +216,7 @@ test('N7: post-npm изменения и внешние links не проход�
         return success;
       };
 
-      await assert.rejects(prepareNpmDependencies(cwd, ['.'], null, npm), (error) => {
+      await assert.rejects(prepareNpmDependencies(cwd, ['.'], npm), (error) => {
         assert.ok(['preview_stale', 'symlink_forbidden'].includes(error.code));
 
         return true;
@@ -237,7 +237,7 @@ test('N7: post-npm изменения и внешние links не проход�
         + 'setInterval(() => {}, 100);',
     ], options));
 
-    await assert.rejects(prepareNpmDependencies(cwd, ['.'], null, npm, undefined, budget), {
+    await assert.rejects(prepareNpmDependencies(cwd, ['.'], npm, undefined, budget), {
       code: 'workspace_limit',
     });
   });

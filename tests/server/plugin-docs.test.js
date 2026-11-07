@@ -11,6 +11,7 @@ import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 import { withPluginDocsHint } from '../../server/src/lib/chat/pluginDocsHint.ts';
 import { resolvePluginDocs } from '../../server/src/lib/pluginDocs.ts';
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 import {
   chatAppFixture, controlledExecutor, saveChat, turnBody,
 } from './helpers/chat-turns.js';
@@ -35,11 +36,15 @@ async function pluginDir(root, id, manifest = {}, files = {}) {
   const dir = path.join(root, id);
 
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'plugin.json'), JSON.stringify({
+  await writeFile(path.join(dir, 'icon.png'), png);
+  await writeFile(path.join(dir, 'plugin.json'), JSON.stringify(manifestV1({
     id,
     name: id,
+    icon: 'icon.png',
+    entrypoints: {},
+    contributes: {},
     ...manifest,
-  }));
+  })));
 
   for (const [file, body] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
