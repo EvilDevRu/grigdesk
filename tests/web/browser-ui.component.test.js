@@ -389,7 +389,7 @@ test('BR-U14: контекстное меню фоновой вкладки, д�
   await rendered();
   await f.wrapper.get('#browser-tab-two').trigger('click');
   await rendered();
-  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.equal(document.querySelector('[role="menu"]') === null, true);
   await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
   await rendered();
   assert.equal(f.browser.snapshot.active, 'two');
@@ -721,7 +721,7 @@ for (const menuTab of ['one', 'dead-a']) {
     assert.equal(item.disabled, false);
     item.click();
     await rendered();
-    assert.equal(document.querySelector('[role="menu"]'), null);
+    assert.equal(document.querySelector('[role="menu"]') === null, true);
     assert.deepEqual(f.calls.filter((item) => item.operation === 'close').map((item) => item.tabId),
       ['dead-a', 'dead-b']);
     assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), [
@@ -770,7 +770,7 @@ test('BR-U19: очистка ждёт ACK и фиксирует кандидат
   [...document.querySelectorAll('[role="menuitem"]')]
     .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
   await rendered();
-  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.equal(document.querySelector('[role="menu"]') === null, true);
   assert.deepEqual(started, ['dead-a']);
   f.browser.snapshot.tabs.push({ ...tab('dead-late'), ...agent });
   release();

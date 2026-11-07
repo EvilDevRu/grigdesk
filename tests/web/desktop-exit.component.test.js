@@ -37,8 +37,8 @@ for (const locale of ['ru', 'en']) {
     assert.ok(dialog.textContent.includes(snapshot.chats[0].title));
     assert.ok(dialog.textContent.includes(snapshot.pipelines[0].title));
     assert.match(dialog.textContent, /#?7/);
-    assert.equal(dialog.querySelector('img'), null);
-    assert.equal(dialog.querySelector('b'), null);
+    assert.equal(dialog.querySelector('img') === null, true);
+    assert.equal(dialog.querySelector('b') === null, true);
     assert.equal(dialog.closest('[data-ui-layer]')?.getAttribute('data-ui-layer'), 'confirm');
     assert.ok(dialog.querySelector('input[type="checkbox"]'));
     await button(h, 'Выйти', locale);

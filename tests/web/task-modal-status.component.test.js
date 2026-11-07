@@ -221,7 +221,7 @@ test('Действия карточки учитывают завершение 
   await t.test('завершённая задача: только возобновление, запуск учёта закрыт с объяснением', async (s) => {
     const { wrapper } = await mountCard(s, browser);
 
-    assert.equal(footerButton(wrapper, '✓ Завершить'), undefined);
+    assert.equal(footerButton(wrapper, '✓ Завершить') === undefined, true);
     assert.equal(footerButton(wrapper, '↺ Возобновить')?.element.disabled, false);
     assert.equal(footerButton(wrapper, '▶ Начать учёт')?.element.disabled, true);
     assert.equal(
@@ -245,7 +245,7 @@ test('Действия карточки учитывают завершение 
     await t.test(`статус «${LABELS[status]}» сохраняет прежние действия`, async (s) => {
       const { wrapper, calls, flushPromises } = await mountCard(s, browser, { status });
 
-      assert.equal(footerButton(wrapper, '↺ Возобновить'), undefined);
+      assert.equal(footerButton(wrapper, '↺ Возобновить') === undefined, true);
       assert.equal(footerButton(wrapper, '✓ Завершить')?.element.disabled, false);
       assert.equal(footerButton(wrapper, '▶ Начать учёт')?.element.disabled, false);
       assert.equal(footerButton(wrapper, '▶ Начать учёт')?.attributes('data-ui-tooltip'), undefined);
@@ -270,7 +270,7 @@ test('Действия карточки учитывают завершение 
       'GET:/api/tracker/task/42',
     ]);
     assert.equal(wrapper.get('.task-status').text(), 'Ждёт выполнения');
-    assert.equal(footerButton(wrapper, '↺ Возобновить'), undefined);
+    assert.equal(footerButton(wrapper, '↺ Возобновить') === undefined, true);
     assert.equal(footerButton(wrapper, '✓ Завершить')?.element.disabled, false);
     assert.equal(footerButton(wrapper, '▶ Начать учёт')?.element.disabled, false);
     await reopen();
@@ -312,7 +312,7 @@ test('Действия карточки учитывают завершение 
     assert.equal(tasks.title(42), 'Проверка действий задачи');
     await reopen();
     assert.equal(wrapper.get('.task-status').text(), 'Завершена');
-    assert.equal(footerButton(wrapper, '✓ Завершить'), undefined);
+    assert.equal(footerButton(wrapper, '✓ Завершить') === undefined, true);
     assert.deepEqual(calls, [
       'GET:/api/tracker/task/42',
       'POST:/api/tracker/task/42/complete',

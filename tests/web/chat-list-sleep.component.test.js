@@ -310,7 +310,7 @@ test('LIST-MEMO-01: копия строк сохраняет DOM, видимые
 
   f.state.rows = f.state.rows.map((row) => ({ ...row }));
   await settle();
-  assert.equal(wrapper.find('.row').element, element);
+  assert.equal(wrapper.find('.row').element === element, true);
 
   const row = f.state.rows[0];
 
