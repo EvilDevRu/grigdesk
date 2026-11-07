@@ -86,30 +86,6 @@ export async function terminalBuildFixture(t: TestContext) {
     await writeFile(file, original.replace('process.exit(', insert + '\nprocess.exit('), { mode: 0o755 });
   }
 
-  // Контракт bundle подтверждается отдельно настоящим executeBundle на маленьком payload.
-  // Для меню здесь проверяется делегирование той же команды и принятие её событий.
-  await writeFile(path.join(box.root, 'tools/bundle.mts'), [
-    'import fs from "node:fs";',
-    'for (const id of ["server", "b24", "relay", "deepseek", "window", "verify", "pack", "publish"]) {',
-    '  if (process.env.GRIGDESK_CTL_BUILD_OBSERVED === "1") {',
-    '    fs.writeSync(3, `start\\tbundle.${id}\\n`);',
-    '  }',
-    '  console.log(`bundle-${id}-out`);',
-    '  console.error(`bundle-${id}-err`);',
-    '  if (id === "pack" && fs.existsSync(process.env.HOME + "/bundle-fail")) {',
-    '    if (process.env.GRIGDESK_CTL_BUILD_OBSERVED === "1") {',
-    '      fs.writeSync(3, `end\\tbundle.${id}\\t27\\n`);',
-    '    }',
-    '    process.exit(27);',
-    '  }',
-    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);',
-    '  if (process.env.GRIGDESK_CTL_BUILD_OBSERVED === "1") {',
-    '    fs.writeSync(3, `end\\tbundle.${id}\\t0\\n`);',
-    '  }',
-    '}',
-    'console.log("Готовы release/, release.tar.gz и release.tar.gz.sha256.");',
-  ].join('\n'));
-
   return { ...box, env };
 }
 
@@ -127,7 +103,7 @@ export function launchBuild(t: TestContext, box: Awaited<ReturnType<typeof termi
 }
 
 /**
- * Порядок пунктов совпадает с меню: all/server/web/window/deepseek/apk/bundle.
+ * Порядок пунктов совпадает с меню: all/server/web/window/deepseek/apk.
  * Ожидание подменю не зависит от скорости запуска Node или системных команд.
  */
 export async function chooseBuild(session: ReturnType<typeof startPty>, target: string) {
@@ -136,9 +112,9 @@ export async function chooseBuild(session: ReturnType<typeof startPty>, target: 
   const before = session.output().length;
 
   session.write(down.repeat(5) + '\r');
-  await session.wait(/Переносимый комплект|Portable bundle/iu, 4000, before);
+  await session.wait(/Android APK/iu, 4000, before);
 
-  const targets = ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle'];
+  const targets = ['all', 'server', 'web', 'window', 'deepseek', 'apk'];
 
   session.write(down.repeat(targets.indexOf(target)) + '\r');
 }

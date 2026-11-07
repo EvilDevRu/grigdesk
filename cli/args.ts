@@ -42,7 +42,6 @@ grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | tracker … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
-grigdesk-ctl bundle             Собрать установочные артефакты из исходников (для CI)
 grigdesk-ctl build [all|server|web|window|deepseek|apk]
                                 Без аргументов: сервер → веб → окно (all по умолчанию)
                                 apk: Android-приложение со встроенным вебом

@@ -44,7 +44,7 @@ function menuItems(source: boolean): MenuItem[] {
     description: `${name}Description`,
     argv: [component, name],
   }));
-  const build = ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle'].map((variant) => ({
+  const build = ['all', 'server', 'web', 'window', 'deepseek', 'apk'].map((variant) => ({
     label: variant === 'server' ? 'serverOnly' : variant,
     description: `${variant === 'server' ? 'serverOnly' : variant}Description`,
     variant,
@@ -254,7 +254,7 @@ export async function runMenu(root: string): Promise<number> {
             return code;
           }
 
-          if (item.variant && item.variant !== 'bundle') {
+          if (item.variant) {
             render();
 
             continue;

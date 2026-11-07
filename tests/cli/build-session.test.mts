@@ -17,7 +17,7 @@ const openQuestion = /Открыть окно GrigDesk\?|Open the GrigDesk windo
 
 /**
  * Меню сохраняет успешный итог вместе с предложением открыть окно до выбора человека.
- * Esc отклоняет запуск и возвращает подменю, у bundle сохраняется обычный экран результата.
+ * Esc отклоняет запуск и возвращает подменю.
  */
 async function leaveSuccessfulMenu(session: ReturnType<typeof launchBuild>) {
   await session.wait(totalTime, 10000);
@@ -28,7 +28,7 @@ async function leaveSuccessfulMenu(session: ReturnType<typeof launchBuild>) {
   assertRestored(result, session.output());
 }
 
-for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle']) {
+for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk']) {
   for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
     test(`BS-RESULTS/SUMMARY: меню ${target}, ${locale}, шаги, прогресс, полный журнал и итог`, async (t) => {
       const box = await terminalBuildFixture(t);
@@ -62,7 +62,7 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bund
       assert.match(output, locale.startsWith('ru') ? /Журнал/u : /Log/u);
       assert.match(output, locale.startsWith('ru') ? /Сборка/u : /Build/iu);
 
-      if (target !== 'bundle' && target !== 'deepseek' && target !== 'apk') {
+      if (target !== 'deepseek' && target !== 'apk') {
         assert.match(output, locale.startsWith('ru')
           ? /Открыть окно GrigDesk\?/u : /Open the GrigDesk window\?/u);
       } else {
@@ -71,46 +71,37 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bund
 
       const log = await buildLog(box);
 
-      if (target === 'bundle') {
-        for (const id of ['server', 'b24', 'relay', 'deepseek', 'window', 'verify', 'pack', 'publish']) {
-          assert.ok(log.text.includes(`bundle-${id}-out`));
-          assert.ok(log.text.includes(`bundle-${id}-err`));
-        }
+      assert.match(log.text, /fixture-out/u);
+      assert.match(log.text, /fixture-err/u);
 
-        assert.match(output, /release\/|release\.tar\.gz/u);
-      } else {
-        assert.match(log.text, /fixture-out/u);
-        assert.match(log.text, /fixture-err/u);
+      if (target === 'all' || target === 'server') {
+        assert.match(log.text, /inner-elf-line/u);
 
-        if (target === 'all' || target === 'server') {
-          assert.match(log.text, /inner-elf-line/u);
-
-          if (target === 'server') {
-            assert.match(output, /grigdesk-ctl desktop use-server/u);
-          } else {
-            assert.match(output, locale.startsWith('ru') ? /следующем запуске/u : /next launch/u);
-            assert.doesNotMatch(output, /grigdesk-ctl desktop use-server/u);
-          }
-        }
-
-        if (target === 'web') {
-          assert.match(output, /grigdesk-ctl build window/u);
-          assert.doesNotMatch(output, /Закройте окно|Close the window/iu);
-        } else if (target === 'server') {
-          assert.match(output, locale.startsWith('ru') ? /новый сервер ещё не выбран/u : /not selected yet/u);
-        } else if (target === 'deepseek') {
-          assert.match(output, locale.startsWith('ru')
-            ? /Поставлен DeepSeek: /u : /Installed DeepSeek: /u);
-          assert.match(output, locale.startsWith('ru')
-            ? /Новый ELF получит следующий ход DeepSeek/u : /next DeepSeek turn/u);
-        } else if (target === 'apk') {
-          assert.match(output, locale.startsWith('ru') ? /Собран APK: /u : /Built APK: /u);
-          assert.match(visibleLines(output).map((line) => line.trim()).join(''),
-            /grigdesk-mobile-debug\.apk/u);
-          assert.doesNotMatch(output, /Закройте окно|Close.*window/iu);
+        if (target === 'server') {
+          assert.match(output, /grigdesk-ctl desktop use-server/u);
         } else {
-          assert.match(output, locale.startsWith('ru') ? /Закройте окно/iu : /Close.*window/iu);
+          assert.match(output, locale.startsWith('ru') ? /следующем запуске/u : /next launch/u);
+          assert.doesNotMatch(output, /grigdesk-ctl desktop use-server/u);
         }
+      }
+
+      if (target === 'web') {
+        assert.match(output, /grigdesk-ctl build window/u);
+        assert.doesNotMatch(output, /Закройте окно|Close the window/iu);
+      } else if (target === 'server') {
+        assert.match(output, locale.startsWith('ru') ? /новый сервер ещё не выбран/u : /not selected yet/u);
+      } else if (target === 'deepseek') {
+        assert.match(output, locale.startsWith('ru')
+          ? /Поставлен DeepSeek: /u : /Installed DeepSeek: /u);
+        assert.match(output, locale.startsWith('ru')
+          ? /Новый ELF получит следующий ход DeepSeek/u : /next DeepSeek turn/u);
+      } else if (target === 'apk') {
+        assert.match(output, locale.startsWith('ru') ? /Собран APK: /u : /Built APK: /u);
+        assert.match(visibleLines(output).map((line) => line.trim()).join(''),
+          /grigdesk-mobile-debug\.apk/u);
+        assert.doesNotMatch(output, /Закройте окно|Close.*window/iu);
+      } else {
+        assert.match(output, locale.startsWith('ru') ? /Закройте окно/iu : /Close.*window/iu);
       }
 
       const calls = await box.calls();
@@ -375,7 +366,7 @@ for (const menu of [false, true]) {
     session.write('\x1b[A\r');
 
     if (menu) {
-      await session.wait(/Переносимый комплект/u, 4000, session.output().length);
+      await session.wait(/Android APK/u, 4000, session.output().length);
       await exitMenus(session);
     }
 
@@ -631,30 +622,6 @@ for (const detached of [false, true]) {
       { code: 'ENOENT' });
   });
 }
-
-test('BS-RESULTS: отказ переносимого комплекта показывает pack/27 и не возвращает успех', async (t) => {
-  const box = await terminalBuildFixture(t);
-
-  await writeFile(path.join(box.env.HOME, 'bundle-fail'), '');
-
-  const session = launchBuild(t, box, 'bundle', true);
-
-  await chooseBuild(session, 'bundle');
-
-  const result = await session.done;
-
-  assert.equal(result.code, 27, session.output());
-  assert.match(session.output(), /✗/u);
-  assert.match(session.output(), /27/u);
-  assert.match(session.output(), /Журнал/u);
-  assert.doesNotMatch(session.output(), /100%/u);
-  assertRestored(result, session.output());
-
-  const log = await buildLog(box);
-
-  assert.match(log.text, /bundle-pack-err/u);
-  assert.doesNotMatch(log.text, /bundle-publish/u);
-});
 
 test('BS-SUMMARY: свой descriptor v4 не порождает подсказку выбора сервера', async (t) => {
   const box = await terminalBuildFixture(t);

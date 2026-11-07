@@ -7,30 +7,6 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 CMD="${1:-help}"
 
-# Справка и ошибки bundle обрабатываются до Node и подготовки установленного ELF.
-# Сборщик работает только с исходниками и не использует ветвь build с установкой.
-if [[ "$CMD" == bundle ]]; then
-  for argument in "${@:2}"; do
-    if [[ "$argument" == --help || "$argument" == -h ]]; then
-      echo 'grigdesk-ctl bundle — собрать переносимую папку release/ и release.tar.gz из исходников'
-      exit 0
-    fi
-  done
-
-  if (( $# > 1 )); then
-    echo 'Справка: grigdesk-ctl bundle [--help]' >&2
-    exit 2
-  fi
-
-  if [[ -f "$DIR/release.json" || ! -f "$DIR/server/src/app.ts" \
-    || ! -f "$DIR/web/package.json" || ! -f "$DIR/desktop/package.json" ]]; then
-    echo 'Команда bundle доступна только в папке исходников.' >&2
-    exit 1
-  fi
-
-  exec node "$DIR/tools/bundle.mts"
-fi
-
 # Явные команды разработки распознают checkout независимо от установленного ELF.
 # release.json сохраняет приоритет готовой поставки даже при случайных исходниках рядом.
 SOURCE_COMMAND=0

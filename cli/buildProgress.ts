@@ -238,8 +238,7 @@ async function observeBuild(
   let completed = false;
   let childCode = 1;
   let failure: string | undefined;
-  const child = spawn('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'),
-    ...variant === 'bundle' ? ['bundle'] : ['build', variant]], {
+  const child = spawn('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), 'build', variant], {
     cwd: root,
     env: {
       ...process.env,
@@ -517,8 +516,7 @@ async function observeBuild(
     warnings.push({ text: t('historyError', { reason: (error as Error).message }), tone: 'warning' });
   }
 
-  const summary = variant === 'bundle' ? 'summaryBundle'
-    : `summary${variant[0]!.toUpperCase()}${variant.slice(1)}`;
+  const summary = `summary${variant[0]!.toUpperCase()}${variant.slice(1)}`;
   const target = variant === 'server' ? 'bin/grigdesk-server'
     : variant === 'window' ? 'bin/grigdesk-app'
     : variant === 'deepseek' ? 'bin/deepseek' : 'web/dist';
@@ -542,7 +540,7 @@ async function observeBuild(
     lines.push(t('serverQueued'));
   }
 
-  if (variant !== 'bundle' && variant !== 'apk') {
+  if (variant !== 'apk') {
     lines.push(variant === 'web' ? t('webHint')
       : variant === 'deepseek'
         ? deferred
@@ -566,7 +564,7 @@ async function observeBuild(
     full: true,
   };
 
-  if (variant === 'bundle' || variant === 'deepseek' || variant === 'apk') {
+  if (variant === 'deepseek' || variant === 'apk') {
     showScreen(session, summaryScreen);
 
     return 0;

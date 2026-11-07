@@ -33,7 +33,6 @@
 | `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl tracker …` | Собранный `bin/tracker`, без него — исходник `tracker/src/main.ts` ([команда tracker](../b24/binary-cli.md)) |
-| `grigdesk-ctl bundle` | Установочные артефакты для CI ([контракт](portable-bundle.md)) |
 | `grigdesk-ctl build [all\|server\|web\|window\|deepseek\|apk]` | Сборка и установка; без цели — сервер, веб, окно; `deepseek` — поставка исполнителя, `apk` — Android-приложение ([контракт](ctl-build.md)) |
 | `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |

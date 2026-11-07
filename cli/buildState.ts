@@ -24,14 +24,6 @@ const seconds: Record<string, number> = {
   'deepseek.smoke-coding-plan': 120,
   'deepseek.install': 30,
   'deepseek.prune': 15,
-  'bundle.server': 300,
-  'bundle.b24': 120,
-  'bundle.relay': 60,
-  'bundle.deepseek': 240,
-  'bundle.window': 180,
-  'bundle.verify': 60,
-  'bundle.pack': 30,
-  'bundle.publish': 5,
 };
 
 /**
@@ -70,17 +62,12 @@ export function estimateBuildProgress(input: {
 }
 
 /**
- * Список совпадает с наблюдаемыми стадиями прежней оболочки и переносимого сборщика.
+ * Список совпадает с наблюдаемыми стадиями прежней оболочки.
  * Он задаёт оценку до получения первого события, не управляя самой цепочкой сборки.
  */
 export function buildStepIds(variant: string): string[] {
   if (variant === 'apk') {
     return ['apk.build'];
-  }
-
-  if (variant === 'bundle') {
-    return ['server', 'b24', 'relay', 'deepseek', 'window', 'verify', 'pack', 'publish']
-      .map((name) => `bundle.${name}`);
   }
 
   if (variant === 'deepseek') {
