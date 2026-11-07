@@ -5,7 +5,7 @@ import { parseEnv } from 'node:util';
 
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
 import type { RuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
-import { portableWindowPath } from '../../shared/node/bundleLayout.ts';
+import { portableWindowPath } from '../../shared/node/portableWindowPath.ts';
 import { probeServerBinary, verifyServerBinary } from '../../shared/node/serverBinaryRuntime.ts';
 import { dataHome, envFilePath } from '../../shared/runtime/dataHome.ts';
 import { resolveRuntimeSettings } from '../../shared/runtime/runtimeSettings.ts';

@@ -1,10 +1,10 @@
+import './startDataHome.ts';
 import { createHelpService } from './lib/help/service.ts';
 import helpModule from './modules/help/index.ts';
 import { runtimeKind } from './lib/runtimePaths.ts';
 import { GrigdeskTaskStore } from './lib/grigdeskTasks/store.ts';
 // Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
-import './startDataHome.ts';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';

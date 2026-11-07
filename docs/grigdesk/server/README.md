@@ -17,7 +17,7 @@
 - [Исходный PATH/prefix и приватная проверка Bash для внешних CLI](user-cli-parent-environment.md)
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
-- [Синхронный ранний импорт папки данных и отдельный поиск CLI](early-data-home-imports.md)
+- [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Подписанный канал сайта: CI, публикация и восстановление обновления пакета](site-release-channel.md)
 - [Ручной release workflow без push: валидация контекста runner и письма](release-workflow-validation.md)
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)

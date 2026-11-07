@@ -90,6 +90,8 @@
 | `runtime/serverBinary.ts` | Чистый decoder публичной metadata одиночного ELF: identity, Node/ABI, capabilities, без приватного индекса |
 | `node/serverBinaryRuntime.ts` | Пробы ELF, prepare/release и удержание preparation при запуске; [контракт launcher](../server/server-binary.md#launcher-ipc-и-кэш) |
 | `node/packagedEnvironment.ts` | Окружение детей SEA: свой Node запасным, Python без pyc, глобальный npm вне R; с готовыми каталогами CLI — общий порядок PATH |
+| `node/bundleLayout.ts` | Синхронные marker/receipt readers установки; ранний серверный граф не импортирует асинхронный discovery |
+| `node/portableWindowPath.ts` | Асинхронный поиск физического AppImage для desktop portable runtime, вне раннего серверного графа |
 | `node/cliPathOrder.ts` | Синхронный [порядок PATH packaged-запуска](../server/server-binary-path.md) без файлового discovery в раннем графе |
 | `node/userCliPaths.ts` | Однократный поиск CLI: явный список, умолчания, nvm без shell rc; совместимый экспорт порядка PATH |
 | `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
@@ -124,6 +126,6 @@ optional shell snapshot. Общие trust/channel, private layout/journal, ар�
 расположены в `shared/node`. Они не импортируют server, desktop или CLI.
 `installedServer.ts` проверяет владельцев, активность и drain; `installedUpdateWorker.ts`
 связывает handoff, boot proofs и восстановление. `installedProcess.ts` запускает helper
-и новые процессы вне cgroup прежнего владельца. `bundleLayout.ts` содержит синхронный reader receipt без зависимостей updater; он используется
-только boot resolver серверного I; асинхронный — перед эффектами.
+и новые процессы вне cgroup прежнего владельца. `bundleLayout.ts` содержит синхронный reader receipt без зависимостей updater для boot
+resolver серверного I. Desktop discovery AppImage живёт отдельно в `portableWindowPath.ts`.
 [Контракт и границы приёмки](../server/installed-release-updates.md).
