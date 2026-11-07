@@ -1015,6 +1015,8 @@
   "stageSections": "Stage sections",
   "stageAnalysis": "Stop analysis",
   "stageResult": "Result",
+  "stageArbiterTab": "Arbiter",
+  "stageArbiterNoteIdle": "The arbiter has not analyzed this stop yet",
   "stageExecutors": "Executors",
   "stageActivity": "Activity",
   "stageReadOnly": "Read only",

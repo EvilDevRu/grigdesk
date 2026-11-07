@@ -563,9 +563,9 @@
           </div>
         </div>
 
-        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
-             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
-        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
+        <!-- Идущий разбор виден плашкой на каждой вкладке, кроме самой вкладки арбитра:
+             там статус уже принадлежит его шапке, и вторая копия над вкладками не нужна. -->
+        <div v-if="stageArbitrating && stageTab !== 'arbiter'"
              class="sarbrun sarbnode">
           <span class="sarbspin" aria-hidden="true"></span>
           <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
@@ -574,9 +574,15 @@
 
         <div class="stage-navigation">
           <UiTabs v-model="stageTab" :label="translate('core.stageSections')">
+            <!-- Содержимое этапа остаётся главной вкладкой при любой остановке: причина,
+                 находки и возврат на этот же этап видны сразу. Арбитр — дополнение рядом. -->
             <UiTab data-context="pipeline-stage-tab" id="stage-result-tab"
                    value="result" controls="stage-result-panel">
-              {{ translate(stageUsesConversation ? 'core.stageAnalysis' : 'core.stageResult') }}
+              {{ translate('core.stageResult') }}
+            </UiTab>
+            <UiTab data-context="pipeline-stage-tab" v-if="stageUsesConversation" id="stage-arbiter-tab"
+                   value="arbiter" controls="stage-arbiter-panel">
+              {{ translate('core.stageArbiterTab') }}
             </UiTab>
             <UiTab data-context="pipeline-stage-tab" v-if="stage!.meta.runner" id="stage-executors-tab"
                    value="executors" controls="stage-executors-panel">
@@ -591,8 +597,11 @@
           <span v-if="stage!.readOnly" class="stage-readonly">{{ translate('core.stageReadOnly') }}</span>
         </div>
 
-        <div v-if="stageUsesConversation && stageTab === 'result'" id="stage-result-panel"
-             class="sconversation" role="tabpanel" aria-labelledby="stage-result-tab">
+        <!-- Разбор арбитра — своя вкладка рядом с содержимым этапа, а не замена результата:
+             раньше она занимала первую вкладку целиком, и человек вставшего узла не видел
+             ни причины остановки, ни кнопки возврата на этот же этап. -->
+        <div v-if="stageUsesConversation && stageTab === 'arbiter'" id="stage-arbiter-panel"
+             class="sconversation" role="tabpanel" aria-labelledby="stage-arbiter-tab">
           <ArbiterConversation :task="String(stage!.task)" :node="stage!.id"
                                :conversation-id="stageConversationId" :legacy-card="stageArbiterCard"
                                :arbitrating="stageArbitrating"
@@ -600,11 +609,11 @@
                                @current-stop="openStallStage(stageTask!)" />
         </div>
         <div v-else class="sworkspace"
-             :class="{ 'main-only': !stageHasRail || stageUsesConversation || stageTab !== 'result',
+             :class="{ 'main-only': !stageHasRail || stageTab !== 'result',
                        'rail-only': stageHasRail && !stageHasMain && stageTab === 'result' }">
           <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
                прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
-          <aside v-if="stageHasRail && !stageUsesConversation" v-show="stageTab === 'result'" class="srail">
+          <aside v-if="stageHasRail" v-show="stageTab === 'result'" class="srail">
             <div class="stage-rail-heading">{{ translate('core.stageDecision') }}</div>
             <!-- Ситуация: чем закончился заход и что от человека нужно. Стоит В ОДНОЙ
                  колонке с решением и прямо над ним — это его условие, а не справка.
@@ -613,14 +622,13 @@
                  рабочей области, причём «почему этап остановился» обрезалось посреди фразы. -->
             <div v-if="stageHasSituation" class="sect situation-sect">
               <div class="secth">{{ translate('core.stageSummary') }}</div>
-              <!-- Разбор арбитра здесь — ПРИЗНАК со входом, а не текст. Узел отвечает на
+              <!-- Разбор арбитра здесь — ПРИЗНАК со входом, а не текст: узел отвечает на
                    вопрос «чем занят исполнитель и чем кончился заход», разбор — на «что мне
-                   решить»; вместе они не поместились: четыре его абзаца делили колонку с
-                   причиной остановки, находками и формой, а длинный путь в «чем проверял»
-                   растягивал её в горизонтальный скролл. Текст и решение — своей модалкой. -->
-              <div v-if="stageArbiterCard" class="sarbnote sarbopen" :class="stageArbiterCard.verdict">
+                   решить». Признак стоит у всякой остановки с арбитром: без карточки он
+                   называет честное «ещё не разбирал», чужой разбор не выдаётся за этот узел. -->
+              <div v-if="stageUsesConversation" class="sarbnote sarbopen" :class="stageArbiterCard?.verdict">
                 <span class="sarbicon" aria-hidden="true">⚖</span>
-                <span class="sarbnote-text">{{ arbiterCardLabel(stageArbiterCard) }}</span>
+                <span class="sarbnote-text">{{ stageArbiterNote }}</span>
                 <UiButton
                   class="sarbmore"
                   data-role="pipeline-stage-arbiter-open"
@@ -1883,7 +1891,7 @@ function pipelineContextDetails() {
     return null;
   }
 
-  const document = stageTab.value === 'result' && !stageUsesConversation.value && stageDocOpen.value
+  const document = stageTab.value === 'result' && stageDocOpen.value
     ? NODE_DOC[stage.value!.id] || null : null;
   const tab = stageTab.value === 'result'
     ? document ? 'document' : 'overview'
@@ -2180,9 +2188,11 @@ const gateArbiterLog = computed(() => {
   return [...rows].sort((a, b) => Number(b.verdict === 'deferred') - Number(a.verdict === 'deferred'));
 });
 
+// Возврат на этот же этап доступен и при остановке, отданной арбитру: разбор —
+// дополнение, а не единственный выход. Без кнопки человек, не желающий разбора,
+// не мог просто перезапустить узел со своим указанием.
 const stageHasRewind = computed(() => Boolean(
   stage.value && !stage.value!.readOnly && !stage.value!.isGate
-  && !stageUsesConversation.value
   && stageTask.value?.graph?.nodeOrigins?.[stage.value!.id]?.scope !== 'bootstrap',
 ));
 // Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
@@ -2214,15 +2224,25 @@ const stageArbiterCard = computed(() => (
   stage.value ? arbiterCardFor(stageTask.value, stage.value!.id) : null
 ));
 
+// Подпись признака разбора в «Итоге этапа». Сохранённый разбор объясняет свой исход;
+// без него признак честно говорит, что арбитр эту остановку ещё не разбирал, — иначе
+// кнопка «разбор и решение» выглядела бы обещанием чужого или выдуманного вердикта.
+const stageArbiterNote = computed(() => (
+  stageArbiterCard.value ? arbiterCardLabel(stageArbiterCard.value) : translate('core.stageArbiterNoteIdle')
+));
+
 // Блокирующие вопросы ушли в форму ответа — значит список стал списком отложенного.
 const verdictDeferredOnly = computed(() => (
   verdictFindings.value.length > 0 && verdictFindings.value.every((f) => f.severity === 'deferred')
 ));
 
 // Чем закончился заход: разбор арбитра, причина остановки, находки узла и дайджест.
+// Остановка с арбитром — самостоятельное основание: у свежей остановки ещё нет ни
+// сохранённого разбора, ни находок, а вход в разбор и причина нужны человеку сразу.
 const stageHasSituation = computed(() => Boolean(
   stage.value && (stage.value!.meta.stall || stage.value!.meta.comment
-    || verdictFindings.value.length || stageArbiterCard.value),
+    || verdictFindings.value.length || stageArbiterCard.value
+    || stageUsesConversation.value),
 ));
 // Телеметрия захода. Нулевой fanout сюда не входит: чип ради нуля держал целую полосу.
 const stageHasMeta = computed(() => Boolean(
@@ -2787,10 +2807,12 @@ function arbiterCardFor(task: PipelineViewTask | null, nodeId: string) {
 }
 
 /**
- * Вход из узла фокусирует тот же блок, сохраняя окно и черновик.
- * Отдельная форма применения поверх окна этапа больше не создаётся.
+ * Вход из признака открывает вкладку арбитра и ставит фокус в поле сообщения.
+ * Содержимое этапа остаётся на своей вкладке и не теряется при возвращении.
  */
-function openArbiterFromStage() {
+async function openArbiterFromStage() {
+  stageTab.value = 'arbiter';
+  await nextTick();
   document.querySelector<HTMLElement>('[data-role="arbiter-conversation"] textarea')?.focus();
 }
 

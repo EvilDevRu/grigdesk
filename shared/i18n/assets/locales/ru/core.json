@@ -1035,6 +1035,8 @@
   "stageSections": "Разделы этапа",
   "stageAnalysis": "Разбор остановки",
   "stageResult": "Результат",
+  "stageArbiterTab": "Арбитр",
+  "stageArbiterNoteIdle": "Арбитр ещё не разбирал эту остановку",
   "stageExecutors": "Исполнители",
   "stageActivity": "Журнал",
   "stageReadOnly": "Только просмотр",

@@ -140,11 +140,18 @@ async function mountPipeline(t, { factoryTask, graph }) {
   return { wrapper, openNode };
 }
 
-test('идущий разбор передаётся в обсуждение без повторной плашки над вкладками', async (t) => {
+test('идущий разбор передаётся в обсуждение своей вкладки арбитра', async (t) => {
   const { wrapper, openNode } = await mountPipeline(t, makeFixture({
     arbitrating: { actor: 'auto', model: 'claude/claude-opus-5', elapsedSec: 200 },
   }));
   await openNode();
+
+  // Содержимое этапа — главная вкладка: пока она открыта, идущий разбор виден плашкой
+  // над вкладками, а обсуждение смонтировано только на своей вкладке арбитра.
+  assert.equal(wrapper.find('.sarbrun.sarbnode').exists(), true);
+  assert.equal(wrapper.findComponent({ name: 'ArbiterConversation' }).exists(), false);
+
+  await wrapper.get('#stage-arbiter-tab').trigger('click');
 
   const conversation = wrapper.getComponent({ name: 'ArbiterConversation' });
 

@@ -163,6 +163,11 @@ const openStageNode = async (wrapper, flushPromises, node) => {
   wrapper.findComponent(globalThis.__pipelineArbiterFactoryGraph).vm.$emit('node', node);
   await flushPromises();
 };
+// Разбор живёт в отдельной вкладке окна узла: содержимое этапа не подменяется.
+const openArbiterTab = async (wrapper, flushPromises) => {
+  await wrapper.get('#stage-arbiter-tab').trigger('click');
+  await flushPromises();
+};
 
 test('карточка останавливает exact ход арбитра и сохраняет доступ к продолжению прогона', async (t) => {
   const { wrapper, posts, bodies, flushPromises } = await mountPipeline(t, makeFixture({
@@ -197,6 +202,7 @@ test('кнопка плашки открывает исторический ра
 
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
+  await openArbiterTab(wrapper, flushPromises);
   const block = wrapper.get('[data-role="arbiter-conversation"]');
 
   assert.match(block.text(), /удешевить рендер строки/);
@@ -205,19 +211,35 @@ test('кнопка плашки открывает исторический ра
   assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
   assert.deepEqual(bodies, []);
 });
-// Модалка узла осталась про заход: разбор в ней — признак со входом, а не текст.
-test('в модалке узла разбор занимает общий блок без второй формы возврата', async (t) => {
-  const { wrapper, flushPromises } = await mountPipeline(t, makeFixture({
+// Содержимое этапа — главная вкладка: причина остановки и возврат на этот же этап видны
+// без разбора, а разбор переезжает в соседнюю вкладку арбитра.
+test('в модалке узла разбор живёт отдельной вкладкой, возврат остаётся на результате', async (t) => {
+  const fx = makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
-  }), { compact: false });
+  });
+
+  fx.graph.nodeMeta.skeptic = {
+    stall: {
+      title: 'SKEPTIC: замкнутый набор замечаний расширен новыми id',
+      hint: 'блокирующие замечания пережили ремонт',
+    },
+  };
+
+  const { wrapper, flushPromises } = await mountPipeline(t, fx, { compact: false });
 
   await openStageNode(wrapper, flushPromises, {
     id: 'skeptic', label: '🕵 Скептик', subtitle: '', status: 'stall',
   });
 
-  assert.match(wrapper.get('.smodal [data-role="arbiter-conversation"]').text(), /оба измеренных рычага/);
-  assert.equal(wrapper.find('.rewind-sect').exists(), false);
+  assert.equal(wrapper.get('#stage-result-tab').attributes('aria-selected'), 'true');
+  assert.equal(wrapper.find('.smodal [data-role="arbiter-conversation"]').exists(), false);
+  assert.match(wrapper.get('.smodal .srail').text(), /Почему этап остановился/);
+  assert.match(wrapper.get('.smodal .srail').text(), /замкнутый набор замечаний/);
+  assert.equal(wrapper.find('.rewind-sect').exists(), true);
   assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
+
+  await openArbiterTab(wrapper, flushPromises);
+  assert.match(wrapper.get('.smodal [data-role="arbiter-conversation"]').text(), /оба измеренных рычага/);
 });
 // Кнопка обязана называть то, что за ней стоит: разбор, который человек ещё не читал.
 test('новая остановка того же узла открывает текущий диалог вместо предыдущего', async (t) => {
@@ -245,7 +267,11 @@ test('новая остановка того же узла открывает т
   });
   assert.equal(globalThis.__pipelineArbiterApiCalls
     .some((url) => url.includes(`/arbiter-conversations/${oldId}`)), false);
+
+  await openArbiterTab(wrapper, flushPromises);
   assert.equal(wrapper.get('[data-role="arbiter-conversation"]').text().includes('Предыдущие разборы'), true);
+  assert.equal(globalThis.__pipelineArbiterApiCalls
+    .some((url) => url.includes(`/arbiter-conversations/${oldId}`)), false);
 });
 
 test('вход в решение назван разбором, когда арбитр отдал вопрос человеку', async (t) => {
@@ -279,10 +305,15 @@ test('разбор чужого узла не выдаётся за разбор
   assert.equal(/разбор остановки/i.test(openAnswerButton(wrapper).text()), true);
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
-  assert.equal(wrapper.find('.smodal .sarbopen').exists(), false);
+  // Признак с арбитром стоит и без карточки, но текст у него честный: чужой вердикт
+  // и его «что» сюда не попадают ни при каком входе.
+  assert.match(wrapper.get('.smodal .sarbnote').text(), /ещё не разбирал/);
+  assert.equal(wrapper.get('.smodal').text().includes(ARBITER_CARD.card.what), false);
+  assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
+
+  await openArbiterTab(wrapper, flushPromises);
   assert.equal(wrapper.get('.smodal [data-role="arbiter-conversation"]')
     .text().includes(ARBITER_CARD.card.what), false);
-  assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
 });
 
 // «Поехать дальше без слов» — это соседняя кнопка «продолжить прогон». Пустой возврат
@@ -294,6 +325,7 @@ test('у исторического разбора нет активного п�
 
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
+  await openArbiterTab(wrapper, flushPromises);
   assert.equal(wrapper.find('[data-role="arbiter-apply"]').exists(), false);
   assert.equal(wrapper.find('[data-role="arbiter-custom-apply"]').exists(), false);
 });
@@ -377,6 +409,8 @@ test('нажатие начинает читающий разбор и откр�
 
   assert.deepEqual(posts, ['/api/tasks/42/arbitrate']);
   assert.deepEqual(dialogs, []);
+
+  await openArbiterTab(wrapper, flushPromises);
   assert.equal(wrapper.find('.smodal [data-role="arbiter-conversation"]').exists(), true);
 });
 test('короткий ответ запуска не выдаётся за принятое исправление', async (t) => {
@@ -417,6 +451,7 @@ test('разбор целиком показан внутри проблемно
 
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
+  await openArbiterTab(wrapper, flushPromises);
 
   const block = wrapper.get('.smodal [data-role="arbiter-conversation"]');
   assert.equal(block.text().includes('удешевить рендер строки'), true);
