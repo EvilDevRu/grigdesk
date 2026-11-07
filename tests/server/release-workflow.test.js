@@ -17,6 +17,8 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.match(text, /node-version:\s*24\.21\.0/);
   assert.match(text, /npm --prefix server test/);
   assert.match(text, /npm --prefix web test/);
+  assert.match(text, /npm --prefix mobile ci/);
+  assert.ok(text.indexOf('npm --prefix mobile ci') < text.indexOf('npm --prefix server test'));
   assert.match(text, /npm --prefix tracker ci/);
   assert.match(text, /npm --prefix relay ci/);
   assert.match(text, /npm --prefix deepseek ci/);
@@ -58,4 +60,6 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   assert.ok(publish, 'publisher остаётся отдельным шагом');
   assert.match(publish.if ?? '', /inputs\.publish/u);
+  assert.equal(publish.env.RELEASE_SITE_PORT, "${{ secrets.RELEASE_SITE_PORT || '22' }}");
+  assert.equal(publish.env.RELEASE_SITE_MIRROR_PORT, "${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}");
 });

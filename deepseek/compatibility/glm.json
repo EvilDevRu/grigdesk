@@ -6,6 +6,10 @@
     {
       "mode": "coding-plan",
       "compatibility": "f9c39e6f240dcd12136ce32722da177f8b513f3d92d8bd0be91a6efee09ded28"
+    },
+    {
+      "mode": "api",
+      "compatibility": "6b17c77865a8a540bc396f4289bdeed8684d5a7f25425b0011aefa5a841eb9a7"
     }
   ]
 }
