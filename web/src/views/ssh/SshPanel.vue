@@ -445,6 +445,7 @@
               <h4 class="ssh-connection-group__heading">
                 <UiDisclosureButton
                   class="ssh-project-toggle"
+                  data-context="ssh-project-toggle"
                   :open="projectIsExpanded(group.projectId)"
                   :controls="projectGroupId(group.projectId)"
                   :data-ssh-project="group.projectId"
@@ -1588,7 +1589,6 @@ defineExpose({ exportState, importState });
 
 .ssh-project-toggle {
   width: 100%;
-  padding-inline: 8px;
 }
 
 .ssh-project-heading {

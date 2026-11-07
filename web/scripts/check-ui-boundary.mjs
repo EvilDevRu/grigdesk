@@ -28,6 +28,10 @@ const PRESSABLE_CONSUMERS = new Set([
   // Плитка версии — пункт рейки, вынесенный из AppShell: тот же skinless-контрол.
   'web/src/features/grigdesk-update/GrigDeskVersionTile.vue',
   'web/src/shared/layout/AppShell.vue',
+  // Кнопка CPU/RAM продолжает строку показателей без отдельной рамки контрола.
+  'web/src/shared/layout/SystemResourcesButton.vue',
+  // Выбор машины — составная строка списка с отдельной кнопкой настроек справа.
+  'web/src/views/ConnectionsView.vue',
   'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',
   // «+N» строки хода — текст той же тихой строки без коробки: кнопка с рамкой и высотой
@@ -49,6 +53,9 @@ const NON_ACTIVATION_HANDLERS = new Set([
   // Делегирование кликов по настоящим ссылкам внутри v-html/markdown.
   'web/src/views/DocumentModal.vue|section|click|onDocumentClick',
   'web/src/views/chat/ChatSession.vue|div|click|onMarkdownClick',
+  'web/src/features/help/HelpBrowser.vue|article|click|followLink',
+  // Карточка не активируется: capture отменяет ложный click после свайпа закрытия.
+  'web/src/components/feedback/UiToastCard.vue|article|click|onClick',
   // Доступные split-resizer: pointer drag дополняют keyboard и exact dblclick reset.
   'web/src/views/ChatsView.vue|div|dblclick|resetListWidth',
   'web/src/views/chat/ChatSession.vue|div|dblclick|resetComposerHeight',

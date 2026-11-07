@@ -360,10 +360,10 @@ onBeforeUnmount(phone.close);
   line-height: 1.5;
 }
 .phone-connect p,
-.phone-connect h3 {
+.phone-connect__content h3 {
   margin: 0;
 }
-.phone-connect h3 {
+.phone-connect__content h3 {
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
