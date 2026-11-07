@@ -3741,8 +3741,12 @@ export const useChatStore = defineStore('chat', {
       const restored = p.turnId
         ? (s.messages || []).some((m) => m.role === 'user' && m.turnId === p.turnId)
         : (s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === userText);
+      // Видимый хвост запуска доказывает, что вопрос уже находится в старшей части ленты.
+      // Частичная загрузка не должна восстанавливать его копию после финального ответа.
+      const representedRun = (s.messages || []).some((m) =>
+        !!p.runId && m.runId === p.runId || !!p.turnId && m.parentTurnId === p.turnId);
 
-      if (userText && !restored) {
+      if (userText && !restored && !representedRun) {
         const sentAt = messageSentAt(p.userSentAt);
 
         s.messages.push({

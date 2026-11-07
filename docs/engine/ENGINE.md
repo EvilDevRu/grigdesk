@@ -48,6 +48,7 @@
 | `lib/provider-lineage-state.{sh,py}` | durable CAS authority native provider resume по exact provider scope |
 | `lib/runtime-usage.mjs` | retained-FD sealing, immutable usage publish и diagnostic `meta.env` mirror |
 | `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
+| `lib/runners/gigacode.sh.disabled` | [Временно отключённый GigaCode](GIGACODE.md); исходники сохранены, в реестре его нет |
 | `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
 | `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
 | `lib/coverage.sh`, `lib/profile-preflight.sh` | readiness/capability artifacts |

@@ -184,7 +184,7 @@
 - [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
 - [Два формата квот Kimi: окна, календарный месяц, разбивка кода и кошелёк](kimi-quota-format.md)
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
-- [GigaCode CLI: документированные возможности и граница проверки](gigacode-cli-contract.md)
+- [GigaCode временно отключён: сохранённые исходники и граница проверки](gigacode-cli-contract.md)
 - [Qwen Code: две точки подключения и проверенные внешние источники](qwen-integration-boundaries.md)
 - [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
 - [Coding Plan: полный smoke выбранного ELF и условия допуска](glm-coding-plan-smoke.md)
