@@ -55,7 +55,15 @@ jobs:
       - name: Песочница native-проверок
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo apt-get install -y --no-install-recommends bubblewrap apparmor
+          sudo tee /etc/apparmor.d/grigdesk-ci-bwrap > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-bwrap
           bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
 
       - name: Зависимости сервера

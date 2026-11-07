@@ -67,6 +67,10 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   assert.ok(sandbox >= 0 && sandbox < workflow.jobs.release.steps.indexOf(serverTests));
   assert.match(workflow.jobs.release.steps[sandbox].run, /bwrap --ro-bind \/ \/ --dev \/dev/u);
+  assert.match(workflow.jobs.release.steps[sandbox].run,
+    /profile grigdesk-ci-bwrap \/usr\/bin\/bwrap flags=\(unconfined\)/u);
+  assert.match(workflow.jobs.release.steps[sandbox].run,
+    /apparmor_parser -r \/etc\/apparmor.d\/grigdesk-ci-bwrap/u);
 
   const snapshot = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('materializeDeepSeekSnapshot'));
