@@ -244,7 +244,7 @@
 - [Скрытое окно Electron: ready-to-show на каждый документ, модальность при скрытом родителе, выход](electron-hidden-window-startup.md)
 - [Окружение потомков Electron и AppImage: APPDIR в путях, CHROME_DESKTOP, IPC с системным node](electron-child-environment.md)
 - [Подсказки: общая директива controls, лента без справки и отличение заголовка от native title](tooltips.md)
-- [Ворота выпуска UI: публичные импорты, точные исключения событий и общий слой оформления](ui-release-guards.md)
+- [Ворота выпуска UI: бюджет тестов, публичные импорты, исключения событий и общий слой оформления](ui-release-guards.md)
 - [Оповещения: тост в окне и системный канал в фоне](in-app-alerts.md)
 - [Счётчик колокольчика: положение внутри сенсорной кнопки и предел числа](alert-bell-badge.md)
 - [Веб (web/src/)](frontend-architecture.md)
