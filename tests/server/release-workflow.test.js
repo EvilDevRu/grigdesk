@@ -62,6 +62,12 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.match(serverTests.run, /df -h/u);
   assert.match(serverTests.run, /free -m/u);
 
+  const sandbox = workflow.jobs.release.steps.findIndex((step) =>
+    step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));
+
+  assert.ok(sandbox >= 0 && sandbox < workflow.jobs.release.steps.indexOf(serverTests));
+  assert.match(workflow.jobs.release.steps[sandbox].run, /bwrap --ro-bind \/ \/ --dev \/dev/u);
+
   const snapshot = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('materializeDeepSeekSnapshot'));
   const binary = workflow.jobs.release.steps.findIndex((step) =>
