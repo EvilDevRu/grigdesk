@@ -194,6 +194,10 @@ factory_external_exec() {
 
 # Возвращает массив готовой команды, чтобы внешний timeout оставался снаружи.
 # SIGTERM тогда получает helper, а он завершает собственную сессию CLI.
+# Аргументы после default НЕ включают имя CLI: оно ставится первым здесь —
+# дескрипторный бинарь при валидном descriptor-е, иначе default. Сдвоенное имя
+# доходит до парсера CLI: Codex его молча проглатывает, Kimi падает с
+# «unknown command» до модели (инцидент 07.11.2026).
 factory_external_launch() {
   local provider=${1:?provider} default=${2:?default}
   shift 2

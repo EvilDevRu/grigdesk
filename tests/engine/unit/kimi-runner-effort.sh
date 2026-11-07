@@ -74,6 +74,12 @@ run_dir="$TEST_ROOT/run-max"
 mkdir -p "$run_dir"
 runner_kimi_run 42 prompt BUILD k3 max 30 "$run_dir"
 assert_rc 0 "$?" "supported effort max is accepted"
+# Регрессия 07.11.2026: имя CLI подставляет factory_external_launch, args его не
+# содержат — сдвоенное «kimi kimi» CLI отвергает как неизвестную команду до модели.
+grep -Fxq $'4\tkimi' "$CAPTURE_FILE"
+assert_rc 0 "$?" "launch puts the CLI binary exactly once before its arguments"
+grep -Fxq $'5\t-p' "$CAPTURE_FILE"
+assert_rc 0 "$?" "provider flags follow the CLI without a duplicate name"
 assert_eq "$run_dir/kimi-home" "$(cat "$CAPTURE_ENV")" "CLI runs with a per-run KIMI_CODE_HOME"
 run_config=$(cat "$run_dir/kimi-home/config.toml")
 assert_contains "$run_config" 'effort = "max"' "per-run config carries the requested effort"

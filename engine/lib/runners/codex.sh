@@ -68,7 +68,10 @@ runner_codex_capabilities() {
 runner_codex_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local sandbox=${RUNNER_CODEX_SANDBOX:-workspace-write}
-  local -a args=(codex exec --json --skip-git-repo-check)
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама.
+  # Сдвоенный лишний позиционный аргумент Codex CLI молча проглатывает, но другие
+  # CLI на «unknown command» падают до модели — контракт один для всех раннеров.
+  local -a args=(exec --json --skip-git-repo-check)
   factory_browser_runner_roots || return 4
   if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
     # Shared checkout не должен наследовать доступ пользователя к Docker socket.
@@ -183,8 +186,10 @@ runner_codex_run() {
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
   if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
+    # Ограниченный стенд идёт мимо descriptor-а через alias-каталог PATH, поэтому
+    # имя CLI здесь ставится в команду явно: args его по контракту не содержат.
     PATH="$codex_alias_dir:$PATH" CODEX_NATIVE_BIN="$codex_native" \
-      factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+      factory_exec provider timeout -k 30 "$timeout_s" codex "${args[@]}" <<<"$prompt"
   else
     factory_external_launch codex codex "${args[@]}" || return $?
     factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}" <<<"$prompt"
