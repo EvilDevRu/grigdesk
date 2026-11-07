@@ -25,8 +25,8 @@ async function checkServerContracts(
   await sessions.open({ password: 'secret' });
   // @ts-expect-error Доступ агента меняется булевым решением.
   await sessions.setAgentAccess('session-a', 'yes');
-  // @ts-expect-error Область работы агенту навязывает сервер, а не его аргументы.
-  await broker.invoke({ projectId: 42 }, { action: 'list' });
+  // @ts-expect-error Чат доставки подтверждения навязывает сервер строковым ключом.
+  await broker.invoke({ chatKey: 42 }, { action: 'list' });
 
   const limited = limitSshOutput('вывод', 16);
 

@@ -259,7 +259,14 @@ test('агентский broker отказывает сразу после жи�
     sessions: {
       listForAgent() {
         sessionReads += 1;
-        return [{ label: 'Боевой код', role: 'code' }];
+
+        return [{
+          id: 'session-a',
+          projectId: 'project-a',
+          label: 'Боевой код',
+          role: 'code',
+          agentAllowed: true,
+        }];
       },
     },
   });
@@ -269,7 +276,12 @@ test('агентский broker отказывает сразу после жи�
   const after = await broker.invoke({ projectId: 'project-a' }, { action: 'list' });
 
   assert.deepEqual({ before, after, sessionReads }, {
-    before: [{ label: 'Боевой код', role: 'code' }],
+    before: [{
+      sessionId: 'session-a',
+      projectId: 'project-a',
+      label: 'Боевой код',
+      role: 'code',
+    }],
     after: { ok: false, error: 'plugin_disabled' },
     sessionReads: 1,
   });

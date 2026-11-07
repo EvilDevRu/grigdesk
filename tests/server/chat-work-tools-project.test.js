@@ -20,6 +20,13 @@ const TIME_COMMAND = Object.freeze({
   command: 'date -Is',
 });
 
+const ALL_SSH_SESSIONS = ['project-a', 'project-b'].map((projectId) => ({
+  sessionId: `session-${projectId}`,
+  projectId,
+  label: `Сервер ${projectId}`,
+  role: 'web',
+}));
+
 /**
  * Настоящий маршрут чата и SSH-брокер работают с синтетическими сессиями.
  * Очередь подтверждений настоящая, а команды только записываются в массив.
@@ -53,8 +60,8 @@ async function fixture(t) {
     pluginEnabled: () => true,
     permissionQueue: queue,
     sessions: {
-      listForAgent(projectId) {
-        return sessions.filter((session) => session.projectId === projectId && session.agentAllowed);
+      listForAgent() {
+        return sessions.filter((session) => session.agentAllowed);
       },
       async exec(id, command) {
         executions.push({ id, command });
@@ -73,8 +80,8 @@ async function fixture(t) {
     id: TEST_MODEL_REF.provider,
     workdir: { switch: 'resume', roots: 'multi' },
     /**
-     * Наблюдает scope на границе реально запущенного исполнителя.
-     * Подставленный projectId в аргументах модели не должен менять сохранённый выбор.
+     * Наблюдает SSH и DB на границе реально запущенного исполнителя.
+     * Подставленный projectId не меняет список SSH и сохранённый проект для DB.
      */
     async run(options) {
       runs.push(options);
@@ -230,14 +237,14 @@ async function changeProject(f, projectId) {
   assert.equal(response.statusCode, 200, response.body);
 }
 
-test('свободный чат видит разрешённые SSH-сессии сохранённого проекта', async (t) => {
+test('свободный чат видит разрешённые SSH-сессии всех проектов', async (t) => {
   const f = await fixture(t);
 
   await saveChat(f, PROJECT_WORKDIR);
 
   const result = await send(f);
 
-  assert.deepEqual(result.list, [{ label: 'Сервер project-a', role: 'web' }]);
+  assert.deepEqual(result.list, ALL_SSH_SESSIONS);
   assert.deepEqual(f.dbScopes, ['project-a']);
   assert.equal(f.executions.length, 0);
   assert.equal(f.queue.waiting().length, 0);
@@ -269,7 +276,7 @@ test('команда свободного чата в auto ждёт отдель
   assert.equal(f.executions.length, 1);
 });
 
-test('смена проекта меняет SSH-область и ключ сессии при прежнем cwd', async (t) => {
+test('смена проекта сохраняет список SSH и меняет только проектный scope DB', async (t) => {
   const f = await fixture(t);
 
   await saveChat(f, PROJECT_WORKDIR);
@@ -280,51 +287,66 @@ test('смена проекта меняет SSH-область и ключ се
 
   const second = await send(f);
 
-  assert.deepEqual(first.list, [{ label: 'Сервер project-a', role: 'web' }]);
-  assert.deepEqual(second.list, [{ label: 'Сервер project-b', role: 'web' }]);
+  assert.deepEqual(first.list, ALL_SSH_SESSIONS);
+  assert.deepEqual(second.list, ALL_SSH_SESSIONS);
   assert.equal(f.runs[0].cwd, f.runs[1].cwd);
   assert.notEqual(f.runs[0].workToolScopeKey, f.runs[1].workToolScopeKey);
   assert.deepEqual(f.dbScopes, ['project-a', 'project-b']);
 
   f.setCommand(TIME_COMMAND);
-  assert.equal((await send(f)).result.error, 'not_available');
-  assert.equal(f.queue.waiting().length, 0);
+
+  const turn = send(f);
+  const pending = await waitFor(() => f.queue.waiting().find((entry) => entry.origin === 'ssh'));
+
   assert.equal(f.executions.length, 0);
+  await f.queue.answer(pending.pid, 'ssh', { allow: true });
+  assert.equal((await turn).result.ok, true);
+  assert.deepEqual(f.executions, [{ id: 'session-project-a', command: 'date -Is' }]);
 });
 
-test('обычный путь к репозиторию не даёт проектный SSH-доступ', async (t) => {
+test('обычный путь разрешает SSH с подтверждением без проектного доступа DB', async (t) => {
   const f = await fixture(t);
 
   await saveChat(f, { kind: 'path', path: f.root });
-  f.setCommand(TIME_COMMAND);
+  f.setCommand({
+    action: 'exec',
+    sessionId: 'session-project-b',
+    command: 'date -Is',
+  });
 
-  const result = await send(f);
+  const turn = send(f);
+  const pending = await waitFor(() => f.queue.waiting().find((entry) => entry.origin === 'ssh'));
 
-  assert.deepEqual(result.list, []);
-  assert.equal(result.result.error, 'project_scope_unavailable');
+  assert.equal(f.executions.length, 0);
+  await f.queue.answer(pending.pid, 'ssh', { allow: true });
+
+  const result = await turn;
+
+  assert.deepEqual(result.list, ALL_SSH_SESSIONS);
+  assert.equal(result.result.ok, true);
   assert.deepEqual(f.dbScopes, []);
-  assert.equal(f.queue.waiting().length, 0);
+  assert.deepEqual(f.executions, [{ id: 'session-project-b', command: 'date -Is' }]);
 });
 
-test('задача использует доверенный проект и не откатывается к выбору чата', async (t) => {
+test('доверенный проект задачи ограничивает DB, а SSH доступен всем чатам', async (t) => {
   const f = await fixture(t);
 
   f.setTaskProject('project-b');
   await saveChat(f, PROJECT_WORKDIR, '44');
 
-  assert.deepEqual((await send(f, '44')).list, [{ label: 'Сервер project-b', role: 'web' }]);
+  assert.deepEqual((await send(f, '44')).list, ALL_SSH_SESSIONS);
 
   f.setTaskProject(null);
 
-  assert.deepEqual((await send(f, '44')).list, []);
+  assert.deepEqual((await send(f, '44')).list, ALL_SSH_SESSIONS);
   assert.deepEqual(f.dbScopes, ['project-b']);
 });
 
-test('удалённый проект сохраняет историческую папку без надзорного доступа', async (t) => {
+test('удаление проекта чата не скрывает разрешённые живые SSH-сессии', async (t) => {
   const f = await fixture(t);
 
   await saveChat(f, PROJECT_WORKDIR);
-  assert.equal((await send(f)).list.length, 1);
+  assert.deepEqual((await send(f)).list, ALL_SSH_SESSIONS);
 
   await new ChatProjectWorkspaces(f.config.chatsDir).capture('project-a', {
     revision: 0,
@@ -337,12 +359,10 @@ test('удалённый проект сохраняет историческу�
       'project-a': { deletedAt: '2026-01-01T00:00:00.000Z', revision: 1 },
     },
   };
-  f.setCommand(TIME_COMMAND);
 
   const result = await send(f);
 
-  assert.deepEqual(result.list, []);
-  assert.equal(result.result.error, 'project_scope_unavailable');
+  assert.deepEqual(result.list, ALL_SSH_SESSIONS);
   assert.deepEqual(f.dbScopes, ['project-a']);
   assert.equal(f.queue.waiting().length, 0);
   assert.equal(f.executions.length, 0);

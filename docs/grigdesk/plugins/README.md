@@ -76,7 +76,7 @@ SSH, просмотр документов, «Код», стенды и песо
 - [Восстановление 3D: проекции без лишних записей, сроки, форматы и пределы](studio3d-recovery-and-limits.md)
 - [Импорт 3D: ограниченный scan, DAG, история и tombstones](studio3d-importer.md)
 - [API 3D: закрытые схемы, transactional lifecycle, uploads и scoped viewer](studio3d-server.md)
-- [SSH-плагин: сессии, подтверждения и доступ из проекта свободного чата](ssh.md)
+- [SSH-плагин: общие сессии всех чатов, однозначный выбор и подтверждения](ssh.md)
 
 ## Грабли
 

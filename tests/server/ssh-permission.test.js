@@ -127,7 +127,6 @@ test('chat/index в auto-режиме не применяет autoDecision и re
     permissionQueue: queue,
     sessions: {
       listForAgent: () => [session],
-      findForAgent: () => session,
       exec: async () => ({ ok: true, output: 'uid=1000' }),
     },
   });

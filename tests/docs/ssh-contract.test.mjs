@@ -47,17 +47,17 @@ test('документация закрепляет одну очередь и o
   );
 });
 
-test('документация называет четыре bridge и trusted task scope', async () => {
+test('документация называет четыре bridge и общий список разрешённых SSH-сессий', async () => {
   const docs = await sshDocs();
 
   assert.deepEqual({
     providers: ['Claude', 'Codex', 'Kimi', 'DeepSeek'].filter((name) => docs.includes(name)),
-    trustedAttempt: /trusted attempt|доверенн[а-я -]*attempt/i.test(docs),
-    nullScope: /free|свободн[а-я ]+чат/i.test(docs),
+    globalSessions: /всех живых сессий/i.test(docs),
+    explicitSelection: /ambiguous_session/.test(docs),
   }, {
     providers: ['Claude', 'Codex', 'Kimi', 'DeepSeek'],
-    trustedAttempt: true,
-    nullScope: true,
+    globalSessions: true,
+    explicitSelection: true,
   });
 });
 

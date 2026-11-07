@@ -96,7 +96,7 @@ test('broker возвращает агенту ограниченный выво
       enqueue: () => ({ result: Promise.resolve({ allow: true }) }),
     },
     sessions: {
-      findForAgent: () => session,
+      listForAgent: () => [session],
       exec: async () => ({ ok: true, output, exitCode: 0 }),
     },
     audit: { append: async () => {} },

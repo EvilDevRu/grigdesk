@@ -1,27 +1,25 @@
 # Рабочие инструменты GrigDesk
 
-`supervised_ssh` — первый рабочий tool самого GrigDesk. Он доставляется Claude через MCP,
-Codex как app-server dynamic tool, Kimi и DeepSeek через ACP/MCP, но
-descriptor и dispatcher едины. У задачи scope строится из trusted attempt ledger:
-task id → доверенный attempt.profile → существующий project. У свободного чата используется
-явно выбранный проект (`workdir.kind: 'project'`) из сохранённой сервером записи разговора.
-В обоих случаях проект повторно проверяется по действующему каталогу регистраций.
+`supervised_ssh` доставляется Claude через MCP, Codex как app-server dynamic tool,
+Kimi и DeepSeek через ACP/MCP; descriptor и dispatcher едины. Агент видит все живые
+SSH-сессии с допуском человека независимо от проекта задачи, проекта свободного чата
+или обычной рабочей папки. Список содержит `sessionId`, `projectId`, `label` и `role`.
+Команда выбирает сессию по `sessionId`; прежняя пара метка/роль допустима только при
+единственном совпадении. Неоднозначный выбор возвращает `ambiguous_session`.
 
-Недоверенная/legacy-задача не получает fallback к выбранному проекту. Свободный чат с
-обычным путём или выбором GrigDesk получает null scope, даже если путь совпадает с
-репозиторием проекта. Удалённая регистрация не даёт надзорного доступа через сохранённые
-исторические корни. UI-context, текст сообщений, поля запроса хода и аргументы model tool
-не выбирают scope. Смена проекта входит в `workToolScopeKey`, поэтому следующая сессия
-исполнителя не переиспользует инструменты прежнего проекта.
+Любой `exec`, независимо от permission mode/auto/remember, создаёт `origin:'ssh'` в общей
+`pendingPerms`; чат доставки задаёт сервер, ответ идёт только через
+`/api/ssh/approvals/:pid`. Broker проверяет допуск до подтверждения и после него, не
+подменяя выбранный ID другой сессией. Human shell отделён от exec-channel агента,
+SFTP в tool отсутствует. Lifecycle и DTO описаны в [ssh.md](../plugins/ssh.md).
 
-Агент видит у доступной живой сессии только `label`/`role`. Любой `exec`, независимо от
-permission mode/auto/remember, создаёт `origin:'ssh'` в общей `pendingPerms`; ответ идёт
-только через `/api/ssh/approvals/:pid`. Human shell отделён от exec-channel агента, SFTP
-в tool отсутствует. Lifecycle, DTO и остаточный риск недоверенного вывода описаны в
-[ssh.md](../plugins/ssh.md).
-
-`supervised_db` использует тот же проектный scope и server-owned descriptor/dispatcher во всех исполнителях;
-его рубеж решений описан в [дополнительных контрактах](../reference/runtime-contracts.md).
+`supervised_db` сохраняет проектный scope: у задачи он строится из trusted attempt ledger,
+а у свободного чата — из явно выбранного проекта (`workdir.kind: 'project'`). Сервер
+проверяет действующую регистрацию. Недоверенная/legacy-задача не получает fallback к
+проекту чата; обычный путь, выбор GrigDesk и удалённая регистрация не дают DB scope.
+UI-context, текст сообщений, поля запроса хода и аргументы model tool не выбирают его.
+Смена проекта входит в `workToolScopeKey`. Рубеж DB описан в
+[дополнительных контрактах](../reference/runtime-contracts.md).
 Прежний третий tool, `knowledge_search`, снят вместе с базой знаний — его устройство сохранено
 в [истории базы](../overview/knowledge-base-history.md).
 
