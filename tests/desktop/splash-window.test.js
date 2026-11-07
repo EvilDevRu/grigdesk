@@ -15,10 +15,10 @@ import { secureWebPreferences } from '../../desktop/src/windowSecurity.ts';
 
 const assets = new URL('../../desktop/assets/splash/', import.meta.url);
 const SPLASH_HASHES = {
-  'background.png': '2d7040803a92ddb9aad1cae4bf1afdc46732859f1e325e9cfd564b3738c976cc',
+  'background.png': '544b12cd3d8fb85ddcea3e2e2269edb48c879683bdcb4a3f6829a865cbfb65c4',
   'wordmark.svg': '732ca732444dd5df453748cbec861562ec5fa344c124210f43fb6b7dd8925ba7',
-  'index.html': '4ead04a147544b294dd574d6a3729141bef32f6f07a009c9095be3b57e1e101d',
-  'style.css': 'f74c79251bf9f6661bd67869ad79eecea48ec22d8afe1f25714de02760152d6e',
+  'index.html': 'acf8133f47d09ab8e2b49842fd25f16551197434df3cdbe10a19bc082a1a65e5',
+  'style.css': '90ffaf5d018b8d783ca97864cc081256784eb9fe5d8cb15d0b6794ac99dde3e0',
 };
 
 /**
@@ -86,10 +86,10 @@ function preventable() {
 test('SP-01: опции заставки точно по решению, сессия — переданная', () => {
   const session = { splash: true };
   const bounds = {
-    x: 600,
-    y: 300,
-    width: 720,
-    height: 480,
+    x: 690,
+    y: 360,
+    width: 540,
+    height: 360,
   };
   const options = splashWindowOptions({
     icon: '/app/icon.png',
@@ -99,10 +99,10 @@ test('SP-01: опции заставки точно по решению, сес�
   });
 
   assert.deepEqual(options, {
-    x: 600,
-    y: 300,
-    width: 720,
-    height: 480,
+    x: 690,
+    y: 360,
+    width: 540,
+    height: 360,
     show: false,
     frame: false,
     resizable: false,
@@ -128,8 +128,8 @@ test('SP-01: опции заставки точно по решению, сес�
     session,
   }).webPreferences.devTools, true);
   assert.deepEqual(SPLASH_SIZE, {
-    width: 720,
-    height: 480,
+    width: 540,
+    height: 360,
   });
   assert.equal(SPLASH_STATUS_TEXT, 'Загрузка…');
   assert.equal(SPLASH_BACKGROUND, '#15191f');
@@ -150,10 +150,11 @@ function rect(x, y, width, height) {
 
 test('SP-02: геометрия 3:2 по центру рабочей области', () => {
   const cases = [
-    [rect(0, 0, 1920, 1080), rect(600, 300, 720, 480)],
-    [rect(0, 0, 640, 400), rect(20, 0, 600, 400)],
+    [rect(0, 0, 1920, 1080), rect(690, 360, 540, 360)],
+    [rect(0, 0, 640, 400), rect(50, 20, 540, 360)],
+    [rect(0, 0, 480, 400), rect(0, 40, 480, 320)],
     [rect(0, 0, 300, 150), rect(38, 0, 225, 150)],
-    [rect(1920, 40, 1920, 1040), rect(2520, 320, 720, 480)],
+    [rect(1920, 40, 1920, 1040), rect(2610, 380, 540, 360)],
   ];
 
   for (const [area, expected] of cases) {
