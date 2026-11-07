@@ -61,7 +61,7 @@ before(async () => {
     }),
   };
   globalThis[`${PREFIX}ChatStore`] = () => globalThis.__lazyDetailChat;
-  ChatSession = await compileChatSession(PREFIX);
+  ChatSession = await compileChatSession(PREFIX, { realHelp: true });
 });
 
 /**

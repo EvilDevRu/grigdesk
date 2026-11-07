@@ -186,7 +186,7 @@
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 - [GigaCode временно отключён: сохранённые исходники и граница проверки](gigacode-cli-contract.md)
 - [Qwen Code: две точки подключения и проверенные внешние источники](qwen-integration-boundaries.md)
-- [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
+- [Исполнитель GLM (Z.ai): допуск, живая проверка, model-only и ограничения чата](glm-executor.md)
 - [Coding Plan: полный smoke выбранного ELF и условия допуска](glm-coding-plan-smoke.md)
 - [Ошибки модели GLM: коды квоты поверх RATE_LIMIT, отказ автопродолжения и пояснение 1113](glm-model-errors.md)
 - [Типы ключей GLM: почему активный Pro совместим с ошибкой 1113 и как проверить причину](glm-key-types.md)

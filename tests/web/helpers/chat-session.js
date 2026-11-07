@@ -90,6 +90,7 @@ function inertComponentStub(className) {
 export function compileChatSession(prefix, {
   realSteps = false,
   realWorkdir = false,
+  realHelp = false,
   expose = [],
   stubs = {},
 } = {}) {
@@ -126,6 +127,9 @@ export function compileChatSession(prefix, {
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
       ...(realWorkdir ? {} : { './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub') }),
+      ...(realHelp ? {} : {
+        '../../features/help/HelpArticleLink.vue': inertComponentStub('help-article-link-stub'),
+      }),
       '../../ui': uiFacadeStub(prefix),
       '../../ui.ts': uiFacadeStub(prefix),
       './codeHighlight.ts': 'export const highlightCode = async () => null;',

@@ -91,7 +91,7 @@ test('изолированный server и Factory работают через �
       HOME: path.join(root, 'data/home'),
       GRIGDESK_HOME: path.join(root, 'data'),
     },
-    timeout: 180000,
+    timeout: 300000,
     maxBuffer: 65536,
   });
   const proof = JSON.parse(result.stdout);

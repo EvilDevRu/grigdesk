@@ -66,11 +66,12 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-bwrap
           bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
 
-      - name: Средства обработки медиа
+      - name: Системные средства тестов
         run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg ripgrep
           ffmpeg -version
           ffprobe -version
+          rg --version
 
       - name: Зависимости сервера
         run: npm --prefix server ci
