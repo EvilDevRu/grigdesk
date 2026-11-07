@@ -75,17 +75,24 @@ function validateSettings(
 }
 
 /**
- * Проверяется только видимый токен текущего режима; пустой ввод сохраняет секрет.
- * Ошибка содержит имя поля, но никогда не включает введённое значение.
+ * Формат проверяется только у введённого токена текущего режима.
+ * Сохранённый секрет учитывается лишь в required: ретроактивная проверка его формата
+ * навсегда заблокировала бы сохранение любых реквизитов, записанных до введения проверки.
  */
-function validateTokenInput(entry: TrackerDescriptor, values: Record<string, unknown>) {
-  for (const key of visibleTrackerTokenKeys(entry.schema, values)) {
-    if (entry.schema[key]?.required && (typeof values[key] !== 'string' || values[key] === '')) {
+function validateTokenInput(
+  entry: TrackerDescriptor,
+  values: Record<string, unknown>,
+  merged: Record<string, unknown>,
+) {
+  for (const key of visibleTrackerTokenKeys(entry.schema, merged)) {
+    if (entry.schema[key]?.required && (typeof merged[key] !== 'string' || merged[key] === '')) {
       throw new TrackerTokenError(entry.id, key,
         'Укажите API-токен трекера. Пароль учётной записи не подходит.');
     }
 
-    if (typeof values[key] === 'string' && !isTrackerTokenInput(values[key])) {
+    const input = values[key];
+
+    if (typeof input === 'string' && input !== '' && !isTrackerTokenInput(input)) {
       throw new TrackerTokenError(entry.id, key,
         'Вставьте API-токен целиком без пробелов, кавычек и префикса Bearer. Пароль не подходит.');
     }
@@ -146,7 +153,7 @@ async function trackersModule(app: FastifyInstance, options: {
           const entry = catalog.find((driver) => driver.id === id);
           const values = validateSettings(entry, input);
 
-          validateTokenInput(entry!, runtime.credsStore.mergeFor(id, values));
+          validateTokenInput(entry!, values, runtime.credsStore.mergeFor(id, values));
 
           return [id, values] as const;
         }));
@@ -201,7 +208,7 @@ async function trackersModule(app: FastifyInstance, options: {
         const entry = runtime.registry.descriptors().find((driver) => driver.id === body.driverId);
         const values = validateSettings(entry, body.settings);
 
-        validateTokenInput(entry!, runtime.credsStore.mergeFor(body.driverId, values));
+        validateTokenInput(entry!, values, runtime.credsStore.mergeFor(body.driverId, values));
 
         const result = await runtime.testConnection(body.driverId, values);
 

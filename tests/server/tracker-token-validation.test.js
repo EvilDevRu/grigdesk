@@ -119,3 +119,37 @@ test('Режим пароля сохраняет пароль без токен�
   });
   assert.equal(fixture.credsStore.readFor('fixture-token').password, 'Пароль с пробелами!');
 });
+
+test('Сохранённый секрет нестандартного формата не блокирует сохранение других реквизитов', async (t) => {
+  const fixture = await tokenFixture(t, 'apiToken');
+
+  // Токен с '=' внутри строки сохранила прежняя версия сервера без форматной проверки.
+  fixture.credsStore.writeFor('fixture-token', { apiToken: 'Abc123==extra0' });
+
+  const response = await fixture.request('POST', '/api/trackers/settings', {
+    externalId: 'fixture-token',
+    expectedRevision: 0,
+    settings: { 'fixture-token': { apiToken: '', password: 'Пароль с пробелами!' } },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().revision, 1);
+  assert.equal(fixture.credsStore.readFor('fixture-token').apiToken, 'Abc123==extra0');
+  assert.equal(fixture.credsStore.readFor('fixture-token').password, 'Пароль с пробелами!');
+});
+
+test('Проверка соединения при пустом вводе доходит до драйвера со старым секретом', async (t) => {
+  const fixture = await tokenFixture(t, 'apiToken');
+
+  fixture.credsStore.writeFor('fixture-token', { apiToken: 'Abc123==extra0' });
+
+  const response = await fixture.request('POST', '/api/trackers/test-connection', {
+    driverId: 'fixture-token',
+    expectedRevision: 0,
+    settings: { apiToken: '' },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().ok, false);
+  assert.equal(response.json().error, 'Ключ отклонён');
+});
