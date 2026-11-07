@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import fs from 'node:fs/promises';
 import nodeFs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { probeGrigDesk } from '../shared/runtime/grigDeskReadiness.ts';
+import { processUsageRecords as processes } from '../shared/node/processUsage.ts';
+import type { ProcessUsageRecord as ProcessInfo } from '../shared/node/processUsage.ts';
 import { readEnvFile } from '../server/src/lib/envFile.ts';
 import { inside } from './brandMoveFiles.ts';
 import { LEGACY } from '../shared/runtime/legacyBrand.ts';
@@ -12,116 +13,6 @@ import type { BrandCheck, BrandContext, BrandDeps } from './brandMoveCore.ts';
 
 const execute = promisify(execFile);
 const busyStates = new Set(['active', 'activating', 'reloading', 'deactivating']);
-
-interface ProcessInfo {
-  pid: number;
-  name: string;
-  cwd: string;
-  args: string[];
-  paths: string[];
-  unchecked: boolean;
-}
-
-const deniedCodes = new Set(['EACCES', 'EPERM']);
-
-/**
- * Исчезновение процесса во время обхода штатно; отказ доступа сохраняется как ошибка.
- * Ссылки читаются только в /proc, содержимое пользовательских файлов не открывается.
- */
-async function procLink(file: string): Promise<string> {
-  try {
-    return (await fs.readlink(file)).replace(/ \(deleted\)$/, '');
-  } catch (error) {
-    if (['ENOENT', 'ESRCH', 'EINVAL'].includes((error as NodeJS.ErrnoException).code ?? '')) {
-      return '';
-    }
-
-    throw error;
-  }
-}
-
-/**
- * Собирает закрытые части процесса: cwd, exe, открытые и отображённые файлы.
- * Процесс без признака dumpable (ssh-agent, менеджер паролей, служебные процессы сессии)
- * закрывает их даже от владельца; такой процесс помечается непроверенным, а не роняет обход.
- */
-async function privatePaths(directory: string, info: ProcessInfo): Promise<void> {
-  // Отказ доступа означает закрытый процесс: он помечается непроверенным, обход идёт дальше.
-  // Любая другая ошибка — настоящая поломка чтения /proc и прерывает план.
-  const guarded = async (action: () => Promise<void>): Promise<void> => {
-    try {
-      await action();
-    } catch (error) {
-      if (!deniedCodes.has((error as NodeJS.ErrnoException).code ?? '')) {
-        throw error;
-      }
-
-      info.unchecked = true;
-    }
-  };
-
-  await guarded(async () => {
-    info.cwd = await procLink(`${directory}/cwd`);
-    info.paths.push(info.cwd, await procLink(`${directory}/exe`));
-  });
-  await guarded(async () => {
-    for (const fd of await fs.readdir(`${directory}/fd`)) {
-      info.paths.push(await procLink(`${directory}/fd/${fd}`));
-    }
-  });
-  await guarded(async () => {
-    const maps = await fs.readFile(`${directory}/maps`, 'utf8');
-
-    for (const line of maps.split('\n')) {
-      const file = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(\/.*)$/.exec(line)?.[1];
-
-      if (file) {
-        info.paths.push(file.replace(/ \(deleted\)$/, ''));
-      }
-    }
-  });
-}
-
-/**
- * Собирает только процессы того же пользователя и исключает саму команду.
- * Аргументы и имя читаются всегда; cwd, exe, fd и maps — если процесс их не закрыл.
- */
-async function processes(): Promise<ProcessInfo[]> {
-  const result: ProcessInfo[] = [];
-
-  for (const name of await fs.readdir('/proc')) {
-    if (!/^\d+$/.test(name) || Number(name) === process.pid) {
-      continue;
-    }
-
-    const directory = `/proc/${name}`;
-
-    try {
-      if ((await fs.stat(directory)).uid !== process.getuid?.()) {
-        continue;
-      }
-
-      const args = (await fs.readFile(`${directory}/cmdline`, 'utf8')).split('\0').filter(Boolean);
-      const info: ProcessInfo = {
-        pid: Number(name),
-        name: (await fs.readFile(`${directory}/comm`, 'utf8')).trim(),
-        cwd: '',
-        args,
-        paths: args.filter((arg) => arg.startsWith('/')),
-        unchecked: false,
-      };
-
-      await privatePaths(directory, info);
-      result.push(info);
-    } catch (error) {
-      if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) {
-        throw new Error(`Не удалось проверить процесс ${name}.`);
-      }
-    }
-  }
-
-  return result;
-}
 
 /**
  * Сервер этой копии узнаётся по аргументу, который вместе с cwd даёт путь к server/src/app.

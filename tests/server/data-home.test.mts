@@ -109,6 +109,12 @@ const expectedLayout = {
   dbEngines: 'db-engines',
   profiles: 'profiles',
   artifacts: 'artifacts',
+  factory: 'factory',
+  factoryState: 'factory/state',
+  factoryControl: 'factory/control',
+  factoryConfig: 'factory/config',
+  factoryRoutes: 'factory/routes',
+  factoryAnalysis: 'factory/analysis',
   moveJournal: '.move-journal.json',
   moveLock: '.move-lock',
 };

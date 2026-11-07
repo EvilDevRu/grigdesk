@@ -24,4 +24,4 @@
 
 ## Связанные статьи
 
-[Обновление](updates.md) · [Рабочая папка](chat-workdir.md) · [Подключения](connections.md)
+[Обновление](updates.md) · [Рабочая папка](chat-workdir.md) · [Подключения](connections.md) · [Конвейер](pipelines.md) · [Маршруты](routes.md)

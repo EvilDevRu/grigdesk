@@ -34,9 +34,6 @@ server/runtime/deepseek/
 __pycache__/
 BUGS.md
 
-# Local project profiles can contain machine-specific paths, credentials and runtimes.
-/profiles/
-
 # Пользовательские плагины — тоже локальные для машины (адреса, токены, чужие сервисы);
 # в репозитории остаётся только описание контракта.
 /plugins/*

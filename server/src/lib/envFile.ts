@@ -57,6 +57,8 @@ interface EnvLine {
 interface EnvSnapshot {
   bytes: Buffer | null;
   mode: number;
+  uid: number;
+  gid: number;
 }
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -351,7 +353,12 @@ async function readSnapshot(target: string): Promise<EnvSnapshot> {
     handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   } catch (error) {
     if (isMissing(error)) {
-      return { bytes: null, mode: 0o600 };
+      return {
+        bytes: null,
+        mode: 0o600,
+        uid: process.getuid?.() ?? 0,
+        gid: process.getgid?.() ?? 0,
+      };
     }
 
     throw error;
@@ -375,7 +382,12 @@ async function readSnapshot(target: string): Promise<EnvSnapshot> {
       throw new EnvFileError('env_file_too_large', `${target} больше ${MAX_FILE_BYTES} байт.`);
     }
 
-    return { bytes: await handle.readFile(), mode: stat.mode & 0o777 };
+    return {
+      bytes: await handle.readFile(),
+      mode: stat.mode & 0o777,
+      uid: stat.uid,
+      gid: stat.gid,
+    };
   } finally {
     await handle.close();
   }
@@ -503,6 +515,191 @@ export async function updateEnvFile(envPath: string, changes: EnvFileChanges,
     }
 
     throw new EnvFileError('env_file_conflict', `${target} меняется параллельно; повторите правку позже.`);
+  });
+}
+
+export interface EnvFileMigrationPlan {
+  logicalPath: string;
+  targetPath: string;
+  logicalLink: string | null;
+  beforeBase64: string | null;
+  afterBase64: string;
+  mode: number;
+  uid: number;
+  gid: number;
+  changes: Record<string, string | null>;
+}
+
+function migrationConflict(): never {
+  throw new EnvFileError('env_file_conflict', 'Файл окружения изменился после подготовки переноса.');
+}
+
+/**
+ * Запоминает raw link только у logical leaf, не заменяя ссылку обычным файлом.
+ * Вновь появившаяся или перенаправленная ссылка означает конфликт подготовленного плана.
+ */
+async function migrationLogicalLink(file: string): Promise<string | null> {
+  try {
+    return (await fs.lstat(file)).isSymbolicLink() ? await fs.readlink(file) : null;
+  } catch (error) {
+    if (isMissing(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Raw snapshots ограничены тем же размером и UTF-8/syntax, что обычный env writer.
+ * Canonical base64 не позволяет передать неоднозначный payload через сохранённый plan.
+ */
+function migrationBytes(value: string | null): Buffer | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string' || value.length > Math.ceil(MAX_FILE_BYTES / 3) * 4) {
+    throw new EnvFileError('env_file_too_large', 'Недопустимый размер снимка окружения.');
+  }
+
+  const bytes = Buffer.from(value, 'base64');
+
+  if (bytes.toString('base64') !== value || bytes.length > MAX_FILE_BYTES) {
+    throw new EnvFileError('env_file_too_large', 'Недопустимый размер снимка окружения.');
+  }
+
+  planText(bytes, new Map());
+
+  return bytes;
+}
+
+/**
+ * Готовит read-only before/after через общий parser и ту же очередь physical target.
+ * Byte changes разрешены только для validateChanges, соседние bytes остаются прежними.
+ */
+export async function prepareEnvFileMigration(
+  envPath: string,
+  changes: EnvFileChanges,
+): Promise<EnvFileMigrationPlan> {
+  const planned = validateChanges(changes);
+  const logicalPath = path.resolve(envPath);
+  const targetPath = await resolveTarget(logicalPath);
+
+  return withPathLock(targetPath, async () => {
+    const logicalLink = await migrationLogicalLink(logicalPath);
+    const snapshot = await readSnapshot(targetPath);
+    const preview = planText(snapshot.bytes, planned);
+    const after = Buffer.from(preview.text, 'utf8');
+
+    if (after.length > MAX_FILE_BYTES) {
+      throw new EnvFileError('env_file_too_large', 'Результат переноса окружения слишком велик.');
+    }
+
+    if (await resolveTarget(logicalPath) !== targetPath
+      || await migrationLogicalLink(logicalPath) !== logicalLink) {
+      migrationConflict();
+    }
+
+    return {
+      logicalPath,
+      targetPath,
+      logicalLink,
+      beforeBase64: snapshot.bytes?.toString('base64') ?? null,
+      afterBase64: after.toString('base64'),
+      mode: snapshot.mode,
+      uid: snapshot.uid,
+      gid: snapshot.gid,
+      changes: Object.fromEntries(planned),
+    };
+  });
+}
+
+/**
+ * Exact raw forward/undo проходит ту же очередь и CAS, что updateEnvFile.
+ * Commit разрешён только на подготовленный physical target и только между двумя снимками.
+ */
+export async function withEnvFileMigrationWrite(
+  plan: EnvFileMigrationPlan,
+  request: {
+    targetPath: string;
+    base64: string | null;
+    owner: {
+      mode: number;
+      uid: number;
+      gid: number
+    };
+  },
+  commit: () => Promise<void>,
+): Promise<void> {
+  const keys = ['afterBase64', 'beforeBase64', 'changes', 'gid', 'logicalLink',
+    'logicalPath', 'mode', 'targetPath', 'uid'];
+
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)
+    || JSON.stringify(Object.keys(plan).sort()) !== JSON.stringify(keys.sort())
+    || typeof plan.logicalPath !== 'string' || typeof plan.targetPath !== 'string'
+    || plan.logicalLink !== null && typeof plan.logicalLink !== 'string'
+    || plan.beforeBase64 !== null && typeof plan.beforeBase64 !== 'string'
+    || typeof plan.afterBase64 !== 'string'
+    || !plan.changes || typeof plan.changes !== 'object' || Array.isArray(plan.changes)
+    || !request || typeof request !== 'object' || Array.isArray(request)
+    || typeof request.targetPath !== 'string'
+    || request.base64 !== null && typeof request.base64 !== 'string'
+    || !request.owner || typeof request.owner !== 'object' || Array.isArray(request.owner)) {
+    throw new EnvFileError('env_changes_invalid', 'Неверный контракт переноса окружения.');
+  }
+
+  // Сохранённый JSON сначала проходит проверку формы, чтобы path/Buffer не выдавали TypeError.
+  // Числа владельца, допустимые значения и exact raw CAS сохраняют прежние проверки ниже.
+  if (!path.isAbsolute(plan.logicalPath) || !path.isAbsolute(plan.targetPath)
+    || path.resolve(plan.logicalPath) !== plan.logicalPath || path.resolve(plan.targetPath) !== plan
+      .targetPath
+    || plan.uid !== process.getuid?.() || !Number.isInteger(plan.gid) || plan.gid < 0
+    || !Number.isInteger(plan.mode) || plan.mode < 0 || plan.mode > 0o777
+    || request.targetPath !== plan.targetPath || request.owner.mode !== plan.mode
+    || request.owner.uid !== plan.uid || request.owner.gid !== plan.gid) {
+    throw new EnvFileError('env_changes_invalid', 'Неверный контракт переноса окружения.');
+  }
+
+  const before = migrationBytes(plan.beforeBase64);
+  const after = migrationBytes(plan.afterBase64)!;
+  const preview = Buffer.from(planText(before, validateChanges(plan.changes)).text, 'utf8');
+
+  if (!preview.equals(after)) {
+    throw new EnvFileError('env_changes_invalid', 'Снимок окружения не соответствует разрешённым правкам.');
+  }
+
+  const desired = migrationBytes(request.base64);
+  const expected = sameBytes(desired, after) ? before
+    : sameBytes(desired, before) ? after : undefined;
+
+  if (expected === undefined) {
+    throw new EnvFileError('env_changes_invalid', 'Неверное направление переноса окружения.');
+  }
+
+  await withPathLock(plan.targetPath, async () => {
+    if (await resolveTarget(plan.logicalPath) !== plan.targetPath
+      || await migrationLogicalLink(plan.logicalPath) !== plan.logicalLink) {
+      migrationConflict();
+    }
+
+    const current = await readSnapshot(plan.targetPath);
+
+    if (!sameBytes(current.bytes, expected) || current.mode !== plan.mode
+      || current.uid !== plan.uid || current.gid !== plan.gid) {
+      migrationConflict();
+    }
+
+    await commit();
+
+    const applied = await readSnapshot(plan.targetPath);
+
+    if (!sameBytes(applied.bytes, desired) || desired !== null && (applied.mode !== plan.mode
+      || applied.uid !== plan.uid || applied.gid !== plan.gid)
+      || await resolveTarget(plan.logicalPath) !== plan.targetPath
+      || await migrationLogicalLink(plan.logicalPath) !== plan.logicalLink) {
+      migrationConflict();
+    }
   });
 }
 

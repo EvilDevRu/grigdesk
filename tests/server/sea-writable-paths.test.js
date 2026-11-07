@@ -25,32 +25,25 @@ async function scratch(t) {
   return root;
 }
 
-test('SEA-WP-01: умолчания профилей зависят от режима, override важнее', () => {
-  const source = {
-    kind: 'source',
-    rootDir: '/tree',
-    dataHome: '/data',
-    env: {}
-  };
+test('SEA-WP-01: defaults профилей едины, override сохраняется', () => {
+  for (const kind of ['source', 'packaged']) {
+    const input = {
+      kind,
+      rootDir: '/tree',
+      dataHome: '/data',
+      env: {}
+    };
 
-  assert.equal(profilesDirFor(source), '/tree/profiles');
-  assert.equal(profilesDirFor({
-    ...source,
-    kind: 'packaged'
-  }), '/data/profiles');
-  assert.equal(profilesDirFor({
-    ...source,
-    env: { FACTORY_PROFILES_DIR: '/external/profiles' }
-  }), '/external/profiles');
-  assert.equal(profilesDirFor({
-    ...source,
-    kind: 'packaged',
-    env: { FACTORY_PROFILES_DIR: '/external/profiles' }
-  }), '/external/profiles');
-  assert.equal(profilesDirFor({
-    ...source,
-    env: { FACTORY_PROFILES_DIR: '' }
-  }), '/tree/profiles');
+    assert.equal(profilesDirFor(input), '/data/profiles');
+    assert.equal(profilesDirFor({
+      ...input,
+      env: { FACTORY_PROFILES_DIR: '' },
+    }), '/data/profiles');
+    assert.equal(profilesDirFor({
+      ...input,
+      env: { FACTORY_PROFILES_DIR: '/external/profiles' },
+    }), '/external/profiles');
+  }
 });
 
 test('SEA-WP-02: конфигурация source сохраняет прежние умолчания', async (t) => {
@@ -77,7 +70,7 @@ test('SEA-WP-02: конфигурация source сохраняет прежни
   const { config } = await import(`../../server/src/config.ts?source=${Date.now()}`);
 
   assert.equal(config.rootDir, ROOT);
-  assert.equal(config.profilesDir, path.join(ROOT, 'profiles'));
+  assert.equal(config.profilesDir, path.join(home, 'profiles'));
   assert.equal('webDist' in config, false);
   assert.equal('uiReleasesDir' in config, false);
   assert.ok(!config.routesDir.startsWith(`${ROOT}${path.sep}`));
