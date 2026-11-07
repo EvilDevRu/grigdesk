@@ -1,21 +1,21 @@
 import { limitSshOutput } from './output.ts';
-import type { LimitedOutput } from './output.ts';
 import type { SshAuditInput } from './audit.ts';
 import type { PublicSshSession } from './sessionManager.ts';
+import { sshSessionTabLabel } from '../../../../shared/plugins/ssh/sessionLabels.ts';
 
 // Что модель говорит инструменту. Больше здесь ничего нет намеренно: адрес, порт и
-// пароль выбирает человек в панели, а агент называет только метку и роль сессии.
+// пароль выбирает человек в панели, а агент выбирает открытую разрешённую сессию.
 export interface BrokerInput {
   action?: string;
+  sessionId?: string;
   label?: string;
   role?: string;
   command?: string;
 }
 
-// Область, которую навязывает сервер. Проект берётся из чата, а не из аргументов
-// модели: иначе агент дотянулся бы до сессии соседнего проекта, назвав её метку.
+// Чат для доставки подтверждения навязывает сервер. Проект разговора не ограничивает
+// SSH: человек выдаёт доступ каждой живой сессии переключателем в панели.
 export interface BrokerScope {
-  projectId?: string;
   chatKey?: string;
 }
 
@@ -33,6 +33,8 @@ export interface BrokerResult {
 }
 
 export interface AgentSessionView {
+  sessionId: string;
+  projectId: string;
   label: string;
   role: string;
 }
@@ -55,8 +57,8 @@ interface BrokerAudit {
 }
 
 interface BrokerSessions {
-  listForAgent: (projectId: string) => PublicSshSession[];
-  findForAgent?: (projectId: string, label: string, role: string) => PublicSshSession | null;
+  list?: () => PublicSshSession[];
+  listForAgent: () => PublicSshSession[];
   exec: (id: string, command: string) => Promise<BrokerResult>;
 }
 
@@ -72,8 +74,13 @@ export interface SshBroker {
   invoke: (scope?: BrokerScope, input?: BrokerInput) => Promise<BrokerResult | AgentSessionView[]>;
 }
 
-function agentSession(value: PublicSshSession | null): AgentSessionView | null {
-  return value ? { label: String(value.label), role: String(value.role) } : null;
+function agentSession(value: PublicSshSession): AgentSessionView {
+  return {
+    sessionId: String(value.id),
+    projectId: String(value.projectId),
+    label: String(value.label),
+    role: String(value.role),
+  };
 }
 
 function safeResult(result: Record<string, unknown>): BrokerResult {
@@ -102,15 +109,14 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
   const audit = options.audit;
   const outputLimitBytes = options.outputLimitBytes || (() => 64 * 1_024);
 
-  function findSession(projectId: string, input: BrokerInput): PublicSshSession | null {
-    if (typeof sessions.findForAgent === 'function') {
-      return sessions.findForAgent(projectId, String(input.label), String(input.role));
-    }
-    return (sessions.listForAgent(projectId) || []).find((session) => (
-      session.label === input.label && session.role === input.role
-    )) || null;
+  function allowedSessions(): PublicSshSession[] {
+    return sessions.listForAgent().filter((session) => session.agentAllowed);
   }
 
+  /**
+   * Выбор делается среди всех разрешённых сессий до запроса подтверждения.
+   * После решения проверяется исходная сессия, без повторного выбора по имени.
+   */
   async function invoke(
     scope: BrokerScope = {},
     input: BrokerInput = {},
@@ -118,26 +124,31 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
     if (!enabled('ssh')) {
       return { ok: false, error: 'plugin_disabled' };
     }
-    const projectId = String(scope.projectId || '');
-    if (!projectId) {
-      return input.action === 'list'
-        ? []
-        : { ok: false, error: 'project_scope_unavailable' };
-    }
     if (input.action === 'list') {
-      return (sessions.listForAgent(projectId) || [])
-        .map(agentSession)
-        .filter((session): session is AgentSessionView => Boolean(session));
+      return allowedSessions().map(agentSession);
     }
     if (input.action !== 'exec') {
       return { ok: false, error: 'invalid_action' };
     }
     const command = String(input.command || '');
-    if (!command || !input.label || !input.role) {
+
+    if (!command || (!input.sessionId && (!input.label || !input.role))) {
       return { ok: false, error: 'invalid_arguments' };
     }
-    const session = await findSession(projectId, input);
-    if (!session || !session.agentAllowed) {
+
+    const matches = allowedSessions().filter((session) => (
+      (!input.sessionId || session.id === input.sessionId)
+      && (!input.label || session.label === input.label)
+      && (!input.role || session.role === input.role)
+    ));
+
+    if (matches.length > 1) {
+      return { ok: false, error: 'ambiguous_session' };
+    }
+
+    const session = matches[0];
+
+    if (!session) {
       return { ok: false, error: 'not_available' };
     }
     if (!permissionQueue) {
@@ -150,6 +161,10 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
       generation: session.generation,
       canRemember: false,
       presentation: {
+        tab: {
+          projectId: session.projectId,
+          label: sshSessionTabLabel(session, sessions.list?.() || allowedSessions()),
+        },
         server: {
           label: session.label,
           host: session.host,
@@ -166,9 +181,9 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
       const denied = decision.error
         ? { ok: false, error: decision.error }
         : { ok: false, error: 'denied', comment: decision.comment || '' };
+
       await audit?.append?.({
         ...session,
-        projectId,
         command,
         decision: 'deny',
         comment: decision.comment || '',
@@ -179,7 +194,8 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
     if (!enabled('ssh')) {
       return { ok: false, error: 'plugin_disabled' };
     }
-    const current = await findSession(projectId, input);
+
+    const current = allowedSessions().find((item) => item.id === session.id);
     if (!current
       || current.id !== session.id
       || current.generation !== session.generation
@@ -195,8 +211,9 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
       ...(limited || {}),
       ...(limited ? { output: limited.text } : {}),
     });
+
     await audit?.append?.({
-      projectId,
+      projectId: current.projectId,
       connectionId: current.connectionId,
       sessionId: current.id,
       label: current.label,

@@ -75,7 +75,7 @@ before(async () => {
  * Список получает реактивное состояние и настоящие UI controls с переводчиком.
  * Его проекция намеренно содержит копию: до ready компонент не должен даже читать list.
  */
-async function fixture(t, initial = {}) {
+async function fixture(t, initial = {}, pagingOverrides = {}) {
   locale.setUiLocale('ru');
 
   const calls = {
@@ -101,6 +101,14 @@ async function fixture(t, initial = {}) {
     get loadErrorMessage() {
       return this.loadError ? locale.messageRef(ERROR_KEYS[this.loadError]) : null;
     },
+    get archivedChatCount() { return this.archived.length; },
+    pageFor() {
+      return page;
+    },
+    beginChatSearch() {},
+    ensureChatPage() {},
+    loadChatPage() {},
+    refreshChatPage() {},
     list() {
       calls.list += 1;
 
@@ -135,6 +143,26 @@ async function fixture(t, initial = {}) {
     deleteChat() {},
     restoreArchived() {},
   });
+
+  const page = vue.reactive({
+
+    get loaded() { return state.loaded; },
+
+    ids: [],
+    overlayIds: [],
+    hasMore: false,
+    nextCursor: null,
+
+    loading: false,
+    error: '',
+    needsRefresh: false,
+    scrollTop: 0,
+
+
+
+  });
+
+  Object.assign(state, pagingOverrides);
 
   globalThis.__loadListChat = state;
   t.mock.method(api, 'get', async (url) => {
@@ -334,3 +362,156 @@ test('PERF: видимый список телефона ждёт успеха, 
     await paint();
     assert.equal(log.snapshot().entries.at(-1).data.phase, 'ready');
   });
+
+test('PAGE-UI-LIST: scroll добавляет карточки, без scroll следующей порции нет', async (t) => {
+  const ids = vue.ref(Array.from({ length: 40 }, (_, index) => `row-${index}`));
+  const page = vue.reactive({
+    loaded: true,
+    loading: false,
+    hasMore: true,
+    error: '',
+    scrollTop: 0
+  });
+  let requests = 0;
+  const { wrapper } = await fixture(t, { loaded: true, loading: false }, {
+    list: () => ids.value.map((id) => ({
+      id,
+      title: id,
+      snippet: '',
+      model: '',
+      ts: 100
+    })),
+    pageFor: () => page,
+    loadChatPage: async () => {
+      requests += 1;
+      ids.value = [...ids.value, ...Array.from({ length: 40 }, (_, index) => `row-${index + 40}`)];
+    },
+  });
+
+  await vue.nextTick();
+  assert.equal(wrapper.findAll('.row').length, 40);
+  assert.equal(requests, 0);
+
+  const rows = wrapper.get('.rows');
+
+  Object.defineProperty(rows.element, 'scrollHeight', { configurable: true, value: 2000 });
+  Object.defineProperty(rows.element, 'clientHeight', { configurable: true, value: 400 });
+  rows.element.scrollTop = 1700;
+  await rows.trigger('scroll');
+  await drain();
+  assert.equal(wrapper.findAll('.row').length, 80);
+  assert.equal(requests, 1);
+});
+
+test('PAGE-UI-TOP: новый ответ сохраняет начало списка, середина сохраняет строку', async (t) => {
+  for (const initialScroll of [0, 100]) {
+    await t.test(`scrollTop=${initialScroll}`, async (t) => {
+      const ids = vue.ref(['first', 'second', 'updated']);
+      const { wrapper } = await fixture(t, { loaded: true, loading: false }, {
+        list: () => ids.value.map((id) => ({
+          id,
+          title: id,
+          snippet: '',
+          model: '',
+          ts: 100,
+        })),
+      });
+
+      await drain();
+
+      const host = wrapper.get('.rows').element;
+      const anchor = wrapper.get('[data-chat-id="first"]').element;
+
+      host.scrollTop = initialScroll;
+      t.mock.method(host, 'getBoundingClientRect', () => ({ top: 0, bottom: 400 }));
+      t.mock.method(anchor, 'getBoundingClientRect', () => {
+        const index = [...host.querySelectorAll('[data-chat-id]')].indexOf(anchor);
+        const top = index * 56 - host.scrollTop + initialScroll;
+
+        return { top, bottom: top + 56 };
+      });
+
+      ids.value = ['updated', 'first', 'second'];
+      await drain();
+      assert.equal(host.scrollTop, initialScroll === 0 ? 0 : initialScroll + 56);
+    });
+  }
+});
+
+test('PAGE-UI-RETRY: ошибка продолжения сохраняет40 и кнопка повторяет cursor', async (t) => {
+  const ids = vue.ref(Array.from({ length: 40 }, (_, index) => `retry-${index}`));
+  const page = vue.reactive({
+
+    loaded: true,
+    loading: false,
+    hasMore: true,
+    error: '',
+    needsRefresh: false,
+
+    nextCursor: 'unchanged-cursor',
+    scrollTop: 0,
+
+  });
+  const attempts = [];
+  const gate = Promise.withResolvers();
+  let pending;
+
+  t.after(() => gate.resolve());
+
+  const { wrapper } = await fixture(t, { loaded: true, loading: false }, {
+    list: () => ids.value.map((id) => ({
+      id,
+      title: id,
+      snippet: '',
+      model: '',
+      ts: 100
+    })),
+    pageFor: () => page,
+    loadChatPage: async () => {
+      if (page.loading) {
+        return pending;
+      }
+
+      attempts.push(page.nextCursor);
+      page.loading = true;
+      page.error = '';
+      pending = (async () => {
+        if (attempts.length === 1) {
+          await gate.promise;
+          page.error = 'Нет связи';
+        } else {
+          ids.value = [...ids.value, ...Array.from({ length: 40 }, (_, index) => `retry-${40 + index}`)];
+          page.nextCursor = 'second-cursor';
+        }
+
+        page.loading = false;
+      })();
+
+      return pending;
+    },
+    refreshChatPage: async () => {
+      throw new Error('Сетевая ошибка не требует reset');
+    },
+  });
+  const rows = wrapper.get('.rows');
+
+  Object.defineProperty(rows.element, 'scrollHeight', { configurable: true, value: 2000 });
+  Object.defineProperty(rows.element, 'clientHeight', { configurable: true, value: 400 });
+  rows.element.scrollTop = 1700;
+  await rows.trigger('scroll');
+  await rows.trigger('scroll');
+  assert.equal(attempts.length, 1);
+  gate.resolve();
+  await pending;
+  await drain();
+  assert.equal(wrapper.findAll('.row').length, 40);
+  assert.ok(wrapper.text().includes('Нет связи'));
+
+  const retry = wrapper.findAll('button').find((button) => button.text().includes('Повторить'));
+
+  assert.ok(retry);
+  await retry.trigger('click');
+  await drain();
+  assert.deepEqual(attempts, ['unchanged-cursor', 'unchanged-cursor']);
+  assert.equal(wrapper.findAll('.row').length, 80);
+});

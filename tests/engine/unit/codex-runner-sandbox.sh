@@ -19,6 +19,11 @@ runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
 assert_rc 0 "$?" "Codex runner can be inspected without a model call"
 
 argv=$(cat "$TEST_ROOT/codex-argv")
+# Регрессия 07.11.2026: имя CLI ставит factory_external_launch, args его не
+# содержат — иначе парсер получает сдвоенное «codex codex» перед подкомандой.
+head_args=$(head -n 7 "$TEST_ROOT/codex-argv" | tr '\n' '|')
+assert_eq 'provider|timeout|-k|30|30|codex|exec|' "$head_args" \
+  "launch puts the CLI once before its subcommand"
 assert_contains "$argv" "$state_root" "Codex sandbox receives writable state root"
 assert_contains "$argv" "$project_extra" "Codex sandbox receives profile write root"
 add_count=$(grep -c '^--add-dir$' "$TEST_ROOT/codex-argv" || true)

@@ -62,6 +62,13 @@ export RUNNER_CLAUDE_SETTINGS="$settings"
 runner_claude_run 42 prompt BUILD opus high 30 "$run_dir"
 assert_rc 0 "$?" "Claude argv can be inspected without a model call"
 
+# Регрессия 07.11.2026: имя CLI подставляет factory_external_launch, args его не
+# содержат — сдвоенное «claude claude» стало бы чужим позиционным аргументом.
+grep -Fxq $'4\tclaude' "$CAPTURE_FILE"
+assert_rc 0 "$?" "launch puts the CLI binary exactly once before its arguments"
+grep -Fxq $'5\t-p' "$CAPTURE_FILE"
+assert_rc 0 "$?" "provider flags follow the CLI without a duplicate name"
+
 argv=$(cut -f2- "$CAPTURE_FILE")
 assert_contains "$argv" '--settings' "Claude receives only the trusted settings file"
 settings_arg=$(awk -F '\t' '$2 == "--settings" { getline; sub(/^[^\t]*\t/, ""); print; exit }' "$CAPTURE_FILE")

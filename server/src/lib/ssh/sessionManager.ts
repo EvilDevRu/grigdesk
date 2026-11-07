@@ -128,8 +128,7 @@ export interface SshSessionManager {
   setAgentAccess: (id: string, allowed: boolean) => Promise<PublicSshSession | ExecOutcome>;
   list: () => PublicSshSession[];
   get: (id: string) => PublicSshSession | null;
-  listForAgent: (projectId: string) => PublicSshSession[];
-  findForAgent: (projectId: string, label: string, role: string) => PublicSshSession | null;
+  listForAgent: () => PublicSshSession[];
   listFiles: (id: string, remotePath?: string) => Promise<SshFileEntry[]>;
   downloadFile: (id: string, remotePath: string) => Promise<Readable>;
   uploadFile: (
@@ -469,22 +468,15 @@ export function createSshSessionManager(
     }));
   }
 
-  function listForAgent(projectId: string): PublicSshSession[] {
+  /**
+   * Допуск принадлежит живой сессии и действует во всех чатах.
+   * Проект соединения остаётся метаданными для выбора сервера и журнала.
+   */
+  function listForAgent(): PublicSshSession[] {
     return [...sessions.values()]
       .filter((session) => session.alive
-        && session.agentAllowed
-        && session.connection.projectId === projectId)
+        && session.agentAllowed)
       .map(publicSession);
-  }
-
-  function findForAgent(
-    projectId: string,
-    label: string,
-    role: string,
-  ): PublicSshSession | null {
-    return listForAgent(projectId).find((session) => (
-      session.label === label && session.role === role
-    )) || null;
   }
 
   async function openSftp(idValue: string) {
@@ -557,7 +549,6 @@ export function createSshSessionManager(
       return session ? publicSession(session) : null;
     },
     listForAgent,
-    findForAgent,
     listFiles,
     downloadFile,
     uploadFile,

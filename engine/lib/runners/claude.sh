@@ -139,8 +139,11 @@ PYTHON
 runner_claude_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   _runner_claude_trusted_settings || return
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама
+  # (дескрипторный или PATH). Сдвоенное «claude claude» у парсера CLI — это
+  # чужой позиционный аргумент до реальных флагов, ход так не начинается.
   local -a args=(
-    claude -p "$prompt" --output-format stream-json --verbose
+    -p "$prompt" --output-format stream-json --verbose
     --settings "$RUNNER_CLAUDE_SETTINGS"
     --setting-sources ""
     --strict-mcp-config

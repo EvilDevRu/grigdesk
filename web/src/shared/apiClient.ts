@@ -471,6 +471,7 @@ async function request(
     const chatHistoryPut = method === 'PUT' && [
       '/api/chat/store/chat',
       '/api/chat/store/chat/step-reuse',
+      '/api/chat/store/chat/window',
     ].includes(path.split(/[?#]/u, 1)[0] ?? '');
     const finishEncode = chatHistoryPut ? startChatPerformance('chat.put.encode', () => ({
       chars: typeof opts.body === 'string' ? opts.body.length : 0,

@@ -51,6 +51,19 @@ test('provider_unavailable attempt result has a human-readable label', () => {
   assert.notEqual(label, 'provider_unavailable');
 });
 
+test('нераспознанный результат объясняет отсутствие причины и сохраняет код завершения', () => {
+  for (const result of ['unknown', 'future_failure']) {
+    assert.equal(attemptResultLabel(result, 7),
+      'Процесс завершился с кодом 7; исполнитель не сообщил причину');
+    assert.equal(attemptResultLabel(result), 'Исполнитель не сообщил причину ошибки');
+    assert.doesNotMatch(attemptResultLabel(result, 7), /неизвестн|unknown|future_failure/);
+  }
+
+  assert.equal(attemptResultLabel(null), 'идёт');
+  assert.equal(attemptResultLabel('ok', 0), 'успешно');
+  assert.equal(attemptResultLabel('timeout', 124), 'таймаут');
+});
+
 test('chain and emergency switch are visible without model-version hardcoding', () => {
   const runner = {
     primary: 'claude',

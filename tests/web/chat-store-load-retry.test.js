@@ -1,3 +1,4 @@
+import { protocolWindowAck } from './helpers/chat-protocol.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -7,7 +8,7 @@ import { chatStoreFixture } from './helpers/chat-store.js';
 import { drain, loadApi, loadClock, memoryStorage, SERVER_CHAT, SNAPSHOT_KEY } from './helpers/chat-load.js';
 
 const fullReads = (calls) => calls.filter(([method, url]) => (
-  method === 'GET' && url === '/api/chat/store/list'
+  method === 'GET' && url === '/api/chat/store/list?page=1&archived=0&limit=40'
 ));
 
 /**
@@ -265,15 +266,15 @@ test('LOAD-RETRY-04', async (t) => {
   await drain();
 
   const sequence = calls.filter(([, url]) => url === '/api/chat/store/reconcile'
-    || url === '/api/chat/store/chat' || url === '/api/chat/pending/pending-check'
+    || url === '/api/chat/store/chat/window' || url === '/api/chat/pending/pending-check'
     || url === '/api/chat/waiting?include=ssh,db'
     || url === '/api/chat/active' || url.startsWith('/api/chat/turns?'));
 
   assert.deepEqual(sequence.map(([method, url]) => [method, url]), [
     ['GET', '/api/chat/turns?ids=turn-check'],
-    ['PUT', '/api/chat/store/chat'],
+    ['PUT', '/api/chat/store/chat/window'],
     ['POST', '/api/chat/store/reconcile'],
-    ['PUT', '/api/chat/store/chat'],
+    ['PUT', '/api/chat/store/chat/window'],
     ['DELETE', '/api/chat/pending/pending-check'],
     ['GET', '/api/chat/waiting?include=ssh,db'],
     ['GET', '/api/chat/active'],
@@ -300,8 +301,8 @@ test('страховки не задерживают ensure и восстана�
   let active = 0;
   let maximum = 0;
 
-  api.put = async (url) => {
-    if (url !== '/api/chat/store/chat') {
+  api.put = async (url, body) => {
+    if (url !== '/api/chat/store/chat/window') {
       return { ok: true };
     }
 
@@ -313,7 +314,7 @@ test('страховки не задерживают ensure и восстана�
     await gate.promise;
     active -= 1;
 
-    return { ok: true };
+    return protocolWindowAck(body);
   };
 
   const chat = await chatStoreFixture({}, { api, unloaded: true });
@@ -362,7 +363,7 @@ test('отказ PUT страховки виден в state, повторяет�
       throw new TypeError('PUT страховки недоступен');
     }
 
-    return { ok: true };
+    return protocolWindowAck(body);
   };
 
   const chat = await chatStoreFixture({}, { api, unloaded: true });

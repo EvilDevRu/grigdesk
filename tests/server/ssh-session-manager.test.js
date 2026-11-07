@@ -196,6 +196,31 @@ test('явное закрытие сессии глобально закрыва
   });
 });
 
+test('список агента объединяет проекты и исключает отозванные и закрытые сессии', async (t) => {
+  const { manager: value, session } = await openSession(t);
+  const second = await value.open({
+    connection: {
+      id: 'connection-b',
+      projectId: 'project-b',
+      label: 'Боевой код',
+      role: 'code',
+      host: 'other.internal',
+      port: 22,
+      user: 'deploy',
+    },
+    password: Buffer.from('test-password'),
+  });
+
+  assert.deepEqual(value.listForAgent(), []);
+  await value.setAgentAccess(session.id, true);
+  await value.setAgentAccess(second.id, true);
+  assert.deepEqual(value.listForAgent().map((item) => item.projectId), ['project-a', 'project-b']);
+  await value.setAgentAccess(session.id, false);
+  assert.deepEqual(value.listForAgent().map((item) => item.id), [second.id]);
+  await value.close(second.id);
+  assert.deepEqual(value.listForAgent(), []);
+});
+
 test('эхо агентской команды приходит в окно терминала, но не в shell-канал', async (t) => {
   const { manager: value, session, transport } = await openSession(t);
   await value.setAgentAccess(session.id, true);

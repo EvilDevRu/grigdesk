@@ -1,3 +1,7 @@
+import type {
+  ChatCatalogPage, ChatCatalogSummary, ChatHistoryWindow,
+} from '../../../shared/chat/chatPaging.ts';
+
 import { isChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import type { ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import type { ChatModeSelection } from '../../../shared/chat/chatPermissionModes.ts';
@@ -62,6 +66,10 @@ export interface ChatPermission {
   user?: string;
   isRoot?: boolean;
   usesSudo?: boolean;
+  tab?: {
+    projectId?: string;
+    label?: string;
+  };
   server?: {
     label?: string;
     host?: string;
@@ -234,6 +242,9 @@ export interface WorkdirProposal {
 }
 
 export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
+  historyWindow?: ChatHistoryWindow;
+  windowRefs?: unknown;
+  clearHistory?: boolean;
   id?: string;
   messages?: ChatMessage[];
   archived?: boolean;
@@ -388,6 +399,7 @@ export interface ChatResult extends ChatContextUsage, Record<string, unknown> {
 }
 
 export interface ChatEnvelope extends ChatStoreData, ChatResult {
+  window?: unknown;
   version?: string;
   chat?: ChatSession;
   pending?: ChatResult[];
@@ -414,6 +426,16 @@ export interface ChatEnvelope extends ChatStoreData, ChatResult {
 export type ChatLoadError = 'network' | 'timeout' | 'server' | 'access';
 
 export interface ChatState {
+  pagingEnabled: boolean;
+  catalogMutationVersion: number;
+  catalogPages: Record<string, ChatCatalogPage>;
+  catalogSummary: ChatCatalogSummary;
+  openedChatIds: string[];
+  historyPaging: Record<string, {
+    loading: boolean;
+    error: string;
+    newer: boolean;
+  }>;
   messageLoads: Record<string, { state: 'loading' | 'loaded' | 'error'; error: string }>;
   search: {
     query: string;
@@ -826,6 +848,58 @@ export function decodeChatList(value: unknown, changes = false) {
 }
 
 /**
+ * Порционная выдача требует явного нового протокола и ограниченной страницы.
+ * Старый цельный список не становится молчаливым fallback нового окна.
+ */
+export function decodeChatPage(value: unknown) {
+  if (!isRecord(value) || value.listProtocol !== 2 || value.historyWindowProtocol !== 1
+    || !isRecord(value.page) || typeof value.page.hasMore !== 'boolean'
+    || (value.page.nextCursor !== null && typeof value.page.nextCursor !== 'string')
+    || value.page.hasMore !== (typeof value.page.nextCursor === 'string')
+    || !isRecord(value.summary)
+    || !['active', 'archived', 'unread', 'waiting', 'sequence'].every((key) => (
+      Number.isSafeInteger((value.summary as Record<string, unknown>)[key])
+        && Number((value.summary as Record<string, unknown>)[key]) >= 0
+    )) || typeof value.summary.epoch !== 'string') {
+    throw new Error(t('core.chatPagingUnsupported'));
+  }
+
+  const result = decodeChatList({ ...value, listProtocol: 1 });
+
+  if (result.sessions.length + result.archived.length > 100) {
+    throw new Error(t('core.chatPageInvalid'));
+  }
+
+  return {
+    ...result,
+    page: value.page as { nextCursor: string | null; hasMore: boolean },
+    summary: value.summary as unknown as ChatCatalogSummary,
+  };
+}
+
+/**
+ * Граница окна подтверждается числом серверных сообщений и digest префикса.
+ * Локальные runtime-флаги и неподтверждённые добавления здесь не принимаются.
+ */
+export function decodeChatWindow(value: unknown, count: number): ChatHistoryWindow {
+  if (!isRecord(value) || !Number.isSafeInteger(value.offset) || Number(value.offset) < 0
+    || !Number.isSafeInteger(value.end) || Number(value.end) - Number(value.offset) !== count
+    || !Number.isSafeInteger(value.total) || Number(value.total) < Number(value.end)
+    || typeof value.prefixHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.prefixHash)
+    || typeof value.hasOlder !== 'boolean' || value.hasOlder !== (Number(value.offset) > 0)
+    || (value.before !== null && typeof value.before !== 'string')
+    || value.hasOlder !== (typeof value.before === 'string')
+    || (typeof value.before === 'string' && value.before.length > 768)
+    || !Number.isSafeInteger(value.historyEpoch) || Number(value.historyEpoch) < 0
+    || !Number.isSafeInteger(value.baseEnd) || Number(value.baseEnd) < Number(value.end)
+    || typeof value.baseHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.baseHash)) {
+    throw new Error(t('core.chatHistoryWindowInvalid'));
+  }
+
+  return value as unknown as ChatHistoryWindow;
+}
+
+/**
  * Сервер возвращает полные pending только для явно загруженных клиентом лент.
  * Неверный ответ не даёт подтверждать pending или считать шапку полной.
  */
@@ -840,6 +914,7 @@ export function decodeChatReconcile(value: unknown) {
   }
 
   return {
+    summary: value.summary,
     pending: value.pending as ChatResult[],
     heads: value.heads.map(decodeChatHead),
     gone: value.gone as string[],

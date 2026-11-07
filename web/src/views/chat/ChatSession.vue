@@ -377,6 +377,18 @@
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
     <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
       <div class="col flow">
+        <div v-if="historyPage?.newer || historyPage?.error || sess?.historyWindow?.hasOlder"
+             class="history-page-notice" role="status" aria-live="polite">
+          <p v-if="historyPage?.error">{{ historyPage.error }}</p>
+          <UiButton v-if="historyPage?.newer" @click="showLatestHistory">
+            {{ t('core.chatHistoryLatest') }}
+          </UiButton>
+          <UiButton v-if="sess?.historyWindow?.hasOlder" :disabled="historyPage?.loading || prepending"
+                    @click="loadOlderHistory">
+            {{ t(historyPage?.loading ? 'core.chatHistoryOlderLoading' : historyPage?.error
+              ? 'core.chatPageRetry' : 'core.chatHistoryOlder') }}
+          </UiButton>
+        </div>
         <div v-if="messagesReady && !sess.messages?.length" class="empty">
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <div class="e-sub muted">
@@ -395,7 +407,7 @@
              :class="{ turn: group.turn }" :style="group.brandStyle"
              :data-role="group.turn ? 'chat-turn' : undefined">
           <div v-for="{ key, message: m, index: i, steps, heading, compact, live, current, thinking } in group.rows"
-               :key="key" class="msg" :class="[m.role, { compact }]"
+               :key="key" :data-history-key="key" class="msg" :class="[m.role, { compact }]"
                :style="m.role === 'assistant' ? group.brandStyle : null">
             <div v-if="m.attachments?.length" class="m-atts">
               <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url || '')" target="_blank" rel="noopener"
@@ -825,6 +837,7 @@ import ChatWorkdir from './ChatWorkdir.vue';
 import ChatKeyboardLayout from './ChatKeyboardLayout.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { captureChatScrollAnchor } from '../../shared/chatScrollAnchor.ts';
 import { api } from '../../shared/apiClient.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { decodeChatAttachment } from '../../shared/chatContracts.ts';
@@ -1029,6 +1042,7 @@ const timeline = computed(() => timelineProjector.project(
   ['running', 'legacy', 'background'].includes(status.value.phase),
   inTurnRun.value,
   runtime.value?.active ? runtime.value.runId : '',
+  sess.value?.historyWindow?.offset || 0,
 ));
 
 watch(() => props.sid, () => timelineProjector.clear(), { flush: 'sync' });
@@ -2046,7 +2060,47 @@ function resetComposerHeight() {
 // и так внизу: отлистал историю вверх — не дёргаем, иначе читать невозможно.
 const NEAR_BOTTOM_PX = 120;
 const atBottom = ref(true);
+const prepending = ref(false);
+const historyPage = computed(() => chat.historyPaging?.[props.sid]);
 
+/**
+ * Старые сообщения добавляются над читаемой строкой с компенсацией DOM-якоря.
+ * Автопрокрутка не участвует в этом переходе и не сбрасывает его вниз.
+ */
+async function loadOlderHistory() {
+  if (!body.value || prepending.value || historyPage.value?.loading) {
+    return;
+  }
+
+  const restore = captureChatScrollAnchor(body.value, '[data-history-key]');
+
+  prepending.value = true;
+
+  try {
+    await chat.loadOlderMessages(props.sid);
+    await nextTick();
+    restore();
+  } finally {
+    prepending.value = false;
+  }
+}
+
+/**
+ * Переход к свежему хвосту является явным действием, а не реакцией на SSE.
+ * После атомарного принятия новой порции возвращается обычная прокрутка вниз.
+ */
+async function showLatestHistory() {
+  await chat.showLatestMessages(props.sid);
+  atBottom.value = true;
+  chat.setChatViewport(props.sid, true);
+  await nextTick();
+  scrollDown();
+}
+
+/**
+ * Положение чтения определяет принятие нового хвоста и автопрокрутку.
+ * Верхняя граница начинает только одну подгрузку старых сообщений.
+ */
 function onBodyScroll() {
   const el = body.value;
 
@@ -2055,10 +2109,16 @@ function onBodyScroll() {
   }
 
   atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  chat.setChatViewport?.(props.sid, atBottom.value);
+
+  if (el.scrollTop <= 240 && sess.value?.historyWindow?.hasOlder
+    && !historyPage.value?.loading && !historyPage.value?.error && !prepending.value) {
+    void loadOlderHistory();
+  }
 }
 
 async function autoScroll() {
-  if (!atBottom.value) {
+  if (!atBottom.value || prepending.value) {
     return;
   }
 
@@ -2123,17 +2183,17 @@ async function submit() {
     return;
   }
 
-  const t = input.value.trim();
+  const text = input.value.trim();
   const atts = pending.value.slice();
 
-  if ((!t && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
+  if ((!text && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
     return;
   }
 
   // Точное имя пункта выполняем через его dispatch. `/`-команды провайдера идут
   // служебным ходом, навыки — обычным prompt; run:'none' остаётся обычным сообщением.
   // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
-  const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
+  const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === text.toLowerCase() && c.run !== 'none');
 
   if (exact && exact.cmd.startsWith('/') && exact.kind !== 'skill') {
     runCommand(exact);
@@ -2141,7 +2201,7 @@ async function submit() {
     return;
   }
   if (sess.value.sending && inTurnComposer.value.ready) {
-    const accepted = await chat.sendInTurn(props.sid, t, atts);
+    const accepted = await chat.sendInTurn(props.sid, text, atts);
 
     if (!accepted) {
       inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
@@ -2175,11 +2235,20 @@ async function submit() {
     chat.setDraftAttachments(props.sid, []);
   }
 
-  const accepted = await chat.send(props.sid, t, atts);
+  let accepted: boolean | undefined;
+
+  try {
+    accepted = await chat.send(props.sid, text, atts);
+  } catch (error) {
+    inputErr.value = errorMessage(error, t('core.chatHistoryRefreshFailed'));
+    accepted = false;
+  }
 
   if (accepted === false) {
-    input.value = t;
-    chat.setDraft(props.sid, t);
+    inputErr.value ||= chat.historyPaging?.[props.sid]?.error || chat.messageLoads?.[props.sid]?.error
+      || sess.value?.error || t('core.chatHistoryChanged');
+    input.value = text;
+    chat.setDraft(props.sid, text);
 
     if (atts.length) {
       chat.setDraftAttachments(props.sid, atts);
@@ -2855,6 +2924,8 @@ function skipQuestion() {
 </script>
 
 <style scoped>
+.history-page-notice { display: grid; justify-items: center; gap: 8px; padding: 8px 0; }
+
 /* min-width: 0 обязателен: без него флекс-элемент не сжимается ниже min-content своего
    содержимого — одна длинная команда в ленте или во всплывашке раздувала всю колонку
    чата, и кнопки «Разрешить/Отклонить» уезжали за правый край экрана. */

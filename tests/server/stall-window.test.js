@@ -124,3 +124,39 @@ test('оборванный прогон не наследует причину �
   assert.equal(stall?.stage, null);
   assert.equal(stall?.title, 'конвейер оборвался, не дойдя до конца');
 });
+
+test('штатная остановка по сигналу не считается обрывом', () => {
+  // Тот же журнал, что и в предыдущем тесте, но движок доказал graceful-остановку
+  // (раннер погашен, инструментация снята) и пометил реестр STOPPED_SIGNAL=1.
+  // Это решение человека, а не сбой: null убирает задачу из «встали» и молчит вотчер.
+  const logText = logOf(
+    line('2026-08-27 10:00:00', 'узел build: подготовка к исполнению'),
+    line('2026-08-27 10:40:00', 'получен TERM; останавливаю exact active runner'),
+  );
+
+  const stall = detectStall({
+    registry: { STOPPED_SIGNAL: '1' },
+    logText,
+    daemonAlive: false,
+  });
+
+  assert.equal(stall, null);
+});
+
+test('маркер остановки не живёт дольше попытки: resume его стирает', () => {
+  // Движок снимает STOPPED_SIGNAL при любом новом заходе; между TERM и следующим
+  // стартом маркированного окна журнал не меняется, а после resume обрыв честно
+  // снова виден как crashed. Вход повторяет первый тест с пустым реестром.
+  const logText = logOf(
+    line('2026-08-27 10:00:00', 'узел build: подготовка к исполнению'),
+    line('2026-08-27 10:40:00', 'получен TERM; останавливаю exact active runner'),
+  );
+
+  const stall = detectStall({
+    registry: { STOPPED_SIGNAL: '' },
+    logText,
+    daemonAlive: false,
+  });
+
+  assert.equal(stall?.kind, 'crashed');
+});

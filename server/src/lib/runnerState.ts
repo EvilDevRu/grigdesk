@@ -12,12 +12,8 @@ import { normalizedMetaUsage } from './metaUsage.ts';
 import type { MetaEnv, MetaUsage } from './metaUsage.ts';
 import { parsePipeline } from './pipelineParse.ts';
 import { GLM_FACTORY_MODELS } from './glm/factoryCatalog.ts';
-import { openRunDirectory, readRunFile } from './runnerArtifacts.ts';
-import {
-  cleanRunnerFailureMessage,
-  inspectGlmFactoryFailure,
-  runnerFailureDetail,
-} from './runnerFailure.ts';
+import { openRunDirectory, readRunFile, readRunnerFailure } from './runnerArtifacts.ts';
+import { runnerFailureDetail } from './runnerFailure.ts';
 import { runnerModelName } from './runnerModel.ts';
 
 // Реестр задачи и runners.env профиля читаются одинаково: плоские строковые пары.
@@ -278,27 +274,20 @@ function runAttemptTokens(meta: MetaEnv): RunAttemptTokens | null {
 }
 
 /**
- * Причина GLM поясняет только завершившийся отказ: успех, таймаут и остановка её не наследуют.
+ * Причина провайдера поясняет завершившийся отказ: успех, таймаут и остановка её не наследуют.
  * Старому запуску без mirror читаем ограниченный хвост его собственного журнала через retained FD.
  */
-async function glmAttemptFailure(
+async function attemptFailure(
   stateDir: string,
   task: string | number,
   stage: string,
   id: string,
   meta: MetaEnv,
 ): Promise<string | null> {
-  if (meta.RUNNER !== 'glm' || !/^-?\d+$/u.test(meta.RC || '')
+  if (!/^-?\d+$/u.test(meta.RC || '')
     || [0, 124, 130, 143].includes(Number(meta.RC))
     || !meta.RESULT_CLASS || ['ok', 'timeout', 'manual_switch'].includes(meta.RESULT_CLASS)) {
     return null;
-  }
-
-  if (meta.FAILURE_CODE && meta.FAILURE_MESSAGE) {
-    return runnerFailureDetail({
-      code: meta.FAILURE_CODE,
-      message: cleanRunnerFailureMessage(meta.FAILURE_MESSAGE),
-    });
   }
 
   try {
@@ -311,9 +300,9 @@ async function glmAttemptFailure(
         return null;
       }
 
-      const failure = inspectGlmFactoryFailure(await readRunFile(directory, 'events.jsonl', true));
+      const failure = await readRunnerFailure(directory, current);
 
-      return failure ? runnerFailureDetail(failure) : null;
+      return runnerFailureDetail(failure);
     } finally {
       await directory.close();
     }
@@ -370,7 +359,7 @@ export async function readRunnerAttempts(
 
   // Старые журналы читаются только для видимых попыток, а не для всей истории этапа.
   await Promise.all(recent.map(async (attempt) => {
-    const detail = await glmAttemptFailure(stateDir, task, stage, attempt.id, metadata.get(attempt.id)!);
+    const detail = await attemptFailure(stateDir, task, stage, attempt.id, metadata.get(attempt.id)!);
 
     if (detail) {
       attempt.failureDetail = detail;

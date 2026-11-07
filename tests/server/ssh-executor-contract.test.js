@@ -187,7 +187,14 @@ test('реальный work MCP получает descriptors и выполняе
     async invoke(scope, input) {
       await new Promise((resolve) => setImmediate(resolve));
       calls.push({ scope, input });
-      return [{ label: 'Боевой код', role: 'code', host: 'private.example' }];
+
+      return [{
+        sessionId: 'session-a',
+        projectId: 'project-b',
+        label: 'Боевой код',
+        role: 'code',
+        host: 'private.example',
+      }];
     },
   });
   const ipc = await createWorkIpc({ workTools: work });
@@ -218,20 +225,28 @@ test('реальный work MCP получает descriptors и выполняе
     tools: ['supervised_ssh'],
     sshRootType: 'object',
     calls: [{
-      scope: { projectId: 'project-a' },
+      scope: {},
       input: { action: 'list' },
     }],
-    result: [{ label: 'Боевой код', role: 'code' }],
+    result: [{
+      sessionId: 'session-a',
+      projectId: 'project-b',
+      label: 'Боевой код',
+      role: 'code',
+    }],
   });
 });
 
-test('list передаёт модели только метку и роль разрешённых сессий своего проекта', async () => {
+test('list передаёт идентификатор и проект сессии без адреса и учётных данных', async () => {
   const calls = [];
   const tools = await workTools({
     projectId: 'project-a',
     async invoke(scope, input) {
       calls.push({ scope, input });
+
       return [{
+        sessionId: 'session-a',
+        projectId: 'project-b',
         label: 'Боевой код',
         role: 'code',
         host: 'server.internal',
@@ -244,8 +259,13 @@ test('list передаёт модели только метку и роль р�
   const result = await tools.invoke('supervised_ssh', { action: 'list' });
 
   assert.deepEqual({ calls, result }, {
-    calls: [{ scope: { projectId: 'project-a' }, input: { action: 'list' } }],
-    result: [{ label: 'Боевой код', role: 'code' }],
+    calls: [{ scope: {}, input: { action: 'list' } }],
+    result: [{
+      sessionId: 'session-a',
+      projectId: 'project-b',
+      label: 'Боевой код',
+      role: 'code',
+    }],
   });
 });
 
@@ -377,28 +397,48 @@ test('MCP tool-result для Claude и Kimi не записывает private me
   });
 });
 
-test('нулевой task scope не вызывает broker и не создаёт подтверждение', async () => {
-  let invoked = 0;
+test('SSH без выбранного проекта вызывает broker и сохраняет адрес подтверждения', async () => {
+  const calls = [];
   const tools = await workTools({
     projectId: null,
-    async invoke() {
-      invoked += 1;
-      return [{ label: 'Чужой сервер', role: 'db' }];
+    chatKey: 'chat-a',
+    async invoke(scope, input) {
+      calls.push({ scope, input });
+
+      return input.action === 'list'
+        ? [{
+          sessionId: 'session-b',
+          projectId: 'project-b',
+          label: 'Сервер',
+          role: 'web',
+        }]
+        : { ok: false, error: 'denied' };
     },
   });
   const list = await tools.invoke('supervised_ssh', { action: 'list' });
-  const exec = await tools.invoke('supervised_ssh', {
-    action: 'exec', label: 'Чужой сервер', role: 'db', command: 'id',
-  });
+  const command = {
+    action: 'exec',
+    sessionId: 'session-b',
+    command: 'id',
+  };
+  const exec = await tools.invoke('supervised_ssh', command);
 
-  assert.deepEqual({ invoked, list, exec }, {
-    invoked: 0,
-    list: [],
-    exec: { ok: false, error: 'project_scope_unavailable' },
-  });
+  assert.deepEqual(list, [
+    {
+      sessionId: 'session-b',
+      projectId: 'project-b',
+      label: 'Сервер',
+      role: 'web',
+    },
+  ]);
+  assert.deepEqual(calls, [
+    { scope: { chatKey: 'chat-a' }, input: { action: 'list' } },
+    { scope: { chatKey: 'chat-a' }, input: command },
+  ]);
+  assert.deepEqual(exec, { ok: false, error: 'denied' });
 });
 
-test('persistent Claude и Codex ротируют процесс при смене SSH project scope', () => {
+test('persistent Claude и Codex ротируют процесс при смене общего scope рабочих инструментов', () => {
   assert.deepEqual({
     claude: claude.session?.restartOn?.includes('workToolScopeKey'),
     codex: codex.session?.restartOn?.includes('workToolScopeKey'),

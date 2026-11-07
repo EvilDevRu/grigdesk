@@ -59,12 +59,27 @@ async function mountPipeline(t, {
   const getCalls = [];
   const posts = [];
   const alerts = [];
+
   globalThis.__pipelineGateApi = {
+    /**
+     * Список задач отвечает тем же opt-in источников, что запрашивает живой экран.
+     * Граф, находки и каталог исполнителей принадлежат фикстуре этой проверки.
+     */
     async get(url) {
       getCalls.push(url);
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners: ['claude'] };
+
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
+
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: ['claude'] };
+      }
+
       if (url.startsWith(`/api/tasks/${factoryTask.task}/findings?`)) {
         if (findingsFails) {
           throw new Error('Источник находок недоступен');
@@ -76,6 +91,7 @@ async function mountPipeline(t, {
           findings: findings || { deferred: [] },
         };
       }
+
       return {};
     },
     async post(url, body) {

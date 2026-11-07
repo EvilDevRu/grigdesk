@@ -89,10 +89,23 @@ async function mountPipeline(t, { factoryTask, graph }) {
     globalThis.__pipelineCloseDialogs.push(text);
   };
   globalThis.__pipelineCloseApi = {
+    /**
+     * Список задач отвечает тем же opt-in источников, что запрашивает живой экран.
+     * Граф и каталог исполнителей принадлежат фикстуре и не обращаются к живым задачам.
+     */
     async get(url) {
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners: [] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
+
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: [] };
+      }
+
       return {};
     },
     async post(url) { posts.push(url); return { ok: true, archived: ['pipeline'], branches: [] }; },

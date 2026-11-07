@@ -77,8 +77,9 @@ function isIntermediate(message: TimelineMessage): boolean {
  * Ключ сообщения не меняется при дописывании блока и переносе из SSE в историю.
  * Индекс остаётся исходным: копирование и продолжение хода работают с сообщением стора.
  */
-function messageRow(message: TimelineMessage, index: number): ChatTimelineRow {
-  const identity = message.assistantMessageId || message.messageId || message.turnId || index;
+function messageRow(message: TimelineMessage, index: number, offset = 0): ChatTimelineRow {
+  const identity = message.assistantMessageId || message.messageId || message.pid
+    || message.turnId || (index + offset);
 
   return {
     key: `${message.runId || ''}:${message.role}:${identity}`,
@@ -293,8 +294,9 @@ function projectTimeline(
   run: ChatInTurnRun | null,
   activeRunId: string,
   projectTurn: (turn: TimelineTurn) => ChatTimelineRow[],
+  offset = 0,
 ): ChatTimelineRow[] {
-  const rows = messages.map(messageRow);
+  const rows = messages.map((message, index) => messageRow(message, index, offset));
   const turns = new Map<string, TimelineTurn>();
   const activeKey = sending ? (activeRunId || (run?.active ? run.runId : 'live')) : '';
 
@@ -438,6 +440,7 @@ export function createChatTimelineProjector() {
       sending: boolean,
       run: ChatInTurnRun | null,
       activeRunId = '',
+      offset = 0,
     ): ChatTimelineRow[] {
       const finish = startChatPerformance('chat.timeline', () => ({
         messages: messages.length,
@@ -485,7 +488,7 @@ export function createChatTimelineProjector() {
 
         return rows;
       };
-      const result = projectTimeline(messages, steps, sending, run, activeRunId, projectTurn);
+      const result = projectTimeline(messages, steps, sending, run, activeRunId, projectTurn, offset);
 
       for (const key of cache.keys()) {
         if (!alive.has(key)) {

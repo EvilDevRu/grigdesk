@@ -4,7 +4,7 @@ import type { DesktopExitSnapshot } from '../../../shared/desktop/desktopExitCon
 
 import { t } from '../ui.ts';
 import { api } from './apiClient.ts';
-import { decodeChatEnvelope } from './chatContracts.ts';
+import { decodeChatHead } from './chatContracts.ts';
 
 type ChatTitle = { id: string; title?: string };
 type Pipeline = DesktopExitSnapshot['pipelines'][number];
@@ -80,9 +80,9 @@ export async function inspectDesktopExitActivity(
 
       if (!title?.trim()) {
         try {
-          const response = await api.get(`/api/chat/store/chat/${encodeURIComponent(chatKey)}`, request);
+          const response = await api.get(`/api/chat/store/head/${encodeURIComponent(chatKey)}`, request);
 
-          title = decodeChatEnvelope(response).chat?.title;
+          title = decodeChatHead(isRecord(response) ? response.head : null).title;
         } catch {
           // Отказ названия не скрывает известный идущий ход.
         }

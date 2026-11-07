@@ -33,11 +33,25 @@ test('RE-H1-04: графический scope ворот не попадает в
   const task = { task: 42, profile: 'sample', route: 'quick', readOnly: false,
     daemonAlive: true, attempt: 'synthetic-attempt', result: null, stall: null };
   const posts = [];
+
   globalThis[`${PREFIX}Api`] = {
+    /**
+     * Список задач отвечает тем же opt-in источников, что запрашивает живой экран.
+     * Граф, находки и каталог исполнителей принадлежат фикстуре этой проверки.
+     */
     async get(url) {
-      if (url === '/api/tasks') return { tasks: [task] };
-      if (url === '/api/tasks/42/graph') return graph;
-      if (url === '/api/factory/runners') return { runners: ['claude'] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [task] };
+      }
+
+      if (url === '/api/tasks/42/graph') {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: ['claude'] };
+      }
+
       if (url.startsWith('/api/tasks/42/findings?')) {
         return {
           profile: task.profile,
@@ -45,6 +59,7 @@ test('RE-H1-04: графический scope ворот не попадает в
           findings: { deferred: [] },
         };
       }
+
       return {};
     },
     async post(url, body) { posts.push([url, body]); return { ok: true, resumed: true }; },

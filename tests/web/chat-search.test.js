@@ -1,3 +1,4 @@
+import { protocolPage } from './helpers/chat-protocol.js';
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 
@@ -54,7 +55,7 @@ async function fixture(t, { fail = false } = {}) {
   const state = await lazyWindow(t, {
     chats: [first, second, archived],
     onCall: async ({ url }) => {
-      if (url.startsWith('/api/chat/store/search?')) {
+      if (url.startsWith('/api/chat/store/list?') && new URL(url, 'http://fixture').searchParams.has('q')) {
 
         const gate = Promise.withResolvers();
 
@@ -69,7 +70,21 @@ async function fixture(t, { fail = false } = {}) {
           throw new TypeError('Нет связи с сервером');
         }
 
-        return gate.promise;
+        const result = await gate.promise;
+        const page = protocolPage({ sessions: [first, second], archived: [archived] }, url);
+        const matches = new Map(result.matches.map((match) => [match.id, match.snippetSource]));
+
+        for (const group of ['sessions', 'archived']) {
+          page[group] = [first, second, archived].filter((chat) => matches.has(chat.id))
+            .map((chat) => ({ ...protocolPage({ sessions: [chat], archived: [] }).sessions[0],
+              snippetSource: matches.get(chat.id) }));
+
+          if ((group === 'archived') !== (params.get('archived') === '1')) {
+            page[group] = [];
+          }
+        }
+
+        return page;
       }
 
       return undefined;

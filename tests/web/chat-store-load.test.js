@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { protocolList, protocolReconcile } from './helpers/chat-protocol.js';
+import { protocolPage, protocolReconcile } from './helpers/chat-protocol.js';
 
 import { api as realApi } from '../../web/src/shared/apiClient.ts';
 import { chatStoreFixture, sseOf } from './helpers/chat-store.js';
@@ -217,13 +217,15 @@ test('LOAD-04', async (t) => {
     chat.$dispose();
   });
   await drain();
-  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/list').length, 1);
+  assert.equal(calls.filter(([, url]) => (
+    url === '/api/chat/store/list?page=1&archived=0&limit=40'
+  )).length, 1);
   gate.reject(new TypeError('Нет связи'));
   await Promise.all(jobs);
   gate = Promise.withResolvers();
   jobs.push(chat.ensure(), chat.revealChat(SERVER_CHAT.id), chat._load(), chat._load());
   await drain();
-  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/list').length, 2,
+  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/list?page=1&archived=0&limit=40').length, 2,
     'после отказа single-flight освобождается для новой попытки');
   gate.resolve({ sessions: [SERVER_CHAT], archived: [] });
   await Promise.all(jobs);
@@ -248,7 +250,8 @@ test('LOAD-05', async (t) => {
     await clock.tick(2001);
     await chat._resyncStore();
 
-    const full = calls.filter(([method, url]) => (method === 'GET' && url === '/api/chat/store/list')
+    const full = calls.filter(([method, url]) => (method === 'GET'
+      && url === '/api/chat/store/list?page=1&archived=0&limit=40')
       || (method === 'POST' && url === '/api/chat/store/changes'));
 
     assert.equal(full.length, 2);
@@ -262,7 +265,7 @@ test('LOAD-05', async (t) => {
     }
 
     for (const [method, url, options] of calls) {
-      if (method === 'GET' && url !== '/api/chat/store/list') {
+      if (method === 'GET' && url !== '/api/chat/store/list?page=1&archived=0&limit=40') {
         assert.equal(options?.idleTimeoutMs, undefined);
       }
     }
@@ -274,14 +277,14 @@ test('LOAD-05', async (t) => {
     const harness = loadApi();
     const ordinaryGet = harness.api.get;
 
-    harness.api.get = (url, options) => url === '/api/chat/store/list'
+    harness.api.get = (url, options) => url === '/api/chat/store/list?page=1&archived=0&limit=40'
       ? realApi.get(url, options) : ordinaryGet(url, options);
 
     const chat = await chatStoreFixture({}, { api: harness.api, unloaded: true });
     const clock = loadClock(sub);
     const requests = streamFetch(sub);
     const loading = chat._load();
-    const envelope = protocolList({ sessions: [SERVER_CHAT], archived: [] });
+    const envelope = protocolPage({ sessions: [SERVER_CHAT], archived: [] });
     const bytes = new TextEncoder().encode(JSON.stringify(envelope));
 
     sub.after(() => chat.$dispose());

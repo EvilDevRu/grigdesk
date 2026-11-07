@@ -8,8 +8,8 @@ import type {
 import { secureWebPreferences } from './windowSecurity.ts';
 
 export const SPLASH_SIZE = {
-  width: 720,
-  height: 480,
+  width: 540,
+  height: 360,
 } as const;
 export const SPLASH_STATUS_TEXT = 'Загрузка…';
 export const SPLASH_BACKGROUND = '#15191f';
@@ -20,7 +20,7 @@ export type SplashSessionLike = Pick<Session, 'setPermissionRequestHandler' | 's
 
 /**
  * Заставка держит пропорцию картинки 3:2 и не выходит за рабочую область экрана.
- * Ширина ограничена 720 px, окно ставится по центру области, а не по курсору.
+ * Ширина ограничена 540 px, окно ставится по центру области, а не по курсору.
  */
 export function splashBounds(area: Rectangle): Rectangle {
   const unit = Math.floor(Math.min(SPLASH_SIZE.width, area.width, area.height * 1.5) / 3);

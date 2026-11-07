@@ -175,6 +175,15 @@ assert_contains "$source_text" 'set_st "$TASK" --init --stages "$(v2_registry_st
   "recovery re-inits the registry from the newly pinned catalog"
 assert_contains "$source_text" 'v2_quarantine_state_artifacts "$EXPECTED_ATTEMPT" || return' \
   "recovery takes the predecessor stage artifacts off the disk"
+# Штатная остановка по сигналу помечается в реестре, чтобы GrigDesk отличал решение
+# человека от обрыва: демона нет, STALLED_HUMAN нет, а звонить «Конвейер оборвался»
+# на собственную кнопку остановки нельзя. Метку снимает любой новый заход движка.
+assert_contains "$source_text" 'set_st "$TASK" STOPPED_SIGNAL 1' \
+  "a proven graceful signal stop marks the registry so GrigDesk tells it from a crash"
+assert_contains "$source_text" 'ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0' \
+  "a new engine run clears the graceful-stop marker atomically with daemon registration"
+assert_contains "$source_text" 'STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered' \
+  "recovery clears the graceful-stop marker of the predecessor"
 
 ticket="$TEST_ROOT/ticket.json"
 cat >"$ticket" <<JSON

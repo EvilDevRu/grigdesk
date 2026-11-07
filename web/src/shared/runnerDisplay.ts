@@ -1,3 +1,5 @@
+import { translate } from '../../../shared/i18n/catalogs.ts';
+
 import {
   formatExactDecimal,
   formatExactInteger,
@@ -32,6 +34,7 @@ export interface RunnerAttempt {
   runner?: string;
   model?: unknown;
   effort?: unknown;
+  rc?: number | null;
   failureDetail?: string;
   tokens?: AttemptTokens | null;
 }
@@ -420,12 +423,15 @@ export function runnerReasonLabel(reason: unknown): string {
 
 /**
  * Чем закончился запуск. Пустое значение означает «идёт»: у незавершённой попытки
- * результата ещё нет, и показывать «неизвестная ошибка» здесь было бы неправдой.
+ * результата ещё нет. Завершённый отказ без диагностики явно сообщает отсутствие причины.
  */
-export function attemptResultLabel(result: unknown): string {
+export function attemptResultLabel(result: unknown, rc?: number | null): string {
+  const fallback = Number.isInteger(rc)
+    ? translate('core.runnerExitReasonMissing', { code: rc! })
+    : translate('core.runnerFailureReasonMissing');
   const labels: Record<string, string> = {
     ok: 'успешно',
-    limited: 'лимит',
+    limited: translate('core.runnerQuotaExhausted'),
     unavailable_preflight: 'недоступен',
     provider_unavailable: 'провайдер недоступен',
     route_unavailable: 'несовместим',
@@ -436,9 +442,9 @@ export function attemptResultLabel(result: unknown): string {
     invalid_config: 'ошибка настройки',
     context_overflow: 'контекст переполнен',
     crashed: 'процесс упал',
-    unknown: 'неизвестная ошибка',
+    unknown: fallback,
   };
   const key = String(result || '');
 
-  return labels[key] || key || 'идёт';
+  return labels[key] || (key ? fallback : 'идёт');
 }

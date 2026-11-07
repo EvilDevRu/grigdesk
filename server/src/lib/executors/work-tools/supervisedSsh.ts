@@ -2,27 +2,29 @@ import type {
   AgentSessionView,
   BrokerInput,
   BrokerResult,
+  BrokerScope,
 } from '../../ssh/broker.ts';
 
-// Что GrigDesk даёт инструменту на запуск. Проект и чат навязывает сервер: агент
-// называет только сессию, а область работы выбрать не может.
+// Чат для подтверждений навязывает сервер. Агент выбирает одну из живых сессий,
+// которым человек разрешил команды; рабочая папка на этот допуск не влияет.
 interface SupervisedSshOptions {
-  projectId?: string;
   chatKey?: string;
   invoke?: (
-    scope: { projectId: string; chatKey?: string },
+    scope: BrokerScope,
     input: BrokerInput,
   ) => Promise<BrokerResult | AgentSessionView[]>;
 }
 
 const descriptor = {
   name: 'supervised_ssh',
-  description: 'Показать разрешённые живые сессии или запросить выполнение команды под надзором.',
+  description: 'Показать разрешённые SSH-сессии всех проектов или запросить команду под надзором. '
+    + 'Выбирай sessionId из list; метка и роль подходят только при единственном совпадении.',
   inputSchema: {
     type: 'object',
     required: ['action'],
     properties: {
       action: { type: 'string', enum: ['list', 'exec'] },
+      sessionId: { type: 'string', description: 'Идентификатор нужной сессии из list' },
       label: { type: 'string', description: 'Метка нужной сессии' },
       role: { type: 'string', description: 'Роль нужной сессии' },
       command: { type: 'string', description: 'Команда целиком; человек подтвердит её отдельно' },
@@ -38,6 +40,8 @@ const descriptor = {
 function safeResult(value: BrokerResult | AgentSessionView[]): BrokerResult | AgentSessionView[] {
   if (Array.isArray(value)) {
     return value.map((item) => ({
+      sessionId: String(item?.sessionId || ''),
+      projectId: String(item?.projectId || ''),
       label: String(item?.label || ''),
       role: String(item?.role || ''),
     }));
@@ -57,18 +61,15 @@ function safeResult(value: BrokerResult | AgentSessionView[]): BrokerResult | Ag
   return result as BrokerResult;
 }
 
-/** Надзорный SSH навязывает модели server-owned проект и чат. */
+/**
+ * SSH доступен независимо от выбранного проекта или папки разговора.
+ * Сервер сохраняет только адрес доставки подтверждения, а допуск проверяет broker.
+ */
 async function invoke(
   options: SupervisedSshOptions,
   input: BrokerInput = {},
 ): Promise<BrokerResult | AgentSessionView[]> {
-  if (!options.projectId) {
-    return input.action === 'list'
-      ? []
-      : { ok: false, error: 'project_scope_unavailable' };
-  }
   const scope = {
-    projectId: String(options.projectId),
     ...(options.chatKey ? { chatKey: String(options.chatKey) } : {}),
   };
   const value = typeof options.invoke === 'function'

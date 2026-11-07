@@ -97,7 +97,7 @@ export async function mountStallPipeline(t, fixture = stallFixture(), options = 
        * Остальные чтения не обращаются к реальному серверу.
        */
       async get(url) {
-        if (url === '/api/tasks') {
+        if (url === '/api/tasks?sources=1') {
           return { tasks: [harness.fixture.factoryTask, ...(harness.fixture.additionalTasks || [])] };
         }
 

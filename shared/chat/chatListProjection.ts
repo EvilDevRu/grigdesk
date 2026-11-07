@@ -65,7 +65,9 @@ export function projectWebChatHead(chat: Record<string, unknown>, version: strin
     }
 
     head.lastReply = {
-      key: chatReplyKey(head.id, message, index),
+      key: chatReplyKey(head.id, message, index + Number(
+        (chat.historyWindow as { offset?: number } | undefined)?.offset || 0,
+      )),
       text: String(message.text || '').slice(0, 120),
     };
     break;

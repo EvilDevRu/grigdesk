@@ -124,6 +124,34 @@ test('неизвестная ошибка видна текстом, а ссыл
   assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
 });
 
+test('новый отказ показывает stderr, пустую или недоступную диагностику', async (t) => {
+  const f = await fixture(t);
+  const stderr = path.join(f.runDir, 'stderr.log');
+
+  await writeFile(path.join(f.runDir, 'events.jsonl'), JSON.stringify({ type: 'future_cli_event' }));
+  await writeFile(stderr, 'Fatal: CLI_E_NEW\n');
+
+  const withDiagnostic = (await f.adapter.getTaskDetail('49')).stall;
+
+  assert.match(withDiagnostic.title, /Последнее сообщение исполнителя: Fatal: CLI_E_NEW/);
+  assert.doesNotMatch(withDiagnostic.title + withDiagnostic.detail, /последний — unknown|неизвестная ошибка/);
+
+  await writeFile(stderr, '');
+
+  const withoutMessage = (await f.adapter.getTaskDetail('49')).stall;
+
+  assert.match(withoutMessage.title, /кодом 1; исполнитель не сообщил причину/);
+  assert.match(withoutMessage.hint, /журнал запуска/);
+
+  await rm(stderr);
+  await rm(path.join(f.runDir, 'events.jsonl'));
+
+  const withoutFiles = (await f.adapter.getTaskDetail('49')).stall;
+
+  assert.match(withoutFiles.title, /кодом 1; журнал диагностики недоступен/);
+  assert.equal(withoutFiles.outcome, 'exhausted');
+});
+
 test('подмена каталога запуска ссылкой не разрешает читать чужой поток', async (t) => {
   const f = await fixture(t);
   const moved = path.join(f.stateDir, 'moved-run');
@@ -193,6 +221,91 @@ test('остановка этапа GLM показывает отказ wrapper-
 
   await writeFile(events, `${JSON.stringify({ type: 'turn.failed', error: { message: capacity } })}\n`);
   assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
+});
+
+test('остановка и журнал Kimi объясняют старый unknown по stderr без изменения состояния', async (t) => {
+  const f = await fixture(t);
+  const meta = f.meta.replace('RUNNER=codex', 'RUNNER=kimi')
+    .replace('MODEL=example-sol', 'MODEL=kimi-code/k3');
+  const stderr = 'error: failed to run prompt: provider.auth_error: 403 '
+    + "You've reached your usage limit for this billing cycle. Your quota will be refreshed.\n";
+
+  await writeFile(path.join(f.runDir, 'meta.env'), meta);
+  await writeFile(path.join(f.runDir, 'stderr.log'), stderr);
+
+  const detail = await f.adapter.getTaskDetail('49');
+  const graph = await f.adapter.getTaskGraph('49');
+
+  for (const stall of [detail.stall, graph.stall, graph.nodeMeta.build.stall]) {
+    assert.match(stall.title, /Закончилась квота/);
+    assert.equal(stall.presentation.lastFailure, 'Закончилась квота');
+    assert.equal(stall.presentation.model, 'kimi-code/k3');
+    assert.match(stall.detail, /You've reached your usage limit/);
+    assert.equal(stall.outcome, 'exhausted');
+  }
+
+  const [lastAttempt] = graph.nodeMeta.build.runner.attempts;
+
+  assert.equal(lastAttempt.result, 'unknown');
+  assert.equal(lastAttempt.failureDetail, 'Закончилась квота');
+  assert.equal(await readFile(path.join(f.runDir, 'meta.env'), 'utf8'), meta);
+  assert.equal(await readFile(path.join(f.stateDir, 't49.pipeline'), 'utf8'), f.registry);
+
+  await writeFile(path.join(f.runDir, 'stderr.log'),
+    'error: failed to run prompt: Provider E_NEW token=secret\n');
+  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /Provider E_NEW/);
+  assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /secret/);
+});
+
+for (const [runner, event] of [
+  ['claude', { type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } }],
+  ['deepseek', {
+    event: 'wrapper_error',
+    code: 'QUOTA',
+    message: 'Quota exhausted',
+  }],
+]) {
+  test(`${runner}: конкретная причина доходит до сводки, графа и журнала попыток`, async (t) => {
+    const f = await fixture(t);
+
+    await writeFile(path.join(f.runDir, 'meta.env'), f.meta.replace('RUNNER=codex', `RUNNER=${runner}`));
+    await writeFile(path.join(f.runDir, 'events.jsonl'), JSON.stringify(event));
+
+    const detail = await f.adapter.getTaskDetail('49');
+    const graph = await f.adapter.getTaskGraph('49');
+
+    for (const stall of [detail.stall, graph.stall, graph.nodeMeta.build.stall]) {
+      assert.match(stall.title, /Закончилась квота/);
+      assert.equal(stall.presentation.lastFailure, 'Закончилась квота');
+      assert.equal(stall.outcome, 'exhausted');
+    }
+
+    assert.equal(graph.nodeMeta.build.runner.attempts[0].result, 'unknown');
+    assert.equal(graph.nodeMeta.build.runner.attempts[0].failureDetail, 'Закончилась квота');
+    assert.equal(await readFile(path.join(f.stateDir, 't49.pipeline'), 'utf8'), f.registry);
+  });
+}
+
+test('Kimi не читает stderr по ссылке и не переносит квоту между визитами', async (t) => {
+  const f = await fixture(t);
+  const meta = f.meta.replace('RUNNER=codex', 'RUNNER=kimi');
+  const stderrPath = path.join(f.runDir, 'stderr.log');
+
+  await writeFile(path.join(f.runDir, 'meta.env'), meta);
+  await writeFile(stderrPath, 'error: failed to run prompt: You have reached your 5-hour usage limit.\n');
+  await writeFile(path.join(f.runDir, 'meta.env'), meta.replace('EPOCH=3', 'EPOCH=2'));
+
+  assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /Закончилась квота/);
+
+  await writeFile(path.join(f.runDir, 'meta.env'), meta);
+  await rename(stderrPath, path.join(f.stateDir, 'external-stderr'));
+  await symlink(path.join(f.stateDir, 'external-stderr'), stderrPath);
+
+  assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /Закончилась квота/);
+
+  const [lastAttempt] = (await f.adapter.getTaskGraph('49')).nodeMeta.build.runner.attempts;
+
+  assert.match(lastAttempt.failureDetail, /кодом 1; журнал диагностики недоступен/);
 });
 
 test('граф GLM передаёт подпись последней попытки даже без actual в реестре', async (t) => {

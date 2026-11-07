@@ -16,7 +16,11 @@ test('full и sparse PUT фиксируют прежний JSON в Blob до о�
   });
 
   try {
-    for (const path of ['/api/chat/store/chat', '/api/chat/store/chat/step-reuse?origin=fixture']) {
+    for (const path of [
+      '/api/chat/store/chat',
+      '/api/chat/store/chat/step-reuse?origin=fixture',
+      '/api/chat/store/chat/window',
+    ]) {
       const payload = {
         chat: {
           id: 'fixture',

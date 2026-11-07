@@ -1,3 +1,10 @@
+import { ChatHistoryError } from './historyError.ts';
+
+export { ChatHistoryError } from './historyError.ts';
+
+import type { ChatWindowBase } from '../../../../shared/chat/chatPaging.ts';
+import { inflateHistoryWindow } from './historyWindow.ts';
+
 // Хранилище истории чатов: папка chats/ в корне проекта.
 // Каждый чат — свой файл chats/YYYY-MM/<id>.json (месяц СОЗДАНИЯ чата, файл не переезжает),
 // мета (активный чат, дефолты модели/усилия) — chats/meta.json. Битый файл одного чата
@@ -133,24 +140,6 @@ interface HistoryLog {
   warn?: (fields: Record<string, unknown>, message: string) => void;
 }
 
-export class ChatHistoryError extends Error {
-  readonly code: string;
-
-  readonly statusCode: number;
-
-  readonly conflicts: unknown[];
-
-  constructor(code: string, message: string, { statusCode = 409, conflicts = [] }: {
-    statusCode?: number;
-    conflicts?: unknown[];
-  } = {}) {
-    super(message);
-    this.name = 'ChatHistoryError';
-    this.code = code;
-    this.statusCode = statusCode;
-    this.conflicts = conflicts;
-  }
-}
 
 export function normalizeCompanionTaskId(value: unknown): string | null {
   if (value == null) return null;
@@ -317,6 +306,7 @@ export class ChatHistoryStore {
   private catalogRegistry: ModelRegistry | null = null;
 
   private headsRefresh: Promise<void> | null = null;
+  private catalogWriteEpoch = 0;
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
@@ -507,27 +497,33 @@ export class ChatHistoryStore {
   private refreshHeads(): Promise<void> {
     if (!this.headsRefresh) {
       this.headsRefresh = (async () => {
-        const seen = new Set<string>();
+        let epoch: number;
 
-        for await (const file of this.catalogFiles()) {
-          seen.add(file);
+        do {
+          epoch = this.catalogWriteEpoch;
 
-          try {
-            await this.headOf(file);
-          } catch (error) {
-            this.headCache.delete(file);
-            this.searchCache.delete(file);
-            this.log?.warn?.({ file, err: (error as Error).message }, 'чат-файл не читается, пропущен');
+          const seen = new Set<string>();
+
+          for await (const file of this.catalogFiles()) {
+            seen.add(file);
+
+            try {
+              await this.headOf(file);
+            } catch (error) {
+              this.headCache.delete(file);
+              this.searchCache.delete(file);
+              this.log?.warn?.({ file, err: (error as Error).message }, 'чат-файл не читается, пропущен');
+            }
           }
-        }
-        for (const file of this.headCache.keys()) {
-          if (!seen.has(file)) {
-            this.headCache.delete(file);
-            this.searchCache.delete(file);
+          for (const file of this.headCache.keys()) {
+            if (!seen.has(file)) {
+              this.headCache.delete(file);
+              this.searchCache.delete(file);
+            }
           }
-        }
 
-        await this.catalogCache.save(this.headCache);
+          await this.catalogCache.save(this.headCache);
+        } while (epoch !== this.catalogWriteEpoch);
       })().finally(() => {
         this.headsRefresh = null;
       });
@@ -783,6 +779,7 @@ export class ChatHistoryStore {
   async writeAtomic(p: string, data: string, durable = false): Promise<void> {
     if (durable) {
       await writeDurableFile(p, data);
+      this.catalogWriteEpoch += 1;
 
       return;
     }
@@ -793,6 +790,7 @@ export class ChatHistoryStore {
 
     await fs.writeFile(temp, data, { mode: 0o600, flag: 'wx' });
     await fs.rename(temp, p);
+    this.catalogWriteEpoch += 1;
     await fs.chmod(p, 0o600).catch(() => {});
   }
 
@@ -1088,10 +1086,12 @@ export class ChatHistoryStore {
   async saveOne(
     chat: StoredChat | null | undefined,
     archived = false,
-    { serverIdentity = '', reuseSteps, legacyImport = false }: {
+    { serverIdentity = '', reuseSteps, legacyImport = false, window, clearHistory = false }: {
       serverIdentity?: string;
       reuseSteps?: unknown;
       legacyImport?: boolean;
+      window?: ChatWindowBase;
+      clearHistory?: boolean;
     } = {},
   ): Promise<SaveResult> {
     if (!chat?.id) return { written: false, restored: 0, dropped: 0 };
@@ -1109,9 +1109,28 @@ export class ChatHistoryStore {
        * Новая запись дополнительно удерживает очередь регистраций до завершения commit.
        */
       const commit = async () => {
-        const chat = reuseSteps === undefined
+        if (window) {
+          inflateHistoryWindow(prev?.chat || null, incoming, window);
+        }
+        if (clearHistory && (!prev || incoming.revision !== prev.chat.revision
+          || incoming.messages?.length !== 0)) {
+          throw new ChatHistoryError('chat_window_changed', 'Чат изменился. Повторите очистку.');
+        }
+
+        const source = window && prev ? {
+          ...prev.chat,
+          messages: (prev.chat.messages || []).slice(window.offset),
+        } : prev?.chat || null;
+        const suffix = reuseSteps === undefined
           ? incoming
-          : restoreHistorySteps(incoming, prev?.chat || null, reuseSteps);
+          : restoreHistorySteps(incoming, source, reuseSteps);
+        const chat: StoredChat = window && !clearHistory
+          ? inflateHistoryWindow(prev?.chat || null, suffix, window)
+          : { ...suffix };
+
+        delete chat.historyWindow;
+        delete chat.windowRefs;
+        delete chat.clearHistory;
 
         if (Object.hasOwn(chat, 'speed') && !isChatSpeed(chat.speed)) {
           throw new ChatHistoryError('bad_chat_speed', 'Некорректная скорость чата.', { statusCode: 400 });
@@ -1543,6 +1562,8 @@ export class ChatHistoryStore {
       const prev = await this.readEntry(chatId);
       if (!prev) return false;
       await fs.rm(prev.path, { force: true });
+      this.catalogWriteEpoch += 1;
+
       return true;
     });
     return identity?.valid

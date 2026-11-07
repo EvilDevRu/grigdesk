@@ -1,4 +1,4 @@
-/* Фон и свет используют один холст 3:2: блик сохраняет положение на дуге при любом размере окна. */
+/* Рельеф и фирменная надпись используют единый вписанный холст 3:2 при любом размере окна. */
 html,
 body {
   height: 100%;
@@ -26,37 +26,6 @@ body {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.arc-light {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-/* Широкий рассеянный свет и узкое отражение идут по разным контурам одной синей полосы.
-   Нормализованная длина путей удерживает их рядом на повороте без таймера или скрипта. */
-.arc-light path {
-  fill: none;
-  stroke-linecap: round;
-  stroke-dasharray: 0.12 1;
-  stroke-dashoffset: 0.18;
-  opacity: 0;
-  animation: arc-travel 4.8s linear infinite;
-}
-
-.arc-halo {
-  stroke: #93d9ff;
-  stroke-width: 68;
-  filter: blur(20px);
-}
-
-.arc-spark {
-  stroke: #d1efff;
-  stroke-width: 3;
-  filter: blur(2px);
 }
 
 .wordmark {
@@ -91,24 +60,6 @@ body {
   animation: status-breathe 2.4s ease-in-out infinite;
 }
 
-@keyframes arc-travel {
-  0% {
-    stroke-dashoffset: 0.18;
-    opacity: 0;
-  }
-
-  12%,
-  64% {
-    opacity: 0.7;
-  }
-
-  82%,
-  100% {
-    stroke-dashoffset: -1.12;
-    opacity: 0;
-  }
-}
-
 @keyframes wordmark-arrive {
   from {
     opacity: 0;
@@ -133,7 +84,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .arc-light path,
   .wordmark,
   .status::before {
     animation: none;

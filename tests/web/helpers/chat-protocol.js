@@ -1,3 +1,4 @@
+import { historyWindow, historyPrefixHash } from '../../../server/src/lib/chat/historyWindow.ts';
 import { createHash } from 'node:crypto';
 
 /**
@@ -63,14 +64,17 @@ export function protocolReconcile(value = { pending: [] }, loadedIds = []) {
  * Дельта сравнивает непрозрачные версии, переданные окном, с тем же каталогом.
  * Исчезновение возвращается только для известных id, как в серверном контракте.
  */
-export function protocolChanges(store, known = {}) {
+export function protocolChanges(store, known = {}, onlyKnown = false) {
   const catalog = protocolList(store);
   const heads = [...catalog.sessions, ...catalog.archived];
 
   return {
     ...catalog,
-    sessions: catalog.sessions.filter((head) => known[head.id] !== head.version),
-    archived: catalog.archived.filter((head) => known[head.id] !== head.version),
+    sessions: catalog.sessions.filter((head) => (!onlyKnown || head.id in known)
+      && known[head.id] !== head.version),
+    archived: catalog.archived.filter((head) => (!onlyKnown || head.id in known)
+      && known[head.id] !== head.version),
+    summary: protocolSummary(store),
     gone: Object.keys(known).filter((id) => !heads.some((head) => head.id === id)),
   };
 }
@@ -98,6 +102,7 @@ export function protocolRoutes(store) {
   const catalog = protocolList(complete);
   const routes = {
     '/api/chat/store/list': catalog,
+    '/api/chat/store/list?page=1&archived=0&limit=40': protocolPage(complete),
     '/api/chat/store/changes': {
       ...catalog,
       sessions: [],
@@ -112,6 +117,7 @@ export function protocolRoutes(store) {
 
     routes[`/api/chat/store/head/${chat.id}`] = { head };
     routes[`/api/chat/store/chat/${chat.id}`] = { chat, version: head.version };
+    routes[`/api/chat/store/chat/${chat.id}?window=1`] = protocolWindow(chat, `http://fixture?window=1`);
   }
 
   return routes;
@@ -145,4 +151,87 @@ export function protocolSearch(store, query, archived) {
   }
 
   return { matches };
+}
+
+/**
+ * Новая выдача ограничивает карточки одним scope и отдельным cursor.
+ * Полная история остаётся только в синтетическом серверном источнике.
+ */
+export function protocolPage(store, url = '/api/chat/store/list?page=1&archived=0&limit=40') {
+  if (!store || !Array.isArray(store.sessions) || !Array.isArray(store.archived)) {
+    return store;
+  }
+
+  const params = new URL(url, 'http://fixture').searchParams;
+  const archived = params.get('archived') === '1';
+  const query = params.get('q') || '';
+  const matches = protocolSearch(store, query, archived).matches;
+  const allowed = new Set(matches.map((match) => match.id));
+  const source = archived ? store.archived : store.sessions;
+  const filtered = query ? source.filter((chat) => allowed.has(chat.id)) : source;
+  const offset = Number(params.get('cursor') || 0);
+  const heads = filtered.slice(offset, offset + 40).map(protocolHead);
+
+  return {
+    ...store,
+    sessions: archived ? [] : heads,
+    archived: archived ? heads : [],
+    listProtocol: 2,
+    historyWindowProtocol: 1,
+    page: {
+      nextCursor: offset + 40 < filtered.length ? String(offset + 40) : null,
+      hasMore: offset + 40 < filtered.length,
+    },
+    summary: protocolSummary(store),
+    matches: query ? matches.filter((match) => heads.some((head) => head.id === match.id)) : [],
+  };
+}
+
+/**
+ * Агрегат относится ко всему каталогу, независимо от размера страницы.
+ * Версия фикстуры меняется вместе с содержимым синтетических записей.
+ */
+export function protocolSummary(store) {
+  return {
+    active: store.sessions.length,
+    archived: store.archived.length,
+    unread: [...store.sessions, ...store.archived].filter((chat) => chat.unread).length,
+    waiting: 0,
+    epoch: 'fixture',
+    sequence: 0,
+  };
+}
+
+/**
+ * Detail использует настоящий алгоритм ограниченного окна.
+ * Версия остаётся общей с карточкой того же исходного разговора.
+ */
+export function protocolWindow(chat, url) {
+  const params = new URL(url, 'http://fixture').searchParams;
+
+  return {
+    ...historyWindow(chat, params.get('before') || ''),
+    version: protocolHead(chat).version,
+  };
+}
+
+/**
+ * Синтетический writer подтверждает ровно отправленное окно и его границу.
+ * Фикстура не имитирует потерю ACK, пока сценарий явно её не задаст.
+ */
+export function protocolWindowAck(body) {
+  if (!body.window) {
+    return { ok: true };
+  }
+
+  return {
+    ok: true,
+    window: {
+      ...body.window,
+      baseEnd: body.window.offset + body.chat.messages.length,
+      baseHash: historyPrefixHash(body.chat.messages, body.chat.messages.length),
+      before: null,
+      hasOlder: false,
+    },
+  };
 }

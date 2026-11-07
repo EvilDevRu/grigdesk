@@ -3,6 +3,8 @@ import { factoryBrowserReady } from './browser/factoryBrowserCapability.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import type { TurnFailureSignal } from './chat/turnFailures.ts';
+
 // Общая часть host-wrapper-ов DSH-исполнителей Factory: разбор argv, private пути RUN_DIR,
 // server-owned identity этапа, env статусного MCP и private I/O. Ход модели и каталог —
 // у конкретного исполнителя; сообщения об ошибках несут его подпись.
@@ -194,6 +196,42 @@ export function factoryStatusEnvironment(env: NodeJS.ProcessEnv): Array<{ name: 
  */
 export function emitRunnerEvent(value: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+/**
+ * Delivery failure — окончательный отказ модели, даже если runtime вернул объект результата.
+ * Wrapper завершится ошибкой с исходной причиной; принятую моделью работу автоматически не повторяем.
+ */
+export function assertFactoryTurnResult(result: {
+  deliveryFailure?: boolean;
+  turnFailure?: TurnFailureSignal;
+  reply?: string;
+}, code: string, fallback: string): void {
+  if (result.deliveryFailure) {
+    throw Object.assign(new Error(result.turnFailure?.message || result.reply || fallback), {
+      code: result.turnFailure?.code || code,
+      status: result.turnFailure?.status,
+    });
+  }
+}
+
+/**
+ * Retained событие ошибки несёт только очищенное сообщение, код и подтверждённый HTTP-статус.
+ * Произвольные поля исключения и private данные runtime в журнал попытки не копируются.
+ */
+export function factoryRunnerErrorEvent(
+  error: unknown,
+  code: string,
+  message: string,
+): Record<string, unknown> {
+  const status = (error as { status?: unknown } | null)?.status;
+
+  return {
+    event: 'wrapper_error',
+    code,
+    message,
+    ...(Number.isInteger(status) && Number(status) >= 100 && Number(status) <= 599 ? { status } : {}),
+  };
 }
 
 /**

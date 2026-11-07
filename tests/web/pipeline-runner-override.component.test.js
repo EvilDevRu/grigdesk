@@ -118,7 +118,7 @@ async function mountPipeline(t, {
     async get(url) {
       getCalls.push(url);
 
-      if (url === '/api/tasks') {
+      if (url === '/api/tasks?sources=1') {
         return { tasks: [factoryTask] };
       }
       if (url === `/api/tasks/${factoryTask.task}/graph`) {
@@ -338,58 +338,82 @@ test('модалка показывает policy effort до запуска и �
   assert.match(wrapper.get('.runner-attempt').text(), /gpt-5\.6-sol · effort xhigh/);
 });
 
-test('журнал попыток GLM показывает конкретную причину вместо unknown', async (t) => {
-  const fixture = makeFixture({ status: 'failed', actual: 'glm' });
+for (const [runner, model, failureDetail] of [
+  ['claude', 'claude-test', 'Закончилась квота'],
+  ['codex', 'codex-test', 'Закончилась квота'],
+  ['deepseek', 'deepseek-test', 'Оборвалась связь с провайдером'],
+  ['glm', 'glm-5.3', 'GLM недоступен: проверь карточку (glm_key_missing)'],
+  ['kimi', 'kimi-code/k3', 'Закончилась квота'],
+]) {
+  test(`журнал попыток ${runner} показывает конкретную причину вместо unknown`, async (t) => {
+    const fixture = makeFixture({ status: 'failed', actual: runner });
 
-  Object.assign(fixture.graph.nodeMeta.plan.runner, {
-    primary: 'glm',
-    chain: ['glm'],
-    model: 'glm-5.3',
-    models: { glm: {
-      family: 'default',
-      label: 'glm-5.3',
-      effort: 'high',
-    } },
-    attempts: [{
-      id: 'run-glm',
-      epoch: 1,
-      runner: 'glm',
-      model: 'glm-5.3',
-      effort: 'high',
-      result: 'unknown',
-      failureDetail: 'GLM недоступен: проверь карточку (glm_key_missing)',
-    }],
+    Object.assign(fixture.graph.nodeMeta.plan.runner, {
+      primary: runner,
+      chain: [runner],
+      model,
+      models: { [runner]: {
+        family: 'default',
+        label: model,
+        effort: 'high',
+      } },
+      attempts: [{
+        id: `run-${runner}`,
+        epoch: 1,
+        runner,
+        model,
+        effort: 'high',
+        result: 'unknown',
+        failureDetail,
+      }],
+    });
+    fixture.factoryTask.stall = {
+      kind: 'human',
+      stop: 'human',
+      outcome: 'exhausted',
+      node: 'plan',
+      stage: 'PLAN',
+      title: `PLAN: ${failureDetail}`,
+      hint: 'Проверьте сообщение провайдера.',
+      presentation: {
+        reason: 'агент не вернул результат',
+        summary: 'Проверьте сообщение провайдера перед повтором этапа.',
+        details: { what: 'Результат этапа не получен.' },
+        attempts: 1,
+        lastFailure: failureDetail,
+        model,
+      },
+    };
+
+    const { wrapper, openPlanStage } = await mountPipeline(t, { ...fixture, runners: [runner] });
+
+    assert.equal(wrapper.get('.stop-failure').text(), failureDetail);
+    assert.equal(wrapper.get('.stop-model').text(), model);
+
+    await openPlanStage('failed');
+
+    assert.equal(wrapper.get('.runner-result').text(), failureDetail);
+    assert.ok(wrapper.get('.runner-attempt').text().includes(`${model} · effort high`));
+    assert.doesNotMatch(wrapper.get('.runner-attempt').text(), /неизвестная ошибка|\["zai"/);
   });
-  fixture.factoryTask.stall = {
-    kind: 'human',
-    stop: 'human',
-    outcome: 'exhausted',
-    node: 'plan',
-    stage: 'PLAN',
-    title: 'PLAN: GLM недоступен: проверь карточку (glm_key_missing)',
-    hint: 'Проверьте сообщение провайдера.',
-    presentation: {
-      reason: 'агент не вернул результат',
-      summary: 'Проверьте сообщение провайдера перед повтором этапа.',
-      details: { what: 'Результат этапа не получен.' },
-      attempts: 1,
-      lastFailure: 'GLM недоступен: проверь карточку (glm_key_missing)',
-      model: 'glm-5.3',
-    },
-  };
+}
 
-  const { wrapper, openPlanStage } = await mountPipeline(t, { ...fixture, runners: ['glm'] });
+test('старый сервер без failureDetail показывает код отказа вместо неизвестной ошибки', async (t) => {
+  const fixture = makeFixture({ status: 'failed', actual: 'codex' });
 
-  assert.equal(wrapper.get('.stop-failure').text(),
-    'GLM недоступен: проверь карточку (glm_key_missing)');
-  assert.equal(wrapper.get('.stop-model').text(), 'glm-5.3');
+  fixture.graph.nodeMeta.plan.runner.attempts = [{
+    id: 'run-no-message',
+    runner: 'codex',
+    result: 'unknown',
+    rc: 7,
+  }];
+
+  const { wrapper, openPlanStage } = await mountPipeline(t, fixture);
 
   await openPlanStage('failed');
 
   assert.equal(wrapper.get('.runner-result').text(),
-    'GLM недоступен: проверь карточку (glm_key_missing)');
-  assert.match(wrapper.get('.runner-attempt').text(), /glm-5\.3 · effort high/);
-  assert.doesNotMatch(wrapper.get('.runner-attempt').text(), /неизвестная ошибка|\["zai"/);
+    'Процесс завершился с кодом 7; исполнитель не сообщил причину');
 });
 
 test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {

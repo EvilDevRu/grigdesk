@@ -113,7 +113,10 @@ runner_kimi_run() {
   # Промпт — только аргументом: stdin-форму `-p -` CLI не читает (доказано spike,
   # KIMI.md). Потолок ARG_MAX (~2 МБ на argv+env) на порядки выше конвейерных
   # промптов, отдельной защиты не делаем.
-  local -a args=(kimi -p "$prompt" --output-format stream-json)
+  # Имени CLI в args нет: factory_external_launch подставляет бинарь сама. Сдвоенное
+  # «kimi kimi» CLI разбирает как неизвестную команду и падает с «unknown command
+  # 'kimi'» ещё до модели (инцидент 07.11.2026, три падения на SHIP-этапе подряд).
+  local -a args=(-p "$prompt" --output-format stream-json)
   [[ -z "$model" ]] || args+=(-m "$model")
   if [[ -n "$effort" ]]; then
     case "$effort" in

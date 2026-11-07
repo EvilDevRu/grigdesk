@@ -13,8 +13,10 @@ import { prepareGlmRuntime, preparedGlmRuntime } from '../src/lib/glm/preparedRu
 import { runGlmTurn } from '../src/lib/glm/runtime.ts';
 import type { GlmTurnOptions } from '../src/lib/glm/runtime.ts';
 import {
+  assertFactoryTurnResult,
   emitRunnerEvent,
   factoryRunIdentity,
+  factoryRunnerErrorEvent,
   factoryStatusEnvironment,
   parseRunnerArguments,
   readRunnerPrompt,
@@ -198,6 +200,8 @@ export async function runGlmFactory(
       return;
     }
 
+    assertFactoryTurnResult(result, 'glm_turn_failed', `${LABEL}: ошибка модели`);
+
     publish({
       event: 'result',
       stopReason: (result as { emptyRun?: boolean }).emptyRun ? 'empty' : 'end_turn',
@@ -218,11 +222,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   } catch (error) {
     const message = redactRunnerError(error, [process.env.ZAI_API_KEY, process.env.ZAI_CODING_API_KEY]);
 
-    emitRunnerEvent({
-      event: 'wrapper_error',
-      code: errorCode(error),
-      message,
-    });
+    emitRunnerEvent(factoryRunnerErrorEvent(error, errorCode(error), message));
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }

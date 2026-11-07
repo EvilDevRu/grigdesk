@@ -96,6 +96,8 @@ FAKE_EPOCH=0
 SILENT_LEFT=0
 SILENT_CLASS=timeout
 SILENT_DETAIL=""
+# Typed verdict сценария (base64 JSON); пустое значение — обычная сдача без вердикта.
+FAKE_VERDICT=""
 run_agent() {
   local task=$1 prompt=$2 stage=$3 run_id token=fake-token
   printf '%s\t%s\t%s\t%s\t%s\n' "$stage" "${FACTORY_ROUTE_FANOUT_MODE:-}" \
@@ -112,7 +114,8 @@ run_agent() {
     DISPATCH_RESULT_DETAIL=$SILENT_DETAIL
     return 0
   fi
-  run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" "$FAKE_RESULT" "$FAKE_COMMENT"
+  run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" \
+    "$FAKE_RESULT" "$FAKE_COMMENT" "${FAKE_VERDICT:-}"
 }
 
 # Попытка на маршруте command: его узел prepare объявляет веер parallel/3 с
@@ -220,5 +223,45 @@ assert_rc 0 "$?" "skipped с комментарием коммитится"
 skipped_event=$(find "$(factory_control_root)/protocol-v2/tasks/t${skipped_task}" -name 'event.*.json' -print | sort | tail -1)
 assert_eq "$FAKE_COMMENT" "$(json_field "$(cat "$skipped_event")" reason)" \
   "причина skipped сохранена в журнале маршрута"
+
+# --- отказ среды: failed/environment не повторяется и сразу решается человеком ---
+# Живой замер (t100000000010, SHIP с codex): песочница не пишет git-метаданные linked
+# worktree, и агент пять заходов подряд честно отдавал failed/environment — каждый
+# повтор сжигал xhigh-заход о детерминированную стену. Движок обязан остановиться
+# после первого такого вердикта и назвать человеку, что делать дальше.
+environment_task=9206
+FAKE_RESULT=done
+FAKE_COMMENT=""
+FAKE_VERDICT=""
+environment_attempt=$(begin_attempt "$environment_task" a_92069206920692069206920692069206)
+assert_rc 0 "$?" "попытка сценария отказа среды начинается"
+environment_comment='Публикация не выполнена: git add отказал — index.lock linked worktree в read-only .git основного checkout'
+environment_verdict=$(run_state_verdict_encode failed environment \
+  'publication-git-readonly=Запись в git-метаданные worktree запрещена песочницей')
+FAKE_RESULT=failed
+FAKE_COMMENT="$environment_comment"
+FAKE_VERDICT="$environment_verdict"
+: >"$RUNS_LOG"
+stopped=$(route_v2_dispatch_next "$environment_task" "$environment_attempt")
+assert_rc 0 "$?" "вердикт отказа среды коммитится доверенным рантаймом"
+assert_eq 1 "$(wc -l <"$RUNS_LOG")" \
+  "отказ среды не повторяется: один заход вместо полного бюджета"
+assert_eq stopped "$(json_field "$stopped" state)" "отказ среды останавливает маршрут"
+assert_eq human "$(json_field "$stopped" stop)" "отказ среды отдаёт решение человеку"
+assert_eq failed "$(json_field "$stopped" lastCommit outcome)" \
+  "исход узла остаётся продуктовым failed с владельцем среды"
+assert_contains "$(pipeline_store_get "$environment_task" PREPARE_COMMENT)" "отчёт агента: $environment_comment" \
+  "комментарий узла несёт дословный отчёт агента"
+assert_contains "$(pipeline_store_get "$environment_task" PREPARE_COMMENT)" "повтор с тем же исполнителем обречён" \
+  "комментарий узла объясняет, почему повторов не будет"
+environment_suffix=$(route_v2_stop_line_suffix "$environment_task" "$environment_attempt")
+assert_contains "$environment_suffix" "отказ среды: повтор с тем же исполнителем обречён" \
+  "строка остановки несёт машинную причину суффиксом"
+assert_contains "$environment_suffix" "перейти сюда" \
+  "суффикс говорит человеку, как продолжить"
+[[ "$environment_suffix" == *"отчёт агента"* ]]
+assert_rc 1 "$?" "в строке остановки нет дословного отчёта агента"
+owner=$(run_state_verdict_owner failed "$environment_verdict")
+assert_eq environment "$owner" "владелец отказа среды доезжает до вердикта попытки"
 
 finish_tests

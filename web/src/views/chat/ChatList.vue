@@ -23,7 +23,7 @@
       </div>
     </div>
 
-    <div class="rows">
+    <div ref="rowsHost" class="rows" @scroll.passive="onRowsScroll">
       <div v-if="!chat.loaded" class="list-pending">
         <section class="load-state" :class="{ 'load-state-error': chat.loadError }">
           <div class="load-status" role="status" aria-live="polite" aria-atomic="true">
@@ -64,16 +64,22 @@
           </div>
         </div>
       </div>
+      <div v-else-if="!paging.loaded" class="load-state" role="status">
+        <p>{{ paging.error || t('core.chatPageLoading') }}</p>
+        <UiButton v-if="paging.error" :disabled="paging.loading"
+                  @click="chat.ensureChatPage(q, showArchived)">{{ t('core.chatPageRetry') }}</UiButton>
+      </div>
       <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
         <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
         <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived)">
           {{ t('core.chatListRetry') }}
         </UiButton>
       </div>
-      <div v-else-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
+      <div v-else-if="!rows.length && !paging.hasMore" class="none muted">{{ emptyLabel }}</div>
       <div
         v-for="r in rows"
         :key="r.id"
+        :data-chat-id="r.id"
         v-memo="[
           r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
           r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
@@ -238,6 +244,16 @@
           </span>
         </span>
       </div>
+      <div v-if="chat.loaded && paging.loaded && (paging.loading || paging.error || paging.hasMore)"
+           class="load-state" role="status" aria-live="polite">
+        <p v-if="paging.loading">{{ t('core.chatPageLoading') }}</p>
+        <p v-else-if="paging.error">{{ paging.error }}</p>
+        <UiButton v-if="paging.needsRefresh" :disabled="paging.loading"
+                  @click="chat.refreshChatPage(q, showArchived)">{{ t('core.chatPageRefresh') }}</UiButton>
+        <UiButton v-else :disabled="paging.loading" @click="chat.loadChatPage(q, showArchived)">
+          {{ t(paging.error ? 'core.chatPageRetry' : 'core.chatPageMore') }}
+        </UiButton>
+      </div>
     </div>
   </aside>
 </template>
@@ -250,6 +266,7 @@ import type { UiFieldHandle } from '../../ui.ts';
 import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
 import { onUnmounted, computed, nextTick, ref, watch } from 'vue';
+import { captureChatScrollAnchor } from '../../shared/chatScrollAnchor.ts';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -287,24 +304,72 @@ prov.load(false, { cached: true, reason: 'mount' });
 
 const q = ref('');
 const showArchived = ref(false);
+const rowsHost = ref<HTMLElement | null>(null);
+const paging = computed(() => chat.pageFor(q.value, showArchived.value));
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let scopeEpoch = 0;
+let restoringScope = false;
 
-watch([q, showArchived], ([query, archived]) => {
+watch([q, showArchived], ([query, archived], previous) => {
   clearTimeout(searchTimer ?? undefined);
 
-  // Поколение меняется сразу: ответ прошлого запроса не рисуется во время debounce.
-  void chat.searchChats('', archived);
+  const epoch = ++scopeEpoch;
+
+  if (previous?.[0] !== undefined && rowsHost.value) {
+    chat.pageFor(previous[0], previous[1]).scrollTop = rowsHost.value.scrollTop;
+  }
+
+  restoringScope = true;
+  chat.beginChatSearch(query, archived);
+
+  /**
+   * Возврат к scope восстанавливает его scroll только после принятой порции.
+   * Быстрый переход к другому поиску отменяет применение прежнего положения.
+   */
+  const load = async () => {
+    await chat.searchChats(query, archived);
+    await nextTick();
+
+    if (epoch === scopeEpoch) {
+      if (rowsHost.value) {
+        rowsHost.value.scrollTop = paging.value.scrollTop;
+      }
+
+      restoringScope = false;
+    }
+  };
 
   if (query.trim()) {
-    chat.search.loading = true;
-    searchTimer = setTimeout(() => void chat.searchChats(query, archived), 250);
+    searchTimer = setTimeout(() => void load(), 250);
+  } else {
+    void load();
   }
-});
+}, { immediate: true });
 
 onUnmounted(() => clearTimeout(searchTimer ?? undefined));
 
+/**
+ * Контейнер сообщает собственную прокрутку и загружает одну следующую порцию.
+ * Кнопка продолжения остаётся доступной, когда строк недостаточно для overflow.
+ */
+function onRowsScroll() {
+  const element = rowsHost.value;
+  const page = paging.value;
+
+  if (!element || restoringScope) {
+    return;
+  }
+
+  page.scrollTop = element.scrollTop;
+
+  if (page.loaded && page.hasMore && !page.loading && !page.error
+    && element.scrollHeight - element.clientHeight - element.scrollTop <= 240) {
+    void chat.loadChatPage(q.value, showArchived.value);
+  }
+}
+
 const archiveLabel = computed(() => (
-  `Показывать архив${chat.archived.length ? ` · ${chat.archived.length}` : ''}`
+  `Показывать архив${chat.archivedChatCount ? ` · ${chat.archivedChatCount}` : ''}`
 ));
 const emptyLabel = computed(() => {
   if (q.value.trim()) {
@@ -331,6 +396,27 @@ const rows = computed(() => {
       sleep: sleepingSessions.value[r.id],
     };
   });
+});
+
+watch(() => rows.value.map((row) => row.id).join('\0'), async () => {
+  if (!rowsHost.value || restoringScope) {
+    return;
+  }
+
+  const restore = captureChatScrollAnchor(rowsHost.value, '[data-chat-id]');
+  const atTop = rowsHost.value.scrollTop <= 1;
+  const epoch = scopeEpoch;
+
+  await nextTick();
+
+  if (!rowsHost.value || restoringScope || epoch !== scopeEpoch) {
+    return;
+  }
+  if (atTop) {
+    rowsHost.value.scrollTop = 0;
+  } else {
+    restore();
+  }
 });
 
 // Memo строки перечисляет всё, что рисует её поддерево, включая выбор и инлайн-редактор.
@@ -497,7 +583,7 @@ async function del(r: ListRow) {
 .archive-toggle { display: flex; align-self: flex-start; }
 .new { flex: none; }
 
-.rows { flex: 1; overflow-y: auto; padding: 5px; }
+.rows { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
 
 .list-pending {

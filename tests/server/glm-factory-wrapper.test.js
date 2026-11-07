@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { runGlmFactory } from '../../server/scripts/glmRunner.mts';
+import { runDeepSeekFactory } from '../../server/scripts/deepseekRunner.mts';
 import { writeCompatibility } from '../../server/scripts/sea/compatibility.mts';
 import { buildHelper, loadHelpers } from '../../server/scripts/sea/helpers.mts';
 import {
@@ -182,6 +183,40 @@ test('SB11: SIGTERM не публикует ложный успешный result
 
   assert.deepEqual(events.map((event) => event.event), ['glm_start']);
 });
+
+for (const [provider, run] of [['glm', runGlmFactory], ['deepseek', runDeepSeekFactory]]) {
+  test(`${provider}: delivery failure сохраняет причину и не публикует успешный result`, async (t) => {
+    const f = await wrapperFixture(t);
+    const events = [];
+    const argv = provider === 'glm' ? f.argv
+      : withArgument(withArgument(f.argv, '--model', '["deepseek-official","deepseek-v4-flash"]'),
+        '--mode', 'read-only');
+    let calls = 0;
+
+    await assert.rejects(run(argv, {
+      ...f.env,
+      GRIGDESK_DEEPSEEK_RUNTIME_MODE: 'binary',
+      GRIGDESK_DEEPSEEK_BIN: f.binary,
+      GRIGDESK_PROVIDER_PREFS_PATH: path.join(f.root, 'prefs.json'),
+    }, {
+      emit: (event) => events.push(event),
+      runTurn: async () => {
+        calls += 1;
+
+        return {
+          reply: 'сохранённый черновик',
+          steps: [],
+          deliveryFailure: true,
+          turnFailure: { code: 'TRANSPORT', message: 'fetch failed' },
+        };
+      },
+    }), { code: 'TRANSPORT', message: 'fetch failed' });
+
+    assert.equal(calls, 1);
+    assert.ok(events.every((event) => event.event !== 'result'));
+    assert.equal(await fs.readFile(path.join(f.runDir, 'last.md'), 'utf8'), 'сохранённый черновик');
+  });
+}
 
 test('SB11: неверная identity, режим доступа и аргументы отвергаются до prompt', async (t) => {
   const f = await wrapperFixture(t);

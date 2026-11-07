@@ -557,6 +557,7 @@ test('SSH-карточка показывает сервер пользоват�
     kind: 'perm',
     tool: 'supervised_ssh',
     server: { label: 'Боевой код', host: 'server.internal', port: 2222 },
+    tab: { projectId: 'project-a', label: 'Боевой код · code · 2' },
     user: 'root',
     isRoot: true,
     usesSudo: true,
@@ -568,19 +569,46 @@ test('SSH-карточка показывает сервер пользоват�
 
   assert.deepEqual({
     server: server.exists() ? server.text() : null,
+    tab: wrapper.get('[data-ssh-tab]').text(),
     user: user.exists() ? user.text() : null,
     badges: wrapper.findAll('[data-ssh-privilege]').map((entry) => entry.text()),
     commandLength: commandElement.exists() ? commandElement.text().length : 0,
     fullCommand: commandElement.exists() && commandElement.text() === command,
     remember: wrapper.find('input[type="checkbox"]').exists(),
   }, {
-    server: 'Боевой код — server.internal:2222',
+    server: 'Сервер: Боевой код — server.internal:2222',
+    tab: 'Вкладка SSH: project-a — Боевой код · code · 2',
     user: 'root',
     badges: ['root', 'sudo'],
     commandLength: command.length,
     fullCommand: true,
     remember: false,
   });
+});
+
+test('SSH-карточка визуально разделяет цепочку и подтверждает исходную команду целиком', async (t) => {
+  const command = `cd /srv/app && printf 'a;b'; npm test || exit 1`;
+  const req = {
+    pid: 'ssh-parts',
+    origin: 'ssh',
+    tool: 'supervised_ssh',
+    server: {
+      label: 'production',
+      host: 'server.internal',
+      port: 22,
+    },
+    tab: { projectId: 'project-a', label: 'production · site · 2' },
+    command,
+  };
+  const { wrapper } = await mountPermission(t, req);
+  const parts = wrapper.findAll('[data-ssh-command-part]')
+    .map((part) => part.element.textContent);
+
+  assert.deepEqual(parts, ['cd /srv/app &&', " printf 'a;b';", ' npm test ||', ' exit 1']);
+  assert.equal(wrapper.get('[data-ssh-command]').element.textContent, command);
+  await button(wrapper, 'Разрешить').trigger('click');
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
+  assert.equal(req.command, command);
 });
 
 test('SSH-отказ без пояснения оставляет карточку без answer', async (t) => {

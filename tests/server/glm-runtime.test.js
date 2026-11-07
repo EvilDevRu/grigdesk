@@ -428,6 +428,26 @@ test('ошибка модели с code AUTH — glm_auth_failed; QUOTA — glm_
     assert.equal(await f.prompts(), 3);
   });
 
+test('недельная квота с кодом Harness RATE_LIMIT завершает GLM без допуска автопродолжения', async (t) => {
+  const f = await fixture(t, {
+    updates: [READ_CALL],
+    turnError: {
+      code: 'RATE_LIMIT',
+      message: '429 {"error":{"code":"1310","message":"Weekly/Monthly Limit Exhausted."}}',
+    },
+  });
+
+  await assert.rejects(f.run(), (error) => {
+    assert.equal(error.code, 'glm_quota_exhausted');
+    assert.match(error.message, /исчерпан лимит использования/iu);
+    assert.ok(error.steps.some((step) => step.k === 'tool' && step.id === 'call-1'));
+
+    return true;
+  });
+  assert.equal(await f.prompts(), 1);
+  assert.equal(await f.closed(), true);
+});
+
 test('ход без сбоя доставки не несёт ни сигнала, ни разрешения продолжать',
   async (t) => {
     const f = await fixture(t, { hooks: true, updates: [READ_CALL] });
