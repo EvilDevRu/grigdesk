@@ -12,10 +12,22 @@ export interface MessageRef {
   readonly params: MessageParams;
   readonly fallback?: string;
 }
-export type UiText = string | MessageRef;
+export interface LocalizedText {
+  readonly localized: Readonly<{ ru: string; en: string }>;
+}
+
+export type UiText = string | MessageRef | LocalizedText;
 export type Messages = { [key: string]: string | Messages };
 
 const DEFAULT_LOCALES: LocaleDefinition[] = defaultLocales;
+
+/**
+ * Буквальные переводы принадлежат отправителю, не каталогу ключей ядра.
+ * Снимок не удерживает изменяемый объект сервера и не интерполирует его строки.
+ */
+export function localizedText(ru: string, en: string): LocalizedText {
+  return Object.freeze({ localized: Object.freeze({ ru, en }) });
+}
 
 /**
  * Явный зарегистрированный выбор имеет приоритет перед системой.
@@ -105,8 +117,20 @@ export function createTranslator(options: {
 
   return {
     t,
+    /**
+     * Буквальные переводы выбираются по языку без поиска ключа и интерполяции.
+     * Прежние MessageRef сохраняют рекурсивный перевод параметров каталога.
+     */
     resolveText(text: UiText, locale = 'ru'): string {
-      return typeof text === 'string' ? text : t(locale, text.key, text.params, text.fallback);
+      if (typeof text === 'string') {
+        return text;
+      }
+
+      if ('localized' in text) {
+        return locale === 'en' ? text.localized.en : text.localized.ru;
+      }
+
+      return t(locale, text.key, text.params, text.fallback);
     },
   };
 }
@@ -116,5 +140,13 @@ export function createTranslator(options: {
  * Обычные строки не интерпретируются как ключи и сохраняются побайтно.
  */
 export function snapshotText(text: UiText): UiText {
-  return typeof text === 'string' ? text : messageRef(text.key, text.params, text.fallback);
+  if (typeof text === 'string') {
+    return text;
+  }
+
+  if ('localized' in text) {
+    return localizedText(text.localized.ru, text.localized.en);
+  }
+
+  return messageRef(text.key, text.params, text.fallback);
 }

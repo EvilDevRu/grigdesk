@@ -1,7 +1,8 @@
 # Карта экранов для визуальной сверки
 
 Источник маршрутов — `web/src/router.ts`: 25 неперенаправляющих маршрутов и редиректы
-`/` → `/board` и `/agents` → `/routes`. Это карта точек входа; вкладки, модальные окна и состояние
+`/` → `/board`, `/agents` → `/routes` и `/3d` → `/ext/studio3d` с query и hash.
+Это карта точек входа; вкладки, модальные окна и состояние
 выбранного объекта не становятся отдельными маршрутами автоматически.
 
 ## Маршруты
@@ -23,8 +24,8 @@
 | `/ssh` | `SshView.vue` |
 | `/db` | `DbView.vue` |
 | `/docker` | `DockerView.vue` |
-| `/3d` | `Studio3dView.vue` |
 | `/sandboxes` | `SandboxesView.vue` |
+| `/browser` | `BrowserView.vue` |
 | `/showcase/:id?` | `ShowcaseView.vue` |
 | `/video` | `VideoView.vue` |
 | `/inbox` | `InboxView.vue` |
@@ -43,7 +44,7 @@
 
 ## Дополнительные поверхности
 
-`settings/SettingsModal.vue` открывает 35 страниц восьми групп через общий `UiDialog`.
+`settings/SettingsModal.vue` открывает 30 страниц восьми групп через общий `UiDialog`.
 Дерево и поиск находятся слева; на узком экране навигацию открывает «Разделы».
 Формы используют одну сессию и footer «Отмена / Применить / ОК». Каталог страниц —
 `features/settings/catalog.ts`; [контракт оболочки](settings-modal.md).
@@ -51,6 +52,7 @@
 с отложенным до входа запросом открытия. Отдельного renderer настроек нет.
 Прежний адрес страницы `connections.mobile` выбирает `connections.devices` и не добавляет
 отдельную страницу в каталог. Доступ к ретрансляторам раскрывается на этой странице.
+Прежний `tools.studio3d` выбирает `plugins.installed` с entity `studio3d`; формы 3D в ядре нет.
 
 В `App.vue` также находятся `NoAccessView`, общие hosts диалогов, подсказок
 и тостов, `TaskModal`, `DiffModal`, `DocumentModal`. Проверка одних маршрутов

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createSettingsSession } from '../../web/src/features/settings/session.ts';
 import { settingsResource, settingsSession } from './helpers/settings-session.js';
+import { localizedText } from '../../shared/i18n/core.ts';
 
 test('DR01: ввод не пишет, baseline неизменен, возврат к исходному снимает dirty', async () => {
   const resource = settingsResource('prefs', { enabled: false });
@@ -218,6 +219,28 @@ test('DR09: discard очищает ошибки, секрет и удалени�
 
   assert.equal(session.getIntent('credentials', 'token'), undefined);
   assert.equal(resource.calls.writes.length, 0);
+});
+
+test('DR09-LOCALIZED: оба буквальных перевода ошибки скрывают секрет до публикации snapshot', async () => {
+  const secret = 'synthetic-private-marker';
+  const resource = settingsResource('credentials', {}, {
+    fields: [{
+      key: 'token',
+      secret: true,
+      address: { pageId: 'agents.providers', fieldPath: ['token'] },
+    }],
+    validate: () => [{
+      key: 'token',
+      message: localizedText(`Проверьте ${secret}`, `Check ${secret}`),
+    }],
+  });
+  const session = await settingsSession(resource);
+
+  session.setField('credentials', 'token', secret);
+  session.validate();
+  assert.equal(JSON.stringify(session.getSnapshot()).includes(secret), false);
+  assert.equal(JSON.stringify(session).includes(secret), false);
+  assert.equal(session.getSnapshot().dirtyCount, 1);
 });
 
 test('DR10: baseline, адреса и намерения владеют копиями вложенных значений', async () => {

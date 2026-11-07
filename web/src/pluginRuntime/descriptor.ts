@@ -12,7 +12,8 @@ export function isPluginModuleDescriptor(id: string, value: unknown): value is P
   }
 
   const prefix = `/api/ext/${encodeURIComponent(id)}/module/`;
-  const urls = [value.entry, ...value.css, ...Object.values(value.locales)];
+  const urls = [value.entry, ...value.css, ...Object.values(value.locales),
+    ...(value.background === undefined ? [] : [value.background])];
 
   return Object.keys(value.locales).every((language) => ['ru', 'en'].includes(language))
     && urls.every((url) => ownResourceUrl(url, prefix));

@@ -18,7 +18,7 @@ const EXPECTED_PAGES = [
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter', 'analysis', 'shelf', 'inbox']],
   ['speech', ['dictation', 'videoTasks']],
   ['connections', ['devices', 'ssh', 'db', 'telegram', 'github']],
-  ['tools', ['code', 'docker', 'studio3d', 'showcase', 'browser']],
+  ['tools', ['code', 'docker', 'showcase', 'browser']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
@@ -253,7 +253,6 @@ test('CAT-N3: системные плагины разнесены по свои
     'usage-forecast': 'interface.usageForecast',
     code: 'tools.code',
     docker: 'tools.docker',
-    studio3d: 'tools.studio3d',
     showcase: 'tools.showcase',
   });
 
@@ -269,7 +268,6 @@ test('CAT-N3: системные плагины разнесены по свои
     'usage-forecast': 'interface',
     code: 'tools',
     docker: 'tools',
-    studio3d: 'tools',
     showcase: 'tools',
   };
 

@@ -64,7 +64,8 @@ Runtime template compiler не предоставляется.
 - `PluginServerAsync` и `PluginServerCallback` описывают оба прежних способа регистрации,
   mutable lifecycle, prepareChange и transition. Request augmentation добавляет только
   необязательный `authKind`; прочие декораторы ядра не являются публичными типами.
-- Расширение core описывает проекты, песочницы, lease, чтение исходников,
+- Расширение core описывает список и паспорта проектов, узкий снимок среды,
+  песочницы, lease, чтение исходников,
   mkdir-lock, канонический digest и model-only вызов с квитанцией. Методы необязательны
   для проверки возможностей старого сервера; `hostServices` не объявляется. Подробности —
   [серверные сервисы](plugin-core-runtime.md).
@@ -78,6 +79,14 @@ Runtime template compiler не предоставляется.
   проверка живого владельца остаются внутри окна. `PluginUiModule` описывает default
   компонент и необязательный named start с cleanup; `PluginPanelProps` — context,
   active/compact и presentation (`page`, `dock`, `hidden`, `placeholder`).
+  Необязательные intents содержат общие id/type/params, consume-intent возвращается
+  wrapper-ом в общую очередь. PluginAlertInput.params несёт проверенный query своей панели.
+- Optional lifecycle.notifications(signal) возвращает серверные PluginNotification show-исходы
+  для общего snapshot без открытия панели. Runtime поколения, дедупликация и просмотр
+  темы принадлежат оболочке; контракт — [серверные оповещения](plugin-notifications.md).
+- Optional entrypoints.web.background и PluginBackgroundContext/PluginBackgroundStart
+  описывают отдельный фон с signal/alerts. Optional context.backgroundReady ждёт
+  тот же coordinator; без поля сохраняется прежний on-demand lifecycle UI.
 - UI-декларации получаются из единственной границы ui.ts и SFC: сохраняют props, события,
   слоты и типы сервисов. Hosts диалогов/тостов/подсказок, диагностика и закрытие слоёв,
   установка языка/адаптера скачивания и raw toast-функции помечены `@internal`.

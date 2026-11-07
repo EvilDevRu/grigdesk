@@ -272,7 +272,7 @@ test('Параметры приложения — общий черновик и
     browser.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
 
     assert.equal(hotkeys.recording, null);
-    settings.setField('hotkeys', 'overrides', { [first]: secondCombo });
+    settings.setField('hotkeys', 'overrides', { [first]: secondCombo, [second]: secondCombo });
     await flushPromises();
 
     assert.match(page.text(), /уже открывает/);

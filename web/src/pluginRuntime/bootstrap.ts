@@ -16,8 +16,14 @@ import { t } from '../ui.ts';
 import { isPluginModuleDescriptor } from './descriptor.ts';
 import { createPluginRuntime } from './runtime.ts';
 import type { PluginRuntime, PluginRuntimeAccess, PluginRuntimeOptions } from './runtime.ts';
+import { createServerNotificationBridge } from './serverNotifications.ts';
+import type { ServerNotificationBridge } from './serverNotifications.ts';
+import { createPluginBackgroundCoordinator } from './background.ts';
+import type { PluginBackgroundCoordinator } from './background.ts';
+import type { ImportModule } from './loader.ts';
 
 const runtimes = new WeakMap<Pinia, PluginRuntime>();
+const catalogRefreshers = new WeakMap<Pinia, () => Promise<void>>();
 
 interface CatalogEpoch {
   controller: AbortController;
@@ -25,6 +31,9 @@ interface CatalogEpoch {
   pending: boolean;
   refreshing: boolean;
   refreshRequested: boolean;
+  snapshotRequested: boolean;
+  notifications?: ServerNotificationBridge;
+  background?: PluginBackgroundCoordinator;
   ready: Promise<void>;
   accept: () => void;
 }
@@ -41,6 +50,22 @@ export function pluginRuntimeFor(pinia = getActivePinia()): PluginRuntime {
   }
 
   return runtime;
+}
+
+/**
+ * Route admission читает только подтверждённый допуск своего приложения.
+ * Отсутствие установленного host остаётся loading без импорта или создания runtime.
+ */
+export function pluginRuntimeAccessFor(pinia = getActivePinia()) {
+  return pinia ? runtimes.get(pinia)?.access ?? null : null;
+}
+
+/**
+ * Явный повтор каталога использует signal текущей auth/access эпохи.
+ * Непривязанный документ не начинает отдельное незащищённое чтение plugins.load.
+ */
+export function refreshPluginCatalogFor(pinia = getActivePinia()): Promise<void> {
+  return pinia ? catalogRefreshers.get(pinia)?.() ?? Promise.resolve() : Promise.resolve();
 }
 
 /**
@@ -63,6 +88,7 @@ function createEpoch(): CatalogEpoch {
     pending: true,
     refreshing: false,
     refreshRequested: false,
+    snapshotRequested: true,
     ready,
     accept,
   };
@@ -77,6 +103,8 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     runtime?: PluginRuntime;
     chat?: PluginRuntimeOptions['chat'];
     subscribe?: (listener: SseListener) => () => void;
+    backgroundImport?: ImportModule;
+    loadPluginModule?: PluginRuntimeOptions['loadPluginModule'];
   } = {}): () => void {
   const auth = useAuthStore(pinia);
   const shell = useShellStore(pinia);
@@ -98,6 +126,23 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     dock,
     chat: options.chat,
     access,
+    loadPluginModule: options.loadPluginModule,
+    backgroundReady: async (id) => {
+      const current = epoch;
+
+      if (!current || !permitted()) {
+        throw new Error(t('core.pluginModuleAccessRevoked'));
+      }
+
+      await current.ready;
+      current.controller.signal.throwIfAborted();
+
+      if (!current.background) {
+        throw new Error(t('core.pluginModuleAccessRevoked'));
+      }
+
+      await current.background.ready(id);
+    },
     isAvailable: () => permitted() && epoch?.accepted === true,
     waitForAccess: async () => {
       const current = epoch;
@@ -166,16 +211,19 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
       }
 
       tracked.set(id, JSON.stringify(descriptor));
-
-
     }
+
+    epoch.notifications?.acceptCatalog(snapshot);
+    epoch.background?.acceptCatalog(snapshot);
   }
 
   /**
    * Сигналы каталога объединяются в одной попытке с повтором после последнего изменения.
    * Вытеснение повторяется в живой эпохе, сетевой отказ сам не создаёт нового запроса.
    */
-  async function refresh(current: CatalogEpoch): Promise<void> {
+  async function refresh(current: CatalogEpoch, snapshotRequested = false): Promise<void> {
+    current.snapshotRequested ||= snapshotRequested;
+
     if (current.refreshing) {
       current.refreshRequested = true;
 
@@ -206,12 +254,27 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
           current.accept();
           reconcile(result.plugins);
           access.value = { owner: access.value.owner, status: 'ready' };
+
+          if (current.snapshotRequested) {
+            current.snapshotRequested = false;
+            void current.notifications?.refresh();
+          }
         }
       } while (current.refreshRequested && !current.controller.signal.aborted);
     } finally {
       current.refreshing = false;
     }
   }
+
+  const refreshCatalog = async () => {
+    const current = epoch;
+
+    if (current && permitted()) {
+      await refresh(current);
+    }
+  };
+
+  catalogRefreshers.set(pinia, refreshCatalog);
 
   const removeOwnerWatch = watch(() => JSON.stringify([
     ownerKey(), auth.ready, auth.authenticated, permitted(), permitted() ? null : shell.status,
@@ -232,12 +295,29 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
 
     if (online && backgroundWindow) {
       const current = createEpoch();
+      const clientScope = auth.clientScope;
 
       epoch = current;
+      current.notifications = createServerNotificationBridge({
+        owner,
+        clientScope,
+        signal: current.controller.signal,
+        isCurrent: () => epoch === current && current.accepted && permitted()
+          && auth.clientScope === clientScope && access.value.owner === owner,
+      });
+      current.background = createPluginBackgroundCoordinator({
+        plugins,
+        signal: current.controller.signal,
+        importModule: options.backgroundImport,
+        isCurrent: () => epoch === current && current.accepted && permitted()
+          && auth.clientScope === clientScope && access.value.owner === owner,
+      });
       removeCatalogEvents = options.subscribe?.((name, data) => {
+        current.notifications?.onEvent(name, data);
+
         if (epoch === current && permitted()
           && (name === 'hello' || name === 'state-change' && isRecord(data) && data.plugins === true)) {
-          void refresh(current);
+          void refresh(current, name === 'hello');
         }
       }) ?? (() => {});
       void refresh(current);
@@ -250,6 +330,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     system: plugin.system,
     web: plugin.entrypoints?.web,
     compatibility: plugin.compatibility,
+    generation: plugin.runtimeGeneration,
   })))], () => {
     if (epoch && !epoch.pending) {
       epoch.accepted = true;
@@ -259,7 +340,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     }
   }, { flush: 'sync' });
 
-  const removeOpener = backgroundWindow ? setPluginAlertOpener(async (id) => {
+  const removeOpener = backgroundWindow ? setPluginAlertOpener(async (id, params = {}) => {
     const plugin = plugins.byId(id);
 
     if (!permitted() || !epoch?.accepted || !plugin?.enabled || plugin.system
@@ -271,7 +352,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
       route: router.currentRoute.value,
       router,
       dock,
-    }, id);
+    }, id, { type: 'open', params });
   }) : () => {};
 
   return () => {
@@ -289,6 +370,10 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
 
     if (runtimes.get(pinia) === runtime) {
       runtimes.delete(pinia);
+    }
+
+    if (catalogRefreshers.get(pinia) === refreshCatalog) {
+      catalogRefreshers.delete(pinia);
     }
   };
 }

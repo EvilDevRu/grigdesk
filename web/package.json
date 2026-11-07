@@ -45,18 +45,18 @@
     "monaco-editor": "0.56.0",
     "pinia": "^2.2.6",
     "shiki": "4.5.0",
-    "three": "0.186.1",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
-    "@types/three": "0.186.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/compiler-sfc": "^3.5.40",
     "@vue/test-utils": "^2.4.11",
     "esbuild": "^0.25.12",
+    "fake-indexeddb": "6.2.7",
     "happy-dom": "^18.0.1",
     "postcss": "^8.5.26",
+    "semver": "7.8.5",
     "typescript": "^5.9.3",
     "vite": "^6.0.5",
     "vue-tsc": "^2.2.12"

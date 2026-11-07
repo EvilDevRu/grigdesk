@@ -47,12 +47,12 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
     source('web/src/shared/tools/panelLoading.ts'),
   ]);
 
-  // Семь встроенных панелей и единственная модульная панель плагина.
+  // Шесть встроенных панелей и единственная модульная панель плагина.
   // Удаление старого канала не меняет независимую ленивую загрузку соседей.
-  assert.equal(count(registry, /asyncView\(/g), 8);
+  assert.equal(count(registry, /asyncView\(/g), 7);
   assert.doesNotMatch(registry, /PluginFramePanel/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginModulePanel\.vue'\)/);
-  assert.match(registry, /import\('\.\.\/\.\.\/views\/studio3d\/Studio3dPanel\.vue'\)/);
+  assert.doesNotMatch(registry, /views\/studio3d\/Studio3dPanel\.vue/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);

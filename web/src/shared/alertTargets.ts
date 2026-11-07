@@ -2,6 +2,7 @@ import { formatTaskReference } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
 import { messageRef, type MessageRef } from '../../../shared/i18n/core.ts';
+import { decodePluginPanelParams } from '../../../shared/plugins/pluginPanelParams.ts';
 
 export const ALERT_CHAT_QUERY = 'openChat';
 export const ALERT_TASK_QUERY = 'openTask';
@@ -9,6 +10,7 @@ export const ALERT_TASK_QUERY = 'openTask';
 export type AlertTarget = {
   kind: 'plugin';
   pluginId: string;
+  params?: Readonly<Record<string, string>>;
 } | {
   kind: 'chat';
   chatId: string;
@@ -19,10 +21,6 @@ export type AlertTarget = {
   kind: 'task';
   taskId: string;
   source?: TaskSourceId;
-} | {
-  kind: 'studio';
-  modelId: string;
-  versionId: string;
 };
 
 /**
@@ -31,10 +29,10 @@ export type AlertTarget = {
  */
 export function alertTargetHash(target: AlertTarget): string {
   if (target.kind === 'plugin') {
-    return `#/ext/${encodeURIComponent(target.pluginId)}`;
-  }
-  if (target.kind === 'studio') {
-    return `#/3d?model=${encodeURIComponent(target.modelId)}&version=${encodeURIComponent(target.versionId)}`;
+    const params = decodePluginPanelParams(target.params ?? {}) ?? {};
+    const query = new URLSearchParams(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)));
+
+    return `#/ext/${encodeURIComponent(target.pluginId)}${query.size ? `?${query}` : ''}`;
   }
   if (target.kind === 'chat') {
     return `#/chats?${ALERT_CHAT_QUERY}=${encodeURIComponent(target.chatId)}`;
@@ -65,7 +63,6 @@ export function alertTargetLabel(target: AlertTarget, locale: LocaleSource = 'ru
 export function alertTargetMessage(target: AlertTarget): MessageRef {
   const keys = {
     plugin: 'core.openPluginPanel',
-    studio: 'core.openModel',
     chat: 'core.openChat',
     task: 'core.openTask',
     pipeline: 'core.openPipeline',

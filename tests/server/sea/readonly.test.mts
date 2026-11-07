@@ -28,13 +28,12 @@ test('SEA-READONLY-02: fake agent проходит MCP и scope без внеш�
   assert.equal(report.scope, true);
 });
 
-test('SEA-READONLY-03: GLB helper, supervisor и Bash wrappers работают из чужого cwd (нестабильный)', {
+test('SEA-READONLY-03: supervisor и Bash wrappers работают из чужого cwd (нестабильный)', {
   timeout: 150000,
 }, async (t) => {
   const fixture = await isolatedRelease(t);
   const report = await fixture.run('workers');
 
-  assert.equal(report.glb, true);
   assert.equal(report.supervisor, true);
   assert.equal(report.peerAlive, true);
   assert.equal(report.engine, true);

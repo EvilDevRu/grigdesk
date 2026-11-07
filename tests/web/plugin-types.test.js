@@ -439,7 +439,7 @@ for (const [label, filename, pattern, replacement, code] of [
 }
 
 test('TSDK-DOCS: рецепт подключения, совместимость и пересборка описаны в документации', async () => {
-  const author = await readFile(path.join(sourceRoot, 'plugins/README.md'), 'utf8');
+  const author = await readFile(path.join(sourceRoot, 'docs/grigdesk/plugins/author-contract.md'), 'utf8');
   const modules = await readFile(path.join(sourceRoot, 'docs/grigdesk/plugins/plugin-ui-modules.md'), 'utf8');
 
   for (const text of [author, modules]) {

@@ -7,6 +7,7 @@ import type {
 export interface PluginWebModuleManifest {
   dir: string;
   entry: string;
+  background?: string;
   css?: string[];
   locales?: { ru?: string; en?: string };
 }

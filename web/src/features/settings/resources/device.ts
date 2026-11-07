@@ -1,6 +1,5 @@
 import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
-import { validateHotkeyOverrides } from '../../../stores/hotkeys.ts';
 import type { JsonValue, ResourceAdapter } from '../contracts.ts';
 
 interface DevicePort {
@@ -10,6 +9,7 @@ interface DevicePort {
 
 interface HotkeysPort {
   overrides: Record<string, string>;
+  validateOverrides(map: unknown, locale?: LocaleSource): { ok: boolean; error?: string };
   replaceOverrides(map: unknown): { ok: boolean; error?: string };
 }
 
@@ -67,7 +67,7 @@ export function createHotkeysAdapter(hotkeys: HotkeysPort,
     validate(intents) {
       const intent = intents.get('overrides');
       const result = intent?.op === 'set'
-        ? validateHotkeyOverrides(intent.value, typeof locale === 'string' ? locale : locale.value)
+        ? hotkeys.validateOverrides(intent.value, locale)
         : { ok: true, error: undefined };
 
       return result.ok ? [] : [{

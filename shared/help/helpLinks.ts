@@ -16,7 +16,7 @@ export const HELP_CONTEXT_ARTICLES: Readonly<Record<string, string>> = {
   '/sandboxes': 'sandboxes',
   '/showcase': 'showcase',
 
-  '/3d': 'studio3d',
+  '/3d': 'plugins',
   '/video': 'speech',
   '/inbox': 'incoming',
   '/github': 'incoming',

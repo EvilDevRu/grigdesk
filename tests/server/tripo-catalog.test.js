@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { OPERATIONS } from '../../shared/studio3d/studio3dOperations.ts';
 import { START_CONTEXT } from '../../server/src/lib/studio3d/provider.ts';
 import {
   MODEL_H,
@@ -47,14 +46,7 @@ function priced(operation, raw, ctx = context()) {
   };
 }
 
-test('TO-01 каталог закрывает словарь, кроме помощников, и поля согласованы', () => {
-  const declared = tripoOperations(context()).map((entry) => entry.operation);
-  const expected = OPERATIONS
-    .map((operation) => operation.id)
-    .filter((id) => !['rotate', 'scale'].includes(id));
-
-  assert.deepEqual([...declared].sort(), [...expected].sort());
-
+test('TO-01 поля и default варианты действующего каталога согласованы', () => {
   for (const entry of tripoOperations(context({ kind: 'parts' }))) {
     const ids = entry.fields.map((field) => field.id);
 

@@ -1,4 +1,4 @@
-import type { ProjectDetail } from '../../../shared/runtime/projectsContracts.ts';
+import type { ProjectDetail, ProjectSummary } from '../../../shared/runtime/projectsContracts.ts';
 import type { SandboxOverview } from '../../../shared/plugins/sandboxes/sandboxContracts.ts';
 
 export interface PluginModelRef {
@@ -34,10 +34,19 @@ export interface PluginDirectoryLock {
   release(): Promise<void>;
 }
 
+export interface PluginEnvironment {
+  runtimeRoot: string;
+  defaultLibraryDir: string;
+  protectedDirs: readonly string[];
+  nodeExecutable: string;
+}
+
 // Возможности серверного core v1. Типы не раскрывают config, executor или fd.
 // Доступность проверяется по методам: старые сборки могут не иметь расширения.
 export interface PluginRuntimeServices {
   project(id: string): Promise<ProjectDetail>;
+  listProjects(): Promise<ProjectSummary[]>;
+  environment(): Readonly<PluginEnvironment>;
   sandboxes(): Promise<SandboxOverview>;
   holdSandbox(task: string): Promise<PluginSandboxLease>;
   readSourceText(root: string, relative: string, limit: number): Promise<string | null>;

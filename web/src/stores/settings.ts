@@ -9,7 +9,7 @@ import {
   SETTINGS_PAGES,
   SETTINGS_PAGE_KEY,
   resolveFieldAddress,
-  resolveSettingsPage,
+  resolveSettingsPageTarget,
   normalizeSettingsPageId,
   equalFieldAddress,
   type SettingsFieldMetadata,
@@ -156,16 +156,19 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      const selected = normalizePageId(request.pageId) ?? normalizePageId(request.queryPage);
+      const raw = normalizePageId(request.pageId) ? request.pageId
+        : normalizePageId(request.queryPage) ? request.queryPage : undefined;
 
-      if (selected) {
-        selectPage(selected, request.entityId);
+      if (raw) {
+        const target = resolveSettingsPageTarget({ pageId: raw });
+
+        selectPage(target.pageId, target.entityId ?? request.entityId);
       }
 
       return true;
     }
 
-    const selected = resolveSettingsPage({
+    const selected = resolveSettingsPageTarget({
       pageId: request.pageId,
       queryPage: request.queryPage,
       storage: navigationStorage(),
@@ -183,7 +186,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
     releaseBindings();
     session.begin();
-    selectPage(selected, request.entityId);
+    selectPage(selected.pageId, selected.entityId ?? request.entityId);
     isOpen.value = true;
     pendingOpen.value = null;
 

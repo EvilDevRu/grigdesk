@@ -71,7 +71,6 @@ export async function startLargeBrowser(t) {
 
   mocks['stores/providerInstall.ts'] += '\nexport const providerInstallVisibleWarnings = () => [];';
 
-  mocks['stores/studio3d.ts'] = `export { passive as useStudio3dStore } from ${ports};`;
   mocks['stores/providers.ts'] = `export const useProvidersStore = () => ({
     providers: [], load() {}, loadUsage() {}, noteUsageConnection() {}, usage: {},
   });`;

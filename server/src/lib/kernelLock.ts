@@ -4,7 +4,7 @@
 // open-file-description и завершается. Пока parent не закрыл FileHandle, lock
 // физически не может исчезнуть из-за задержанного события `child.exit`.
 import { spawn } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, fstatSync, lstatSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,6 +31,7 @@ export interface KernelFileLockOptions {
 export interface KernelFileLock {
   assertHeld: () => void;
   assertPathIdentity: () => Promise<void>;
+  assertPathIdentityNow: () => void;
   inheritedFd: () => number;
   release: () => Promise<void>;
 }
@@ -156,6 +157,32 @@ export async function acquireKernelFileLock({
             || heldNow.dev !== heldIdentity.dev || heldNow.ino !== heldIdentity.ino
             || atPath.dev !== heldIdentity.dev || atPath.ino !== heldIdentity.ino) {
           throw new Error('lock path указывает на другой inode');
+        }
+      } catch (error) {
+        throw errorFactory(
+          lostCode,
+          `Kernel lock ${label} потерял path identity: ${failureText(error)}`,
+        );
+      }
+    },
+    /**
+     * Последний допуск перед внешним эффектом не уступает event loop.
+     * Fd и путь должны по-прежнему обозначать один обычный inode без дополнительных ссылок.
+     */
+    assertPathIdentityNow() {
+      try {
+        if (released || handle.fd < 0) {
+          throw new Error('lock уже освобождён');
+        }
+
+        const heldNow = fstatSync(handle.fd);
+        const atPath = lstatSync(lockPath);
+
+        if (!heldNow.isFile() || !atPath.isFile() || atPath.isSymbolicLink()
+          || heldNow.nlink !== 1 || atPath.nlink !== 1
+          || heldNow.dev !== heldIdentity.dev || heldNow.ino !== heldIdentity.ino
+          || atPath.dev !== heldIdentity.dev || atPath.ino !== heldIdentity.ino) {
+          throw new Error('lock path потерял единственный закреплённый inode');
         }
       } catch (error) {
         throw errorFactory(

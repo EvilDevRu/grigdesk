@@ -34,6 +34,7 @@ import { compareSemVer, parseSemVer } from './releaseCommon.ts';
 import { installError, errorInfo } from './packageInstall/errors.ts';
 import { pluginResourcePath, resolvePluginAssets } from './pluginAssets.ts';
 import { resolvePluginWebModule } from './pluginWebModule.ts';
+import { isCanonicalPanelHotkey } from '../../../shared/hotkeys/combo.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
@@ -491,49 +492,6 @@ export const SYSTEM: PluginManifest[] = [
     ],
   },
   {
-    id: 'studio3d',
-    system: true,
-    defaultEnabled: false,
-    name: '3D',
-    version: '1.0.0',
-    description: 'Трёхмерные модели через 3D-исполнителей: создание, библиотека с поиском '
-      + 'и версиями, просмотр, скелет и движения, экспорт в проект. Выключение блокирует '
-      + 'новые заказы; принятые продолжаются. После запуска сервера с выключенным плагином '
-      + 'скачивание ждёт включения; срок хранения результатов у поставщика не гарантирован.',
-    category: 'dev',
-    nav: {
-      path: '/3d',
-      label: '3D',
-      group: 'dock',
-      order: 30,
-    },
-    settings: [
-      {
-        key: 'autoImport',
-        label: 'Подтягивать прошлые заказы и заказы агентов',
-        type: 'checkbox',
-        default: true,
-        hint: 'Записи task.json в проектах и история трат исполнителя.',
-      },
-      {
-        key: 'lowDiskGb',
-        label: 'Предупреждать, когда свободно меньше, ГБ',
-        type: 'number',
-        default: 10,
-        min: 1,
-        max: 1000,
-        step: 1,
-      },
-      {
-        key: 'libraryDir',
-        label: 'Папка библиотеки',
-        type: 'text',
-        default: '',
-        hint: 'Пусто — 3d в папке данных. Смена после завершения заданий, без переноса файлов.',
-      },
-    ],
-  },
-  {
     id: 'usage-forecast',
     system: true,
     // Включён по умолчанию: блок читает те же снимки лимитов, что и полосы, ничего не
@@ -644,6 +602,12 @@ export function decodeUserPluginManifest(
 
   if (panels.length && !isRecord(raw.entrypoints.web)) {
     throw installError('manifest_invalid', 'панель требует entrypoints.web');
+  }
+
+  for (const panel of panels) {
+    if (panel.hotkey !== undefined && !isCanonicalPanelHotkey(panel.hotkey)) {
+      throw installError('manifest_invalid', 'hotkey панели должен быть каноническим допустимым сочетанием');
+    }
   }
 
   for (const slot of slots) {

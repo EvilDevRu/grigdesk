@@ -102,7 +102,8 @@ test('HELP-S3: фактический корпус полный, обезлич�
     assert.equal(article.markdown.split('\n')[0], `# ${article.title}`);
   }
 
-  assert.equal(corpus.articles.length, 29);
+  assert.equal(corpus.articles.length, 28);
+  assert.equal(corpus.articles.some((entry) => entry.id === 'studio3d'), false);
   assert.ok(corpus.articles.some((entry) => entry.id === 'getting-started'));
   assert.ok(corpus.articles.some((entry) => entry.id === 'troubleshooting'));
 });

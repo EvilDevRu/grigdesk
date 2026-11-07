@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { PluginCore } from '../../../../packages/plugin-types/src/server.ts';
+import type { PluginCore, PluginFileLockOptions } from '../../../../packages/plugin-types/src/server.ts';
 import type { PluginRuntimeServices } from '../../../../packages/plugin-types/src/coreRuntime.ts';
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import { getProviderAdapters } from '../../lib/executors/index.ts';
@@ -7,6 +7,7 @@ import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
 import { withPathLock } from '../../lib/pathLock.ts';
 import { parseByteRange } from '../../lib/httpRange.ts';
 import { createProviderCapabilities } from './providerCapabilities.ts';
+import { decodePluginNotification } from '../../../../shared/plugins/pluginNotifications.ts';
 
 /**
  * Набор замыкает идентификатор плагина и использует экземпляры сервисов приложения.
@@ -15,6 +16,7 @@ import { createProviderCapabilities } from './providerCapabilities.ts';
 export function createPluginCore(
   fastify: FastifyInstance, pluginId: string, reader?: DocumentReader,
   runtime?: PluginRuntimeServices,
+  notificationGeneration?: () => string | null,
 ): PluginCore {
   const capabilities = createProviderCapabilities();
   const documents = () => {
@@ -52,6 +54,27 @@ export function createPluginCore(
         );
       }
 
+      if (event === 'notification') {
+        const notification = decodePluginNotification(data);
+
+        if (!notification) {
+          throw new TypeError('Некорректное серверное уведомление плагина.');
+        }
+
+        const generation = notificationGeneration?.();
+
+        if (generation && typeof fastify.sse?.broadcast === 'function') {
+          fastify.sse.broadcast('plugin-event', {
+            pluginId,
+            generation,
+            event,
+            data: notification,
+          });
+        }
+
+        return;
+      }
+
       if (typeof fastify.sse?.broadcast !== 'function') {
         throw new Error('Общий поток событий недоступен.');
       }
@@ -63,7 +86,28 @@ export function createPluginCore(
       });
     },
     withPathLock,
-    acquireKernelFileLock,
+    /**
+     * Публичный фасад принимает только объявленные настройки kernel flock.
+     * Дескриптор, выбор binary и фабрика ошибок остаются внутри ядра.
+     */
+    async acquireKernelFileLock(options: PluginFileLockOptions) {
+      const handle = await acquireKernelFileLock({
+        lockPath: options.lockPath,
+        mode: options.mode,
+        timeoutMs: options.timeoutMs,
+        timeoutCode: options.timeoutCode,
+        unavailableCode: options.unavailableCode,
+        lostCode: options.lostCode,
+        label: options.label,
+      });
+
+      return Object.freeze({
+        assertHeld: () => handle.assertHeld(),
+        assertPathIdentity: () => handle.assertPathIdentity(),
+        assertPathIdentityNow: () => handle.assertPathIdentityNow(),
+        release: () => handle.release(),
+      });
+    },
     parseByteRange,
     documents: Object.freeze({
       roots: (...args: Parameters<DocumentReader['roots']>) => documents().roots(...args),

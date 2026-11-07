@@ -148,13 +148,6 @@
       "description": "Worker приёма медиа: статус и результат задания."
     },
     {
-      "id": "studio3d-analysis-worker",
-      "entry": "server/src/lib/studio3d/analysisWorker.ts",
-      "entryKind": "script",
-      "exports": [],
-      "description": "Worker анализа 3D-модели."
-    },
-    {
       "id": "showcase-worker",
       "entry": "server/scripts/showcaseWorker.mts",
       "entryKind": "script",

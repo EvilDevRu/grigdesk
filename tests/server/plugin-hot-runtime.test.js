@@ -23,6 +23,7 @@ function release(version) {
       entrypoints: { server: 'server.js', web: {
         dir: 'ui',
         entry: 'panel.js',
+        background: 'background.js',
         css: ['panel.css'],
         locales: { ru: 'ru.json' },
       } },
@@ -42,6 +43,7 @@ function release(version) {
       ].join('\n'),
       'ui/panel.js': `import { version } from './helper.js'; export default { version };`,
       'ui/helper.js': `export const version = ${JSON.stringify(version)};`,
+      'ui/background.js': `export const start = () => ${JSON.stringify(version)};`,
       'ui/panel.css': `/* ${version} */`,
       'ui/ru.json': JSON.stringify({ version }),
     },
@@ -149,6 +151,11 @@ test('HOT: legacy update → off/on → rollback, новые ESM зависим�
   assert.equal(after.install.restartRequired, false);
   assert.notEqual(after.entrypoints.web.entry, before.entrypoints.web.entry);
   assert.equal((await f.request(before.entrypoints.web.entry)).statusCode, 404);
+  assert.notEqual(after.entrypoints.web.background, before.entrypoints.web.background);
+  assert.equal(after.entrypoints.web.background,
+    after.entrypoints.web.entry.replace('panel.js', 'background.js'));
+  assert.equal((await f.request(before.entrypoints.web.background)).statusCode, 404);
+  assert.match((await f.request(after.entrypoints.web.background)).body, /1\.1\.0/u);
 
   const helper = await f.request(after.entrypoints.web.entry.replace('panel.js', 'helper.js'));
 
@@ -162,6 +169,7 @@ test('HOT: legacy update → off/on → rollback, новые ESM зависим�
   assert.equal((await f.toggle(true)).json().needsRestart, false);
   assert.equal((await f.request('/api/ext/demo/version')).json().version, '1.1.0');
   assert.notEqual((await f.card()).entrypoints.web.entry, after.entrypoints.web.entry);
+  assert.notEqual((await f.card()).entrypoints.web.background, after.entrypoints.web.background);
 
   const installed = await f.service.describe('demo');
   const restored = await f.service.rollback('demo', {
@@ -173,6 +181,8 @@ test('HOT: legacy update → off/on → rollback, новые ESM зависим�
   assert.equal(restored.status, 'done');
   assert.equal((await f.request('/api/ext/demo/version')).json().version, '1.0.0');
   assert.equal((await f.card()).needsRestart, false);
+  assert.match((await f.request((await f.card()).entrypoints.web.background)).body, /1\.0\.0/u);
+  assert.equal((await f.request(after.entrypoints.web.background)).statusCode, 404);
   assert.equal(f.service.restartRequired('demo'), false);
   assert.deepEqual(f.probe.closed, ['1.0.0', '1.1.0']);
 });

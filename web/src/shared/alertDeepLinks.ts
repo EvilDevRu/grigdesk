@@ -4,14 +4,18 @@ import { watch } from 'vue';
 import type { LocationQueryRaw } from 'vue-router';
 import { ALERT_CHAT_QUERY, ALERT_TASK_QUERY, firstQueryValue } from './alertTargets.ts';
 import type { AlertTarget } from './alertTargets.ts';
+import { decodePluginPanelParams } from '../../../shared/plugins/pluginPanelParams.ts';
+import type { PluginPanelParams } from '../../../shared/plugins/pluginPanelParams.ts';
 
-let pluginOpener: ((pluginId: string) => unknown) | null = null;
+type PluginOpener = (pluginId: string, params?: PluginPanelParams) => unknown;
+
+let pluginOpener: PluginOpener | null = null;
 
 /**
  * Runtime главного окна открывает только доступную панель её владельца.
  * Снятие старой регистрации не затрагивает более новую открывалку.
  */
-export function setPluginAlertOpener(open: (pluginId: string) => unknown): () => void {
+export function setPluginAlertOpener(open: PluginOpener): () => void {
   pluginOpener = open;
 
   return () => {
@@ -50,12 +54,11 @@ export interface AlertLinkDeps {
  */
 export function openAlertTarget(target: AlertTarget, deps: AlertLinkDeps): void {
   if (target.kind === 'plugin') {
-    void pluginOpener?.(target.pluginId);
-  } else if (target.kind === 'studio') {
-    void deps.router.push({
-      path: '/3d',
-      query: { model: target.modelId, version: target.versionId }
-    });
+    const params = decodePluginPanelParams(target.params ?? {});
+
+    if (params) {
+      void pluginOpener?.(target.pluginId, params);
+    }
   } else if (target.kind === 'task') {
     deps.ui.openTask(target.taskId, target.source);
   } else if (target.kind === 'chat') {

@@ -135,7 +135,7 @@ test('RUNTIME-router', async () => {
   const routes = [];
 
   for (const route of router.routes) {
-    const { component, ...rest } = route;
+    const { component, redirect, ...rest } = route;
     let componentName = component?.name;
 
     if (typeof component === 'function') {
@@ -145,8 +145,28 @@ test('RUNTIME-router', async () => {
       componentName = 'inline-empty';
     }
 
+    let redirectValue = redirect;
+
+    if (typeof redirect === 'function') {
+      const query = {
+        model: 'model #1',
+        version: 'version 2',
+        extra: ['a', 'b'],
+      };
+      const hash = '#saved-selection';
+
+      redirectValue = redirect({ query, hash });
+      assert.deepEqual(redirectValue, {
+        path: '/ext/studio3d',
+        query,
+        hash,
+      }, route.path);
+      assert.equal(redirectValue.query, query, 'redirect сохраняет исходный query без потери ключей');
+    }
+
     routes.push({
       ...rest,
+      ...(redirect === undefined ? {} : { redirect: redirectValue }),
       ...(component ? { component: componentName } : {}),
     });
   }

@@ -117,6 +117,30 @@
   Переход 900→899 закрывает док и размонтирует непоказанные панели, чтобы возврат на широкий
   экран сам не создал PTY.
 
+## Внешний маршрут
+
+Общий /ext/:id получает отдельную placeholder поверхность до готовности пакета.
+Resolver читает полный каталог и подтверждённую access epoch: loading, load-error,
+missing, incompatible, disabled, no-panel и ready. До ready чужой dock скрыт, UI entry
+не импортируется и query остаётся в адресе. Retry каталога замкнут на текущий epoch/signal;
+missing/disabled/incompatible/no-panel открывают карточку плагина без auto install/toggle.
+
+После ready query проходит общий decoder, один enqueue и последующий consume;
+только принятый query очищается. Retained enabled card не даёт допуска до свежего каталога.
+Удаление/выключение закрывает поверхность и очищает старые runtime id, включая уже
+отсутствующие в текущем tools. Сохранённые activeTool/expandedPreferences не заменяются
+fallback только из-за временно отсутствующего пакета. /3d сохраняет лишь redirect
+на /ext/studio3d с прежними query и hash.
+
+Встроенной панели Studio3D, записи в static tool catalog, store и UI registry больше нет.
+Единственный id `studio3d` принадлежит пользовательскому пакету. Профиль
+`studio3d-full-tool-host.component.test.js` проверяет настоящий внешний PanelRoot
+через ToolHost/PluginView: страницу 1280 и 899 px, док 900 px, сохранение черновика,
+одноразовый query и default/custom/отключённую клавишу на 899/900 px. Без установленного
+пакета import/start панели и фона равны нулю, query сохраняется до ready. Эти проверки
+используют source fixture с fake provider и не заменяют приёмку установленного выпуска
+в браузере или живой WebGL.
+
 ## Передача в окно
 
 Исключение из постоянного render-site — [окно инструмента](tool-windows.md): главный ToolHost

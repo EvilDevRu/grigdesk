@@ -134,3 +134,24 @@ test('I18N-03: общие JSON-каталоги RU/EN зарегистриров
     }
   }
 });
+
+test('I18N-LOCALIZED: буквальные RU/EN frozen snapshots не становятся ключами или шаблонами', async () => {
+  const module = await core();
+
+  assert.equal(typeof module.localizedText, 'function');
+
+  const translator = module.createTranslator({ locales, messages });
+  const input = module.localizedText('Готово {name}', 'core.modelReady');
+  const snapshot = module.snapshotText(input);
+
+  assert.equal(Object.isFrozen(input), true);
+  assert.equal(Object.isFrozen(input.localized), true);
+  assert.notEqual(snapshot, input);
+  assert.equal(Object.isFrozen(snapshot.localized), true);
+  assert.equal(translator.resolveText(snapshot, 'ru'), 'Готово {name}');
+  assert.equal(translator.resolveText(snapshot, 'en'), 'core.modelReady');
+  assert.equal(translator.resolveText('greeting', 'en'), 'greeting');
+  assert.equal(translator.resolveText(module.messageRef('greeting', {
+    name: module.messageRef('fallback', { name: 'A' }),
+  }), 'en'), 'Hello, Русская подпись A');
+});

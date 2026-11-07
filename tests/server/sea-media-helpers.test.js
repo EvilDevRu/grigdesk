@@ -61,16 +61,11 @@ async function packaged(t) {
 
 test('SEA-MEDIA-01: source-команды worker-ов прежние', () => {
   const ingest = helperCommand('media-ingest-worker', ['status.json']);
-  const analysis = helperCommand('studio3d-analysis-worker', []);
 
   assert.equal(ingest.command, process.execPath);
   assert.deepEqual(ingest.args, [
     path.join(ROOT, 'server/src/lib/media/ingestWorker.ts'),
     'status.json',
-  ]);
-  assert.equal(analysis.command, process.execPath);
-  assert.deepEqual(analysis.args, [
-    path.join(ROOT, 'server/src/lib/studio3d/analysisWorker.ts'),
   ]);
 });
 
@@ -78,15 +73,11 @@ test('SEA-MEDIA-02: packaged-команды берут helper-ы своего R'
   const { R, paths } = await packaged(t);
   const catalog = readHelperCatalog(path.join(ROOT, 'server/build/helpers.json'));
   const ingest = helperCommandFor(paths, catalog, 'media-ingest-worker', ['status.json']);
-  const analysis = helperCommandFor(paths, catalog, 'studio3d-analysis-worker', []);
 
   assert.equal(ingest.command, path.join(R, 'runtime/node/bin/node'));
   assert.deepEqual(ingest.args, [
     path.join(R, 'server/runtime/helpers/media-ingest-worker.mjs'),
     'status.json',
-  ]);
-  assert.deepEqual(analysis.args, [
-    path.join(R, 'server/runtime/helpers/studio3d-analysis-worker.mjs'),
   ]);
 });
 

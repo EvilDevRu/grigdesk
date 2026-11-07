@@ -200,7 +200,7 @@ test('TW-P01/docker и plugin: снимок сохраняет viewer/tab; src �
       '../asyncView.ts':
         'export const asyncView = () => ({});',
       ...Object.fromEntries([
-        'code/CodePanel', 'shelf/TaskShelfPanel', 'studio3d/Studio3dPanel', 'terminal/TerminalPanel',
+        'code/CodePanel', 'shelf/TaskShelfPanel', 'terminal/TerminalPanel',
         'ssh/SshPanel', 'db/DbPanel', 'docker/DockerPanel', 'ext/PluginModulePanel',
       ].map((name) => [`../../views/${name}.vue`, 'export default {};'])),
     }

@@ -32,9 +32,11 @@ export function resolvePluginWebModule(
     const dirPath = modulePath(raw.dir, normalize);
     const dir = path.join(root, dirPath);
     const entry = modulePath(raw.entry, normalize);
+    const background = raw.background === undefined ? undefined : modulePath(raw.background, normalize);
 
-    if (!/\.m?js$/u.test(entry) || !ordinaryPath(root, dirPath, true)) {
-      throw new Error('неверная папка или расширение entry');
+    if (!/\.m?js$/u.test(entry) || background !== undefined && !/\.m?js$/u.test(background)
+      || !ordinaryPath(root, dirPath, true)) {
+      throw new Error('неверная папка или расширение entry/background');
     }
     if (raw.css != null && !Array.isArray(raw.css)
       || raw.locales != null && !isRecord(raw.locales)) {
@@ -50,7 +52,12 @@ export function resolvePluginWebModule(
       }
     }
 
-    const files = [entry, ...css, ...Object.values(locales)];
+    const files = [
+      entry,
+      ...(background === undefined ? [] : [background]),
+      ...css,
+      ...Object.values(locales),
+    ];
 
     if (!files.every((file) => ordinaryPath(dir, file))) {
       throw new Error('ресурс отсутствует или содержит ссылку');
@@ -62,6 +69,7 @@ export function resolvePluginWebModule(
     return {
       dir,
       entry: url(entry),
+      ...(background === undefined ? {} : { background: url(background) }),
       css: css.map(url),
       locales: Object.fromEntries(Object.entries(locales).map(([language, file]) => [language, url(file)])),
     };

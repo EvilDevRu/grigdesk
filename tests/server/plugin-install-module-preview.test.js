@@ -41,6 +41,8 @@ for (const dir of ['web/ui', 'docs/ui']) {
       const repo = await createPluginRepo(t);
       const first = moduleRelease('1.0.0', dir);
 
+      first.manifest.entrypoints.web.background = 'background.js';
+      first.files[`${dir}/background.js`] = 'throw new Error("Не исполнять старый background");';
       first.files[`${dir}/helper.txt`] = 'Первый helper';
       first.files['web/index.html'] = '<title>Первая страница</title>';
       first.files['docs/readme.md'] = 'Первый документ';
@@ -61,6 +63,8 @@ for (const dir of ['web/ui', 'docs/ui']) {
       }
       if (change !== 'remove') {
         next.files[`${nextDir}/helper.txt`] = 'Следующий helper';
+        next.manifest.entrypoints.web.background = 'background.js';
+        next.files[`${nextDir}/background.js`] = 'throw new Error("Не исполнять новый background");';
       }
 
       next.files['web/index.html'] = '<title>Следующая страница</title>';
@@ -77,7 +81,7 @@ for (const dir of ['web/ui', 'docs/ui']) {
       const dirs = change === 'move' ? [dir, nextDir] : [dir];
 
       for (const root of dirs) {
-        for (const file of ['panel.js', 'panel.css', 'ru.json', 'en.json', 'helper.txt']) {
+        for (const file of ['panel.js', 'background.js', 'panel.css', 'ru.json', 'en.json', 'helper.txt']) {
           assert.ok(sensitive.includes(`${root}/${file}`), `${root}/${file}`);
         }
       }

@@ -495,12 +495,6 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     description: translator.t('ru', 'settings.builtinPlugins.docker.description'),
   },
   {
-    id: 'tools.studio3d',
-    groupId: 'tools',
-    label: translator.t('ru', 'settings.builtinPlugins.studio3d.name'),
-    description: translator.t('ru', 'settings.builtinPlugins.studio3d.description'),
-  },
-  {
     id: 'tools.showcase',
     groupId: 'tools',
     label: translator.t('ru', 'settings.builtinPlugins.showcase.name'),
@@ -587,12 +581,13 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
 }
 
 /**
- * Снятые страницы установки и речи ведут в соответствующий общий раздел.
+ * Снятые страницы установки, инструментов и речи ведут в соответствующий общий раздел.
  * Неизвестный ID по-прежнему не даёт импортировать произвольный компонент.
  */
 export function normalizeSettingsPageId(raw: unknown): string | undefined {
   const aliases: Record<string, string> = {
     'plugins.install': 'plugins.installed',
+    'tools.studio3d': 'plugins.installed',
     'speech.video': 'speech.dictation',
     'speech.language': 'speech.dictation',
     'speech.models': 'speech.dictation',
@@ -607,14 +602,35 @@ export function normalizeSettingsPageId(raw: unknown): string | undefined {
  * Приоритет источников фиксирован и не зависит от порядка монтирования страниц.
  * Неизвестные ID не разрешаются в импорт и не затирают сохранённую страницу.
  */
-export function resolveSettingsPage(request: PageRequest = {}): string {
+export function resolveSettingsPageTarget(request: PageRequest = {}): {
+  pageId: string;
+  entityId?: string;
+} {
   const saved = request.storage ? readStoredPage(request.storage, SETTINGS_PAGE_KEY) : null;
   const migrated = request.storage && saved === null ? migrateLegacyPage(request.storage) : undefined;
   const candidates = [request.pageId, request.queryPage, saved, migrated].map((id) =>
     id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
 
-  return candidates.map(normalizeSettingsPageId).find((id) => id !== undefined)
-    ?? DEFAULT_SETTINGS_PAGE;
+  for (const candidate of candidates) {
+    const pageId = normalizeSettingsPageId(candidate);
+
+    if (pageId) {
+      return candidate === 'tools.studio3d' ? {
+        pageId,
+        entityId: 'studio3d',
+      } : { pageId };
+    }
+  }
+
+  return { pageId: DEFAULT_SETTINGS_PAGE };
+}
+
+/**
+ * Прежний строковый API сохраняет приоритет источников и свой результат.
+ * Расширенный target нужен навигации для entity снятой тематической страницы.
+ */
+export function resolveSettingsPage(request: PageRequest = {}): string {
+  return resolveSettingsPageTarget(request).pageId;
 }
 
 /**
@@ -633,6 +649,7 @@ export function resolveFieldAddress(address: FieldAddress): FieldAddress | null 
   return {
     ...address,
     pageId,
+    ...(address.pageId === 'tools.studio3d' ? { entityId: 'studio3d' } : {}),
     fieldPath: [...address.fieldPath],
   };
 }
@@ -774,10 +791,6 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   "tools.docker": {
     "label": "settings.builtinPlugins.docker.name",
     "description": "settings.builtinPlugins.docker.description"
-  },
-  "tools.studio3d": {
-    "label": "settings.builtinPlugins.studio3d.name",
-    "description": "settings.builtinPlugins.studio3d.description"
   },
   "tools.showcase": {
     "label": "settings.builtinPlugins.showcase.name",

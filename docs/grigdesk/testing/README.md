@@ -8,6 +8,7 @@
 
 ## Грабли
 
+- [Happy-dom: отключённый CSS посылает преждевременный error](happy-dom-disabled-css-transport.md) — проверяемый HTTP receipt перед load/error.
 - [Happy DOM: условие после :root применяется без проверки атрибута](happy-dom-root-selector.md)
 - [Navigator.locks Node и удержанный ответ фикстуры окна](node-navigator-locks.md)
 - [Happy DOM: первое несовпадение media не вызывает change без начального resize](happy-dom-media-initial-state.md)

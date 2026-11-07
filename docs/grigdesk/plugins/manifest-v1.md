@@ -56,6 +56,17 @@ Category, defaultEnabled и install.npm сохраняют свой смысл. 
 Без декларации панели модуль не создаёт навигацию. Единственный ToolHost владеет
 панелью и в доке от 900 px, и на маршруте узкого окна.
 
+Optional entrypoints.web.background указывает отдельный JS/mjs того же dir.
+Он проходит проверки entry и получает URL того же generation, но экспортирует
+start(context), без default-компонента. Enabled compatible пакет запускает фон
+после входа и свежего каталога независимо от открытия панели, без CSS/UI import.
+Lifecycle и optional backgroundReady — в [контракте фона](plugin-background.md).
+
+Optional contributes.panels[0].hotkey задаёт default физической клавиши.
+Scanner/installer принимают только непустую canonical строку до 64 символов по
+shared/hotkeys/combo.ts. HTTP selector повторяет тот же guard перед bindings.
+Сохранённое device назначение, включая отключённое '', сильнее default пакета.
+
 Слот provider.popover.after-bars с kind provider-usage требует серверного входа.
 Он читает прежний readonly JSON из provider-usage и может сосуществовать с панелью.
 Произвольные Vue-компоненты через внешнюю декларацию слота не подключаются.

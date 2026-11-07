@@ -7,7 +7,7 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { isPluginModuleDescriptor } from './descriptor.ts';
 import { loadPluginStyles } from './styles.ts';
 
-type ImportModule = (specifier: string) => Promise<Record<string, unknown>>;
+export type ImportModule = (specifier: string) => Promise<Record<string, unknown>>;
 
 export class PluginModuleError extends Error {
   constructor(readonly code: 'unsupported' | 'load-failed') {
@@ -21,7 +21,7 @@ const nativeImport: ImportModule = (specifier) => import(/* @vite-ignore */ spec
  * Фасады проверяются реальными import и сравнением ссылок до исполнения плагина.
  * Ядро не ожидает эту проверку; сбой карты остаётся ошибкой отдельной панели.
  */
-async function sharedRuntime(importModule: ImportModule): Promise<void> {
+export async function sharedRuntime(importModule: ImportModule): Promise<void> {
   try {
     const [vue, ui] = await Promise.all([importModule('vue'), importModule('@grigdesk/ui')]);
 

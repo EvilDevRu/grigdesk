@@ -5,14 +5,14 @@ import { loadProductModule } from './helpers/compile-vue.js';
 import { descriptor, pluginCard, registryModule } from './helpers/pluginModuleContract.js';
 
 for (const mode of ['main', 'page']) {
-  test(`PM-NEIGHBOR-DETACH: Code/iframe и исключения terminal/3D в ${mode}`, async (t) => {
+  test(`PM-NEIGHBOR-DETACH: Code/iframe и исключения terminal/external в ${mode}`, async (t) => {
     const host = await hostFixture(t, { mode });
 
-    for (const id of ['code', 'example', 'terminal', 'studio3d']) {
+    for (const id of ['code', 'example', 'terminal', 'module-example']) {
       host.dock.open(id);
       await host.settle();
       assert.equal(Boolean(detachButton(host.wrapper)), mode === 'main'
-        && !['terminal', 'studio3d'].includes(id), id);
+        && !['terminal', 'module-example'].includes(id), id);
     }
   });
 }

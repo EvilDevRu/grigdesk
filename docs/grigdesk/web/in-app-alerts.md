@@ -15,7 +15,7 @@
 | Ворота | `conveyor-<taskId>` | `task:<taskId>` | warning | Нет | Открыть конвейер |
 | Авария или затык | `stall-<taskId>:<kind>:<stage>` | `task:<taskId>` | danger | Нет | Открыть конвейер |
 | Молчание | `silence-<taskId>:<stage>` | `task:<taskId>` | warning | Нет | Открыть конвейер |
-| Результат 3D | `studio-<versionId>` | `studio:<modelId>` | accent / danger | Ready: 8 секунд; failed: нет | Открыть модель и версию |
+| Событие внешнего плагина | `plugin-server:<pluginId>:<localId>` | `plugin-server:<pluginId>` | По событию | По событию | Открыть панель с params |
 | Ошибка сохранения истории | `chat-save-error` | — | danger | Нет | Крестик |
 | Новое событие полки | `task-shelf-<taskId>-<fingerprint>` | `task:<taskId>` | accent | Через 8 секунд | Открыть задачу поверх раздела |
 
@@ -107,8 +107,16 @@ Notification. Service worker не используется; иконка — в�
 `notify-watch-stall.test.js`, `task-shelf.test.js`, `task-shelf.component.test.js` и
 `shelf-contract.test.js`.
 
-Раздел 3D получает terminal состояние через постоянный shell subscriber и
-`studio-changed` → перечитывание задач. Семантический dedup не даёт повторить тост
-при reconnect. Текущая открытая модель подавляет свой тост; кеш после ухода со страницы
-его не подавляет. Цель `studio` открывает `#/3d?model=…&version=…` без token URL
-или абсолютного пути в уведомлении. Потеря сессии и отключение прекращают эту подписку.
+Серверные события внешнего плагина принимает общий `pluginRuntime/serverNotifications.ts`
+без импорта UI и acquire панели. Канал связан с owner, runtime generation и подтверждённым
+каталогом. Подписка начинается до snapshot; live и snapshot используют общий decoder
+и один persistent dedup последних 500 ключей на owner. Ошибка snapshot показывается
+с повтором. Последний release UI не закрывает серверный канал.
+
+Цель `plugin` передаёт plugin id и params в общий открыватель; отдельного вида `studio`
+или перехода к встроенному продукту нет. `context.notifications.setViewing` активной
+панели подавляет только её тему и снимает уже показанные тосты этой темы. Abort старого
+контекста не затрагивает новый канал. UI/background/server scopes независимы.
+Потеря авторизации, выключение, удаление и смена поколения отзывают старый канал.
+Проверки: `plugin-server-notifications.test.js`, `plugin-module-background.test.js` и
+`studio3d-notifications-migration.test.js`; профильный производитель находится в плагине.

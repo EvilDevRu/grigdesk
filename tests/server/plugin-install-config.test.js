@@ -99,7 +99,8 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
   const { pluginBootFixture, waitBootJob } = await import('./helpers/pluginBootFixture.js');
   const { createApplyFixture } = await import('./helpers/pluginApplyFixture.js');
   const { createPluginRepo } = await import('./helpers/pluginRepo.js');
-  const repo = await createPluginRepo(t, { id: 'studio3d' });
+  const reservedId = 'usage-forecast';
+  const repo = await createPluginRepo(t, { id: reservedId });
 
   await repo.release('1.0.0');
 
@@ -135,7 +136,7 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
 
   const result = await waitBootJob(fixture, (job) => job?.status === 'failed');
 
-  assert.equal(result.job.error.code, 'id_reserved', 'SYSTEM включает последний studio3d id');
+  assert.equal(result.job.error.code, 'id_reserved', 'SYSTEM сохраняет оставшийся builtin id');
   fixture.child.kill('SIGTERM');
   assert.equal((await fixture.exited)[1], null, 'onClose заканчивается без SIGKILL');
 
@@ -144,7 +145,7 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
     pluginsDir: fixture.env.GRIGDESK_PLUGINS_DIR,
     statePath: fixture.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH,
     grigDeskVersion: '0.1.0',
-    reservedIds: ['studio3d'],
+    reservedIds: [reservedId],
   });
 
   try {

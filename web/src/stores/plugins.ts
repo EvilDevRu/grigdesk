@@ -39,7 +39,7 @@ function isPlugin(value: unknown): value is PluginCard {
     return false;
   }
 
-  return ['version', 'description', 'category', 'icon', 'serverError'].every((key) => (
+  return ['version', 'description', 'category', 'icon', 'serverError', 'runtimeGeneration'].every((key) => (
     value[key] == null || typeof value[key] === 'string'
   )) && ['system', 'needsRestart'].every((key) => value[key] == null || typeof value[key] === 'boolean')
     && (value.nav == null || (isRecord(value.nav)

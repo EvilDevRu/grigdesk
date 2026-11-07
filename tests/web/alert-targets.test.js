@@ -50,15 +50,15 @@ test('query: первый строковый элемент и пустые зн
   }
 });
 
-test('цель studio ведёт к версии и называет модель', () => {
+test('цель studio3d использует общий plugin адрес и params модели', () => {
   const target = {
-    kind: 'studio',
-    modelId: 'model #1',
-    versionId: 'v01-model'
+    kind: 'plugin',
+    pluginId: 'studio3d',
+    params: { model: 'model #1', version: 'v01-model' }
   };
 
-  assert.equal(alertTargetHash(target), '#/3d?model=model%20%231&version=v01-model');
-  assert.equal(alertTargetLabel(target), 'Открыть модель');
+  assert.equal(alertTargetHash(target), '#/ext/studio3d?model=model+%231&version=v01-model');
+  assert.equal(alertTargetLabel(target), 'Открыть панель');
 });
 
 test('PM-PLUGIN-TARGET: системный адрес кодирует pluginId', () => {

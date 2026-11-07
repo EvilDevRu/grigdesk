@@ -18,6 +18,7 @@ import type {
 import { pluginModuleStaticOptions } from '../../lib/pluginWebModule.ts';
 import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
 import { changeError } from './changes.ts';
+import type { PluginNotificationSource } from './notifications.ts';
 
 export const PLUGIN_APIS = [1];
 
@@ -33,7 +34,10 @@ interface RuntimeEntry {
 
 interface RuntimeOptions {
   parent: FastifyInstance;
-  options(manifest: PluginManifest): Promise<Omit<PluginServerOptions, 'lifecycle'>>;
+  options(
+    manifest: PluginManifest,
+    notificationGeneration: () => string | null,
+  ): Promise<Omit<PluginServerOptions, 'lifecycle'>>;
 }
 
 /**
@@ -59,6 +63,53 @@ export class UserPluginRuntime {
 
   isLoading(id: string): boolean {
     return this.loading.has(id);
+  }
+
+  /**
+   * UUID каталога берётся у действующего entry, без запуска выключенного сервера.
+   * Отозванный или ещё не готовый runtime не предоставляет поколение уведомлений.
+   */
+  generationOf(id: string): string | null {
+    const entry = this.entries.get(id);
+
+    return entry ? this.notificationGeneration(entry) : null;
+  }
+
+  /**
+   * Замыкание старого core привязано к конкретному entry, а не только к pluginId.
+   * On/off читает новый UUID синхронно, replacement навсегда отзывает прежний источник.
+   */
+  private notificationGeneration(entry: RuntimeEntry): string | null {
+    return this.entries.get(entry.manifest.id) === entry && entry.ready && !entry.closed
+      && entry.gate.isEnabled ? entry.generation : null;
+  }
+
+  /**
+   * Snapshot захватывает identity и UUID до await, затем сверяет их ещё раз.
+   * Только готовый совместимый сервер с объявленной панелью может отдавать исходы.
+   */
+  notificationSources(): PluginNotificationSource[] {
+    const sources: PluginNotificationSource[] = [];
+
+    for (const entry of this.entries.values()) {
+      const generation = this.notificationGeneration(entry);
+      const lifecycle = entry.gate.options.lifecycle;
+      const hook = lifecycle.notifications;
+
+      if (!generation || entry.manifest.compatibility?.status === 'incompatible'
+        || !entry.manifest.contributes?.panels?.length || typeof hook !== 'function') {
+        continue;
+      }
+
+      sources.push({
+        pluginId: entry.manifest.id,
+        generation,
+        read: (signal) => hook.call(lifecycle, signal),
+        isCurrent: () => this.notificationGeneration(entry) === generation,
+      });
+    }
+
+    return sources;
   }
 
   renewModule(id: string): void {
@@ -102,6 +153,7 @@ export class UserPluginRuntime {
       entrypoints: { web: web ? {
         ...web,
         entry: url(web.entry),
+        ...(web.background === undefined ? {} : { background: url(web.background) }),
         css: web.css.map(url),
         locales: Object.fromEntries(Object.entries(web.locales)
           .map(([language, value]) => [language, url(value)])),
@@ -220,7 +272,10 @@ export class UserPluginRuntime {
       }
 
       if (manifest.hasServer) {
-        const options = { ...await this.options.options(manifest), lifecycle };
+        const options = {
+          ...await this.options.options(manifest, () => this.notificationGeneration(entry)),
+          lifecycle,
+        };
 
         entry.directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-runtime-'));
         await cp(String(manifest.dir), entry.directory, {

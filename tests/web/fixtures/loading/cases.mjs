@@ -1,5 +1,4 @@
 import { extraProps, extraPorts } from './extraCases.mjs';
-import { modelDto } from '../../helpers/studio3d-fixtures.js';
 
 export const documentDto = {
     ref: { source: 'fixture', path: 'readme.txt' },
@@ -187,31 +186,6 @@ export const portCases = [
         readyState: { usageLoading: false, usage: usageDto },
         emptyState: { usageLoading: false, usage: null },
         readySelector: '.docker-usage',
-    },
-    {
-        id: 'studio3d-library',
-        file: 'src/views/studio3d/LibraryPanel.vue',
-        pending: {},
-        state: {
-            query: '',
-            filters: {},
-            models: [],
-            busy: 1,
-            total: 0,
-            broken: [],
-            state: { providers: [] }
-        },
-        readyState: {
-            busy: 0,
-            models: [modelDto()],
-            total: 1
-        },
-        emptyState: {
-            busy: 0,
-            models: [],
-            total: 0
-        },
-        readySelector: '[data-context="studio-model-card"]',
     },
 
     {

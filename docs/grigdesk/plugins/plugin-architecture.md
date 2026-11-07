@@ -6,7 +6,7 @@
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
 несовместимый пользовательский пакет остаётся без навигации. Реестр: `server/src/lib/pluginsRegistry.ts` (SYSTEM =
-video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан
+video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, usage-forecast) + скан
 пользовательских `plugins/<id>/plugin.json` (сервер объявлен в entrypoints.server).
 Роуты заперты в префиксе `/api/ext/<id>/` механикой Fastify; контракт версионирован полем `api: 1`.
 Пользовательский плагин выключается и включается сразу, включая первое включение dormant;
@@ -72,14 +72,11 @@ model-only генератором Code): настройка живёт
 Устаревший уровень снимается с записью в журнал и остаётся видимым в настройках с
 пометкой «нет у этой модели».
 
-## Жизненный цикл 3D
+## Внешние панели и поставщики
 
-Системный studio3d выключен по умолчанию. Его `/api/studio3d/*` закрыт auth guard
-и живым plugin gate (404 plugin_disabled); заказы/reconcile/close требуют human session.
-При выключенном старте нет файловых эффектов, scan, history или обращения к исполнителю.
-Включение открывает проверенную библиотеку и lock, выполняет resume и расписание.
-Выключение прекращает новые отправки и автоимпорт, сохраняет исход уже отправленного
-POST и дочитывает принятые платные результаты в прежнюю библиотеку. После выключенного
-перезапуска resume ждёт включения. Смена libraryDir проходит prepare/commit/rollback
-до prefs; активные/unknown/leased входы закрывают переход. Подробнее —
-[API и lifecycle](studio3d-server.md), [контракт раздела](../guide/studio3d.md).
+Продукт Studio3D поставляется самостоятельным плагином с id `studio3d`. Его библиотека,
+заказы, GLB worker и документация принадлежат пакету. Ядро предоставляет общие lifecycle,
+панель, уведомления, API и capability поставщиков; ключи остаются у адаптера ядра.
+Встроенного обработчика `/api/studio3d` нет. Общие контракты описаны в
+[серверном API](server-core-api.md), [runtime](user-plugin-runtime.md) и
+[границах Tripo](tripo-module-boundaries.md).

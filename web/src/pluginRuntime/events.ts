@@ -11,6 +11,10 @@ type Subscribe = (event: string, listener: (data: unknown) => void, init: Plugin
 
 const panelSubscriptions = new WeakMap<Subscribe, Subscribe>();
 
+type ProviderSubscribe = (listener: () => void) => () => void;
+
+const providerSubscriptions = new WeakMap<ProviderSubscribe, ProviderSubscribe>();
+
 /**
  * Доставка использует общую шину окна и замыкает идентификатор плагина.
  * Скрытие снимает транспортную подписку, сохраняя регистрацию до следующего показа.
@@ -26,7 +30,12 @@ export function createPluginEvents(pluginId: string, options: {
    * У каждой регистрации свой срок и идемпотентное снятие.
    * Ошибка доверенного обработчика не прерывает доставку другим подписчикам.
    */
-  function subscribe(event: string, listener: (data: unknown) => void, init: PluginEventOptions) {
+  function subscribe(
+    event: string,
+    listener: (data: unknown) => void,
+    init: PluginEventOptions,
+    providers = false,
+  ) {
     const background = init.lifetime === 'background';
     const active = background ? options.backgroundActive : options.panelActive;
 
@@ -65,6 +74,18 @@ export function createPluginEvents(pluginId: string, options: {
       }
 
       unsubscribe = sseSubscribe((name, envelope) => {
+        if (providers) {
+          if (name === 'providers-update') {
+            try {
+              listener(undefined);
+            } catch {
+              // Ошибка подписчика не прерывает общий транспорт исполнителей.
+            }
+          }
+
+          return;
+        }
+
         if (name !== 'plugin-event' || !isRecord(envelope)
           || envelope.pluginId !== pluginId || envelope.event !== event) {
           return;
@@ -124,8 +145,46 @@ export function createPluginEvents(pluginId: string, options: {
 
   panelSubscriptions.set(on, subscribe);
 
+  const subscribeProvider: ProviderSubscribe = (listener) =>
+    subscribe('providers-update', () => listener(), {}, true);
+
+  /**
+   * Исполнители передают только факт изменения, без сырого SSE payload.
+   * Setup-регистрация следует за новым prop context так же, как события панели.
+   */
+  function onProvidersChanged(listener: () => void) {
+    type ProviderContext = {
+      pluginId: string;
+      providers: { onChanged: ProviderSubscribe };
+    };
+
+    const props = getCurrentInstance()?.props;
+    const panelContext = () => props?.context as ProviderContext | undefined;
+
+    if (!getCurrentScope() || panelContext()?.providers?.onChanged !== onProvidersChanged) {
+      return subscribeProvider(listener);
+    }
+
+    const off = watch(panelContext, (context, previous, cleanup) => {
+      if (context?.pluginId === pluginId) {
+        const register = providerSubscriptions.get(context.providers.onChanged);
+
+        if (register) {
+          cleanup(register(listener));
+        }
+      }
+    }, { immediate: true, flush: 'sync' });
+
+    onScopeDispose(off);
+
+    return off;
+  }
+
+  providerSubscriptions.set(onProvidersChanged, subscribeProvider);
+
   return {
     on,
+    onProvidersChanged,
     clearPanel: () => {
       for (const off of [...panelRegistrations]) {
         off();

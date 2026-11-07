@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -10,6 +10,7 @@ import { parseByteRange } from '../../server/src/lib/httpRange.ts';
 import { DocumentReader } from '../../server/src/lib/documents/reader.ts';
 import { pluginCore, runtimeFixture, settle } from './helpers/pluginRuntimeFixture.js';
 import { createPluginRuntimeServices } from '../../server/src/modules/plugins/runtimeServices.ts';
+import { createRuntimePaths, nodeExecutableFor } from '../../server/src/lib/runtimePaths.ts';
 
 /**
  * Подменяется только транспорт модели и источники данных приложения.
@@ -32,6 +33,13 @@ function runtimeServicesFixture(overrides = {}) {
   };
   const runtime = createPluginRuntimeServices({
     config: {},
+    listProjects: async () => [],
+    environment: () => Object.freeze({
+      runtimeRoot: '/runtime',
+      defaultLibraryDir: '/data/studio3d',
+      protectedDirs: Object.freeze([]),
+      nodeExecutable: process.execPath,
+    }),
     project: async (id) => {
       reads.push(id);
 
@@ -49,6 +57,98 @@ function runtimeServicesFixture(overrides = {}) {
 
   return { runtime, target, calls, reads };
 }
+
+test('PC-ENV: ленивый узкий снимок среды без настроек и credentials', async (t) => {
+  const reads = [];
+  const environment = Object.freeze({
+    runtimeRoot: '/runtime',
+    defaultLibraryDir: '/data/studio3d',
+    protectedDirs: Object.freeze(['/data/plugins', '/data/chats']),
+    nodeExecutable: process.execPath,
+  });
+  const data = runtimeServicesFixture({
+    config: { credentials: 'SECRET', providerSettings: { secret: 'SECRET' } },
+    environment: () => {
+      reads.push('environment');
+
+      return environment;
+    },
+  });
+  const f = await runtimeFixture(t, [{ id: 'demo' }], { runtimeServices: data.runtime });
+  const core = pluginCore(f);
+
+  assert.deepEqual(reads, []);
+  assert.equal(typeof core.environment, 'function');
+  assert.equal(core.environment(), environment);
+  assert.deepEqual(Object.keys(core.environment()).sort(), [
+    'defaultLibraryDir', 'nodeExecutable', 'protectedDirs', 'runtimeRoot',
+  ]);
+  assert.equal(Object.isFrozen(core.environment()), true);
+  assert.equal(Object.isFrozen(core.environment().protectedDirs), true);
+  assert.equal(JSON.stringify(core.environment()).includes('SECRET'), false);
+});
+
+test('PC-PROJECTS: список summary не меняет detail и исходный missing=404', async (t) => {
+  const summary = {
+    id: 'fixture',
+    title: 'Проект',
+    archivedAt: '2026-01-01T00:00:00.000Z',
+    repos: [{
+      key: 'web',
+      dir: '/projects/web',
+      exists: true,
+    }],
+  };
+  const detail = { ...summary, description: 'Описание' };
+  const missing = Object.assign(new Error('missing'), { statusCode: 404 });
+  const reads = [];
+  const data = runtimeServicesFixture({
+    listProjects: async () => {
+      reads.push('list');
+
+      return [summary];
+    },
+    project: async (id) => {
+      if (id !== summary.id) {
+        throw missing;
+      }
+
+      return detail;
+    },
+  });
+  const f = await runtimeFixture(t, [{ id: 'demo' }], { runtimeServices: data.runtime });
+  const core = pluginCore(f);
+
+  assert.deepEqual(reads, []);
+  assert.equal(typeof core.listProjects, 'function');
+  assert.deepEqual(await core.listProjects(), [summary]);
+  assert.equal(await core.project(summary.id), detail);
+  await assert.rejects(core.project('absent'), (error) => error === missing && error.statusCode === 404);
+});
+
+test('PC-ENV-NODE: source/packaged используют Node, отсутствие вложенного binary явно', async (t) => {
+  const f = await runtimeFixture(t);
+  const executable = path.join(f.root, 'bin', 'grigdesk');
+  const nestedNode = path.join(f.root, 'runtime', 'node', 'bin', 'node');
+
+  await mkdir(path.dirname(executable), { recursive: true });
+  await mkdir(path.dirname(nestedNode), { recursive: true });
+  await writeFile(executable, 'ELF fixture');
+  await writeFile(nestedNode, 'Node fixture');
+
+  const source = createRuntimePaths({
+    mode: 'source',
+    root: f.root,
+    execPath: process.execPath,
+  });
+  const packaged = createRuntimePaths({ mode: 'sea', execPath: executable });
+
+  assert.equal(nodeExecutableFor(source), process.execPath);
+  assert.equal(nodeExecutableFor(packaged), nestedNode);
+  assert.notEqual(nodeExecutableFor(packaged), executable);
+  await rm(nestedNode);
+  assert.throws(() => nodeExecutableFor(packaged), /нет вложенного Node/);
+});
 
 test('CORE-V1: loader выдаёт сервисы через core без отдельного hostServices', async (t) => {
   const data = runtimeServicesFixture();

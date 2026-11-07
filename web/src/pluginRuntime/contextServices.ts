@@ -8,12 +8,16 @@ import { createPluginEvents } from './events.ts';
 import { createPluginAlerts } from './alerts.ts';
 import { createPluginPanel } from './panel.ts';
 import type { PluginPanelOptions } from './panel.ts';
+import { openSettings } from '../shared/settingsNavigation.ts';
+import { createPluginNotifications } from './serverNotifications.ts';
+import type { PluginNotificationIdentity } from './serverNotifications.ts';
 
 export interface PluginServiceOptions extends PluginPanelOptions {
   signal: AbortSignal;
   panelActive: Readonly<Ref<boolean>>;
   backgroundActive: Readonly<Ref<boolean>>;
   chat?: AskAgentOptions['chat'];
+  notificationIdentity?: PluginNotificationIdentity;
 }
 
 /**
@@ -45,6 +49,23 @@ export function createPluginContextServices(
       });
     },
     panel: createPluginPanel(base.pluginId, options),
+    /**
+     * Настройки открывает общая навигация, а источник выбирает оболочка.
+     * Отозванный контекст не создаёт запрос и не меняет текущую форму.
+     */
+    openSettings(input: { pageId: string; entityId?: string }) {
+      if (options.signal.aborted || !options.isAlive()) {
+        return false;
+      }
+
+      return openSettings({
+        pageId: input.pageId,
+        ...(input.entityId === undefined ? {} : { entityId: input.entityId }),
+        source: 'button',
+      });
+    },
+    providers: { onChanged: events.onProvidersChanged },
+    notifications: createPluginNotifications(base.pluginId, options),
   };
 
   return { context, clearPanel: events.clearPanel };

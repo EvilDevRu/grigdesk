@@ -11,6 +11,8 @@ import { resolveInboxTriageTarget } from '../../lib/inbox/triage.ts';
 export interface PluginRuntimePorts {
   config: unknown;
   project: PluginRuntimeServices['project'];
+  listProjects: PluginRuntimeServices['listProjects'];
+  environment: PluginRuntimeServices['environment'];
   sandboxes: PluginRuntimeServices['sandboxes'];
   holdSandbox: PluginRuntimeServices['holdSandbox'];
   resolveTarget?: typeof resolveInboxTriageTarget;
@@ -53,6 +55,8 @@ export function createPluginRuntimeServices(ports: PluginRuntimePorts): PluginRu
 
   return Object.freeze({
     project: ports.project,
+    listProjects: ports.listProjects,
+    environment: ports.environment,
     sandboxes: ports.sandboxes,
     holdSandbox: ports.holdSandbox,
     readSourceText: readContainedText,

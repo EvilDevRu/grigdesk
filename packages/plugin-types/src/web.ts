@@ -16,6 +16,14 @@ export interface PluginApi {
   put(path: string, body?: unknown): Promise<unknown>;
   patch(path: string, body?: unknown): Promise<unknown>;
   del(path: string, body?: unknown): Promise<unknown>;
+  upload(path: string, formData: FormData, options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal | null;
+  }): Promise<unknown>;
+  getBlob(path: string): Promise<Blob>;
+  postBytes(path: string, body: BodyInit, options?: {
+    headers?: Record<string, string>;
+  }): Promise<unknown>;
 }
 
 export interface PluginBaseContext {
@@ -34,6 +42,12 @@ export interface PluginEvents {
   on(event: string, listener: (data: unknown) => void, options?: PluginEventOptions): () => void;
 }
 
+export interface PluginAlertAction {
+  id: string;
+  label: UiText;
+  run(): void | Promise<void>;
+}
+
 export interface PluginAlertInput {
   id: string;
   title: UiText;
@@ -42,6 +56,8 @@ export interface PluginAlertInput {
   tone?: UiToastTone;
   sticky?: boolean;
   openPanel?: boolean;
+  params?: Readonly<Record<string, string>>;
+  actions?: readonly PluginAlertAction[];
 }
 
 export interface PluginAlerts {
@@ -68,18 +84,38 @@ export interface PluginModuleContext extends PluginBaseContext {
   alerts: PluginAlerts;
   askAgent(input: PluginAskAgentInput): Promise<string>;
   panel: PluginPanel;
+  openSettings(input: { pageId: string; entityId?: string }): boolean;
+  providers: { onChanged(listener: () => void): () => void };
+  notifications?: { setViewing(topic: string | null): void };
+  backgroundReady?(): Promise<void>;
 }
 
 export type PluginPresentation = 'page' | 'dock' | 'hidden' | 'placeholder';
+
+export interface PluginPanelIntent {
+  id: number;
+  type: string;
+  params: Readonly<Record<string, string>>;
+}
 
 export interface PluginPanelProps {
   context: PluginModuleContext;
   active?: boolean;
   compact?: boolean;
   presentation?: PluginPresentation;
+  intents?: readonly PluginPanelIntent[];
 }
 
 export type PluginModuleCleanup = () => void;
+
+export interface PluginBackgroundContext extends PluginBaseContext {
+  signal: AbortSignal;
+  alerts: PluginAlerts;
+}
+
+export type PluginBackgroundStart = (context: PluginBackgroundContext) =>
+  void | PluginModuleCleanup | Promise<void | PluginModuleCleanup>;
+
 export type PluginModuleStart = (context: PluginModuleContext) =>
   void | PluginModuleCleanup | Promise<void | PluginModuleCleanup>;
 

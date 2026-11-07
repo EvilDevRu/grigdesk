@@ -112,6 +112,7 @@ import {
   messageRef,
   resolveUiText,
   type UiText,
+  type MessageRef,
 } from '../../../ui.ts';
 
 import SettingsEmpty from '../SettingsEmpty.vue';
@@ -203,7 +204,7 @@ function current(): boolean {
  * Подпись сохраняет название чата и принадлежность задаче без раскрытия ключа.
  * Для безымянного разговора задача остаётся понятной человеку точкой входа.
  */
-function title(item: ProcessView): UiText {
+function title(item: ProcessView): MessageRef {
   return item.chatTitle
     ? messageRef('settings.namedProcessChat', {
       chatTitle: item.chatTitle,

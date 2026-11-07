@@ -17,7 +17,6 @@ export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '',
     const ports = JSON.stringify(path.join(fixture, 'ports.mjs'));
     const mocks = new Map(Object.entries({
         'stores/docker.ts': 'export const useDockerStore = () => globalThis.__loadingSurface.store;',
-        'stores/studio3d.ts': 'export const useStudio3dStore = () => globalThis.__loadingSurface.store;',
         'stores/plugins.ts': `export const usePluginsStore = () => ({ byId: () => ({ values: {} }),
           enabled: () => true, loaded: true,
           loadSetup: () => fetch('/api/fixture/setup').then((response) => response.json()),

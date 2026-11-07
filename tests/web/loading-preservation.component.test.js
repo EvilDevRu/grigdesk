@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mountChannelView } from './helpers/channel-views.js';
-import { compileVue, webFile } from './helpers/compile-vue.js';
-import { installUiBrowser } from './helpers/ui-components.js';
-import { modelDto } from './helpers/studio3d-fixtures.js';
 
 const REF = '[1,"item","github","fixture","issue"]';
 const SNAPSHOT = {
@@ -129,57 +126,6 @@ test('LOAD-KEEP-inline-github: обновление правил остаётс�
     pending.resolve({ rules: [] });
     await reading;
     await h.settle();
-});
-test('LOAD-KEEP-inline-studio3d: обновление сохраняет настоящую карточку модели', async (t) => {
-    await installUiBrowser(t);
-
-    const { reactive, nextTick } = await import('../../web/node_modules/vue/index.mjs');
-    const { mount } = await import(
-        '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
-    );
-    const state = reactive({
-        query: '',
-        filters: {},
-        models: [modelDto({ name: 'Сохранённый куб' })],
-        total: 1,
-        broken: [],
-        busy: 0,
-        state: { providers: [] },
-        search() {
-        },
-        loadModels() {
-        },
-    });
-
-    globalThis.__loadingKeepLibrary = state;
-
-    const component = await compileVue(webFile('src/views/studio3d/LibraryPanel.vue'), {
-        stubs: {
-            '../../stores/studio3d.ts': (
-                'export const useStudio3dStore = () => globalThis.__loadingKeepLibrary;'
-            ),
-            '../../shared/projectsApi.ts': 'export const projectsApi = { list: async () => [] };',
-        },
-    });
-    const wrapper = mount(component);
-    const card = wrapper.get('[data-context="studio-model-card"]').element;
-
-    t.after(() => {
-        wrapper.unmount();
-        delete globalThis.__loadingKeepLibrary;
-    });
-    state.busy = 1;
-    await nextTick();
-    assert.equal(wrapper.get('[data-context="studio-model-card"]').element === card, true);
-    assert.match(wrapper.text(), /Сохранённый куб/);
-    assert.equal(wrapper.find('[data-ui-skeleton]').exists(), false);
-    assert.equal(
-        wrapper.find('[data-ui-loading][data-variant="inline"] .ui-spinner').exists(),
-        true
-    );
-    state.busy = 0;
-    await nextTick();
-    assert.equal(wrapper.find('[data-ui-loading]').exists(), false);
 });
 
 const { mountInfrastructure } = await import('./fixtures/loading/infrastructure.mjs');

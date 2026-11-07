@@ -10,7 +10,7 @@ import { scanText } from './helpers/privateIdentifiers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const execFileAsync = promisify(execFile);
-const ROOT_DOCS = new Set(['AGENTS.md', 'CLAUDE.md', 'README.md', 'tests/README.md', 'plugins/README.md']);
+const ROOT_DOCS = new Set(['AGENTS.md', 'CLAUDE.md', 'README.md', 'tests/README.md']);
 const ENGINE_DOCS = new Set(['engine/AGENTS.md', 'engine/CLAUDE.md', 'engine/README.md']);
 
 // Названия продуктов и технические виды профиля не являются именами подключённых проектов.

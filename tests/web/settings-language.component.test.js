@@ -26,7 +26,6 @@ const pages = [
   'interface.usageForecast',
   'tools.code',
   'tools.docker',
-  'tools.studio3d',
   'tools.showcase',
   'tools.browser',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',

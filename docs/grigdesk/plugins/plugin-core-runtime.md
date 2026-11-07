@@ -13,6 +13,8 @@ model-only вызовы через `options.core`. Отдельного `options
 | Метод `core` | Назначение |
 |---|---|
 | `project(id)` | Актуальные сведения о проекте из сервиса приложения. |
+| `listProjects()` | Текущие ProjectSummary с title, repos и archivedAt; подробный project(id) сохраняет свой контракт. |
+| `environment()` | Ленивый frozen снимок runtimeRoot, defaultLibraryDir, protectedDirs и nodeExecutable. |
 | `sandboxes()` | Живой обзор песочниц, включая привязку к проекту и состояние стенда. |
 | `holdSandbox(task)` | Action lease общего guard; ручка содержит проверку владения и `release()`. |
 | `readSourceText(root, relative, limit)` | Начало обычного текстового файла, до `limit + 1` символов для обнаружения усечения. |
@@ -24,6 +26,14 @@ model-only вызовы через `options.core`. Отдельного `options
 Приложение подключает свои сервисы через внутренний `runtimeServices` загрузчика.
 `createPluginRuntimeServices` не читает файлы и модели при создании; запросы данных
 выполняются лениво. Расширение не зависит от наличия панели интерфейса.
+
+`environment()` не выдаёт config, ключи или настройки исполнителей. Массив protectedDirs
+тоже заморожен; в него входят системные хранилища, каталог пользовательских пакетов,
+активные control/config деревья фабрики, в том числе после переноса данных.
+Снимок собирает единая createPluginEnvironment(config) в server/src/lib; её используют
+production factory и изолированные integration fixtures, без второго списка путей.
+Node выбирается ядром: в source это текущий Node, в комплекте — вложенный executable.
+Отсутствие вложенного Node обнаруживается при вызове, без поиска в PATH и fallback на ELF.
 
 `modelText` принимает только ref модели, текст, signal, timeout и callbacks допуска
 и квитанции. Он не выдаёт исполнителя и не передаёт модели cwd, coding tools, чат или

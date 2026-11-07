@@ -147,6 +147,7 @@ import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
 import { createPluginRuntimeServices } from './modules/plugins/runtimeServices.ts';
+import { createPluginEnvironment } from './lib/pluginEnvironment.ts';
 import { SESSION_ONLY_PREFIXES } from './modules/plugins/installRoutes.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
@@ -163,7 +164,6 @@ import { createFactoryBrowserTrusted } from './lib/browser/factoryBrowserTrusted
 import { createBrowserService } from './lib/browser/browserService.ts';
 import browserModule from './modules/browser/index.ts';
 import codeModule from './modules/code/index.ts';
-import studio3dModule from './modules/studio3d/index.ts';
 import telegramModule from './modules/telegram/index.ts';
 import githubModule from './modules/github/index.ts';
 import inboxModule from './modules/inbox/index.ts';
@@ -1184,6 +1184,8 @@ async function build(desktopParent: DesktopParent | null) {
     runtimeServices: createPluginRuntimeServices({
       config,
       project: (id) => projectsService.read(id),
+      listProjects: () => projectsService.list(),
+      environment: () => createPluginEnvironment(config),
       sandboxes: () => sandboxService.overview(),
       holdSandbox: (task) => sandboxActivityGuard.acquireAction(task),
       log: fastify.log,
@@ -1192,7 +1194,6 @@ async function build(desktopParent: DesktopParent | null) {
     prefs,
     installs: pluginInstalls,
     documentReader,
-    prepareChange: (id, change) => id === 'studio3d' ? fastify.studio3d?.prepareChange(change) : undefined,
     onToggle: async (id, enabled) => {
       if (id === 'ssh' && !enabled) {
         await sshService.disable();
@@ -1227,11 +1228,6 @@ async function build(desktopParent: DesktopParent | null) {
     providerSettings: () => (prefs.read().providerSettings || {}) as Record<string, unknown>,
   });
   await fastify.register(codeModule, { config, prefs });
-  await fastify.register(studio3dModule, {
-    config,
-    documentReader,
-    projects: () => fastify.projects,
-  });
   await fastify.register<GitHubModuleOptions>(githubModule, {
     isProjectDeleted: isDeletedProject,
     withReferences: projectsService.withReferences,

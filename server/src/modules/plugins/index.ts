@@ -30,6 +30,7 @@ import type { PluginRuntimeServices } from '../../../../packages/plugin-types/sr
 import { readPluginRaster, PLUGIN_MEDIA_LIMITS } from '../../lib/pluginAssets.ts';
 import { changeError, writeUserPluginChange } from './changes.ts';
 import type { PluginTransition } from './changes.ts';
+import { collectPluginNotifications } from './notifications.ts';
 
 export type { PluginTransition } from './changes.ts';
 
@@ -108,14 +109,14 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     && !recovery?.blockedIds.includes(manifest.id));
   const runtime = new UserPluginRuntime({
     parent: fastify,
-    options: async (manifest) => ({
+    options: async (manifest, notificationGeneration) => ({
       config,
       prefs,
       plugin: manifest,
       prefix: `/api/ext/${manifest.id}`,
       dataDir: manifest.hasServer && dataRoot ? await preparePluginDataDir(dataRoot, manifest.id) : undefined,
       core: createPluginCore(fastify, manifest.id, opts.documentReader,
-        opts.runtimeServices),
+        opts.runtimeServices, notificationGeneration),
     }),
   });
   const gates = runtime.gates;
@@ -262,6 +263,27 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     }
   }
 
+  fastify.get('/api/plugins/notifications', async (request) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+
+    request.raw.once('aborted', abort);
+
+    try {
+      const sources = runtime.notificationSources().filter(({ pluginId }) => {
+        const manifest = byId.get(pluginId);
+
+        return manifest && !manifest.system && isEnabled(prefs.read(), manifest)
+          && manifest.compatibility?.status !== 'incompatible' && !manifest.serverError
+          && !!manifest.contributes?.panels?.length;
+      });
+
+      return { plugins: await collectPluginNotifications(sources, controller.signal) };
+    } finally {
+      request.raw.removeListener('aborted', abort);
+    }
+  });
+
   fastify.get('/api/plugins', async () => {
     if (opts.installs?.health()) {
       // Commit остаётся достоверным при отказе scanner: следующее чтение повторяет refresh.
@@ -296,11 +318,15 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         contributes: m.contributes ?? {},
         entrypoints: { web: m.entrypoints?.web ? {
           entry: m.entrypoints.web.entry,
+          ...(m.entrypoints.web.background === undefined ? {} : {
+            background: m.entrypoints.web.background,
+          }),
           css: m.entrypoints.web.css,
           locales: m.entrypoints.web.locales,
         } : null },
         serverError: m.serverError ?? null,
         needsRestart: needsRestart(m),
+        runtimeGeneration: runtime.generationOf(m.id),
         install: m.system ? null : await describeInstall(m.id),
       }))),
     };

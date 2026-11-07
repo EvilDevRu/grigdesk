@@ -38,7 +38,6 @@ const keys = [
     'interface.usageForecast',
     'tools.code',
     'tools.docker',
-    'tools.studio3d',
     'tools.showcase',
 
     'system.startup',
@@ -77,7 +76,6 @@ before(async () => {
     for (const relative of [
         '../../views/code/CodePanel.vue',
         '../../views/shelf/TaskShelfPanel.vue',
-        '../../views/studio3d/Studio3dPanel.vue',
         '../../views/terminal/TerminalPanel.vue',
         '../../views/ssh/SshPanel.vue',
         '../../views/db/DbPanel.vue',
@@ -136,7 +134,6 @@ async function checkLifecycle(t, entry, id) {
 
         const names = {
             shelf: 'TaskShelfLoading',
-            studio3d: 'Studio3dLoading',
             terminal: 'TerminalLoading',
             ssh: 'SshPanelLoading',
             db: 'DbPanelLoading',
@@ -156,8 +153,8 @@ async function checkLifecycle(t, entry, id) {
             );
         }
 
-        if (id === 'studio3d' || id === 'docker') {
-            assert.equal(layout.props('area'), id === 'studio3d' ? 'create' : 'panel');
+        if (id === 'docker') {
+            assert.equal(layout.props('area'), 'panel');
         }
 
 
@@ -186,7 +183,6 @@ async function checkLifecycle(t, entry, id) {
 
 for (const id of [
     'shelf',
-    'studio3d',
     'terminal',
     'ssh',
     'db',

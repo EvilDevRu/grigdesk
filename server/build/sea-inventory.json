@@ -1469,15 +1469,6 @@
       "detail": "Ленивый литеральный import включается esbuild в CJS-бандл."
     },
     {
-      "file": "server/src/modules/studio3d/files.ts",
-      "construct": "dynamic-import",
-      "target": "node:fs",
-      "count": 1,
-      "owner": "task-14",
-      "fate": "server-bundle",
-      "detail": "Встроенный модуль node:fs разрешается Node и не требует файлового loader-а."
-    },
-    {
       "file": "server/src/modules/terminal/index.ts",
       "construct": "import-meta",
       "target": "url",
@@ -1941,14 +1932,6 @@
       "owner": "task-9",
       "fate": "helper",
       "detail": "Worker приёма медиа."
-    },
-    {
-      "path": "server/src/lib/studio3d/analysisWorker.ts",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "helper",
-      "detail": "Worker анализа 3D."
     },
     {
       "path": "server/src/lib/db/engines/",

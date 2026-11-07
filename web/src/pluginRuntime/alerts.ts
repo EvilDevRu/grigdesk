@@ -1,5 +1,6 @@
 import { alertUser, dismissAlert, dismissAlertScope } from '../shared/alerts.ts';
 import type { PluginAlertInput } from '../../../packages/plugin-types/src/web.js';
+import { decodePluginPanelParams } from '../../../shared/plugins/pluginPanelParams.ts';
 
 export type { PluginAlertInput } from '../../../packages/plugin-types/src/web.js';
 
@@ -10,8 +11,9 @@ export type { PluginAlertInput } from '../../../packages/plugin-types/src/web.js
 export function createPluginAlerts(pluginId: string, options: {
   signal: AbortSignal;
   isAlive: () => boolean;
+  kind?: 'plugin' | 'plugin-background';
 }) {
-  const scope = `plugin:${encodeURIComponent(pluginId)}`;
+  const scope = `${options.kind ?? 'plugin'}:${encodeURIComponent(pluginId)}`;
   const alive = () => !options.signal.aborted && options.isAlive();
   const validId = (id: string) => typeof id === 'string' && !!id.trim();
   const fullId = (id: string) => `${scope}:${encodeURIComponent(id)}`;
@@ -25,6 +27,24 @@ export function createPluginAlerts(pluginId: string, options: {
         return false;
       }
 
+      const params = decodePluginPanelParams(input.params ?? {});
+
+      if (!params) {
+        return false;
+      }
+
+      if (input.actions !== undefined && (!Array.isArray(input.actions)
+        || input.actions.some((action) => !action || !validId(action.id)
+          || typeof action.run !== 'function'))) {
+        return false;
+      }
+
+      const actions = input.actions?.map(({ id, label, run }) => ({
+        id,
+        label,
+        run: () => alive() ? run() : undefined,
+      }));
+
       return alertUser({
         id: fullId(input.id),
         scope,
@@ -33,7 +53,14 @@ export function createPluginAlerts(pluginId: string, options: {
         detail: input.detail,
         tone: input.tone,
         sticky: input.sticky,
-        ...(input.openPanel === false ? {} : { target: { kind: 'plugin' as const, pluginId } }),
+        actions,
+        ...(input.openPanel === false ? {} : {
+          target: {
+            kind: 'plugin' as const,
+            pluginId,
+            params,
+          },
+        }),
       });
     },
     dismiss: (id: string): void => {

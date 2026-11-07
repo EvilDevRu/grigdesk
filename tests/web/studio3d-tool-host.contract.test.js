@@ -1,57 +1,46 @@
-import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { checkUiBoundary } from '../../web/scripts/check-ui-boundary.mjs';
 
-test('перенесённая панель 3D соблюдает общую границу UiPressable', () => {
-  const { errors } = checkUiBoundary();
-
-  assert.deepEqual(errors.filter((error) => error.includes('studio3d/Studio3dPanel.vue')), []);
-});
+import { compileModule, webFile } from './helpers/compile-vue.js';
 
 /**
- * Контракт читает только исходники панели, без живого состояния приложения.
- * Отсутствующий файл даёт понятную причину отказа конкретного требования.
+ * Встроенный паспорт не регистрирует продукт внешнего пакета даже при старых prefs.
+ * Настоящие mounted consumers и пакет проверяются отдельным full ToolHost integration.
  */
-async function source(relative, contract) {
-  try {
-    return await readFile(migrationUrl(relative.slice(4)), 'utf8');
-  } catch (error) {
-    assert.fail(`${contract}: ${error.message}`);
-  }
-}
+test('studio3d отсутствует во встроенном каталоге инструментов', async () => {
+  const { TOOL_CATALOG } = await compileModule(webFile('src/shared/tools/catalog.ts'));
 
-test('«3D» зарегистрированы одной встроенной панелью ToolHost', async () => {
-  const [catalog, registry, shell, view] = await Promise.all([
-    source('web/src/shared/tools/catalog.ts', '3D отсутствует в паспорте инструментов'),
-    source('web/src/shared/tools/registry.ts', '3D отсутствует в реестре ToolHost'),
-    source('web/src/shared/layout/AppShell.vue', 'единый AppShell недоступен'),
-    source('web/src/views/Studio3dView.vue', 'route-adapter 3D ещё не реализован'),
-  ]);
-  const registrations = [...catalog.matchAll(/id:\s*['"]studio3d['"]/g)].length;
-  const hosts = [...shell.matchAll(/<ToolHost\b/g)].length + [...view.matchAll(/<ToolHost\b/g)].length;
-
-  assert.deepEqual({
-    registrations,
-    hosts,
-    routeAdapter: /data-tool-route=["']studio3d["']/.test(view),
-    panel: /views\/studio3d\/Studio3dPanel\.vue/.test(registry),
-  }, {
-    registrations: 1,
-    hosts: 1,
-    routeAdapter: true,
-    panel: true,
-  });
+  assert.equal(TOOL_CATALOG.some((item) => item.id === 'studio3d'), false);
 });
 
-test('маршрут 3D делегирует единственному ToolHost', async () => {
-  const router = await source('web/src/router.ts', 'маршрут 3D ещё не реализован');
+test('общий ToolHost остаётся единственным render-site внешних панелей', async () => {
+  const [registry, shell, view, loading] = await Promise.all([
+    readFile(webFile('src/shared/tools/registry.ts'), 'utf8'),
+    readFile(webFile('src/shared/layout/AppShell.vue'), 'utf8'),
+    readFile(webFile('src/views/PluginView.vue'), 'utf8'),
+    readFile(webFile('src/shared/tools/panelLoading.ts'), 'utf8'),
+  ]);
 
-  const route = /path:\s*['"]\/3d['"][\s\S]*?component:\s*/;
-  const panel = /\(\)\s*=>\s*import\(['"]\.\/views\/Studio3dView\.vue['"]\)/;
-  const tool = /[\s\S]*?tool:\s*['"]studio3d['"]/;
+  assert.equal([...shell.matchAll(/<ToolHost\b/g)].length, 1);
+  assert.equal([...view.matchAll(/<ToolHost\b/g)].length, 0);
+  assert.match(registry, /views\/ext\/PluginModulePanel\.vue/);
+  assert.doesNotMatch(registry, /views\/studio3d\/|\bstudio3d\s*:/);
+  assert.doesNotMatch(loading, /Studio3dLoading|\bstudio3d\s*:/);
+  assert.doesNotMatch(shell, /useStudio3dStore|studio3d\.start|studio3d\.stop/);
+  assert.match(shell, /arbiterConversations\.start/);
+  assert.match(shell, /arbiterConversations\.stop/);
+});
 
-  assert.equal(new RegExp(route.source + panel.source + tool.source).test(router), true);
+test('продуктовые UI файлы отсутствуют, прежний URL имеет только redirect', async () => {
+  for (const relative of ['src/views/Studio3dView.vue', 'src/views/studio3d',
+    'src/stores/studio3d.ts', 'src/features/studio3d', 'src/shared/viewer3d']) {
+    await assert.rejects(access(webFile(relative)), { code: 'ENOENT' });
+  }
 
+  const router = await readFile(webFile('src/router.ts'), 'utf8');
+
+  assert.doesNotMatch(router, /Studio3dView\.vue/);
+  assert.match(router, /path:\s*['"]\/3d['"][\s\S]*?redirect:/);
+  assert.match(router, /path:\s*['"]\/ext\/studio3d['"]/);
 });

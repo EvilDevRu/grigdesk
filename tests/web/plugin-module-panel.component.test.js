@@ -44,12 +44,13 @@ async function panelFixture(t, options = {}) {
 
   };
   const child = {
-    props: ['context', 'active', 'compact', 'presentation'],
+    props: ['context', 'active', 'compact', 'presentation', 'intents'],
+    emits: ['consume-intent'],
     /**
      * Локальный ввод и счётчик mount различают скрытие панели и пересоздание компонента.
      * Событие регистрируется в Vue scope, чтобы проверять настоящий путь снятия подписки.
      */
-    setup(props) {
+    setup(props, { emit }) {
       const text = vue.ref('');
 
       state.mounts = (state.mounts || 0) + 1;
@@ -67,6 +68,11 @@ async function panelFixture(t, options = {}) {
         vue.h(ui.UiButton, {}, () => props.context.t('greeting')),
         vue.h('output', {}, JSON.stringify(props.context.settings.value)),
         vue.h('span', {}, `${props.active}/${props.compact}/${props.presentation}`),
+        vue.h('output', { 'data-intents': '' }, JSON.stringify(props.intents ?? [])),
+        vue.h('button', {
+          'data-consume': '',
+          onClick: () => emit('consume-intent', props.intents?.[0]?.id),
+        }, 'Принять'),
       ]);
     },
   };
@@ -239,12 +245,13 @@ async function panelFixture(t, options = {}) {
     label: 'Модуль проверки'
 
   });
+  const visible = vue.ref(true);
   const root = utils.mount({
     setup: () => () => vue.h('main', {}, [
       vue.h(ui.UiButton, { class: 'healthy', onClick: () => {
          clicks += 1;
       } }, () => 'Сосед'),
-      vue.h(panel, panelProps),
+      visible.value ? vue.h(panel, panelProps) : null,
     ]),
   }, { attachTo: document.body });
   const wrapper = root.findComponent(panel);
@@ -272,6 +279,17 @@ async function panelFixture(t, options = {}) {
 
     updateProps: async (patch) => {
        Object.assign(panelProps, patch);
+      await settle();
+    },
+
+    /**
+     * Повторный mount возвращает тот же подтверждённый набор props.
+     * Очередь принятых команд не создаётся заново самим wrapper.
+     */
+    remount: async () => {
+      visible.value = false;
+      await settle();
+      visible.value = true;
       await settle();
     },
 
@@ -308,6 +326,35 @@ test('PM-PANEL: default получает context/props, язык и values со�
   assert.equal(f.state.calls.length, 1);
   await f.root.get('.healthy').trigger('click');
   assert.equal(f.clicks(), 1);
+});
+
+test('PM-PANEL-INTENTS: wrapper доставляет params и consume удаляет принятую очередь', async (t) => {
+  const f = await panelFixture(t);
+  const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
+  const { useDockStore } = await compileModule(webFile('src/stores/dock.ts'));
+  const dock = useDockStore(createPinia());
+
+  dock.nextIntentId = 42;
+
+  const intent = dock.enqueue('ui-module', {
+    type: 'open',
+    params: { model: 'модель 1', version: 'версия β' },
+  });
+
+  await f.updateProps({
+    intents: dock.intents['ui-module'],
+    'onConsume-intent': (id) => dock.consume('ui-module', id),
+  });
+  await f.settle();
+  assert.deepEqual(JSON.parse(f.wrapper.find('[data-intents]').text()), [intent]);
+  await f.wrapper.find('[data-consume]').trigger('click');
+  assert.deepEqual(f.wrapper.emitted('consume-intent'), [[42]]);
+  assert.equal(dock.intents['ui-module'], undefined);
+  await f.settle();
+  assert.deepEqual(JSON.parse(f.wrapper.find('[data-intents]').text()), []);
+  await f.remount();
+  assert.deepEqual(JSON.parse(f.root.find('[data-intents]').text()), []);
+  assert.equal(dock.intents['ui-module'], undefined);
 });
 
 for (const variant of ['unsupported', 'import', 'empty-default', 'css', 'json', 'setup', 'render']) {

@@ -244,7 +244,6 @@ const surfaceGeometry = [
     ['pipeline-deferred', 'row', '[data-role="pipeline-deferred-findings"] li', ['x', 'width']],
     ['docker-containers', 'row', '.docker-row', ['x', 'width', 'height']],
     ['docker-usage', 'table', '.docker-usage', ['x', 'width']],
-    ['studio3d-library', 'tile', '[data-context="studio-model-card"]', ['x', 'width', 'height']],
 ];
 
 for (const [id, region, readySelector, dimensions] of surfaceGeometry) {

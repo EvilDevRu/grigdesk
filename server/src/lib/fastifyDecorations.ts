@@ -19,7 +19,6 @@ import type {} from '@fastify/websocket';
 import type { ProviderUsagePatch } from './providerUsage.ts';
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
-import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
 import type { PluginDocsEntry } from './pluginDocs.ts';
 import type { ConversationAck } from './arbiterConversationService.ts';
 
@@ -74,7 +73,6 @@ declare module 'fastify' {
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
     projects?: ProjectsService;
-    studio3d?: StudioRuntime;
     // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.
     shutdown?: ShutdownCoordinator;
   }

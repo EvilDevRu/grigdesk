@@ -70,7 +70,6 @@ const loaders = {
     'pipeline-deferred': () => import('../../../../web/src/views/pipeline/DeferredFindings.vue'),
     'docker-containers': () => import('../../../../web/src/views/docker/DockerContainers.vue'),
     'docker-usage': () => import('../../../../web/src/views/docker/DockerPanel.vue'),
-    'studio3d-library': () => import('../../../../web/src/views/studio3d/LibraryPanel.vue'),
 };
 const Surface = spec ? (await loaders[spec.id]()).default : null;
 const Gallery = mode === 'gallery'

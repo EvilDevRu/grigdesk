@@ -15,7 +15,6 @@ export const SYSTEM_PLUGIN_PAGES: Record<string, string> = {
   'usage-forecast': 'interface.usageForecast',
   code: 'tools.code',
   docker: 'tools.docker',
-  studio3d: 'tools.studio3d',
   showcase: 'tools.showcase',
 };
 

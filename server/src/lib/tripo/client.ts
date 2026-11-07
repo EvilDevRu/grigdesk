@@ -21,7 +21,7 @@ import type {
 } from '../studio3d/provider.ts';
 
 export const UPLOAD_MAX_BYTES = 150 * 1024 * 1024;
-const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const MODEL_EXTENSIONS = new Set(['.glb', '.fbx', '.obj', '.stl']);
 const JSON_MAX_BYTES = 4 * 1024 * 1024;

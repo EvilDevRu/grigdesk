@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { makeGlb } from '../../helpers/studio3dGlb.js';
 import { environment, tracked, within } from './common.mts';
 
 const execute = promisify(execFile);
@@ -13,46 +11,6 @@ const root = process.argv[2]!;
 const node = path.join(root, 'runtime/node/bin/node');
 const helper = (id: string) => path.join(root, 'server/runtime/helpers', `${id}.mjs`);
 const env = environment();
-
-await mkdir('/D/helper-work', { recursive: true });
-await writeFile('/D/helper-work/source.glb', makeGlb({ triangles: 2, size: [1, 2, 1] }));
-
-const source = await open('/D/helper-work/source.glb', 'r');
-const directory = await open('/D/helper-work', 'r');
-const analysis = spawn(node, [helper('studio3d-analysis-worker'), JSON.stringify({
-  operation: 'rewrite',
-  sourcePath: '/D/helper-work/source.glb',
-  outputDirectory: '/D/helper-work',
-  outputName: 'result.glb',
-  wrap: { scale: 2 },
-})], {
-  cwd: '/D',
-  env,
-  stdio: ['ignore', 'pipe', 'pipe', source.fd, directory.fd],
-});
-let output = '';
-let errors = '';
-
-analysis.stdout!.on('data', (chunk: Buffer) => {
-  output += chunk.toString();
-});
-analysis.stderr!.on('data', (chunk: Buffer) => {
-  errors += chunk.toString();
-});
-
-try {
-  assert.equal((await within(once(analysis, 'close'), 20000))[0], 0, errors);
-  assert.equal(JSON.parse(output).ok, true, output);
-  assert.deepEqual(JSON.parse(output).stats.size, [2, 4, 2]);
-  assert.equal((await readFile('/D/helper-work/result.glb')).readUInt32LE(0), 0x46546c67);
-} finally {
-  if (analysis.exitCode === null && analysis.signalCode === null) {
-    analysis.kill('SIGKILL');
-  }
-
-  await source.close();
-  await directory.close();
-}
 
 const peer = tracked(node, ['-e', 'setInterval(() => {}, 1000)'], env);
 const supervisor = tracked(node, [helper('plugin-command-supervisor')], env, true);
@@ -146,7 +104,6 @@ const version = await execute(path.join(root, 'bin/grigdesk-ctl'), ['--version']
 assert.match(help.stdout, /grigdesk-ctl/);
 assert.match(version.stdout, /GrigDesk \d/);
 console.log(JSON.stringify({
-  glb: true,
   supervisor: true,
   peerAlive: true,
   engine: true,

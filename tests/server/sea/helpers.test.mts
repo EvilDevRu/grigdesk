@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { fork, spawn } from 'node:child_process';
+import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { makeGlb } from '../helpers/studio3dGlb.js';
 import { helperFixture, runFile } from './helperFixture.mts';
 
 test('SEA-HELPERS-01: перенесённый helper читает ресурс и запускает соседний helper', async (t) => {
@@ -43,44 +42,6 @@ test('SEA-HELPERS-01: перенесённый helper читает ресурс 
     stdout: '',
     stderr: '',
   });
-});
-
-test('SEA-HELPERS-02: собранный 3D worker читает fd и публикует настоящий GLB', async (t) => {
-  const fixture = await helperFixture(t, ['studio3d-analysis-worker']);
-  const input = path.join(fixture.temporary, 'input.glb');
-
-  await writeFile(input, makeGlb({ triangles: 2, size: [1, 2, 1] }));
-
-  const source = await open(input, 'r');
-  const directory = await open(fixture.temporary, 'r');
-
-  t.after(() => source.close());
-  t.after(() => directory.close());
-
-  const child = spawn(fixture.node, [fixture.entry('studio3d-analysis-worker'), JSON.stringify({
-    operation: 'rewrite',
-    sourcePath: input,
-    outputDirectory: fixture.temporary,
-    outputName: 'result.glb',
-    wrap: { scale: 2 },
-  })], {
-    cwd: '/',
-    env: { PATH: '/nonexistent' },
-    stdio: ['ignore', 'pipe', 'pipe', source.fd, directory.fd],
-  });
-  let output = '';
-
-  child.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString();
-  });
-
-  const [code] = await once(child, 'close');
-  const result = JSON.parse(output);
-
-  assert.equal(code, 0);
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.stats.size, [2, 4, 2]);
-  assert.equal((await readFile(path.join(fixture.temporary, 'result.glb'))).readUInt32LE(0), 0x46546c67);
 });
 
 test('SEA-HELPERS-03: собранный supervisor запускает leader самого helper-а', {

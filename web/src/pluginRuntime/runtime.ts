@@ -45,6 +45,7 @@ export interface PluginRuntimeOptions {
   access?: Readonly<Ref<PluginRuntimeAccess>>;
   loadPluginModule?: typeof loadPluginModule;
   createPluginContext?: typeof createPluginContext;
+  backgroundReady?: (pluginId: string) => Promise<void>;
 }
 
 /**
@@ -156,15 +157,33 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
 
         controller.signal.throwIfAborted();
 
+        const owner = options.access?.value.owner;
+        const generation = options.plugins.byId(pluginId)?.runtimeGeneration;
         const services = createPluginContextServices(base, {
           ...options,
           signal: controller.signal,
           panelActive: entry.panelActive,
           backgroundActive: entry.backgroundActive,
           isAlive,
+          ...(typeof owner === 'string' && typeof generation === 'string' && generation.length > 0 ? {
+            notificationIdentity: { owner, generation },
+          } : {}),
         });
 
         entry.clearPanel = services.clearPanel;
+
+        if (descriptor.background && options.backgroundReady) {
+          services.context.backgroundReady = async () => {
+            controller.signal.throwIfAborted();
+
+            if (!isAlive()) {
+              throw new PluginModuleError('load-failed');
+            }
+
+            await options.backgroundReady!(pluginId);
+            controller.signal.throwIfAborted();
+          };
+        }
 
         return {
           component: loaded.component,

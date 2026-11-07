@@ -37,7 +37,7 @@
 проверка фиксирует согласованную пару ключа и региона до первого ожидания.
 
 Адаптер не имеет `run`, LLM-каталога, MCP или установки. Его capability `studio3d`
-объявляет действия, расчёт и заказы для отдельного [раздела 3D](../plugins/studio3d-providers.md),
+объявляет действия, расчёт и заказы для внешнего плагина через [SPI Tripo](../plugins/tripo-module-boundaries.md),
 сохраняя прежний чатовый допуск.
 `server/src/lib/tripo/account.ts` выполняет только `GET /v3/account/balance`
 с Bearer-авторизацией, без редиректов. Без ключа возвращает `auth_required` без сети.
@@ -118,5 +118,5 @@ credentials и `providers-model-ref.test.js` в окне. Новый web со с
 Capability `studio3d` описывает операции, поля/наборы, нормализацию, quote, account snapshot,
 submit/poll/history и происхождение файлов/native. Реестр раздела использует только
 адаптеры с `type: '3d'` и этой capability, затем добавляет «Локально». Общие Vue формы
-не ветвятся по вендору. [Контракт раздела](../guide/studio3d.md) и
-[Tripo API v3](../plugins/tripo-api.md) описывают оплату и восстановление отдельно от чата.
+не ветвятся по вендору. Продуктовый контракт поставляется в `docs/README.md` плагина;
+[Tripo API v3](../plugins/tripo-api.md) описывает протокол и цены адаптера отдельно от чата.

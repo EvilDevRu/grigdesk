@@ -35,6 +35,9 @@ const contextApi: ContextApi = {
   put: (path, body) => api.put(apiPath(path), body),
   patch: (path, body) => api.patch(apiPath(path), body),
   del: (path, body) => api.del(apiPath(path), body),
+  upload: (path, body, options) => api.upload(apiPath(path), body, options),
+  getBlob: (path) => api.getBlob(apiPath(path)),
+  postBytes: (path, body, options) => api.postBytes(apiPath(path), body, options),
 };
 
 /**

@@ -53,8 +53,18 @@
     data-perf-surface="route"
     :data-perf-target="String(route.name || 'other')"
     :data-perf-key="route.fullPath"
-    :aria-busy="routeState === 'pending' || undefined" class="tool-placeholder" role="status">
-    <span v-if="routeState === 'pending'">{{ t('core.checkingToolAvailability') }}</span>
+    :aria-busy="routeState === 'pending' || externalState?.status === 'loading' || undefined"
+    :data-plugin-route-state="externalState?.status"
+    class="tool-placeholder" role="status">
+    <template v-if="externalState">
+      <p>{{ externalMessage }}</p>
+      <p v-if="externalState.reason">{{ externalState.reason }}</p>
+      <UiButton v-if="externalState.status !== 'loading'" data-plugin-route-action
+                @click="externalAction">
+        {{ externalActionLabel }}
+      </UiButton>
+    </template>
+    <span v-else-if="routeState === 'pending'">{{ t('core.checkingToolAvailability') }}</span>
     <span v-else>
       {{ t('core.plugin') }}{{ routeItem?.label || t('core.tool') }}{{ t('core.isDisabledEnableItInSettingsPlugins') }}
     </span>
@@ -86,14 +96,17 @@ import { usePluginsStore } from '../../stores/plugins.ts';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.ts';
 import { navIconPath } from '../navIcons.ts';
-import { toolsOf, toolById, toolAvailability } from '../tools/registry.ts';
+import { toolsOf, pluginTools, toolById, toolAvailability } from '../tools/registry.ts';
 import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
 import { useHotkeysStore } from '../../stores/hotkeys.ts';
 import ToolDock from './ToolDock.vue';
 import NavigationCount from './NavigationCount.vue';
 import { shelfNavBadge } from '../navBadges.ts';
-import { UiIconButton, UiInlineMessage, useUiLayer, vTooltip } from '../../ui';
+import { UiButton, UiIconButton, UiInlineMessage, useUiLayer, vTooltip } from '../../ui';
+import { pluginRuntimeAccessFor, refreshPluginCatalogFor } from '../../pluginRuntime/bootstrap.ts';
+import { resolvePluginRouteState } from '../tools/pluginRouteState.ts';
+import { openSettings } from '../settingsNavigation.ts';
 
 const route = useRoute();
 const router = useRouter();
@@ -104,6 +117,7 @@ const shelf = useTaskShelfStore();
 const hotkeys = useHotkeysStore();
 const toolContext = useUiContextSource('tool', { layer: 'dock', active: false });
 const { dockCapable } = useDockViewport();
+const access = pluginRuntimeAccessFor();
 
 // Встроенные панели плюс страницы включённых плагинов: состав меняется тумблером
 // плагина, поэтому реестр читается как computed, а не один раз при загрузке.
@@ -117,30 +131,83 @@ const routeTool = computed(() => {
 
   return typeof route.meta?.tool === 'string' ? route.meta.tool || null : null;
 });
-const routeItem = computed(() => toolById(plugins, routeTool.value));
+const externalRoute = computed(() => route.meta?.tool === 'ext');
+const externalState = computed(() => externalRoute.value ? resolvePluginRouteState(routeTool.value ?? '', {
+  list: plugins.list,
+  loaded: plugins.loaded,
+  loadError: plugins.loadError,
+  accepted: access?.value.status === 'ready',
+}) : null);
+const routeItem = computed(() => externalRoute.value
+  ? pluginTools(plugins).find((item) => item.id === routeTool.value) ?? null
+  : toolById(plugins, routeTool.value));
 const routeState = computed(() => (routeItem.value
   ? toolAvailability(routeItem.value, plugins)
   : null));
 const presentedTool = computed(() => {
+  if (externalRoute.value) {
+    return externalState.value?.status === 'ready' ? routeItem.value?.id ?? null : null;
+  }
+
   if (routeItem.value) {
     return routeState.value === 'enabled' && !dock.windowOwners[routeItem.value.id]
       ? routeItem.value.id : null;
   }
 
   const item = toolById(plugins, dock.activeTool);
+  const external = item?.route.startsWith('/ext/');
 
   return dockCapable.value && dock.isOpen && !dock.windowOwners[dock.activeTool || '']
+    && (!external || access?.value.status === 'ready')
     && toolAvailability(item, plugins) === 'enabled'
     ? item!.id
     : null;
 });
 const presentation = computed(() => {
+  if (externalRoute.value) {
+    return externalState.value?.status === 'ready' ? 'page' : 'placeholder';
+  }
+
   if (routeItem.value) {
     return routeState.value === 'enabled' ? 'page' : 'placeholder';
   }
 
   return presentedTool.value ? 'dock' : 'hidden';
 });
+
+const externalMessage = computed(() => {
+  const state = externalState.value;
+
+  if (!state) {
+    return '';
+  }
+
+  const params = { name: state.label };
+
+  switch (state.status) {
+    case 'loading': return t('core.pluginRouteLoading', params);
+    case 'load-error': return t('core.pluginRouteLoadError', params);
+    case 'missing': return t('core.pluginRouteMissing', params);
+    case 'incompatible': return t('core.pluginRouteIncompatible', params);
+    case 'disabled': return t('core.pluginRouteDisabled', params);
+    case 'no-panel': return t('core.pluginRouteNoPanel', params);
+    default: return '';
+  }
+});
+const externalActionLabel = computed(() => externalState.value?.status === 'load-error'
+  ? t('core.pluginRouteRetry') : t('core.pluginRouteOpenSettings'));
+
+/**
+ * Placeholder предлагает только явный повтор либо общую карточку плагина.
+ * Открытие отсутствующей панели не устанавливает и не включает её автоматически.
+ */
+function externalAction(): void {
+  if (externalState.value?.status === 'load-error') {
+    void refreshPluginCatalogFor();
+  } else if (routeTool.value) {
+    openSettings({ pageId: 'plugins.installed', entityId: routeTool.value });
+  }
+}
 
 const railItems = computed(() => tools.value.filter((item) => {
   if (toolAvailability(item, plugins) !== 'enabled') {
@@ -368,9 +435,10 @@ function onHotkey(event: KeyboardEvent) {
   }
 
   const id = hotkeys.toolByCombo[comboFromEvent(event)];
-  const item = id && railItems.value.some((entry) => entry.id === id) ? toolById(plugins, id) : null;
+  const item = id ? toolById(plugins, id) : null;
 
-  if (!item) {
+  if (!item || toolAvailability(item, plugins) !== 'enabled'
+    || item.route.startsWith('/ext/') && access?.value.status !== 'ready') {
     return;
   }
 
@@ -382,7 +450,7 @@ function onHotkey(event: KeyboardEvent) {
 function canDetach(id: string) {
   return toolById(plugins, id)?.detachable !== false
     && desktopWindowRole(navigator.userAgent) === 'main' && shell.capabilities.includes('windows')
-    && !['terminal', 'studio3d'].includes(id);
+    && id !== 'terminal';
 }
 
 function detach(id: string) {
@@ -507,6 +575,8 @@ watch(() => route.path, (path, previous) => {
   }
 });
 
+let previousPluginIds = new Set<string>();
+
 watch(() => [
   plugins.loaded,
   ...plugins.list.map((item) => `${item.id}:${item.enabled}:${item.nav?.group || ''}`),
@@ -515,29 +585,31 @@ watch(() => [
     return;
   }
 
-  for (const item of tools.value.filter((entry) => entry.plugin)) {
-    if (toolAvailability(item, plugins) === 'enabled') {
+  const currentPluginIds = new Set(pluginTools(plugins).map((item) => item.id));
+  const candidates = new Set([
+    ...previousPluginIds,
+    ...tools.value.filter((item) => item.plugin).map((item) => item.id),
+    ...Object.keys(dock.mounted),
+    ...Object.keys(dock.runtime),
+    ...(dock.activeTool ? [dock.activeTool] : []),
+  ]);
+
+  for (const id of candidates) {
+    const item = toolById(plugins, id);
+    const removed = previousPluginIds.has(id) && !currentPluginIds.has(id);
+
+    if (!removed && toolAvailability(item, plugins) === 'enabled') {
       continue;
     }
-    if (dock.activeTool === item.id) {
+    if (dock.activeTool === id) {
       dock.close();
     }
 
-    dock.resetRuntime(item.id);
-    delete contexts[item.id];
+    dock.resetRuntime(id);
+    delete contexts[id];
   }
 
-  const valid = railItems.value.some((item) => item.id === dock.activeTool);
-
-  if (!valid) {
-    const fallback = railItems.value[0]?.id || null;
-
-    dock.rememberTool(fallback);
-
-    if (!fallback) {
-      dock.close();
-    }
-  }
+  previousPluginIds = currentPluginIds;
 
   syncUiContext();
 }, { immediate: true });

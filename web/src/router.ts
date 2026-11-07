@@ -11,8 +11,11 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/3d',
     name: 'studio3d',
-    component: () => import('./views/Studio3dView.vue'),
-    meta: { title: '3D', tool: 'studio3d', layout: 'workspace' },
+    redirect: (to) => ({
+      path: '/ext/studio3d',
+      query: to.query,
+      hash: to.hash,
+    }),
   },
   {
     path: '/board',

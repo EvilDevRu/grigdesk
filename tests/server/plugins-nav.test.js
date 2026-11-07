@@ -32,9 +32,11 @@ test('системные инструменты имеют явные group/orde
       db: ['dock', 50],
       docker: ['dock', 60],
       showcase: ['tools', 50],
-      studio3d: ['dock', 30],
     },
   );
+
+  assert.equal(SYSTEM.some((plugin) => plugin.id === 'studio3d'), false,
+    'внешний Studio3D не резервируется встроенным каталогом');
 
   const inbox = SYSTEM.find((plugin) => plugin.id === 'inbox');
   const code = SYSTEM.find((plugin) => plugin.id === 'code');
@@ -104,7 +106,6 @@ test('каждый системный плагин объявляет род р�
       db: 'dev',
       docker: 'dev',
       showcase: 'knowledge',
-      studio3d: 'dev',
       'usage-forecast': 'dev',
     },
   );

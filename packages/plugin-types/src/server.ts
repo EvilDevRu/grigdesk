@@ -4,6 +4,9 @@ import type { PluginMetadata } from './manifest.ts';
 import type { PluginProvider } from './provider.ts';
 import type { PluginRuntimeServices } from './coreRuntime.ts';
 import type { ResolvedDocument } from '../../../shared/plugins/documents/documentsContracts.ts';
+import type { PluginNotification } from '../../../shared/plugins/pluginNotifications.ts';
+
+export type { PluginNotification } from '../../../shared/plugins/pluginNotifications.ts';
 
 export type * from './provider.ts';
 export type * from './coreRuntime.ts';
@@ -36,6 +39,7 @@ export interface PluginLifecycle {
   prepareReplace: null | ((signal: AbortSignal) => Promise<ReplacementLease>);
   onEnable?: () => unknown;
   onDisable?: () => unknown;
+  notifications?: (signal: AbortSignal) => Promise<PluginNotification[]>;
   prepareChange?: (change: PluginChange, signal: AbortSignal) =>
     PluginTransition | undefined | Promise<PluginTransition | undefined>;
 }
@@ -53,6 +57,7 @@ export interface PluginFileLockOptions {
 export interface PluginFileLock {
   assertHeld(): void;
   assertPathIdentity(): Promise<void>;
+  assertPathIdentityNow(): void;
   release(): Promise<void>;
 }
 

@@ -42,9 +42,6 @@ export async function mountSurface(t, spec) {
         '../../shared/apiClient.ts': apiPort,
         '../../stores/docker': 'export const useDockerStore = () => globalThis.__loadingSurface.store;',
         '../../stores/plugins.ts': `export const usePluginsStore = () => ({ byId: () => ({ values: {} }) });`,
-        '../../stores/studio3d.ts': (
-                'export const useStudio3dStore = () => globalThis.__loadingSurface.store;'
-            ),
         '../../../stores/plugins.ts': `export const usePluginsStore = () => ({
             loadSetup: () => globalThis.__loadingSurface.api('/fixture/setup'),
         });`,
@@ -54,12 +51,7 @@ export async function mountSurface(t, spec) {
     if (spec.id === 'docker-containers') {
         harness.store.isBusy = () => false;
     }
-    if (spec.id === 'studio3d-library') {
-        harness.store.search = () => {
-        };
-        harness.store.loadModels = () => {
-        };
-    }
+
 
     const component = await compileVue(webFile(spec.file), { stubs });
     const wrapper = mount(component, { props: spec.pending });

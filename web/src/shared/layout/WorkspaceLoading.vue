@@ -37,7 +37,7 @@ import GitHubLoading from '../../views/GitHubLoading.vue';
 import TelegramLoading from '../../views/TelegramLoading.vue';
 
 const props = defineProps<{ label: string; routeName: string }>();
-const toolIds = ['code', 'shelf', 'studio3d', 'terminal', 'ssh', 'db', 'docker'];
+const toolIds = ['code', 'shelf', 'terminal', 'ssh', 'db', 'docker'];
 
 /**
  * До подключения доступны только настройки устройства, без данных чатов.

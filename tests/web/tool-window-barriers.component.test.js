@@ -35,7 +35,7 @@ test('TW-B02: прежние режимы и исключённые инстру
     await t.test(mode, async (t) => {
       const f = await hostFixture(t, { mode, windows: false });
 
-      for(const id of ['code', 'terminal', 'studio3d']) {
+      for(const id of ['code', 'terminal', 'module-example']) {
         f.dock.open(id);
         await f.settle();
         assert.equal(detachButton(f.wrapper), undefined);
@@ -44,10 +44,10 @@ test('TW-B02: прежние режимы и исключённые инстру
     });
   }
 
-  await t.test('terminal и studio3d с windows', async (t) => {
+  await t.test('terminal и внешний модуль с windows', async (t) => {
     const f = await hostFixture(t);
 
-    for(const id of ['terminal', 'studio3d']) {
+    for(const id of ['terminal', 'module-example']) {
       f.dock.open(id);
       await f.settle();
       assert.equal(detachButton(f.wrapper), undefined);

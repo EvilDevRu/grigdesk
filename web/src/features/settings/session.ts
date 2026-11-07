@@ -1,7 +1,7 @@
 import {
   localeMessage, localeTranslator, resolveLocaleText, type LocaleSource,
 } from '../../../../shared/i18n/catalogs.ts';
-import { snapshotText, type UiText } from '../../../../shared/i18n/core.ts';
+import { localizedText, snapshotText, type UiText } from '../../../../shared/i18n/core.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { decodeResourceWriteResult, resourceWriteFailure } from './contracts.ts';
 import type {
@@ -107,6 +107,13 @@ function publicMessage(
 
 ): UiText {
   const t = localeTranslator(locale);
+
+  if (typeof message !== 'string' && 'localized' in message) {
+    return localizedText(
+      publicMessage(resource, message.localized.ru, intents, locale) as string,
+      publicMessage(resource, message.localized.en, intents, locale) as string,
+    );
+  }
 
   let result = typeof message === 'string' ? message : snapshotText({
     ...message,

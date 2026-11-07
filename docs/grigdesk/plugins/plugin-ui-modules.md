@@ -44,7 +44,7 @@ Default — заранее скомпилированный компонент �
 передаёт context, active, compact, presentation внутри текущего Vue app.
 Прежние поля контекста сохраняют свои значения:
 
-- api — get/post/put/patch/del общего apiClient, только пути `/api/…`, с общей
+- api — get/post/put/patch/del/upload/getBlob/postBytes общего apiClient, только пути `/api/…`, с общей
   сессией и обработкой 401; токенов и нового транспорта нет;
 - locale — readonly ref языка окна;
 - settings — глубоко readonly computed эффективных values текущей карточки;
@@ -67,6 +67,10 @@ RequestOptions.signal; массивы и значения, отличные от
 делят один экземпляр и context; последний release вызывает cleanup. Настройки, язык,
 скрытие и разворот не перезапускают hook. Каждая вкладка владеет своим runtime.
 Surface-окна отдельного фонового запуска не имеют.
+Optional entrypoints.web.background добавляет [самостоятельный boot lifecycle](plugin-background.md).
+Его start и UI named start различны: фон не требует acquire, UI остаётся по спросу.
+Панель ждёт общий сервис через optional context.backgroundReady, последний release
+панели background не закрывает.
 Выход, offline оболочки, смена владельца/профиля и выключение плагина отзывают signal,
 подписки и свои уведомления. Возвращение online создаёт новую эпоху со свежим каталогом.
 Cleanup кооперативный, вызывается один раз, включая поздний результат async start.
@@ -98,7 +102,7 @@ RU/EN на месте панели; onErrorCaptured возвращает false, 
 npx esbuild src/panel.js --bundle --format=esm --outfile=ui/panel.js --external:vue --external:@grigdesk/ui
 ```
 
-Default-компонент, пример и полный контракт автора — [plugins/README.md](../../../plugins/README.md).
+Default-компонент, пример и полный контракт автора — [author-contract.md](author-contract.md).
 CSS и ru/en JSON кладутся в ui отдельно. SFC предварительно компилируется сборкой
 автора с теми же external; runtime template compiler не предоставляется.
 Пакет `@grigdesk/plugin-types` собирается в отдельную папку для dev-проекта автора:

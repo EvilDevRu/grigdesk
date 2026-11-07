@@ -90,6 +90,7 @@ export interface PluginSetupStatus {
 // Публичные адреса модуля; файловые пути сервера в каталог не попадают.
 export interface PluginWebModule {
   entry: string;
+  background?: string;
   css: string[];
   locales: { ru?: string; en?: string };
 }
@@ -98,6 +99,7 @@ export interface PluginPanelDecl {
   title?: string;
   group?: 'rail' | 'tools' | 'dock';
   order?: number;
+  hotkey?: string;
 }
 
 export interface PluginSlotDecl extends PluginPlacementDecl {
@@ -129,6 +131,7 @@ export interface PluginListItem {
   nav: PluginNav | null;
   enabled: boolean;
   needsRestart?: boolean;
+  runtimeGeneration?: string | null;
   serverError?: string | null;
   // Установка из источника; у системных и положенных руками — null.
   install?: PluginInstallInfo | null;

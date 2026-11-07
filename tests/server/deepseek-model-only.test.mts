@@ -91,6 +91,10 @@ for (const mismatch of [null, 'provider', 'model', 'reasoningEffort', 'showcase-
     });
     const runtime = createPluginRuntimeServices({
       config: selected.config,
+      listProjects: async () => [],
+      environment: () => {
+        throw new Error('unused');
+      },
       project: async () => {
         throw new Error('unused');
       },

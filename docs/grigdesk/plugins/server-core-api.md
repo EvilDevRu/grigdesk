@@ -7,7 +7,7 @@
 `request.authKind === 'session'`. Это доверенный код процесса, не sandbox ОС.
 
 Реализация: `server/src/modules/plugins/{core,providerCapabilities,changes,lifecycle,index}.ts`.
-Примеры для автора — [plugins/README.md](../../../plugins/README.md).
+Примеры для автора — [author-contract.md](author-contract.md).
 
 ## Функции и исполнители
 
@@ -16,7 +16,7 @@
 | `getProviders(type)` | Асинхронно читает singleton реестра исполнителей. Только строгий тип `3d` и capability `studio3d`; остальные типы дают `[]`. |
 | `emit(event, data?)` | Посылает `plugin-event` в общий `/api/events`; id и envelope принадлежат ядру. |
 | `withPathLock(key, task)` | Прямая функция очереди ядра по ключу внутри процесса. |
-| `acquireKernelFileLock(options)` | Прямая функция kernel flock ядра; освобождение через `await lock.release()` в finally. |
+| `acquireKernelFileLock(options)` | Frozen фасад kernel flock; освобождение через `await lock.release()` в finally. |
 | `documents` | Только bound `roots`, `resolveAbsolute`, `read`, `readAsset` того же DocumentReader, который создало приложение. |
 | `parseByteRange(header, size)` | Штатный разбор одного Range: `{start,end}`, `'invalid'` или `null`. |
 
@@ -24,6 +24,11 @@
 методов добавления корней нет. Отсутствие reader или SSE в изолированном подключении
 выявляется явной ошибкой при вызове. Flock сохраняет штатные проверки identity и протокол
 владения; lock-файл не удаляют. Документы сохраняют проверки корней, ссылок и открытого fd.
+
+Замок выдаёт assertHeld, async assertPathIdentity, синхронный assertPathIdentityNow и release.
+Последняя проверка перед внешним эффектом сверяет fstat/lstat без await: обычный файл,
+одна ссылка, закреплённые dev/ino и живое владение. Подмена inode, symlink, hardlink и
+освобождение дают lostCode. Публичный ввод не принимает binary/errorFactory и не выдаёт fd.
 
 Фасад исполнителя содержит только публичные данные и методы Studio3dProvider. Не передаются
 поля адаптера, probe/auth/login и credentials. Публичные поля копируются и замораживаются,
@@ -42,6 +47,10 @@
 переводы строк в JSON не создают SSE-фрейм. У core нет нового raw broadcast API.
 Прежние root decorators остаются доступны доверенному коду: гарантия относится к core.emit.
 Выключение не гасит emit и не останавливает фон; это ответственность плагина.
+Исключение — `notification`: он проходит закрытый decoder и получает generation
+текущего ready/enabled entry. Отозванный сервер ничего не публикует. Getter читает UUID
+живьём, поэтому тот же core после off/on работает с новым поколением.
+Snapshot и оконный bridge описаны в [серверных оповещениях](plugin-notifications.md).
 Клиент использует один общий SSE на вкладку; новая подписка окна здесь не вводится.
 
 ## Допуск и подпись перезапуска

@@ -143,7 +143,9 @@ test('ToolHost слушает клавиши в capture, молчит во вр�
   assert.match(host, /document\.removeEventListener\('keydown', onHotkey, true\)/);
   assert.match(host, /if \(hotkeys\.recording \|\| event\.defaultPrevented/);
   assert.match(host, /hotkeys\.toolByCombo\[comboFromEvent\(event\)\]/);
-  assert.match(host, /railItems\.value\.some\(\(entry\) => entry\.id === id\)/);
+  assert.match(host, /const item = id \? toolById\(plugins, id\) : null/);
+  assert.match(host, /!item \|\| toolAvailability\(item, plugins\) !== 'enabled'/);
+  assert.match(host, /item\.route\.startsWith\('\/ext\/'\) && access\?\.value\.status !== 'ready'/);
   assert.match(host, /event\.preventDefault\(\);\s*\n\s*event\.stopPropagation\(\);/);
   assert.match(host, /v-tooltip\.left="railTitle\(item\)"/);
 });

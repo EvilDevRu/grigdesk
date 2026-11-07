@@ -84,8 +84,7 @@
   ],
   "fragments": [
     "web/src/stores/chat.ts",
-    "web/src/stores/notifyWatch.ts",
-    "web/src/stores/studio3d.ts"
+    "web/src/stores/notifyWatch.ts"
   ],
   "dynamicKeys": {},
   "technicalTokens": [
@@ -393,18 +392,28 @@
   "dynamicExpressions": {
     "web/src/stores/providers.ts": {
       "mode.labelKey": [
-        "core.agentModeAsk", "core.agentModeAuto", "core.agentModeReadOnly"
+        "core.agentModeAsk",
+        "core.agentModeAuto",
+        "core.agentModeReadOnly"
       ],
       "mode.hintKey": [
-        "core.agentModeAskHint", "core.agentModeAutoHint", "core.agentModeReadOnlyHint"
+        "core.agentModeAskHint",
+        "core.agentModeAutoHint",
+        "core.agentModeReadOnlyHint"
       ]
     },
     "web/src/features/settings/catalog.ts": {
       "labelKey": [
-        "settings.browserOpen", "settings.browserApplication", "settings.browserAgents", "settings.browserSearch"
+        "settings.browserOpen",
+        "settings.browserApplication",
+        "settings.browserAgents",
+        "settings.browserSearch"
       ],
       "hintKey": [
-        "settings.browserOpenHint", "settings.browserApplicationHint", "settings.browserAgentsHint", "settings.browserSearchHint"
+        "settings.browserOpenHint",
+        "settings.browserApplicationHint",
+        "settings.browserAgentsHint",
+        "settings.browserSearchHint"
       ],
       "GROUP_MESSAGES[group.id]!.label!": [
         "settings.*"
@@ -508,10 +517,10 @@
       ]
     },
     "web/src/shared/hotkeys/combo.ts": {
-      "reserved": [
-        "settings.reservedShortcut*"
-      ],
-      "digitPrefix": [
+      "issue": [
+        "settings.comboInvalidKey",
+        "settings.comboMetaReserved",
+        "settings.comboNeedsModifier",
         "settings.reservedShortcut*"
       ]
     },

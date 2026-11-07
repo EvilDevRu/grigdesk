@@ -10,6 +10,8 @@
       :active="active"
       :compact="compact"
       :presentation="presentation"
+      :intents="panelIntents"
+      @consume-intent="emit('consume-intent', $event)"
     />
     <PluginPanelLoading v-else-if="state === 'loading'" :label="message" />
     <UiInlineMessage v-else tone="warning">
@@ -30,6 +32,8 @@ import { loadPluginStyles } from '../../pluginRuntime/styles.ts';
 import type { PluginModuleContext } from '../../pluginRuntime/contextServices.ts';
 import type { PluginPresentation } from '../../../../packages/plugin-types/src/web.js';
 import type { PluginRuntime } from '../../pluginRuntime/runtime.ts';
+import { decodePluginPanelParams } from '../../../../shared/plugins/pluginPanelParams.ts';
+import type { PluginPanelIntent } from '../../../../packages/plugin-types/src/web.js';
 
 const props = withDefaults(defineProps<{
   pluginId: string;
@@ -38,7 +42,20 @@ const props = withDefaults(defineProps<{
   active?: boolean;
   compact?: boolean;
   presentation?: PluginPresentation;
+  intents?: readonly Record<string, unknown>[];
 }>(), { active: true });
+
+const emit = defineEmits<{ 'consume-intent': [id: number] }>();
+const panelIntents = computed<PluginPanelIntent[]>(() => (props.intents ?? []).flatMap((intent) => {
+  const params = decodePluginPanelParams(intent.params);
+
+  return Number.isSafeInteger(intent.id) && typeof intent.type === 'string' && params
+    ? [{
+      id: intent.id as number,
+      type: intent.type,
+      params,
+    }] : [];
+}));
 
 type PanelState = 'loading' | 'ready' | 'unsupported' | 'load-failed' | 'render-failed';
 

@@ -35,7 +35,6 @@ interface PluginsPagesPort {
 const PANELS: Record<string, Component> = {
   code: asyncView(() => import('../../views/code/CodePanel.vue'), panelLoading('code')),
   shelf: asyncView(() => import('../../views/shelf/TaskShelfPanel.vue'), panelLoading('shelf')),
-  studio3d: asyncView(() => import('../../views/studio3d/Studio3dPanel.vue'), panelLoading('studio3d')),
   terminal: asyncView(() => import('../../views/terminal/TerminalPanel.vue'), panelLoading('terminal')),
   ssh: asyncView(() => import('../../views/ssh/SshPanel.vue'), panelLoading('ssh')),
   db: asyncView(() => import('../../views/db/DbPanel.vue'), panelLoading('db')),

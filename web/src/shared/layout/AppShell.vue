@@ -513,7 +513,6 @@ import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.ts';
 import { navIconPath } from '../navIcons.ts';
 import { PLUGIN_CATEGORIES } from '../../../../shared/plugins/pluginsContracts.ts';
 import { localizePluginCategory } from '../../features/settings/metadataLocale.ts';
-import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
@@ -602,11 +601,10 @@ const installation = useProviderInstallStore();
 const runtimeProviders = computed(() => prov.providers.filter(isTopbarProvider));
 const plugins = usePluginsStore();
 
-const studio3d = useStudio3dStore();
-const studioAuth = useAuthStore();
+const shellAuth = useAuthStore();
 const arbiterConversations = useArbiterConversationsStore();
 
-watch(() => [studioAuth.authenticated, studioAuth.clientScope], ([authenticated, clientScope]) => {
+watch(() => [shellAuth.authenticated, shellAuth.clientScope], ([authenticated, clientScope]) => {
   if (authenticated && clientScope) {
     arbiterConversations.start(String(clientScope));
   } else {
@@ -614,18 +612,6 @@ watch(() => [studioAuth.authenticated, studioAuth.clientScope], ([authenticated,
   }
 }, { immediate: true });
 onUnmounted(() => arbiterConversations.stop());
-
-// Подписка живёт вместе с авторизованной оболочкой, включая переходы между страницами.
-// Disable и logout закрывают requests; повторный start не создаёт вторую SSE подписку.
-watch(() => [studioAuth.authenticated, studioAuth.clientScope, plugins.loaded, plugins.enabled('studio3d')],
-  ([authenticated, clientScope, loaded, enabled]) => {
-    if (authenticated && loaded && enabled) {
-      void studio3d.start(String(clientScope));
-    } else {
-      studio3d.stop();
-    }
-  }, { immediate: true });
-onUnmounted(() => studio3d.stop());
 
 const inboxStore = useInboxStore();
 

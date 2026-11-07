@@ -66,6 +66,10 @@ for (const transport of ['core', 'showcase-timeout']) {
       const receipts: unknown[] = [];
       const core = createPluginRuntimeServices({
         config: selected.config,
+        listProjects: async () => [],
+        environment: () => {
+          throw new Error('unused');
+        },
         project: async () => {
           throw new Error('unused');
         },
@@ -237,6 +241,10 @@ for (const mode of ['api', 'coding-plan'] as const) {
       }) as unknown as Record<string, any>;
       const core = createPluginRuntimeServices({
         config: selected.config,
+        listProjects: async () => [],
+        environment: () => {
+          throw new Error('unused');
+        },
         project: async () => {
           throw new Error('unused');
         },

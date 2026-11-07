@@ -4,7 +4,7 @@
 в `entrypoints.web`. Его прежние поля
 `pluginId`, `api`, readonly `locale`/`settings` и собственный переводчик `t` сохранены.
 `PluginModuleContext` в `web/src/pluginRuntime/contextServices.ts` добавляет сервисы
-одного отзываемого экземпляра. Пример пакета и рецепт сборки — в [документе автора](../../../plugins/README.md).
+одного отзываемого экземпляра. Пример пакета и рецепт сборки — в [документе автора](author-contract.md).
 
 ## Спрос панели и слота
 
@@ -41,11 +41,41 @@ Lifetime=background разрешён только во время start по п�
 
 ## Оповещения
 
+`context.providers.onChanged(listener)` получает только invalidation общего
+`providers-update`, без payload. Подписка активна при panelActive, снимается через
+disposer/signal/scope; setup-регистрация перепривязывается при новом prop context.
+Сведения об исполнителях плагин перечитывает через свой API.
+
+`context.openSettings({pageId, entityId?})` открывает общую форму настроек с источником
+button. Отозванный signal или неживой context возвращает false без requestOpen.
+
+API включает upload(FormData, {timeoutMs?, signal?}), getBlob(path) и
+postBytes(path, BodyInit, {headers?}) с контрактами общего транспорта. У multipart
+Content-Type/boundary выставляет браузер. У getBlob/postBytes signal не добавляется.
+Все три метода проверяют /api-путь и используют общий обработчик 401.
+
 ```ts
-context.alerts.show({ id, title, body?, detail?, tone?, sticky?, openPanel? }): boolean
+context.alerts.show({ id, title, body?, detail?, tone?, sticky?, openPanel?, actions? }): boolean
 context.alerts.dismiss(id): void
 context.alerts.clear(): void
 ```
+
+Необязательные params — query собственной панели: до 16 строковых полей,
+ключ до 64 и значение до 512 символов, без controls, массивов и prototype-ключей.
+Ядро не интерпретирует предметные поля. Системная ссылка сортирует и кодирует params;
+кнопка открытия передаёт `{type:'open',params}` в общую очередь dock.
+При openPanel=false цель полностью отсутствует. Невалидные params дают false.
+
+Необязательные actions содержат `{id, label, run}` для явного действия, например
+повтора неудачного чтения состояния фоном. Label имеет обычный тип UiText; run
+возвращает void или Promise<void>. Callback копируется при show и вызывается только
+пока signal и context действуют: сохранённая кнопка старой эпохи ничего не запускает.
+Битый массив действий отклоняется целиком до показа. Actions не задают scope или
+target; цель собственной панели по-прежнему определяется openPanel/params.
+
+Wrapper передаёт PluginPanelProps.intents с общими id/type/params; событие
+consume-intent(id) возвращается к dock.consume. Route query ждёт доступной панели,
+затем попадает в ту же очередь; только принятый query очищается через replace.
 
 Local id — непустая строка. Ядро строит scope `plugin:<encodedPluginId>` и id
 `<scope>:<encodedLocalId>`; передать чужой scope/target через фасад нельзя. Одинаковые

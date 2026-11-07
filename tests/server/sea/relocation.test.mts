@@ -23,6 +23,5 @@ test('SEA-RELOCATION-01: boot/MCP/плагин/helpers повторяются п
   assert.equal(agent.agentTurn, true);
   assert.equal(agent.mcp, true);
   assert.equal(agent.scope, true);
-  assert.equal(workers.glb, true);
   assert.equal(workers.engine, true);
 });

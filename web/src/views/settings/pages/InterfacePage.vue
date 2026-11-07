@@ -68,6 +68,9 @@
             <small v-if="row.availability === 'disabled'">
               {{ t('settings.pluginDisabledShortcutInactive') }}
             </small>
+            <small v-if="row.isDefault && row.shadowedBy" data-hotkey-shadowed>
+              {{ t('settings.hotkeyDefaultShadowed', { name: row.shadowedLabel || row.shadowedBy }) }}
+            </small>
           </div>
           <div class="settings-hotkey-actions">
             <UiButton
@@ -114,12 +117,8 @@ import { useSettingsStore } from '../../../stores/settings.ts';
 import { useDeviceStore, WAKE_LOCK_KEY } from '../../../stores/device.ts';
 import {
   useHotkeysStore,
-  validateHotkeyOverrides,
-  DEFAULT_HOTKEYS,
   HOTKEYS_KEY,
 } from '../../../stores/hotkeys.ts';
-import { usePluginsStore } from '../../../stores/plugins.ts';
-import { TOOL_CATALOG, toolAvailability } from '../../../shared/tools/catalog.ts';
 import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../../shared/hotkeys/combo.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import { uiLanguage, uiLanguageBusy, uiLanguageError, setUiLanguage } from '../../../shared/uiLocale.ts';
@@ -132,7 +131,6 @@ const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const device = useDeviceStore();
 const hotkeys = useHotkeysStore();
-const plugins = usePluginsStore();
 const error = ref<UiText>('');
 const fields = computed(() => getSettingsFields(uiLocale.value)
   .filter((field) => field.address.pageId === settings.pageId)
@@ -147,14 +145,9 @@ const overrides = computed(() => {
 
   return settings.getValue('hotkeys', 'overrides') as Record<string, string> | undefined ?? {};
 });
-const rows = computed(() => TOOL_CATALOG.map((tool) => ({
-  id: tool.id,
-  label: tool.label,
-  availability: toolAvailability(tool, plugins),
-  combo: Object.hasOwn(overrides.value, tool.id) ? overrides.value[tool.id] : DEFAULT_HOTKEYS[tool.id],
-})));
+const rows = computed(() => hotkeys.rowsFor(overrides.value));
 const mapIssue = computed(() => {
-  const result = validateHotkeyOverrides(overrides.value, uiLocale.value);
+  const result = hotkeys.validateOverrides(overrides.value, uiLocale.value);
 
   return result.ok ? '' : result.error;
 });

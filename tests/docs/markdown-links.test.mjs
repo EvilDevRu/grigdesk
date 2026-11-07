@@ -13,7 +13,6 @@ const ENTRIES = [
   'docs',
   'engine/README.md',
   'engine/CLAUDE.md',
-  'plugins/README.md',
   'tests/README.md',
 ];
 

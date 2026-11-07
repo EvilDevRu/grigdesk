@@ -187,7 +187,7 @@ test('TW-CTX01: main capture принимает только безопасны�
   assert.equal(capture().promptContext.details?.toolWindow, undefined);
 });
 
-test('TW-CTX02: локальные Терминал/3D не вытесняют контекст оконного Кода', async (t) => {
+test('TW-CTX02: локальные Терминал/module не вытесняют контекст оконного Кода', async (t) => {
   const host = await hostFixture(t);
   const f = await coordinatorFixture(t, { pinia: host.pinia });
   const warnings = [];
@@ -216,7 +216,7 @@ test('TW-CTX02: локальные Терминал/3D не вытесняют �
     }
   });
 
-  for(const id of ['terminal', 'studio3d']) {
+  for(const id of ['terminal', 'module-example']) {
     host.dock.open(id);
     await host.settle();
     host.contexts[id]({ id });
@@ -234,6 +234,6 @@ test('TW-CTX02: локальные Терминал/3D не вытесняют �
 
   assert.equal(warnings.some((warning) => warning.includes('duplicate_source')), false);
   await f.coordinator.closed({ id: 'code', instance });
-  assert.equal(f.context.capture({ path: '/chats' }).promptContext.details.tool.id, 'studio3d');
+  assert.equal(f.context.capture({ path: '/chats' }).promptContext.details.tool.id, 'module-example');
   assert.equal(f.context.capture({ path: '/chats' }).promptContext.details.toolWindow, undefined);
 });

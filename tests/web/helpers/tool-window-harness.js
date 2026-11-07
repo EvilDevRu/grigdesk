@@ -44,8 +44,8 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
   const unmounts = [];
   const imports = [];
   const contexts = {};
-  const ids = ['code', 'shelf', 'ssh', 'db', 'docker', 'terminal', 'studio3d', 'example', 'module-example'];
-  const names = ['Код', 'Полка', 'SSH', 'БД', 'Докер', 'Терминал', '3D', 'Пример', 'Модуль'];
+  const ids = ['code', 'shelf', 'ssh', 'db', 'docker', 'terminal', 'example', 'module-example'];
+  const names = ['Код', 'Полка', 'SSH', 'БД', 'Докер', 'Терминал', 'Пример', 'Модуль'];
   const tools = ids.map((id, index) => ({
 
     id,
@@ -100,7 +100,17 @@ vue.watch(() => props.active, (active) => {
       loaded: true,
       nav: [],
       installed: [],
-      list: [],
+      list: ['example', 'module-example'].map((id) => ({
+        id,
+        name: id,
+        enabled: true,
+        contributes: { panels: [{}] },
+        entrypoints: { web: {
+          entry: `/api/ext/${id}/module/panel.js`,
+          css: [],
+          locales: {},
+        } },
+      })),
       dockNav: [{ id: 'example' }, { id: 'module-example' }],
       enabled: () => true
 
@@ -118,6 +128,7 @@ vue.watch(() => props.active, (active) => {
     },
 
     mode,
+    access: vue.ref({ owner: 'fixture', status: 'ready' }),
 
   };
 
@@ -183,8 +194,13 @@ vue.watch(() => props.active, (active) => {
 
       '../tools/registry.ts': `
         export const toolsOf = () => globalThis.__toolWindowHarness.tools;
+        export const pluginTools = () => toolsOf().filter((item) => item.route.startsWith('/ext/'));
         export const toolById = (_, id) => toolsOf().find((item) => item.id === id);
         export const toolAvailability = (item) => item ? 'enabled' : null;
+      `,
+      '../../pluginRuntime/bootstrap.ts': `
+        export const pluginRuntimeAccessFor = () => globalThis.__toolWindowHarness.access;
+        export const refreshPluginCatalogFor = async () => {};
       `,
 
     },

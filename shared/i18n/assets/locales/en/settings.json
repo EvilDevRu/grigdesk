@@ -845,6 +845,7 @@
   "hotkeysInvalidMap": "Invalid keyboard shortcut map.",
   "hotkeysUnknownTool": "Unknown tool or shortcut.",
   "hotkeysDuplicate": "This shortcut already opens “{name}”.",
+  "hotkeyDefaultShadowed": "The default shortcut is already used: “{name}” takes priority.",
   "comboInvalidKey": "Choose a letter, number or function key for this shortcut.",
   "comboMetaReserved": "The operating system reserves the Win/Cmd key.",
   "comboNeedsModifier": "Use Ctrl or Alt to avoid triggering the shortcut while typing.",
@@ -1072,24 +1073,6 @@
         }
       },
       "navigation": "Presentations"
-    },
-    "studio3d": {
-      "name": "3D",
-      "description": "3D models through 3D providers: creation, a searchable versioned library, preview, rigging, motion and project export. Disabling blocks new jobs; accepted jobs continue. Downloads wait until enabled after server restart. Provider retention is not guaranteed.",
-      "fields": {
-        "autoImport": {
-          "label": "Import past and agent orders",
-          "hint": "Project task.json records and provider spending history."
-        },
-        "lowDiskGb": {
-          "label": "Warn below free space, GB"
-        },
-        "libraryDir": {
-          "label": "Library folder",
-          "hint": "Empty uses 3d in the data folder. Change after jobs finish; files are not moved."
-        }
-      },
-      "navigation": "3D"
     },
     "usage-forecast": {
       "name": "Usage forecast",
