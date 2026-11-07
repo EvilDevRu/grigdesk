@@ -160,7 +160,7 @@ test('Обновление приложения в production dialog/store', asy
     assert.match(text, /grigdesk-ctl/);
     assert.match(text, /release_signature_invalid/);
     assert.match(text, /описан|описани/i);
-    assert.equal(view.browser.document.querySelector('[role="progressbar"]'), null);
+    assert.equal(view.browser.document.querySelector('[role="progressbar"]') === null, true);
     await view.store.action('resume');
     assert.deepEqual(view.calls, [{
       method: 'POST',

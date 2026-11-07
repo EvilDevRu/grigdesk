@@ -70,7 +70,7 @@ test('LOAD-KEEP-data-inbox: повторное чтение сохраняет �
     const heading = h.wrapper.get('h1').element;
     const item = h.wrapper.get('[data-status="new"]').element;
 
-    await h.wrapper.findAll('button').find((button) => button.text() === 'Обновить').trigger('click');
+    await h.wrapper.get('button[aria-label="Обновить"]').trigger('click');
     await h.settle();
     assert.equal(calls, 2, 'обновление действительно началось');
     assert.equal(h.wrapper.get('[data-status="new"]').element === item, true);

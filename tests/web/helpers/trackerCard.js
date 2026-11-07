@@ -106,7 +106,11 @@ export async function mountTrackerCard(t, {
     },
   });
   const useUiStore = defineStore(`${prefix}-ui`, {
-    state: () => ({ taskId: id, launchRequested: false }),
+    state: () => ({
+      taskId: id,
+      taskSource: detail.source,
+      launchRequested: false,
+    }),
     actions: {
       close() {
         this.taskId = null;
@@ -260,6 +264,27 @@ export async function mountTrackerCard(t, {
       return () => listeners.delete(listener);
     },
   };
+
+  if (detail.source === 'grigdesk') {
+    for (const suffix of ['FavoritesStore', 'SeenStore']) {
+      const branch = globals[suffix]();
+
+      branch.own = branch;
+      globals[suffix] = () => branch;
+    }
+
+    const shelf = {
+      loaded: true,
+      entries: [],
+      isOnShelf: () => false,
+      isPending: () => false,
+      async load() {},
+      async acknowledge() {},
+    };
+
+    shelf.own = shelf;
+    globals.ShelfStore = () => shelf;
+  }
 
   for (const [suffix, value] of Object.entries(globals)) {
     globalThis[`${prefix}${suffix}`] = value;

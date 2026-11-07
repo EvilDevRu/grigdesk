@@ -199,7 +199,8 @@ test('шаблоны страниц журнала совпадают с compone
 
   assert.ok(declaration?.initializer && ts.isArrayLiteralExpression(declaration.initializer));
 
-  const paths = ['/'];
+  // Старый /3d остаётся допустимым адресом исторических записей после redirect в плагин.
+  const paths = ['/', '/3d'];
 
   for (const entry of declaration.initializer.elements) {
     assert.ok(ts.isObjectLiteralExpression(entry));

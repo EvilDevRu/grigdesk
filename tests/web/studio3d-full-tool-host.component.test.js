@@ -88,7 +88,7 @@ for (const [width, presentation] of [[1280, 'page'], [900, 'dock'], [899, 'page'
         f.element.querySelector('[data-context="tool-dock-hide"]').click();
         await f.settle();
         assert.equal(presentedPanels(f).length, 0);
-        assert.equal(f.element.querySelector('.studio-panel'), panel);
+        assert.equal(f.element.querySelector('.studio-panel') === panel, true);
 
         const button = [...f.element.querySelectorAll('[data-context="tool-rail-item"]')]
           .find((item) => item.getAttribute('aria-label')?.startsWith('3D'));
@@ -103,8 +103,8 @@ for (const [width, presentation] of [[1280, 'page'], [900, 'dock'], [899, 'page'
         await f.settle();
       }
 
-      assert.equal(f.element.querySelector('.studio-panel'), panel);
-      assert.equal(f.element.querySelector('.studio-panel textarea'), textarea);
+      assert.equal(f.element.querySelector('.studio-panel') === panel, true);
+      assert.equal(f.element.querySelector('.studio-panel textarea') === textarea, true);
       assert.equal(textarea.value, 'Черновик настоящего внешнего ToolHost');
       assert.equal(presentedPanels(f).length, 1);
       assert.deepEqual(f.counts(), { panel: 1, background: 1 });
@@ -179,8 +179,8 @@ integration('S3D-FULL-HOST actual query model/version получает ровн�
     assert.equal(Number.isSafeInteger(consumed[0][1]), true);
     assert.equal(f.dock.intents.studio3d, undefined);
     assert.deepEqual(f.router.currentRoute.value.query, {});
-    assert.equal(f.element.querySelector('.studio-panel'), panel);
-    assert.equal(f.element.querySelector('.studio-panel textarea'), textarea);
+    assert.equal(f.element.querySelector('.studio-panel') === panel, true);
+    assert.equal(f.element.querySelector('.studio-panel textarea') === textarea, true);
     assert.equal(presentedPanels(f).length, 1);
     await f.router.replace('/ext/studio3d');
     await f.settle();
@@ -276,11 +276,11 @@ for (const width of [899, 900]) {
           model: 'old-model',
           version: 'v1',
         });
-      assert.equal(f.element.querySelector('.studio-panel'), null);
+      assert.equal(f.element.querySelector('.studio-panel') === null, true);
       assert.deepEqual(f.counts(), { panel: 0, background: 0 });
       f.dock.open('terminal');
       await f.settle();
-      assert.equal(f.element.querySelector('.tool-surface.is-dock'), null);
+      assert.equal(f.element.querySelector('.tool-surface.is-dock') === null, true);
       assert.match(f.element.querySelector('[data-plugin-route-state="missing"]').textContent,
         /не установлен/);
       f.element.querySelector('[data-plugin-route-action]').click();

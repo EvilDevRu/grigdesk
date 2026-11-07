@@ -49,6 +49,7 @@ export async function nativeRouteFixture(t, provider = syntheticProvider(), {
     },
     prefs,
     getProviderAdapters: async () => new Map([[provider.id, provider]]),
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 

@@ -59,6 +59,8 @@ test('WebView: настоящая страница диктовки открыв
   });
 
   assert.equal(h.wrapper.attributes('data-ready'), 'true');
+  await h.wrapper.get('[data-speech-advanced-toggle]').trigger('click');
+  await h.flushPromises();
   assert.match(h.wrapper.text(), /Недоступно/);
   assert.equal(calls.length, 0);
   assert.equal(h.settings.getValue('speech', 'browserProcessing'), 'local');

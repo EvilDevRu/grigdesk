@@ -21,7 +21,7 @@ test('нормализованный тариф рисуется общим ко
   const [{ mount }, Component] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileVue(webFile('src/features/providers/ProviderUsageResources.vue'), {
-      stubs: { '../../stores/providers.js': PROVIDERS_STUB },
+      stubs: { '../../stores/providers.ts': PROVIDERS_STUB },
     }),
   ]);
   const literal = {

@@ -1,3 +1,4 @@
+import { protocolPage } from './helpers/chat-protocol.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -112,13 +113,12 @@ test('после F5 SSH-подтверждение восстанавливае�
     async get(path) {
       gets.push(path);
 
-      if (path === '/api/chat/store/list') {
-        return {
-          listProtocol: 1,
+      if (path.startsWith('/api/chat/store/list?')) {
+        return protocolPage({
           sessions: [],
           archived: [],
           activeId: null,
-        };
+        }, path);
       }
       if (path === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [restored] };

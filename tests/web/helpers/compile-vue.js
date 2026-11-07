@@ -405,9 +405,10 @@ export async function compileBoundary(relative, expose, additional = {}) {
     tasks: 'useTasksStore',
     board: 'useBoardStore',
     plugins: 'usePluginsStore',
-    'task-favorites': 'useTaskFavoritesStore',
-    'task-seen': 'useTaskSeenStore',
+    taskFavorites: 'useTaskFavoritesStore',
+    taskSeen: 'useTaskSeenStore',
     taskShelf: 'useTaskShelfStore',
+    trackers: 'useTrackersStore',
   })) {
     for (const extension of ['js', 'ts']) {
       stubs[`../stores/${file}.${extension}`] = `${viewPrelude}

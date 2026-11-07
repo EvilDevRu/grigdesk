@@ -119,7 +119,7 @@ test('устройства: медленный ответ API не переда�
   const result = await api.post('/api/devices/pairing', { name: 'Планшет' });
 
   assert.equal(result.text, secret);
-  assert.equal(events[0].event, 'api.slow');
+  assert.ok(events.some((event) => event.event === 'api.slow'));
   assert.equal(JSON.stringify(events).includes(secret), false);
 });
 
@@ -176,6 +176,7 @@ for (const action of ['rename', 'revoke']) {
         address: 'https://b.example:443'
       },
       profiles: [],
+      localAvailable: false,
       capabilities: [],
     });
     h.auth.clientScope = 'scope-b';

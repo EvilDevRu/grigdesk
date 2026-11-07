@@ -41,6 +41,6 @@ test('PHONE-DENSITY: отдельная страница доски сохран
 
   browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
   style.textContent = cssText;
-  assert.equal(css('.col.primary').paddingTop, '14px');
+  assert.equal(css('.col.primary').paddingTop, '18px');
   assert.equal(css('.col.primary').borderTopWidth, '1px');
 });

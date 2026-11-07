@@ -235,7 +235,7 @@ test('TWP-BOOT-01: начальная очистка сессии не закр�
       await nextTick();
       state.auth.authenticated = true;
       await nextTick();
-      assert.equal(wrapper.get('[data-task-draft]').element, draft);
+      assert.equal(wrapper.get('[data-task-draft]').element === draft, true);
       assert.equal(draft.value, 'Сохраняемый черновик');
       assert.equal(closeCount, 0);
 

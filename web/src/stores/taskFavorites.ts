@@ -3,6 +3,7 @@ import { trackerMutationOptions } from '../shared/trackerMutation.ts';
 // Независимое серверное избранное трекера и GrigDesk. Строка фильтра меняется после подтверждения сервера.
 // Ошибка мутации сохраняет прежний список без локального rollback.
 import { defineStore } from 'pinia';
+import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -34,7 +35,7 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-interface FavoritesBranch {
+interface FavoritesBranch extends Pick<StoreGeneric, '$onAction'> {
   scope: string;
   revision: number;
   taskIds: string[];
