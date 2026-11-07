@@ -72,6 +72,16 @@ jobs:
         run: >-
           npm --prefix deepseek run prepare:runtime --
           --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
+      - name: Исходники тестового исполнителя
+        run: |
+          node --input-type=module <<'NODE'
+          import { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';
+          await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
+          NODE
+      - name: Проверка тестового ELF
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+          tests/server/deepseek-binary-cache-root.test.js
       - name: Тесты сервера
         env:
           NODE_OPTIONS: --test-reporter=tap
