@@ -265,3 +265,103 @@ test('ответ на приём, опоздавший к концу корот�
   assert.equal(session.sending, false, 'законченный ход не «думает» снова');
   assert.equal(session.messages.find((m) => m.turnId === turnId && m.role === 'user').delivery, undefined);
 });
+
+test('вопрос из pending не задваивается в частичном окне, где уже видны сообщения его запуска', async () => {
+  // Длинный ход: вопрос остался в негружнутом префиксе, лента несёт только хвост
+  // с финальным блоком. Восстановление push-ом в хвост ставило вопрос после ответа.
+  const runId = 'run-partial-0001';
+  const chat = await chatStoreFixture({
+    sessions: [chatWith([
+      {
+        role: 'assistant',
+        kind: 'assistant-block',
+        runId,
+        parentTurnId: 'turn-res-000006',
+        assistantMessageId: 'msg-final-1',
+        text: 'Реализация завершена',
+        complete: true,
+        serverCanonical: true,
+      },
+    ])],
+  });
+  const deleted = [];
+
+  apiHarness.get = async (url) => {
+    if (url === '/api/chat/pending') {
+      return {
+        pending: [{
+          id: 'turn-res-000006',
+          turnId: 'turn-res-000006',
+          chatKey: 'res-chat',
+          role: 'assistant',
+          reply: 'Реализация завершена',
+          userText: 'Реализуй план',
+          runId,
+          assistantMessageId: 'msg-final-1',
+          at: 11,
+        }],
+      };
+    }
+
+    if (String(url).startsWith('/api/chat/in-turn?')) {
+      return { entries: [], throughSequence: 0, nextAfterSequence: null };
+    }
+
+    throw new Error(`неожиданный запрос: ${url}`);
+  };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
+  apiHarness.put = async () => ack(4);
+  apiHarness.del = async (url) => {
+    deleted.push(url);
+
+    return { ok: true };
+  };
+
+  await chat._collectPending();
+
+  const session = chat.sessions[0];
+
+  assert.equal(
+    session.messages.filter((m) => m.role === 'user' && m.text === 'Реализуй план').length,
+    0,
+    'копия вопроса не появляется после финала',
+  );
+  assert.equal(session.messages.length, 1, 'лента не получила лишних сообщений');
+  assert.equal(session.messages[0].pid, 'turn-res-000006', 'финал слился с видимым блоком хода');
+  assert.deepEqual(deleted, ['/api/chat/pending/turn-res-000006']);
+});
+
+test('вопрос восстанавливается в конец, когда сообщений его запуска в ленте нет', async () => {
+  // Пустая лента: восстанавливать вопрос по-прежнему нужно, финал встанет после него.
+  const chat = await chatStoreFixture({ sessions: [chatWith([])] });
+  const deleted = [];
+
+  apiHarness.get = async () => ({
+    pending: [{
+      id: 'turn-res-000007',
+      turnId: 'turn-res-000007',
+      chatKey: 'res-chat',
+      role: 'assistant',
+      reply: 'ответ',
+      userText: 'вопрос без следа',
+      at: 12,
+    }],
+  });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
+  apiHarness.put = async () => ack(4);
+  apiHarness.del = async (url) => {
+    deleted.push(url);
+
+    return { ok: true };
+  };
+
+  await chat._collectPending();
+
+  const session = chat.sessions[0];
+
+  assert.deepEqual(session.messages.map((m) => `${m.role}:${m.text}`), [
+    'user:вопрос без следа',
+    'assistant:ответ',
+  ], 'вопрос восстановлен перед своим ответом');
+  assert.deepEqual(deleted, ['/api/chat/pending/turn-res-000007']);
+});
