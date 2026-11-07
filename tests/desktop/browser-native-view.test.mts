@@ -316,13 +316,16 @@ test('BR-V-favicon: иконка читается в session сайта и пе�
 });
 
 test('BR-V-favicon-navigation: поздняя иконка не попадает на новую страницу', async (t) => {
-  const pending = Promise.withResolvers<Response>();
-  const f = fixture({ favicon: () => pending.promise });
+  let finishFavicon!: (response: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    finishFavicon = resolve;
+  });
+  const f = fixture({ favicon: () => pending });
 
   t.after(() => f.adapter.destroy());
   f.contents.emit('page-favicon-updated', {}, ['https://fixture.test/old.png']);
   f.contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
-  pending.resolve(new Response('old', { headers: { 'content-type': 'image/png' } }));
+  finishFavicon(new Response('old', { headers: { 'content-type': 'image/png' } }));
   await nextLoop();
   assert.equal(f.metadata.at(-1)?.favicon, null);
 

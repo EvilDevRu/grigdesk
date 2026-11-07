@@ -61,6 +61,12 @@ export async function mountDesktopEntry(t, options = {}) {
       './App.vue': 'export default {};',
       './styles/index.css': '',
       './plugins/index.ts': '',
+      './pluginRuntime/bootstrap.ts': 'export const installPluginRuntime = () => () => {};',
+      './shared/helpNavigation.ts': 'export const installHelpNavigation = () => () => {};',
+      './shared/browser/browserHostRuntime.ts':
+        'export const installBrowserHostRuntime = () => () => {};',
+      './shared/webDiagnostics.ts': 'export const setWebDiagnosticSink = () => {};',
+      './shared/apiDiagnostics.ts': 'export const resetApiDiagnostics = () => {};',
       './stores/device.ts': `export const useDeviceStore = () => ({
         initInstall: () => globalThis.__desktopBootstrap.push('install'),
         initWakeLock: () => globalThis.__desktopBootstrap.push('wake'),
@@ -86,13 +92,17 @@ export async function mountDesktopEntry(t, options = {}) {
         export const isReportedApiError = () => false;
         export const setApiLogSink = () => {};`,
       './composables/useSse.ts': `export const setSseLogSink = () => {};
-        export const configureSseRelay = () => {};`,
+        export const configureSseRelay = () => {};
+        export const sseSubscribe = () => () => {};`,
       './shared/desktopSettings.ts':
         'export const currentDesktopMode = () => globalThis.__surfaceNavigation.mode;',
       './shared/uiLocale.ts': 'export const bootstrapUiLocale = () => () => {};',
       './stores/ui.ts': 'export const useUiStore = () => globalThis.__surfaceNavigation.ui;',
       './shared/webLogRuntime.ts': `export const createWebLogRuntime = () => ({
         attachAuthStore() {},
+        log: {
+          subscribeLevel: () => () => {},
+        },
       });`,
       './ui.ts': `export const showToast = () => {}; export const getUiLayerDiagnostics = () => ({});
         export const setUiDownloadAdapter = () => globalThis.__desktopBootstrap.push('download');
