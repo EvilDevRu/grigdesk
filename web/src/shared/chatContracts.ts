@@ -66,6 +66,10 @@ export interface ChatPermission {
   user?: string;
   isRoot?: boolean;
   usesSudo?: boolean;
+  tab?: {
+    projectId?: string;
+    label?: string;
+  };
   server?: {
     label?: string;
     host?: string;

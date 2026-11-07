@@ -957,6 +957,8 @@
   "interventionQuestionTitle": "Вопрос агента",
   "interventionFile": "Файл",
   "interventionCommand": "Команда",
+  "interventionSshServer": "Сервер",
+  "interventionSshTab": "Вкладка SSH",
   "interventionDetails": "Подробности действия",
   "interventionJustification": "Обоснование",
   "interventionAccess": "Уровень доступа",

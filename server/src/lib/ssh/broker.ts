@@ -1,6 +1,7 @@
 import { limitSshOutput } from './output.ts';
 import type { SshAuditInput } from './audit.ts';
 import type { PublicSshSession } from './sessionManager.ts';
+import { sshSessionTabLabel } from '../../../../shared/plugins/ssh/sessionLabels.ts';
 
 // Что модель говорит инструменту. Больше здесь ничего нет намеренно: адрес, порт и
 // пароль выбирает человек в панели, а агент выбирает открытую разрешённую сессию.
@@ -56,6 +57,7 @@ interface BrokerAudit {
 }
 
 interface BrokerSessions {
+  list?: () => PublicSshSession[];
   listForAgent: () => PublicSshSession[];
   exec: (id: string, command: string) => Promise<BrokerResult>;
 }
@@ -159,6 +161,10 @@ export function createSshBroker(options: SshBrokerOptions): SshBroker {
       generation: session.generation,
       canRemember: false,
       presentation: {
+        tab: {
+          projectId: session.projectId,
+          label: sshSessionTabLabel(session, sessions.list?.() || allowedSessions()),
+        },
         server: {
           label: session.label,
           host: session.host,

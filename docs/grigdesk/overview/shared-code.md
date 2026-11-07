@@ -95,6 +95,7 @@
 | `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
 | `node/helpSources.ts` | Компиляция закрытого guide и проверка revision пакета справки |
 | `lib/shellQuote.ts` | Один буквальный shell-аргумент для команд, включая транзакцию публикации |
+| `plugins/ssh/sessionLabels.ts` | Одинаковые подписи SSH-вкладок в панели и подтверждениях чата |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |

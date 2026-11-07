@@ -29,6 +29,7 @@ function fixture(t) {
     pluginEnabled: () => enabled,
     permissionQueue: queue,
     sessions: {
+      list: () => sessions,
       listForAgent: () => sessions,
       async exec(id, command) {
         executions.push({ id, command });
@@ -109,6 +110,7 @@ test('одинаковые метки требуют ID, а выбранный I
   assert.equal(pending.chatKey, 'chat-without-project');
   assert.equal(pending.canRemember, false);
   assert.equal(pending.presentation.server.host, 'b.example');
+  assert.deepEqual(pending.presentation.tab, { projectId: 'project-b', label: 'production · site' });
   assert.equal(f.executions.length, 0);
   await f.queue.answer(pending.pid, 'ssh', { allow: true });
   assert.equal((await first).ok, true);
@@ -127,6 +129,30 @@ test('одинаковые метки требуют ID, а выбранный I
   });
   assert.equal(f.executions.length, 1);
   assert.equal(f.audit[1].projectId, 'project-b');
+});
+
+test('подтверждение называет вкладку с учётом сессий без допуска агента', async (t) => {
+  const f = fixture(t);
+
+  f.sessions.splice(1, 0, {
+    ...f.sessions[1],
+    id: 'human-only',
+    agentAllowed: false,
+  });
+
+  const command = 'cd /srv/app && npm test; printf done';
+  const run = f.broker.invoke({}, {
+    action: 'exec',
+    sessionId: 'session-b',
+    command,
+  });
+  const pending = f.queue.waiting()[0];
+
+  assert.deepEqual(pending.presentation.tab, { projectId: 'project-b', label: 'production · site · 2' });
+  assert.equal(pending.presentation.command, command);
+  await f.queue.answer(pending.pid, 'ssh', { allow: true });
+  assert.equal((await run).ok, true);
+  assert.deepEqual(f.executions, [{ id: 'session-b', command }]);
 });
 
 test('старый селектор работает при одном совпадении и не переходит на новую похожую сессию', async (t) => {

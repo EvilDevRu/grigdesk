@@ -9,7 +9,12 @@
 
     <div v-if="isSsh" class="p-ssh-meta">
       <div data-ssh-server>
+        <span class="p-label">{{ t('core.interventionSshServer') }}:</span>
         {{ req.server?.label }} — {{ req.server?.host }}:{{ req.server?.port }}
+      </div>
+      <div v-if="req.tab" data-ssh-tab>
+        <span class="p-label">{{ t('core.interventionSshTab') }}: </span>
+        <strong>{{ req.tab.projectId }} — {{ req.tab.label }}</strong>
       </div>
       <div>
         Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
@@ -49,12 +54,13 @@
       <div class="p-path">{{ filePath }}</div>
     </div>
     <div v-if="command" class="p-label p-section">{{ t('core.interventionCommand') }}</div>
-    <pre
-      v-if="command"
-      class="p-in cmd"
-      :class="{ ssh: isSsh }"
-      :data-ssh-command="isSsh ? '' : undefined"
-    >{{ command }}</pre>
+    <pre v-if="command && isSsh" class="p-in cmd ssh" data-ssh-command><span
+      v-for="(part, index) in commandParts"
+      :key="index"
+      class="p-ssh-command-part"
+      data-ssh-command-part
+    >{{ part }}</span></pre>
+    <pre v-else-if="command" class="p-in cmd">{{ command }}</pre>
     <pre v-if="plan" class="p-in big">{{ plan }}</pre>
 
     <div v-if="diff" class="p-diff">
@@ -156,6 +162,7 @@ import type { PropType } from 'vue';
 import { formatNumber } from '../../../../shared/i18n/formats.ts';
 import type { ChatPermission, PermissionChoice } from '../../shared/chatContracts.ts';
 import { lineDiff, splitRows } from '../../shared/diff.ts';
+import { sshCommandParts } from '../../shared/sshCommandParts.ts';
 import ChatIntervention from './ChatIntervention.vue';
 import {
   t,
@@ -211,6 +218,7 @@ const title = computed(() => {
 });
 const plan = computed(() => displayText(input.value.plan));
 const command = computed(() => displayText(isSsh.value ? props.req.command : input.value.command));
+const commandParts = computed(() => sshCommandParts(command.value));
 const filePath = computed(() => displayText(input.value.file_path));
 const details = computed(() => displayText(
   input.value.details ?? (typeof input.value.content === 'string' ? input.value.content : null),
@@ -534,6 +542,16 @@ function chooseById(value: unknown) {
 .p-in.cmd,
 .p-in.big {
   color: var(--ink);
+}
+
+.p-ssh-command-part {
+  display: block;
+}
+
+.p-ssh-command-part + .p-ssh-command-part {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--control-border);
 }
 
 .p-ssh-meta,

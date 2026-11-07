@@ -937,6 +937,8 @@
   "interventionQuestionTitle": "Agent question",
   "interventionFile": "File",
   "interventionCommand": "Command",
+  "interventionSshServer": "Server",
+  "interventionSshTab": "SSH tab",
   "interventionDetails": "Action details",
   "interventionJustification": "Justification",
   "interventionAccess": "Access level",

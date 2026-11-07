@@ -640,6 +640,7 @@ import type { IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
+import { sshSessionTabLabel } from '../../../../shared/plugins/ssh/sessionLabels.ts';
 
 import {
   UiRefreshIcon,
@@ -1116,34 +1117,17 @@ function sessionProjectLabel(session: SshSession): string {
   return String(session.projectId || connection?.projectId || 'не указан');
 }
 
-function sessionTargetBase(session: SshSession): string {
-  const values = [session.label, session.role]
-    .map((value) => String(value || '').trim())
-    .filter((value, index, items) => value && items.indexOf(value) === index);
-
-  return values.join(' · ')
-    || [session.host, session.port].filter(Boolean).join(':')
-    || 'SSH-сессия';
-}
-
 /**
- * Полная видимая метка различает повторные входы в один сервер порядковым номером:
- * две вкладки с одинаковым названием человек путает, а закрывает он их по одной.
+ * Общая подпись совпадает с серверным подтверждением SSH-команды.
+ * Для старых снимков без проекта сохраняется привязка через соединение.
  */
 function sessionTargetLabel(session: SshSession): string {
-  const project = sessionProjectLabel(session);
-  const target = sessionTargetBase(session);
-  const sameTarget = (store.sessions || []).filter((item) => (
-    sessionProjectLabel(item) === project && sessionTargetBase(item) === target
-  ));
+  const tabs = (store.sessions || []).map((item) => ({
+    ...item,
+    projectId: sessionProjectLabel(item),
+  }));
 
-  if (sameTarget.length < 2) {
-    return target;
-  }
-
-  const position = sameTarget.findIndex((item) => item.id === session.id) + 1;
-
-  return `${target} · ${Math.max(position, 1)}`;
+  return sshSessionTabLabel({ ...session, projectId: sessionProjectLabel(session) }, tabs);
 }
 
 // Подсказка вкладки называет проект, саму сессию и адрес входа: одной метки мало,
