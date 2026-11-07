@@ -78,6 +78,15 @@ jobs:
           import { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';
           await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
           NODE
+      - name: Прогрев вариантов тестового ELF
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
+          tests/helpers/deepseekBinary.mts --prepare-suite
+          > "$RUNNER_TEMP/deepseek-test-suite.json"
+      - name: Прогрев среды миграции
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
+          tests/helpers/deepseekRuntimeArtifact.mts
       - name: Проверка тестового ELF
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test

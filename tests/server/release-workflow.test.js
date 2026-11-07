@@ -66,10 +66,14 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
     step.run?.includes('materializeDeepSeekSnapshot'));
   const binary = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('tests/server/deepseek-binary-cache-root.test.js'));
+  const variants = workflow.jobs.release.steps.findIndex((step) =>
+    step.run?.includes('tests/helpers/deepseekBinary.mts --prepare-suite'));
+  const legacy = workflow.jobs.release.steps.findIndex((step) =>
+    step.run?.includes('tests/helpers/deepseekRuntimeArtifact.mts'));
   const suite = workflow.jobs.release.steps.indexOf(serverTests);
 
-  assert.ok(snapshot >= 0 && snapshot < binary && binary < suite,
-    'проверенный snapshot и прогретый ELF обязательны до большого серверного набора');
+  assert.ok(snapshot >= 0 && snapshot < variants && variants < legacy && legacy < binary && binary < suite,
+    'snapshot, варианты ELF и среда миграции готовятся последовательно до большого набора');
 
   const publish = workflow.jobs.release.steps.find((step) =>
     step.run?.includes('tools/release-publish.mts'));
