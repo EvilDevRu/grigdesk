@@ -1,15 +1,12 @@
 // Диагностическое дополнение остановки: читаем только exact завершившийся run.
 // Текст ошибки не изменяет курсор, вердикт, разрешение повтора или арбитраж.
-import { openRunDirectory, readRunFile } from './runnerArtifacts.ts';
+import { openRunDirectory, readRunFile, readRunnerFailure } from './runnerArtifacts.ts';
 import { runnerModelName } from './runnerModel.ts';
 
+import { translate } from '../../../shared/i18n/catalogs.ts';
+
 import { parsePipeline } from './pipelineParse.ts';
-import {
-  cleanRunnerFailureMessage,
-  inspectCodexFailure,
-  inspectGlmFactoryFailure,
-  runnerFailureDetail,
-} from './runnerFailure.ts';
+import { runnerFailureDetail } from './runnerFailure.ts';
 import type { RunnerFailure } from './runnerFailure.ts';
 import type { StallEvent, StallInfo } from './stall.ts';
 
@@ -26,13 +23,6 @@ interface RunFailure {
   failure: RunnerFailure;
   model: string;
 }
-
-// Раннеры с доказанным разбором терминального отказа в retained-потоке. Остальные
-// остановки сохраняют прежнюю карточку: чужой формат не угадывается.
-const RUNNER_FAILURE_READERS: Record<string, (raw: string) => RunnerFailure | null> = {
-  codex: (raw) => inspectCodexFailure(raw).failure,
-  glm: inspectGlmFactoryFailure,
-};
 
 /**
  * Сверка attempt/run/epoch и временного окна отсеивает ошибку прошлой попытки или визита.
@@ -53,7 +43,7 @@ function matchingRun(meta: Record<string, string>, input: RunnerStallInput): boo
   return Boolean(expectedAttempt && meta.ATTEMPT_ID === expectedAttempt
     && meta.TASK === `t${input.task}` && meta.STAGE === stage && meta.SOURCE === 'runtime'
     && meta.RUN_ID === registry[`ACTIVE_RUN_${stage}`] && meta.EPOCH === registry[`ACTIVE_EPOCH_${stage}`]
-    && RUNNER_FAILURE_READERS[meta.RUNNER || ''] !== undefined && /^-?\d+$/.test(meta.RC || '')
+    && /^-?\d+$/.test(meta.RC || '')
     && ![0, 124, 130, 143].includes(Number(meta.RC))
     && !['ok', 'timeout', 'manual_switch'].includes(meta.RESULT_CLASS || '')
     && Number.isFinite(started) && Number.isFinite(finished) && Number.isFinite(stopped)
@@ -83,9 +73,7 @@ async function readFailure(input: RunnerStallInput): Promise<RunFailure | null> 
       return null;
     }
 
-    const failure = meta.FAILURE_CODE && meta.FAILURE_MESSAGE
-      ? { code: meta.FAILURE_CODE, message: cleanRunnerFailureMessage(meta.FAILURE_MESSAGE) }
-      : RUNNER_FAILURE_READERS[meta.RUNNER || '']!(await readRunFile(directory, 'events.jsonl', true));
+    const failure = await readRunnerFailure(directory, meta);
 
     return failure ? { failure, model: runnerModelName(meta.RESOLVED_MODEL || meta.MODEL) || '' } : null;
   } finally {
@@ -121,20 +109,25 @@ export async function enrichRunnerStall(input: RunnerStallInput): Promise<StallI
     const runs = stall.title.match(/\d+ заход(?:а|ов)? без результата/u)?.[0];
     const attempts = stall.presentation?.attempts ?? (runs ? Number.parseInt(runs, 10) : undefined);
     const temporary = ['capacity', 'rate_limit'].includes(displayFailure.code);
-    const hint = temporary
+    const diagnostic = ['stderr', 'diagnostic_missing'].includes(displayFailure.code);
+    const hint = diagnostic ? translate('core.runnerFailureInspectLog') : temporary
       ? 'Провайдер временно отклонил запрос. Повторите этап позже;'
         + ' если черновик записан, он будет передан следующему заходу.'
       : 'Проверьте сообщение провайдера. Если черновик записан, при повторе этап получит его.';
+    const previousDetail = (stall.detail || stall.comment || '')
+      .replace(/последний —[^\n]*$/u, () => `последний — ${detail}`);
 
     return {
       ...stall,
       title: `${stall.stage}: ${detail}${runs ? ` — ${runs}` : ''}`,
       comment: stall.comment?.replace(/последний —[^\n]*$/u, () => `последний — ${detail}`) ?? null,
-      detail: `${stall.detail || stall.comment || ''}\nОтвет провайдера: ${evidence.failure.message}`,
+      detail: `${previousDetail}\n${translate('core.runnerFailureDiagnostic', {
+        message: evidence.failure.message,
+      })}`,
       hint,
       presentation: {
         reason: 'агент не вернул результат',
-        summary: temporary
+        summary: diagnostic ? hint : temporary
           ? 'Провайдер отклонил запрос; повторите этап позже.'
           : 'Проверьте сообщение провайдера перед повтором этапа.',
         details: {

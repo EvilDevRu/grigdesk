@@ -88,6 +88,100 @@ test('попытки GLM сохраняют resolved-модель и конкр�
   assert.deepEqual(attempts.slice(2).map((attempt) => attempt.failureDetail), Array(3).fill(undefined));
 });
 
+for (const [runner, file, log] of [
+  ['claude', 'events.jsonl', JSON.stringify({
+    type: 'rate_limit_event', rate_limit_info: { status: 'rejected' },
+  })],
+  ['codex', 'events.jsonl', JSON.stringify({ type: 'usage_limit_reached', message: 'Usage limit reached' })],
+  ['deepseek', 'events.jsonl', JSON.stringify({
+    event: 'wrapper_error',
+    code: 'QUOTA',
+    message: 'Quota',
+  })],
+  ['glm', 'events.jsonl', JSON.stringify({
+    event: 'wrapper_error',
+    code: 'QUOTA',
+    message: 'Quota',
+  })],
+  ['kimi', 'stderr.log', 'error: failed to run prompt: '
+    + "provider.auth_error: 403 You've reached your usage limit for this billing cycle.\n"],
+]) {
+  test(`${runner}: попытки показывают квоту и не переносят её в успех или остановку`, async (t) => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), `grigdesk-attempt-${runner}.`));
+
+    t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+    const outcomes = [
+      ['unknown', 1], ['limited', 1], ['ok', 0], ['timeout', 124],
+      ['manual_switch', 1], ['unknown', 130], ['unknown', 143], ['', 1],
+    ];
+
+    for (const [index, [result, rc]] of outcomes.entries()) {
+      const runDir = path.join(stateDir, 'logs/runs/t46/BUILD', `run-${index}`);
+
+      await mkdir(runDir, { recursive: true });
+      await writeFile(path.join(runDir, 'meta.env'), [
+        'SOURCE=runtime', `RUNNER=${runner}`, `EPOCH=${index + 1}`, 'MODEL=fixture-model',
+        `RESULT_CLASS=${result}`, `RC=${rc}`,
+      ].join('\n'));
+      await writeFile(path.join(runDir, file), log);
+    }
+
+    const attempts = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+    assert.deepEqual(attempts.map((attempt) => attempt.result), outcomes.map(([result]) => result || null));
+    assert.deepEqual(attempts.map((attempt) => attempt.failureDetail), [
+      'Закончилась квота', 'Закончилась квота', ...Array(6).fill(undefined),
+    ]);
+  });
+}
+
+for (const runner of ['claude', 'codex', 'deepseek', 'glm', 'kimi', 'future-provider']) {
+  test(`${runner}: новая ошибка, пустая диагностика и потерянный журнал объясняются явно`, async (t) => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), `grigdesk-failure-fallback-${runner}.`));
+    const runDir = path.join(stateDir, 'logs/runs/t46/BUILD/run-1');
+    const stderr = path.join(runDir, 'stderr.log');
+    const events = path.join(runDir, 'events.jsonl');
+
+    t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, 'meta.env'), [
+      'SOURCE=runtime', `RUNNER=${runner}`, 'EPOCH=1', 'RESULT_CLASS=unknown', 'RC=7',
+    ].join('\n'));
+    await writeFile(events, JSON.stringify({ role: 'tool', content: 'quota exceeded: текст задания' }));
+    await writeFile(stderr, 'RuntimeError: CLI_E_NEW token=secret-value\n    at main (/private/file:1)\n');
+
+    const [withDiagnostic] = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+    assert.match(withDiagnostic.failureDetail, /Последнее сообщение исполнителя: RuntimeError: CLI_E_NEW/);
+    assert.doesNotMatch(withDiagnostic.failureDetail, /secret-value|private\/file|неизвестн/);
+    assert.equal(withDiagnostic.result, 'unknown');
+
+    await writeFile(stderr, '');
+
+    const [withoutMessage] = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+    assert.equal(withoutMessage.failureDetail,
+      'Процесс завершился с кодом 7; исполнитель не сообщил причину');
+
+    await rm(stderr);
+    await rm(events);
+
+    const [withoutFiles] = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+    assert.equal(withoutFiles.failureDetail,
+      'Процесс завершился с кодом 7; журнал диагностики недоступен');
+
+    await writeFile(stderr, 'RuntimeError: token=secret-' + 'x'.repeat(300000));
+
+    const [truncated] = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+    assert.equal(truncated.failureDetail,
+      'Процесс завершился с кодом 7; исполнитель не сообщил причину');
+  });
+}
+
 test('runner state follows engine precedence and exposes an emergency switch', () => {
   const profile = {
     PROJECT_RUNNER_PRIMARY: 'claude',
@@ -219,8 +313,17 @@ test('runner config and attempts are read from canonical profile files', async (
   assert.equal(loadRunnerConfig(profilesDir, 'demo').CONFIG_REVISION, '4');
   assert.deepEqual(await readRunnerAttempts(path.join(root, 'state'), '42', 'BUILD'), [
     {
-      id: 'run-a', epoch: 1, runner: 'claude', model: 'opus', reason: null,
-      effort: null, result: 'limited', rc: 1, source: 'runtime', tokens: null,
+      id: 'run-a',
+      epoch: 1,
+      runner: 'claude',
+      model: 'opus',
+      reason: null,
+      effort: null,
+      result: 'limited',
+      rc: 1,
+      source: 'runtime',
+      tokens: null,
+      failureDetail: 'Закончилась квота',
     },
     {
       id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol',

@@ -14,8 +14,10 @@ import { deepSeekDistributionMode } from '../src/lib/deepseek/distribution.ts';
 import { isDirectRun } from '../src/lib/helperEntry.ts';
 import { helperCommand, runtimeKind } from '../src/lib/runtimePaths.ts';
 import {
+  assertFactoryTurnResult,
   emitRunnerEvent as emit,
   factoryRunIdentity,
+  factoryRunnerErrorEvent,
   factoryStatusEnvironment,
   parseRunnerArguments,
   readRunnerPrompt,
@@ -234,6 +236,8 @@ export async function runDeepSeekFactory(
       return;
     }
 
+    assertFactoryTurnResult(result, 'deepseek_turn_failed', 'DeepSeek Factory: ошибка модели');
+
     publish({
       event: 'result',
       stopReason: result.stopReason || 'unknown',
@@ -257,7 +261,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   } catch (error) {
     const message = safeError(error);
 
-    emit({ event: 'wrapper_error', code: errorCode(error, message), message });
+    emit(factoryRunnerErrorEvent(error, errorCode(error, message), message));
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }

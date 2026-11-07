@@ -1025,9 +1025,9 @@
                     success: a.result === 'ok',
                     switched: a.result === 'manual_switch',
                     failed: a.result && !['ok', 'manual_switch'].includes(a.result),
-                    'runner-result-detail': Boolean(a.failureDetail),
+                    'runner-result-detail': Boolean(a.failureDetail) || a.result === 'unknown',
                   }">
-                    {{ a.failureDetail || attemptResultLabel(a.result) }}
+                    {{ a.failureDetail || attemptResultLabel(a.result, a.rc) }}
                   </span>
                 </div>
               </div>

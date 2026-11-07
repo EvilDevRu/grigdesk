@@ -21,6 +21,12 @@ native settings context и ACP run; смена файла или выбора п
 launch и модели. Handle не сериализуется. Настройки перечитываются на каждом узле;
 busy snapshot, запрет прямого SSH и headless reject сохраняются.
 
+Окончательный `deliveryFailure` не считается успешным завершением wrapper-а. После
+сохранения `last.md` он возвращает ошибку с кодом и сообщением модели, которые `main`
+публикует как `wrapper_error`. Сигнал host-остановки имеет приоритет; автоматического
+повтора запроса нет. Сервер читает этот отказ для карточки и журнала попыток, как
+описано в [общем контракте диагностики](runner-failure-diagnostics.md).
+
 `deepseekHarnessProbe.mts` использует descriptor prefix/cache, allowlist без credentials
 и общий владелец process group. Он делает initialize/new/close без prompt и сообщает
 успех после фактического завершения процесса. Ошибка cleanup остаётся ошибкой.

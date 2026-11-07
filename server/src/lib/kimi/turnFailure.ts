@@ -4,7 +4,7 @@ import { trimmedText } from '../../../../shared/lib/text.ts';
 import { classifyTurnFailure, TURN_FAILURE_LABELS } from '../chat/turnFailures.ts';
 import type { TurnFailureRule, TurnFailureSignal } from '../chat/turnFailures.ts';
 
-const KIMI_FAILURE_RULES: readonly TurnFailureRule[] = [
+export const KIMI_FAILURE_RULES: readonly TurnFailureRule[] = [
   {
     id: 'kimi.usage-limit',
     kind: 'usage_limit',
