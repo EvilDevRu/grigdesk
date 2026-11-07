@@ -18,7 +18,7 @@
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
-- [Подписанный канал сайта: CI, публикация и восстановление обновления пакета](site-release-channel.md)
+- [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
 - [Ручной release workflow: зависимости, SSH-порт, TAP-ошибки, ресурсы runner и диагностика писем](release-workflow-validation.md)
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
