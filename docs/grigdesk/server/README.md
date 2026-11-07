@@ -19,7 +19,7 @@
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
-- [Ручной release workflow: snapshot Harness, последовательный прогрев ELF/миграции, RSS, TAP и SSH-порт](release-workflow-validation.md)
+- [Ручной release workflow: прогрев ELF/миграции, RSS, TAP, SSH-порт и origin подписанных архивов](release-workflow-validation.md)
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
