@@ -272,7 +272,11 @@ async function exercise(t, legacy) {
   await chat._resyncStore();
   assert.equal(chat.isArchived(session.id), true);
   chat.restoreArchived(session.id);
-  await chat._writeChat(session.id);
+
+  const restored = await chat._writeChat(session.id);
+
+  assert.equal(restored?.ok, true, 'восстановление из архива требует подтверждённой записи');
+  assert.equal(await chat._writeChat(session.id), null, 'ACK не оставляет архивность dirty');
 
   const reloaded = await chatStoreFixture({}, {
     api: transport.api,

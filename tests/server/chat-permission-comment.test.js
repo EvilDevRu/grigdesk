@@ -18,9 +18,12 @@ import chatModule from '../../server/src/modules/chat/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
+/**
+ * HTTP-фикстура закрывает сервер до удаления каталога, чтобы завершить фоновые записи.
+ * Поддельный исполнитель и накопленные SSE проверяют контракт ответа без внешнего CLI.
+ */
 async function apiFixture(t, executor = null) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-perm-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const events = [];
   app.decorate('sse', { broadcast(name, payload) { events.push({ name, payload }); } });
@@ -49,7 +52,10 @@ async function apiFixture(t, executor = null) {
     }),
     executorResolver: async (provider) => (provider === 'fake' ? executor : null),
   });
-  t.after(() => app.close());
+  t.after(async () => {
+    await app.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
   return { app, events };
 }
 

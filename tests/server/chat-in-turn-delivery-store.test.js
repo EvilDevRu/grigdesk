@@ -29,6 +29,16 @@ test('POST → общий SSE → store: уточнение и ответ вид
   const steer = [];
   let release;
   let onSse = null;
+  let chat;
+  let surface;
+
+  t.after(() => {
+    onSse = null;
+    release?.();
+    surface?.dispose();
+    chat?.$dispose();
+  });
+
   const executor = {
     id: 'test-provider',
     inTurnInput: { protocol: 1, text: true, confirmation: 'forwarded' },
@@ -52,10 +62,13 @@ test('POST → общий SSE → store: уточнение и ответ вид
     executor, withSsePlugin: true,
     onEvent(name, data) { if (onSse) setImmediate(() => onSse(name, structuredClone(data))); },
   });
-  t.after(() => release?.());
   await saveChat(app, 'chat-fixture');
   const api = apiOf(app);
-  const chat = await chatStoreFixture({}, { api, fromServer: true });
+
+  chat = await chatStoreFixture({}, { api, fromServer: true });
+  surface = chat.registerSurface({}, { chatId: 'chat-fixture', visible: true });
+
+  await chat.ensureChatMessages('chat-fixture');
   onSse = sseOf(chat);
 
   const started = await app.inject({

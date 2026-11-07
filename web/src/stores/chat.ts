@@ -357,17 +357,20 @@ interface ChatLoadRuntime {
 const chatLoads = new WeakMap<object, ChatLoadRuntime>();
 
 /**
- * Расхождение местной метки прочтения с последней подтверждённой шапкой сервера.
+ * Расхождение метки прочтения или принадлежности архиву с подтверждённой шапкой.
  * Чужая запись (материализация pending, PATCH другого окна) меняет unread молча, и тогда
  * отпечаток «уже отправлено» ложно глушит корректирующий PUT: сервер навсегда держит
  * точку «не прочитано» на ответе, который окно уже показало как прочитанное. Без
- * подтверждённой шапки правило не применяется — новый локальный чат ещё не имеет
+ * Архивность не входит в отпечаток ленты, поэтому восстановление тоже требует записи.
+ * Без подтверждённой шапки правило не применяется — новый локальный чат ещё не имеет
  * серверного состояния, и сравнивать не с чем.
  */
-function unreadDivergedFromHead(store: object, id: string, unread: unknown): boolean {
+function chatFlagsDivergedFromHead(
+  store: { isArchived(id: string): boolean }, id: string, unread: unknown,
+): boolean {
   const head = chatLoadRuntimeFor(store).heads.get(id);
 
-  return !!head && !!unread !== !!head.unread;
+  return !!head && (!!unread !== !!head.unread || store.isArchived(id) !== !!head.archived);
 }
 
 /**
@@ -2274,14 +2277,15 @@ export const useChatStore = defineStore('chat', {
       }
 
       const state = historyPersistenceFor(this);
-      const snapshot = captureChatHistorySnapshot(this.isArchived(id) ? archivedSlimOf(live) : slimOf(live));
+      const archived = this.isArchived(id);
+      const snapshot = captureChatHistorySnapshot(archived ? archivedSlimOf(live) : slimOf(live));
       const fingerprint = fingerprintOf(snapshot);
       const steps = state.signature(snapshot);
       const generation = state.generation(id);
 
       // Расхождение unread с подтверждённой шапкой пишется принудительно: точка
       // «не прочитано» на сервере может держаться только на молчаливой чужой записи.
-      if (!force && !unreadDivergedFromHead(this, id, live.unread)
+      if (!force && !chatFlagsDivergedFromHead(this, id, live.unread)
         && state.isSent(snapshot, fingerprint)) {
         return null;
       }
@@ -2302,7 +2306,7 @@ export const useChatStore = defineStore('chat', {
           chat: Object.fromEntries(Object.entries(request.chat).filter(([key]) => (
             !['historyWindow', 'windowRefs', 'clearHistory'].includes(key)
           ))),
-          archived: this.isArchived(id),
+          archived,
           origin: WINDOW_ID,
           window: windowRequestBase(base),
           ...(snapshot.clearHistory ? { clearHistory: true } : {}),
@@ -2367,6 +2371,7 @@ export const useChatStore = defineStore('chat', {
 
         if (confirmedHead && !response.stale) {
           confirmedHead.unread = !!snapshot.unread;
+          confirmedHead.archived = archived;
         }
 
         if (edit !== undefined && runtime.counterEdits.get(id)?.sequence === edit) {
@@ -3891,9 +3896,9 @@ export const useChatStore = defineStore('chat', {
           alive.add(c.id);
 
           // Расхождение unread с подтверждённой шапкой требует записи даже при
-          // неизменном отпечатке: сервер мог сменить метку молча (см. unreadDivergedFromHead).
+          // неизменном отпечатке: сервер мог сменить флаги молча (см. chatFlagsDivergedFromHead).
           if (state.isSent(c, projection.fingerprint.value)
-            && !unreadDivergedFromHead(this, c.id, c.unread)) {
+            && !chatFlagsDivergedFromHead(this, c.id, c.unread)) {
             return;
           }
           // Очередь чата сама возьмёт свежий снимок в момент отправки и не пошлёт
@@ -4141,7 +4146,7 @@ export const useChatStore = defineStore('chat', {
 
       // Расхождение unread с подтверждённой шапкой пишется принудительно: точка
       // «не прочитано» на сервере может держаться только на молчаливой чужой записи.
-      if (!force && !unreadDivergedFromHead(this, id, live.unread)
+      if (!force && !chatFlagsDivergedFromHead(this, id, live.unread)
         && state.isSent(snapshot, fingerprint)) {
         return null;
       }
@@ -4318,6 +4323,7 @@ export const useChatStore = defineStore('chat', {
 
       if (confirmed && !response?.stale) {
         confirmed.unread = !!snapshot.unread;
+        confirmed.archived = archived;
       }
 
       chatLoadRuntimeFor(this).epochs.set(id, (chatLoadRuntimeFor(this).epochs.get(id) || 0) + 1);
@@ -5296,7 +5302,7 @@ export const useChatStore = defineStore('chat', {
       const snapshot = archived ? archivedSlimOf(chat) : slimOf(chat);
 
       return !historyPersistenceFor(this).isSent(snapshot, fingerprintOf(snapshot))
-        || unreadDivergedFromHead(this, chat.id, chat.unread);
+        || chatFlagsDivergedFromHead(this, chat.id, chat.unread);
     },
     /**
      * Чат изменили в другом окне (в т.ч. на другом устройстве) — забираем именно его.
