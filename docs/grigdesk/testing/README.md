@@ -49,7 +49,7 @@
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Подготовленные dependencies source-проверок GLM и SEA без legacy prefix](source-runtime-dependencies.md)
 - [Smoke GLM проверяет admission выбранного выпуска без внешней модели](glm-release-admission-fixture.md)
-- [Фикстуры GLM: режимы smoke, изолированный CLI, model-only и setup-only команды](glm-smoke-mode-fixtures.md)
+- [Фикстуры GLM: smoke, изолированный CLI, model-only, команды и frozen admission](glm-smoke-mode-fixtures.md)
 - [Родитель временной фикстуры в артефактах создаётся самим тестом](artifact-fixture-parent.md)
 - [Реальный GLM: policy и home фикстуры вне системного tmp, скрываемого песочницей](glm-sandbox-fixture-root.md)
 - [Короткий engine-фильтр может совпасть с именем checkout](engine-filter-path.md)
