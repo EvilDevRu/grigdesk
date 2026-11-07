@@ -29,6 +29,11 @@
 backend даёт отказ до модели даже при успешных metadata/verify. Непригодная песочница
 останавливает workflow на ранней пробе, до дорогих сборок.
 
+Ubuntu runner ограничивает создание user namespaces через AppArmor: одной установки
+bubblewrap недостаточно (`setting up uid map: Permission denied`). Workflow загружает
+отдельный профиль для `/usr/bin/bwrap` с разрешением `userns`, затем повторяет функциональную
+пробу. Это настройка одноразового runner по [контракту Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces).
+
 После подготовки pinned dependencies workflow явно материализует проверенный snapshot
 Harness через `materializeDeepSeekSnapshot`. В Git хранится только manifest, patches
 и лицензии; `upstream/` — игнорируемый кэш. Без подготовки холодная сборка тестового ELF
