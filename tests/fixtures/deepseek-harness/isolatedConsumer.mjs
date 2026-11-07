@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 
 const root = path.resolve(process.argv[2]);
 const input = JSON.parse(await fs.readFile(process.argv[3], 'utf8'));
+const execute = promisify(execFile);
 const load = (relative) => import(pathToFileURL(path.join(root, relative)).href);
 const { default: deepseek } = await load('server/src/lib/executors/deepseek.ts');
 const { createGlmAdapter } = await load('server/src/lib/executors/glm.ts');
@@ -24,6 +25,17 @@ const descriptor = await resolveDeepSeekRuntimeAsync(config);
 assert.equal(descriptor.kind, 'binary');
 assert.equal(descriptor.generationDir, null);
 assert.equal(descriptor.metadata.packageId, input.packageId);
+
+// Холодная распаковка и проверка пакета имеют собственный срок до boot web.
+// Проверка границы consumer не измеряет скорость диска двухъядерного CI runner.
+const prepared = await execute(config.deepseekBin, [
+  '--cache-dir', config.deepseekCacheDir, '--verify', '--json',
+], { timeout: 120000, maxBuffer: 65536 });
+const verified = JSON.parse(prepared.stdout);
+
+assert.equal(prepared.stderr, '');
+assert.equal(verified.packageId, input.packageId);
+assert.equal(verified.verified, true);
 
 let diagnostics = '';
 
@@ -121,7 +133,6 @@ const glmSecond = await stage('GLM resume', () => runGlm({
   sessionId: glmFirst.sessionId,
   message: 'boundary-glm-second',
 }));
-const execute = promisify(execFile);
 const probe = await execute('/bin/bash', ['-c', [
   'source "$FACTORY_HOME/lib/runners/deepseek.sh"',
   'runner_deepseek_probe',

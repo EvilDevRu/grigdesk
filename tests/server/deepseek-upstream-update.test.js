@@ -49,7 +49,15 @@ test('настоящий новый SHA проходит build/transport gates; 
     });
 
     assert.notEqual(commit, before.commit);
-    await publishDeepSeekSync(candidate);
+
+    try {
+      await publishDeepSeekSync(candidate);
+    } catch (error) {
+      // execFile помещает TAP вложенного gate в stdout, которого нет в error.message.
+      // Ограниченный хвост сохраняет причину отказа в CI, полный private отчёт остаётся на диске.
+      throw new Error(`${error.message}\n${String(error.stdout || '').slice(-16384)}`, { cause: error });
+    }
+
     assert.equal((await verifyDeepSeekSnapshot(vendorDir)).commit, commit);
     assert.equal(await fs.readlink(path.join(runtimeRoot, 'current')), 'builds/previous');
 

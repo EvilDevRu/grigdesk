@@ -24,7 +24,7 @@
 - [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
 - [Native-пробы режимов Codex: loopback, отсутствие CLI, очистка RPC и граница вложенной песочницы](codex-permission-mode-fixtures.md)
 - [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)
-- [Гейты DeepSeek: sandbox preflight, unit, SEA, source candidate и host parity](deepseek-test-gates.md)
+- [Гейты DeepSeek: sandbox, unit/SEA, source candidate, host parity и изолированный consumer](deepseek-test-gates.md)
 - [Подтверждение установки: прежняя всплывашка тоже имеет role=dialog](provider-confirmation-target.md)
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 - [API Android в JVM-тестах: Files и checked JSONException](android-test-sdk-api.md)
