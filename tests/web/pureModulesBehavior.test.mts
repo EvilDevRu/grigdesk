@@ -106,6 +106,7 @@ test('форма и id пяти локальных сторов сохранен
       'intents',
       'nextIntentId',
       'runtime',
+      'windowOwners',
     ]],
     [useHotkeysStore(pinia), 'hotkeys', ['overrides', 'recording']],
     [useUiContextStore(pinia), 'uiContext', ['revision']],

@@ -10,6 +10,7 @@ import test from 'node:test';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { subscribedSseNames as subscribedNames } from './helpers/sseSubscriptions.js';
 
 const WEB_SRC = fileURLToPath(new URL('../../web/src/', import.meta.url));
 const SERVER_SRC = fileURLToPath(new URL('../../server/src/', import.meta.url));
@@ -22,13 +23,6 @@ async function walk(dir, ext) {
     else if (ext.some((suffix) => entry.name.endsWith(suffix))) found.push(full);
   }
   return found;
-}
-
-async function subscribedNames() {
-  const source = await readFile(path.join(WEB_SRC, 'composables/useSse.ts'), 'utf8');
-  const list = source.match(/const EVENT_NAMES = \[([\s\S]*?)\];/);
-  assert.ok(list, 'список подписки не найден — его нельзя переносить без обновления сторожа');
-  return new Set([...list[1].matchAll(/'([a-z-]+)'/g)].map((m) => m[1]));
 }
 
 test('SSE: фронт подписан на все события, которые сам обрабатывает', async () => {

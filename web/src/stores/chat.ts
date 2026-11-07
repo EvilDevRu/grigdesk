@@ -1,5 +1,5 @@
 import { chatPageKey } from '../../../shared/chat/chatPaging.ts';
-import type { ChatCatalogPage, ChatCatalogSummary } from '../../../shared/chat/chatPaging.ts';
+import type { ChatCatalogPage } from '../../../shared/chat/chatPaging.ts';
 import { messageKey } from '../../../shared/chat/chatMessageIdentity.ts';
 
 import { isChatSpeed, chatSpeedModes } from '../../../shared/chat/chatSpeed.ts';
@@ -1542,7 +1542,11 @@ export const useChatStore = defineStore('chat', {
           const local = !chatLoadRuntimeFor(this).headOnly.has(sess.id)
             && !historyPersistenceFor(this).isSent(sess,
               fingerprintOf(archived ? archivedSlimOf(sess) : slimOf(sess)))
-            ? chatSearchSnippet(sess as unknown as Record<string, unknown>, t) : null;
+            ? chatSearchSnippet({
+              title: sess.title,
+              taskId: sess.taskId,
+              messages: sess.messages,
+            }, t) : null;
 
           if (remote === undefined && local === null) {
             return null;
@@ -1842,7 +1846,14 @@ export const useChatStore = defineStore('chat', {
         runtime.retiredSummaries.add(this.catalogSummary.epoch);
       }
 
-      this.catalogSummary = value as unknown as ChatCatalogSummary;
+      this.catalogSummary = {
+        active: Number(value.active),
+        archived: Number(value.archived),
+        unread: Number(value.unread),
+        waiting: Number(value.waiting),
+        epoch: value.epoch,
+        sequence: Number(value.sequence),
+      };
       runtime.counterEdits.clear();
     },
     /**

@@ -48,8 +48,8 @@ test('route launch, resume and goto use the single API contract', async () => {
   assert.match(pipeline, /api\.post\(`\/api\/tasks\/\$\{task\}\/resume`\)/);
 
   const stageEndpoint = [
-    /api\.post\(\s*`\/api\/tasks\/\$\{stage\.value!?\.task\}/,
-    /\/stage\/\$\{stage\.value!?\.key\}\/\$\{status\}`/,
+    /api\.post\(\s*`\/api\/tasks\/\$\{opened\.task\}/,
+    /\/stage\/\$\{opened\.key\}\/\$\{status\}`/,
   ];
 
   assert.match(pipeline, new RegExp(stageEndpoint.map((part) => part.source).join('')));

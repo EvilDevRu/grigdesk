@@ -63,7 +63,7 @@
 - [Единая команда: песочница, стабы, PTY, termios и ветки b24](cli-sandbox.md)
 - [Проверка типов UI должна видеть импортируемые JS-сторы](ui-typecheck-js-imports.md)
 - [Типизированные модули, Vite URL и lazy-компоненты в unit-загрузчиках](typed-vite-unit-loaders.md)
-- [Проверки исходника должны допускать TS-синтаксис и многострочные объекты](typed-source-contracts.md)
+- [Сторожи исходника: TS-синтаксис, общие SSE-имена, снимки экспортов и сокращение baseline](typed-source-contracts.md)
 - [Проверка lazy-маршрутов учитывает многострочные объекты и связь пути с компонентом](router-lazy-route-checks.md)
 - [ResizeObserver окна happy-dom нужно перенести в глобальное окружение теста](happy-dom-resize-observer.md)
 - [Изолированный UI preview: область наблюдения Vite и доступ Chromium к loopback](isolated-ui-preview.md)

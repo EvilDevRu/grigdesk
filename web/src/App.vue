@@ -234,8 +234,8 @@ function startWindowSync() {
     stores: [
       { store: favorites, actions: ['setFavorite'] },
       { store: seen, actions: ['markSeen'] },
-      { store: useTaskFavoritesStore().own as unknown as typeof favorites, actions: ['setFavorite'] },
-      { store: useTaskSeenStore().own as unknown as typeof seen, actions: ['markSeen'] },
+      { store: useTaskFavoritesStore().own, actions: ['setFavorite'] },
+      { store: useTaskSeenStore().own, actions: ['markSeen'] },
     ],
     invalidate: () => refresh.request(),
   });

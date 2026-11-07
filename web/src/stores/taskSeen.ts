@@ -3,6 +3,7 @@ import { trackerMutationOptions } from '../shared/trackerMutation.ts';
 // Серверные отметки двух личных пространств синхронизируются между устройствами.
 // Пока базовой линии нет, давние задачи не объявляются новыми.
 import { defineStore } from 'pinia';
+import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -36,7 +37,7 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-interface SeenBranch {
+interface SeenBranch extends Pick<StoreGeneric, '$onAction'> {
   scope: string;
   revision: number;
   taskIds: string[];

@@ -217,10 +217,11 @@ test('Code держит рейку разделов и навигатор сле
   assert.match(code, /Math\.floor\(width \* 0\.42\)/);
   assert.match(code, /:aria-valuemax="Math\.round\(navigatorMaxWidth\)"/);
   assert.match(code, /--code-nav-width/);
-  assert.match(code, /data-context="tool-dock-navigator"/);
+  assert.match(code, /class="navigator-toggle"[\s\S]*?data-context="workspace-toolbar"/);
   assert.match(
     actions,
     /data-context='tool-dock-navigator'\] \{[\s\S]*height:\s*var\(--tool-dock-action-size, 30px\);[\s\S]*min-height:\s*var\(--tool-dock-action-size, 30px\);/,
   );
-  assert.match(code, /\.code-panel\.compact \.code-head \{[\s\S]*padding:\s*var\(--tool-dock-action-top, 4px\)[^;]*5px 11px;/);
+  assert.match(code,
+    /<UiPaneHeader class="code-pane-heading" :data-ui-host-actions="compact \? '' : undefined"/);
 });
