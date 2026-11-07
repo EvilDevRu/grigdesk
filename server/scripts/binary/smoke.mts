@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 
@@ -28,29 +28,46 @@ async function freePort(): Promise<number> {
 }
 
 /**
- * Каждый запуск получает только синтетическое окружение со своим D/HOME/портами.
- * Пустой PATH проверяет ordinary Node из payload и отсутствие обязательных внешних CLI.
+ * Все app/factory/provider paths принадлежат одному physical TMP дереву E0,
+ * изолированному от build cache; пустой PATH сохраняет автономность payload.
  */
 function environment(root: string, data: string, port: number, mobilePort: number): NodeJS.ProcessEnv {
   return {
     PATH: '',
     HOME: path.join(root, 'home'),
+    TMPDIR: path.dirname(root),
     XDG_CACHE_HOME: path.join(root, 'cache'),
     XDG_CONFIG_HOME: path.join(root, 'config'),
     XDG_DATA_HOME: path.join(root, 'xdg-data'),
     GRIGDESK_HOME: data,
+    GRIGDESK_ENV_FILE: path.join(data, '.env'),
+    GRIGDESK_ARTIFACTS_DIR: path.join(data, 'artifacts'),
     GRIGDESK_PORT: String(port),
     GRIGDESK_MOBILE_PORT: String(mobilePort),
     GRIGDESK_WINDOW_KEY_PATH: path.join(data, 'window-auth/window-key'),
     GRIGDESK_CLI_TOKEN_PATH: path.join(data, 'state/cli-token'),
     FACTORY_STATE_DIR: path.join(data, 'factory/state'),
+    STATE_DIR: path.join(data, 'factory/state'),
+    FACTORY_STATE: path.join(data, 'factory/state'),
     FACTORY_CONTROL_ROOT: path.join(data, 'factory/control'),
     FACTORY_CONFIG_ROOT: path.join(data, 'factory/config'),
     FACTORY_PROFILES_DIR: path.join(data, 'profiles'),
+    GRIGDESK_ROUTES_DIR: path.join(data, 'factory/routes'),
+    GRIGDESK_ROUTES_AUTHORING_DIR: path.join(data, 'factory/routes.authoring'),
+    GRIGDESK_ANALYSIS_DIR: path.join(data, 'factory/analysis'),
+    GRIGDESK_3D_DIR: path.join(data, '3d'),
+    GRIGDESK_DEEPSEEK_RUNTIME_HOME: path.join(data, 'runtimes/deepseek'),
+    GRIGDESK_GLM_RUNTIME_HOME: path.join(data, 'runtimes/glm'),
+    GRIGDESK_KIMI_RUNTIME_HOME: path.join(data, 'runtimes/kimi'),
+    CODEX_HOME: path.join(root, 'codex'),
+    CLAUDE_CONFIG_DIR: path.join(root, 'claude'),
+    KIMI_CODE_HOME: path.join(root, 'kimi'),
     FACTORY_FORBID_LIVE: '1',
     NODE_ENV: 'production',
   };
 }
+
+export { environment as binarySmokeEnvironment };
 
 /**
  * Authenticated API readiness и закрытие собственного порта проверяются на реальном ELF.
@@ -188,6 +205,7 @@ export interface BinarySmokePorts {
 /**
  * E0 всегда проверяет функциональность и cold-порог; отдельный прежний R включает warm ratio.
  * Существующий baseline сохраняет прежние пары и пороги; полная приёмка S27 не меняется.
+ * Приватный umask наследуется тестовыми ELF; после прогона возвращается маска вызывающего.
  */
 export async function runBinarySmoke(input: {
   binary: string;
@@ -199,14 +217,16 @@ export async function runBinarySmoke(input: {
   const prepare = ports.prepare ?? prepareServerBinary;
   const verify = ports.verify ?? verifyServerBinary;
   const run = ports.boot ?? boot;
-  const root = await mkdtemp(path.join(input.cacheDir, 'e0-'));
+  const temporary = await realpath('/tmp');
+  const root = await mkdtemp(path.join(temporary, 'grigdesk-e0-'));
   const data = path.join(root, 'data');
   const baselineData = path.join(root, 'baseline-data');
   const baselineRoot = path.join(input.cacheDir, 'baseline-release');
   const baseline = path.join(baselineRoot, 'server/grigdesk-server');
+  const previousUmask = process.umask(0o077);
 
   try {
-    await mkdir(path.join(root, 'home'));
+    await mkdir(path.join(root, 'home'), { mode: 0o700 });
 
     const hasBaseline = await stat(baselineRoot).then(() => true, (error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') {
@@ -296,6 +316,7 @@ export async function runBinarySmoke(input: {
 
     return report;
   } finally {
+    process.umask(previousUmask);
     await rm(root, { recursive: true, force: true });
   }
 }

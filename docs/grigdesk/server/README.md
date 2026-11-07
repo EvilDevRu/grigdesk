@@ -31,7 +31,7 @@
 - [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
 - [Android APK в меню сборки и отдельной команде, пути и ошибки](ctl-build-apk.md)
 - [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
-- [E0 без baseline: функциональные ворота, cold-порог и явная пометка отчёта](server-binary-smoke-baseline.md)
+- [E0 без baseline: функциональные ворота, cold-порог и приватный HOME независимо от umask](server-binary-smoke-baseline.md)
 - [Выбор ELF/R/source и владение preparation в окне](server-binary-desktop.md)
 - [Сервер одним ELF: I/D/R, argv, launcher, приёмка и действия владельца](server-binary.md)
 - [Установка, private receipt и откат серверного ELF](server-binary-install.md)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -261,11 +261,14 @@ test('SB22-E0: без baseline холодный старт всё ещё огр�
 });
 
 test('SB22-E0: без baseline отказ любой функциональной проверки запрещает публикацию', async (t) => {
+  const callerUmask = process.umask();
+
   for (const failure of ['metadata', 'cold', 'prepare', 'ipc', 'verify']) {
     const input = await fixture(t);
 
     smokeHarness(input, { failure });
     await assert.rejects(executeBinaryBuild(input.options, input.steps), /fixture.*failed/, failure);
+    assert.equal(process.umask(), callerUmask, 'отказ возвращает umask вызывающего процесса');
     assert.equal(await readFile(input.target, 'utf8'), 'previous');
     assert.equal(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8'),
       'previous-result');
@@ -313,3 +316,50 @@ test('SB22-E0: неполный явно существующий baseline не 
   await assert.rejects(executeBinaryBuild(input.options, input.steps), /ENOENT/);
   assert.deepEqual(harness.events, []);
 });
+
+test('SB22-E0 isolation RED: ephemeral app roots отделены от build cache и удаляются после boot',
+  async (t) => {
+    const input = await fixture(t);
+    const temporary = await realpath('/tmp');
+    const seen = [];
+    const callerUmask = process.umask();
+    const reportFile = path.join(input.root, 'isolation-e0.json');
+    const report = await runBinarySmoke({
+      binary: input.target,
+      manifest: input.manifest,
+      cacheDir: input.options.cacheDir,
+      reportFile
+    }, {
+      probe: async () => ({ version: '0.1.0', packageId: input.manifest.packageId }),
+      prepare: async () => ({ preparationToken: 'fixture-token' }),
+      verify: async () => ({ elfSha256: sha256('previous') }),
+      boot: async (settings) => {
+        assert.ok(settings.root.startsWith(temporary + path.sep));
+        assert.equal(settings.root.startsWith(input.options.cacheDir + path.sep), false);
+        assert.ok(settings.data.startsWith(settings.root + path.sep));
+        assert.equal((await stat(settings.root)).mode & 0o777, 0o700);
+        assert.equal((await stat(path.join(settings.root, 'home'))).mode & 0o777, 0o700);
+
+        seen.push(settings.root);
+
+        return 100;
+      },
+    });
+
+    assert.equal(seen.length, 2, 'cold и IPC boot обязательны без baseline');
+    assert.equal(new Set(seen).size, 1);
+    assert.equal(report.coldMs, 100);
+    assert.equal(report.ipcMs, 100);
+    assert.equal(process.umask(), callerUmask, 'успех возвращает umask вызывающего процесса');
+    assert.equal(report.warmRatio, null);
+    assert.equal(report.warmP95Ratio, null);
+    assert.equal(JSON.parse(await readFile(reportFile, 'utf8')).coldMs, 100);
+
+    for (const root of seen) {
+      await assert.rejects(stat(root), { code: 'ENOENT' });
+    }
+
+    assert.equal(await readFile(input.target, 'utf8'), 'previous');
+    assert.equal(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8'),
+      'previous-result');
+  });
