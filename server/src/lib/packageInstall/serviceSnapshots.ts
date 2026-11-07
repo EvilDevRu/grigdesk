@@ -6,6 +6,7 @@ import type {
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { normalizePluginPackagePath } from '../pluginsRegistry.ts';
 import { readPluginManifest } from './validatePackage.ts';
+import type { PackageKind } from './packagePolicy.ts';
 
 /**
  * Previous удерживает самодостаточную версию без mutable bookkeeping current.
@@ -51,7 +52,7 @@ export function sensitivePluginFile(
     return true;
   }
 
-  return ['plugin.json', 'package.json', 'package-lock.json'].includes(basename);
+  return ['plugin.json', 'engine.json', 'package.json', 'package-lock.json'].includes(basename);
 }
 
 /**
@@ -75,9 +76,16 @@ export async function installedWebModuleDir(directory: string): Promise<string |
  * Прежний серверный путь остаётся чувствительным даже после его удаления из нового манифеста.
  * Чтение метаданных не импортирует код и не запрещает замену повреждённого пакета.
  */
-export async function installedServerEntry(directory: string): Promise<string | null> {
+export async function installedServerEntry(
+  directory: string, kind: PackageKind = 'plugin',
+): Promise<string | null> {
   try {
-    const manifest = await readPluginManifest(directory);
+    const manifest = await readPluginManifest(directory, kind);
+
+    if (kind === 'db-engine') {
+      return normalizePluginPackagePath(manifest.entry, false);
+    }
+
     const entries = manifest.entrypoints;
 
     return isRecord(entries) ? normalizePluginPackagePath(entries.server, false) : null;

@@ -16,6 +16,7 @@ import { installedRecord } from './helpers/pluginInstallState.js';
 import { mirrorPair } from './helpers/pluginMirrorFixture.js';
 import { createPluginRepo } from './helpers/pluginRepo.js';
 import { serviceFixture } from './helpers/pluginServiceFixture.js';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 
 /**
  * Barrier даёт наблюдаемую точку удержания без проверки времени выполнения.
@@ -49,8 +50,14 @@ function controlledSource() {
     fetch: async (request) => {
       calls.push(request);
       await mkdir(request.destination, { recursive: true });
+      await mkdir(path.join(request.destination, 'assets'), { recursive: true });
+      await writeFile(path.join(request.destination, 'assets/icon.png'), png);
       await writeFile(path.join(request.destination, 'plugin.json'),
-        JSON.stringify({ id: 'demo', version: '1.1.0' }));
+        JSON.stringify(manifestV1({
+          version: '1.1.0',
+          entrypoints: {},
+          contributes: {},
+        })));
     },
     changes: async () => null,
     inspectInstalled: async (_dir, expected) => ({ sha: expected.sha, modified: false }),
@@ -65,7 +72,10 @@ async function seedManaged({ service, pluginsDir }) {
   const directory = path.join(pluginsDir, 'demo');
 
   await mkdir(directory);
-  await writeFile(path.join(directory, 'plugin.json'), JSON.stringify({ id: 'demo', version: '1.0.0' }));
+  await mkdir(path.join(directory, 'assets'));
+  await writeFile(path.join(directory, 'assets/icon.png'), png);
+  await writeFile(path.join(directory, 'plugin.json'),
+    JSON.stringify(manifestV1({ entrypoints: {}, contributes: {} })));
 
   const record = installedRecord();
 
@@ -232,11 +242,12 @@ test('M30: общий deadline и budget между npmDirs не допуска�
 
       source.fetch = async (request) => {
         await original(request);
-        await writeFile(path.join(request.destination, 'plugin.json'), JSON.stringify({
-          id: 'demo',
+        await writeFile(path.join(request.destination, 'plugin.json'), JSON.stringify(manifestV1({
           version: '1.1.0',
+          entrypoints: {},
+          contributes: {},
           install: { npm: ['.', 'browser'] },
-        }));
+        })));
 
         for (const relative of ['.', 'browser']) {
           const directory = path.join(request.destination, relative);
