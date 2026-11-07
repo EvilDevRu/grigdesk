@@ -95,7 +95,7 @@ test('RL-45: посредник выпускается через общий wor
   assert.match(text, /^permissions:\n  contents: read$/m);
   assert.match(text, /persist-credentials: false/);
   assert.ok(text.includes(`node-version: ${runtime.version}`));
-  assert.equal(uses.length, 2);
+  assert.equal(uses.length, 3);
 
   for (const action of uses) {
     assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
@@ -106,7 +106,7 @@ test('RL-45: посредник выпускается через общий wor
   for (const command of [
     'npm --prefix server ci',
     'npm --prefix web ci',
-    'npm --prefix b24 ci',
+    'npm --prefix tracker ci',
     'npm --prefix relay ci',
     'npm --prefix deepseek ci',
     'npm --prefix desktop ci',

@@ -17,7 +17,7 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.match(text, /node-version:\s*24\.21\.0/);
   assert.match(text, /npm --prefix server test/);
   assert.match(text, /npm --prefix web test/);
-  assert.match(text, /npm --prefix b24 ci/);
+  assert.match(text, /npm --prefix tracker ci/);
   assert.match(text, /npm --prefix relay ci/);
   assert.match(text, /npm --prefix deepseek ci/);
   assert.match(text, /npm --prefix desktop ci/);

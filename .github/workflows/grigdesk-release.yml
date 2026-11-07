@@ -60,7 +60,7 @@ jobs:
       # пакетов импортируют esbuild из своих node_modules — ставим их явно.
       - name: Зависимости комплекта
         run: |
-          npm --prefix b24 ci
+          npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci
