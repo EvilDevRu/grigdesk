@@ -1,0 +1,25 @@
+{
+  "distributionVersion": "26.7.33",
+  "scenario": "Native registry with excluded shell and HTTP fetch; local synthetic OpenAI backend",
+  "excludedTools": [
+    "agent",
+    "skill",
+    "run_shell_command",
+    "web_fetch"
+  ],
+  "offeredTools": [
+    "list_directory",
+    "read_file",
+    "grep_search",
+    "glob",
+    "edit",
+    "write_file",
+    "save_memory",
+    "todo_write",
+    "ask_user_question",
+    "exit_plan_mode"
+  ],
+  "stopReason": "end_turn",
+  "paidModelCalls": 0,
+  "corporateAccountTested": false
+}

@@ -42,6 +42,7 @@
 - [Опись внешних CLI, успешное время замера и границы прогноза](external-cli-diagnostics.md)
 - [Проверка лимитов Kimi сохраняет путь к пользовательскому Node.js](kimi-usage-node-path.md)
 - [Окружение запуска и источники лимитов всех встроенных исполнителей](provider-runtime-environments.md)
+- [Очистка private homes GigaCode: PID/starttime и общий reader из packageInstall](gigacode-private-home-recovery.md)
 - [Lifecycle внешних CLI: четыре операции, PTY/factory и восстановление](external-cli-lifecycle.md)
 - [Живые сессии держат копию: инспекция holders и подтверждение закрытия в окне установки](provider-session-holders-close.md)
 - [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)

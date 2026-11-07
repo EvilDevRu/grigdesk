@@ -1,0 +1,125 @@
+[
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "bug",
+            "description": "Отправка отчёта об ошибке",
+            "input": null
+          },
+          {
+            "name": "compress",
+            "description": "Сжатие контекста заменой на краткую сводку",
+            "input": null
+          },
+          {
+            "name": "init",
+            "description": "Анализ проекта и создание адаптированного файла GIGACODE.md",
+            "input": null
+          },
+          {
+            "name": "summary",
+            "description": "Сгенерировать сводку проекта и сохранить её в .gigacode/PROJECT_SUMMARY.md",
+            "input": null
+          },
+          {
+            "name": "review",
+            "description": "Review changed code for correctness, security, code quality, and performance. Use when the user asks to review code changes, a PR, or specific files. Invoke with `/review`, `/review <pr-number>`, or `/review <file-path>`.",
+            "input": null
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "synthetic-tool-call",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "path": "allowed.txt",
+            "oldText": "overwritten",
+            "newText": "overwritten"
+          }
+        ],
+        "_meta": {
+          "toolName": "write_file"
+        },
+        "rawOutput": {
+          "fileDiff": "Index: allowed.txt\n===================================================================\n--- allowed.txt\tOriginal\n+++ allowed.txt\tWritten\n",
+          "fileName": "allowed.txt",
+          "originalContent": "overwritten",
+          "newContent": "overwritten",
+          "diffStat": {
+            "model_added_lines": 0,
+            "model_removed_lines": 0,
+            "model_added_chars": 0,
+            "model_removed_chars": 0,
+            "user_added_lines": 0,
+            "user_removed_lines": 0,
+            "user_added_chars": 0,
+            "user_removed_chars": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Синтетический "
+        }
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "ответ."
+        }
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": ""
+        },
+        "_meta": {
+          "usage": {
+            "inputTokens": 12,
+            "outputTokens": 3,
+            "totalTokens": 15,
+            "thoughtTokens": 0,
+            "cachedReadTokens": 0
+          },
+          "durationMs": 32
+        }
+      }
+    }
+  }
+]

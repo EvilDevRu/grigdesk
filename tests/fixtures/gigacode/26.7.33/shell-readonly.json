@@ -1,0 +1,111 @@
+[
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "bug",
+            "description": "Отправка отчёта об ошибке",
+            "input": null
+          },
+          {
+            "name": "compress",
+            "description": "Сжатие контекста заменой на краткую сводку",
+            "input": null
+          },
+          {
+            "name": "init",
+            "description": "Анализ проекта и создание адаптированного файла GIGACODE.md",
+            "input": null
+          },
+          {
+            "name": "summary",
+            "description": "Сгенерировать сводку проекта и сохранить её в .gigacode/PROJECT_SUMMARY.md",
+            "input": null
+          },
+          {
+            "name": "review",
+            "description": "Review changed code for correctness, security, code quality, and performance. Use when the user asks to review code changes, a PR, or specific files. Invoke with `/review`, `/review <pr-number>`, or `/review <file-path>`.",
+            "input": null
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "synthetic-tool-call",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Command: printf overwritten > '/tmp/gigacode-contract-fixture/workspace/source/canary.txt'\nDirectory: (root)\nOutput: bash: line 1: /tmp/gigacode-contract-fixture/workspace/source/canary.txt: Read-only file system\nError: (none)\nExit Code: 1\nSignal: (none)\nProcess Group PGID: (none)"
+            }
+          }
+        ],
+        "_meta": {
+          "toolName": "run_shell_command"
+        },
+        "rawOutput": "bash: line 1: /tmp/gigacode-contract-fixture/workspace/source/canary.txt: Read-only file system"
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Синтетический "
+        }
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "ответ."
+        }
+      }
+    }
+  },
+  {
+    "method": "session/update",
+    "params": {
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": ""
+        },
+        "_meta": {
+          "usage": {
+            "inputTokens": 12,
+            "outputTokens": 3,
+            "totalTokens": 15,
+            "thoughtTokens": 0,
+            "cachedReadTokens": 0
+          },
+          "durationMs": 59
+        }
+      }
+    }
+  }
+]
