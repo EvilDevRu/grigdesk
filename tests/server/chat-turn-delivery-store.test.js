@@ -212,7 +212,7 @@ test('ENOSPC при подготовке инструментов заверша
 
   await view.chat.send(id, 'Проверь временные файлы');
   await waitFor(() => view.chat.session(id).messages.some((message) => message.role === 'error'));
-  await settle();
+  await waitFor(() => !view.chat.session(id).sending, { what: 'завершение ошибочного хода в окне' });
 
   const session = view.chat.session(id);
   const error = session.messages.find((message) => message.role === 'error');
@@ -255,7 +255,7 @@ test('ошибка подготовки из очереди снимает ра�
   w.runs[0].release('Первый ответ');
   await waitFor(() => replies(view.chat, id).length === 1
     && view.chat.session(id).messages.some((message) => message.role === 'error'));
-  await settle();
+  await waitFor(() => !view.chat.session(id).sending, { what: 'завершение ошибки подготовки из очереди' });
   assert.equal(view.chat.session(id).sending, false);
   assert.equal(w.runs.length, 1);
 

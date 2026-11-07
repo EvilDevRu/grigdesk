@@ -29,8 +29,9 @@ DOM-узел happy-dom нельзя передавать в `assert.equal` / `de
 
 Вторая защита — `tests/run-node-tests-safe.sh`: он задаёт `--max-old-space-size` и следит за
 суммарным RSS группы тестовых процессов, останавливая её выше потолка (по умолчанию heap 1024 МиБ
-и 2048 МиБ RSS). Через него идут `npm --prefix web run test:components` и `npm --prefix server
-test` (6144 МиБ RSS на всю группу параллельных файлов). **Голый `node --test` этой защиты не
+и 2048 МиБ RSS). Через него идут `npm --prefix web run test:components` (6144 МиБ RSS)
+и `npm --prefix server test` (4096 МиБ RSS, два файла одновременно).
+Бюджет относится ко всей группе параллельных файлов. **Голый `node --test` этой защиты не
 получает**, поэтому отдельные веб-тесты запускай так: `bash tests/run-node-tests-safe.sh --test
 <файлы>`. Заминированный файл сторож останавливает на 2 ГиБ за секунды. Бюджет RSS общий на всю
 группу: несколько файлов запускай с `--test-concurrency=2` и `NODE_TEST_MAX_RSS_MB=4096`, иначе

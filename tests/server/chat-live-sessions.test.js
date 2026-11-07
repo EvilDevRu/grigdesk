@@ -431,10 +431,6 @@ async function apiFixture(t, {
 } = {}) {
   const root = givenRoot || await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
 
-  if (!givenRoot) {
-    t.after(() => rm(root, { recursive: true, force: true }));
-  }
-
   const events = [];
   const handles = [];
   const app = Fastify({ logger: false });
@@ -470,7 +466,12 @@ async function apiFixture(t, {
           sends: 0,
           closed: false,
           async send() {
-            if (handle.hold) await handle.hold;
+            handle.sends += 1;
+
+            if (handle.hold) {
+              await handle.hold;
+            }
+
             return { reply: 'ок', steps: [], sessionId: 'sid-live', cost: 0 };
           },
           async interrupt() { handle.interrupted += 1; },
@@ -522,7 +523,13 @@ async function apiFixture(t, {
     taskExists: async (id) => taskId !== null && String(id) === taskId,
   });
   await app.ready();
-  t.after(() => app.close());
+  t.after(async () => {
+    await app.close();
+
+    if (!givenRoot) {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
   async function chat(id = 'live-chat') {
     const saved = await app.inject({
@@ -641,7 +648,9 @@ test('погашение процесса не трогает разговор, 
 
   // Идущий ход: держим send незавершённым и пробуем погасить процесс под ним.
   const second = fixture.turn(chatKey);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  await waitUntil(() => fixture.handles.length >= 2);
+
   const live = fixture.handles[1];
   assert.ok(live, 'следующий ход поднял процесс заново');
   let release = null;
@@ -649,7 +658,7 @@ test('погашение процесса не трогает разговор, 
 
   const third = fixture.turn(chatKey);
   await second;
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitUntil(() => live.sends >= 2);
 
   const busy = await fixture.app.inject({ method: 'DELETE', url: `/api/chat/sessions/${chatKey}` });
   assert.equal(busy.statusCode, 409, busy.body);

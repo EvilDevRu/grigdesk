@@ -107,12 +107,15 @@ async function buildCandidate(
     return path.join(cache, 'payloads', manifest.payload.sha256, 'payload.zip');
   } catch (error) {
     const failure = error as Error & { stdout?: string; stderr?: string };
+    const details = `${failure.message}\n${failure.stdout ?? ''}\n${failure.stderr ?? ''}`;
 
-    await fs.writeFile(log, `${failure.message}\n${failure.stdout ?? ''}\n${failure.stderr ?? ''}`, {
+    await fs.writeFile(log, details, {
       mode: 0o600,
     });
 
-    throw new Error(`Сборка test DeepSeek binary отказала; журнал ${log}`, { cause: error });
+    throw new Error(`Сборка test DeepSeek binary отказала; журнал ${log}\n${details.slice(-8192)}`, {
+      cause: error,
+    });
   } finally {
     await fs.rm(source, { recursive: true, force: true });
   }
