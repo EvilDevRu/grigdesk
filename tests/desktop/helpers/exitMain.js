@@ -284,6 +284,7 @@ export async function exitMain(t, options = {}) {
   };
 
   Object.assign(app, {
+    commandLine: { getSwitchValue: () => '', appendSwitch() {} },
     setName() {},
     setPath() {},
     enableSandbox() {},
@@ -334,6 +335,8 @@ export async function exitMain(t, options = {}) {
       const f = globalThis.__exitMain;
       export const app = f.app;
       export const BrowserWindow = f.BrowserWindow;
+      export const BaseWindow = f.BrowserWindow;
+      export const nativeImage = { createFromPath: () => ({ isEmpty: () => true }) };
       export class WebContentsView {}
       export const ipcMain = {
         handle() {}, on() {}, removeHandler() {}, removeListener() {},

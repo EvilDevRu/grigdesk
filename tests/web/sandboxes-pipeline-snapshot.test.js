@@ -95,7 +95,7 @@ export { failureText } from '${webFile('src/shared/apiClient.ts')}';
 export const api = { async get(url) {
   const h = globalThis.__sandboxSnapshotHarness;
   h.requests.push(url);
-  if (url === '/api/tasks') {
+  if (url === '/api/tasks?sources=1') {
     if (h.fail) throw new Error('Источник недоступен');
     return { tasks: h.tasks, silenceWindow: 300 };
   }
@@ -154,7 +154,7 @@ test('полный снимок публикует и неактивную за�
     assert.equal(published.loadedAt, store.loadedAt);
     assert.equal(published.error, null);
     assert.deepEqual(harness.requests,
-        ['/api/tasks',
+        ['/api/tasks?sources=1',
         ...harness.tasks.map((task) => `/api/tasks/${task.task}/graph`)]);
     assert.deepEqual(harness.notifications, []);
 });
@@ -174,7 +174,7 @@ test('ошибка источника сохраняет снимок и пом�
     assert.deepEqual(harness.latest.observedByTask, before.observedByTask);
     assert.equal(harness.latest.loadedAt, before.loadedAt);
     assert.match(String(harness.latest.error), /Источник недоступен/);
-    assert.equal(harness.requests.at(-1), '/api/tasks');
+    assert.equal(harness.requests.at(-1), '/api/tasks?sources=1');
     assert.equal(harness.requests.length, harness.tasks.length + 2);
 });
 test('новый успешный снимок удаляет исчезнувшую задачу', async (t) => {

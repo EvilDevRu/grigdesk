@@ -4,6 +4,8 @@
 адресное окно `/api/chat/store/chat/:id?window=1`. Фикстура с прежним полным store
 или `listProtocol: 1` не проверяет загрузку после F5. Используй общие `protocolPage`,
 `protocolWindow` либо `loadApi`, сохраняя метаданные выбранной модели в ответе каталога.
+Это относится и к восстановлению карточек SSH/DB: устаревший list останавливает `_load`
+раньше чтения `/api/chat/waiting?include=ssh,db`.
 
 Если сценарий пишет историю после F5, транспорт должен передать `window` в настоящий
 `ChatHistoryStore.saveOne` и вернуть подтверждённые prefix/base hashes, границы и cursor.

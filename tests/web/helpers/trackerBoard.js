@@ -356,7 +356,9 @@ export async function openTrackerManager(card) {
  * Тест выбирает реальное поле по его значению и проверяет эффект через HTTP.
  */
 export async function chooseExternal(card, id) {
-  if (!card.wrapper.find('select').exists()) {
+  if (!card.wrapper.find(`input[type="radio"][value="${id}"]`).exists()
+    && !card.wrapper.findAll('select')
+      .some((candidate) => candidate.find(`option[value="${id}"]`).exists())) {
     await actionButton(card.wrapper, /^(?:Подключение доски|Board connection)$/u).trigger('click');
     await card.flushPromises();
   }

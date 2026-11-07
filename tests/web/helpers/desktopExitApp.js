@@ -59,6 +59,7 @@ export async function desktopExitApp(t, options = {}) {
     clear() {},
     stopPoll() {},
     setPassive() {},
+    clearSource() {},
   };
 
   globalThis.__desktopExitApp = { auth, other };
@@ -117,6 +118,8 @@ export async function desktopExitApp(t, options = {}) {
     '../router.ts': 'export const router = { push: async () => {} };',
   };
 
+  delete stubs['./shared/layout/DesktopExitHost.vue'];
+
   for (const [name, exported] of [
     ['board', 'useBoardStore'], ['system', 'useSystemStore'], ['taskFavorites', 'useTaskFavoritesStore'],
     ['taskShelf', 'useTaskShelfStore'],
@@ -153,6 +156,7 @@ export async function desktopExitApp(t, options = {}) {
     status: 'online',
     detail: null,
     capabilities: [],
+    localAvailable: true,
     desktopExit: { skipConfirmation: false },
   };
 

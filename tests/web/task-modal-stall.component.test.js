@@ -7,6 +7,8 @@ import { disclosure, exhaustedStop, stallFixture, stopDetails } from './helpers/
 
 process.env.NODE_ENV = 'test';
 
+const SOURCE = `fixture@${'a'.repeat(64)}`;
+
 /**
  * Окно читает синтетические summary и graph через свои прежние сетевые порты.
  * Оба представления используют настоящий TaskModal, stores изолированы новой Pinia.
@@ -48,10 +50,11 @@ async function mountTaskStop(t, presentation, { legacy = false, graphError = fal
       async get(url) {
         calls.push(url);
 
-        if (url === '/api/tasks') {
+        if (url === '/api/tasks?sources=1') {
           return {
             tasks: Object.entries(stops).map(([task, stall]) => ({
               task,
+              source: SOURCE,
               stall,
               attempt: 'a_test',
             })),
@@ -95,7 +98,7 @@ async function mountTaskStop(t, presentation, { legacy = false, graphError = fal
         },
       },
     }),
-    BoardStore: defineStore('task-stop-board', { state: () => ({ data: null }) }),
+    BoardStore: defineStore('task-stop-board', { state: () => ({ data: { source: SOURCE } }) }),
     FavoritesStore: () => ({
       loaded: true,
       isFavorite: () => false,
@@ -148,8 +151,8 @@ for (const presentation of ['dialog', 'document']) {
     const { wrapper, calls } = await mountTaskStop(t, presentation);
     const panel = wrapper.get('.convstall');
 
-    assert.equal(calls.filter((url) => url === '/api/tasks').length, 1);
-    assert.equal(calls.filter((url) => url === '/api/tasks/42/graph').length, 1);
+    assert.equal(calls.filter((url) => url === '/api/tasks?sources=1').length, 2);
+    assert.equal(calls.filter((url) => url === '/api/tasks/42/graph').length, 2);
     assert.match(panel.text(), /агент не вернул результат/);
     assert.ok(!panel.text().includes(exhaustedStop.hint));
 
@@ -164,7 +167,7 @@ for (const presentation of ['dialog', 'document']) {
       'Что случилось', 'Возможная причина', 'Что уцелело', 'Что делать',
     ]);
     assert.deepEqual(panel.findAll('dd').map((item) => item.text()), Object.values(stopDetails));
-    assert.equal(calls.filter((url) => url === '/api/tasks').length, 1);
+    assert.equal(calls.filter((url) => url === '/api/tasks?sources=1').length, 2);
   });
 
   test(`другая задача закрывает старые подробности: ${presentation}`, async (t) => {
@@ -193,7 +196,7 @@ for (const presentation of ['dialog', 'document']) {
     const panel = wrapper.get('.convstall');
 
     assert.match(panel.text(), /нужно решение человека/);
-    assert.equal(calls.filter((url) => url === '/api/tasks/42/graph').length, 1);
+    assert.equal(calls.filter((url) => url === '/api/tasks/42/graph').length, 2);
 
     const button = disclosure(panel);
 

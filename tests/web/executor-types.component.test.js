@@ -80,9 +80,11 @@ function compileShell() {
   };
   const stubs = Object.fromEntries(Object.entries(stores).map(([file, name]) => [
     `../../stores/${file}.js`,
-    `export const ${name} = () => globalThis.__typesShellStores.${name};`,
+    `export const ${name} = () => globalThis.__typesShellStores.${name};`
+      + (file === 'plugins' ? 'export const pluginCategoryOf = (plugin) => plugin.category;' : ''),
   ]));
   const children = [
+    '../../features/providers/ProviderUsagePlugins.vue',
     '../../features/board/BoardTimerPopover.vue',
     '../../features/pipeline/PipelineTopbarPopover.vue',
     '../../features/analysis/AttentionAlerts.vue',
@@ -105,6 +107,9 @@ function compileShell() {
       '../apiClient.ts': `export const api = { get: async () => ({}) };
         export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
       '../../composables/useSse.ts': `
+        export const reconnectSse = () => {};
+        export const sseRecovering = { value: false };
+        export const sseRetryAt = { value: 0 };
         export const useSse = (handler) => {
           globalThis.__typesShellSse = handler;
           return { connected: globalThis.__typesShellConnected };

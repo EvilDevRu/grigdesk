@@ -149,15 +149,23 @@ async function mountScenario(t, { own = false } = {}) {
   let boardLoads = 0;
 
   globalThis.__pipelineB24Api = {
+    /**
+     * Полный список источников и адресные графы читаются из одного набора задач.
+     * Неизвестная ручка не маскируется пустым успешным ответом.
+     */
     async get(url) {
       getCalls.push(url);
-      if (url === '/api/tasks') {
+
+      if (url === '/api/tasks?sources=1') {
         return { tasks };
       }
+
       const graphMatch = url.match(/^\/api\/tasks\/(\d+)\/graph$/u);
+
       if (graphMatch && graphs.has(Number(graphMatch[1]))) {
         return graphs.get(Number(graphMatch[1]));
       }
+
       throw new Error(`Неожиданный GET ${url}`);
     },
     async post() {
@@ -380,7 +388,7 @@ test('карточки конвейера различают три состоя
     intervalDelays: [1000],
     boardLoads: 1,
     getCalls: [
-      '/api/tasks',
+      '/api/tasks?sources=1',
       '/api/tasks/101/graph',
       '/api/tasks/202/graph',
       '/api/tasks/303/graph',
@@ -410,5 +418,5 @@ test('LOCAL-PIPELINE-01: собственное название открыва�
   t.mock.timers.tick(1000);
   await fx.flushPromises();
   assert.equal(fx.loadedTasks.includes('100000000001'), false);
-  assert.ok(fx.getCalls.filter((url) => url === '/api/tasks').length >= 2);
+  assert.ok(fx.getCalls.filter((url) => url === '/api/tasks?sources=1').length >= 2);
 });
