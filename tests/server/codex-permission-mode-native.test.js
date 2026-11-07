@@ -1,13 +1,43 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import { nativeModeProbe } from '../fixtures/codex-app-server/permission-mode-loopback.mjs';
 
 const directory = process.env.GRIGDESK_CODEX_NATIVE_ARTIFACTS || os.tmpdir();
+const nativeOptions = { timeout: 30_000 };
+const binary = process.env.CODEX_BIN || 'codex';
+
+try {
+  await promisify(execFile)(binary, ['--version'], { timeout: 10_000 });
+} catch (error) {
+  if (error.code !== 'ENOENT') {
+    throw error;
+  }
+
+  nativeOptions.skip = `Codex CLI не установлен (${binary})`;
+}
+
+test('native fixture завершает отказ запуска и закрывает loopback без установленного CLI', {
+  timeout: 5_000,
+}, async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-missing-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(nativeModeProbe({
+    directory: root,
+    binary: path.join(root, 'missing-codex'),
+    policy: 'never',
+    sandbox: 'read-only',
+    call: () => assert.fail('модель не должна вызываться при отказе запуска'),
+  }), { code: 'ENOENT' });
+});
 
 /**
  * Реальный code-mode вызывает объявленный shell, а ответчик не подменяет результат команды.
@@ -35,9 +65,7 @@ async function shellProbe(policy, sandbox, cmd, setup) {
   });
 }
 
-test('native on-request/read-only не обеспечивает подтверждение каждого Bash', {
-  timeout: 30_000,
-}, async () => {
+test('native on-request/read-only не обеспечивает подтверждение каждого Bash', nativeOptions, async () => {
   const f = await shellProbe('on-request', 'read-only', 'printf NATIVE_READ_PROBE');
   const output = JSON.stringify(f.requests[1]?.input.filter((item) => item.type.endsWith('call_output')));
 
@@ -45,9 +73,8 @@ test('native on-request/read-only не обеспечивает подтверж
   assert.equal(f.events.some((event) => event.method === 'item/commandExecution/requestApproval'), false);
 });
 
-test('native untrusted с внешним allow-rule не гарантирует вопрос для каждого Bash', {
-  timeout: 30_000,
-}, async () => {
+test('native untrusted с внешним allow-rule не гарантирует вопрос для каждого Bash',
+  nativeOptions, async () => {
   const f = await shellProbe('untrusted', 'read-only', 'ls', async ({ cwd, home }) => {
     await writeFile(path.join(cwd, 'NATIVE_READ_SENTINEL'), 'fixture');
     await mkdir(path.join(home, 'rules'));
@@ -60,9 +87,8 @@ test('native untrusted с внешним allow-rule не гарантирует 
   assert.equal(f.events.some((event) => event.method === 'item/commandExecution/requestApproval'), false);
 });
 
-test('native dontAsk разрешает workspace effect и запрещает внешний без approval', {
-  timeout: 30_000,
-}, async () => {
+test('native dontAsk разрешает workspace effect и запрещает внешний без approval',
+  nativeOptions, async () => {
   const f = await shellProbe('never', 'workspace-write', ({ root }) => (
     `printf allowed > allowed.txt; printf forbidden > ${JSON.stringify(path.join(root, 'forbidden'))}`
   ));
@@ -73,7 +99,7 @@ test('native dontAsk разрешает workspace effect и запрещает �
   assert.equal(f.ready.approvalPolicy, 'never');
 });
 
-test('native bypass разрешает только синтетический sibling в пробе', { timeout: 30_000 }, async () => {
+test('native bypass разрешает только синтетический sibling в пробе', nativeOptions, async () => {
   const f = await shellProbe('never', 'danger-full-access', ({ root }) => (
     `printf bypass > ${JSON.stringify(path.join(root, 'sibling'))}`
   ));
@@ -82,9 +108,8 @@ test('native bypass разрешает только синтетический s
   assert.equal(f.ready.sandbox.type, 'dangerFullAccess');
 });
 
-test('native cleanup не отзывает detached effect полного доступа: bypass не получает admission', {
-  timeout: 30_000,
-}, async () => {
+test('native cleanup не отзывает detached effect полного доступа: bypass не получает admission',
+  nativeOptions, async () => {
   const f = await nativeModeProbe({
     directory,
     policy: 'never',
@@ -109,9 +134,7 @@ test('native cleanup не отзывает detached effect полного дос
   assert.equal(await readFile(path.join(f.root, 'detached-marker'), 'utf8'), 'detached');
 });
 
-test('native acceptEdits не защищает новый .env при автоматическом patch', {
-  timeout: 30_000,
-}, async () => {
+test('native acceptEdits не защищает новый .env при автоматическом patch', nativeOptions, async () => {
   const f = await nativeModeProbe({
     directory,
     policy: 'on-request',
@@ -133,9 +156,7 @@ test('native acceptEdits не защищает новый .env при автом
 });
 
 for (const mode of ['dontAsk']) {
-  test(`настоящий CLI через wrapped adapter: ${mode}, reuse и cleanup`, {
-    timeout: 30_000,
-  }, async () => {
+  test(`настоящий CLI через wrapped adapter: ${mode}, reuse и cleanup`, nativeOptions, async () => {
     const f = await nativeModeProbe({
       directory,
       adapterMode: mode,
