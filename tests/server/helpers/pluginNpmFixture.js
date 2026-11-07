@@ -5,6 +5,8 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
+import { manifestV1, png } from '../../helpers/pluginV1.js';
+
 /**
  * Lifecycle scripts только создают marker в своём temp root, никогда не запускаются при pack.
  * Настоящий npm получает tarballs по integrity из одноразового кеша без сети.
@@ -76,7 +78,14 @@ export async function createOfflineNpmFixture(t) {
 
   await writeFile(path.join(cwd, 'package.json'), JSON.stringify(manifest));
   await writeFile(path.join(cwd, 'package-lock.json'), JSON.stringify(lock));
-  await writeFile(path.join(cwd, 'plugin.json'), JSON.stringify({ id: 'demo', version: '1.0.0' }));
+  await mkdir(path.join(cwd, 'assets'));
+  await writeFile(path.join(cwd, 'assets/icon.png'), png);
+  await writeFile(path.join(cwd, 'plugin.json'),
+    JSON.stringify(manifestV1({
+      entrypoints: {},
+      contributes: {},
+      install: undefined,
+    })));
 
   return {
     root,

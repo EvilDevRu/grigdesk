@@ -51,7 +51,7 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Удаление пользовательского пакета: несовместимые пакеты, identity recovery и сохранение данных](user-plugin-removal.md)
 - [Установка v1: проверка модуля, доверие, обновление и единый каталог](plugin-module-install.md)
 - [Installer boot: пути, VERSION, SYSTEM, recovery до import и close](plugin-install-boot.md)
-- [Runtime lease, drain потоков, user dataDir и строгий HTTP установки](plugin-install-runtime.md)
+- [Runtime lease, drain, объявленные входы v1, поколения модуля и строгий HTTP установки](plugin-install-runtime.md)
 - [Сервис подготовки: admission, owned reads, managed update и snapshot rollback](user-plugin-install-service.md)
 - [Замена папок: durable intent, identity resolver, cleanup и process-crash barriers](user-plugin-apply-recovery.md)
 - [Подготовка npm: реальный offline fixture, изоляция config и durable state](user-plugin-npm-state.md)

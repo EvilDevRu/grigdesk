@@ -136,6 +136,7 @@ jobs:
         run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
         env:
           GRIGDESK_RELEASE_NOTES_JSON: ${{ inputs.notes }}
+          GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
 
       - name: Deb-пакет
         # Bootstrap-пакет для apt: ставит только загрузчик и подписанный installer,

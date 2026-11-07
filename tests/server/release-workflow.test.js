@@ -77,8 +77,12 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   const publish = workflow.jobs.release.steps.find((step) =>
     step.run?.includes('tools/release-publish.mts'));
+  const bundle = workflow.jobs.release.steps.find((step) =>
+    step.run?.includes('node tools/bundle.mts'));
 
   assert.ok(publish, 'publisher остаётся отдельным шагом');
+  assert.equal(bundle.env.GRIGDESK_RELEASE_ORIGIN,
+    "${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}");
   assert.match(publish.if ?? '', /inputs\.publish/u);
   assert.equal(publish.env.RELEASE_SITE_PORT, "${{ secrets.RELEASE_SITE_PORT || '22' }}");
   assert.equal(publish.env.RELEASE_SITE_MIRROR_PORT, "${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}");

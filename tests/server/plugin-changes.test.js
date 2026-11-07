@@ -7,22 +7,28 @@ import { runtimeFixture, settle } from './helpers/pluginRuntimeFixture.js';
 
 const slot = PLUGIN_SLOT_NAMES[0];
 const manifest = {
-  settings: [
-    {
-      key: 'limit',
-      type: 'number',
-      min: 2,
-      max: 10,
-      step: 2,
-      default: 4,
-    },
-    {
-      key: 'name',
-      type: 'text',
-      default: 'Исходное',
-    },
-  ],
-  placements: [{ slot, label: 'Панель' }],
+  contributes: {
+    settings: [
+      {
+        key: 'limit',
+        type: 'number',
+        min: 2,
+        max: 10,
+        step: 2,
+        default: 4,
+      },
+      {
+        key: 'name',
+        type: 'text',
+        default: 'Исходное',
+      },
+    ],
+    slots: [{
+      slot,
+      kind: 'provider-usage',
+      default: true,
+    }],
+  },
 };
 
 /**
