@@ -13,6 +13,7 @@ import { externalCliAdapter } from '../../../server/src/lib/providerInstall/exte
  */
 export async function nativeModeProbe({
   directory, policy, sandbox, call, decision = 'decline', setup, adapterMode, startConfig, cleanTerminals,
+  binary = process.env.CODEX_BIN || 'codex',
 }) {
   const root = await mkdtemp(path.join(directory, 'native-'));
   const home = path.join(root, 'home');
@@ -88,7 +89,7 @@ export async function nativeModeProbe({
 
   if (adapterMode) {
     const config = {
-      codexBin: process.env.CODEX_BIN || 'codex',
+      codexBin: binary,
       dataHome: path.join(root, 'data'),
       artifactsDir: root
     };
@@ -168,7 +169,7 @@ export async function nativeModeProbe({
     }
   }
 
-  const child = spawn(process.env.CODEX_BIN || 'codex', ['app-server'], {
+  const child = spawn(binary, ['app-server'], {
     cwd,
     env: {
       PATH: process.env.PATH,
@@ -182,8 +183,16 @@ export async function nativeModeProbe({
   });
   const pending = new Map();
   let sequence = 0;
+  let failure;
+  const closed = new Promise((resolve) => child.once('close', resolve));
   const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
   const rpc = (method, params) => new Promise((resolve, reject) => {
+    if (failure) {
+      reject(failure);
+
+      return;
+    }
+
     const id = ++sequence;
 
     pending.set(id, { resolve, reject });
@@ -198,15 +207,27 @@ export async function nativeModeProbe({
     complete = resolve;
   });
 
+  /**
+   * Ошибка запуска и общий срок прерывают также текущий RPC, а не только ожидание turn.
+   * Иначе незавершённый initialize удерживает HTTP-ответчик после провала теста.
+   */
+  function fail(error) {
+    failure = error;
+
+    for (const waiter of pending.values()) {
+      waiter.reject(error);
+    }
+
+    pending.clear();
+    complete({ error });
+  }
+
   child.stderr.on('data', (chunk) => {
     stderr += chunk;
   });
+  child.once('error', fail);
   child.on('exit', () => {
-    for (const waiter of pending.values()) {
-      waiter.reject(new Error(`CLI exited: ${stderr.slice(-1000)}`));
-    }
-
-    complete({ exited: true });
+    fail(new Error(`CLI exited: ${stderr.slice(-1000)}`));
   });
   createInterface({ input: child.stdout }).on('line', (line) => {
     const event = JSON.parse(line);
@@ -230,7 +251,7 @@ export async function nativeModeProbe({
     }
   });
 
-  const timer = setTimeout(() => complete({ timeout: true }), 25_000);
+  const timer = setTimeout(() => fail(new Error('Native Codex probe timed out')), 25_000);
 
   try {
     await rpc('initialize', {
@@ -273,6 +294,11 @@ export async function nativeModeProbe({
     });
 
     const result = await completed;
+
+    if (failure) {
+      throw failure;
+    }
+
     const terminals = cleanTerminals ? await (async () => {
       await rpc('thread/backgroundTerminals/clean', { threadId: ready.thread.id });
 
@@ -302,21 +328,17 @@ export async function nativeModeProbe({
     clearTimeout(timer);
 
     // detached=true создаёт собственную группу: чужие процессы сюда не входят.
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch (error) {
-      if (error.code !== 'ESRCH') {
-        throw error;
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch (error) {
+        if (error.code !== 'ESRCH') {
+          throw error;
+        }
       }
     }
 
-    await new Promise((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        resolve();
-      } else {
-        child.once('close', resolve);
-      }
-    });
+    await closed;
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
