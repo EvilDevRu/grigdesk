@@ -37,7 +37,7 @@ async function readShellStateCore(rev?: number, signal?: AbortSignal): Promise<S
     });
 
     if (response.status >= 500 || response.status === 429) {
-      throw new Error('Оболочка временно недоступна');
+      throw new Error(localeTranslator(uiLocalePort)('core.shellTemporarilyUnavailable'));
     }
 
     if (!response.ok) {

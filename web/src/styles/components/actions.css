@@ -2659,11 +2659,11 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 
 /* Сводка узкого окна показывает подписанные строки с полной площадкой нажатия.
    Число исполнителей увеличивает высоту панели, сохраняя ширину верхней полосы. */
-.topbar-status-label {
+.ui-button .topbar-status-label {
   display: none;
 }
 
-.shell-status-panel .topbar-status-label {
+.ui-topbar-panel.shell-status-panel .topbar-status-label {
   display: block;
   white-space: normal;
 }
@@ -2920,6 +2920,10 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 
 [data-ui-phone-sections] .topbar-status-label {
   display: inline;
+}
+
+.ui-disclosure-button[data-context='ssh-project-toggle'] {
+  padding-inline: 8px;
 }
 
 [data-ui-phone-sections] .ui-button:is(

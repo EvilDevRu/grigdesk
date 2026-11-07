@@ -109,6 +109,10 @@ export const useSettingsStore = defineStore('settings', () => {
       id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
   }
 
+  /**
+   * Навигация принимает только существующую страницу и сохраняет выбранную сущность.
+   * Неизвестный адрес оставляет текущую страницу и показывает причину отказа.
+   */
   function selectPage(id: string, entity?: string, tab?: string): boolean {
     const selected = normalizePageId(id);
 

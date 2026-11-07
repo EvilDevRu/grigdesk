@@ -902,6 +902,7 @@
   "machineConnectionTitle": "Подключение",
   "machineConnectionIntro": "Состояние выбранной машины",
   "machineUnavailable": "Машина недоступна",
+  "shellTemporarilyUnavailable": "Оболочка временно недоступна",
   "machineOfflineHint": "Проверьте, что компьютер включён, GrigDesk запущен и есть доступ к сети.",
   "machineRetryCountdown": "Повторим подключение через {seconds} с",
   "machineRetryNow": "Повторить сейчас",

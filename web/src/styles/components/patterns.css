@@ -695,7 +695,7 @@
 }
 
 .ui-tabs[data-ui-browser-tabs] .browser-tab-agent[data-agent-state='working'] {
-  animation: browser-agent-pulse 1.2s ease-in-out infinite;
+  animation: ui-browser-agent-pulse 1.2s ease-in-out infinite;
 }
 
 .ui-tabs[data-ui-browser-tabs] .browser-tab-agent[data-agent-state='paused'] {
@@ -703,7 +703,7 @@
   opacity: var(--control-disabled-opacity);
 }
 
-@keyframes browser-agent-pulse {
+@keyframes ui-browser-agent-pulse {
   0%, 100% {
     opacity: 1;
   }
@@ -1519,11 +1519,11 @@
 /* Заголовок не сжимается до буквенного столбца: длинные actions переносятся целиком.
    Короткое действие остаётся рядом, когда обоим хватает собственной ширины. */
 @media (max-width: 600px) {
-  .board {
+  .board.ui-workspace {
     --board-secondary-color: color-mix(in srgb, var(--ink-low) 70%, var(--surface));
   }
 
-  .board-phone-footer [data-role='board-snapshot-status'] {
+  .ui-workspace .board-phone-footer [data-role='board-snapshot-status'] {
     color: var(--board-secondary-color);
   }
 
@@ -1771,5 +1771,19 @@
     justify-content: space-between;
     flex-wrap: nowrap;
     gap: 12px;
+  }
+}
+
+.ui-video[data-context='media-viewer'] {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 80%);
+}
+
+@media (max-width: 600px) {
+  .ui-video[data-context='media-viewer'] {
+    border-radius: 0;
   }
 }
