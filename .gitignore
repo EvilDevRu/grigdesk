@@ -62,10 +62,10 @@ web/.generated/markdown/
 /bin/.grigdesk-relay-*.tmp
 /relay/.cache/
 
-# Готовый b24 и проверяемый кэш его сборки SEA.
-/bin/b24
-/bin/.b24-*.tmp
-/b24/.cache/
+# Готовый tracker и проверяемый кэш его сборки SEA.
+/bin/tracker
+/bin/.tracker-*.tmp
+/tracker/.cache/
 
 # Готовый DeepSeek и отдельные зависимости и кэш его SEA-сборки.
 /bin/deepseek

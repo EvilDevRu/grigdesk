@@ -1,7 +1,7 @@
-export const UNKNOWN_FAILURE = 'Не удалось выполнить команду b24.';
+export const UNKNOWN_FAILURE = 'Не удалось выполнить команду tracker.';
 
 /**
- * Отказ команды b24 с кодом выхода и русским сообщением для stderr.
+ * Отказ команды tracker с кодом выхода и русским сообщением для stderr.
  * Сообщение не содержит токена, тела ответа и английского стека.
  */
 export class B24Error extends Error {

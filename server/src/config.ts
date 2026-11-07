@@ -335,7 +335,7 @@ export const config = {
   // (владельца незавершённых операций 3D) и продуктом не переписывается.
   authAccountPath: process.env.GRIGDESK_AUTH_ACCOUNT || path.join(dataStateDir, 'auth-account.json'),
   authSessionsPath: process.env.GRIGDESK_AUTH_SESSIONS || path.join(dataStateDir, 'auth-sessions.json'),
-  // Токен для ЛОКАЛЬНЫХ CLI-потребителей API (bin/b24, ship-этап фабрики, скиллы):
+  // Токен для ЛОКАЛЬНЫХ CLI-потребителей API (bin/tracker, ship-этап фабрики, скиллы):
   // файл 0600 на этой же машине. Кто может его прочитать — уже владеет всеми кредами .state.
   cliTokenPath: process.env.GRIGDESK_CLI_TOKEN_PATH || path.join(dataStateDir, 'cli-token'),
   // Проверка и применение релизов GrigDesk. Это runtime-state машины, не часть релиза.

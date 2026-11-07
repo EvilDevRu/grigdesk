@@ -180,7 +180,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
   // Команды, которые bin/grigdesk-ctl передаёт отдельным скриптам: имя — путь заглушки.
   const delegated: Record<string, string> = {
     desktop: 'deploy/desktop.sh',
-    b24: 'bin/b24',
+    tracker: 'bin/tracker',
     mobile: 'tools/mobile',
     release: 'tools/release',
   };

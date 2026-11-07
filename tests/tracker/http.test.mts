@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { B24Error } from '../../b24/src/errors.ts';
-import { request } from '../../b24/src/http.ts';
+import { B24Error } from '../../tracker/src/errors.ts';
+import { request } from '../../tracker/src/http.ts';
 import { sendChunked, startHttpFixture } from './helpers/httpFixture.mts';
 
 const TOKEN = 'secret-token-value';

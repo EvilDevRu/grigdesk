@@ -82,12 +82,12 @@ if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/
       cd "$DIR"
       exec "$_grigdesk_server_binary" "${@:2}"
       ;;
-    b24)
-      [[ -f "$DIR/bin/b24" && -x "$DIR/bin/b24" ]] || {
-        echo 'Установите отдельный ELF b24 в bin этой установки.' >&2
+    tracker)
+      [[ -f "$DIR/bin/tracker" && -x "$DIR/bin/tracker" ]] || {
+        echo 'Установите отдельный ELF tracker в bin этой установки.' >&2
         exit 1
       }
-      exec "$DIR/bin/b24" "${@:2}"
+      exec "$DIR/bin/tracker" "${@:2}"
       ;;
     desktop)
       if [[ "$PORTABLE" == 1 ]]; then
@@ -123,21 +123,21 @@ if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/
 fi
 
 # Готовая поставка запускает собранный CLI своим Node и не ищет исходники.
-# Явные команды разработки требуют checkout, готовые b24/окно сохраняют свои входы.
+# Явные команды разработки требуют checkout, готовые tracker/окно сохраняют свои входы.
 if [[ -f "$DIR/release.json" ]]; then
   source "$DIR/deploy/lib/runtime-env.sh"
   grigdesk_require_node
 
   case "$CMD" in
-    b24)
+    tracker)
       shift
 
-      if [[ ! -x "$DIR/bin/b24" ]]; then
-        echo "Повреждён комплект: нет bin/b24" >&2
+      if [[ ! -x "$DIR/bin/tracker" ]]; then
+        echo "Повреждён комплект: нет bin/tracker" >&2
         exit 1
       fi
 
-      exec "$DIR/bin/b24" "$@"
+      exec "$DIR/bin/tracker" "$@"
       ;;
     desktop)
       shift
@@ -577,16 +577,16 @@ case "$CMD" in
     shift
     exec "$DIR/deploy/desktop.sh" "$@"
     ;;
-  b24)
+  tracker)
     shift
 
-    if [[ -x "$DIR/bin/b24" ]]; then
-      exec "$DIR/bin/b24" "$@"
+    if [[ -x "$DIR/bin/tracker" ]]; then
+      exec "$DIR/bin/tracker" "$@"
     fi
 
     source "$DIR/deploy/lib/runtime-env.sh"
     grigdesk_require_node
-    exec node "$DIR/b24/src/main.ts" "$@"
+    exec node "$DIR/tracker/src/main.ts" "$@"
     ;;
   mobile|release)
     shift

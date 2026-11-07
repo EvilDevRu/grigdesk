@@ -18,7 +18,7 @@ export interface BuildOptions {
   cacheDir: string;
 }
 
-const USAGE = 'Использование: npm --prefix b24 run build -- [--out-dir <каталог>] [--cache-dir <каталог>]';
+const USAGE = 'Использование: npm --prefix tracker run build -- [--out-dir <каталог>] [--cache-dir <каталог>]';
 const FLAGS = new Map<string, keyof BuildOptions>([
   ['--out-dir', 'outDir'],
   ['--cache-dir', 'cacheDir'],
@@ -33,7 +33,7 @@ export function parseBuildArgs(args: readonly string[], cwd: string, packageDir:
   const root = path.resolve(packageDir, '..');
   const result: BuildOptions = {
     outDir: path.join(root, 'bin'),
-    cacheDir: path.join(root, 'b24/.cache'),
+    cacheDir: path.join(root, 'tracker/.cache'),
   };
   const seen = new Set<string>();
 
@@ -57,6 +57,6 @@ export function parseBuildArgs(args: readonly string[], cwd: string, packageDir:
  * Общая проверка версии, платформы и SHA256 живёт в shared/node/nodeRuntime.ts.
  */
 export function readNodeRuntime(value: unknown): NodeRuntime {
-  return readSharedRuntime(value, 'b24/build/node-runtime.json');
+  return readSharedRuntime(value, 'tracker/build/node-runtime.json');
 }
 

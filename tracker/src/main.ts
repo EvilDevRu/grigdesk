@@ -8,7 +8,7 @@ import { runB24 } from './app.ts';
 import { request } from './http.ts';
 
 const SOURCE_LICENSE = 'Исходный запуск использует лицензию установленного Node.js. '
-  + 'Полная лицензия включена в b24 SEA.\n';
+  + 'Полная лицензия включена в tracker SEA.\n';
 
 /**
  * Читает stdin до EOF без декодирования: create передаёт байты серверу как есть.

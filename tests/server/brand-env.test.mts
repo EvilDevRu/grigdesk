@@ -124,7 +124,7 @@ test('GE-05: ключ плагина загружается без предуп�
 
 test('GE-06: список ключей хоста совпадает с исходниками продукта', () => {
   const roots = ['server/src/', 'server/scripts/', 'cli/', 'deploy/', 'shared/', 'engine/',
-    'desktop/src/', 'b24/src/', 'tools/'];
+    'desktop/src/', 'tracker/src/', 'tools/'];
   const extensions = new Set(['', '.ts', '.mts', '.js', '.mjs', '.cjs', '.sh', '.py', '.service']);
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
     cwd: ROOT,

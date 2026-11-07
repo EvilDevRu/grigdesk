@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PACKAGE = fileURLToPath(new URL('../../../b24/', import.meta.url));
+export const PACKAGE = fileURLToPath(new URL('../../../tracker/', import.meta.url));
 export const BUILD_SCRIPT = path.join(PACKAGE, 'scripts/build.mts');
 
 const ARCHIVE = 'node-v24.21.0-linux-x64.tar.xz';
@@ -68,7 +68,7 @@ export async function runBuild(args: readonly string[]): Promise<BuildRun> {
 
 /**
  * Готовит проверяемый файл: явный GRIGDESK_B24_TEST_BINARY или свежую сборку в mkdtemp.
- * Кэш b24/.cache только копируется — build.mts заново сверяет SHA256; иначе качается pin.
+ * Кэш tracker/.cache только копируется — build.mts заново сверяет SHA256; иначе качается pin.
  */
 export async function prepareCandidate(): Promise<SeaCandidate> {
   const explicit = process.env.GRIGDESK_B24_TEST_BINARY;
@@ -91,7 +91,7 @@ export async function prepareCandidate(): Promise<SeaCandidate> {
     };
   }
 
-  const work = await mkdtemp(path.join(os.tmpdir(), 'b24-sea-build-'));
+  const work = await mkdtemp(path.join(os.tmpdir(), 'tracker-sea-build-'));
   const cache = path.join(work, 'cache');
   const out = path.join(work, 'out');
   const cached = path.join(PACKAGE, '.cache', ARCHIVE);
@@ -110,7 +110,7 @@ export async function prepareCandidate(): Promise<SeaCandidate> {
   }
 
   return {
-    binary: path.join(out, 'b24'),
+    binary: path.join(out, 'tracker'),
     explicit: false,
     cleanup: async () => {
       await rm(work, {

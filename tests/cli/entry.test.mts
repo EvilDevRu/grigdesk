@@ -148,7 +148,7 @@ test('CE-8 ссылка из каталога с пробелами, cwd /', asy
 test('CE-9 старые скрипты получают argv и возвращают код', async (t) => {
   const box = await createSandbox(t);
 
-  for (const command of ['desktop', 'b24', 'mobile', 'release']) {
+  for (const command of ['desktop', 'tracker', 'mobile', 'release']) {
     const result = await box.run([command, 'example', 'two words']);
 
     assert.equal(result.code, 7, result.stderr);
@@ -186,13 +186,13 @@ test('CE-11 справка команд разработчика ничего н
 });
 
 /**
- * Минимальный TS-вход b24 в корне песочницы: печатает argv JSON и выходит с кодом 7.
+ * Минимальный TS-вход tracker в корне песочницы: печатает argv JSON и выходит с кодом 7.
  * Маркер запуска позволяет доказать, что fallback не исполнялся.
  */
-function installB24Source(root: string, marker: string): void {
-  mkdirSync(path.join(root, 'b24/src'), { recursive: true });
-  writeFileSync(path.join(root, 'b24/package.json'), '{"private": true, "type": "module"}\n');
-  writeFileSync(path.join(root, 'b24/src/main.ts'), [
+function installTrackerSource(root: string, marker: string): void {
+  mkdirSync(path.join(root, 'tracker/src'), { recursive: true });
+  writeFileSync(path.join(root, 'tracker/package.json'), '{"private": true, "type": "module"}\n');
+  writeFileSync(path.join(root, 'tracker/src/main.ts'), [
     "import { writeFileSync } from 'node:fs';",
     '',
     `writeFileSync(${JSON.stringify(marker)}, 'source');`,
@@ -203,14 +203,14 @@ function installB24Source(root: string, marker: string): void {
 }
 
 /**
- * Песочница CLI с исходником b24 и путём маркера fallback.
- * Заглушка bin/b24 песочницы остаётся, пока тест сам её не уберёт.
+ * Песочница CLI с исходником tracker и путём маркера fallback.
+ * Заглушка bin/tracker песочницы остаётся, пока тест сам её не уберёт.
  */
 async function b24Sandbox(t: TestContext) {
   const box = await createSandbox(t);
   const marker = path.join(box.home, 'source-started');
 
-  installB24Source(box.root, marker);
+  installTrackerSource(box.root, marker);
 
   return {
     box,
@@ -218,12 +218,12 @@ async function b24Sandbox(t: TestContext) {
   };
 }
 
-test('CE-B24-1: без бинарника grigdesk запускает source и передаёт argv', async (t) => {
+test('CE-TRACKER-1: без бинарника grigdesk запускает source и передаёт argv', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
-  rmSync(path.join(box.root, 'bin/b24'));
+  rmSync(path.join(box.root, 'bin/tracker'));
 
-  const result = await box.run(['b24', 'comment', '42', 'два слова', '']);
+  const result = await box.run(['tracker', 'comment', '42', 'два слова', '']);
 
   assert.equal(result.code, 7, result.stderr);
   assert.equal(result.stdout, `${JSON.stringify(['comment', '42', 'два слова', ''])}\n`);
@@ -231,11 +231,11 @@ test('CE-B24-1: без бинарника grigdesk запускает source и 
   assert.equal(existsSync(marker), true);
 });
 
-test('CE-B24-2: готовый b24 не требует Node', async (t) => {
+test('CE-TRACKER-2: готовый tracker не требует Node', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
   // Заглушка готового файла печатает каждый аргумент отдельной строкой: так видно точный argv.
-  writeFileSync(path.join(box.root, 'bin/b24'), '#!/bin/bash\nprintf \'<%s>\\n\' "$@"\nexit 5\n', {
+  writeFileSync(path.join(box.root, 'bin/tracker'), '#!/bin/bash\nprintf \'<%s>\\n\' "$@"\nexit 5\n', {
     mode: 0o755,
   });
   writeFileSync(path.join(box.home, 'stubs/node'), [
@@ -245,7 +245,7 @@ test('CE-B24-2: готовый b24 не требует Node', async (t) => {
     '',
   ].join('\n'), { mode: 0o755 });
 
-  const result = await box.run(['b24', 'users', 'Иван Петров']);
+  const result = await box.run(['tracker', 'users', 'Иван Петров']);
 
   assert.equal(result.code, 5, result.stderr);
   assert.equal(result.stdout, '<users>\n<Иван Петров>\n');
@@ -253,13 +253,13 @@ test('CE-B24-2: готовый b24 не требует Node', async (t) => {
   assert.equal(existsSync(marker), false);
 });
 
-test('CE-B24-3: ошибка готового b24 не запускает fallback', async (t) => {
+test('CE-TRACKER-3: ошибка готового tracker не запускает fallback', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
-  writeFileSync(path.join(box.root, 'bin/b24'), '#!/bin/bash\necho "Запрос к GrigDesk" >&2\nexit 22\n',
+  writeFileSync(path.join(box.root, 'bin/tracker'), '#!/bin/bash\necho "Запрос к GrigDesk" >&2\nexit 22\n',
     { mode: 0o755 });
 
-  const result = await box.run(['b24', 'start', '42']);
+  const result = await box.run(['tracker', 'start', '42']);
 
   assert.equal(result.code, 22);
   assert.equal(result.stdout, '');

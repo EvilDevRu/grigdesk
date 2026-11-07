@@ -29,7 +29,7 @@ const LAUNCH_FILES = [
   'desktop/src/serverProcess.ts',
   'server/package.json',
   'web/package.json',
-  'b24/package.json',
+  'tracker/package.json',
   'tests/run-all.sh',
 ];
 

@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 const execute = promisify(execFile);
 const repository = path.resolve(import.meta.dirname, '../..');
 const payload = [
-  'GrigDesk', 'README.md', 'bin/b24', 'bin/deepseek', 'bin/grigdesk-ctl',
+  'GrigDesk', 'README.md', 'bin/tracker', 'bin/deepseek', 'bin/grigdesk-ctl',
   'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/lib/runtime-env.sh',
 ].sort();
 const executable = new Set(payload.filter((file) => !file.endsWith('.md') && !file.endsWith('.sh')));
@@ -130,7 +130,7 @@ async function fixture(t) {
   };
   const names = {
     server: 'grigdesk-server',
-    b24: 'b24',
+    tracker: 'tracker',
     relay: 'grigdesk-relay',
     deepseek: 'deepseek',
     window: 'GrigDesk.AppImage',
@@ -252,7 +252,7 @@ test('PB-PACK-01: повторная сборка свежая и не меня�
     code: 'ENOENT',
   });
 
-  for (const stage of ['server', 'b24', 'relay', 'deepseek', 'window']) {
+  for (const stage of ['server', 'tracker', 'relay', 'deepseek', 'window']) {
     assert.equal(box.calls.filter((call) => call === stage).length, 2);
   }
 
@@ -372,7 +372,7 @@ test('PB-PACK-06: DeepSeek пересобирается, full verify и host/GLM
 });
 
 test('PB-PACK-FAIL: любой build, verify, audit, tar и rename сохраняют прежний комплект', async (t) => {
-  for (const stage of ['server', 'b24', 'relay', 'deepseek', 'window', 'verify-deepseek',
+  for (const stage of ['server', 'tracker', 'relay', 'deepseek', 'window', 'verify-deepseek',
     'compatibility', 'audit', 'tar', 'rename']) {
     await t.test(stage, async (t) => {
       const box = await fixture(t);
@@ -412,7 +412,7 @@ test('PB-PACK-INSTALLED-01–06: allowlist, bytes, mode и admission installer',
 
     await extractReleaseArtifact(path.join(built.directory, `${component}.tar.gz`), directory, artifact);
     assert.deepEqual(artifact.files.map((entry) => entry.path).sort(), component === 'desktop'
-      ? ['GrigDesk'] : ['bin/b24', 'bin/deepseek', 'bin/grigdesk-relay', 'bin/grigdesk-server']);
+      ? ['GrigDesk'] : ['bin/deepseek', 'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/tracker']);
 
     for (const entry of artifact.files) {
       const file = path.join(directory, entry.path);
@@ -441,7 +441,7 @@ test('PB-PACK-INSTALLED-01–06: allowlist, bytes, mode и admission installer',
   assert.equal(await fs.readFile(path.join(built.root, 'VERSION'), 'utf8'), '0.3.0\n');
 });
 
-for (const failBuilder of ['server', 'b24', 'relay', 'deepseek', 'window']) {
+for (const failBuilder of ['server', 'tracker', 'relay', 'deepseek', 'window']) {
   test(`PB-PACK-INSTALLED-FAIL: ${failBuilder} не выдаёт готовый выпуск`, async (t) => {
     await assert.rejects(installedBuild(t, 'release', { failBuilder }),
       new RegExp(`fixture_builder_failed:${failBuilder}`));

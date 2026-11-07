@@ -29,7 +29,7 @@ export async function helperFixture(t: TestContext, ids: string[], extra: Helper
   const runtime = readNodeRuntime(JSON.parse(await readFile(
     path.join(SOURCE_ROOT, 'server/build/node-runtime.json'), 'utf8',
   )), 'server runtime');
-  const archive = path.join(SOURCE_ROOT, 'b24/.cache', nodeArchive(runtime).name);
+  const archive = path.join(SOURCE_ROOT, 'tracker/.cache', nodeArchive(runtime).name);
 
   if (await sha256File(archive) !== runtime.sha256) {
     throw new Error('Повреждён кэш закреплённого Node');

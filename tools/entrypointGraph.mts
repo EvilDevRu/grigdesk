@@ -20,8 +20,8 @@ export const ENTRYPOINTS: readonly string[] = [
     // Единая команда: этот TS-вход запускает bin/grigdesk-ctl после проверки Node.
     'cli/main.ts',
     // Команда задач Б24: исходный вход и сборка единственного файла SEA.
-    'b24/src/main.ts',
-    'b24/scripts/build.mts',
+    'tracker/src/main.ts',
+    'tracker/scripts/build.mts',
     // Launcher и worker DeepSeek имеют отдельные SEA/Node точки входа.
     'deepseek/src/launcher/main.ts',
     'deepseek/src/launcher/workerBootstrap.ts',

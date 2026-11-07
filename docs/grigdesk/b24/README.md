@@ -4,7 +4,7 @@
 
 Драйверы трекеров, совместимый HTTP-фасад, доска, полка и личное состояние задач.
 
-Читай перед правкой: `server/src/lib/trackers`, `server/src/modules/tracker`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).
+Читай перед правкой: `server/src/lib/trackers`, `server/src/modules/tracker`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `tracker/` (команда `tracker`).
 
 ## Устройство
 
@@ -45,7 +45,7 @@
 - [Статусы и приоритет обработки](statuses-and-priority.md)
 - [Действия завершённой задачи в карточке](completed-task-actions.md)
 - [CLI для агента и оператора](agent-and-operator-cli.md)
-- [Команда b24: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
+- [Команда tracker: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
 - [HTTP API GrigDesk](http-api-grigdesk.md)
 
 ## Грабли

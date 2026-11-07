@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { HELP_TEXT } from '../../b24/src/args.ts';
+import { HELP_TEXT } from '../../tracker/src/args.ts';
 import { sendChunked, startHttpFixture } from './helpers/httpFixture.mts';
 import type { HttpFixture, RecordedRequest } from './helpers/httpFixture.mts';
 import { childEnv, runProcess, SOURCE_MAIN, syntheticHome } from './helpers/processFixture.mts';
@@ -25,7 +25,7 @@ function echoBody(request: RecordedRequest): Buffer {
 }
 
 /**
- * Запускает исходник b24 с явными URL и токеном против фейка.
+ * Запускает исходник tracker с явными URL и токеном против фейка.
  * Окружение составляется только из синтетических значений.
  */
 async function runSource(
@@ -300,11 +300,11 @@ test('BI-08: справка и неверные аргументы работа�
 
   assert.equal(license.code, 0);
   assert.equal(license.stdout.toString(),
-    'Исходный запуск использует лицензию установленного Node.js. Полная лицензия включена в b24 SEA.\n');
+    'Исходный запуск использует лицензию установленного Node.js. Полная лицензия включена в tracker SEA.\n');
 
   const version = await runProcess(t, process.execPath, [SOURCE_MAIN, '--version'], { env });
 
-  const expected = `b24 0.1.0 (Node ${process.version}, ${process.platform} ${process.arch})\n`;
+  const expected = `tracker 0.1.0 (Node ${process.version}, ${process.platform} ${process.arch})\n`;
 
   assert.equal(version.stdout.toString(), expected);
   assert.equal(fixture.requests.length, 0);
@@ -332,14 +332,14 @@ test('BI-10: разные cwd и пробелы в пути исходника �
   const fixture = await startHttpFixture(t, (request, response) => {
     response.end(echoBody(request));
   });
-  const copy = await mkdtemp(path.join(os.tmpdir(), 'b24 исходник с пробелами '));
+  const copy = await mkdtemp(path.join(os.tmpdir(), 'tracker исходник с пробелами '));
 
-  for (const name of ['b24/src', 'b24/package.json', 'shared']) {
+  for (const name of ['tracker/src', 'tracker/package.json', 'shared']) {
     await cp(path.join(REPO, name), path.join(copy, name), { recursive: true });
   }
 
   for (const cwd of ['/', copy]) {
-    const result = await runProcess(t, process.execPath, [path.join(copy, 'b24/src/main.ts'), 'comment', '9',
+    const result = await runProcess(t, process.execPath, [path.join(copy, 'tracker/src/main.ts'), 'comment', '9',
       ' ведущий', 'хвост ', ''], {
       env: {
         PATH: '/usr/bin:/bin',

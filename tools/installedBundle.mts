@@ -87,7 +87,7 @@ export async function executeInstalledBundle(options: BundleOptions): Promise<vo
 
     const files: Record<string, string> = {
       server: 'server/bin/grigdesk-server',
-      b24: 'server/bin/b24',
+      tracker: 'server/bin/tracker',
       relay: 'server/bin/grigdesk-relay',
       deepseek: 'server/bin/deepseek',
       window: 'desktop/GrigDesk',

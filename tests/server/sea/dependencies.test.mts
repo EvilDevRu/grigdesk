@@ -28,7 +28,7 @@ test('SEA-DEPS-01: реальный production npm ci и native ABI на Node 24
   )), 'server runtime');
 
   await extractRuntime({
-    archive: path.join(SOURCE_ROOT, 'b24/.cache', nodeArchive(runtime).name),
+    archive: path.join(SOURCE_ROOT, 'tracker/.cache', nodeArchive(runtime).name),
     runtime,
     target: path.join(root, 'runtime/node'),
   });

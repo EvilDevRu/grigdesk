@@ -13,7 +13,7 @@ for required in \
   tests/server \
   tests/web \
   tests/relay \
-  tests/b24 \
+  tests/tracker \
   tests/mobile \
   tests/desktop; do
   if [[ -d "$PROJECT_ROOT/$required" ]]; then
@@ -35,8 +35,8 @@ for forbidden in \
   web/tests \
   relay/test \
   relay/tests \
-  b24/test \
-  b24/tests \
+  tracker/test \
+  tracker/tests \
   mobile/test \
   mobile/tests \
   desktop/test \

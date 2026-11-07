@@ -40,7 +40,7 @@ grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
 grigdesk-ctl device add <имя> [--address host:port] [--json]
 grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
-grigdesk-ctl desktop … | b24 … | mobile … | release …
+grigdesk-ctl desktop … | tracker … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
 grigdesk-ctl bundle             Собрать установочные артефакты из исходников (для CI)
 grigdesk-ctl build [all|server|web|window|deepseek|apk]

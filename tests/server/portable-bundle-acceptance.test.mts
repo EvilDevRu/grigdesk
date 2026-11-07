@@ -15,7 +15,7 @@ const publishedOnly = {
   timeout: 600000,
 };
 const expectedPayload = [
-  'GrigDesk', 'README.md', 'bin/b24', 'bin/deepseek', 'bin/grigdesk-ctl',
+  'GrigDesk', 'README.md', 'bin/tracker', 'bin/deepseek', 'bin/grigdesk-ctl',
   'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/lib/runtime-env.sh',
 ].sort();
 

@@ -13,10 +13,10 @@ const REPO = new URL('../../', import.meta.url);
 
 // Сервер кладёт bin/ первым в PATH каждого агента (server/src/lib/cliPath.ts), поэтому любой
 // исполняемый файл здесь становится командой агента по голому имени. Набор закрыт: единая
-// команда, иконка ярлыка и собранные файлы (b24, посредник и установленное окно), которые в git
+// команда, иконка ярлыка и собранные файлы (tracker, посредник и установленное окно), которые в git
 // не попадают.
 const COMMANDS = ['grigdesk-ctl'];
-const BUILT = ['b24', 'deepseek', 'grigdesk-relay', 'grigdesk-app', 'grigdesk-server'];
+const BUILT = ['tracker', 'deepseek', 'grigdesk-relay', 'grigdesk-app', 'grigdesk-server'];
 const RECEIPTS = {
   'deepseek.grigdesk-deepseek.json': 'DeepSeek',
   'grigdesk-server.grigdesk-server.json': 'сервера',
@@ -24,10 +24,10 @@ const RECEIPTS = {
 const ALLOWED = new Set([...COMMANDS, ...BUILT, 'grigdesk.png', ...Object.keys(RECEIPTS)]);
 
 // ELF сборки имеет 0755; установленный DeepSeek публикуется без записи, с правами 0555.
-const ELF_BUILT = ['b24', 'deepseek', 'grigdesk-app', 'grigdesk-server'];
+const ELF_BUILT = ['tracker', 'deepseek', 'grigdesk-app', 'grigdesk-server'];
 
 // Скрипты, которым bin/grigdesk-ctl передаёт `desktop`, `mobile` и `release`. Им нужен
-// бит исполнения: команда зовёт их через exec, а не через bash. b24 — собранный файл или исходник.
+// бит исполнения: команда зовёт их через exec, а не через bash. tracker — собранный файл или исходник.
 const DELEGATED = ['deploy/desktop.sh', 'tools/mobile', 'tools/release'];
 
 /**
@@ -105,17 +105,17 @@ test('в bin/ только команды на PATH, иконка и собра�
   assert.deepEqual(binProblems(fileURLToPath(new URL('bin/', REPO))), []);
 });
 
-test('BD-01: b24 отсутствует до сборки и допустим только как собранный ELF после неё', () => {
+test('BD-01: tracker отсутствует до сборки и допустим только как собранный ELF после неё', () => {
   // Отдельный каталог bin во временной папке: настоящий bin/ этого дерева не меняется.
-  // Без аргумента b24 отсутствует, иначе записываются заданные байты и права.
-  const fixture = (b24?: { bytes: Buffer; mode: number }) => {
-    const directory = mkdtempSync(path.join(os.tmpdir(), 'b24-bin-layout-'));
+  // Без аргумента tracker отсутствует, иначе записываются заданные байты и права.
+  const fixture = (tracker?: { bytes: Buffer; mode: number }) => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'tracker-bin-layout-'));
 
     writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
 
-    if (b24) {
-      writeFileSync(path.join(directory, 'b24'), b24.bytes);
-      chmodSync(path.join(directory, 'b24'), b24.mode);
+    if (tracker) {
+      writeFileSync(path.join(directory, 'tracker'), tracker.bytes);
+      chmodSync(path.join(directory, 'tracker'), tracker.mode);
     }
 
     return directory;
@@ -130,11 +130,11 @@ test('BD-01: b24 отсутствует до сборки и допустим т
   assert.deepEqual(binProblems(fixture({
     bytes: Buffer.from('#!/usr/bin/env bash\n'),
     mode: 0o755,
-  })), ['b24 не ELF']);
+  })), ['tracker не ELF']);
   assert.deepEqual(binProblems(fixture({
     bytes: elf,
     mode: 0o644,
-  })), ['b24 без прав 0755']);
+  })), ['tracker без прав 0755']);
 });
 
 test('BD-02: окно в bin/ допустимо только как ELF с правами 0755, временная копия — лишняя', () => {
@@ -265,10 +265,10 @@ test('bin/grigdesk-ctl передаёт команды существующим 
   const dispatcher = readFileSync(new URL('bin/grigdesk-ctl', REPO), 'utf8');
 
   assert.match(dispatcher, /exec "\$DIR\/deploy\/desktop\.sh"/);
-  assert.match(dispatcher, /if \[\[ -x "\$DIR\/bin\/b24" \]\]; then\n\s+exec "\$DIR\/bin\/b24" "\$@"/);
-  assert.match(dispatcher, /exec node "\$DIR\/b24\/src\/main\.ts" "\$@"/);
+  assert.match(dispatcher, /if \[\[ -x "\$DIR\/bin\/tracker" \]\]; then\n\s+exec "\$DIR\/bin\/tracker" "\$@"/);
+  assert.match(dispatcher, /exec node "\$DIR\/tracker\/src\/main\.ts" "\$@"/);
   assert.match(dispatcher, /mobile\|release\)\n\s+shift\n\s+exec "\$DIR\/tools\/\$CMD"/);
-  assert.ok(existsSync(new URL('b24/src/main.ts', REPO)), 'исходник b24 для запуска без сборки');
+  assert.ok(existsSync(new URL('tracker/src/main.ts', REPO)), 'исходник tracker для запуска без сборки');
 
   for (const file of DELEGATED) {
     assert.ok(statSync(new URL(file, REPO)).mode & 0o111, `${file} исполняемый`);

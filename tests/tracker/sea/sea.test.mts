@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 
-import { HELP_TEXT } from '../../../b24/src/args.ts';
+import { HELP_TEXT } from '../../../tracker/src/args.ts';
 import { sendChunked, startHttpFixture } from '../helpers/httpFixture.mts';
 import type { RecordedRequest } from '../helpers/httpFixture.mts';
 import { childEnv, runProcess, syntheticHome } from '../helpers/processFixture.mts';
@@ -31,7 +31,7 @@ async function hashOf(file: string): Promise<string> {
  */
 function binary(): string {
   if (!candidate) {
-    throw new Error('Кандидат b24 не подготовлен');
+    throw new Error('Кандидат tracker не подготовлен');
   }
 
   return candidate.binary;
@@ -76,9 +76,9 @@ test('BS-01: кандидат является самостоятельным EL
 });
 
 test('BS-02: копия без исходников и пустой PATH исполняет локальные команды', async (t) => {
-  const scratch = await mkdtemp(path.join(os.tmpdir(), 'b24 копия '));
+  const scratch = await mkdtemp(path.join(os.tmpdir(), 'tracker копия '));
   const directory = path.join(scratch, 'папка с пробелами');
-  const copy = path.join(directory, 'b24');
+  const copy = path.join(directory, 'tracker');
 
   // Копия весит около 120 МиБ: убираем её после теста, чтобы прогоны не копили мусор.
   t.after(async () => {
@@ -99,7 +99,7 @@ test('BS-02: копия без исходников и пустой PATH исп�
   assert.equal(help.code, 0);
   assert.equal(help.stdout.toString(), HELP_TEXT);
   assert.equal(version.code, 0);
-  assert.equal(version.stdout.toString(), 'b24 0.1.0 (Node v24.21.0, linux x64)\n');
+  assert.equal(version.stdout.toString(), 'tracker 0.1.0 (Node v24.21.0, linux x64)\n');
   assert.equal(license.code, 0);
   assert.match(license.stdout.toString(), /Node\.js is licensed for use as follows/);
 
@@ -112,12 +112,12 @@ test('BS-03: NODE_OPTIONS не исполняет посторонний код'
   const result = await runProcess(t, binary(), ['--version'], {
     env: {
       PATH: '',
-      NODE_OPTIONS: '--require /nonexistent-b24.js',
+      NODE_OPTIONS: '--require /nonexistent-tracker.js',
     },
   });
 
   assert.equal(result.code, 0, result.stderr.toString());
-  assert.equal(result.stdout.toString(), 'b24 0.1.0 (Node v24.21.0, linux x64)\n');
+  assert.equal(result.stdout.toString(), 'tracker 0.1.0 (Node v24.21.0, linux x64)\n');
   assert.equal(result.stderr.length, 0);
 });
 
@@ -263,8 +263,8 @@ test('BS-06: SEA сохраняет ошибки source-контракта', asy
 });
 
 test('BS-07: неудачная сборка не заменяет прежний результат', async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'b24-sea-marker-'));
-  const target = path.join(directory, 'b24');
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'tracker-sea-marker-'));
+  const target = path.join(directory, 'tracker');
 
   await writeFile(target, 'маркер прежней сборки');
 
@@ -282,7 +282,7 @@ test('BS-07: неудачная сборка не заменяет прежни�
   const badCache = await runBuild(['--out-dir', directory, '--cache-dir', path.join(blocker, 'cache')]);
 
   assert.equal(badCache.code, 1);
-  assert.match(badCache.stderr, /^Сборка b24 не удалась: /);
+  assert.match(badCache.stderr, /^Сборка tracker не удалась: /);
   assert.equal(await readFile(target, 'utf8'), 'маркер прежней сборки');
 });
 

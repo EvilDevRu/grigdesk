@@ -19,7 +19,7 @@ export interface ProcessOptions {
   timeoutMs?: number;
 }
 
-export const SOURCE_MAIN = fileURLToPath(new URL('../../../b24/src/main.ts', import.meta.url));
+export const SOURCE_MAIN = fileURLToPath(new URL('../../../tracker/src/main.ts', import.meta.url));
 
 /**
  * Запускает исполняемый файл асинхронно и собирает оба потока как Buffer.
@@ -84,7 +84,7 @@ export async function runProcess(
  * Возвращает HOME и GRIGDESK_HOME, которые передаются ребёнку явно.
  */
 export async function syntheticHome(): Promise<{ home: string; data: string }> {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'b24-home-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'tracker-home-'));
 
   return {
     home,

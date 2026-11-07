@@ -290,7 +290,7 @@ async function runBrowserCli(argv: string[], env: NodeJS.ProcessEnv): Promise<vo
     const selected = runtimeKind() === 'packaged'
       ? [path.dirname(nodeExecutable()), path.join(root, 'server/runtime/helpers')]
       : [path.dirname(nodeExecutable()), ...['server/src', 'server/scripts', 'server/node_modules',
-        'shared', 'deepseek', 'tools', 'b24'].map((name) => path.join(root, name))];
+        'shared', 'deepseek', 'tools', 'tracker'].map((name) => path.join(root, name))];
     const roots = [...new Set(selected.filter(existsSync).map((directory) => realpathSync(directory)))];
 
     if (roots.some((directory) => !/^\/[A-Za-z0-9_@+.,/=-]+$/u.test(directory))) {

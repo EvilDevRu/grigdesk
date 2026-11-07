@@ -7,7 +7,7 @@
 
 `grigdesk-ctl bundle` из исходников заново собирает Linux x64 комплект в `release/`,
 архив `release.tar.gz` и внешние суммы `release.tar.gz.sha256`. DeepSeek пересобирается
-из закреплённого upstream-снимка вместе с сервером, b24, посредником и AppImage.
+из закреплённого upstream-снимка вместе с сервером, tracker, посредником и AppImage.
 Номер версии берётся из `VERSION`; до выпуска он остаётся `0.1.0`.
 При `GRIGDESK_RELEASE_SIGNING_KEY=<путь PKCS8 PEM>` сборщик подписывает точный файл
 сумм ed25519 и выпускает `channel.json` и `release.tar.gz.sha256.sig` — локальный

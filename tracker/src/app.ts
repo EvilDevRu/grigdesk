@@ -23,7 +23,7 @@ export interface AppIO extends ConfigIO, CommandIO {
  * Не читает настройки, stdin и сеть.
  */
 export function versionLine(version: string): string {
-  return `b24 ${version} (Node ${process.version}, ${process.platform} ${process.arch})\n`;
+  return `tracker ${version} (Node ${process.version}, ${process.platform} ${process.arch})\n`;
 }
 
 /**
@@ -58,7 +58,7 @@ async function produce(command: Command, runtime: RuntimeInfo, io: AppIO): Promi
 }
 
 /**
- * Выполняет b24 целиком и возвращает код выхода без эффектов при импорте.
+ * Выполняет tracker целиком и возвращает код выхода без эффектов при импорте.
  * Аргументы разбираются до настроек; при отказе stdout пуст, причина уходит в stderr.
  */
 export async function runB24(argv: readonly string[], runtime: RuntimeInfo, io: AppIO): Promise<number> {

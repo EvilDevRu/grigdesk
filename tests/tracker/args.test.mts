@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { HELP_TEXT, parseArgs } from '../../b24/src/args.ts';
-import type { Command } from '../../b24/src/args.ts';
+import { HELP_TEXT, parseArgs } from '../../tracker/src/args.ts';
+import type { Command } from '../../tracker/src/args.ts';
 
 const RUSSIAN = /[А-Яа-яЁё]/;
 
@@ -106,7 +106,7 @@ test('BA-03: неверный argv даёт русскую причину и с�
 
   for (const command of ['dashboard', 'task', 'comment', 'timer', 'start', 'complete', 'renew', 'create',
     'users']) {
-    assert.ok(HELP_TEXT.includes(`b24 ${command}`), command);
+    assert.ok(HELP_TEXT.includes(`tracker ${command}`), command);
   }
 
   assert.match(HELP_TEXT, RUSSIAN);

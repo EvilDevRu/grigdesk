@@ -119,11 +119,11 @@ async function main(): Promise<void> {
 
         return path.join(input.outDir, 'grigdesk-server');
       },
-      async b24(input) {
-        await run('npm', ['--prefix', path.join(root, 'b24'), 'run', 'build', '--',
+      async tracker(input) {
+        await run('npm', ['--prefix', path.join(root, 'tracker'), 'run', 'build', '--',
           '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
 
-        return path.join(input.outDir, 'b24');
+        return path.join(input.outDir, 'tracker');
       },
       async relay(input) {
         await run('npm', ['--prefix', path.join(root, 'relay'), 'run', 'build', '--',

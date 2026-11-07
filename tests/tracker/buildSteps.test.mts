@@ -18,9 +18,9 @@ import {
   publishFile,
   readNodeRuntime,
   SEA_FUSE,
-} from '../../b24/scripts/buildSteps.mts';
+} from '../../tracker/scripts/buildSteps.mts';
 
-const PACKAGE = fileURLToPath(new URL('../../b24/', import.meta.url));
+const PACKAGE = fileURLToPath(new URL('../../tracker/', import.meta.url));
 const ROOT = path.resolve(PACKAGE, '..');
 
 /**
@@ -28,7 +28,7 @@ const ROOT = path.resolve(PACKAGE, '..');
  * Сеть и настоящий bin/ не используются.
  */
 async function scratch(): Promise<string> {
-  return await mkdtemp(path.join(os.tmpdir(), 'b24-build-steps-'));
+  return await mkdtemp(path.join(os.tmpdir(), 'tracker-build-steps-'));
 }
 
 /**
@@ -40,23 +40,23 @@ function digest(bytes: string): string {
 }
 
 test('BB-01: аргументы сборки проверяются до эффектов', () => {
-  const cwd = '/work/b24';
+  const cwd = '/work/tracker';
 
   assert.deepEqual(parseBuildArgs([], cwd, PACKAGE), {
     outDir: path.join(ROOT, 'bin'),
-    cacheDir: path.join(ROOT, 'b24/.cache'),
+    cacheDir: path.join(ROOT, 'tracker/.cache'),
   });
   assert.deepEqual(parseBuildArgs(['--out-dir', '/abs/out', '--cache-dir', 'rel/cache'], cwd, PACKAGE), {
     outDir: '/abs/out',
-    cacheDir: '/work/b24/rel/cache',
+    cacheDir: '/work/tracker/rel/cache',
   });
   assert.deepEqual(parseBuildArgs(['--cache-dir', '/abs/cache', '--out-dir', '../out'], cwd, PACKAGE), {
     outDir: '/work/out',
     cacheDir: '/abs/cache',
   });
   assert.deepEqual(parseBuildArgs(['--out-dir', 'only'], cwd, PACKAGE), {
-    outDir: '/work/b24/only',
-    cacheDir: path.join(ROOT, 'b24/.cache'),
+    outDir: '/work/tracker/only',
+    cacheDir: path.join(ROOT, 'tracker/.cache'),
   });
 
   for (const args of [['--out-dir'], ['--out-dir', ''], ['--out-dir', '/a', '--out-dir', '/b'],
@@ -185,7 +185,7 @@ test('BB-04: рабочая папка убирается при успехе и
 test('BB-05: публикация атомарна и сохраняет старый файл при отказе', async () => {
   const directory = await scratch();
   const source = path.join(directory, 'candidate');
-  const target = path.join(directory, 'new parent/bin/b24');
+  const target = path.join(directory, 'new parent/bin/tracker');
 
   await writeFile(source, 'новый');
   await chmod(source, 0o600);
@@ -196,12 +196,12 @@ test('BB-05: публикация атомарна и сохраняет ста�
   await writeFile(target, 'прежний');
   await assert.rejects(publishFile(path.join(directory, 'missing'), target));
   assert.equal(await readFile(target, 'utf8'), 'прежний');
-  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['b24']);
+  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['tracker']);
 
   await mkdir(path.join(directory, 'dir-source'));
   await assert.rejects(publishFile(path.join(directory, 'dir-source'), target));
   assert.equal(await readFile(target, 'utf8'), 'прежний');
-  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['b24']);
+  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['tracker']);
 
   const keep = path.join(directory, 'keep');
   const previousInode = (await stat(target)).ino;
@@ -211,7 +211,7 @@ test('BB-05: публикация атомарна и сохраняет ста�
   assert.equal(await readFile(keep, 'utf8'), 'прежний', 'публикация изменила прежний inode');
   assert.equal(await readFile(target, 'utf8'), 'новый');
   assert.notEqual((await stat(target)).ino, previousInode);
-  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['b24']);
+  assert.deepEqual((await readdir(path.dirname(target))).sort(), ['tracker']);
 });
 
 test('BB-06: SEA config содержит лицензию и запрещает NODE_OPTIONS', () => {
@@ -239,11 +239,11 @@ test('BB-08: сборка не пишет бинарник в путь, кото
 
   git('init', '-q');
   await mkdir(path.join(repository, 'bin'));
-  await writeFile(path.join(repository, 'bin/b24'), '#!/bin/sh\n');
-  git('add', 'bin/b24');
+  await writeFile(path.join(repository, 'bin/tracker'), '#!/bin/sh\n');
+  git('add', 'bin/tracker');
 
-  await assert.rejects(assertUntracked(path.join(repository, 'bin/b24')), /отслеживается git/);
+  await assert.rejects(assertUntracked(path.join(repository, 'bin/tracker')), /отслеживается git/);
   await assertUntracked(path.join(repository, 'bin/other'));
-  await assertUntracked(path.join(repository, 'new parent/bin/b24'));
-  await assertUntracked(path.join(await scratch(), 'b24'));
+  await assertUntracked(path.join(repository, 'new parent/bin/tracker'));
+  await assertUntracked(path.join(await scratch(), 'tracker'));
 });

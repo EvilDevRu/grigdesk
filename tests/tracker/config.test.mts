@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveConnection } from '../../b24/src/config.ts';
-import type { ConfigIO } from '../../b24/src/config.ts';
-import { B24Error } from '../../b24/src/errors.ts';
+import { resolveConnection } from '../../tracker/src/config.ts';
+import type { ConfigIO } from '../../tracker/src/config.ts';
+import { B24Error } from '../../tracker/src/errors.ts';
 
 type Files = Record<string, string | null | NodeJS.ErrnoException>;
 
@@ -221,14 +221,14 @@ test('BC-06: файл — данные, окружение не меняется
   };
   const snapshot = { ...env };
   const io = fakeIO({
-    '/etc/grigdesk.env': 'GRIGDESK_CLI_TOKEN_PATH=/tok/$(touch /tmp/b24-pwned)\nUNRELATED=`id`\n',
-    '/tok/$(touch /tmp/b24-pwned)': 'tok',
+    '/etc/grigdesk.env': 'GRIGDESK_CLI_TOKEN_PATH=/tok/$(touch /tmp/tracker-pwned)\nUNRELATED=`id`\n',
+    '/tok/$(touch /tmp/tracker-pwned)': 'tok',
   });
 
   assert.equal((await resolveConnection(env, io)).token, 'tok');
   assert.deepEqual(env, snapshot);
   assert.equal(process.env.UNRELATED, undefined);
-  assert.deepEqual(io.reads, ['/etc/grigdesk.env', '/tok/$(touch /tmp/b24-pwned)']);
+  assert.deepEqual(io.reads, ['/etc/grigdesk.env', '/tok/$(touch /tmp/tracker-pwned)']);
 });
 
 test('BC-07: старая раскладка не запрашивается', async () => {

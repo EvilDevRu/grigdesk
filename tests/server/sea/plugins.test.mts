@@ -42,7 +42,7 @@ async function pinnedRuntime(): Promise<{ runtime: NodeRuntime; archive: string 
   ) as NodeRuntime;
   const { name } = nodeArchive(runtime);
 
-  for (const cache of ['b24/.cache', 'relay/.cache']) {
+  for (const cache of ['tracker/.cache', 'relay/.cache']) {
     const archive = path.join(ROOT, cache, name);
 
     try {
@@ -59,7 +59,7 @@ async function pinnedRuntime(): Promise<{ runtime: NodeRuntime; archive: string 
     }
   }
 
-  throw new Error(`Нет проверенного архива ${name}: сначала положите его в b24/.cache`);
+  throw new Error(`Нет проверенного архива ${name}: сначала положите его в tracker/.cache`);
 }
 
 /**

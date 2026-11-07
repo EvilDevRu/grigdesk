@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const safeRunner = path.join(root, 'tests/run-node-tests-safe.sh');
 
 /**
- * Запускает быстрый или SEA-набор b24 только через сторож памяти репозитория.
+ * Запускает быстрый или SEA-набор tracker только через сторож памяти репозитория.
  * Неизвестные аргументы и пустой набор дают код 2 без запуска тестов.
  */
 export async function runTests(argv: readonly string[]): Promise<number> {
@@ -19,7 +19,7 @@ export async function runTests(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const directory = path.join(root, sea ? 'tests/b24/sea' : 'tests/b24');
+  const directory = path.join(root, sea ? 'tests/tracker/sea' : 'tests/tracker');
 
   return runPackageTests({
     root,
@@ -32,6 +32,6 @@ export async function runTests(argv: readonly string[]): Promise<number> {
 void runTests(process.argv.slice(2)).then((code) => {
   process.exitCode = code;
 }, (error: unknown) => {
-  process.stderr.write(`Не удалось запустить тесты b24: ${(error as Error).message}\n`);
+  process.stderr.write(`Не удалось запустить тесты tracker: ${(error as Error).message}\n`);
   process.exitCode = 1;
 });

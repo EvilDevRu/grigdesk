@@ -94,20 +94,20 @@ if [[ "$INSTALL_UNIT_ONLY" == 1 ]]; then
   exit 0
 fi
 
-# Команда b24 — собранный файл серверной поставки. Отказ сборки (код 1) не прерывает установку:
+# Команда tracker — собранный файл серверной поставки. Отказ сборки (код 1) не прерывает установку:
 # прежняя ссылка остаётся, повторить шаг можно одной командой из предупреждения. Код 2 — сборка
 # прошла, но чужой файл в PATH не тронут; об этом helper уже предупредил сам.
-b24_status=0
+tracker_status=0
 if [[ -n "$_grigdesk_server_binary" ]]; then
   echo "→ Отдельные утилиты: готовые ELF в $GRIGDESK_DIR/bin"
 else
-  echo "→ CLI b24 в PATH…"
-  source "$GRIGDESK_DIR/deploy/lib/b24-cli.sh"
-  grigdesk_install_b24_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || b24_status=$?
+  echo "→ CLI tracker в PATH…"
+  source "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh"
+  grigdesk_install_tracker_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || tracker_status=$?
 fi
-if (( b24_status == 1 )); then
-  printf '  ⚠ b24 не собран; повтор: bash %q %q %q\n' \
-    "$GRIGDESK_DIR/deploy/lib/b24-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
+if (( tracker_status == 1 )); then
+  printf '  ⚠ tracker не собран; повтор: bash %q %q %q\n' \
+    "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
 fi
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 

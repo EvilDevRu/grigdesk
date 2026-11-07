@@ -65,7 +65,7 @@ console.log(JSON.stringify({
     entry: 'worker.mjs',
     outputFile,
     workDirectory: path.join(temporary, 'build-cache'),
-    nodeArchive: path.join(root, 'b24/.cache', `node-v${pin.version}-${pin.platform}.tar.xz`),
+    nodeArchive: path.join(root, 'tracker/.cache', `node-v${pin.version}-${pin.platform}.tar.xz`),
   });
 
   const binary = path.join(copiedDirectory, 'deepseek');

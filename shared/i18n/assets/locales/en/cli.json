@@ -152,7 +152,7 @@
     },
     "bundle": {
       "server": "Bundle: server",
-      "b24": "Bundle: B24",
+      "tracker": "Bundle: tracker",
       "relay": "Bundle: relay",
       "deepseek": "Bundle: DeepSeek",
       "window": "Bundle: window",

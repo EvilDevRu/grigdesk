@@ -11,12 +11,12 @@ import { auditStage, normalizeStageModes } from '../server/scripts/sea/stage.mts
 
 const execute = promisify(execFile);
 const payload = [
-  'GrigDesk', 'README.md', 'bin/b24', 'bin/deepseek', 'bin/grigdesk-ctl',
+  'GrigDesk', 'README.md', 'bin/tracker', 'bin/deepseek', 'bin/grigdesk-ctl',
   'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/lib/runtime-env.sh',
 ];
 const executables = payload.filter((file) => !file.endsWith('.md') && !file.endsWith('.sh'));
 
-type Stage = 'server' | 'b24' | 'relay' | 'deepseek' | 'window';
+type Stage = 'server' | 'tracker' | 'relay' | 'deepseek' | 'window';
 
 export interface BundleBuildInput {
   outDir: string;
@@ -211,7 +211,7 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
     const stage = path.join(work, 'release');
     const targets: Record<Stage, string> = {
       server: 'bin/grigdesk-server',
-      b24: 'bin/b24',
+      tracker: 'bin/tracker',
       relay: 'bin/grigdesk-relay',
       deepseek: 'bin/deepseek',
       window: 'GrigDesk',

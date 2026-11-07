@@ -7,7 +7,7 @@ import test from 'node:test';
 import { executeBundle } from '../../tools/bundleSteps.mts';
 import { streamProbe } from './helpers/streamProbe.js';
 
-const names = ['server', 'b24', 'relay', 'deepseek', 'window'];
+const names = ['server', 'tracker', 'relay', 'deepseek', 'window'];
 const steps = [...names, 'verify', 'pack', 'publish'].map((name) => `bundle.${name}`);
 
 /**

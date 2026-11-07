@@ -1,4 +1,4 @@
-# Что лежит в bin/: единая команда, собранные b24, DeepSeek, посредник и окно, иконка
+# Что лежит в bin/: единая команда, собранные tracker, DeepSeek, посредник и окно, иконка
 
 Сервер ставит `<корень>/bin` первым в PATH каждого агента (`server/src/lib/cliPath.ts`), так же
 делает `grigdesk_add_cli_paths` в `deploy/lib/runtime-env.sh`. Любой исполняемый файл в `bin/`
@@ -8,8 +8,8 @@
 
 | Файл | Зачем |
 | --- | --- |
-| `bin/grigdesk-ctl` | единая команда: окно, сервер, посредник, а также `desktop`, `b24`, `mobile`, `release` |
-| `bin/b24` | задачи Б24 по имени для навыков и этапа SHIP фабрики: собранный ELF Node SEA из `b24/`, вне git, до сборки отсутствует ([сборка](../b24/binary-cli.md)); ссылка `~/.local/bin/b24` ведёт сюда |
+| `bin/grigdesk-ctl` | единая команда: окно, сервер, посредник, а также `desktop`, `tracker`, `mobile`, `release` |
+| `bin/tracker` | задачи Б24 по имени для навыков и этапа SHIP фабрики: собранный ELF Node SEA из `tracker/`, вне git, до сборки отсутствует ([сборка](../b24/binary-cli.md)); ссылка `~/.local/bin/tracker` ведёт сюда |
 | `bin/deepseek` | автономный Harness для DeepSeek и GLM, виден агентам как `deepseek`; отдельные сборка и установка ([поставка](../chat/deepseek-binary.md)) |
 | `bin/deepseek.grigdesk-deepseek.json` | приватная SHA-квитанция установщика, обычный файл 0600, не команда |
 | `bin/grigdesk-server` | автономный серверный ELF: 0755 после сборки, 0555 после установки; до установки отсутствует ([установщик и откат](../server/server-binary-install.md)) |
@@ -35,8 +35,8 @@
   «Перезапустить» и обновление), юнит `grigdesk-server.service`;
 - `deploy/lib/` — общие bash-функции: `runtime-env.sh` (Node, PATH и порт для `bin/grigdesk-ctl`
   и скриптов), `desktop-app.sh` (пути окна) и куски установщика `install-choices.sh`,
-  `media-runtime.sh`, `cli-link.sh`, `b24-cli.sh` (зависимости сборки, сборка и ссылка `b24`), `deepseek-cli.sh` (явная установка отдельного DeepSeek ELF);
-- `b24/` — TypeScript-исходник команды `b24` и её сборщик (`npm --prefix b24 run build`);
+  `media-runtime.sh`, `cli-link.sh`, `tracker-cli.sh` (зависимости сборки, сборка и ссылка `tracker`), `deepseek-cli.sh` (явная установка отдельного DeepSeek ELF);
+- `tracker/` — TypeScript-исходник команды `tracker` и её сборщик (`npm --prefix tracker run build`);
 - `tools/` — инструменты разработчика: `release` и `release-check` (выпуск GrigDesk), `mobile`
   (сборка APK), `relay` (сборка посредника), `upgrade-publish-contract` (переход старых установок).
 
@@ -52,14 +52,14 @@
 Все исполняемые файлы копии лежат в `bin/`, как в готовом архиве выпуска. Состав закрепляет
 `tests/docs/bin-layout.test.mts`: лишний файл в `bin/` (включая брошенную временную копию окна),
 публичная или исполняемая квитанция DeepSeek/сервера, не TypeScript в `cli/`, расхождение иконки или пропавший бит исполнения у скрипта, которому
-`bin/grigdesk-ctl` передаёт команду, валят тест. `bin/b24` и `bin/grigdesk-app` до сборки или
+`bin/grigdesk-ctl` передаёт команду, валят тест. `bin/tracker` и `bin/grigdesk-app` до сборки или
 установки могут отсутствовать, а после допускаются только как ELF с правами 0755;
 `bin/deepseek` и `bin/grigdesk-server` допускают 0755 после сборки или 0555 после установки,
 до неё отсутствуют. Символические ссылки ELF и receipt запрещены; allowlist содержит точные имена.
 Постоянная квитанция, lock и staging установщика исключены из Git; оставленный staging
 в `bin/` всё равно отклоняется проверкой раскладки. Управляемую поставку собирают в отдельный
 release-каталог и затем устанавливают; установщик сохраняет старый ELF для отката.
-`bin/grigdesk-ctl b24` обязан запускать `bin/b24`, а без него — `b24/src/main.ts`.
+`bin/grigdesk-ctl tracker` обязан запускать `bin/tracker`, а без него — `tracker/src/main.ts`.
 
 Неизменённый legacy worker обновления без systemd перезапускает сервер через `bin/restart`.
 После переезда такая установка перезапускается руками:

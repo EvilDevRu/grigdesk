@@ -125,7 +125,7 @@ async function readToken(file: string, io: ConfigIO): Promise<string> {
 }
 
 /**
- * Вычисляет адрес и токен GrigDesk в фиксированном порядке контракта b24.
+ * Вычисляет адрес и токен GrigDesk в фиксированном порядке контракта tracker.
  * Явные GRIGDESK_URL и GRIGDESK_TOKEN не трогают папку данных и файлы.
  */
 export async function resolveConnection(env: DataHomeEnv, io: ConfigIO): Promise<Connection> {

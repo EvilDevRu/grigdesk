@@ -37,7 +37,7 @@ async function fixture(t) {
   const builders = {};
   const targets = {
     server: 'bin/grigdesk-server',
-    b24: 'bin/b24',
+    tracker: 'bin/tracker',
     relay: 'bin/grigdesk-relay',
     deepseek: 'bin/deepseek',
     window: 'GrigDesk',

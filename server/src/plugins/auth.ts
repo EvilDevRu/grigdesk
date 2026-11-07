@@ -292,7 +292,7 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
       return sessionOnlyGate(request, reply, routeUrl, opts);
     }
 
-    // Локальные CLI-потребители (bin/b24, ship-этап фабрики, скиллы): токен из файла 0600
+    // Локальные CLI-потребители (bin/tracker, ship-этап фабрики, скиллы): токен из файла 0600
     // в .state — прочитать его может только владелец машины, которому и так принадлежит
     // всё содержимое .state. Cookie у CLI нет, а публиковать PR/комментарии он обязан.
     if (cliToken && request.headers['x-grigdesk-token'] === cliToken) {

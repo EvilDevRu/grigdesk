@@ -38,7 +38,7 @@ const exceptions: Array<[string, string, string]> = [
 ];
 
 // Обходим только перечисленные кодовые каталоги; хранилища пользователя сюда не входят.
-// Рекурсивный обход нужен серверному исходнику, исходнику b24 и shell-библиотекам deploy.
+// Рекурсивный обход нужен серверному исходнику, исходнику tracker и shell-библиотекам deploy.
 function codeFiles(directory: string, extensions: RegExp, recursive = false, base = root): string[] {
   const result: string[] = [];
 
@@ -95,7 +95,7 @@ test('DP-1 данные не вычисляются от дерева кода',
     ...codeFiles('server/src', /\.(?:ts|js|mjs)$/, true),
     ...codeFiles('server/scripts', /\.(?:mts|mjs)$/),
     ...['cli', 'shared', 'desktop/src'].flatMap((dir) => codeFiles(dir, /\.ts$/, dir === 'shared')),
-    ...codeFiles('b24/src', /\.ts$/, true),
+    ...codeFiles('tracker/src', /\.ts$/, true),
     ...codeFiles('deploy', /\.sh$/, true),
     ...codeFiles('tools', /\.(?:ts|mts|mjs)$/),
     ...codeFiles('tools/mobile-phone', /\.mts$/),
@@ -109,21 +109,21 @@ test('DP-1 данные не вычисляются от дерева кода',
   assert.deepEqual(findings, [], findings.join('\n'));
 });
 
-test('BD-02: исходники b24 покрыты сторожем путей, бинарник не читается как текст', () => {
-  const fixture = mkdtempSync(path.join(os.tmpdir(), 'b24-data-paths-'));
+test('BD-02: исходники tracker покрыты сторожем путей, бинарник не читается как текст', () => {
+  const fixture = mkdtempSync(path.join(os.tmpdir(), 'tracker-data-paths-'));
 
-  mkdirSync(path.join(fixture, 'b24/src/nested'), { recursive: true });
+  mkdirSync(path.join(fixture, 'tracker/src/nested'), { recursive: true });
   mkdirSync(path.join(fixture, 'bin'));
-  writeFileSync(path.join(fixture, 'b24/src/nested/legacy.ts'),
+  writeFileSync(path.join(fixture, 'tracker/src/nested/legacy.ts'),
     "const token = path.join(root, '.env');\n");
-  writeFileSync(path.join(fixture, 'b24/src/clean.ts'), "const token = dataPath(home, 'cliToken');\n");
-  writeFileSync(path.join(fixture, 'bin/b24'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0xff, 0xfe, 0x00]));
+  writeFileSync(path.join(fixture, 'tracker/src/clean.ts'), "const token = dataPath(home, 'cliToken');\n");
+  writeFileSync(path.join(fixture, 'bin/tracker'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0xff, 0xfe, 0x00]));
 
-  const files = codeFiles('b24/src', /\.ts$/, true, fixture);
+  const files = codeFiles('tracker/src', /\.ts$/, true, fixture);
 
-  assert.deepEqual(files.sort(), ['b24/src/clean.ts', 'b24/src/nested/legacy.ts']);
+  assert.deepEqual(files.sort(), ['tracker/src/clean.ts', 'tracker/src/nested/legacy.ts']);
   assert.deepEqual(pathFindings(fixture, files), [
-    "b24/src/nested/legacy.ts:1: const token = path.join(root, '.env');",
+    "tracker/src/nested/legacy.ts:1: const token = path.join(root, '.env');",
   ]);
 });
 

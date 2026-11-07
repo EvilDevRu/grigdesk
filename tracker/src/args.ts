@@ -36,21 +36,21 @@ export type ApiCommand =
 
 export type Command = ApiCommand | { kind: 'help' } | { kind: 'version' } | { kind: 'license' };
 
-export const HELP_TEXT = `b24 — команды задач Б24 через локальный GrigDesk.
+export const HELP_TEXT = `tracker — команды задач Б24 через локальный GrigDesk.
 
 Использование:
-  b24 dashboard                    доска: мои задачи, показатели и графики
-  b24 task <id>                    детали задачи
-  b24 comment <id> <текст…>        комментарий к задаче
-  b24 timer <id> start|pause|stop  таймер задачи
-  b24 start <id>                   взять в работу: возобновить и запустить таймер
-  b24 complete <id>                завершить задачу со стопом таймера
-  b24 renew <id>                   возобновить задачу
-  b24 create                       создать задачу из JSON на stdin
-  b24 users [запрос]               сотрудники для выбора исполнителя
-  b24 --version                    показать версию
-  b24 --license                    показать лицензию Node.js
-  b24 --help                       показать эту справку
+  tracker dashboard                    доска: мои задачи, показатели и графики
+  tracker task <id>                    детали задачи
+  tracker comment <id> <текст…>        комментарий к задаче
+  tracker timer <id> start|pause|stop  таймер задачи
+  tracker start <id>                   взять в работу: возобновить и запустить таймер
+  tracker complete <id>                завершить задачу со стопом таймера
+  tracker renew <id>                   возобновить задачу
+  tracker create                       создать задачу из JSON на stdin
+  tracker users [запрос]               сотрудники для выбора исполнителя
+  tracker --version                    показать версию
+  tracker --license                    показать лицензию Node.js
+  tracker --help                       показать эту справку
 
 Адрес и токен: GRIGDESK_URL и GRIGDESK_TOKEN либо настройки папки данных GrigDesk.
 `;

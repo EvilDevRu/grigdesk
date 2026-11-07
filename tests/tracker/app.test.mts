@@ -3,9 +3,9 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { runB24 } from '../../b24/src/app.ts';
-import type { AppIO, RuntimeInfo } from '../../b24/src/app.ts';
-import { HELP_TEXT } from '../../b24/src/args.ts';
+import { runB24 } from '../../tracker/src/app.ts';
+import type { AppIO, RuntimeInfo } from '../../tracker/src/app.ts';
+import { HELP_TEXT } from '../../tracker/src/args.ts';
 
 const RUNTIME: RuntimeInfo = {
   version: '0.1.0',
@@ -62,7 +62,7 @@ function harness(overrides: Partial<AppIO> = {}): Harness {
 
 test('BP-01: импорт библиотечных модулей не имеет эффектов', async () => {
   const modules = ['args', 'config', 'http', 'commands', 'app', 'errors'].map((name) => (
-    new URL(`../../b24/src/${name}.ts`, import.meta.url).href
+    new URL(`../../tracker/src/${name}.ts`, import.meta.url).href
   ));
   const script = [
     "globalThis.fetch = () => { process.stderr.write('fetch вызван'); throw new Error('fetch'); };",
@@ -103,7 +103,7 @@ test('BP-02: локальные команды и неверный argv не ч�
   assert.deepEqual(help.stderr, []);
 
   const version = harness();
-  const expected = `b24 0.1.0 (Node ${process.version}, ${process.platform} ${process.arch})\n`;
+  const expected = `tracker 0.1.0 (Node ${process.version}, ${process.platform} ${process.arch})\n`;
 
   assert.equal(await runB24(['--version'], RUNTIME, version), 0);
   assert.deepEqual(version.stdout, [expected]);
@@ -215,5 +215,5 @@ test('BP-04: отказ записи не оставляет необработ�
   });
 
   assert.equal(await runB24(['dashboard'], RUNTIME, unknown), 1);
-  assert.deepEqual(unknown.stderr, ['Не удалось выполнить команду b24.\n']);
+  assert.deepEqual(unknown.stderr, ['Не удалось выполнить команду tracker.\n']);
 });

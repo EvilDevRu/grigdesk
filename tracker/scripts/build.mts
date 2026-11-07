@@ -23,7 +23,7 @@ const run = promisify(execFile);
 const packageDir = path.resolve(import.meta.dirname, '..');
 
 /**
- * Находит CLI postject по package.json внутри зависимостей b24.
+ * Находит CLI postject по package.json внутри зависимостей tracker.
  * Поле bin бывает строкой или объектом с именем команды.
  */
 async function postjectCli(): Promise<string> {
@@ -50,7 +50,7 @@ export async function buildBinary(options: BuildOptions): Promise<void> {
   const archive = await ensureNodeArchive(runtime, options.cacheDir, { download: downloadFile });
   const { directory } = nodeArchive(runtime);
   const postject = await postjectCli();
-  const target = path.join(options.outDir, 'b24');
+  const target = path.join(options.outDir, 'tracker');
 
   await assertUntracked(target);
 
@@ -75,26 +75,26 @@ export async function buildBinary(options: BuildOptions): Promise<void> {
     ]);
     await writeFile(path.join(work, 'sea-config.json'), JSON.stringify(seaConfig()));
     await run(path.join(work, 'bin/node'), ['--experimental-sea-config', 'sea-config.json'], { cwd: work });
-    await copyFile(path.join(work, 'bin/node'), path.join(work, 'b24'));
+    await copyFile(path.join(work, 'bin/node'), path.join(work, 'tracker'));
     await run(process.execPath, [
-      postject, 'b24', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
+      postject, 'tracker', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
     ], {
       cwd: work,
       maxBuffer: 4 * 1024 * 1024,
     });
-    await chmod(path.join(work, 'b24'), 0o755);
+    await chmod(path.join(work, 'tracker'), 0o755);
 
-    const version = await run(path.join(work, 'b24'), ['--version'], {
+    const version = await run(path.join(work, 'tracker'), ['--version'], {
       env: {},
       timeout: 10000,
     });
-    const expected = `b24 ${manifest.version} (Node v${runtime.version}, linux x64)\n`;
+    const expected = `tracker ${manifest.version} (Node v${runtime.version}, linux x64)\n`;
 
     if (version.stdout !== expected || version.stderr !== '') {
-      throw new Error('версия готового b24 не совпадает с manifest');
+      throw new Error('версия готового tracker не совпадает с manifest');
     }
 
-    await publishFile(path.join(work, 'b24'), target);
+    await publishFile(path.join(work, 'tracker'), target);
   });
 
   process.stdout.write(`${target}\n${(await stat(target)).size} байт\nsha256 ${await sha256File(target)}\n`);
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   try {
     await buildBinary(parsed);
   } catch (error) {
-    process.stderr.write(`Сборка b24 не удалась: ${(error as Error).message}\n`);
+    process.stderr.write(`Сборка tracker не удалась: ${(error as Error).message}\n`);
     process.exitCode = 1;
   }
 }

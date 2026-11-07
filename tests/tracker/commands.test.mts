@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ApiCommand } from '../../b24/src/args.ts';
-import { runCommand } from '../../b24/src/commands.ts';
-import type { CommandIO } from '../../b24/src/commands.ts';
-import { B24Error } from '../../b24/src/errors.ts';
-import type { RequestSpec } from '../../b24/src/http.ts';
+import type { ApiCommand } from '../../tracker/src/args.ts';
+import { runCommand } from '../../tracker/src/commands.ts';
+import type { CommandIO } from '../../tracker/src/commands.ts';
+import { B24Error } from '../../tracker/src/errors.ts';
+import type { RequestSpec } from '../../tracker/src/http.ts';
 
 const CONNECTION = {
   baseUrl: 'http://127.0.0.1:9',
