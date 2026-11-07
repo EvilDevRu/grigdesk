@@ -118,7 +118,7 @@ async function mountPipeline(t, {
     async get(url) {
       getCalls.push(url);
 
-      if (url === '/api/tasks') {
+      if (url === '/api/tasks?sources=1') {
         return { tasks: [factoryTask] };
       }
       if (url === `/api/tasks/${factoryTask.task}/graph`) {

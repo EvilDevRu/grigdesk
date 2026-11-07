@@ -70,15 +70,30 @@ async function mountPipeline(t, { factoryTask, graph }) {
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
+
   globalThis.__pipelineArbNodeApi = {
+    /**
+     * Список задач отдаёт тот же opt-in источников, что запрашивает живой экран конвейера.
+     * Граф и каталог исполнителей принадлежат фикстуре и не обращаются к живым задачам.
+     */
     async get(url) {
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners: ['claude'] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
+
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: ['claude'] };
+      }
+
       return {};
     },
     async post() { return { ok: true }; },
   };
+
   globalThis.__pipelineArbNodeConfirmDialog = async () => true;
   globalThis.__pipelineArbNodeAlertDialog = async () => {};
   globalThis.__pipelineArbNodeFactoryGraph = {
