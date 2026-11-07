@@ -86,7 +86,7 @@
 - [IPC-барьер может не удержать child до аварийной остановки](ipc-barrier-lifetime.md)
 - [Порядок событий проверяется при доставке, а не после опроса](event-order-observer.md)
 - [Точное время рендера зависит от подготовки стенда без фиксированных часов](wall-clock-render-fixture.md)
-- [Подмена providers adapters оставляет настоящий discovery моделей](providers-offline-fixtures.md)
+- [Офлайн providers: независимые models/adapters, native route и бюджет снимка](providers-offline-fixtures.md)
 - [Веб-тест монтирует SFC дважды — а работает со сторами первого теста](sfc-store-isolation.md)
 - [SFC-бандлы: переиспользование, ранний unmount и очистка дочерних emit Test Utils](sfc-bundle-memory.md)
 - [Всплывашка открывается только в первом тесте файла = Vue запомнил document первого окна](vue-document-cache.md)
