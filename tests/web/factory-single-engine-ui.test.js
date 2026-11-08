@@ -13,10 +13,12 @@ test('factory UI has no engine-generation branch or operational suffix', async (
     source('views/TaskModal.vue'),
     source('views/PipelineView.vue'),
   ]);
+  // Поколение подключения трекера защищает кеш аккаунта и не выбирает движок фабрики.
+  // Запрет относится к версии движка; metadata TrackerTarget остаётся допустимой.
   for (const text of files) {
     assert.doesNotMatch(
       text,
-      /\b(?:v1|v2)\b|generation|isV2|v2Result|(?:factory|route)-v[0-9]+/i,
+      /\b(?:v1|v2)\b|(?:engine|factory|route)Generation|isV2|v2Result|(?:factory|route)-v[0-9]+/i,
     );
   }
 });

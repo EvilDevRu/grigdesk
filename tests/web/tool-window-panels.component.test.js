@@ -165,7 +165,9 @@ test('TW-P01/shelf: перенос восстанавливает фильтр �
   const { mount } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const first = mount(component);
+  const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
+  const pinia = createPinia();
+  const first = mount(component, { global: { plugins: [pinia] } });
 
   t.after(() => first.unmount());
   await first.get('input[type="search"]').setValue('длинное название');
@@ -175,7 +177,7 @@ test('TW-P01/shelf: перенос восстанавливает фильтр �
 
   first.unmount();
 
-  const second = mount(component);
+  const second = mount(component, { global: { plugins: [pinia] } });
 
   t.after(() => second.unmount());
   await second.vm.importState(state);

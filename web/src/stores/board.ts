@@ -19,6 +19,64 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeBoardDashboard, isBoardDashboard } from '../shared/boardContracts.ts';
 import type { BoardDashboard } from '../shared/boardContracts.ts';
 
+type BoardCatalog = Pick<TrackerCatalog, 'enabledIds' | 'default' | 'externalId' | 'revision'> & {
+  drivers: Array<Pick<TrackerCatalog['drivers'][number], 'id' | 'dataRevision'>>;
+};
+
+/**
+ * Доске нужны только владельцы снимков, а не схемы настроек и capabilities драйверов.
+ * Чтение проверяет эти поля явно; старый каталог без enabledIds сохраняет legacy-путь.
+ */
+function boardCatalog(raw: Record<string, unknown>): BoardCatalog {
+  const invalid = () => new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
+
+  if ((raw.externalId !== null && typeof raw.externalId !== 'string')
+    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
+    throw invalid();
+  }
+
+  const catalog: BoardCatalog = {
+    externalId: raw.externalId,
+    revision: Number(raw.revision),
+    drivers: [],
+  };
+
+  if (raw.enabledIds === undefined) {
+    return catalog;
+  }
+
+  if (!Array.isArray(raw.enabledIds) || !raw.enabledIds.every((id) => typeof id === 'string')
+    || !Array.isArray(raw.drivers)) {
+    throw invalid();
+  }
+
+  catalog.drivers = raw.drivers.map((driver) => {
+    if (!isRecord(driver) || typeof driver.id !== 'string'
+      || (driver.dataRevision !== undefined && (!Number.isSafeInteger(driver.dataRevision)
+        || Number(driver.dataRevision) < 0))) {
+      throw invalid();
+    }
+
+    return {
+      id: driver.id,
+      ...(driver.dataRevision === undefined ? {} : { dataRevision: Number(driver.dataRevision) }),
+    };
+  });
+
+  const preferred = raw.default === undefined ? catalog.externalId : raw.default;
+
+  if (!raw.enabledIds.every((id) => catalog.drivers.some((driver) => driver.id === id))
+    || (preferred !== null && typeof preferred !== 'string')
+    || (preferred !== null && !raw.enabledIds.includes(preferred))) {
+    throw invalid();
+  }
+
+  catalog.enabledIds = raw.enabledIds;
+  catalog.default = preferred;
+
+  return catalog;
+}
+
 const mirrors = new WeakMap<object, () => void>();
 const reads = new WeakMap<object, AbortController>();
 const loadingJobs = new WeakMap<object, Promise<number | undefined>>();
@@ -29,7 +87,7 @@ const forcedJobs = new WeakMap<object, Promise<number | undefined>>();
  * Ни секреты, ни ключ источника не передаются в диагностику или наружный запрос.
  */
 async function readBoardSource(
-  signal?: AbortSignal, receive?: (catalog: TrackerCatalog) => void,
+  signal?: AbortSignal, receive?: (catalog: BoardCatalog) => void,
 ): Promise<string> {
   const raw = await api.get('/api/trackers', {
     signal,
@@ -37,18 +95,19 @@ async function readBoardSource(
     retry: false,
   });
 
-  if (!isRecord(raw) || (raw.externalId !== null && typeof raw.externalId !== 'string')
-    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
+  if (!isRecord(raw)) {
     throw new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
   }
 
-  receive?.(raw as unknown as TrackerCatalog);
+  const catalog = boardCatalog(raw);
+
+  receive?.(catalog);
 
   return JSON.stringify([
     useAuthStore().clientScope,
     useShellStore().profile?.id ?? '',
     ...(Array.isArray(raw.enabledIds) ? [
-      (raw.drivers as TrackerCatalog['drivers']).map((driver) => [driver.id, driver.dataRevision]),
+      catalog.drivers.map((driver) => [driver.id, driver.dataRevision]),
     ] : [raw.externalId, raw.revision]),
   ]);
 }
@@ -172,7 +231,7 @@ export const useBoardStore = defineStore('board', {
       this.loading = true;
 
       try {
-        let catalog: TrackerCatalog | undefined;
+        let catalog: BoardCatalog | undefined;
         const source = await readBoardSource(controller.signal, (value) => {
           catalog = value;
         });
@@ -286,7 +345,7 @@ export const useBoardStore = defineStore('board', {
      * Поколение владельца и локальная эпоха не дают вернуть прежний аккаунт после записи.
      */
     async loadMulti(
-      catalog: TrackerCatalog, source: string, force: boolean, controller: AbortController, epoch: number,
+      catalog: BoardCatalog, source: string, force: boolean, controller: AbortController, epoch: number,
     ): Promise<number | undefined> {
       this.sourceKey = source;
 
@@ -364,7 +423,7 @@ export const useBoardStore = defineStore('board', {
      * Метрики принадлежат дефолтной доске; списки ролей объединяются без склейки номеров.
      * Выключенный пакет остаётся в памяти до смены владельца или выхода из сессии.
      */
-    mergeBranches(catalog: TrackerCatalog) {
+    mergeBranches(catalog: BoardCatalog) {
       const ids = [...new Set([...Object.keys(this.branches), ...(catalog.enabledIds ?? [])])];
       const primary = this.branches[catalog.default ?? catalog.externalId ?? '']?.snapshot;
       const data: BoardDashboard = {

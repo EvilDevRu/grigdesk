@@ -251,7 +251,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
           if (await driver.isVisible()) {
             await driver.click();
           } else {
-            await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
+            await selectUiOption(page, dialog.locator('#tracker-driver'), 'grigdesk-b24');
           }
 
           const enabled = dialog.locator('[data-role="tracker-board-enabled"]');
