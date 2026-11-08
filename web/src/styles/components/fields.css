@@ -846,7 +846,9 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar'] {
 html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   content: '';
   position: absolute;
-  inset: -6px 0;
+  inset: 50% 0 auto;
+  height: max(100%, var(--toolbar-control-h));
+  transform: translateY(-50%);
 }
 
 /* Поиск списка использует ту же поверхность, что и остальные поля шапки.

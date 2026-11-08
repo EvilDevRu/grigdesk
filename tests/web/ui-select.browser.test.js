@@ -174,7 +174,10 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       });
 
       if (touch) {
-        await trigger.tap();
+        const target = await trigger.boundingBox();
+
+        assert.ok(target);
+        await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2 + 21);
       } else {
         await trigger.click();
       }
