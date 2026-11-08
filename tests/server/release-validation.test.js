@@ -112,6 +112,11 @@ test('reuse: текущая версия полного workflow также пр
   const f = fixture();
 
   f.source().tree.at(-1).sha = 'c'.repeat(40);
+  f.jobs().jobs[0].steps.push({
+    name: 'Проверка готовых пакетов',
+    status: 'completed',
+    conclusion: 'success',
+  });
   assert.equal((await f.verify()).validatedCommit, prior);
 });
 
@@ -189,8 +194,8 @@ for (const [name, mutate] of [
   ['другой канал', (f) => {
     f.input.channel = 'dev';
   }],
-  ['ветка вместо тега', (f) => {
-    f.input.ref = 'refs/heads/main';
+  ['ветка кроме main', (f) => {
+    f.input.ref = 'refs/heads/feature';
   }],
   ['другой тег версии', (f) => {
     f.input.ref = 'refs/tags/v0.2.0';
@@ -209,3 +214,31 @@ for (const [name, mutate] of [
     await assert.rejects(f.verify(), /release_validation_/u);
   });
 }
+
+test('reuse: stable из main принимает прежний полный прогон тех же исходников', async () => {
+  const f = fixture();
+
+  f.input.ref = 'refs/heads/main';
+  assert.equal((await f.verify()).currentCommit, current);
+});
+
+test('reuse: текущий workflow допускает пропуск только публикации после проверки пакетов', async () => {
+  const f = fixture();
+
+  f.source().tree.at(-1).sha = 'c'.repeat(40);
+  f.jobs().jobs[0].steps.push({
+    name: 'Проверка готовых пакетов',
+    status: 'completed',
+    conclusion: 'success',
+  });
+  f.jobs().jobs.push({
+    name: 'Публикация на сайт',
+    status: 'completed',
+    conclusion: 'skipped',
+    steps: [],
+  });
+  f.jobs().total_count++;
+  assert.equal((await f.verify()).runId, 42);
+  f.jobs().jobs[1].name = 'Произвольный пропущенный job';
+  await assert.rejects(f.verify(), /release_validation_job_not_successful/);
+});

@@ -111,7 +111,7 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(input.repository)
     || !/^[1-9][0-9]*$/u.test(input.runId) || !COMMIT.test(input.currentCommit)
     || input.channel !== 'release' || !version || version.dev !== null
-    || input.ref !== `refs/tags/v${input.version}`) {
+    || !['refs/heads/main', `refs/tags/v${input.version}`].includes(input.ref)) {
     throw new Error('release_validation_input_invalid');
   }
 
@@ -145,6 +145,12 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
   const steps: Record<string, unknown>[] = [];
 
   for (const job of jobs.jobs) {
+    if (isRecord(job) && priorWorkflow === currentWorkflow && job.name === 'Публикация на сайт'
+      && job.status === 'completed' && job.conclusion === 'skipped'
+      && Array.isArray(job.steps) && job.steps.length === 0) {
+      continue;
+    }
+
     if (!isRecord(job) || job.status !== 'completed' || job.conclusion !== 'success'
       || !Array.isArray(job.steps) || job.steps.some((step) => !isRecord(step))) {
       throw new Error('release_validation_job_not_successful');
@@ -153,7 +159,9 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
     steps.push(...job.steps as Record<string, unknown>[]);
   }
 
-  for (const name of CHECKS) {
+  const checks = priorWorkflow === currentWorkflow ? [...CHECKS, 'Проверка готовых пакетов'] : CHECKS;
+
+  for (const name of checks) {
     const matches = steps.filter((step) => step.name === name);
     const match = matches.length === 1 ? matches[0] : null;
 
@@ -177,7 +185,7 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
     validatedCommit: run.head_sha,
     currentCommit: input.currentCommit,
     productDigest: sha256(currentProduct),
-    checks: [...CHECKS],
+    checks: [...checks],
     orchestrationPaths: [...ORCHESTRATION],
   };
 }

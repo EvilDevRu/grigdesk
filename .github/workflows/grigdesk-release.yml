@@ -1,5 +1,5 @@
-# Сервер и web проверяются параллельно; упаковка ждёт оба результата.
-# Native-набор получает отдельный дисковый бюджет до длительных проверок.
+# План → проверки → сборка с подписью → проверка пакетов → публикация.
+# Пропуск полных тестов является явным решением и сохраняется в выпуске.
 name: Релиз GrigDesk — сборка и публикация
 on:
   workflow_dispatch:
@@ -24,6 +24,18 @@ on:
         description: Успешный полный прогон тех же исходников для stable (необязательно)
         type: string
         default: ""
+      test_mode:
+        description: Полный набор тестов или согласованный пропуск
+        type: choice
+        options:
+          - full
+          - skip
+        default: full
+        required: true
+      skip_reason:
+        description: Причина явного пропуска тестов (для skip)
+        type: string
+        default: ""
 permissions:
   contents: read
   actions: read
@@ -31,9 +43,62 @@ concurrency:
   group: grigdesk-release
   cancel-in-progress: false
 jobs:
+  plan:
+    name: План и допуск выпуска
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      run_tests: ${{ steps.checks.outputs.run_tests }}
+      mode: ${{ steps.checks.outputs.mode }}
+      artifact_id: ${{ steps.plan_artifact.outputs.artifact-id }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+      - name: Происхождение выпуска из main
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |-
+          if [ "$RELEASE_CHANNEL" = release ]; then
+            git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          fi
+      - name: План проверок
+        id: checks
+        run: |-
+          mkdir release-plan
+          node tools/releaseChecks.mts plan release-plan/release-checks.json
+        env:
+          TEST_MODE: ${{ inputs.test_mode }}
+          TEST_SKIP_REASON: ${{ inputs.skip_reason }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+      - name: Подтверждение прежних проверок
+        id: validation
+        run: node tools/releaseValidation.mts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+          VALIDATION_RECEIPT: ${{ github.workspace }}/release-plan/validation-receipt.json
+      - name: Сохранение плана
+        id: plan_artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-plan/
+          if-no-files-found: error
   server:
     name: Сервер, shared и руководство
-    if: ${{ inputs.validation_run == '' }}
+    if: ${{ needs.plan.outputs.run_tests == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -47,6 +112,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -207,9 +273,11 @@ jobs:
           test "$SERVER_RESULT" = success
           test "$SHARED_RESULT" = success
           test "$GUIDE_RESULT" = success
+    needs:
+      - plan
   web:
     name: Web-проверки
-    if: ${{ inputs.validation_run == '' }}
+    if: ${{ needs.plan.outputs.run_tests == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -223,6 +291,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -324,14 +393,19 @@ jobs:
         run: npm --prefix web test
         env:
           NODE_OPTIONS: --test-reporter=tap
-  release:
-    name: Упаковка и публикация
     needs:
+      - plan
+  build:
+    name: Сборка и подпись
+    needs:
+      - plan
       - server
       - web
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      artifact_id: ${{ steps.artifacts.outputs.artifact-id }}
     steps:
       - name: Окружение тестов
         run: |
@@ -343,6 +417,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -351,28 +426,17 @@ jobs:
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
-      - name: Подтверждение прежних проверок
-        id: validation
-        run: node tools/releaseValidation.mts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VALIDATION_RUN: ${{ inputs.validation_run }}
-          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
+      - name: Получение артефакта
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: release-plan
+          merge-multiple: true
       - name: Подтверждение всех проверок
-        if: ${{ !cancelled() }}
         env:
           SERVER_RESULT: ${{ needs.server.result }}
           WEB_RESULT: ${{ needs.web.result }}
-          REUSED_VALIDATION: ${{ steps.validation.outputs.reused }}
-          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
-        run: |
-          printf '%s\n' "server=$SERVER_RESULT" "web=$WEB_RESULT"
-          if [ "$REUSED_VALIDATION" = true ]; then
-            test -s "$VALIDATION_RECEIPT"
-          else
-            test "$SERVER_RESULT" = success
-            test "$WEB_RESULT" = success
-          fi
+        run: node tools/releaseChecks.mts gate release-plan/release-checks.json
       - name: Место для native-сборок
         run: >
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
@@ -429,7 +493,7 @@ jobs:
       - name: Проверка механизма подтверждения CI
         run: NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
           tests/server/release-validation.test.js tests/server/release-workflow.test.js
-          tests/relay/release-workflow.test.js
+          tests/relay/release-workflow.test.js tests/server/release-checks.test.js
       - name: Подготовка среды тестового исполнителя
         run: npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
       - name: Исходники тестового исполнителя
@@ -451,8 +515,100 @@ jobs:
         run: |
           install -m 600 /dev/null "$RUNNER_TEMP/release-signing.pem"
           printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+      - name: Описание проверок в подписанном выпуске
+        run: node tools/releaseChecks.mts notes release-plan/release-checks.json
+        env:
+          RELEASE_NOTES: ${{ inputs.notes }}
+      - name: Сборка комплекта
+        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
+        env:
+          GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
+      - name: Deb-пакет
+        run: node tools/buildDeb.mts
+      - name: Свидетельство проверок
+        run: |-
+          cp release-plan/*.json release-artifacts/
+          node tools/releaseChecks.mts attach release-artifacts/release-checks.json
+      - name: Артефакты проверочного выпуска
+        id: artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-${{ inputs.channel }}-${{ github.run_number }}
+          path: release-artifacts/
+          if-no-files-found: error
+  verify:
+    name: Проверка готовых пакетов
+    needs:
+      - plan
+      - build
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+      - name: Получение артефакта
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: release-artifacts
+          merge-multiple: true
+      - name: Зависимости проверки
+        run: npm --prefix server ci
+      - name: Проверка готовых пакетов
+        run: NODE_TEST_MAX_RSS_MB=4096 NODE_TEST_HEAP_MB=1024 bash tests/run-node-tests-safe.sh
+          tools/verifyRelease.mts release-artifacts
+      - name: Сохранение результата проверки
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-verified-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-artifacts/verified-proof.json
+          if-no-files-found: error
+  publish:
+    name: Публикация на сайт
+    needs:
+      - plan
+      - build
+      - verify
+    if: >-
+      ${{ !cancelled() && inputs.publish && needs.plan.result == 'success' &&
+      needs.build.result == 'success' && needs.verify.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+      - name: Получение артефакта
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: release-artifacts
+          merge-multiple: true
+      - name: Зависимости публикации
+        run: npm --prefix server ci
       - name: Ключ сайта
-        if: ${{ inputs.publish }}
         env:
           SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
           MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
@@ -463,24 +619,7 @@ jobs:
             install -m 600 /dev/null "$RUNNER_TEMP/release-site-mirror-key"
             printf '%s' "$MIRROR_KEY" > "$RUNNER_TEMP/release-site-mirror-key"
           fi
-      - name: Сборка комплекта
-        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
-        env:
-          GRIGDESK_RELEASE_NOTES_JSON: ${{ inputs.notes }}
-          GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
-      - name: Deb-пакет
-        run: node tools/buildDeb.mts
-      - name: Свидетельство прежних проверок
-        if: ${{ steps.validation.outputs.reused == 'true' }}
-        run: cp "$RUNNER_TEMP/release-validation.json" release-artifacts/validation-receipt.json
-      - name: Артефакты проверочного выпуска
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: grigdesk-${{ inputs.channel }}-${{ github.run_number }}
-          path: release-artifacts/
-          if-no-files-found: error
       - name: Публикация на сайт
-        if: ${{ inputs.publish }}
         run: node tools/release-publish.mts "$PWD"
         env:
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
@@ -495,4 +634,4 @@ jobs:
           RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
           RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
           RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}
-run-name: "${{ inputs.channel }}: проверка и выпуск #${{ github.run_number }}"
+run-name: "${{ inputs.channel }}: ${{ inputs.test_mode }} — выпуск #${{ github.run_number }}"

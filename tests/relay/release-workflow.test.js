@@ -95,8 +95,7 @@ test('RL-45: посредник выпускается через общий wor
   assert.match(text, /^permissions:\n  contents: read$/m);
   assert.match(text, /persist-credentials: false/);
   assert.ok(text.includes(`node-version: ${runtime.version}`));
-  assert.equal(new Set(uses).size, 3);
-  assert.equal(uses.length, 7);
+  assert.equal(new Set(uses).size, 4);
 
   for (const action of uses) {
     assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
@@ -105,9 +104,10 @@ test('RL-45: посредник выпускается через общий wor
   const yaml = await import('../../server/node_modules/yaml/dist/index.js');
   const workflow = yaml.parse(text);
 
-  assert.deepEqual(workflow.jobs.release.needs, ['server', 'web']);
+  assert.deepEqual(workflow.jobs.build.needs, ['plan', 'server', 'web']);
+  assert.deepEqual(workflow.jobs.publish.needs, ['plan', 'build', 'verify']);
 
-  for (const job of Object.values(workflow.jobs)) {
+  for (const job of [workflow.jobs.server, workflow.jobs.web, workflow.jobs.build]) {
     let previous = -1;
     const jobSource = yaml.stringify(job);
 
