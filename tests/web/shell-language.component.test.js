@@ -209,15 +209,31 @@ test('I18N-U02: топбар без поиска команд, соседние 
         await settings.waitFor();
         await actions.locator('[data-context="connection-trigger"]').waitFor();
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
-        // Подключение, телефон, колокольчик, справка и настройки.
-        assert.equal(await actions.getByRole('button').count(), 5);
+
+        const phone = width === 600;
+
+        // Телефон и справка на узком экране перенесены в «Разделы».
+        // Подключение, колокольчик и настройки остаются в основной полосе.
+        assert.equal(await actions.getByRole('button').count(), phone ? 3 : 5);
         assert.equal(
           await actions.getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).count(),
-          1,
+          phone ? 0 : 1,
         );
         assert.equal(await actions.locator('[data-context="alert-history"]').isVisible(), true);
+
+        if (phone) {
+          await page.locator('.phone-nav').getByRole('button', { name: /^(Разделы|Sections)$/ }).click();
+          await page.locator('[data-role="phone-sections"]')
+            .getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).waitFor();
+        }
+
         await page.locator('[data-context="topbar-network"]').waitFor();
         await page.locator('[data-context="provider-status"]').first().waitFor();
+
+        if (phone) {
+          await page.keyboard.press('Escape');
+          await page.locator('[data-role="phone-sections"]').waitFor({ state: 'hidden' });
+        }
 
         const unusedWidth = await actions.evaluate((element) => {
           const buttons = [...element.querySelectorAll('button')];

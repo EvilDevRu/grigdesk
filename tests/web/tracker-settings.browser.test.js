@@ -245,7 +245,13 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
             await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
           }
 
-          await dialog.locator('[data-role="tracker-board-enabled"]').check();
+          const enabled = dialog.locator('[data-role="tracker-board-enabled"]');
+
+          if (!await enabled.isChecked()) {
+            await dialog.locator('label.ui-checkbox:has([data-role="tracker-board-enabled"])').click();
+          }
+
+          assert.equal(await enabled.isChecked(), true);
 
           await dialog.getByRole('button', { name: /сохранить|save/iu }).click();
           assert.ok(writes.some((call) => call.path === '/api/trackers/settings'

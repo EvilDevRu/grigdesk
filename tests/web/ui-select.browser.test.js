@@ -207,7 +207,12 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
           bottom: box.bottom,
           overflow: node.scrollWidth > node.clientWidth + 1,
           listHeight: list.clientHeight,
-          minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
+          minButtonHeight: Math.min(...buttons.map((button) => {
+            const height = button.getBoundingClientRect().height;
+            const after = getComputedStyle(button, '::after');
+
+            return after.content === 'none' ? height : Math.max(height, Number.parseFloat(after.height) || 0);
+          })),
           searchFocused: document.activeElement === node.querySelector('input[type="search"]'),
           searchHeight: search.getBoundingClientRect().height,
           searchRadius: searchStyle.borderRadius,
@@ -241,7 +246,20 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
 
       await page.screenshot({ path: path.join(client.artifacts, `models-${width}x${height}.png`) });
       await popup.screenshot({ path: path.join(client.artifacts, `models-menu-${width}x${height}.png`) });
-      await popup.getByRole('button', { name: /^Codex/u }).click();
+
+      const codex = popup.getByRole('button', { name: /^Codex/u });
+
+      if (touch) {
+        const target = await codex.boundingBox();
+
+        assert.ok(target);
+        // Знак группы занимает 32 px, прозрачная площадка — 44 px.
+        // Нажатие у нижнего края доказывает работу расширения за пределами рисунка.
+        await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2 + 21);
+      } else {
+        await codex.click();
+      }
+
       assert.equal(await popup.getByRole('option').count(), 8);
       assert.equal(await trigger.innerText(), 'GLM-5.3');
       await popup.locator('input[type="search"]').fill('GLM-4.7');
