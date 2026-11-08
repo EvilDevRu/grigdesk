@@ -3,6 +3,7 @@ on:
   workflow_dispatch: {}
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: grigdesk-web-diagnostic-0.1.0
   cancel-in-progress: false
@@ -21,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 87dcc93b09aa73a199ba0e9f47b9a260a0714865
+          ref: da4da9a7003366373f64c697500c266aa6cbf80b
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -139,11 +140,23 @@ jobs:
           npm --prefix desktop ci
       - name: Тесты web
         id: web_tests
-        run: npm --prefix web test
+        run: NODE_TEST_MAX_RSS_MB=4096 NODE_TEST_HEAP_MB=1024 bash
+          tests/run-node-tests-safe.sh --test --test-concurrency=2
+          tests/web/client-phone.test.js
+          tests/web/computer-resources-baseline.component.test.js
+          tests/web/i18n-browser.test.js tests/web/i18n-preservation.test.js
+          tests/web/in-app-alerts-wiring.contract.test.js
+          tests/web/loading-layouts.browser.test.js
+          tests/web/loading-major.browser.test.js
+          tests/web/projects-responsive.test.js
+          tests/web/shell-language.component.test.js
+          tests/web/tracker-settings.browser.test.js
+          tests/web/ui-select.browser.test.js
         env:
           NODE_OPTIONS: --test-reporter=tap
     env:
       GRIGDESK_RELEASE_VERSION: 0.1.0-dev.18
       GRIGDESK_RELEASE_CHANNEL: dev
-      GRIGDESK_RELEASE_COMMIT: 87dcc93b09aa73a199ba0e9f47b9a260a0714865
-      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/87dcc93b09aa73a199ba0e9f47b9a260a0714865
+      GRIGDESK_RELEASE_COMMIT: da4da9a7003366373f64c697500c266aa6cbf80b
+      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/da4da9a7003366373f64c697500c266aa6cbf80b
+run-name: "Web: 11 исправленных файлов da4da9a7"
