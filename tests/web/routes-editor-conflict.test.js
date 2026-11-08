@@ -1,3 +1,4 @@
+import { subscribedSseNames } from './helpers/sseSubscriptions.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -187,9 +188,11 @@ test('RE-E4-05: hello/focus сверяют версии, подписка одн
   section.stopWatchingRoutes();
   assert.equal(unsubscriptions, 1);
   assert.equal(focus.size, 0);
-  const source = await readFile(webFile('src/composables/useSse.ts'), 'utf8');
-  assert.match(source, /'routes-draft-changed'/);
-  assert.match(source, /'routes-catalog-changed'/);
+
+  const names = await subscribedSseNames();
+
+  assert.ok(names.has('routes-draft-changed'));
+  assert.ok(names.has('routes-catalog-changed'));
 });
 
 test('RE-H3-05: после hello новый current и capabilities обесценивают старые validate/compare',

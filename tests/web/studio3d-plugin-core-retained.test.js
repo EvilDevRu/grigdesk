@@ -48,6 +48,9 @@ test('WA-07 retained core: consumer abort сохраняет deadline и не п
  */
 test('WL-05 retained core: штатный resolver допускает внешнюю библиотеку без проекта', async (t) => {
   const artifacts = process.env.GRIGDESK_ARTIFACTS_DIR ?? path.join(os.homedir(), '.grigdesk/artifacts');
+
+  await fs.mkdir(path.join(artifacts, 'studio3d-extraction'), { recursive: true });
+
   const directory = await fs.mkdtemp(path.join(artifacts, 'studio3d-extraction', 'core-workdir-'));
   const grigdesk = path.join(directory, 'grigdesk');
   const modelDirectory = path.join(directory, 'library', 'hero');

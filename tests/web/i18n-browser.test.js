@@ -177,7 +177,7 @@ test('I18N-B01/shell: старый shell использует browser fallback, 
   const page = await context.newPage();
 
   await page.goto(old.origin + '#/chats');
-  await page.getByRole('button', { name: 'Settings', exact: true }).waitFor();
+  await page.locator('.machine-welcome').waitFor();
   assert.equal(await page.locator('html').getAttribute('lang'), 'en');
 
   const sharedPreference = { preference: 'en', systemLanguage: 'ru-RU' };
@@ -201,7 +201,7 @@ test('I18N-B01/shell: старый shell использует browser fallback, 
 
   for (const origin of [noMachine.origin, offline.origin]) {
     await localPage.goto(origin + '#/chats');
-    await localPage.getByRole('button', { name: 'Settings', exact: true }).waitFor();
+    await localPage.locator('.machine-welcome').waitFor();
     assert.equal(await localPage.locator('html').getAttribute('lang'), 'en');
   }
 });

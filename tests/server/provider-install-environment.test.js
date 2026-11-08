@@ -151,6 +151,10 @@ test('внутренний и относительный env-prefix — явны
 
 test('внешний runtime требует и npm, и внешний Node', async (t) => {
   const { env, roots, home, bin, npm } = await fixture(t);
+
+  // Отказ проверяет только свой bin: системные Node/npm runner не замещают удалённые файлы.
+  env.PATH = bin;
+
   const runtime = await resolveExternalRuntime({
     env,
     roots,

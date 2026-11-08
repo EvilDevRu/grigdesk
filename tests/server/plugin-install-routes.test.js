@@ -297,8 +297,11 @@ test('R8: Git/service закрывает API/static до rename и удержи�
     }`;
 
     globalThis[key] = controls;
-    await repo.release('1.0.0', { manifest: { web: 'web' }, files: {
-      'web/index.html': 'old static',
+
+    const manifest = { entrypoints: { server: 'server.js', web: { dir: 'ui', entry: 'panel.js' } } };
+
+    await repo.release('1.0.0', { manifest, files: {
+      'ui/panel.js': 'export default {}; // old static',
       'server.js': server,
     } });
 
@@ -325,10 +328,14 @@ test('R8: Git/service закрывает API/static до rename и удержи�
 
     assert.equal((await fixture.app.inject({ url: '/api/ext/demo/value', headers: fixture.session }))
       .statusCode, 200);
-    assert.equal((await fixture.app.inject({ url: '/api/ext/demo/web/', headers: fixture.session }))
-      .statusCode, 200);
-    await repo.release('1.1.0', { manifest: { web: 'web' }, files: {
-      'web/index.html': 'new static',
+
+    const card = (await fixture.app.inject({ url: '/api/plugins', headers: fixture.session }))
+      .json().plugins.find((plugin) => plugin.id === 'demo');
+    const moduleUrl = card.entrypoints.web.entry;
+
+    assert.equal((await fixture.app.inject({ url: moduleUrl, headers: fixture.session })).statusCode, 200);
+    await repo.release('1.1.0', { manifest, files: {
+      'ui/panel.js': 'export default {}; // new static',
       'server.js': server,
     } });
     await fixture.installs.startUpdate('demo');
@@ -338,7 +345,7 @@ test('R8: Git/service закрывает API/static до rename и удержи�
     const native = fixture.installs.filesystem();
     const rename = native.rename;
     const current = path.join(fixture.pluginsDir, 'demo');
-    const before = await readFile(path.join(current, 'web/index.html'), 'utf8');
+    const before = await readFile(path.join(current, 'ui/panel.js'), 'utf8');
     let renames = 0;
 
     native.rename = async (from, to) => {
@@ -362,7 +369,7 @@ test('R8: Git/service закрывает API/static до rename и удержи�
     await entered.promise;
 
     try {
-      for (const url of ['/api/ext/demo/value', '/api/ext/demo/web/']) {
+      for (const url of ['/api/ext/demo/value', moduleUrl]) {
         const response = await fixture.app.inject({ url, headers: fixture.session });
 
         assert.equal(response.statusCode, 409);
@@ -370,7 +377,7 @@ test('R8: Git/service закрывает API/static до rename и удержи�
       }
 
       assert.equal(renames, 0);
-      assert.equal(await readFile(path.join(current, 'web/index.html'), 'utf8'), before);
+      assert.equal(await readFile(path.join(current, 'ui/panel.js'), 'utf8'), before);
     } finally {
       held.release();
     }
@@ -381,15 +388,18 @@ test('R8: Git/service закрывает API/static до rename и удержи�
     assert.equal(result.json().job.status, blocked ? 'recovery_required' : 'done');
     assert.deepEqual(controls.finishes, [blocked ? 'blocked' : 'installed']);
 
-    for (const url of ['/api/ext/demo/value', '/api/ext/demo/web/']) {
+    const nextCard = (await fixture.app.inject({ url: '/api/plugins', headers: fixture.session }))
+      .json().plugins.find((plugin) => plugin.id === 'demo');
+
+    for (const url of ['/api/ext/demo/value', blocked ? moduleUrl : nextCard.entrypoints.web.entry]) {
       const response = await fixture.app.inject({ url, headers: fixture.session });
 
       assert.equal(response.statusCode, blocked ? 503 : 200);
 
       if (blocked) {
         assert.equal(response.json().error, 'recovery_required');
-      } else if (url.endsWith('/web/')) {
-        assert.equal(response.body, 'new static');
+      } else if (url.endsWith('/panel.js')) {
+        assert.equal(response.body, 'export default {}; // new static');
       }
     }
 
@@ -412,8 +422,11 @@ test('R9: dataDir0700 вне заменяемого дерева, same lifecycle
           app.get('/data', async () => ({ dataDir: options.dataDir }));
         }
       ` });
-      await writeHttpPlugin(pluginsDir, 'page', { web: 'web' }, { 'web/index.html': 'page' });
-      await writeHttpPlugin(pluginsDir, 'sleeper', { web: 'web' }, { 'web/index.html': 'sleep' });
+
+      const manifest = { entrypoints: { web: { dir: 'ui', entry: 'panel.js' } } };
+
+      await writeHttpPlugin(pluginsDir, 'page', manifest, { 'ui/panel.js': 'export default {};' });
+      await writeHttpPlugin(pluginsDir, 'sleeper', manifest, { 'ui/panel.js': 'export default {};' });
     },
   });
   const data = path.join(fixture.userPluginsDataDir, 'demo');
@@ -557,7 +570,9 @@ test('R11: recover до scan, blocked user не импортирован, ост
           await writeFile(installs.options.statePath, '{invalid');
         }
 
-        await writeHttpPlugin(pluginsDir, 'other', { web: 'web' }, { 'web/index.html': 'other available' });
+        await writeHttpPlugin(pluginsDir, 'other', {
+          entrypoints: { web: { dir: 'ui', entry: 'panel.js' } },
+        }, { 'ui/panel.js': 'export default {}; // other available' });
       },
     });
     const catalog = await fixture.app.inject({ url: '/api/plugins', headers: fixture.session });
@@ -578,7 +593,14 @@ test('R11: recover до scan, blocked user не импортирован, ост
       assert.equal(await lstat(path.join(fixture.root, 'wrong-marker')).catch(() => null), null);
       assert.equal(await lstat(path.join(fixture.root, 'import-marker')).catch(() => null), null);
       assert.equal(health.recoveryError.code, mode === 'blocked' ? 'recovery_required' : 'state_invalid');
-      assert.equal((await fixture.app.inject({ url: '/api/ext/other/web/', headers: fixture.session }))
+
+      const other = catalog.json().plugins.find((plugin) => plugin.id === 'other');
+      const moduleUrl = mode === 'blocked'
+        ? other.entrypoints.web.entry : '/api/ext/other/module/unavailable/panel.js';
+
+      assert.equal(Boolean(other), mode === 'blocked');
+
+      assert.equal((await fixture.app.inject({ url: moduleUrl, headers: fixture.session }))
     .statusCode,
         mode === 'blocked' ? 200 : 404);
     }

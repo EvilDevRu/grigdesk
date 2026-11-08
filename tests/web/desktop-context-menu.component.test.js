@@ -58,10 +58,10 @@ test('выбор возвращает индекс, сохраняет фоку�
   assert.equal(document.querySelector('[role="separator"]').textContent, '');
   document.querySelector('[role="menuitem"]').click();
   assert.equal(await result, 0);
-  assert.equal(document.activeElement, editor);
+  assert.equal(document.activeElement === editor, true);
   assert.equal(editor.selectionStart, 1);
   await nextTick();
-  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.equal(document.querySelector('[role="menu"]') === null, true);
   wrapper.unmount();
 });
 
@@ -96,7 +96,7 @@ test('стрелки пропускают разделители, Enter выби
   }
 
   assert.equal(await selected, 2);
-  assert.equal(document.activeElement, editor);
+  assert.equal(document.activeElement === editor, true);
 
   const cancelled = requestDesktopContextMenu(request);
 

@@ -210,10 +210,14 @@ test('DPI-02: v1/v2/rollback возвращают source/SHA/deps и durable rec
 
   const v1 = (await driver.service.store.read()).plugins['fixture-db'];
 
-  await repo.release('2.0.0', { files: {
-    'entry.mjs': repo.source + '\n// Версия 2\n',
-    'payload.txt': 'two',
-  } });
+  await repo.release('2.0.0', {
+    manifest: { entry: 'next.mjs' },
+    files: {
+      'entry.mjs': repo.source + '\n// Прежний вход обновлён\n',
+      'next.mjs': repo.source + '\n// Версия 2\n',
+      'payload.txt': 'two',
+    },
+  });
 
   await driver.service.startUpdate('fixture-db', { version: '2.0.0' });
 
@@ -226,6 +230,8 @@ test('DPI-02: v1/v2/rollback возвращают source/SHA/deps и durable rec
   assert.ok(update.preview.changes.sensitive.includes('engine.json'));
 
   assert.ok(update.preview.changes.sensitive.includes('entry.mjs'));
+
+  assert.ok(update.preview.changes.sensitive.includes('next.mjs'));
 
   assert.deepEqual(v1.npmDirs, ['.']);
 

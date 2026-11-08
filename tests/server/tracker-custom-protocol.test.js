@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { startHttpFixture } from '../b24/helpers/httpFixture.mts';
+import { startHttpFixture } from '../tracker/helpers/httpFixture.mts';
 import { trackerFixture } from './helpers/trackerFixture.js';
 import { copyCustomPackage, customClientModule } from './helpers/trackerPackage.js';
 
@@ -27,6 +27,108 @@ const taskHtml = `
 </div>
 bitrix:forum.comments {"params":"signed.fixture","EXEMPLAR_ID":"fixture_7"}
 `;
+
+/**
+ * Новый API-токенный пакет получает настоящий loopback HTTP через свой transport seam.
+ * Старая сессионная версия сохраняет отдельную проверку, а ядро не копирует ни один клиент.
+ */
+async function apiPortal(t) {
+  let version = 1;
+  const task = () => ({
+    id: 42,
+    title: 'Фикстура CRM',
+    status: 'in_progress',
+    version,
+    creator: { id: 7, name: 'Автор' },
+    assignee: { id: 7, name: 'Исполнитель' },
+  });
+  const portal = await startHttpFixture(t, (request, response) => {
+    const url = new URL(request.url, 'http://fixture');
+    const route = url.pathname.replace('/api/v1', '');
+    let data;
+
+    assert.equal(request.headers.authorization, 'Bearer fixture-api-token');
+
+    if (route === '/auth/token') {
+      data = { user: { id: 7 } };
+    } else if (route === '/tasks' && request.method === 'GET') {
+      data = url.searchParams.get('role') === 'doing' ? [task()] : [];
+    } else if (route === '/tasks' && request.method === 'POST') {
+      data = { ...task(), id: 43 };
+    } else if (route === '/tasks/42' || route === '/tasks/42/transition') {
+      if (request.method !== 'GET') {
+        const body = JSON.parse(request.body.toString());
+
+        assert.equal(body.version, version);
+        version += 1;
+      }
+
+      data = task();
+    } else if (route === '/subjects/task/42/comments') {
+      data = request.method === 'POST' ? { id: 52 } : [{
+        id: 51,
+        body: 'Ответ человека',
+        author: { id: 7, name: 'Автор' },
+      }];
+    } else if (route === '/time/active') {
+      data = [];
+    } else if (route === '/time/start' || route === '/time/stop') {
+      data = null;
+    } else {
+      assert.fail(`Неожиданный маршрут CRM: ${request.method} ${request.url}`);
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ data }));
+  });
+
+  return {
+    ...portal,
+    /**
+     * HTTPS origin и запрет redirect проверяются до передачи синтетическому HTTP-серверу.
+     * Остальные параметры запроса, включая AbortSignal и Bearer, сохраняются без подмены.
+     */
+    fetch(input, options) {
+      const url = new URL(String(input));
+
+      assert.equal(url.origin, 'https://crm.fixture');
+      assert.equal(options.redirect, 'error');
+
+      return fetch(portal.baseUrl + url.pathname + url.search, options);
+    },
+  };
+}
+
+/**
+ * Методы нового пакета проходят тот же host-контракт с token и optimistic version.
+ * Вложения и виджеты не приписываются пакету, который не объявляет эти возможности.
+ */
+async function checkApiClient(t, createDiscriptTracker) {
+  const portal = await apiPortal(t);
+  const client = createDiscriptTracker({
+    credentials: { read: () => ({ baseUrl: 'https://crm.fixture', accessToken: 'fixture-api-token' }) },
+  }, portal.fetch);
+
+  t.after(() => client.dispose());
+  assert.equal((await client.accountIdentity()).userId, '7');
+  assert.equal((await client.taskPageData('42')).comments[0].text, 'Ответ человека');
+  assert.equal((await client.createTask({
+    title: 'Новая',
+    responsibleId: 7,
+    priority: 1,
+  })).id, 43);
+  assert.equal((await client.addComment('42', 'Новый ответ')).commentId, 52);
+  await client.timer('start', '42');
+  await client.completeTask('42');
+  await client.renewTask('42');
+
+  const writes = portal.requests.filter((request) => request.url.endsWith('/transition'));
+
+  assert.deepEqual(writes.map((request) => JSON.parse(request.body.toString())), [
+    { action: 'complete', version: 1 },
+    { action: 'reopen', version: 2 },
+  ]);
+}
 
 /**
  * Synthetic portal выполняет настоящий session/CSRF/upload протокол на loopback.
@@ -110,6 +212,12 @@ test('CUSTOM-PROTOCOL-01: login, page, upload, create CSRF, comment, timer, comp
     return;
   }
 
+  if (typeof clientModule.createDiscriptTracker === 'function') {
+    await checkApiClient(t, clientModule.createDiscriptTracker);
+
+    return;
+  }
+
   const portal = await customPortal(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-custom-client-'));
 
@@ -158,6 +266,41 @@ test('CUSTOM-PROTOCOL-01: login, page, upload, create CSRF, comment, timer, comp
 
 for (const emptyChart of [false, true]) {
   test(`CUSTOM-WIDGET-01: completed_tasks и все периоды, emptyChart=${emptyChart}`, async (t) => {
+    const clientModule = await customClientModule(t);
+
+    if (!clientModule) {
+      return;
+    }
+
+    if (typeof clientModule.createDiscriptTracker === 'function') {
+      const portal = await apiPortal(t);
+      const fixture = await trackerFixture(t, {
+        fetch: portal.fetch,
+        setup: async (config, context) => {
+          if (!await copyCustomPackage(config, context)) {
+            return false;
+          }
+
+          await mkdir(path.dirname(config.trackerCredentialsPath), { recursive: true });
+          await writeFile(config.trackerCredentialsPath, JSON.stringify({
+            'grigdesk-b24-discript': {
+              baseUrl: 'https://crm.fixture', accessToken: 'fixture-api-token',
+            },
+          }));
+          await writeFile(config.trackerSettingsPath, JSON.stringify({
+            externalId: 'grigdesk-b24-discript', revision: 0,
+          }));
+        },
+      });
+      const snapshot = await fixture.tracker.getDashboard();
+
+      assert.equal(snapshot.tasks.length, 1);
+      assert.equal(snapshot.tasks[0].id, 42);
+      assert.deepEqual(snapshot.widgets, []);
+
+      return;
+    }
+
     const portal = await customPortal(t, { emptyChart });
     const fixture = await trackerFixture(t, {
       setup: async (config, context) => {

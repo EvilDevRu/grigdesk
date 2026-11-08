@@ -92,9 +92,10 @@ test("карточка glm есть в getProviderAdapters, а без режим
   assert.deepEqual(glm.seedModels(), []);
 
   assert.equal(typeof glm.usage, 'function');
+  assert.equal(typeof glm.commands, 'function');
 
   for (const field of ['install', 'login', 'statusPage', 'nativeSettings',
-    'scopedWorkspace', 'untrustedInput', 'runUntrusted', 'session', 'efforts', 'modelEfforts', 'commands']) {
+    'scopedWorkspace', 'untrustedInput', 'runUntrusted', 'session', 'efforts', 'modelEfforts']) {
     assert.equal(glm[field], undefined, field);
   }
 

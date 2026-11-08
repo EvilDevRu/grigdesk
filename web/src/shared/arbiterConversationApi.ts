@@ -1,5 +1,6 @@
 import { api } from './apiClient.ts';
-import { t } from '../services/locale.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
 import {
   ARBITER_LIMITS,
   ArbiterConversationError,
@@ -13,6 +14,8 @@ import type {
   ConversationSnapshot,
   StopIdentity,
 } from '../../../shared/pipeline/arbiterConversation.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 export interface CurrentArbiterStop {
   identity: StopIdentity | null;

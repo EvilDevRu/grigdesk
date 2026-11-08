@@ -243,7 +243,7 @@ exit 0
       },
     });
     assert.equal(res.statusCode, 200, res.body);
-    assert.equal(res.json().outcome, 'launched');
+    assert.equal(res.json().outcome, 'started');
     return JSON.parse(await readFile(path.join(root, 'tickets', `t${id}.ticket.json`), 'utf8'));
   };
 

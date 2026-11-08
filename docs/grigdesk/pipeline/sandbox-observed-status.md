@@ -43,7 +43,7 @@ worktree («есть незакоммиченные изменения — workt
 
 Оба пути GrigDesk (`sandbox/down` и `sandbox/retry`) сначала закрывают попытку (`abandon`),
 то есть работа этапа уже ничья — поэтому они зовут `down.sh` с `FACTORY_DOWN_WORKTREE=force`.
-Профиль перед удалением кладёт снимок незакоммиченного в `~/.factory/state/archive/`
+Профиль перед удалением кладёт снимок незакоммиченного в `~/.grigdesk/factory/state/archive/`
 (`t<id>.<репозиторий>-<worktree>.patch`, `git add -A` + `git diff --cached --binary`,
 накатывается обратно `git apply`) и сносит worktree, только если снимок удался. Ручной
 `down.sh` из терминала остаётся бережным (`keep`) — принудительный режим включает лишь

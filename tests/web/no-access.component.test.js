@@ -305,7 +305,7 @@ test('DW-NA5: ответ 401 не повторяется и обмен ключ�
   assert.match(wrapper.text(), /Нет входа/u);
 });
 
-test('DW-NA6: прежний вход становится clientScope владельца 3D', async (t) => {
+test('DW-NA6: подтверждённый вход сохраняет clientScope без встроенной привязки 3D', async (t) => {
   const { h } = await mountApp(t);
   const { useAuthStore } = await import(migrationUrl('src/stores/auth.ts').href);
 
@@ -327,6 +327,5 @@ test('DW-NA6: прежний вход становится clientScope влад�
 
   const shell = await readFile(webFile('src/shared/layout/AppShell.vue'), 'utf8');
 
-  assert.match(shell, /studioAuth\.clientScope/u);
-  assert.doesNotMatch(shell, /studioAuth\.login/u);
+  assert.doesNotMatch(shell, /studioAuth/u);
 });

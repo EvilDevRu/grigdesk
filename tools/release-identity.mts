@@ -33,16 +33,18 @@ export async function resolveReleaseIdentity(input: {
     return buildReleaseIdentity('dev', `${base}-dev.${input.runNumber}`, commit);
   }
 
-  if (input.ref !== `refs/tags/v${base}`) {
-    throw new Error('release_requires_matching_version_tag');
+  if (input.ref !== 'refs/heads/main' && input.ref !== `refs/tags/v${base}`) {
+    throw new Error('release_requires_main_or_matching_version_tag');
   }
 
-  const tagCommit = (await execute('git', ['rev-parse', `v${base}^{commit}`], {
-    cwd: input.root,
-  })).stdout.trim();
+  if (input.ref !== 'refs/heads/main') {
+    const tagCommit = (await execute('git', ['rev-parse', `v${base}^{commit}`], {
+      cwd: input.root,
+    })).stdout.trim();
 
-  if (tagCommit !== commit) {
-    throw new Error('release_tag_commit_mismatch');
+    if (tagCommit !== commit) {
+      throw new Error('release_tag_commit_mismatch');
+    }
   }
 
   return buildReleaseIdentity('release', base, commit);
@@ -55,6 +57,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
     ref: process.env.GITHUB_REF ?? '',
     runNumber: process.env.GITHUB_RUN_NUMBER ?? '',
   });
+
+  if (process.env.GITHUB_SHA && identity.commit !== process.env.GITHUB_SHA) {
+    throw new Error('release_checkout_commit_mismatch');
+  }
+
   const lines = [
     `GRIGDESK_RELEASE_VERSION=${identity.version}`,
     `GRIGDESK_RELEASE_CHANNEL=${identity.channel}`,

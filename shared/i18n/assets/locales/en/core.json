@@ -884,6 +884,7 @@
   "machineConnectionTitle": "Connection",
   "machineConnectionIntro": "Selected machine status",
   "machineUnavailable": "Machine unavailable",
+  "shellTemporarilyUnavailable": "The shell is temporarily unavailable",
   "machineOfflineHint": "Make sure the computer is on, GrigDesk is running and the network is available.",
   "machineRetryCountdown": "Retrying in {seconds} s",
   "machineRetryNow": "Retry now",

@@ -15,6 +15,9 @@ const sseStub = `
   export const setSseEnabled = () => {};
   export const setSseLogSink = () => {};
   export const resetSseForTests = () => {};
+  export const reconnectSse = () => {};
+  export const sseRecovering = { value: false };
+  export const sseRetryAt = { value: 0 };
 `;
 const sseStubs = Object.fromEntries([
   './composables/useSse.ts',

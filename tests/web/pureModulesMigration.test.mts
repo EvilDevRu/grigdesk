@@ -19,7 +19,13 @@ const migrations: readonly Migration[] = [
   [
     'web/src/shared/board-task-list.js',
     'web/src/shared/boardTaskList.ts',
-    ['boardTaskListResetKey', 'matchesBoardTask', 'selectBoardTasks'],
+    [
+      'boardComposition',
+      'boardTaskListResetKey',
+      'matchesBoardTask',
+      'selectBoardTasks',
+      'unifiedBoardTasks',
+    ],
   ],
   [
     'web/src/shared/chat-model-run.js',
@@ -76,6 +82,7 @@ const migrations: readonly Migration[] = [
     [
       'ACTIVE_UPDATE_STATES',
       'BLOCK_REASON_LABELS',
+      'PACKAGE_UPDATE_STAGE_LABELS',
       'UPDATE_STAGE_LABELS',
       'UPDATE_STAGE_SHORT_LABELS',
       'blockReasonLabel',

@@ -8,7 +8,15 @@
       </div>
       <div class="conversation"><ChatLoadingPreview /></div>
     </div>
-    <div v-else-if="routeName === 'board'" class="board"><BoardLoading include-own-tasks /></div>
+    <div v-else-if="routeName === 'board'" class="board">
+      <UiPaneHeader class="board-heading" aria-hidden="true">
+        <template #title><UiSkeleton width="64px" height="20px" /></template>
+        <template #actions>
+          <UiSkeleton shape="block" width="120px" height="var(--toolbar-control-h)" />
+        </template>
+      </UiPaneHeader>
+      <BoardLoading />
+    </div>
     <div v-else-if="routeName === 'pipeline'" class="pipeline">
       <div class="toolbar" data-loading-region="toolbar">
         <UiSkeleton shape="block" width="120px" height="var(--toolbar-control-h)" />
@@ -27,7 +35,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiLoadingState, UiSkeleton, UiSkeletonLayout } from '../../ui';
+import { UiLoadingState, UiPaneHeader, UiSkeleton, UiSkeletonLayout } from '../../ui';
 import { panelLoading } from '../tools/panelLoading.ts';
 import ChatLoadingPreview from '../../views/chat/ChatLoadingPreview.vue';
 import BoardLoading from '../../views/BoardLoading.vue';
@@ -88,7 +96,8 @@ const listStyle = computed(() => props.routeName === 'chats' && width != null
   padding: 0 10px; border-bottom: 1px solid var(--line); }
 .list-rows { padding: 24px 18px; }
 .conversation { display: flex; flex: 1; min-width: 0; }
-.board { container: board-page / inline-size; }
+.board { container: board-page / inline-size; display: flex; flex-direction: column; gap: 16px; }
+.board-heading { margin: calc(var(--page-gutter) * -1) calc(var(--page-gutter) * -1) 0; }
 .pipeline { display: flex; flex-direction: column; gap: 14px; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   min-height: calc(var(--toolbar-control-h) + 8px);

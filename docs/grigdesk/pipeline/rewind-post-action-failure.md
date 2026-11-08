@@ -32,7 +32,7 @@ resume**, а `route_v2_project_latest_reset` до реестра не доход
 попытки. Строк нет, а событие есть — значит упал пост-шаг, и работа сделана:
 
 ```bash
-tail -3 ~/.factory/state/logs/t<TASK>.stages.log
+tail -3 ~/.grigdesk/factory/state/logs/t<TASK>.stages.log
 python3 -c "import json;print(json.load(open('runtime.json'))['runtime']['cursor'])" \
   # …/control/protocol-v2/tasks/t<TASK>/attempts/<attempt>/stage-results/runtime.json
 ```

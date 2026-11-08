@@ -459,5 +459,5 @@ test('PHONE-HEADER: реальная форма создания наследу�
   assert.equal(fx.browser.getComputedStyle(title).fontWeight, '500');
   fx.browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
   style.textContent = cssText;
-  assert.equal(fx.browser.getComputedStyle(title).fontSize, '17px');
+  assert.equal(fx.browser.getComputedStyle(title).fontSize, '13px');
 });

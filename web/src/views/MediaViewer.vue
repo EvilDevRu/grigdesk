@@ -66,6 +66,7 @@
           v-else-if="preview.video"
           :key="preview.video.src"
           class="media-viewer__video"
+          data-context="media-viewer"
           :src="preview.video.src"
           :label="preview.video.name"
           autoplay
@@ -246,8 +247,7 @@ watch(() => media.value?.src, () => {
   min-height: 0;
 }
 
-.media-viewer__stage img,
-.media-viewer__video {
+.media-viewer__stage img {
   display: block;
   max-width: 100%;
   max-height: 100%;
@@ -310,8 +310,7 @@ watch(() => media.value?.src, () => {
     inset: 56px 0 72px;
   }
 
-  .media-viewer__stage img,
-  .media-viewer__video {
+  .media-viewer__stage img {
     border-radius: 0;
   }
 

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import ts from '../../../../web/node_modules/typescript/lib/typescript.js';
+import { appWindowStubs } from '../../helpers/app-window-stubs.js';
 import { compileVue, webFile } from '../../helpers/compile-vue.js';
 
 /**
@@ -17,7 +18,10 @@ export async function captureSettingsModal(t, mount, flushPromises) {
       ready: false,
       watchUnauthorized() {},
       stopRecovery() {},
-      async load() {}
+      async load() {},
+      close() {},
+      invalidate() {},
+      clear() {}
     },
     shell: {
       initialized: false,
@@ -33,8 +37,9 @@ export async function captureSettingsModal(t, mount, flushPromises) {
     },
   };
   const stubs = {
+    ...appWindowStubs,
     './shared/asyncView.ts': `export const asyncView = (_loader, loadingComponent) => {
-      globalThis.__loadingAppCapture.entry = loadingComponent;
+      if (loadingComponent) globalThis.__loadingAppCapture.entry = loadingComponent;
       return { render: () => null };
     };`,
     './views/settings/SettingsModal.vue': 'export default { render: () => null };',

@@ -153,6 +153,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
       export { t, uiLocale } from './src/services/locale.ts';
       const Host = { render: () => h('div') };
       export const UiDialogHost = Host;
+      export const UiDesktopContextMenu = Host;
       export const UiTooltipHost = Host;
       export const UiToastHost = Host;
       export const UiInlineMessage = Host;
@@ -347,12 +348,12 @@ test('SP-08: карточка монтируется только после з�
 
   h.auth.authenticated = false;
   await flushPromises();
-  assert.equal(page().element, element);
+  assert.equal(page().element === element, true);
   assert.equal(page().attributes('data-ready'), 'true');
   assert.equal(h.passive, true);
   h.auth.authenticated = true;
   await flushPromises();
-  assert.equal(page().element, element);
+  assert.equal(page().element === element, true);
   assert.equal(page().attributes('data-ready'), 'true');
   assert.equal(h.passive, true);
 });

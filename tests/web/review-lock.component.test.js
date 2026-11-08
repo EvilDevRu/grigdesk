@@ -90,9 +90,9 @@ test('блокировка: одно нажатие, ожидание Android, �
   button.click();
   await nextTick();
   assert.equal(calls, 2);
-  assert.equal(dialog.querySelector('[role="alert"]'), null);
+  assert.equal(dialog.querySelector('[role="alert"]') === null, true);
   resolve();
   await flushPromises();
   assert.equal(button.disabled, false);
-  assert.equal(dialog.querySelector('[role="alert"]'), null);
+  assert.equal(dialog.querySelector('[role="alert"]') === null, true);
 });

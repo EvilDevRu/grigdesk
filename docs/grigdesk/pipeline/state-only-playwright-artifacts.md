@@ -15,7 +15,7 @@ Playwright `tests/e2e/auth.setup.ts` пишет storage state в `e2e/.auth/user
 before/after) честно видит расхождение → 75. Тот же файл до этого ронял `verify` у <TASK>
 (четыре раза; человек искал причину в браузере Playwright) и <TASK> (плюс `e2e/screenshots/*.png`).
 
-Где искать диагноз по старым журналам: `~/.factory/control/guards-v2/t<TASK>/<attempt>/<node>/
+Где искать диагноз по старым журналам: `~/.grigdesk/factory/control/guards-v2/t<TASK>/<attempt>/<node>/
 sequence-N.after.diff` — строки `±UNTRACKED <base64 root> <base64 rel>`; расшифровать `base64 -d`.
 
 Лечение 11.09.2026 (три слоя):

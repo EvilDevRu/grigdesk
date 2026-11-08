@@ -74,9 +74,10 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 
 import type { DockerImage } from '../../../../shared/plugins/docker/dockerContracts';
 
-import { t } from '../../services/locale';
 import { useDockerStore } from '../../stores/docker';
-import { UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, vTooltip } from '../../ui';
+import {
+  UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, t, vTooltip,
+} from '../../ui';
 import { formatAge, formatSize, formatTags } from './format';
 
 interface DockerFeedback {

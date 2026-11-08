@@ -13,6 +13,31 @@ import { runInstalledCli } from '../cli/installedCli.ts';
 import { dataHome } from '../shared/runtime/dataHome.ts';
 import type { ReleaseEnvelope } from '../shared/runtime/installedUpdateContracts.ts';
 import { installRelease } from './installRelease.mts';
+import { copyInstallerArchive, verifyInstallerArchive } from '../shared/node/installerArchiveTail.ts';
+import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
+import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+
+/**
+ * В SEA хранится только небольшое подписанное описание, архивы читаются из хвоста ELF.
+ * Схема и подпись проверяются до вычисления границ или создания установки.
+ */
+function installerRelease(): ReleaseEnvelope {
+  const source = JSON.parse(getAsset('release', 'utf8')) as ReleaseEnvelope;
+  const index = decodeReleaseChannelIndex({
+    format: 2,
+    channel: source.payload.channel,
+    publishedAt: source.payload.publishedAt,
+    latest: source,
+  });
+
+  if (!index.latest) {
+    throw new Error('installer_release_missing');
+  }
+
+  verifyReleaseEnvelope(index.latest);
+
+  return index.latest;
+}
 
 /**
  * Installed entry содержит собственный Node и не ищет исходники, npm или серверный payload.
@@ -21,6 +46,27 @@ import { installRelease } from './installRelease.mts';
 export async function runMaintenance(argv: string[]): Promise<number> {
   const root = path.resolve(path.dirname(process.execPath), '..');
   const [action, ...args] = argv;
+
+  if (action === '--verify') {
+    if (!isSea() || args.length !== 1 || args[0] !== '--json') {
+      throw new Error('Использование: grigdesk-install --verify --json');
+    }
+
+    const envelope = installerRelease();
+
+    for (const component of ['server', 'desktop'] as const) {
+      await verifyInstallerArchive(process.execPath, envelope.payload.artifacts, component);
+    }
+
+    process.stdout.write(JSON.stringify({
+      verified: true,
+      version: envelope.payload.version,
+      commit: envelope.payload.commit,
+      archiveHashesValid: true,
+    }) + '\n');
+
+    return 0;
+  }
 
   if (action === 'install') {
     const mode = args[0];
@@ -48,7 +94,7 @@ export async function runMaintenance(argv: string[]): Promise<number> {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-'));
 
     try {
-      const envelope = JSON.parse(getAsset('release', 'utf8')) as ReleaseEnvelope;
+      const envelope = installerRelease();
 
       await installRelease({
         root: paths.get('--root') ?? path.join(os.homedir(), '.local/lib/grigdesk'),
@@ -66,7 +112,7 @@ export async function runMaintenance(argv: string[]): Promise<number> {
         async archive(component) {
           const file = path.join(temporary, `${component}.tar.gz`);
 
-          await fs.writeFile(file, Buffer.from(getAsset(component)), { mode: 0o600 });
+          await copyInstallerArchive(process.execPath, envelope.payload.artifacts, component, file);
 
           return file;
         },
@@ -151,7 +197,9 @@ export async function runMaintenance(argv: string[]): Promise<number> {
 }
 
 if (isSea() || process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  void runMaintenance(process.argv.slice(isSea() ? 1 : 2)).then((code) => {
+  // SEA сохраняет два служебных элемента argv, как запуск обычного файла Node.
+  // Команда начинается с третьего элемента в обоих вариантах запуска.
+  void runMaintenance(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : 'maintenance_failed'}\n`);

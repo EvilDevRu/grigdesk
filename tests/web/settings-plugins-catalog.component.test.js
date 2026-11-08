@@ -205,7 +205,7 @@ test('Поиск поля открывает параметры из источ�
   assert.equal(h.wrapper.get('[data-plugin-details-tab="parameters"]').attributes('aria-selected'), 'true');
   assert.equal(h.wrapper.get('input[aria-label="Лимит"]').isVisible(), true);
   assert.equal(h.wrapper.get('input[aria-label="Лимит"]').element.value, '24');
-  assert.equal(h.browser.document.activeElement, h.wrapper.get('input[aria-label="Лимит"]').element);
+  assert.equal(h.browser.document.activeElement === h.wrapper.get('input[aria-label="Лимит"]').element, true);
   assert.equal(h.writes().length, 0);
 
   h.settings.reveal({
@@ -214,5 +214,8 @@ test('Поиск поля открывает параметры из источ�
     fieldPath: ['enabled'],
   });
   await h.flushPromises();
-  assert.equal(h.browser.document.activeElement, h.wrapper.get('[data-plugin-enable-action]').element);
+  assert.equal(
+    h.browser.document.activeElement === h.wrapper.get('[data-plugin-enable-action]').element,
+    true,
+  );
 });

@@ -7,18 +7,12 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { subscribedSseNames as eventNames } from './helpers/sseSubscriptions.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SSE_PATH = path.join(REPO_ROOT, 'web', 'src', 'composables', 'useSse.ts');
 const TELEGRAM_VIEW_PATH = path.join(REPO_ROOT, 'web', 'src', 'views', 'TelegramView.vue');
 const APP_SHELL_PATH = path.join(REPO_ROOT, 'web', 'src', 'shared', 'layout', 'AppShell.vue');
-
-async function eventNames() {
-  const src = await readFile(SSE_PATH, 'utf8');
-  const block = src.match(/const EVENT_NAMES\s*=\s*\[([\s\S]*?)\]/);
-  assert.ok(block, 'в useSse.js не найден список EVENT_NAMES');
-  return new Set([...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
-}
 
 test('общий inbox-changed и native telegram-status зарегистрированы без legacy telegram-inbox', async () => {
   const names = await eventNames();

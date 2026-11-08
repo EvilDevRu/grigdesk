@@ -130,9 +130,11 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       const toolbarStyles = await page.locator('button[data-context="chat-session-toolbar"]')
         .evaluateAll((buttons) => buttons.map((button) => {
           const style = getComputedStyle(button);
+          const after = getComputedStyle(button, '::after');
 
           return {
             height: style.height,
+            targetHeight: Math.max(Number.parseFloat(style.height), Number.parseFloat(after.height) || 0),
             padding: style.padding,
             border: style.border,
             radius: style.borderRadius,
@@ -145,13 +147,15 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       assert.equal(toolbarStyles.length, 3);
       assert.deepEqual(toolbarStyles[0], toolbarStyles[1]);
       assert.deepEqual(toolbarStyles[1], toolbarStyles[2]);
-      assert.equal(toolbarStyles[0].height, touch ? '44px' : '28px');
+      assert.equal(toolbarStyles[0].height, touch ? (width <= 600 ? '44px' : '32px') : '28px');
+      assert.equal(toolbarStyles[0].targetHeight, touch ? 44 : 28);
       assert.equal(toolbarStyles[0].radius, '4px');
       await page.locator('.cs-top').screenshot({
         path: path.join(client.artifacts, `chat-header-${width}x${height}.png`),
       });
 
-      const selectBounds = await page.locator('.bar .sel').evaluateAll((fields) => {
+      const selectBounds = await page.locator('button[data-context="chat-session-toolbar"]')
+        .evaluateAll((fields) => {
         const boxes = fields.map((field) => field.getBoundingClientRect());
         const left = Math.min(...boxes.map((box) => box.left)) - 4;
         const top = Math.min(...boxes.map((box) => box.top)) - 4;
@@ -170,7 +174,10 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       });
 
       if (touch) {
-        await trigger.tap();
+        const target = await trigger.boundingBox();
+
+        assert.ok(target);
+        await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2 + 21);
       } else {
         await trigger.click();
       }
@@ -206,7 +213,12 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
           bottom: box.bottom,
           overflow: node.scrollWidth > node.clientWidth + 1,
           listHeight: list.clientHeight,
-          minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
+          minButtonHeight: Math.min(...buttons.map((button) => {
+            const height = button.getBoundingClientRect().height;
+            const after = getComputedStyle(button, '::after');
+
+            return after.content === 'none' ? height : Math.max(height, Number.parseFloat(after.height) || 0);
+          })),
           searchFocused: document.activeElement === node.querySelector('input[type="search"]'),
           searchHeight: search.getBoundingClientRect().height,
           searchRadius: searchStyle.borderRadius,
@@ -240,7 +252,20 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
 
       await page.screenshot({ path: path.join(client.artifacts, `models-${width}x${height}.png`) });
       await popup.screenshot({ path: path.join(client.artifacts, `models-menu-${width}x${height}.png`) });
-      await popup.getByRole('button', { name: /^Codex/u }).click();
+
+      const codex = popup.getByRole('button', { name: /^Codex/u });
+
+      if (touch) {
+        const target = await codex.boundingBox();
+
+        assert.ok(target);
+        // Знак группы занимает 32 px, прозрачная площадка — 44 px.
+        // Нажатие у нижнего края доказывает работу расширения за пределами рисунка.
+        await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2 + 21);
+      } else {
+        await codex.click();
+      }
+
       assert.equal(await popup.getByRole('option').count(), 8);
       assert.equal(await trigger.innerText(), 'GLM-5.3');
       await popup.locator('input[type="search"]').fill('GLM-4.7');
@@ -371,9 +396,12 @@ test('SELECT-GEOMETRY-01: полный каталог, локальный touch,
       const popup = page.locator('.ui-select-popup');
 
       await popup.waitFor({ state: 'visible' });
-      await page.waitForFunction(() => {
-        return document.querySelector('.ui-select-popup input[type="search"]') === document.activeElement;
-      });
+      await page.waitForFunction((touch) => {
+        const selector = touch ? '.ui-select-popup [role="listbox"]'
+          : '.ui-select-popup input[type="search"]';
+
+        return document.querySelector(selector) === document.activeElement;
+      }, touch);
 
       const box = await geometry(page);
 

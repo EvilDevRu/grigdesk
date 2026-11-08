@@ -7,9 +7,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { test as nodeTest } from 'node:test';
 
-import { protocolChanges, protocolHead, protocolList, protocolReconcile } from './helpers/chat-protocol.js';
+import {
+  protocolChanges, protocolHead, protocolPage, protocolReconcile, protocolWindow,
+} from './helpers/chat-protocol.js';
 
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import {
+  decodeWindowBase, historyPrefixHash, historyWindowCursor,
+} from '../../server/src/lib/chat/historyWindow.ts';
 import { chatStoreFixture, setChatProviders, sseOf } from './helpers/chat-store.js';
 
 const test = (name, run) => nodeTest(name, { timeout: 15000 }, run);
@@ -150,8 +155,15 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
    * Смена revision и решение stale принадлежат серверу, не фикстуре.
    */
   async function put(body) {
-    const result = await history.saveOne(body.chat, !!body.archived);
+    const window = body.window ? decodeWindowBase(body.window) : null;
+
+    assert.ok(!body.window || window, 'основание окна проходит публичный decoder');
+
+    const result = await history.saveOne(body.chat, !!body.archived, {
+      ...(window ? { window, clearHistory: body.clearHistory === true } : {}),
+    });
     const saved = result.chat;
+    const offset = body.clearHistory ? 0 : (window?.offset || 0);
 
     return {
       ok: true,
@@ -167,6 +179,15 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
       workdir: saved?.workdir,
       taskId: saved?.taskId ?? null,
       workdirState: saved?.workdirState,
+      ...(window && saved ? { window: {
+        offset,
+        prefixHash: historyPrefixHash(saved.messages || [], offset),
+        before: historyWindowCursor(saved, offset),
+        hasOlder: offset > 0,
+        historyEpoch: Number(saved.mobileHistoryEpoch || 0),
+        baseEnd: saved.messages?.length || 0,
+        baseHash: historyPrefixHash(saved.messages || [], saved.messages?.length || 0),
+      } } : {}),
     };
   }
 
@@ -187,19 +208,20 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
       async get(url) {
         requests.push({ method: 'GET', url });
 
-        if (url === '/api/chat/store/list') {
-          return protocolList({
+        if (url.startsWith('/api/chat/store/list?')) {
+          return protocolPage({
             sessions: [await history.readOne(base.id)],
             archived: [],
             activeId: base.id,
-          });
+          }, url);
         }
         if (url === `/api/chat/store/head/${base.id}`) {
           return { head: protocolHead(await history.readOne(base.id)) };
         }
-        if (url === `/api/chat/store/chat/${base.id}`) {
+        if (url.split('?')[0] === `/api/chat/store/chat/${base.id}`) {
           const chat = await history.readOne(base.id);
-          const answer = { chat, version: protocolHead(chat).version };
+          const answer = url.includes('?window=1')
+            ? protocolWindow(chat, url) : { chat, version: protocolHead(chat).version };
 
           return hooks.get ? hooks.get(answer) : answer;
         }

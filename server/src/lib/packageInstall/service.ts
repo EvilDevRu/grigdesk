@@ -46,7 +46,7 @@ import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
 import { finishPackageRemoval } from './removePackage.ts';
 import {
-  installedSnapshot, sameSource,
+  installedSnapshot, installedServerEntry, sameSource,
 } from './serviceSnapshots.ts';
 import { compareSemVer } from '../releaseCommon.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
@@ -159,6 +159,7 @@ export class PluginInstallService {
       serverWarnings: packagePolicy(options.packageKind).warnings,
       installedModuleDir: options.packageKind === 'db-engine'
         ? async () => null : pluginPackagePolicy.installedModuleDir,
+      installedServerEntry: (directory) => installedServerEntry(directory, options.packageKind),
     };
     this.workDir = path.join(options.pluginsDir, '.grigdesk-install');
     this.now = options.now ?? (() => new Date());

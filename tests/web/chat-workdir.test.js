@@ -2,9 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
+import { protocolList } from './helpers/chat-protocol.js';
 
 const FIRST = { kind: 'path', path: '/workspace/first' };
 const SECOND = { kind: 'path', path: '/workspace/second' };
+
+/**
+ * Сверка использует настоящий POST дельты и лёгкие шапки каталога.
+ * Сценарий управляет только ответом, сохраняя синхронную установку своих барьеров.
+ */
+function mockReconcile(read) {
+  apiHarness.post = async (url) => {
+    assert.equal(url, '/api/chat/store/changes');
+
+    return { ...protocolList(await read()), gone: [] };
+  };
+}
 
 test('PD: reconnect очищает default/recent пропущенного удаления и сохраняет папку истории', async () => {
   const { chat, session } = await fixture();
@@ -18,12 +31,12 @@ test('PD: reconnect очищает default/recent пропущенного уд�
   chat.defWorkdir = choice;
   chat.recentWorkdirs = [choice];
   chat._markSent();
-  apiHarness.get = async () => ({
+  mockReconcile(async () => ({
     sessions: [{ ...session }],
     archived: [],
     defWorkdir: { kind: 'grigdesk' },
     recentWorkdirs: [],
-  });
+  }));
   await chat._resyncStore();
   assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
   assert.deepEqual(chat.recentWorkdirs, []);
@@ -31,13 +44,13 @@ test('PD: reconnect очищает default/recent пропущенного уд�
 });
 
 for (const during of [false, true]) {
-  test(`PD: reconnect сохраняет локальный выбор (правка во время GET=${during})`, async () => {
+  test(`PD: reconnect сохраняет локальный выбор (правка во время сверки=${during})`, async () => {
     const { chat } = await fixture();
     let release;
 
-    apiHarness.get = () => new Promise((resolve) => {
+    mockReconcile(() => new Promise((resolve) => {
       release = resolve;
-    });
+    }));
 
     if (!during) {
       chat.defWorkdir = SECOND;
@@ -60,7 +73,7 @@ for (const during of [false, true]) {
   });
 }
 
-test('PD: поздний GET до удаления не возвращает default/recent', async () => {
+test('PD: поздний ответ сверки до удаления не возвращает default/recent', async () => {
   const { chat } = await fixture();
   const choice = {
     kind: 'project',
@@ -73,9 +86,9 @@ test('PD: поздний GET до удаления не возвращает def
   chat.defWorkdir = choice;
   chat.recentWorkdirs = [choice];
   chat._markSent();
-  apiHarness.get = () => new Promise((resolve) => {
+  mockReconcile(() => new Promise((resolve) => {
     release = resolve;
-  });
+  }));
 
   const syncing = chat._resyncStore();
 
@@ -95,31 +108,36 @@ test('PD: поздний GET до удаления не возвращает def
   assert.deepEqual(chat.recentWorkdirs, []);
 });
 
-test('PD: новый reconnect имеет приоритет над поздним старым GET', async () => {
+test('PD: одновременные reconnect делят запрос, следующий принимает свежий ответ', async () => {
   const { chat } = await fixture();
   const responses = [];
 
-  apiHarness.get = () => new Promise((resolve) => {
+  mockReconcile(() => new Promise((resolve) => {
     responses.push(resolve);
-  });
+  }));
 
   const old = chat._resyncStore();
   const fresh = chat._resyncStore();
 
+  assert.equal(responses.length, 1);
+  responses[0]({
+    sessions: [],
+    archived: [],
+    defWorkdir: FIRST,
+    recentWorkdirs: [FIRST],
+  });
+  await Promise.all([old, fresh]);
+
+  const next = chat._resyncStore();
+
+  assert.equal(responses.length, 2);
   responses[1]({
     sessions: [],
     archived: [],
     defWorkdir: SECOND,
     recentWorkdirs: [SECOND],
   });
-  await fresh;
-  responses[0]({
-      sessions: [],
-      archived: [],
-      defWorkdir: FIRST,
-      recentWorkdirs: [FIRST],
-    });
-  await old;
+  await next;
   assert.deepEqual(chat.defWorkdir, SECOND);
   assert.deepEqual(chat.recentWorkdirs, [SECOND]);
 });
@@ -132,12 +150,12 @@ test('PD: полученный по SSE выбор не считается ло�
     origin: 'other-window',
     meta: { defWorkdir: FIRST, recentWorkdirs: [FIRST] },
   });
-  apiHarness.get = async () => ({
+  mockReconcile(async () => ({
     sessions: [],
     archived: [],
     defWorkdir: SECOND,
     recentWorkdirs: [SECOND],
-  });
+  }));
   await chat._resyncStore();
   assert.deepEqual(chat.defWorkdir, SECOND);
   assert.deepEqual(chat.recentWorkdirs, [SECOND]);

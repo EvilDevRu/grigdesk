@@ -2,8 +2,8 @@ import { constants } from 'node:fs';
 import { factoryTicketHash } from '../lib/factoryTaskSources.ts';
 import { readContainedText } from '../../../shared/node/readContainedText.ts';
 // FactoryStateAdapter — единственная точка чтения состояния фабрики.
-// Изолирует хрупкий файловый источник (`~/.factory/state`) от остального сервера:
-// читает `tNNNN.pipeline` (реестр), `logs/tNNNN.stages.log` (таймлайн), проверяет
+// Изолирует хрупкий файловый источник (`factory/state` в папке данных) от остального
+// сервера: читает `tNNNN.pipeline` (реестр), `logs/tNNNN.stages.log` (таймлайн), проверяет
 // живость демона по `/proc/<ORCH_PID>`. Только ЧТЕНИЕ — мутации идут через factory-cli.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';

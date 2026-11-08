@@ -34,7 +34,7 @@ lifecycle-аналитики, журнал пуст, `route_selected` в нём 
 с наличием событий —
 
 ```bash
-ls ~/.factory/control/protocol-v2/tasks/t<TASK>/attempts/a_*/lifecycle/segments/*.ndjson
+ls ~/.grigdesk/factory/control/protocol-v2/tasks/t<TASK>/attempts/a_*/lifecycle/segments/*.ndjson
 ```
 
 Ноль байт (или каталога нет вовсе) — это он. Сторож — три проверки `pre-ledger`

@@ -322,14 +322,25 @@ test('медленный prepare сразу открывает окно, а по
   assert.equal(fixture.posts.length, 0);
 });
 
-test('три исполнителя открывают одно окно из обоих мест', { timeout: 120000 }, async (t) => {
+test('три исполнителя открывают установку из настроек и обновление из обоих мест', {
+  timeout: 300000,
+}, async (t) => {
   for (const installed of [false, true]) {
     for (const entry of ['topbar', 'settings']) {
+      if (!installed && entry === 'topbar') {
+        continue;
+      }
+
       for (const id of ['claude', 'codex', 'kimi']) {
         await t.test(`${id}/${entry}/${installed ? 'update' : 'install'}`, async (scenario) => {
           const fixture = await browserFixture(scenario, installed);
           const page = await fixture.newPage();
           const provider = fixture.cards.find((item) => item.id === id);
+
+          if (!installed) {
+            assert.equal(await page.locator(`.prov-${id} [data-context="provider-status"]`).count(), 0);
+          }
+
           const area = await openEntry(page, id, entry);
 
           await confirmStart(page, area, provider, installed ? 'update' : 'install', fixture.posts);

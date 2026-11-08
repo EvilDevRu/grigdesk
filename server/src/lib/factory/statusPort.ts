@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+
+import { runtimeRoot } from '../runtimePaths.ts';
 
 const execFileAsync = promisify(execFile);
-const STAGE_PROGRESS = fileURLToPath(new URL('../../../../engine/lib/stage-progress.sh', import.meta.url));
-const STAGE_RESULT = fileURLToPath(new URL('../../../../engine/lib/stage-result.sh', import.meta.url));
-const FACTORY_HOME = path.dirname(path.dirname(STAGE_PROGRESS));
+const FACTORY_HOME = path.join(runtimeRoot(), 'engine');
+const STAGE_PROGRESS = path.join(FACTORY_HOME, 'lib/stage-progress.sh');
+const STAGE_RESULT = path.join(FACTORY_HOME, 'lib/stage-result.sh');
 
 interface RunContext {
   task: string;

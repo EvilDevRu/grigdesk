@@ -57,7 +57,7 @@ function dataConfig(t, extra = {}) {
   };
 }
 
-test('CD-DH-1 вся раскладка данных отделена от кода и фабрики', (t) => {
+test('CD-DH-1 вся раскладка данных вместе с фабрикой отделена от кода', (t) => {
   const { home, result, config: c } = dataConfig(t);
 
   assert.equal(result.status, 0, result.stderr);
@@ -112,8 +112,10 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
   for (const [key, suffix] of Object.entries(mapping)) {
     assert.equal(c[key], path.join(h, suffix), key);
   }
+  // Фабрика живёт внутри папки данных (factory/*): прежнего отдельного ~/.factory
+  // после переноса не существует, и умолчания не должны указывать на него.
   for (const key of ['routesDir', 'stateDir', 'factoryControlDir', 'factoryConfigRoot', 'analysisDir']) {
-    assert.ok(c[key].startsWith(home + '/.factory/'), key);
+    assert.ok(c[key].startsWith(h + '/factory/'), key);
   }
 
   assert.equal(c.rootDir, ROOT);

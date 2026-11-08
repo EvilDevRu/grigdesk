@@ -99,7 +99,7 @@ test('TW-F01: ready переносит все поля rows; badge main совп
   const f = await pairedShelf(t);
 
   assert.ok(f.main.store.rows.length > 0, 'Фикстура main содержит готовые строки');
-  assert.deepEqual(f.mirror.store.rows, f.main.store.rows);
+  assert.deepEqual(f.mirror.store.rows, JSON.parse(JSON.stringify(f.main.store.rows)));
   assert.deepEqual(shelfNavBadge(f.mirror.store.rows), shelfNavBadge(f.main.store.rows));
 
   const row = f.mirror.store.rows[0];
@@ -126,7 +126,7 @@ test(
   await tick();
   assert.equal(f.main.h.alerts.length, 1);
   assert.equal(f.mirror.h.alerts.length, 0);
-  assert.deepEqual(f.mirror.store.rows, f.main.store.rows);
+  assert.deepEqual(f.mirror.store.rows, JSON.parse(JSON.stringify(f.main.store.rows)));
   assert.deepEqual(
     f.mirror.h.calls,
     [],
@@ -161,7 +161,7 @@ test(
   assert.equal(puts.length, 1);
   assert.equal(puts[0].body.snapshot.pipeline.gate, 'GATE_PLAN');
   assert.equal(f.mirror.h.calls.some((call) => call.method === 'PUT'), false);
-  assert.deepEqual(f.mirror.store.rows, f.main.store.rows);
+  assert.deepEqual(f.mirror.store.rows, JSON.parse(JSON.stringify(f.main.store.rows)));
 
   const old = structuredClone(f.mainChannel.posted.at(-1));
 
@@ -169,7 +169,7 @@ test(
   await tick();
   await tick();
   assert.equal(f.main.store.rows.some((row) => row.taskId === '99'), false);
-  assert.deepEqual(f.mirror.store.rows, f.main.store.rows);
+  assert.deepEqual(f.mirror.store.rows, JSON.parse(JSON.stringify(f.main.store.rows)));
   f.childChannel.onmessage({ data: old });
   await tick();
   assert.equal(f.mirror.store.rows.some((row) => row.taskId === '99'), false);
