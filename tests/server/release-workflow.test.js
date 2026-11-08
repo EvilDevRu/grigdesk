@@ -53,6 +53,9 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.equal(inputs.channel.default, 'release');
   assert.equal(inputs.publish.type, 'boolean');
   assert.equal(inputs.publish.default, false);
+  assert.equal(inputs.validation_run.type, 'string');
+  assert.equal(inputs.validation_run.default, '');
+  assert.equal(workflow.permissions.actions, 'read');
   assert.equal(workflow.on.push, undefined);
 
   const steps = workflow.jobs.release.steps;
@@ -72,6 +75,7 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
     const step = steps.find((entry) => entry.id === id);
 
     assert.equal(step?.['continue-on-error'], true);
+    assert.equal(step.if, "${{ steps.validation.outputs.reused != 'true' }}");
     assert.ok(steps.indexOf(step) < steps.indexOf(gate));
     assert.equal(gate.env[result], '${{ steps.' + id + '.outcome }}');
     assert.ok(gate.run.includes(`test "$${result}" = success`));
@@ -83,6 +87,24 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.equal(serverTests.env.NODE_OPTIONS, '--test-reporter=tap');
   assert.match(serverTests.run, /df -h/u);
   assert.match(serverTests.run, /free -m/u);
+
+  const validation = steps.find((step) => step.id === 'validation');
+  const mechanism = steps.find((step) => step.name === 'Проверка механизма подтверждения CI');
+
+  assert.equal(validation.run, 'node tools/releaseValidation.mts');
+  assert.equal(validation.env.VALIDATION_RUN, '${{ inputs.validation_run }}');
+  assert.ok(steps.indexOf(validation) < steps.indexOf(serverTests));
+  assert.ok(steps.indexOf(mechanism) < steps.indexOf(gate));
+  assert.match(mechanism.run, /release-validation\.test\.js/u);
+  assert.equal(mechanism.if, undefined);
+  assert.match(gate.run, /if \[ "\$REUSED_VALIDATION" = true \]/u);
+  assert.match(gate.run, /test -s "\$VALIDATION_RECEIPT"/u);
+
+  for (const name of ['Браузер тестов', 'Песочница Chromium', 'Прогрев вариантов тестового ELF',
+    'Прогрев среды миграции', 'Проверка тестового ELF']) {
+    assert.equal(steps.find((step) => step.name === name).if,
+      "${{ steps.validation.outputs.reused != 'true' }}");
+  }
 
   const browser = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('node server/node_modules/playwright-core/cli.js install --with-deps chromium'));
