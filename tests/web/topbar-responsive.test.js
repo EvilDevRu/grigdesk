@@ -135,10 +135,7 @@ test('узкая шапка сохраняет действия и полную 
 
       assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
       assert.equal(await overview.locator('[data-context="topbar-metrics"]').count(), 0);
-      const networkVisible = await overview.locator('[data-context="topbar-network"]').isVisible();
-      const networkCount = await page.locator('[data-context="topbar-network"]').count();
-
-      assert.equal(networkVisible, true, `${width}: сеть в сводке; всего индикаторов ${networkCount}`);
+      await overview.locator('[data-context="topbar-network"]').waitFor();
       await overview.locator('[data-context="provider-status"]').last().click();
     }
 
