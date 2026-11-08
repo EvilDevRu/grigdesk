@@ -48,7 +48,9 @@ withDefaults(defineProps<{
 .compact .header { height: 24px; }
 .nodes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
 @media (max-width: 600px) {
-  .header { height: 48px; }
+  .loading-card { padding: 10px 12px; }
+  .header, .compact .header { display: grid; grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-rows: repeat(2, 44px); gap: 4px 10px; height: 92px; }
   .nodes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

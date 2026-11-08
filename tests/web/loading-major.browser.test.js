@@ -18,8 +18,8 @@ after(async () => {
 
 const layouts = [
   ['board', [
-    ['primary', '.col.primary', ['x', 'width']],
-    ['header', '.col.primary .colhead', ['y', 'height']],
+    ['primary', '.col.primary', ['x', 'width'], true],
+    ['header', '.col.primary .colhead', ['height'], true],
   ]],
   ['pipeline', [
     ['card', '.card', ['x', 'width']],
@@ -35,7 +35,7 @@ async function horizontalGeometry(page) {
   return page.evaluate(() => ({
     viewport: innerWidth,
     document: document.documentElement.scrollWidth,
-    loading: [...document.querySelectorAll('[data-ui-loading]')].map((element) => {
+    loading: [...document.querySelectorAll('[data-ui-loading], [data-perf-pending]')].map((element) => {
       const rect = element.getBoundingClientRect();
 
       return {
@@ -55,12 +55,17 @@ for (const [mode, pairs] of layouts) {
       const bricks = await h.page.locator('[data-ui-skeleton]').count();
       const pending = [];
 
-      const measuredPairs = mode === 'board'
-        ? [...pairs, ['summary', width < 600 ? '.stats-summary' : '.stats', ['y', 'height']]]
-        : pairs;
+      const measuredPairs = pairs.map(([region, selector, dimensions, permanent]) => [
+        region,
+        mode === 'board' && width < 600 && region === 'header' ? `${selector} .search` : selector,
+        dimensions,
+        permanent,
+      ]);
+      const phoneBoard = mode === 'board' && width < 600;
+      const pendingPhoneText = phoneBoard ? await h.page.locator('.board-phone-footer').innerText() : '';
 
-      for (const [region] of measuredPairs) {
-        const locator = h.page.locator(`[data-loading-region="${region}"]`).first();
+      for (const [region, selector, , permanent] of measuredPairs) {
+        const locator = h.page.locator(permanent ? selector : `[data-loading-region="${region}"]`).first();
 
         pending.push(await locator.count() ? await locator.boundingBox() : null);
       }
@@ -69,6 +74,7 @@ for (const [mode, pairs] of layouts) {
 
       await h.release();
       await h.page.evaluate(() => window.loadingFixture.ready());
+      await h.page.locator('[data-perf-pending]').waitFor({ state: 'detached' });
       await h.page.locator(measuredPairs[0][1]).first().waitFor({ state: 'visible' });
       await frames(h.page);
 
@@ -84,6 +90,7 @@ for (const [mode, pairs] of layouts) {
       assert.deepEqual(h.unexpected, [], 'неизвестные API запрещены');
       assert.ok(ready.every(Boolean), 'все крупные области ready действительно видны');
       assert.equal(await h.page.locator('[data-ui-loading]').count(), 0);
+      assert.equal(await h.page.locator('[data-perf-pending]').count(), 0);
       await writeFile(`${h.artifacts}/major-${mode}-${width}.json`, JSON.stringify({
         pairs: measuredPairs,
         pending,
@@ -91,7 +98,13 @@ for (const [mode, pairs] of layouts) {
         pendingHorizontal,
         readyHorizontal,
       }, null, 2));
-      assert.ok(bricks > 0, `${mode}: первое чтение имеет общий каркас`);
+
+      if (phoneBoard) {
+        assert.match(pendingPhoneText, /Загрузка|Loading/u);
+        assert.match(await h.page.locator('.board-phone-footer').innerText(), /Обновлено|Updated/u);
+      } else {
+        assert.ok(bricks > 0, `${mode}: первое чтение имеет общий каркас`);
+      }
 
       for (const [index, [region, , dimensions]] of measuredPairs.entries()) {
         assert.ok(pending[index], `видна область каркаса ${region}`);
@@ -162,7 +175,8 @@ for (const route of ['chats', 'board', 'unknown']) {
 
     if (route !== 'unknown') {
       for (const [index, region] of regions.entries()) {
-        const selector = region === 'list' ? '.cl' : `[data-loading-region="${region}"]`;
+        const selector = region === 'list' ? '.cl' : region === 'primary'
+          ? '.col.primary' : `[data-loading-region="${region}"]`;
         const locator = h.page.locator(selector).first();
         const online = await locator.count() ? await locator.boundingBox() : null;
 
@@ -198,7 +212,7 @@ for (const compact of [false, true]) {
     assert.deepEqual(h.errors, []);
     assert.deepEqual(h.unexpected, []);
     assert.equal(await h.page.locator('.card.collapsed').count(), 1);
-    assert.equal(h.requests.filter((request) => request === 'GET /api/tasks').length, 1);
+    assert.equal(h.requests.filter((request) => request === 'GET /api/tasks?sources=1').length, 1);
     assert.equal(h.requests.filter((request) => request === 'GET /api/tasks/42/graph').length, 1);
     assert.deepEqual(await h.page.evaluate((keys) => Object.fromEntries(keys.map((key) =>
       [key, localStorage.getItem(key)])), Object.keys(storage)), storage);

@@ -32,7 +32,7 @@
 - [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)
 - [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)
 - [Фикстуры трекеров и оболочки: смешанные источники, Pinia, ApiError и выбор драйвера](tracker-dev-fixtures.md)
-- [Каталог capabilities и виджеты в loading-фикстурах трекера](tracker-loading-fixtures.md)
+- [Loading-фикстуры: каталог трекера, личные ветки, порты App и геометрия единой доски](tracker-loading-fixtures.md)
 - [Снимок после recovery нового владельца для проверки повторного close установщика](installer-recovery-close-snapshot.md)
 - [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
 - [Общий выбор в фикстурах: видимый список, native adapter и required](select-fixtures.md)
