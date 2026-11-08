@@ -521,8 +521,9 @@ jobs:
         env:
           RELEASE_NOTES: ${{ inputs.notes }}
       - name: Сборка комплекта
-        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
+        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts 3>&1
         env:
+          GRIGDESK_CTL_BUILD_OBSERVED: '1'
           GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
       - name: Deb-пакет
         run: node tools/buildDeb.mts
