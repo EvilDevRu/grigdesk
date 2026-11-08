@@ -188,7 +188,7 @@ test('телефон: полная ширина, меню разделов, ча
       const composer = page.locator('textarea[data-role="chat-composer"]');
       const model = page.locator('button[data-role="chat-model"][role="combobox"]');
       const nativeModel = page.locator('select[data-role="chat-model"]');
-      const options = page.getByRole('button', { name: 'Настройки чата', exact: true });
+      const options = page.locator('.phone-options');
 
       await composer.fill('Черновик на телефоне');
       await assertPhoneFrame(page, width, 844);
@@ -199,13 +199,18 @@ test('телефон: полная ширина, меню разделов, ча
       assert.equal(await model.isVisible(), false);
       assert.ok(await page.locator('.cs-top').evaluate((el) => el.clientHeight) <= 68);
       await options.click();
+
+      const dialog = page.locator('[data-role="chat-options"]');
+
+      await dialog.waitFor();
       assert.equal(await model.isVisible(), true);
       assert.equal(await nativeModel.isVisible(), false);
-      await scaleClientText(page, 1.3, '.cs-top');
-      assert.equal(await page.locator('.cs-top').evaluate((el) => (
+      await scaleClientText(page, 1.3, '[data-role="chat-options"]');
+      assert.equal(await dialog.evaluate((el) => (
         el.scrollWidth <= el.clientWidth + 1
       )), true);
-      await options.click();
+      await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+      await dialog.waitFor({ state: 'hidden' });
       assert.equal(await composer.inputValue(), 'Черновик на телефоне');
       await page.screenshot({ path: path.join(artifacts, `chat-${width}.png`) });
 

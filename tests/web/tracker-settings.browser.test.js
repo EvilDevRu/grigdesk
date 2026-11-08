@@ -161,7 +161,8 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
               data = {
                 tasks: [],
                 revision: 0,
-                trackerConfigured: false
+                trackerConfigured: false,
+                personalStateVersion: 1,
               };
             } else if (url.pathname.endsWith('/projects')) {
               data = { projects: [] };
@@ -216,7 +217,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
             errors.push(`${request.url()}: ${request.failure()?.errorText}`);
           });
           await page.goto(`${fixture.url}?locale=${locale}`);
-          await page.locator('.own-tasks').waitFor({ timeout: 10_000 }).catch(() => {
+          await page.locator('.board [data-role="board-new-task"]').waitFor({ timeout: 10_000 }).catch(() => {
             assert.fail(`Board fixture не загрузилась: ${JSON.stringify(errors)}`);
           });
           assert.deepEqual(errors, [], 'Реальная доска загружена без ошибок fixture');

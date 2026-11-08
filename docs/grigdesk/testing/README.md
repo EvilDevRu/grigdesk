@@ -35,7 +35,7 @@
 - [Loading-фикстуры: каталог трекера, личные ветки, порты App и геометрия единой доски](tracker-loading-fixtures.md)
 - [Снимок после recovery нового владельца для проверки повторного close установщика](installer-recovery-close-snapshot.md)
 - [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
-- [Общий выбор в фикстурах: видимый список, native adapter и required](select-fixtures.md)
+- [Общий выбор в фикстурах: видимый список, native adapter, touch-фокус и required](select-fixtures.md)
 - [Отказ запуска браузера оставляет Vite открытым](browser-fixture-startup-cleanup.md) —
   поздняя регистрация очистки превращает отсутствие браузера в таймаут всего прогона.
 
@@ -78,7 +78,7 @@
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)
 - [Сквозные фикстуры чата: завершение SSE, ожидание состояния и закрытие окна до сервера](window-store-fixture-close.md)
 - [Версия шапки фикстуры фиксируется до нормализации store](chat-fixture-head-version.md)
-- [Фикстуры App: каталог чатов, ACK окна, metadata трекера и личные ветки](chat-catalog-fixtures.md)
+- [Фикстуры App: каталог чатов, cursor истории, ACK окна, metadata трекера и личные ветки](chat-catalog-fixtures.md)
 - [Очистка фикстуры: область hooks, закрытие сервера до удаления каталога](node-test-hook-cleanup.md)
 - [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
 - [Тест ждёт сигнал HTTP-фикстуры после отказа исходного хода](async-fixture-producer-failure.md)

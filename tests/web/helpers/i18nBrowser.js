@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { protocolRoutes } from './chat-protocol.js';
 import { clientBrowser, chatSession } from './client-browser.mjs';
+import { selectUiOption } from './selectUiOption.ts';
 import data from '../fixtures/settings-modal/data.json' with { type: 'json' };
 
 /**
@@ -21,7 +22,7 @@ export async function i18nBrowser(t, options = {}) {
       ...chatSession,
       messages: [
         ...chatSession.messages,
-        ...Array.from({ length: 40 }, (_, index) => ({
+        ...Array.from({ length: 39 }, (_, index) => ({
           role: 'assistant',
           text: `Непереведённый ответ ${index + 1}. Текст для прокрутки настоящего чата.`,
         })),
@@ -151,7 +152,7 @@ export async function chooseLanguage(page, preference) {
 
   const control = page.getByRole('combobox', { name: /^(Язык интерфейса|Interface language)$/ });
 
-  await control.selectOption(preference);
+  await selectUiOption(page, control, preference);
   await page.getByRole('button', { name: /^(Отмена|Cancel)$/ }).click();
   await page.locator('[data-role="settings-modal"]').waitFor({ state: 'hidden' });
 }

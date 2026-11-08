@@ -204,8 +204,8 @@ test('I18N-U02: топбар без поиска команд, соседние 
         await settings.waitFor();
         await actions.locator('[data-context="connection-trigger"]').waitFor();
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
-        // Подключение, телефон, колокольчик и настройки.
-        assert.equal(await actions.getByRole('button').count(), 4);
+        // Подключение, телефон, колокольчик, справка и настройки.
+        assert.equal(await actions.getByRole('button').count(), 5);
         assert.equal(
           await actions.getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).count(),
           1,
@@ -415,6 +415,7 @@ test('I18N-U05: исходное имя local переводится тольк�
     profile: profiles[0], 
     profiles, 
     status: 'online', 
+    localAvailable: true,
     capabilities: [] 
   });
 
@@ -505,7 +506,7 @@ test('RET-NAV: старая ссылка открывает маршруты б�
           assert.equal(await page.getByRole('link', { name: /^(Агенты|Agents)$/ }).count(), 0);
           assert.equal(await page.locator('[href="#/routes"]').count(), 1);
 
-          await page.locator('[href="#/board"]').click();
+          await page.getByRole('link', { name: /^(Доска|Board)( ·.*)?$/ }).click();
           await page.waitForURL(origin + '#/board');
           await page.locator('[href="#/routes"]').click();
           await page.locator('.routes-page').waitFor();

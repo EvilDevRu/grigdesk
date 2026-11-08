@@ -151,7 +151,8 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
         path: path.join(client.artifacts, `chat-header-${width}x${height}.png`),
       });
 
-      const selectBounds = await page.locator('.bar .sel').evaluateAll((fields) => {
+      const selectBounds = await page.locator('button[data-context="chat-session-toolbar"]')
+        .evaluateAll((fields) => {
         const boxes = fields.map((field) => field.getBoundingClientRect());
         const left = Math.min(...boxes.map((box) => box.left)) - 4;
         const top = Math.min(...boxes.map((box) => box.top)) - 4;
@@ -371,9 +372,12 @@ test('SELECT-GEOMETRY-01: полный каталог, локальный touch,
       const popup = page.locator('.ui-select-popup');
 
       await popup.waitFor({ state: 'visible' });
-      await page.waitForFunction(() => {
-        return document.querySelector('.ui-select-popup input[type="search"]') === document.activeElement;
-      });
+      await page.waitForFunction((touch) => {
+        const selector = touch ? '.ui-select-popup [role="listbox"]'
+          : '.ui-select-popup input[type="search"]';
+
+        return document.querySelector(selector) === document.activeElement;
+      }, touch);
 
       const box = await geometry(page);
 
