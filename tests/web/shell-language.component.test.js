@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import { i18nComponent, prepareI18nWindow } from './helpers/i18nComponent.js';
 import { catalogMessage } from './helpers/i18nCatalog.js';
-import { waitForShellActions } from './helpers/client-browser.mjs';
 import { pluginCard } from './helpers/pluginModuleContract.js';
 
 process.env.NODE_ENV = 'test';
@@ -13,6 +12,7 @@ process.env.NODE_ENV = 'test';
 await prepareI18nWindow();
 
 const { i18nBrowser, chooseLanguage } = await import('./helpers/i18nBrowser.js');
+const { waitForShellActions } = await import('./helpers/client-browser.mjs');
 
 test('I18N-U01: EN/RU каркас, builtin/custom/disabled и прежний порядок rail/tools/dock', {
   timeout: 120000,
