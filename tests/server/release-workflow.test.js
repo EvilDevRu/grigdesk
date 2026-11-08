@@ -59,7 +59,7 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   const gate = steps.find((step) => step.name === 'Подтверждение всех проверок');
   const production = steps.findIndex((step) => step.run === 'npm --prefix web run build');
 
-  assert.equal(workflow.jobs.release['timeout-minutes'], 180);
+  assert.equal(workflow.jobs.release['timeout-minutes'], 240);
   assert.ok(steps.indexOf(gate) < production);
   assert.equal(gate.if, '${{ !cancelled() }}');
 
