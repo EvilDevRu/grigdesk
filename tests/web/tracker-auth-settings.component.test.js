@@ -39,7 +39,7 @@ const schema = {
  * Скрытый native select не получает синтетических изменений в этой проверке.
  */
 async function chooseMode(card, label) {
-  const trigger = card.wrapper.findAll('button[role="combobox"]').at(-1);
+  const trigger = card.wrapper.get('.tracker-settings__fields button[role="combobox"]');
 
   assert.ok(trigger);
   await trigger.trigger('click');
@@ -62,7 +62,7 @@ test('Режим подключения: комбобокс, видимость,
 
   await openTrackerSettings(card);
   await chooseExternal(card, 'grigdesk-b24');
-  assert.equal(card.wrapper.findAll('button[role="combobox"]').length, 2);
+  assert.equal(card.wrapper.findAll('.tracker-settings__fields button[role="combobox"]').length, 1);
   assert.equal(card.wrapper.findAll('input[type="password"]').length, 0);
   await chooseMode(card, 'Токен доступа');
   await card.wrapper.find('input[type="password"]').setValue('token-draft');

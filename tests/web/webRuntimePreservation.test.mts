@@ -33,7 +33,7 @@ test('RUNTIME-store-shapes', async () => {
 
     const module = await loadMigrationModule(oldPath.slice(4), newPath.slice(4));
     const factory = Object.values(module).find((value) => (
-      typeof value === 'function' && '$id' in value
+      typeof value === 'function' && '$id' in value && value.$id === expected.id
     ));
 
     assert.ok(factory && typeof factory === 'function', newPath);

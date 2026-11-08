@@ -102,7 +102,8 @@ test('узкая шапка сохраняет действия и полную 
     const overview = page.getByRole('dialog', { name: 'Состояние системы', exact: true });
 
     if (width <= 600) {
-      assert.equal(await page.locator('.topbar button').count(), 2);
+      assert.equal(await page.locator('.topbar button').count(), 3);
+      assert.equal(await page.locator('.topbar [data-context="alert-history"]').count(), 1);
       await page.locator('.phone-nav').getByRole('button', { name: 'Разделы', exact: true }).click();
 
       const menu = page.getByRole('dialog', { name: 'Разделы', exact: true });

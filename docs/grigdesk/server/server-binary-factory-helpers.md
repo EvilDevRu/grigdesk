@@ -26,3 +26,7 @@ Hook marker и authority CAS остаются отдельными провер�
 применяет deferred requests настоящим run-state writer; неверный token, старый epoch
 и чужой run-id сохраняют active record. Сама постановка deferred request не означает,
 что authority уже приняла результат.
+
+Status port получает `engine/lib/stage-progress.sh` и `stage-result.sh` через общий
+`runtimeRoot()`. Относительный `import.meta.url` серверного исходника не сохраняется
+в собранном helper: после переноса команды принадлежат `R/engine`.

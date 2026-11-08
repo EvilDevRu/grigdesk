@@ -121,14 +121,20 @@ async function taskSeenModule(
 
 
 
-  fastify.get('/api/tracker/task-seen', (request, reply) =>
-    withTrackerRequestRead(request, reply, (options) =>
-      run(() => seen.list(options))(request, reply)));
-  fastify.post('/api/tracker/task-seen', run((request) => {
-    const { taskIds, baseline } = parseMarkBody(request.body);
+  for (const prefix of ['/api/tracker', '/api/tracker/:driverId']) {
+    fastify.get(`${prefix}/task-seen`, (request, reply) =>
+      withTrackerRequestRead(request, reply, (options) =>
+        run(() => seen.list(options, {
+          driverId: (request.params as { driverId?: string }).driverId,
+        }))(request, reply)));
+    fastify.post(`${prefix}/task-seen`, run((request) => {
+      const { taskIds, baseline } = parseMarkBody(request.body);
 
-    return seen.markSeen(taskIds, { baseline, ...trackerPersonalRequestOptions(request.headers) });
-  }));
+      return seen.markSeen(taskIds, { baseline, ...trackerPersonalRequestOptions(request.headers,
+        (request.params as { driverId?: string }).driverId) });
+    }));
+  }
+
   fastify.get('/api/grigdesk-tasks/task-seen', (request, reply) =>
     withTrackerRequestRead(request, reply, (options) =>
       run(() => seen.list(options, { source: 'grigdesk' }))(request, reply)));

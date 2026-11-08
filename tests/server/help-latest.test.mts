@@ -8,7 +8,7 @@ import { latestScript } from '../../server/scripts/help/buildHelpSite.mts';
  * Настоящий опубликованный скрипт получает управляемый HTTP-ответ и location.
  * Проверяется результат перехода и ошибки, а не наличие строки channel.json в исходнике.
  */
-async function runLatest(response: unknown, fail = false) {
+async function runLatest(response: unknown, fail = false, pathname = '/help/latest.html') {
   let redirected = '';
   const message = { textContent: '' };
   const requests: Array<{ url: string; credentials: unknown }> = [];
@@ -17,7 +17,9 @@ async function runLatest(response: unknown, fail = false) {
     document: { getElementById: () => message },
     AbortSignal,
     location: {
-      hash: '#/help/chats', replace: (url: string) => {
+      pathname,
+      hash: '#/help/chats',
+      replace: (url: string) => {
         redirected = url;
       }
     },
@@ -42,10 +44,22 @@ async function runLatest(response: unknown, fail = false) {
 }
 
 test('HELP-L1: latest следует версии канала и сохраняет статью без cookies', async () => {
-  const result = await runLatest({ format: 1, latest: { version: '0.2.0' } });
+  for (const [channel, version, pathname] of [
+    ['release', '0.2.0', '/help/latest.html'],
+    ['dev', '0.2.0-dev.2', '/help/latest-dev.html'],
+  ]) {
+    const result = await runLatest({
+      format: 2,
+      channel,
+      latest: { payload: { version } },
+    }, false, pathname);
 
-  assert.equal(result.redirected, './0.2.0/index.html#/help/chats');
-  assert.deepEqual(result.requests, [{ url: '../api/releases/v1/channel.json', credentials: 'omit' }]);
+    assert.equal(result.redirected, `./${version}/index.html#/help/chats`);
+    assert.deepEqual(result.requests, [{
+      url: `../api/releases/v1/${channel}.json`,
+      credentials: 'omit',
+    }]);
+  }
 });
 
 test('HELP-L2: отсутствующий/невалидный канал и сеть показывают ошибку без перехода', async () => {

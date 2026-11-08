@@ -8,7 +8,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import { executeBundle } from '../../tools/bundleSteps.mts';
-import { decodeChannelIndex } from '../../shared/runtime/releaseChannelContracts.ts';
+import { decodeChannelEntry } from '../../shared/runtime/releaseChannelContracts.ts';
 
 const execute = promisify(execFile);
 
@@ -64,6 +64,7 @@ const baseOptions = (root, builders, sign) => {
   return ({
   root,
   builders,
+  env: { PATH: process.env.PATH },
   readSourceState: async () => {
     return ({
       commit: 'f'.repeat(40),
@@ -93,16 +94,18 @@ test('RBS-1: подписанный выпуск содержит channel.json �
     assert.ok(verifyBytes(null, Buffer.from(checksum, 'utf8'), publicKey,
       Buffer.from(signature, 'base64')), 'подпись соответствует файлу сумм');
 
-    const index = decodeChannelIndex(JSON.parse(
+    const index = JSON.parse(
       await fs.readFile(path.join(root, 'channel.json'), 'utf8'),
-    ));
+    );
+    const entry = decodeChannelEntry(index.latest);
 
-    assert.equal(index.latest?.version, '0.3.0');
-    assert.equal(index.latest?.commit, 'f'.repeat(40));
-    assert.equal(index.latest?.archiveUrl, null);
-    assert.equal(index.latest?.archiveSha256, checksum.split('\n')[0]?.split(' ')[0]);
-    assert.equal(index.latest?.signature, signature);
-    assert.equal(index.latest?.compat.glibc, '2.28');
+    assert.equal(index.format, 1);
+    assert.equal(entry.version, '0.3.0');
+    assert.equal(entry.commit, 'f'.repeat(40));
+    assert.equal(entry.archiveUrl, null);
+    assert.equal(entry.archiveSha256, checksum.split('\n')[0]?.split(' ')[0]);
+    assert.equal(entry.signature, signature);
+    assert.equal(entry.compat.glibc, '2.28');
   });
 
 test('RBS-2: без sign выпуск прежний — три выхода, без канала', async (t) => {

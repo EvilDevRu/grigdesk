@@ -374,7 +374,7 @@ test('HEAD-UNREAD: окончательный ответ уведомляет о
     id: original.id,
     origin: 'foreign-window',
   });
-  await drain();
+  await waitFor(() => chat._find(original.id).title === original.title);
   assert.equal(chatNotifications().length, 0);
   await writeChat(world, {
     ...original,

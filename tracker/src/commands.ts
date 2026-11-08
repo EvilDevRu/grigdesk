@@ -13,8 +13,12 @@ export interface CommandIO {
  * Путь задачи с ID, закодированным как один сегмент URL.
  * Числовая нормализация остаётся на сервере.
  */
-function taskPath(id: string, tail = ''): string {
-  return `/api/tracker/task/${encodeURIComponent(id)}${tail}`;
+function taskPath(id: string, tail = '', board?: string): string {
+  return `${trackerPath(board)}/task/${encodeURIComponent(id)}${tail}`;
+}
+
+function trackerPath(board?: string): string {
+  return board === undefined ? '/api/tracker' : `/api/tracker/${encodeURIComponent(board)}`;
 }
 
 /**
@@ -33,51 +37,53 @@ async function stdinBody(io: CommandIO): Promise<Uint8Array> {
  * Описание единственного запроса команды; start собирается отдельно.
  * POST без тела не получает JSON-заголовок и пустой объект.
  */
-async function specOf(command: Exclude<ApiCommand, { kind: 'start' }>, io: CommandIO): Promise<RequestSpec> {
+async function specOf(
+  command: Exclude<ApiCommand, { kind: 'start' | 'boards' }>, io: CommandIO,
+): Promise<RequestSpec> {
   switch (command.kind) {
     case 'dashboard':
       return {
         method: 'GET',
-        path: '/api/tracker/dashboard',
+        path: `${trackerPath(command.board)}/dashboard`,
       };
     case 'task':
       return {
         method: 'GET',
-        path: taskPath(command.id),
+        path: taskPath(command.id, '', command.board),
       };
     case 'comment':
       return {
         method: 'POST',
-        path: taskPath(command.id, '/comment'),
+        path: taskPath(command.id, '/comment', command.board),
         body: JSON.stringify({ text: command.text }),
         json: true,
       };
     case 'timer':
       return {
         method: 'POST',
-        path: taskPath(command.id, `/timer/${command.action}`),
+        path: taskPath(command.id, `/timer/${command.action}`, command.board),
       };
     case 'complete':
       return {
         method: 'POST',
-        path: taskPath(command.id, '/complete'),
+        path: taskPath(command.id, '/complete', command.board),
       };
     case 'renew':
       return {
         method: 'POST',
-        path: taskPath(command.id, '/renew'),
+        path: taskPath(command.id, '/renew', command.board),
       };
     case 'create':
       return {
         method: 'POST',
-        path: '/api/tracker/tasks',
+        path: `${trackerPath(command.board)}/tasks`,
         body: await stdinBody(io),
         json: true,
       };
     case 'users':
       return {
         method: 'GET',
-        path: `/api/tracker/users?${new URLSearchParams({ q: command.query })}`,
+        path: `${trackerPath(command.board)}/users?${new URLSearchParams({ q: command.query })}`,
       };
   }
 }
@@ -91,6 +97,25 @@ export async function runCommand(
   connection: Connection,
   io: CommandIO,
 ): Promise<Uint8Array> {
+  if (command.kind === 'boards') {
+    const body = await io.request(connection, { method: 'GET', path: '/api/trackers' });
+    const catalog = JSON.parse(new TextDecoder().decode(body));
+    const ids = catalog.enabledIds ?? (catalog.externalId ? [catalog.externalId] : []);
+    const boards = ids.map((id: string) => {
+      const descriptor = catalog.drivers.find((item: { id: string }) => item.id === id);
+
+      return {
+        id,
+        name: descriptor?.name ?? id,
+        status: descriptor?.status ?? 'unavailable',
+        default: id === (catalog.default ?? catalog.externalId),
+        reason: descriptor?.reason ?? null,
+      };
+    });
+
+    return new TextEncoder().encode(JSON.stringify(boards));
+  }
+
   if (command.kind !== 'start') {
     return await io.request(connection, await specOf(command, io));
   }
@@ -98,7 +123,7 @@ export async function runCommand(
   try {
     await io.request(connection, {
       method: 'POST',
-      path: taskPath(command.id, '/renew'),
+      path: taskPath(command.id, '/renew', command.board),
     });
   } catch (error) {
     if (!(error instanceof B24Error) || error.code !== 22) {
@@ -108,6 +133,6 @@ export async function runCommand(
 
   return await io.request(connection, {
     method: 'POST',
-    path: taskPath(command.id, '/timer/start'),
+    path: taskPath(command.id, '/timer/start', command.board),
   });
 }

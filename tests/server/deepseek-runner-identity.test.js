@@ -327,15 +327,18 @@ test('новая сборка DeepSeek в резерве обновляет host
     host="$STATE_DIR/coverage/fixture/host.env"
     [[ "$(coverage_artifact_get "$host" RUNTIME_VERSION_deepseek)" == "$3" ]] || exit 62
     [[ -z "$(coverage_artifact_get "$host" RUNTIME_VERSION_claude)" ]] || exit 63
-    _multi_require_coverage 1 BUILD "$2" || exit 64
+    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 64
     [[ ! -e flog ]] || exit 65
     ln -sfn builds/B "$4/current"
-    _multi_require_coverage 1 BUILD "$2" || exit 66
+    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 66
     [[ "$(coverage_artifact_get "$host" RUNTIME_VERSION_deepseek)" == "$5" ]] || exit 67
     grep -q 'сменилась сборка' flog || exit 68
     ln -sfn builds/missing "$4/current"
-    _multi_require_coverage 1 BUILD "$2" && exit 69
-    runner_transition_allowed preflight runtime_changed auto 0 && exit 70
+    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 69
+    [[ "$(coverage_artifact_get "$host" PROVIDER_deepseek)" == unavailable ]] || exit 70
+    [[ "$(coverage_artifact_get "$host" PROVIDER_claude)" == ready ]] || exit 71
+    _multi_require_coverage 1 BUILD "$2" deepseek '' && exit 72
+    runner_transition_allowed preflight runtime_changed auto 0 && exit 73
     printf 'refreshed-then-blocked\\n'
   `, [profiles, config, f.a.runnerVersion, f.runtimeRoot, f.b.runnerVersion], {
     PATH: `${bin}:${process.env.PATH}`,

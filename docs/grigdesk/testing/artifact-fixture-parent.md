@@ -6,3 +6,7 @@
 Общий прогон может передать новый изолированный `GRIGDESK_ARTIFACTS_DIR`.
 Например, проверка native titles создаёт свой `title-tooltips` перед временной папкой,
 а затем удаляет только созданную ею фикстуру.
+
+Оставшиеся в ядре проверки 3D используют тот же `GRIGDESK_ARTIFACTS_DIR` либо
+`os.homedir()/.grigdesk/artifacts`, создавая `studio3d-extraction` перед mkdtemp.
+Абсолютный путь рабочей машины не переносится на runner.

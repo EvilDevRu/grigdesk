@@ -17,6 +17,7 @@ export const ALLOWED_TITLE_TAGS = [
   'UiTopbarPanel',
   'MiniChart',
   'ProjectAvatar',
+  'StageDocument',
 ];
 
 /**

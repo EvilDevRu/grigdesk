@@ -1,5 +1,9 @@
 // Модуль analysis — триаж задач: оценка сложности/рисков разведкой кода без стенда.
 // Очередь и раннер — в lib/analysis/analyzer.ts; здесь только HTTP-обвязка.
+import type { TrackerFacade } from '../../lib/trackers/facade.ts';
+import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
+import { readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
+
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
@@ -10,6 +14,7 @@ import type { AnalysisClarifications } from '../../../../shared/pipeline/analysi
 
 export interface AnalysisModuleOptions {
   analyzer: Analyzer;
+  tracker?: TrackerFacade;
   arbiter?: AnalysisArbiter | null;
 }
 
@@ -38,6 +43,38 @@ async function analysisModule(
   }, async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
+    const body = objectOrEmpty(request.body);
+
+    if (body.taskSource === 'grigdesk') {
+      if (!await readGrigdeskTask(analyzer.config, id)) {
+        return reply.code(404).send({ error: 'grigdesk_task_not_found' });
+      }
+    } else if (body.taskSource !== undefined) {
+      try {
+        const tracker = opts.tracker!;
+        const context = tracker.captureContext();
+        const identity = await tracker.accountIdentity();
+        const source = `${context.trackerId}@${trackerAccountScope(identity)}`;
+
+        tracker.assertContext(context);
+
+        if (body.taskSource !== source) {
+          return reply.code(409).send({ error: 'tracker_context_changed',
+            message: 'Оценка доступна для доски по умолчанию' });
+        }
+
+        const generation = request.headers['x-grigdesk-tracker-generation'];
+
+        if (generation !== undefined) {
+          tracker.forDriver(context.trackerId!).assertContext(Number(generation));
+        }
+      } catch {
+        return reply.code(409).send({ error: 'tracker_context_changed',
+          message: 'Не удалось подтвердить источник доски по умолчанию' });
+      }
+    }
+
     return analyzer.enqueue(id);
   });
 
@@ -73,6 +110,7 @@ async function analysisModule(
   }, async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     const body = objectOrEmpty(request.body);
     const answers = body.answers;
     if (Array.isArray(answers)) {

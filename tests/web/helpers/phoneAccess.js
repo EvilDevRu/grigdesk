@@ -137,7 +137,7 @@ export async function phoneHarness(t, options = {}) {
     profiles: [],
     status: 'online',
     capabilities: [],
-    localAvailable: true,
+    localAvailable: options.kind === 'local',
   });
   settings.setAuthenticated(true);
   module.setUiLocale(options.locale || 'ru');

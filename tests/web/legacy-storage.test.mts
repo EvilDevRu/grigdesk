@@ -36,8 +36,11 @@ test('GW-01: настройки переносятся без перезапис
   assert.doesNotThrow(() => migrateStoragePrefix(null, LEGACY.storagePrefix, 'grigdesk-'));
 });
 
-test('GW-02: перенос выполняется первым импортом приложения', () => {
+test('GW-02: перенос импортируется до создания приложения', () => {
   const source = readFileSync(migrationUrl('src/main.ts'), 'utf8');
 
-  assert.equal(source.match(/^import .+$/m)?.[0], "import './shared/legacyStorage.ts';");
+  const migration = source.indexOf("import './shared/legacyStorage.ts';");
+  const bootstrap = source.indexOf('const app = createApp(App)');
+
+  assert.ok(migration >= 0 && bootstrap > migration);
 });

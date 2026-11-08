@@ -12,7 +12,7 @@
           variant="link"
           tone="accent"
           :data-speech-dependency="dependency.id"
-          :title="t('settings.speechDependencyTerminal')"
+          v-tooltip="t('settings.speechDependencyTerminal')"
           :disabled="disabled"
           @click="emit('installDependency', dependency.id)"
         >{{ t('settings.speechDependencyInstall', { package: dependency.package }) }}</UiButton>
@@ -72,6 +72,7 @@ import {
   UiLoadingState,
   UiProgress,
   t,
+  vTooltip,
 } from '../../ui.ts';
 import type { SpeechInstallationController } from '../../features/settings/speechInstallation.ts';
 import type { SpeechDependencyAction } from '../../features/settings/speechDependencies.ts';

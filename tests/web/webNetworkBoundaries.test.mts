@@ -251,7 +251,7 @@ test('NET-pipeline-graph', async () => {
   assert.ok(store.error || store.observedByTask['42']?.gateKnown === false,
     'неверный граф не становится известным состоянием');
   assert.deepEqual(migrationHarness.alerts, []);
-  assert.deepEqual(calls.map((call) => call.url), ['/api/tasks', '/api/tasks/42/graph']);
+  assert.deepEqual(calls.map((call) => call.url), ['/api/tasks?sources=1', '/api/tasks/42/graph']);
 });
 
 test('NET-b24', async () => {

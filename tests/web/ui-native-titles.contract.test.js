@@ -43,6 +43,7 @@ test('TIP-GUARD-02: исключения, похожие слова и комм�
   const source = `<template>
 <option :title="label" /><iframe title="Кадр" /><UiDialog title="Диалог" />
 <UiFloatingDialog title="Диалог" /><MiniChart title="Часы" /><ProjectAvatar title="Имя" />
+<StageDocument title="План этапа" />
 <span data-title="x" /><!-- <span title="x" /> -->
 </template><script setup>const title = 'title';</script>`;
 

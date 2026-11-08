@@ -5,8 +5,8 @@
         <div class="catalog" data-loading-region="catalog">
           <div class="tools" data-loading-region="header">
             <div class="tabs" data-loading-region="tabs">
-              <UiSkeleton width="48%" height="30px" />
-              <UiSkeleton width="48%" height="30px" />
+              <UiSkeleton width="48%" height="28px" />
+              <UiSkeleton width="48%" height="28px" />
             </div>
             <UiSkeleton shape="block" height="32px" />
           </div>
@@ -55,7 +55,7 @@ withDefaults(defineProps<{
 .catalog { min-width: 0; overflow: hidden; border-right: 1px solid var(--line);
   background: var(--sidebar); }
 .tools { display: grid; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
-.tabs { display: flex; align-items: center; gap: 2px; padding: 3px; height: 42px; }
+.tabs { display: flex; align-items: center; gap: 2px; padding: 3px; height: 34px; margin-block: 6px; }
 .rows { padding: 6px; }
 .row { display: grid; gap: 8px; padding: 12px; margin-bottom: 3px; }
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }

@@ -41,6 +41,7 @@
     "web/src/stores/grigdeskUpdate.ts": [
       "ACTIVE_UPDATE_STATES",
       "BLOCK_REASON_LABELS",
+      "PACKAGE_UPDATE_STAGE_LABELS",
       "UPDATE_STAGE_LABELS",
       "UPDATE_STAGE_SHORT_LABELS",
       "blockReasonLabel",
@@ -58,15 +59,18 @@
       "usePluginsStore"
     ],
     "web/src/stores/providers.ts": [
+      "connectProviderCliUpdate",
       "useProvidersStore"
     ],
     "web/src/stores/system.ts": [
       "useSystemStore"
     ],
     "web/src/stores/taskFavorites.ts": [
+      "useGrigdeskTaskFavoritesStore",
       "useTaskFavoritesStore"
     ],
     "web/src/stores/taskSeen.ts": [
+      "useGrigdeskTaskSeenStore",
       "useTaskSeenStore"
     ],
     "web/src/stores/tasks.ts": [
@@ -89,13 +93,19 @@
         "clientScope": "",
         "logConfirmation": 0,
         "logEpoch": 0,
-        "logReason": "load"
+        "logReason": "load",
+        "retryAt": 0,
+        "retryAttempt": 0,
+        "recovering": false
       }
     },
     "web/src/stores/board.ts": {
       "id": "board",
       "state": {
         "data": null,
+        "branches": {},
+        "branchEpochs": {},
+        "suspendedIds": [],
         "loading": false,
         "error": null,
         "loadedAt": 0,
@@ -121,10 +131,34 @@
           "kind": "grigdesk"
         },
         "recentWorkdirs": [],
+        "pagingEnabled": false,
+        "catalogMutationVersion": 0,
+        "catalogPages": {},
+        "catalogSummary": {
+          "active": 0,
+          "archived": 0,
+          "unread": 0,
+          "waiting": 0,
+          "epoch": "",
+          "sequence": 0
+        },
+        "openedChatIds": [],
+        "historyPaging": {},
+        "messageLoads": {},
+        "search": {
+          "query": "",
+          "archived": false,
+          "loading": false,
+          "error": "",
+          "matches": {}
+        },
         "loaded": false,
+        "loading": false,
+        "loadError": null,
         "revealRequest": "",
         "pending": {},
         "saveError": null,
+        "snapshotRecovery": {},
         "compactWindow": 0,
         "speech": {
           "engine": "browser",
@@ -201,6 +235,7 @@
         "silent": [],
         "running": [],
         "observedByTask": {},
+        "observedByReference": {},
         "loadedAt": 0,
         "error": null
       }
@@ -222,6 +257,7 @@
         "usageAt": 0,
         "usageVersion": 0,
         "usageRequest": 0,
+        "usageRecoveryAfter": {},
         "usageTransport": {
           "status": "idle",
           "receivedAt": 0,
@@ -284,7 +320,8 @@
     "web/src/stores/tasks.ts": {
       "id": "tasks",
       "state": {
-        "details": {}
+        "details": {},
+        "epoch": 0
       }
     },
     "web/src/stores/ui.ts": {
@@ -327,7 +364,8 @@
       "path": "/pipeline",
       "name": "pipeline",
       "meta": {
-        "title": "Конвейер"
+        "title": "Конвейер",
+        "layout": "workspace"
       },
       "component": "./views/PipelineView.vue"
     },
@@ -335,15 +373,26 @@
       "path": "/sandboxes",
       "name": "sandboxes",
       "meta": {
-        "title": "Песочницы"
+        "title": "Песочницы",
+        "layout": "workspace"
       },
       "component": "./views/SandboxesView.vue"
+    },
+    {
+      "path": "/browser",
+      "name": "browser",
+      "meta": {
+        "layout": "workspace",
+        "title": "Браузер"
+      },
+      "component": "./views/BrowserView.vue"
     },
     {
       "path": "/showcase/:id?",
       "name": "showcase",
       "meta": {
-        "title": "Презентации"
+        "title": "Презентации",
+        "layout": "workspace"
       },
       "component": "./views/ShowcaseView.vue"
     },
@@ -368,6 +417,15 @@
         "layout": "workspace"
       },
       "component": "./views/DiffView.vue"
+    },
+    {
+      "path": "/help/:id?",
+      "name": "help",
+      "meta": {
+        "layout": "workspace",
+        "title": "Справка"
+      },
+      "component": "./views/HelpView.vue"
     },
     {
       "path": "/documents",
@@ -402,7 +460,8 @@
       "name": "db",
       "meta": {
         "title": "Базы",
-        "tool": "db"
+        "tool": "db",
+        "layout": "workspace"
       },
       "component": "./views/DbView.vue"
     },
@@ -411,7 +470,8 @@
       "name": "docker",
       "meta": {
         "title": "Докер",
-        "tool": "docker"
+        "tool": "docker",
+        "layout": "workspace"
       },
       "component": "./views/DockerView.vue"
     },
@@ -419,7 +479,8 @@
       "path": "/routes",
       "name": "routes",
       "meta": {
-        "title": "Маршруты"
+        "title": "Маршруты",
+        "layout": "workspace"
       },
       "component": "./views/RoutesView.vue"
     },
@@ -427,7 +488,8 @@
       "path": "/projects/:id?",
       "name": "projects",
       "meta": {
-        "title": "Проекты"
+        "title": "Проекты",
+        "layout": "workspace"
       },
       "component": "./views/ProjectsView.vue"
     },
@@ -446,7 +508,8 @@
       "name": "shelf",
       "meta": {
         "title": "Полка",
-        "tool": "shelf"
+        "tool": "shelf",
+        "layout": "workspace"
       },
       "component": "./views/ShelfView.vue"
     },
@@ -454,7 +517,8 @@
       "path": "/tools",
       "name": "tools",
       "meta": {
-        "title": "Инструменты"
+        "title": "Инструменты",
+        "layout": "workspace"
       },
       "component": "./views/ToolsView.vue"
     },
@@ -471,7 +535,8 @@
       "path": "/video",
       "name": "video",
       "meta": {
-        "title": "Видео"
+        "title": "Видео",
+        "layout": "workspace"
       },
       "component": "./views/VideoView.vue"
     },
@@ -479,7 +544,8 @@
       "path": "/inbox",
       "name": "inbox",
       "meta": {
-        "title": "Входящие"
+        "title": "Входящие",
+        "layout": "workspace"
       },
       "component": "./views/InboxView.vue"
     },
@@ -487,7 +553,8 @@
       "path": "/github",
       "name": "github",
       "meta": {
-        "title": "GitHub"
+        "title": "GitHub",
+        "layout": "workspace"
       },
       "component": "./views/GitHubView.vue"
     },
@@ -495,17 +562,18 @@
       "path": "/telegram",
       "name": "telegram",
       "meta": {
-        "title": "Телеграм"
+        "title": "Телеграм",
+        "layout": "workspace"
       },
       "component": "./views/TelegramView.vue"
     },
     {
       "path": "/surface",
       "name": "surface",
-      "component": "inline-empty",
       "meta": {
         "title": "Карточка задачи"
-      }
+      },
+      "component": "inline-empty"
     },
     {
       "path": "/settings",

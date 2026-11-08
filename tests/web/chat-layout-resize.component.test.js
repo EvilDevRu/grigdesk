@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { api } from '../../web/src/shared/apiClient.ts';
+import { chatListPagingStub } from './helpers/chat-list.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -126,7 +127,11 @@ async function mountChats(t, browser, { storedWidth, activeId = '', wide = true,
   const read = [];
   globalThis.__chatsDockCapable = ref(wide);
   globalThis.__chatsResizeStore = defineStore(`chats-resize-${nonce}`, {
-    state: () => ({ activeId, revealRequest }),
+    state: () => ({
+      activeId,
+      revealRequest,
+      openedChatIds: activeId ? [activeId] : [],
+    }),
     actions: {
       ensure() {},
       loadConveyor() {},
@@ -253,7 +258,15 @@ test('строка чата: знак исполнителя красится ц
       activeId: 'a',
       archived: [],
     }),
-    actions: { list: () => rows, selectChat() {}, newSession() {}, renameChat() {}, deleteChat() {}, restoreArchived() {} },
+    actions: {
+      ...chatListPagingStub(),
+      list: () => rows,
+      selectChat() {},
+      newSession() {},
+      renameChat() {},
+      deleteChat() {},
+      restoreArchived() {},
+    },
   });
   globalThis.__chatListProviders = defineStore(`chat-list-prov-${nonce}`, {
     actions: {
@@ -372,7 +385,7 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   );
   assert.match(
     actions,
-    /data-context='chat-list-action'\]\s*\{[^}]*background:\s*var\(--ground\);/,
+    /data-context='chat-list-action'\]\s*\{[^}]*background:\s*var\(--row-bg, var\(--surface\)\);/,
   );
   assert.match(layout, /'grigdesk-chat-composer-h'/);
   assert.doesNotMatch(layout, /grigdesk-chat-panel-composer-h/);

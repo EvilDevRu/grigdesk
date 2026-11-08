@@ -29,7 +29,7 @@
           <ul class="board-timers-popover-list">
             <li
               v-for="task in tasks"
-              :key="task.id"
+              :key="taskReferenceKey(task)"
               :class="{ paused: !task.timerRunning }"
             >
               <span class="board-timers-popover-row">
@@ -37,7 +37,7 @@
                   data-context="topbar-timer-task"
                   variant="ghost"
                   v-tooltip="task.title"
-                  @click="openTask(task.id, close)"
+                  @click="openTask(task, close)"
                 >
                   <span class="board-timers-popover-copy">
                     <span class="board-timers-popover-title">{{ task.title }}</span>
@@ -59,7 +59,7 @@
                   :label="timerActionLabel(task)"
                   v-tooltip="timerActionLabel(task)"
                   :loading="isTimerBusy(task)"
-                  :disabled="timerControlsBusy"
+                  :disabled="isTimerBusy(task)"
                   @click="emit('toggleTimer', task)"
                 >
                   <svg
@@ -105,6 +105,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskReferenceKey } from '../../../../shared/tasks/taskReference.ts';
 import { t } from '../../ui.ts';
 
 import type { PropType } from 'vue';
@@ -137,7 +138,6 @@ const emit = defineEmits(['openTask', 'openBoard', 'toggleTimer']);
 const now = ref(Date.now());
 const activeCount = computed(() => props.tasks.filter((task) => task.timerRunning).length);
 const workedToday = computed(() => hoursToHM(props.workedTodayHours));
-const timerControlsBusy = computed(() => props.busyTaskId !== null);
 const ticker = setInterval(() => {
   now.value = Date.now();
 }, 1000);
@@ -145,16 +145,17 @@ const ticker = setInterval(() => {
 (ticker as typeof ticker & { unref?: () => void }).unref?.();
 
 const elapsed = (task: BoardTask) => secToHMS(liveTimerSec(task, now.value));
-const isTimerBusy = (task: BoardTask) => String(props.busyTaskId) === String(task.id);
+const isTimerBusy = (task: BoardTask) => (task.source
+  ? props.busyTaskId === taskReferenceKey(task) : String(props.busyTaskId) === String(task.id));
 const timerActionLabel = (task: BoardTask) => (
   task.timerRunning
     ? t('core.pauseTaskTimer', { taskId: task.id })
     : t('core.startTaskTimer', { taskId: task.id })
 );
 
-function openTask(taskId: string | number, close: (reason: 'action') => void) {
+function openTask(task: BoardTask, close: (reason: 'action') => void) {
   close('action');
-  emit('openTask', taskId);
+  emit('openTask', task.source ? { id: task.id, source: task.source } : task.id);
 }
 
 function openBoard(close: (reason: 'action') => void) {

@@ -7,6 +7,7 @@ import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/source
 import { createPluginRepo } from './helpers/pluginRepo.js';
 import { commandSuccess, serviceFixture } from './helpers/pluginServiceFixture.js';
 import { PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 
 /**
  * Synthetic source не использует Git transport: service обязан вызывать его интерфейс.
@@ -34,8 +35,15 @@ function mirrorSource() {
     ],
     fetch: async ({ target, destination }) => {
       await mkdir(destination, { recursive: true });
+      await mkdir(path.join(destination, 'assets'), { recursive: true });
+      await writeFile(path.join(destination, 'assets/icon.png'), png);
       await writeFile(path.join(destination, 'plugin.json'),
-        JSON.stringify({ id: 'demo', version: target.version }));
+        JSON.stringify(manifestV1({
+          version: target.version,
+          entrypoints: { server: 'server.js' },
+          contributes: {},
+          install: undefined,
+        })));
       await writeFile(path.join(destination, 'server.js'), 'export default async () => {};');
     },
     changes: async () => null,

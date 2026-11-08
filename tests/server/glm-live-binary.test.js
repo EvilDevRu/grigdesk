@@ -249,15 +249,28 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и не �
   assert.equal(mock.requests.length, requests);
 });
 
-test('smoke не выдаёт DI admission для Coding Plan', async () => {
+test('smoke отвергает неизвестный режим до файловой системы и DI admission', async () => {
   await assert.rejects(runGlmLiveSmoke({
-    mode: 'coding-plan',
+    mode: 'unknown',
     env: {},
     config: serviceConfig,
     binary: '/missing',
     cacheDir: '/missing',
     workRoot: '/missing',
   }), { code: 'glm_mode_not_admitted' });
+});
+
+test('оба режима smoke проверяют абсолютные пути до чтения env и ELF', async () => {
+  for (const mode of ['api', 'coding-plan']) {
+    await assert.rejects(runGlmLiveSmoke({
+      mode,
+      env: {},
+      config: serviceConfig,
+      binary: 'relative',
+      cacheDir: '/missing',
+      workRoot: '/missing',
+    }), { name: 'TypeError', message: 'Smoke требует абсолютные --binary и --cache-dir' });
+  }
 });
 
 test('smoke сохраняет HTTP-статус и тело 1113 из настоящего ELF и останавливается на первом отказе', {
@@ -304,14 +317,24 @@ test('smoke сохраняет HTTP-статус и тело 1113 из наст�
   assert.equal(JSON.stringify(report).includes(GLM_SERVICE_KEY), false);
 });
 
-test('CLI без confirm-live отказывает до чтения env и запуска модели', async () => {
+test('CLI с неполными аргументами отказывает до чтения env и запуска модели', async (t) => {
+  const root = await createGlmBinaryFixtureRoot('glm-cli-arguments-');
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
   for (const args of [
     ['--mode', 'api'],
     ['--mode', 'api', '--confirm-live'],
-    ['--mode', 'coding-plan', '--confirm-live', '--binary', '/missing', '--cache-dir', '/missing'],
+    ['--mode', 'coding-plan', '--binary', '/missing', '--cache-dir', '/missing'],
+    ['--mode', 'coding-plan', '--confirm-live'],
   ]) {
     await assert.rejects(exec(process.execPath, [smokeScript, ...args], {
-      env: { PATH: process.env.PATH, GRIGDESK_DATA_HOME: '/missing-smoke-env' },
+      env: {
+        PATH: process.env.PATH,
+        GRIGDESK_HOME: path.join(root, 'data'),
+        GRIGDESK_ENV_FILE: path.join(root, 'absent.env'),
+        GRIGDESK_ARTIFACTS_DIR: path.join(root, 'artifacts'),
+      },
       timeout: 30000,
     }), (error) => {
       assert.equal(error.code, 2);

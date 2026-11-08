@@ -767,7 +767,19 @@ export class ChatHistoryStore {
 
     if (legacy?.sessions?.length || legacy?.archived?.length) {
       await this.save(legacy, { legacyImport: true });
-      await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
+
+      try {
+        await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
+      } catch (error) {
+        // Другой store мог завершить тот же импорт после нашего чтения legacy.
+        // Подтверждённый файл миграции отличает эту гонку от потери источника.
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+
+        await fs.access(this.legacyPath + '.migrated');
+      }
+
       await this.refreshHeads();
     }
   }

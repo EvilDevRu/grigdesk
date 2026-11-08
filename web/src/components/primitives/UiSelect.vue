@@ -94,7 +94,7 @@
             size="compact"
             :pressed="effectiveGroupKey === null"
             :aria-label="t('core.selectAllGroups')"
-            :title="t('core.selectAllGroups')"
+            v-tooltip="t('core.selectAllGroups')"
             data-group-icon
             data-select-group="all"
             @click="selectGroup(null)"
@@ -118,7 +118,7 @@
             size="compact"
             :pressed="effectiveGroupKey === group.key"
             :aria-label="group.label"
-            :title="group.label"
+            v-tooltip="group.label"
             :data-group-icon="$slots['group-leading'] ? '' : undefined"
             :data-select-group="group.key"
             @click="selectGroup(group.key)"

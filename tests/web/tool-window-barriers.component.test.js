@@ -76,6 +76,6 @@ test('TW-B03: прежние relay события остаются неизме�
 
   assert.ok(block, 'найден действующий список RELAYED_EVENTS');
   assert.deepEqual([...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).slice(0, 4), [
-    'hello', 'diagnostic-logging', 'task-shelf-changed', 'speech-settings',
+    'projects-changed', 'hello', 'diagnostic-logging', 'task-shelf-changed',
   ]);
 });

@@ -99,11 +99,18 @@
 
             <section class="tracker-settings__section" :aria-label="t('core.trackerConnectionSettings')">
               <h4>{{ t('core.trackerConnectionSettings') }}</h4>
-              <UiCheckbox :model-value="externalId === editorId" data-role="tracker-board-enabled"
-                          :disabled="busy || (!driverAvailable && externalId !== editorId)"
-                          @update:model-value="externalId = $event ? editorId : ''">
+              <UiCheckbox :model-value="enabledIds.includes(editorId)" data-role="tracker-board-enabled"
+                          :disabled="busy || (!driverAvailable && !enabledIds.includes(editorId))"
+                          @update:model-value="setEnabled(Boolean($event))">
                 {{ t('core.trackerUseOnBoard') }}
               </UiCheckbox>
+              <UiField :label="t('core.trackerDefaultBoard')">
+                <UiSelect v-model="externalId" :aria-label="t('core.trackerDefaultBoard')" :disabled="busy">
+                  <option v-for="id in enabledIds" :key="id" :value="id">
+                    {{ externalDrivers.find((driver) => driver.id === id)?.name ?? id }}
+                  </option>
+                </UiSelect>
+              </UiField>
               <UiInlineMessage v-if="externalId !== (trackers.catalog?.externalId ?? '')">
                 {{ externalId ? t('core.trackerSwitchConnection', { name: activeDriverName })
                   : t('core.trackerDisconnectConnection') }}
@@ -197,6 +204,7 @@ defineProps<{ open: boolean }>();
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
 const trackers = useTrackersStore();
 const installer = useDriverInstallStore();
+const enabledIds = ref<string[]>([]);
 const externalId = ref('');
 const editorId = ref('');
 const revision = ref(0);
@@ -334,6 +342,19 @@ watch([externalId, editorId, values], () => {
   connectionResult.value = null;
   tokenFailure.value = null;
 }, { deep: true });
+
+/**
+ * Включение и редактор независимы; снятие дефолта выбирает первый оставшийся источник.
+ * Сервер повторно нормализует этот выбор при сохранении по ревизии.
+ */
+function setEnabled(enabled: boolean) {
+  enabledIds.value = enabled ? [...new Set([...enabledIds.value, editorId.value])]
+    : enabledIds.value.filter((id) => id !== editorId.value);
+
+  if (!enabledIds.value.includes(externalId.value)) {
+    externalId.value = enabledIds.value[0] ?? '';
+  }
+}
 
 function fieldError(key: string): string | undefined {
   return tokenInputErrors.value[key] || (tokenFailure.value?.driverId === editorId.value
@@ -477,13 +498,16 @@ async function load() {
 
     const settings = await api.get('/api/trackers/settings') as {
       externalId: string | null;
+      drivers?: string[];
+      default?: string | null;
       revision: number;
       settings: Record<string, Record<string, unknown>>;
     };
 
     savedValues.value = settings.settings;
     revision.value = settings.revision;
-    externalId.value = settings.externalId ?? '';
+    externalId.value = settings.default ?? settings.externalId ?? '';
+    enabledIds.value = settings.drivers ?? (settings.externalId ? [settings.externalId] : []);
     editorId.value = settings.externalId ?? externalDrivers.value[0]?.id ?? '';
   } catch (cause) {
     error.value = failureText(cause);
@@ -512,9 +536,22 @@ async function save() {
 
     const settings = Object.fromEntries([...pending]
       .filter(([id]) => externalDrivers.value.some((driver) => driver.id === id))
-      .map(([id, draft]) => [id, visibleValues(id, draft)]));
+      .map(([id, draft]) => {
+        const schema = externalDrivers.value.find((driver) => driver.id === id)?.schema ?? {};
+        const changed = Object.entries(visibleValues(id, draft)).filter(([key, value]) => {
+          if (schema[key]?.secret && value === '') {
+            return false;
+          }
+
+          return value !== savedValues.value[id]?.[key];
+        });
+
+        return [id, Object.fromEntries(changed)];
+      }));
     const result = await trackers.saveSettings({
-      externalId: externalId.value || null,
+      ...(trackers.catalog?.enabledIds ? {
+        drivers: [...enabledIds.value], default: externalId.value || null,
+      } : { externalId: externalId.value || null }),
       settings,
       expectedRevision: revision.value,
     }) as { revision: number };

@@ -902,6 +902,7 @@
   "machineConnectionTitle": "Подключение",
   "machineConnectionIntro": "Состояние выбранной машины",
   "machineUnavailable": "Машина недоступна",
+  "shellTemporarilyUnavailable": "Оболочка временно недоступна",
   "machineOfflineHint": "Проверьте, что компьютер включён, GrigDesk запущен и есть доступ к сети.",
   "machineRetryCountdown": "Повторим подключение через {seconds} с",
   "machineRetryNow": "Повторить сейчас",
@@ -1576,9 +1577,11 @@
   "chatHistoryBaseFailed": "Не обновилась база истории",
   "chatHistoryChanged": "Окно чата уже изменилось",
   "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна",
-  "routeUpdateTitle": "Изменить адрес",
+  "routeUpdateConfirm": "Обновить маршрут",
+  "routeUpdateDirect": "Изменить прямой адрес",
   "routeUpdateHint": "Обновление маршрута сохраняет ключ и доверие к выбранной машине.",
   "routeUpdateQr": "Обновить маршрут по QR или строке",
-  "routeUpdateDirect": "Изменить прямой адрес",
-  "routeUpdateConfirm": "Обновить маршрут"
+  "routeUpdateTitle": "Изменить адрес",
+  "trackerDefaultBoard": "Доска по умолчанию",
+  "trackerSourceUnavailable": "недоступен"
 }

@@ -9,6 +9,7 @@ import { isTrackerWidget } from '../../../shared/trackers/validation.ts';
 export interface BoardTask extends Record<string, unknown> {
   id: string | number;
   source?: TaskSourceId | 'b24';
+  driverId?: string;
   personalSource?: 'tracker' | 'grigdesk';
   createdAt?: string;
   title?: string;
@@ -138,7 +139,15 @@ export interface BoardChart {
   avg_time_dept?: Array<number | string>;
 }
 
+export interface DriverBoardSnapshot {
+  snapshot: BoardDashboard;
+  dataRevision?: number;
+  error?: string;
+}
+
 export interface BoardDashboard extends Record<string, unknown> {
+  multiSource?: boolean;
+  driverSnapshots?: Record<string, DriverBoardSnapshot>;
   source?: TaskSourceId;
   trackerId?: string;
   capabilities?: TrackerCapabilities;
@@ -199,6 +208,15 @@ function isBoardTask(value: unknown): value is BoardTask {
  */
 export function isBoardDashboard(value: unknown): value is BoardDashboard {
   if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value.multiSource === true && (!isRecord(value.driverSnapshots)
+    || !Object.values(value.driverSnapshots).every((branch) => isRecord(branch)
+      && isRecord(branch.snapshot) && branch.snapshot.driverSnapshots === undefined
+      && isBoardDashboard(branch.snapshot)
+      && (branch.dataRevision === undefined || Number.isSafeInteger(branch.dataRevision))
+      && (branch.error === undefined || typeof branch.error === 'string')))) {
     return false;
   }
 

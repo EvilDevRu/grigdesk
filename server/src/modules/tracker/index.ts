@@ -27,6 +27,7 @@ type Payload = Record<string, unknown>;
 type TaskRoute = {
   Params: {
     id: string;
+    driverId?: string;
     action?: string;
     itemId?: string;
   };
@@ -44,7 +45,54 @@ function failureText(error: unknown): string {
  * Сервер сохраняет разрешение media-имён и проверку поколения новых клиентов.
  */
 async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOptions): Promise<void> {
-  const { tracker } = opts;
+  const targets = new WeakMap<FastifyRequest, TrackerFacade>();
+
+  /**
+   * Цель разрешается один раз до заголовка поколения и любых вложений.
+   * Readback использует тот же фасад даже после асинхронного эффекта.
+   */
+  const targetOf = (request: FastifyRequest): TrackerFacade => {
+    const cached = targets.get(request);
+
+    if (cached) {
+      return cached;
+    }
+
+    const params = request.params as { driverId?: string };
+    const routeId = params.driverId ?? (request.routeOptions.url?.startsWith('/api/tracker/task/')
+      && request.routeOptions.url !== '/api/tracker/task/:id'
+      && !request.routeOptions.url?.startsWith('/api/tracker/task/:id/') ? 'task' : undefined);
+    const body = request.body as Payload | null;
+    const board = request.method === 'POST' && request.url.endsWith('/tasks') ? body?.board : undefined;
+
+    if (board !== undefined && (typeof board !== 'string' || (routeId && routeId !== board))) {
+      throw new TrackerError('tracker_target_conflict', 'Адрес и доска задачи не совпадают', 400);
+    }
+
+    const id = routeId ?? board;
+    const target = typeof id === 'string' ? opts.tracker.forDriver(id) : opts.tracker;
+
+    target.captureContext?.();
+    targets.set(request, target);
+
+    return target;
+  };
+
+  registerTrackerRoutes(fastify, targetOf, '/api/tracker');
+  registerTrackerRoutes(fastify, targetOf, '/api/tracker/:driverId', true);
+  registerTrackerRoutes(fastify, targetOf, '/api/tracker/task', true);
+}
+
+/**
+ * Обе семьи маршрутов используют одни обработчики и один контекст запроса.
+ * Статический префикс task сохраняет допустимое имя драйвера без перехвата legacy detail.
+ */
+function registerTrackerRoutes(
+  fastify: FastifyInstance,
+  targetOf: (request: FastifyRequest) => TrackerFacade,
+  prefix: string,
+  addressed = false,
+): void {
 
   // Новые клиенты фиксируют поколение при подготовке мутации.
   // Legacy HTTP и CLI без заголовка продолжают обращаться к текущему выбору.
@@ -60,7 +108,11 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
         throw new TrackerError('tracker_context_changed', 'Некорректное поколение трекера', 409);
       }
 
-      (tracker as TrackerFacade).assertContext?.(Number(generation));
+      if (!Number.isSafeInteger(Number(generation))) {
+        throw new TrackerError('tracker_context_changed', 'Некорректное поколение трекера', 409);
+      }
+
+      targetOf(request).assertContext?.(Number(generation));
     }
   };
 
@@ -68,7 +120,11 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
    * Дополняет неизменённые данные портала разрешёнными Telegram-обсуждениями.
    * Одна функция обслуживает чтение и ответ после редактирования, чтобы DTO не расходились.
    */
-  const taskWithDiscussion = async (id: string, options: TrackerReadOptions = {}): Promise<unknown> => {
+  const taskWithDiscussion = async (
+    tracker: TrackerFacade,
+    id: string,
+    options: TrackerReadOptions = {},
+  ): Promise<unknown> => {
     const task = await tracker.taskDetail(id, options) as Payload | null;
 
     if (typeof fastify.telegramDiscussion !== 'function' || !task) {
@@ -81,11 +137,30 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     return telegram?.links?.length ? { ...task, telegram } : task;
   };
 
+  if (addressed) {
+    fastify.get(`${prefix}/context`, wrapContext);
+  }
+
+  /**
+   * Прямая ссылка подтверждает источник даже при отсутствии задачи на доске.
+   * Ошибка адресной цели сохраняет свой HTTP-статус и не обращается к дефолту.
+   */
+  async function wrapContext(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      return await targetOf(request).context();
+    } catch (error) {
+      return reply.code(error instanceof TrackerError ? error.status : 503).send({
+        error: error instanceof TrackerError ? error.code : 'tracker_unavailable',
+        message: failureText(error),
+      });
+    }
+  }
+
   // Полный дашборд: задачи + на контроле + я поставил + показатели + графики.
-  fastify.get('/api/tracker/dashboard', async (request, reply) => {
+  fastify.get(`${prefix}/dashboard`, async (request, reply) => {
     try {
       return await withTrackerRequestRead(request, reply,
-        (options) => tracker.getDashboard(options));
+        (options) => targetOf(request).getDashboard(options));
     } catch (err) {
       const message = failureText(err);
       const known = err instanceof TrackerError;
@@ -108,8 +183,9 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // регистрируется ПОЗЖЕ tracker, а к первому запросу он уже на месте. Выключенный
   // плагин, сломанный архив или молчащий Телеграм отдают пустоту — карточка
   // задачи открывается в любом случае (см. modules/telegram).
-  fastify.get<TaskRoute>('/api/tracker/task/:id', async (request, reply) => {
-    const id = String(request.params.id).replace(/[^0-9]/g, '');
+  fastify.get<TaskRoute>(`${prefix}/task/:id`, async (request, reply) => {
+    const id = addressed && !/^\d+$/.test(request.params.id) ? ''
+      : String(request.params.id).replace(/[^0-9]/g, '');
 
     if (!id) {
       return reply.code(400).send({ error: 'bad_task_id' });
@@ -118,45 +194,51 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     try {
       assertGeneration(request);
 
-      const context = (tracker as TrackerFacade).captureContext?.();
+      const context = targetOf(request).captureContext?.();
       const result = await withTrackerRequestRead(request, reply,
-        (options) => taskWithDiscussion(id, options));
+        (options) => taskWithDiscussion(targetOf(request), id, options));
 
       if (context) {
-        (tracker as TrackerFacade).assertContext(context);
+        targetOf(request).assertContext(context);
       }
 
       return result;
     } catch (err) {
-      if (err instanceof TrackerError && err.status === 409) {
-        return reply.code(409).send({ error: err.code, message: err.message });
+      if (err instanceof TrackerError) {
+        return reply.code(err.status).send({ error: err.code, message: err.message });
       }
 
-      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
+      return reply.code(err instanceof TrackerError ? err.status : 502).send({
+        error: err instanceof TrackerError ? err.code : 'tracker_error', message: failureText(err),
+      });
     }
   });
 
   // Поиск пользователей (для выбора исполнителя).
-  fastify.get<TaskRoute>('/api/tracker/users', async (request, reply) => {
+  fastify.get<TaskRoute>(`${prefix}/users`, async (request, reply) => {
     try {
       const users = await withTrackerRequestRead(request, reply,
-        (options) => tracker.findUsers(request.query.q || '', options));
+        (options) => targetOf(request).findUsers(request.query.q || '', options));
 
       return { users };
     } catch (err) {
-      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
+      return reply.code(err instanceof TrackerError ? err.status : 502).send({
+        error: err instanceof TrackerError ? err.code : 'tracker_error', message: failureText(err),
+      });
     }
   });
 
   // Доступные текущему пользователю проекты/рабочие группы для поля GROUP_ID задачи.
-  fastify.get('/api/tracker/groups', async (request, reply) => {
+  fastify.get(`${prefix}/groups`, async (request, reply) => {
     try {
       const groups = await withTrackerRequestRead(request, reply,
-        (options) => tracker.listGroups(options));
+        (options) => targetOf(request).listGroups(options));
 
       return { groups };
     } catch (err) {
-      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
+      return reply.code(err instanceof TrackerError ? err.status : 502).send({
+        error: err instanceof TrackerError ? err.code : 'tracker_error', message: failureText(err),
+      });
     }
   });
 
@@ -165,6 +247,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     fn: (request: FastifyRequest<TaskRoute>) => Promise<unknown> | unknown,
   ) => async (request: FastifyRequest<TaskRoute>, reply: FastifyReply) => {
     try {
+      targetOf(request);
       assertGeneration(request);
 
       return await fn(request);
@@ -178,9 +261,13 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
       });
     }
   };
-  const taskId = (request: FastifyRequest<TaskRoute>) => (
-    String(request.params.id).replace(/[^0-9]/g, '')
-  );
+  const taskId = (request: FastifyRequest<TaskRoute>) => {
+    if (addressed && !/^\d+$/.test(request.params.id)) {
+      throw new TrackerValidationError('Некорректный номер задачи');
+    }
+
+    return String(request.params.id).replace(/[^0-9]/g, '');
+  };
 
   /**
    * Новые мутации не превращают повреждённый адрес в номер другой задачи.
@@ -201,10 +288,11 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // Принимать путь от клиента здесь нельзя: это ручка, которая грузит файлы на портал,
   // и произвольный путь означал бы «залей туда что скажу». Ссылка ленивая — модуль
   // media регистрируется отдельно, а при выключенном плагине кадров просто нет.
-  fastify.post<TaskRoute>('/api/tracker/tasks', wrap((r) => {
+  fastify.post<TaskRoute>(`${prefix}/tasks`, wrap((r) => {
     const body = { ...((r.body || {}) as Payload) };
 
-    (tracker as TrackerFacade).assertAttachments?.(body);
+    delete body.board;
+    targetOf(r).assertAttachments?.(body);
 
     const names = Array.isArray(body.frames) ? body.frames : [];
     const clips = Array.isArray(body.clips) ? body.clips : [];
@@ -244,10 +332,10 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
       }
     }
 
-    return tracker.createTask(body);
+    return targetOf(r).createTask(body);
   }));
 
-  fastify.put<TaskRoute>('/api/tracker/task/:id', wrap(async (r) => {
+  fastify.put<TaskRoute>(`${prefix}/task/:id`, wrap(async (r) => {
     const id = taskId(r);
 
     if (!id) {
@@ -255,26 +343,26 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     }
 
     const fields = normalizeTaskUpdateFields(r.body);
-    const context = (tracker as TrackerFacade).captureContext?.();
+    const context = targetOf(r).captureContext?.();
 
-    await tracker.updateTask(id, fields);
+    await targetOf(r).updateTask(id, fields);
 
     if (context) {
-      (tracker as TrackerFacade).assertContext(context);
+      targetOf(r).assertContext(context);
     }
 
-    return taskWithDiscussion(id);
+    return taskWithDiscussion(targetOf(r), id);
   }));
-  fastify.post<TaskRoute>('/api/tracker/task/:id/comment', wrap((r) => tracker.addComment(
+  fastify.post<TaskRoute>(`${prefix}/task/:id/comment`, wrap((r) => targetOf(r).addComment(
     taskId(r),
     ((r.body || {}) as Payload).text || '',
   )));
 
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
-  fastify.get<TaskRoute>('/api/tracker/task/:id/comments', async (request, reply) => {
+  fastify.get<TaskRoute>(`${prefix}/task/:id/comments`, async (request, reply) => {
     try {
       const page = await withTrackerRequestRead(request, reply,
-        (options) => tracker.taskPageData(taskId(request), options)) as Payload;
+        (options) => targetOf(request).taskPageData(taskId(request), options)) as Payload;
       const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
 
       return {
@@ -287,49 +375,49 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     }
   });
 
-  fastify.post<TaskRoute>('/api/tracker/task/:id/timer/:action', wrap((r) => {
+  fastify.post<TaskRoute>(`${prefix}/task/:id/timer/:action`, wrap((r) => {
     const a = String(r.params.action ?? '');
 
     if (!['start', 'pause', 'stop'].includes(a)) {
       throw new Error(`неизвестное действие таймера: ${a}`);
     }
 
-    return tracker.timer(a, taskId(r));
+    return targetOf(r).timer(a, taskId(r));
   }));
 
-  fastify.delete<TaskRoute>('/api/tracker/task/:id', wrap(async (r) => {
+  fastify.delete<TaskRoute>(`${prefix}/task/:id`, wrap(async (r) => {
     const id = taskId(r);
 
     if (!id) {
       throw new TrackerValidationError('Некорректный номер задачи');
     }
 
-    await tracker.deleteTask(id);
+    await targetOf(r).deleteTask(id);
 
     return { ok: true };
   }));
 
-  fastify.post<TaskRoute>('/api/tracker/task/:id/complete', wrap((r) => tracker.completeTask(taskId(r))));
-  fastify.post<TaskRoute>('/api/tracker/task/:id/renew', wrap((r) => tracker.renewTask(taskId(r))));
+  fastify.post<TaskRoute>(`${prefix}/task/:id/complete`, wrap((r) => targetOf(r).completeTask(taskId(r))));
+  fastify.post<TaskRoute>(`${prefix}/task/:id/renew`, wrap((r) => targetOf(r).renewTask(taskId(r))));
 
-  fastify.post<TaskRoute>('/api/tracker/task/:id/checklist', wrap((r) => (
-    tracker.addChecklistItem(mutationTaskId(r), normalizeChecklistAdd(r.body))
+  fastify.post<TaskRoute>(`${prefix}/task/:id/checklist`, wrap((r) => (
+    targetOf(r).addChecklistItem(mutationTaskId(r), normalizeChecklistAdd(r.body))
   )));
-  fastify.put<TaskRoute>('/api/tracker/task/:id/checklist/:itemId', wrap((r) => (
-    tracker.updateChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId),
+  fastify.put<TaskRoute>(`${prefix}/task/:id/checklist/:itemId`, wrap((r) => (
+    targetOf(r).updateChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId),
       normalizeChecklistUpdate(r.body))
   )));
-  fastify.delete<TaskRoute>('/api/tracker/task/:id/checklist/:itemId', wrap((r) => (
-    tracker.deleteChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId))
+  fastify.delete<TaskRoute>(`${prefix}/task/:id/checklist/:itemId`, wrap((r) => (
+    targetOf(r).deleteChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId))
   )));
-  fastify.put<TaskRoute>('/api/tracker/task/:id/tags', wrap((r) => (
-    tracker.updateTaskTags(mutationTaskId(r), normalizeTaskTags(r.body))
+  fastify.put<TaskRoute>(`${prefix}/task/:id/tags`, wrap((r) => (
+    targetOf(r).updateTaskTags(mutationTaskId(r), normalizeTaskTags(r.body))
   )));
-  fastify.post<TaskRoute>('/api/tracker/task/:id/approve', wrap((r) => (
-    tracker.approveTask(mutationTaskId(r))
+  fastify.post<TaskRoute>(`${prefix}/task/:id/approve`, wrap((r) => (
+    targetOf(r).approveTask(mutationTaskId(r))
   )));
-  fastify.post<TaskRoute>('/api/tracker/task/:id/disapprove', wrap((r) => (
-    tracker.disapproveTask(mutationTaskId(r))
+  fastify.post<TaskRoute>(`${prefix}/task/:id/disapprove`, wrap((r) => (
+    targetOf(r).disapproveTask(mutationTaskId(r))
   )));
 }
 

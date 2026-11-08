@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { reactive, ref } from 'vue';
+import { chatListPagingStub } from '../../helpers/chat-list.js';
 
 export const counts = reactive({
     ensure: 0,
@@ -14,6 +15,7 @@ export const useChatStore = defineStore('loading-fixture-chat', {
         loadError: null,
         loadErrorMessage: null,
         activeId: 'fixture-chat',
+        openedChatIds: ['fixture-chat'],
         revealRequest: '',
         archived: [],
         compactWindow: 0,
@@ -38,6 +40,9 @@ export const useChatStore = defineStore('loading-fixture-chat', {
         ],
     }),
     actions: {
+        ...chatListPagingStub(),
+        async ensureChatMessages() {},
+        setChatViewport() {},
         ensure() {
             counts.ensure += 1;
         },

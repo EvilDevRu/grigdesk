@@ -1,6 +1,6 @@
 <template>
-  <UiRefreshIcon v-if="name === 'refresh'" class="machine-glyph" />
-  <svg v-else class="machine-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  <UiRefreshIcon v-if="name === 'refresh'" class="machine-glyph" height="20" />
+  <svg v-else class="machine-glyph" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path :d="paths[name]" />
   </svg>
@@ -36,6 +36,5 @@ const paths = {
 .machine-glyph {
   flex: none;
   width: 20px;
-  height: 20px;
 }
 </style>

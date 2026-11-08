@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 
 import { seaConfig } from '../../shared/node/seaBuild.ts';
 
-test('SEA config принимает assets пакета и сохраняет независимый NODE-LICENSE Б24', () => {
+test('SEA config принимает assets пакета и сохраняет независимый NODE-LICENSE трекера', () => {
   const assets = {
     'manifest.json': 'manifest.json',
     'payload.zip': 'payload.zip',
@@ -33,7 +33,9 @@ test('пакет DeepSeek закрепляет свои build deps и тот ж�
     new URL('../../deepseek/package-lock.json', import.meta.url), 'utf8',
   ));
   const pin = await readFile(new URL('../../deepseek/build/node-runtime.json', import.meta.url), 'utf8');
-  const b24Pin = await readFile(new URL('../../b24/build/node-runtime.json', import.meta.url), 'utf8');
+  const trackerPin = await readFile(
+    new URL('../../tracker/build/node-runtime.json', import.meta.url), 'utf8',
+  );
 
   assert.equal(manifest.name, 'grigdesk-deepseek');
   assert.equal(manifest.private, true);
@@ -47,7 +49,7 @@ test('пакет DeepSeek закрепляет свои build deps и тот ж�
     typescript: '5.9.3',
   });
   assert.equal(lock.packages[''].name, 'grigdesk-deepseek');
-  assert.equal(pin, b24Pin);
+  assert.equal(pin, trackerPin);
   assert.equal(manifest.scripts.build, 'node scripts/buildBinary.mts');
   assert.equal(manifest.scripts.test, 'node scripts/test.mts');
   assert.equal(manifest.scripts['test:sea'], 'node scripts/test.mts --sea');

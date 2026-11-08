@@ -58,6 +58,7 @@ import { SpeechRuntime } from './lib/speech/index.ts';
 import { SpeechInstallationService } from './lib/speech/installation.ts';
 import { ModelJobManager } from './lib/speech/modelJobs.ts';
 import { listProjects } from './lib/profiles.ts';
+import { installBundledSkills } from './lib/skills/bundledSkills.ts';
 import * as telegramBotApi from './lib/telegram/api.ts';
 import { TelegramAccountBindings } from './lib/telegram/accountBindings.ts';
 import { createTelegramAccountContextFactory } from './lib/telegram/accountContext.ts';
@@ -244,6 +245,14 @@ async function build(desktopParent: DesktopParent | null) {
     // на AVV_ERR_PLUGIN_EXEC_TIMEOUT и уходил в бесконечный цикл перезапусков systemd.
     pluginTimeout: 60_000,
   });
+
+  // Встроенные навыки комплекта зеркалируются в ~/.agents/skills при каждом старте: только
+  // этот каталог знают меню «/» и файловый provider Harness. Сбой синка не мешает подъёму.
+  const bundledSkills = await installBundledSkills().catch(() => [] as string[]);
+
+  if (bundledSkills.length > 0) {
+    fastify.log.info({ skills: bundledSkills }, 'Встроенные навыки синхронизированы в ~/.agents/skills');
+  }
 
   await fastify.register(apiVersionPlugin);
 
@@ -1410,7 +1419,11 @@ async function build(desktopParent: DesktopParent | null) {
   });
   analyzer.onAnalyzed = (id: string) => analysisArbiter.arbitrate(id, { automatic: true });
   await analyzer.start();
-  await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
+  await fastify.register(analysisModule, {
+    analyzer,
+    tracker,
+    arbiter: analysisArbiter,
+  });
 
   // Закрытые снимки и самостоятельное сообщение о запуске приложения — последними.
   await fastify.register(staticPlugin, {

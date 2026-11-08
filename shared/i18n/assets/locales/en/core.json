@@ -884,6 +884,7 @@
   "machineConnectionTitle": "Connection",
   "machineConnectionIntro": "Selected machine status",
   "machineUnavailable": "Machine unavailable",
+  "shellTemporarilyUnavailable": "The shell is temporarily unavailable",
   "machineOfflineHint": "Make sure the computer is on, GrigDesk is running and the network is available.",
   "machineRetryCountdown": "Retrying in {seconds} s",
   "machineRetryNow": "Retry now",
@@ -1556,9 +1557,11 @@
   "chatHistoryBaseFailed": "Could not refresh the history base",
   "chatHistoryChanged": "The chat window has changed",
   "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
-  "routeUpdateTitle": "Change address",
+  "routeUpdateConfirm": "Update route",
+  "routeUpdateDirect": "Change direct address",
   "routeUpdateHint": "Updating the route preserves the key and trust of the selected machine.",
   "routeUpdateQr": "Update route using QR or text",
-  "routeUpdateDirect": "Change direct address",
-  "routeUpdateConfirm": "Update route"
+  "routeUpdateTitle": "Change address",
+  "trackerDefaultBoard": "Default board",
+  "trackerSourceUnavailable": "unavailable"
 }

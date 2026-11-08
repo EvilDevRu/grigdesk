@@ -90,6 +90,9 @@ test('UiActionLink остаётся ссылкой и guard снимает пе�
   assert.equal(wrapper.element.tagName, 'A');
   assert.equal(wrapper.attributes('href'), '/settings');
   assert.equal(wrapper.attributes('rel'), 'noopener noreferrer');
+  await wrapper.setProps({ wrap: true });
+  assert.equal(wrapper.classes().includes('ui-button--wrap'), true);
+  assert.equal(wrapper.attributes('href'), '/settings');
   await wrapper.setProps({ disabled: true });
   assert.equal(wrapper.attributes('href'), undefined);
   assert.equal(wrapper.attributes('aria-disabled'), 'true');

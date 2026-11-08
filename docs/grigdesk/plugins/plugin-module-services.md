@@ -100,6 +100,8 @@ context.askAgent({ workdir, title, draft }): Promise<string>
 зарегистрированных проектов. Пропущенный workdir не подставляет GrigDesk.
 Сначала helper ждёт chat.ensure() и выбранную defModelRef; при отсутствии модели
 возвращается понятная ошибка RU/EN с просьбой выбрать модель в чате.
+Холодная загрузка читает постраничный каталог `/api/chat/store/list` вместе с выбранной
+моделью; новый черновик добавляется после применения этого каталога, сохраняя прежние чаты.
 
 POST `/api/chat/workdir/preview` получает modelRef и candidate `{taskId: null, workdir}`
 с signal экземпляра. Проверяются capability switch=resume/reseed, roots=single/multi,

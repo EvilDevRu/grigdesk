@@ -565,6 +565,8 @@ async function mountCodeView(t, {
   }
 
   let wrapper = null;
+  let released = false;
+  let unmount = null;
 
   slot.busy = true;
   slot.ports = {
@@ -575,11 +577,26 @@ async function mountCodeView(t, {
   };
   globalThis.__codeViewModuleSlot = slot;
 
-  t.after(() => {
-    wrapper?.unmount();
+  /**
+   * Явное размонтирование при reload освобождает граф сразу, ещё внутри сценария.
+   * Повторный after прежнего mount не очищает порты уже переиспользованного слота.
+   */
+  function release() {
+    if (released) {
+      return;
+    }
+
+    released = true;
     slot.toasts?.clear();
     slot.ports = null;
     slot.busy = false;
+    wrapper = null;
+    unmount = null;
+  }
+
+  t.after(() => {
+    wrapper?.unmount();
+    release();
     delete globalThis.__codeViewApi;
     delete globalThis.__codeViewMonaco;
     delete globalThis.__codeViewConfirm;
@@ -591,7 +608,7 @@ async function mountCodeView(t, {
     delete globalThis.__codeViewModuleSlot;
   });
 
-  const [{ mount, flushPromises, DOMWrapper }, CodeView] = await Promise.all([
+  const [{ mount, flushPromises, DOMWrapper, VueWrapper }, CodeView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     slot.component ||= compileCodeView(),
   ]);
@@ -605,9 +622,30 @@ async function mountCodeView(t, {
     attachTo: browser.document.querySelector('#mount'),
     props,
     global: {
+      mixins: [{
+        /**
+         * Test Utils очищает историю emit только корневого wrapper, но дети тоже передают DOM.
+         * После их unmount публичный reader позволяет освободить аргументы завершённых событий.
+         */
+        unmounted() {
+          const history = VueWrapper.prototype.emitted.call({ vm: this });
+
+          for (const key of Object.keys(history)) {
+            delete history[key];
+          }
+        },
+      }],
       stubs: { RouterLink: { template: '<a href="/projects"><slot /></a>' } },
     },
   });
+  unmount = wrapper.unmount.bind(wrapper);
+
+  wrapper.unmount = () => {
+    if (!released) {
+      unmount();
+      release();
+    }
+  };
   await settle(flushPromises);
 
   return {
@@ -1360,7 +1398,7 @@ test('откат и удаление требуют подтверждения, 
   const trackedMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(trackedMenu.querySelector('[data-action="discard-file"]'));
-  assert.equal(trackedMenu.querySelector('[data-action="clean-file"]'), null);
+  assert.equal(trackedMenu.querySelector('[data-action="clean-file"]') === null, true);
   trackedMenu.querySelector('[data-action="discard-file"]').click();
   await settle(flushPromises);
   assert.equal(posts.length, 0, 'отказ в диалоге не запускает мутацию');
@@ -1380,8 +1418,8 @@ test('откат и удаление требуют подтверждения, 
   const stagedMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(stagedMenu.querySelector('[data-action="unstage-file"]'));
-  assert.equal(stagedMenu.querySelector('[data-action="discard-file"]'), null);
-  assert.equal(stagedMenu.querySelector('[data-action="clean-file"]'), null);
+  assert.equal(stagedMenu.querySelector('[data-action="discard-file"]') === null, true);
+  assert.equal(stagedMenu.querySelector('[data-action="clean-file"]') === null, true);
   browser.document.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await settle(flushPromises);
   await wrapper.get('button[data-action="row-more"][data-file="new.js"]').trigger('click');
@@ -1390,7 +1428,7 @@ test('откат и удаление требуют подтверждения, 
   const newMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(newMenu.querySelector('[data-action="clean-file"]'));
-  assert.equal(newMenu.querySelector('[data-action="discard-file"]'), null);
+  assert.equal(newMenu.querySelector('[data-action="discard-file"]') === null, true);
   assert.equal(posts.length, 1, 'Просмотр меню не запускает действие');
 });
 
@@ -1466,7 +1504,7 @@ test('конфликт помечен в Git, разрешается через 
   }
 
   for (const action of ['discard-file', 'clean-file', 'partial-stage', 'ignore-shared', 'ignore-local']) {
-    assert.equal(menu.querySelector(`[data-action="${action}"]`), null, action);
+    assert.equal(menu.querySelector(`[data-action="${action}"]`) === null, true, action);
   }
 
   assert.equal(posts.length, 0, 'Чтение меню конфликта не помечает файл разрешённым');
@@ -5677,10 +5715,10 @@ test('CODE-LAYOUT: фильтры и групповые команды появ�
 test('CODE-LAYOUT: меню выбирает блок, быстрый список заменяет скрытое дерево', async (t) => {
   const h = await mountReviewPanel(t);
 
-  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]') === null, true);
   assert.equal(h.wrapper.find('[data-action="diff-file-list"]').exists(), false);
   await clickReviewMenuAction(h, 'select-diff-hunk');
-  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]') === null, true);
   assert.ok(reviewEditors(h).some((editor) => editor.getSelection()?.startLineNumber === 5));
   await h.wrapper.get('button.navigator-toggle').trigger('click');
   await reviewControl(h.wrapper, 'diff-file-list').setValue('work:b.txt');
@@ -6325,7 +6363,7 @@ test('CODE-MENU-KEYBOARD: contextmenu, Shift+F10, стрелки, Escape воз�
   assert.ok(menu, 'Правая кнопка открывает меню');
   menu.dispatchEvent(new h.browser.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await settle(h.flushPromises);
-  assert.equal(h.browser.document.activeElement, row.element);
+  assert.equal(h.browser.document.activeElement === row.element, true);
   await row.trigger('keydown', { key: 'F10', shiftKey: true });
   await settle(h.flushPromises);
   menu = h.browser.document.querySelector('[role="menu"]');

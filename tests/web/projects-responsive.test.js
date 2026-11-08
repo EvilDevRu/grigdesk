@@ -34,7 +34,13 @@ async function geometry(page) {
       overflow,
       labels,
       documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
-      minimumTarget: Math.min(...targets.map((element) => element.getBoundingClientRect().height)),
+      // Действия шапки видимы на 32 px, а общий ::after сохраняет площадку touch 44 px.
+      minimumTarget: Math.min(...targets.map((element) => {
+        const height = element.getBoundingClientRect().height;
+        const after = getComputedStyle(element, '::after');
+
+        return after.content === 'none' ? height : Math.max(height, parseFloat(after.height) || 0);
+      })),
       saveVisible: !saveRect || (saveRect.top >= 0 && saveRect.bottom <= innerHeight),
     };
   });
@@ -99,7 +105,7 @@ test('проекты: каталог, карточка и создание на 
             node.getBoundingClientRect().height
           )));
 
-          assert.deepEqual(headers, [36, 36], 'Обе панели имеют высоту toolbar конвейера');
+          assert.deepEqual(headers, [36, 36], 'Обе панели имеют общую desktop-геометрию шапки');
         }
 
         assert.equal(result.documentOverflow, false, label);

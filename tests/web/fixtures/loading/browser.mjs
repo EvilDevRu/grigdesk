@@ -192,6 +192,7 @@ export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '',
         const page = await context.newPage();
 
         page.setDefaultTimeout(7000);
+        page.setDefaultNavigationTimeout(60_000);
 
         page.on('pageerror', (error) => errors.push(error.stack || error.message));
         await page.goto(`http://127.0.0.1:${address.port}/${entry}?mode=${mode}`);

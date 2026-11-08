@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { protocolPage } from './helpers/chat-protocol.js';
 
 const CHAT_STORE = webFile('src/stores/chat.ts');
 
@@ -89,13 +90,12 @@ test('после F5 DB-подтверждение восстанавливает
     async get(path) {
       gets.push(path);
 
-      if (path === '/api/chat/store/list') {
-        return {
-          listProtocol: 1,
+      if (path.startsWith('/api/chat/store/list?')) {
+        return protocolPage({
           sessions: [],
           archived: [],
           activeId: null,
-        };
+        }, path);
       }
       if (path === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [restored] };

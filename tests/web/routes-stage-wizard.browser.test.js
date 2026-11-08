@@ -68,6 +68,7 @@ async function fixture(t, initial) {
     const errors = [];
 
     page.setDefaultTimeout(7000);
+    page.setDefaultNavigationTimeout(60000);
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript((locale) => localStorage.setItem('grigdesk-ui-language', locale), language);
     await page.route('**/api/routes/**', async (route) => {

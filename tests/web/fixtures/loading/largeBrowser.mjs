@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import ts from '../../../../web/node_modules/typescript/lib/typescript.js';
 import { startLoadingBrowser } from './browser.mjs';
+import { appWindowStubs } from '../../helpers/app-window-stubs.js';
+import { trackerMetadata } from '../../helpers/trackerCard.js';
 
 /**
  * Изолирует внешние ресурсы App и крупных экранов, сохраняя их настоящий шаблон и setup.
@@ -13,6 +15,8 @@ export async function startLargeBrowser(t) {
   const ports = JSON.stringify(path.join(root, 'tests/web/fixtures/loading/largePorts.mjs'));
   const empty = 'export default { render: () => null };';
   const mocks = {
+    ...Object.fromEntries(Object.entries(appWindowStubs)
+      .map(([specifier, source]) => [specifier.slice(2), source])),
     'features/speech/provider.ts': `import { h } from 'vue';
       export const SpeechProvider = { setup: (_, { slots }) => () => h('div', {
         style: 'display:contents'
@@ -24,8 +28,12 @@ export async function startLargeBrowser(t) {
       export const useSse = () => ({ connected: ref(true) });
       export const sseSubscribe = () => () => {}; export const setSseEnabled = () => {};`,
     'shared/desktopSettings.ts': "export const currentDesktopMode = () => 'page';",
+    'shared/settingsNavigation.ts': 'export const openSettings = () => {};',
+    'shared/tools/registry.ts': 'export const toolById = () => null;',
+    'views/settings/SettingsModal.vue': empty,
+    'views/board/TrackerSettingsDialog.vue': empty,
     'stores/tasks.ts': `export const useTasksStore = () => ({
-      async load() { return {}; }, title() { return 'Синтетическая задача'; }
+      async load() { return {}; }, title() { return 'Синтетическая задача'; }, invalidate() {}
     });`,
     'stores/board.ts': `export { board as store } from ${ports};
       import { board } from ${ports}; export const useBoardStore = () => board;`,
@@ -58,6 +66,7 @@ export async function startLargeBrowser(t) {
   }
 
   delete mocks['shared/layout/AppShell.vue'];
+  delete mocks['stores/grigdeskTasks.ts'];
 
   for (const [file, name] of Object.entries({
     providerInstall: 'useProviderInstallStore',
@@ -70,11 +79,13 @@ export async function startLargeBrowser(t) {
   }
 
   mocks['stores/providerInstall.ts'] += '\nexport const providerInstallVisibleWarnings = () => [];';
+  mocks['shared/helpNavigation.ts'] += '\nexport const openHelp = () => {};';
 
   mocks['stores/providers.ts'] = `export const useProvidersStore = () => ({
     providers: [], load() {}, loadUsage() {}, noteUsageConnection() {}, usage: {},
   });`;
-  mocks['stores/plugins.ts'] = `export const usePluginsStore = () => ({
+  mocks['stores/plugins.ts'] = `export const pluginCategoryOf = () => 'tools';
+    export const usePluginsStore = () => ({
     loaded: true, list: [], railNav: [], toolsNav: [], dockNav: [],
     byId: () => ({ values: {} }), enabled: () => false, async load() {},
   });`;
@@ -101,8 +112,10 @@ export async function startLargeBrowser(t) {
     additionalMocks: mocks,
     entry: 'large.html',
     replies: {
+      '/api/trackers': trackerMetadata('fixture-driver'),
       '/api/grigdesk-tasks': {
         revision: 1,
+        personalStateVersion: 1,
         trackerConfigured: true,
         tasks: [],
       },

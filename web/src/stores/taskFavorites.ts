@@ -1,8 +1,11 @@
+import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from '../shared/trackerMutation.ts';
 // Независимое серверное избранное трекера и GrigDesk. Строка фильтра меняется после подтверждения сервера.
 // Ошибка мутации сохраняет прежний список без локального rollback.
 import { defineStore } from 'pinia';
+import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -34,7 +37,7 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-interface FavoritesBranch {
+interface FavoritesBranch extends Pick<StoreGeneric, '$onAction'> {
   scope: string;
   revision: number;
   taskIds: string[];
@@ -50,12 +53,20 @@ interface FavoritesBranch {
   toggle(id: unknown, options?: TaskSourceOptions): Promise<boolean>;
 }
 
-const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) => {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+/**
+ * Один алгоритм личного состояния создаётся для каждой подтверждённой учётной записи.
+ * Раздельные эпохи и очереди сохраняют соседние источники при смене реквизитов.
+ */
+const createTaskFavoritesStore = (
+  storeId: string, source: TaskPersonalSource, taskSource?: string,
+) => {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
+    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
   const url = `/api/${prefix}/task-favorites`;
 
   return defineStore(storeId, {
   state: () => ({
+    sources: [] as string[],
     scope: '',
     revision: -1,
     taskIds: [] as string[],
@@ -68,12 +79,38 @@ const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) =
     _scopeRequestSeq: 0,
   }),
   getters: {
+    external: (state): FavoritesBranch[] => state.sources.map((id) => externalBranches.get(id)!()),
     own: (): FavoritesBranch => useGrigdeskTaskFavoritesStore(),
     count: (state) => state.taskIds.length,
     isFavorite: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     isPending: (state) => (id: unknown) => !!state.pending[taskKey(id)],
   },
   actions: {
+    /**
+     * Полный источник выбирает независимую ветку личного состояния.
+     * Собственные задачи и прежний default сохраняют свои публичные обращения.
+     */
+    forSource(target?: string): FavoritesBranch {
+      if (target === 'grigdesk') {
+        return useGrigdeskTaskFavoritesStore();
+      }
+      if (!target || !target.includes('@')) {
+        return this;
+      }
+
+      if (!taskSource && !this.sources.includes(target)) {
+        this.sources.push(target);
+      }
+
+      let useBranch = externalBranches.get(target);
+
+      if (!useBranch) {
+        useBranch = createTaskFavoritesStore(`taskFavorites-${target}`, 'tracker', target);
+        externalBranches.set(target, useBranch);
+      }
+
+      return useBranch();
+    },
     /**
      * Принимает только новый scope или неустаревшую ревизию текущего владельца.
      * Поздний ответ старого аккаунта не восстанавливает его список.
@@ -126,7 +163,8 @@ const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) =
       this.error = null;
 
       try {
-        const snapshot = await api.get(url);
+        const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
+          const snapshot = await api.get(url, target?.options);
 
         if (epoch !== this._epoch) {
           return false;
@@ -175,11 +213,12 @@ const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) =
       this.error = null;
 
       try {
+        const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
         const snapshot = favorite
           ? await api.put(`${url}/${encodeURIComponent(key)}`, undefined,
-            source === 'tracker' ? trackerMutationOptions() : {})
+            target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}))
           : await api.del(`${url}/${encodeURIComponent(key)}`, undefined,
-            source === 'tracker' ? trackerMutationOptions() : {});
+            target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
 
         if (epoch !== this._epoch) {
           return false;
@@ -216,7 +255,11 @@ const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) =
      * Летящие ответы больше не могут восстановить избранное.
      */
     clear(options: TaskSourceOptions = {}): void {
-      if (source === 'tracker' && options.source !== 'tracker') {
+      if (!taskSource && source === 'tracker') {
+        this.external.forEach((branch) => branch.clear());
+      }
+
+      if (!taskSource && source === 'tracker' && options.source !== 'tracker') {
         useGrigdeskTaskFavoritesStore().clear();
       }
 
@@ -234,6 +277,8 @@ const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) =
   },
   });
 };
+
+const externalBranches = new Map<string, ReturnType<typeof createTaskFavoritesStore>>();
 
 export const useTaskFavoritesStore = createTaskFavoritesStore('taskFavorites', 'tracker');
 export const useGrigdeskTaskFavoritesStore = createTaskFavoritesStore('grigdeskTaskFavorites', 'grigdesk');

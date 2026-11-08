@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import test from 'node:test';
 
 import { scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
 import { validatePluginPackage } from '../../server/src/lib/packageInstall/validatePackage.ts';
 import { png } from '../helpers/pluginV1.js';
 
-const artifacts = '/home/evildev/.grigdesk/artifacts/studio3d-extraction';
+const artifacts = path.join(process.env.GRIGDESK_ARTIFACTS_DIR
+  ?? path.join(os.homedir(), '.grigdesk/artifacts'), 'studio3d-extraction');
 const payload = process.env.STUDIO3D_PAYLOAD_DIR;
 const expected = {
   version: '1.0.0',
@@ -26,6 +28,8 @@ if (payload !== undefined) {
  * а не отсутствие импортируемого кода, файла или зависимости теста.
  */
 async function oldCandidate(t) {
+  await mkdir(artifacts, { recursive: true });
+
   const root = await mkdtemp(path.join(artifacts, 'payload-old-'));
   const directory = path.join(root, 'studio3d');
   const files = {

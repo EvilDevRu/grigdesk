@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { chatListPagingStub } from './helpers/chat-list.js';
 
 let mount;
 let nextTick;
@@ -71,11 +72,13 @@ function fixture(t, initial = {}) {
             loadError: null,
             loadErrorMessage: null,
             activeId: 'saved',
+            openedChatIds: ['saved'],
             revealRequest: '',
             archived: [],
             ...initial,
         }),
         actions: {
+            ...chatListPagingStub(),
             ensure() {
                 state.ensures += 1;
             },

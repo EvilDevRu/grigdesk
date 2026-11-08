@@ -12,6 +12,8 @@ import type { HttpFixture, RecordedRequest } from './helpers/httpFixture.mts';
 import { childEnv, runProcess, SOURCE_MAIN, syntheticHome } from './helpers/processFixture.mts';
 import type { ProcessResult } from './helpers/processFixture.mts';
 import { startProxyFixture } from './helpers/proxyFixture.mts';
+import { multiFixture, saveMulti } from '../server/helpers/trackerMulti.js';
+import { trackerCalls } from '../server/helpers/trackerFixture.js';
 
 const TOKEN = 'tok-cli';
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
@@ -408,4 +410,75 @@ test('BI-12: закрытый получатель stdout не роняет ко
 
   assert.equal(code, 0, Buffer.concat(stderr).toString());
   assert.equal(Buffer.concat(stderr).length, 0, Buffer.concat(stderr).toString());
+});
+
+test('MD-CLI-HTTP: source CLI выбирает default, --board и JSON board через настоящий runtime', async (t) => {
+  const fixture = await multiFixture(t);
+
+  await fixture.app.listen({ host: '127.0.0.1', port: 0 });
+
+  const address = fixture.app.server.address();
+
+  assert.ok(address && typeof address === 'object');
+
+  const { home } = await syntheticHome();
+  const env = childEnv(home, {
+    GRIGDESK_URL: `http://127.0.0.1:${address.port}`,
+    GRIGDESK_TOKEN: 'tracker-test-cli',
+  });
+  const run = (args: string[], input?: string) => runProcess(t, process.execPath, [SOURCE_MAIN, ...args], {
+    env,
+    input,
+  });
+
+  for (const [args, input, target] of [
+    [['create'], '{"title":"Default"}\n', 'fixture-b'],
+    [['create', '--board', 'fixture-a'], '{"title":"Flag"}\r\n', 'fixture-a'],
+    [['create'], '{"title":"JSON","board":"fixture-a"}\n', 'fixture-a'],
+  ] as const) {
+    const before = (await trackerCalls(fixture.config, target))
+      .filter((call: { method: string }) => call.method === 'createTask').length;
+    const result = await run([...args], input);
+
+    assert.equal(result.code, 0, result.stderr.toString());
+    assert.equal(JSON.parse(result.stdout.toString()).id, 43);
+    assert.equal((await trackerCalls(fixture.config, target))
+      .filter((call: { method: string }) => call.method === 'createTask').length, before + 1);
+  }
+
+  const boards = await run(['boards']);
+
+  assert.equal(boards.code, 0, boards.stderr.toString());
+
+  const rows = JSON.parse(boards.stdout.toString()) as Array<{
+    id: string;
+    name: string;
+    status: string;
+    default: boolean;
+  }>;
+
+  assert.deepEqual(rows.map((row) => [row.id, row.default]), [['fixture-a', false], ['fixture-b', true]]);
+  assert.ok(rows.every((row) => row.name && row.status));
+
+  const before = await trackerCalls(fixture.config, 'fixture-b');
+  const beforeA = await trackerCalls(fixture.config, 'fixture-a');
+  const conflict = await run(['create', '--board', 'fixture-b'], '{"title":"X","board":"fixture-a"}');
+  const unknown = await run(['create', '--board', 'unknown-driver'], '{"title":"X"}');
+
+  assert.equal(conflict.code, 22);
+  assert.equal(unknown.code, 22);
+  assert.equal(unknown.stdout.length, 0);
+  assert.match(unknown.stderr.toString(), /unknown-driver/u);
+  assert.deepEqual(await trackerCalls(fixture.config, 'fixture-b'), before);
+  assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), beforeA);
+
+  const disabled = await saveMulti(fixture, ['fixture-b'], 'fixture-b');
+
+  assert.equal(disabled.statusCode, 200, disabled.body);
+
+  const off = await run(['create', '--board', 'fixture-a'], '{"title":"X"}');
+
+  assert.equal(off.code, 22);
+  assert.match(off.stderr.toString(), /fixture-a/u);
+  assert.deepEqual(await trackerCalls(fixture.config, 'fixture-b'), before);
 });

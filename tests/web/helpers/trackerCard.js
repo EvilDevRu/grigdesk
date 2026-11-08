@@ -53,6 +53,9 @@ export async function mountTrackerCard(t, {
   boardFields = {},
   users = [],
   mutation = null,
+  catalog = null,
+  taskSource,
+  boardSource,
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/board');
   const prefix = `__trackerCard${nonce += 1}`;
@@ -76,11 +79,12 @@ export async function mountTrackerCard(t, {
     comments: [{ mid: 1, text: 'Устаревший комментарий' }],
     ...detail,
   };
-  const metadata = trackerMetadata(trackerId, capabilities);
+  const metadata = catalog ?? trackerMetadata(trackerId, capabilities);
   const useBoardStore = defineStore(`${prefix}-board`, {
     state: () => ({
       data: {
         trackerId,
+        ...(boardSource ? { source: boardSource } : {}),
         capabilities: metadataMode === 'empty' ? null : capabilities,
         widgets: [],
         revision: 1,
@@ -106,7 +110,11 @@ export async function mountTrackerCard(t, {
     },
   });
   const useUiStore = defineStore(`${prefix}-ui`, {
-    state: () => ({ taskId: id, launchRequested: false }),
+    state: () => ({
+      taskId: id,
+      taskSource: taskSource ?? detail.source,
+      launchRequested: false,
+    }),
     actions: {
       close() {
         this.taskId = null;
@@ -145,7 +153,19 @@ export async function mountTrackerCard(t, {
           : structuredClone(metadata);
       }
 
-      if (url === `/api/tracker/task/${id}` || url === `/api/grigdesk-tasks/${id}`) {
+      if (catalog && /\/context$/u.test(url)) {
+        const driverId = url.split('/')[3];
+        const driver = catalog.drivers.find((entry) => entry.id === driverId);
+
+        return {
+          source: driver?.source,
+          generation: driver?.generation,
+          capabilities: driver?.capabilities,
+        };
+      }
+
+      if (url === `/api/tracker/task/${id}` || url === `/api/grigdesk-tasks/${id}`
+        || (catalog && url === `/api/tracker/${trackerId}/task/${id}`)) {
         if (detailMode === 'held') {
           return heldDetail.promise;
         }
@@ -157,8 +177,12 @@ export async function mountTrackerCard(t, {
         return structuredClone(task);
       }
 
-      if (url === '/api/tracker/users') {
+      if (url === '/api/tracker/users' || (catalog && url === `/api/tracker/${trackerId}/users`)) {
         return { users };
+      }
+
+      if (catalog && url === `/api/tracker/${trackerId}/groups`) {
+        return { groups: [] };
       }
 
       if (url === '/api/tasks') {
@@ -260,6 +284,48 @@ export async function mountTrackerCard(t, {
       return () => listeners.delete(listener);
     },
   };
+
+  if (taskSource) {
+    for (const suffix of ['FavoritesStore', 'SeenStore']) {
+      const branch = globals[suffix]();
+
+      branch.forSource = () => branch;
+      globals[suffix] = () => branch;
+    }
+
+    const shelf = {
+      loaded: true,
+      entries: [],
+      isOnShelf: () => false,
+      isPending: () => false,
+      async load() {},
+      async acknowledge() {},
+    };
+
+    shelf.forSource = () => shelf;
+    globals.ShelfStore = () => shelf;
+  }
+
+  if (detail.source === 'grigdesk') {
+    for (const suffix of ['FavoritesStore', 'SeenStore']) {
+      const branch = globals[suffix]();
+
+      branch.own = branch;
+      globals[suffix] = () => branch;
+    }
+
+    const shelf = {
+      loaded: true,
+      entries: [],
+      isOnShelf: () => false,
+      isPending: () => false,
+      async load() {},
+      async acknowledge() {},
+    };
+
+    shelf.own = shelf;
+    globals.ShelfStore = () => shelf;
+  }
 
   for (const [suffix, value] of Object.entries(globals)) {
     globalThis[`${prefix}${suffix}`] = value;

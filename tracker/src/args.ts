@@ -1,6 +1,7 @@
 export type TimerAction = 'start' | 'pause' | 'stop';
 
-export type ApiCommand =
+export type ApiCommand = (
+  | { kind: 'boards' }
   | { kind: 'dashboard' }
   | {
     kind: 'task';
@@ -32,7 +33,7 @@ export type ApiCommand =
   | {
     kind: 'users';
     query: string;
-  };
+  }) & { board?: string };
 
 export type Command = ApiCommand | { kind: 'help' } | { kind: 'version' } | { kind: 'license' };
 
@@ -40,6 +41,8 @@ export const HELP_TEXT = `tracker — команды задач Б24 через 
 
 Использование:
   tracker dashboard                    доска: мои задачи, показатели и графики
+  tracker boards                       включённые доски и доска по умолчанию
+  tracker --board <id> <команда>        выполнить команду на указанной доске
   tracker task <id>                    детали задачи
   tracker comment <id> <текст…>        комментарий к задаче
   tracker timer <id> start|pause|stop  таймер задачи
@@ -167,6 +170,46 @@ function parseTaskCommand(command: string, rest: readonly string[]): ApiCommand 
  * Локальные флаги допустимы только единственным аргументом; ошибка — UsageError.
  */
 export function parseArgs(argv: readonly string[]): Command {
+  const args: string[] = [];
+  let board: string | undefined;
+  let literal = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+
+    if (!literal && value === '--') {
+      literal = true;
+    } else if (!literal && value === '--board') {
+      const target = argv[++index];
+
+      if (board !== undefined || !target?.trim() || target.startsWith('--')) {
+        throw new UsageError('Укажите --board один раз с непустым ID доски.');
+      }
+
+      board = target;
+    } else {
+      args.push(value!);
+    }
+  }
+
+  const command = parseCommand(args);
+
+  if (board === undefined) {
+    return command;
+  }
+
+  if (['help', 'version', 'license', 'boards'].includes(command.kind)) {
+    throw new UsageError('У этой команды нет целевой доски.');
+  }
+
+  return { ...command, board } as ApiCommand;
+}
+
+/**
+ * Разбирает команду после выделения общей цели.
+ * Текст после разделителя уже не интерпретируется как флаги.
+ */
+function parseCommand(argv: readonly string[]): Command {
   const [command, ...rest] = argv;
 
   if (command === undefined) {
@@ -183,6 +226,7 @@ export function parseArgs(argv: readonly string[]): Command {
 
   switch (command) {
     case 'dashboard':
+    case 'boards':
     case 'create':
       expectCount(command, rest, 0);
 

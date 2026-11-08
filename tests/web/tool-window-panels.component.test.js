@@ -13,7 +13,7 @@ after(() => runtimeBrowser.close());
 test('TW-P01/ssh: перенос сохраняет выбранную server-owned сессию и remotePath', async (t) => {
   const first = await mountSshPanel(t);
 
-  await first.wrapper.findAll('[role="tab"]')[1].trigger('click');
+  await first.wrapper.findAll('.ssh-tabs [role="tab"]')[1].trigger('click');
   await first.flushPromises();
   assert.equal(first.store.activeId, 'session-b');
   await first.wrapper.get('details.ssh-sftp summary').trigger('click');
@@ -30,7 +30,7 @@ test('TW-P01/ssh: перенос сохраняет выбранную server-ow
   await second.flushPromises();
   assert.equal(second.store.activeId, 'session-b');
   assert.equal(second.wrapper.get('input[aria-label="Путь на сервере"]').element.value, '/fixture/path');
-  assert.equal(second.wrapper.findAll('[role="tab"]')[1].attributes('aria-selected'), 'true');
+  assert.equal(second.wrapper.findAll('.ssh-tabs [role="tab"]')[1].attributes('aria-selected'), 'true');
 });
 
 test('TW-P01/db: перенос сохраняет session/profile и SQL draft без пароля и повторного query', async (t) => {

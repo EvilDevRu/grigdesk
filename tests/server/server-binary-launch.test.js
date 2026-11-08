@@ -225,17 +225,17 @@ test('SB28-refusal: повреждённые metadata, non-ELF и symlink не �
   assert.doesNotMatch(await box.calls(), /npm/);
 });
 
-test('SB28-tools: отдельный b24 выбирается из bin установки без подготовки runtime', async (t) => {
+test('SB28-tools: отдельный tracker выбирается из bin установки без подготовки runtime', async (t) => {
   const box = await fixture(t);
 
-  await fs.writeFile(path.join(box.root, 'bin/b24'), '#!/bin/bash\necho local-b24 "$@"\n',
+  await fs.writeFile(path.join(box.root, 'bin/tracker'), '#!/bin/bash\necho local-tracker "$@"\n',
     { mode: 0o755 });
-  await fs.writeFile(path.join(box.env.PATH, 'b24'), '#!/bin/bash\nexit 97\n', { mode: 0o755 });
+  await fs.writeFile(path.join(box.env.PATH, 'tracker'), '#!/bin/bash\nexit 97\n', { mode: 0o755 });
 
-  const result = await box.run('bin/grigdesk-ctl', ['b24', '--version']);
+  const result = await box.run('bin/grigdesk-ctl', ['tracker', '--version']);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'local-b24 --version');
+  assert.equal(result.stdout.trim(), 'local-tracker --version');
   assert.doesNotMatch(await box.calls(), /--prepare|npm/);
 });
 

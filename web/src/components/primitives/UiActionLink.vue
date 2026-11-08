@@ -6,7 +6,10 @@
     :class="[
       `ui-button--${normalizedVariant}`,
       `ui-button--${normalizedTone}`,
-      { 'ui-button--block': block },
+      {
+        'ui-button--block': block,
+        'ui-button--wrap': wrap,
+      },
     ]"
     :data-variant="normalizedVariant"
     :data-tone="normalizedTone"
@@ -49,6 +52,7 @@ const props = withDefaults(
     disabled?: boolean;
     ariaDisabled?: boolean;
     block?: boolean;
+    wrap?: boolean;
   }>(),
   {
     target: undefined,
@@ -60,6 +64,7 @@ const props = withDefaults(
     disabled: false,
     ariaDisabled: false,
     block: false,
+    wrap: false,
   },
 );
 

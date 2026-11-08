@@ -29,7 +29,7 @@ effort.
 Его выбор может разойтись с советом триажа: в живом случае совет был «добавить и туда»,
 арбитр выбрал «не трогать».
 
-Как отличить: в `~/.factory/analysis/t<ID>.analysis.json` массив `questions` непуст при
+Как отличить: в `~/.grigdesk/factory/analysis/t<ID>.analysis.json` массив `questions` непуст при
 `needs_clarification: false`, а `generated_at` — за минуту-две до старта. В
 `t<ID>.clarify.md` у этого вопроса есть только запись арбитра триажа `human_required`,
 ответа человека нет.

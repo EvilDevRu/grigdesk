@@ -39,7 +39,7 @@ v1 сохранено отдельно. Основной HTTP и прежний 
 - [Gradle Wrapper в git: зачем хранится, сверка jar и `cap migrate`](gradle-wrapper.md)
 - [Проверка release-варианта без создания ключа](release-check.md)
 - [Пустой раздел «Чаты» на телефоне: полная история не укладывается в таймаут GET](../chat/history-initial-load-timeout.md)
-- [Чаты во встроенном UI APK: устаревший пакет, порции карточек и истории и границы проверки](packaged-chat-history.md)
+- [Чаты в APK: устаревший UI, полный list/detail, порции, realtime и границы диагностики](packaged-chat-history.md)
 - [Завершение привязки не отменяет выбранный человеком раздел](pairing-navigation.md)
 
 ## Совместимость с прежним v1

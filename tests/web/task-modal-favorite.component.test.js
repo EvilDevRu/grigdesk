@@ -102,6 +102,7 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
       isPending: (state) => (id) => !!state.pending[String(id)],
     },
     actions: {
+      async load() {},
       async toggle(id) { shelfToggled.push(String(id)); return true; },
       async acknowledge(id) { acknowledged.push(String(id)); return true; },
     },
