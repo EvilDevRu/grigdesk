@@ -1010,6 +1010,9 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
   .ui-input, .ui-textarea, .ui-select {
     font-size: 16px;
   }
+  html:root .ui-select-popup .ui-input[data-context='select-search'] {
+    font-size: 16px;
+  }
   .ui-textarea[data-role='chat-composer'] {
     height: auto;
     max-height: min(160px, 28vh);

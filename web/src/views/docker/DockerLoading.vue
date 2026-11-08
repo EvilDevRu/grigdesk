@@ -74,7 +74,7 @@ withDefaults(defineProps<{
   .containers .actions { grid-column: 2 / 4; grid-row: 2; }
 }
 @container docker-loading (max-width: 600px) {
-  .containers .row { grid-template-columns: 1fr 1fr; min-height: 151px; padding: 10px 0; gap: 8px; }
+  .containers .row { grid-template-columns: 1fr 1fr; min-height: 155px; padding: 10px 0; gap: 8px; }
   .containers .row > :nth-child(1) { grid-column: 1 / -1; }
   .containers .row > :nth-child(2) { grid-column: 1 / -1; }
   .containers .row > :nth-child(3) { grid-column: 1; grid-row: 3; }
