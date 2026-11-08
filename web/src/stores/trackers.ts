@@ -1,4 +1,6 @@
-import { setTrackerMutationGeneration } from '../shared/trackerMutation.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+import { setTrackerMutationGeneration, setTrackerDriverGenerations } from '../shared/trackerMutation.ts';
 import { defineStore } from 'pinia';
 import { useBoardStore } from './board.ts';
 
@@ -6,6 +8,8 @@ import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { api, ApiError } from '../shared/apiClient.ts';
 import { LEGACY_TRACKER_CAPABILITIES, trackerCapabilities } from '../shared/trackerCapabilities.ts';
+
+const catalogJobs = new WeakMap<object, Promise<void>>();
 
 export const useTrackersStore = defineStore('trackers', {
   state: () => ({
@@ -36,12 +40,14 @@ export const useTrackersStore = defineStore('trackers', {
      * Пауза принадлежит своей эпохе; SSE или более новая запись не разблокируются поздним finally.
      */
     async saveSettings(input: {
-      externalId: string | null;
+      externalId?: string | null;
+      drivers?: string[];
+      default?: string | null;
       settings: Record<string, Record<string, unknown>>;
       expectedRevision: number;
     }) {
       const board = useBoardStore();
-      const token = board.beginSourceChange();
+      const token = board.beginSourceChange(input.settings);
 
       try {
         const result = await api.post('/api/trackers/settings', input) as { revision: number };
@@ -58,7 +64,29 @@ export const useTrackersStore = defineStore('trackers', {
      * Metadata читается независимо от details и зеркала доски.
      * Только подтверждённый 404 старого API разрешает прежние custom-действия.
      */
-    async load(force = false) {
+    load(force = false): Promise<void> {
+      const active = catalogJobs.get(this);
+
+      if (active && this.loading) {
+        return active;
+      }
+
+      const job = this.loadCatalog(force);
+
+      catalogJobs.set(this, job);
+      void job.finally(() => {
+        if (catalogJobs.get(this) === job) {
+          catalogJobs.delete(this);
+        }
+      });
+
+      return job;
+    },
+    /**
+     * Один запрос каталога подтверждает возможности всех ожидающих читателей.
+     * Эпоха исключает публикацию metadata после смены подключения.
+     */
+    async loadCatalog(force = false) {
       if (this.loading || (!force && (this.catalog || this.legacy))) {
         return;
       }
@@ -83,8 +111,18 @@ export const useTrackersStore = defineStore('trackers', {
           throw new Error('Некорректные возможности трекера');
         }
 
+        const descriptors = raw.drivers;
+
+        if (raw.enabledIds !== undefined && (!Array.isArray(raw.enabledIds)
+          || !raw.enabledIds.every((id) => typeof id === 'string' && id !== 'own'
+            && descriptors.some((entry) => isRecord(entry) && entry.id === id))
+          || (raw.default !== null && !raw.enabledIds.includes(raw.default)))) {
+          throw new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
+        }
+
         this.catalog = raw as unknown as TrackerCatalog;
         setTrackerMutationGeneration(this.catalog.revision);
+        setTrackerDriverGenerations(this.catalog.drivers);
         this.legacy = false;
         this.error = '';
       } catch (error) {
@@ -110,7 +148,19 @@ export const useTrackersStore = defineStore('trackers', {
       this.legacy = false;
       this.loading = false;
     },
-    mutationOptions() {
+    /**
+     * Адресная мутация получает поколение только своей доски.
+     * Старый маршрут продолжает использовать ревизию общего выбора.
+     */
+    mutationOptions(driverId?: string) {
+      if (driverId && this.catalog?.enabledIds) {
+        const driver = this.catalog.drivers.find((entry) => entry.id === driverId);
+
+        return driver?.generation == null ? {} : {
+          headers: { 'x-grigdesk-tracker-generation': String(driver.generation) },
+        };
+      }
+
       return this.catalog ? {
         headers: { 'x-grigdesk-tracker-generation': String(this.catalog.revision) },
       } : {};

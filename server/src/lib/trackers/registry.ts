@@ -1,3 +1,5 @@
+import { readTrackerLogo } from './trackerLogo.ts';
+
 import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -23,6 +25,8 @@ export class TrackerRegistry {
   private readonly entries = new Map<string, Entry>();
   private readonly active = new Set<string>(['own']);
   private closed = false;
+  private readonly contexts = new Map<string, { generation: number; dataRevision: number }>();
+  private readonly health = new Map<string, string>();
 
   constructor(
     privateOptions: { directory: string; host: (id: string) => TrackerHost },
@@ -36,12 +40,64 @@ export class TrackerRegistry {
     return [...this.active].filter((id) => !this.entries.get(id)?.closed);
   }
 
+  /**
+   * Контекст меняется только у затронутого пакета, а не при смене общего дефолта.
+   * Ревизия данных отделяет смену владельца от временного отключения.
+   */
+  bumpContext(id: string, data = false): void {
+    const current = this.context(id);
+
+    this.contexts.set(id, {
+      generation: current.generation + 1,
+      dataRevision: current.dataRevision + (data ? 1 : 0),
+    });
+  }
+
+  context(id: string) {
+    return this.contexts.get(id) ?? { generation: 0, dataRevision: 0 };
+  }
+
+  /**
+   * Сетевой отказ не закрывает ESM: следующее чтение может восстановить драйвер.
+   * Событие нужно только при изменении состояния, иначе отказ породит цикл SSE.
+   */
+  reportHealth(id: string, reason?: string): boolean {
+    const previous = this.health.get(id);
+
+    if (reason) {
+      this.health.set(id, reason);
+    } else {
+      this.health.delete(id);
+    }
+
+    return previous !== reason;
+  }
+
+  /**
+   * Исключение одного isConfigured изолируется внутри его описания.
+   * Другие драйверы и собственные задачи остаются доступны в каталоге.
+   */
   descriptors(): TrackerDescriptor[] {
-    return [...this.entries.values()].map(({ descriptor, tracker }) => ({
-      ...descriptor,
-      capabilities: { ...descriptor.capabilities },
-      configured: !descriptor.deleted && (tracker?.isConfigured() ?? false),
-    }));
+    return [...this.entries.values()].map(({ descriptor, tracker }) => {
+      let configured = false;
+      let failure = this.health.get(descriptor.id);
+
+      try {
+        configured = !descriptor.deleted && (tracker?.isConfigured() ?? false);
+      } catch {
+        failure = 'Не удалось проверить настройки драйвера';
+      }
+
+      return {
+        ...descriptor,
+        ...this.context(descriptor.id),
+        capabilities: { ...descriptor.capabilities },
+        configured,
+        ...(failure ? { status: 'unavailable' as const, reason: failure } : {}),
+        ...(!this.active.has(descriptor.id) && descriptor.status === 'available'
+          ? { reason: 'Драйвер отключён' } : {}),
+      };
+    });
   }
 
   /**
@@ -138,10 +194,13 @@ export class TrackerRegistry {
         }
 
         const manifest = raw as unknown as DriverManifest;
+        const { logo, ...metadata } = manifest;
 
         this.entries.set(id, {
           descriptor: {
-            ...manifest,
+            ...metadata,
+            ...(logo ? { logoUrl: `/api/trackers/${id}/logo/${
+              readTrackerLogo(directory, logo).digest}` } : {}),
             configured: false,
             status: 'available',
             capabilities: { ...NO_TRACKER_CAPABILITIES },
@@ -334,6 +393,7 @@ export class TrackerRegistry {
     }
 
     this.active.delete(id);
+    this.bumpContext(id);
     entry.closed = true;
     entry.busy = undefined;
     entry.descriptor.deleted = true;

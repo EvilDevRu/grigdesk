@@ -124,3 +124,33 @@ test('BA-04: локальные флаги допустимы только от�
     text: '--help',
   });
 });
+
+test('MD-CLI-ARGS: boards, цель до и после команды, буквальный хвост после --', () => {
+  assert.deepEqual(parseArgs(['boards']), { kind: 'boards' });
+
+  for (const argv of [['--board', 'fixture-a', 'task', '42'], ['task', '42', '--board', 'fixture-a']]) {
+    assert.deepEqual(parseArgs(argv), {
+      kind: 'task',
+      id: '42',
+      board: 'fixture-a',
+    });
+  }
+
+  assert.deepEqual(parseArgs(['--board', 'fixture-a', 'comment', '42', '--', '--board', 'текст']), {
+    kind: 'comment',
+    id: '42',
+    board: 'fixture-a',
+    text: '--board текст',
+  });
+
+  for (const argv of [
+    ['--board', '', 'create'],
+    ['create', '--board'],
+    ['--board', 'fixture-a', 'create', '--board', 'fixture-b'],
+    ['boards', '--board', 'fixture-a'],
+    ['--help', '--board', 'fixture-a'],
+    ['--version', '--board', 'fixture-a'],
+  ]) {
+    rejects(argv);
+  }
+});

@@ -15,7 +15,7 @@ export interface TaskShelfModuleOptions {
 
 interface TaskShelfRoute {
   Params: {
-    taskId: string;
+    taskId: string; driverId?: string;
   };
   Body: unknown;
 }
@@ -95,19 +95,26 @@ async function taskShelfModule(
 
 
 
-  fastify.get<TaskShelfRoute>('/api/tracker/task-shelf', (request, reply) =>
-    withTrackerRequestRead(request, reply, (options) =>
-      run(() => shelf.list(options))(request, reply)));
-  fastify.put<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
-    const taskId = normalizeShelfTaskId(request.params.taskId);
+  for (const prefix of ['/api/tracker', '/api/tracker/:driverId']) {
+    fastify.get<TaskShelfRoute>(`${prefix}/task-shelf`, (request, reply) =>
+      withTrackerRequestRead(request, reply, (options) =>
+        run(() => shelf.list(options, {
+          driverId: (request.params as { driverId?: string }).driverId,
+        }))(request, reply)));
+    fastify.put<TaskShelfRoute>(`${prefix}/task-shelf/:taskId`, run((request) => {
+      const taskId = normalizeShelfTaskId(request.params.taskId);
 
-    return shelf.put(taskId, request.body, trackerPersonalRequestOptions(request.headers));
-  }, { mutation: true }));
-  fastify.delete<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
-    const taskId = normalizeShelfTaskId(request.params.taskId);
+      return shelf.put(taskId, request.body, trackerPersonalRequestOptions(request.headers,
+        (request.params as { driverId?: string }).driverId));
+    }, { mutation: true }));
+    fastify.delete<TaskShelfRoute>(`${prefix}/task-shelf/:taskId`, run((request) => {
+      const taskId = normalizeShelfTaskId(request.params.taskId);
 
-    return shelf.remove(taskId, trackerPersonalRequestOptions(request.headers));
-  }, { mutation: true }));
+      return shelf.remove(taskId, trackerPersonalRequestOptions(request.headers,
+        (request.params as { driverId?: string }).driverId));
+    }, { mutation: true }));
+  }
+
   fastify.get<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf', (request, reply) =>
     withTrackerRequestRead(request, reply, (options) =>
       run(() => shelf.list(options, { source: 'grigdesk' }))(request, reply)));

@@ -1,3 +1,5 @@
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import { resolveTrackerTarget } from './trackerTarget.ts';
 import type { TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from './trackerMutation.ts';
 import { api } from './apiClient.ts';
@@ -13,8 +15,13 @@ export interface ShelfPutRequest {
   createIfMissing: boolean;
 }
 
-function shelfUrl(taskId: string, source: TaskPersonalSource): string {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+/**
+ * Личный scope выбирается сервером по конкретному драйверу.
+ * Отсутствие полной ссылки сохраняет прежнюю ручку дефолтной доски.
+ */
+function shelfUrl(taskId: string, source: TaskPersonalSource, taskSource?: string): string {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
+    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
 
   return `/api/${prefix}/task-shelf/${encodeURIComponent(taskId)}`;
 }
@@ -25,17 +32,27 @@ function shelfUrl(taskId: string, source: TaskPersonalSource): string {
  * Поэтому контракт проверяется и на чтении, и на каждой мутации.
  */
 export const shelfApi = {
-  async list(source: TaskPersonalSource = 'tracker'): Promise<ShelfState> {
-    const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
-    const value: unknown = await api.get(`/api/${prefix}/task-shelf`);
+  /**
+   * Проверяет владельца адресной ветки до чтения её меток.
+   * Собственный источник не запрашивает внешнюю identity.
+   */
+  async list(source: TaskPersonalSource = 'tracker', taskSource?: string): Promise<ShelfState> {
+    const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
+    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
+    const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
+    const value: unknown = await api.get(`/api/${prefix}/task-shelf`, target?.options);
 
     return parseShelfState(value);
   },
 
+  /**
+   * Перед записью подтверждает источник и поколение этой ветки.
+   * Серверный снимок остаётся единственным результатом успешного эффекта.
+   */
   async put(
     taskId: string,
     request: ShelfPutRequest,
-    source: TaskPersonalSource = 'tracker',
+    source: TaskPersonalSource = 'tracker', taskSource?: string,
   ): Promise<ShelfState> {
     const body: ShelfPutInput = {
       title: request.title,
@@ -43,15 +60,23 @@ export const shelfApi = {
       snapshot: parseShelfEntrySnapshot(request.snapshot),
       createIfMissing: request.createIfMissing,
     };
-    const value: unknown = await api.put(shelfUrl(taskId, source), body,
-      source === 'tracker' ? trackerMutationOptions() : {});
+    const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
+    const value: unknown = await api.put(shelfUrl(taskId, source, taskSource), body,
+      target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
 
     return parseShelfState(value);
   },
 
-  async remove(taskId: string, source: TaskPersonalSource = 'tracker'): Promise<ShelfState> {
-    const value: unknown = await api.del(shelfUrl(taskId, source), undefined,
-      source === 'tracker' ? trackerMutationOptions() : {});
+  /**
+   * Удаляет запись только в подтверждённой учётной записи.
+   * Ошибка адресного подключения не допускает перехода к дефолту.
+   */
+  async remove(
+    taskId: string, source: TaskPersonalSource = 'tracker', taskSource?: string,
+  ): Promise<ShelfState> {
+    const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
+    const value: unknown = await api.del(shelfUrl(taskId, source, taskSource), undefined,
+      target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
 
     return parseShelfState(value);
   },

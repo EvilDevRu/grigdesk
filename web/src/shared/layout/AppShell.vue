@@ -460,6 +460,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskReferenceKey, isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import PluginIcon from '../PluginIcon.vue';
 
 import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
@@ -802,18 +803,27 @@ const taskStore = useTasksStore();
 const recentPausedTimerIds = ref<string[]>([]);
 const timerActionTaskId = ref<string | null>(null);
 const timerActionError = ref('');
-const boardTasks = computed(() => boardSupportsTimer(boardStore.data) ? boardStore.data?.tasks || [] : []);
+const boardTasks = computed(() => boardStore.data?.multiSource || boardSupportsTimer(boardStore.data)
+  ? boardStore.data?.tasks || [] : []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
 const topbarTimerTasks = computed(() => {
   const recentIds = new Set(recentPausedTimerIds.value);
 
   return boardTasks.value.filter((task) => (
-    task.timerRunning || recentIds.has(String(task.id))
+    task.timerRunning || recentIds.has(taskReferenceKey(task))
   ));
 });
 
-function openBoardTask(taskId: string | number) {
-  ui.openTask(taskId);
+/**
+ * Таймер передаёт полную ссылку в прежнюю границу размещения карточки.
+ * Старый числовой вызов сохраняет работу без подтверждённого источника.
+ */
+function openBoardTask(task: string | number | { id: string | number; source?: string }) {
+  if (typeof task === 'object') {
+    ui.openTask(task.id, isTaskSourceId(task.source) ? task.source : undefined);
+  } else {
+    ui.openTask(task);
+  }
 }
 
 function openBoard() {
@@ -833,7 +843,7 @@ async function toggleBoardTimer(task: BoardTask) {
     return;
   }
 
-  const taskId = String(task.id);
+  const taskId = taskReferenceKey(task);
   const action = task.timerRunning ? 'pause' : 'start';
   const wasRemembered = recentPausedTimerIds.value.includes(taskId);
 
@@ -845,7 +855,7 @@ async function toggleBoardTimer(task: BoardTask) {
   }
 
   try {
-    await taskStore.timer(task.id, action);
+    await taskStore.timer(task.id, action, isTaskSourceId(task.source) ? task.source : undefined);
 
     if (action === 'start') {
       recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
@@ -1109,13 +1119,15 @@ const { connected } = useSse((name, data) => {
   if (name === 'trackers-changed') {
     const trackers = useTrackersStore();
 
-    boardStore.invalidate();
-    taskStore.invalidate();
-    trackers.invalidate();
+    if (!trackers.catalog?.enabledIds) {
+      boardStore.invalidate();
+      taskStore.invalidate();
+    }
+
     recentPausedTimerIds.value = [];
     timerActionError.value = '';
     void trackers.load(true);
-    void boardStore.load();
+    void boardStore.load(true);
   }
 
   if (name === 'grigdesk-tasks-changed' || name === 'hello') {
