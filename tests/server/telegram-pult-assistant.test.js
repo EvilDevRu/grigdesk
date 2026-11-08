@@ -66,6 +66,10 @@ const message = (text, over = {}) => ({
   ...over,
 });
 
+/**
+ * Создаёт изолированный пульт с управляемым ответом модели.
+ * Перед удалением состояния завершает собственные фоновые ходы и durable-записи.
+ */
 async function fixture(t, {
   speechRuntime = null,
   staleSaves = 0,
@@ -78,8 +82,24 @@ async function fixture(t, {
   editFailure = null,
 } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'telegram-pult-assistant-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const model = deferred();
+  let actions = null;
+  let store = null;
+
+  t.after(async () => {
+    actions?.stop();
+    model.resolve({ statusCode: 200, body: { stopped: true, reply: 'Остановлено' } });
+
+    const assistant = actions?.assistant;
+
+    while (assistant?.background.size) {
+      await Promise.allSettled([...assistant.background]);
+    }
+
+    await store?.queue;
+    await rm(dir, { recursive: true, force: true });
+  });
+
   const calls = [];
   const botCalls = [];
   let remainingStaleSaves = staleSaves;
@@ -147,10 +167,12 @@ async function fixture(t, {
     }
     return { statusCode: 404, body: { error: 'not_found' } };
   };
-  const store = new TelegramPultStateStore({
+
+  store = new TelegramPultStateStore({
     file: path.join(dir, 'pult-state.json'),
     log: silent,
   });
+
   const context = {
     botId: '8123456789',
     credentials: { token: '8123456789:test-token' },
@@ -183,7 +205,8 @@ async function fixture(t, {
     isCurrent: () => true,
     release: async () => {},
   });
-  const actions = new TelegramPultActions({
+
+  actions = new TelegramPultActions({
     isEnabled: () => true,
     callApi,
     stateStoreFor: () => store,
@@ -200,7 +223,6 @@ async function fixture(t, {
     now: () => NOW,
     log: silent,
   });
-  t.after(() => actions.stop());
   return {
     actions,
     store,

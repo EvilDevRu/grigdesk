@@ -161,6 +161,7 @@
 - [Лишние вопросы auto: старый установленный ELF, приватный tmp и запись артефактов](deepseek-auto-runtime-update.md)
 - [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
 - [Хранилище истории: chats/, слияние и параллельное завершение legacy-миграции](history-storage.md)
+- [История для нового процесса исполнителя: свежий снимок и граница текущего хода](executor-history-replay.md)
 - [Ссылки на сохранённые шаги: отдельный PUT, durable ACK, снимок и fallback](history-step-reuse.md)
 - [Живой ход: refs при серверных записях, stale CAS и синтетика 20 блоков](history-reuse-live-writes.md)
 - [Порционная сериализация полного JSON и смена revision без второго обхода](history-serialization.md)
