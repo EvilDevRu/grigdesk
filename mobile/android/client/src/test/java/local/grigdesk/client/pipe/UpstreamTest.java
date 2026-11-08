@@ -296,6 +296,49 @@ public class UpstreamTest {
     }
   }
   /**
+   * Мутации без объявленного тела доходят до машины без тела: OkHttp иначе
+   * помечал бы их chunked без Content-Type, и Fastify отвечал 415 до обработчика.
+   * Объявленное тело любой длины сохраняет прежнее пересылание.
+   */
+  @Test
+  public void bodylessMutationsAreForwardedWithoutBody() throws Exception {
+    byte[] payload = "подтверждение".getBytes(StandardCharsets.UTF_8);
+    java.util.List<byte[]> bodies = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    try (TlsFixture server = new TlsFixture((head, body, output) -> {
+      bodies.add(body.readAllBytes());
+      TlsFixture.response(output, 200, "0.1", "ok".getBytes(StandardCharsets.US_ASCII));
+    }); Upstream upstream = new Upstream(server.address(), server.pin, TlsFixture.keys("client"),
+      new VersionGate(0, 1), (status, reason) -> {})) {
+      try (PipeResponse response = upstream.forward(
+        new HttpHead("DELETE /api/chat/pending/x HTTP/1.1", Map.of()),
+        new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+      }
+
+      assertNull(server.requests.get(0).headers.get("transfer-encoding"));
+      assertNull(server.requests.get(0).headers.get("content-length"));
+
+      try (PipeResponse response = upstream.forward(new HttpHead(
+        "DELETE /api/chat/pending/y HTTP/1.1", Map.of("content-length", "0")),
+        new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+      }
+
+      assertEquals("0", server.requests.get(1).headers.get("content-length"));
+      assertNull(server.requests.get(1).headers.get("transfer-encoding"));
+
+      try (PipeResponse response = upstream.forward(new HttpHead(
+        "DELETE /api/chat/pending/z HTTP/1.1", Map.of("content-length",
+          Integer.toString(payload.length))), new ByteArrayInputStream(payload))) {
+        assertEquals(200, response.status);
+      }
+
+      assertArrayEquals(payload, bodies.get(2));
+    }
+  }
+
+  /**
    * Заголовки диагностики проходят настоящий pinned TLS до чтения потокового тела.
    * Обычный сервер без подробной метрики не включает диагностику в мосте.
    */

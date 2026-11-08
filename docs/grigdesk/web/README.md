@@ -314,6 +314,7 @@
 
 ## Грабли
 
+- [«Нет входа» на собственном стенде: web-процесс запущен без пути ключа окна](stand-window-key-path.md)
 - [Сообщения Linux-окна: накопление слушателей, Mesa и Chromium atom cache](desktop-linux-diagnostics.md)
 - [Восстановление настроек после отказа чтения или загрузки](settings-recovery.md)
 - [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](../chat/concurrent-send-transport.md)

@@ -72,3 +72,5 @@ Dev-стенд не изображает native-оболочку и не пол�
 Связанные контракты: [вход приложения](../server/desktop-only-access.md),
 [native-изоляция браузера](browser-workspace.md),
 [браузер этапа конвейера](../pipeline/browser-transport.md).
+Грабли про тот же симптом на собственном стенде —
+[запуск web без пути ключа окна](stand-window-key-path.md).

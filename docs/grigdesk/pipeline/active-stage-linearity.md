@@ -31,9 +31,9 @@ chain.forEach((n, i) => { if (['run', 'wait'].includes(st[n])) st[n] = i < keep 
 источника, и при расхождении верен журнал. Проверять так:
 
 ```bash
-grep -E '^(ORCH_PID|WF_STATUS)=' ~/.factory/state/t<TASK>.pipeline
+grep -E '^(ORCH_PID|WF_STATUS)=' ~/.grigdesk/factory/state/t<TASK>.pipeline
 systemctl --user is-active factory-t<TASK>.service
-tail -5 ~/.factory/state/logs/t<TASK>.stages.log
+tail -5 ~/.grigdesk/factory/state/logs/t<TASK>.stages.log
 ```
 
 Проверки — `tests/server/factory-graph-linearity.test.js`.

@@ -116,6 +116,16 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
       timeout: 180000,
       maxBuffer: 1024 * 1024,
     };
+    const installer = await execute(path.join(directory, 'grigdesk-install'), ['--verify', '--json'], options);
+    const installerProof = JSON.parse(installer.stdout);
+
+    assert.equal(installer.stderr, '');
+    assert.equal(installerProof.verified, true);
+    assert.equal(installerProof.commit, expectedCommit);
+    assert.equal(installerProof.version, index.latest.payload.version);
+    assert.equal(installerProof.archiveHashesValid, true);
+    runtime.installer = installerProof;
+
     const server = path.join(work, 'server/bin/grigdesk-server');
     const metadata = await execute(server, ['--runtime-info', '--json'], options);
 

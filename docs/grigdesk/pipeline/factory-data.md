@@ -1,6 +1,6 @@
 # Данные фабрики
 
-- Реестр прогона: `~/.factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.
+- Реестр прогона: `~/.grigdesk/factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.
 - Метка штатной остановки: `STOPPED_SIGNAL=1` ставит движок при graceful-остановке по
   сигналу и снимает при любом новом заходе; `detectStall` не считает такую задачу
   обрывом — [ручная остановка — не сбой](manual-stop-vs-crash.md).

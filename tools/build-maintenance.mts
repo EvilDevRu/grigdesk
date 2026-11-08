@@ -8,6 +8,7 @@ import { readNodeRuntime, ensureNodeArchive, SEA_FUSE } from '../shared/node/nod
 import { downloadFile, nodeArchive, seaConfig } from '../shared/node/seaBuild.ts';
 import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 import { postjectCli } from '../server/scripts/sea/buildSteps.mts';
+import { appendInstallerArchives } from '../shared/node/installerArchiveTail.ts';
 
 const execute = promisify(execFile);
 
@@ -21,6 +22,12 @@ export async function buildMaintenance(input: {
   cacheDir: string;
   assets?: Record<string, string>;
 }): Promise<string> {
+  const { server, desktop, ...assets } = input.assets ?? {};
+
+  if (Boolean(server) !== Boolean(desktop) || server && !assets.release) {
+    throw new Error('installer_archive_pair_required');
+  }
+
   const runtime = readNodeRuntime(JSON.parse(await fs.readFile(
     path.join(input.root, 'server/build/node-runtime.json'), 'utf8',
   )), 'server/build/node-runtime.json');
@@ -44,7 +51,7 @@ export async function buildMaintenance(input: {
       target: 'node24',
       define: { 'import.meta.filename': '__filename' },
     });
-    await fs.writeFile(path.join(work, 'sea-config.json'), JSON.stringify(seaConfig(input.assets)));
+    await fs.writeFile(path.join(work, 'sea-config.json'), JSON.stringify(seaConfig(assets)));
     await execute(path.join(work, 'bin/node'), ['--experimental-sea-config', 'sea-config.json'], {
       cwd: work,
       env: {},
@@ -52,6 +59,10 @@ export async function buildMaintenance(input: {
     await fs.copyFile(path.join(work, 'bin/node'), path.join(work, 'grigdesk-install'));
     await execute(path.join(work, 'bin/node'), [await postjectCli(path.join(input.root, 'server')),
       'grigdesk-install', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE], { cwd: work });
+
+    if (server && desktop) {
+      await appendInstallerArchives(path.join(work, 'grigdesk-install'), { server, desktop });
+    }
 
     const output = path.join(input.outDir, 'grigdesk-install');
 
