@@ -63,8 +63,12 @@ test('узкая шапка сохраняет действия и полную 
     }
 
     await waitForShellActions(page, width <= 600);
-    await page.waitForFunction(() => document.querySelector('#app').__vue_app__
-      .config.globalProperties.$pinia._s.get('providers')?.providers.length === 10);
+    await page.waitForFunction(() => {
+      const stores = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s;
+
+      return stores.get('providers')?.providers.length === 10
+        && stores.get('system')?.data?.net?.ip === '192.0.2.1';
+    });
 
     if (width === 390 || width === 800) {
       await scaleClientText(page, 1.3);
@@ -131,7 +135,7 @@ test('узкая шапка сохраняет действия и полную 
 
       assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
       assert.equal(await overview.locator('[data-context="topbar-metrics"]').count(), 0);
-      assert.equal(await overview.locator('[data-context="topbar-network"]').isVisible(), true);
+      await overview.locator('[data-context="topbar-network"]').waitFor();
       await overview.locator('[data-context="provider-status"]').last().click();
     }
 
@@ -156,7 +160,7 @@ test('узкая шапка сохраняет действия и полную 
 
     await settings.click();
 
-    const settingsDialog = page.getByRole('dialog', { name: 'Настройки', exact: true });
+    const settingsDialog = page.locator('[data-role="settings-modal"]');
 
     await settingsDialog.waitFor();
     await page.keyboard.press('Escape');
