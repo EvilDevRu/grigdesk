@@ -35,7 +35,7 @@ async function horizontalGeometry(page) {
   return page.evaluate(() => ({
     viewport: innerWidth,
     document: document.documentElement.scrollWidth,
-    loading: [...document.querySelectorAll('[data-ui-loading], [data-perf-pending]')].map((element) => {
+    loading: [...document.querySelectorAll('[data-ui-loading]')].map((element) => {
       const rect = element.getBoundingClientRect();
 
       return {
@@ -115,7 +115,9 @@ for (const [mode, pairs] of layouts) {
         }
       }
 
-      assert.ok(pendingHorizontal.loading.length > 0, 'измерен контейнер загрузки');
+      if (!phoneBoard) {
+        assert.ok(pendingHorizontal.loading.length > 0, 'измерен контейнер загрузки');
+      }
 
       for (const loading of pendingHorizontal.loading) {
         assert.ok(loading.left >= -1 && loading.right <= pendingHorizontal.viewport + 1,

@@ -558,7 +558,7 @@ defineExpose({
 }
 
 .shelf-loading {
-  padding: 12px;
+  padding: 12px 0;
 }
 
 .shelf-state,

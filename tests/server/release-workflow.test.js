@@ -40,15 +40,19 @@ test('RW-2: отдельный relay-workflow удалён', async () => {
   );
 });
 
-test('RW-CHANNELS: ручной выпуск выбирает release/dev и по умолчанию только проверяет', async () => {
+test('RW-CHANNELS: проверки параллельны, упаковка требует оба успешных набора или доказанный reuse',
+  async () => {
   const source = await fs.readFile(
     path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
   );
   const yaml = await import('../../server/node_modules/yaml/dist/index.js');
   const workflow = yaml.parse(source);
   const inputs = workflow.on.workflow_dispatch?.inputs;
+  const { server, web, release } = workflow.jobs;
+  const steps = release.steps;
+  const gate = steps.find((step) => step.name === 'Подтверждение всех проверок');
+  const production = steps.findIndex((step) => step.run === 'npm --prefix web run build');
 
-  assert.ok(inputs?.channel, 'ручной workflow должен объявлять выбор канала');
   assert.deepEqual(inputs.channel.options, ['release', 'dev']);
   assert.equal(inputs.channel.default, 'release');
   assert.equal(inputs.publish.type, 'boolean');
@@ -57,116 +61,114 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.equal(inputs.validation_run.default, '');
   assert.equal(workflow.permissions.actions, 'read');
   assert.equal(workflow.on.push, undefined);
-
-  const steps = workflow.jobs.release.steps;
-  const gate = steps.find((step) => step.name === 'Подтверждение всех проверок');
-  const production = steps.findIndex((step) => step.run === 'npm --prefix web run build');
-
-  assert.equal(workflow.jobs.release['timeout-minutes'], 240);
+  assert.deepEqual(release.needs, ['server', 'web']);
+  assert.equal(release.if, '${{ !cancelled() }}');
+  assert.equal(server.needs, undefined);
+  assert.equal(web.needs, undefined);
+  assert.equal(server.if, "${{ inputs.validation_run == '' }}");
+  assert.equal(web.if, "${{ inputs.validation_run == '' }}");
+  assert.equal(server['timeout-minutes'], 240);
+  assert.equal(web['timeout-minutes'], 90);
+  assert.equal(release['timeout-minutes'], 120);
   assert.ok(steps.indexOf(gate) < production);
   assert.equal(gate.if, '${{ !cancelled() }}');
-
-  for (const [id, result] of [
-    ['server_tests', 'SERVER_RESULT'],
-    ['web_tests', 'WEB_RESULT'],
-    ['shared_tests', 'SHARED_RESULT'],
-    ['guide_tests', 'GUIDE_RESULT'],
-  ]) {
-    const step = steps.find((entry) => entry.id === id);
-
-    assert.equal(step?.['continue-on-error'], true);
-    assert.equal(step.if, "${{ steps.validation.outputs.reused != 'true' }}");
-    assert.ok(steps.indexOf(step) < steps.indexOf(gate));
-    assert.equal(gate.env[result], '${{ steps.' + id + '.outcome }}');
-    assert.ok(gate.run.includes(`test "$${result}" = success`));
-  }
-
-  const serverTests = workflow.jobs.release.steps.find((step) =>
-    step.run?.includes('npm --prefix server test'));
-
-  assert.equal(serverTests.env.NODE_OPTIONS, '--test-reporter=tap');
-  assert.match(serverTests.run, /df -h/u);
-  assert.match(serverTests.run, /free -m/u);
-
-  const validation = steps.find((step) => step.id === 'validation');
-  const mechanism = steps.find((step) => step.name === 'Проверка механизма подтверждения CI');
-
-  assert.equal(validation.run, 'node tools/releaseValidation.mts');
-  assert.equal(validation.env.VALIDATION_RUN, '${{ inputs.validation_run }}');
-  assert.ok(steps.indexOf(validation) < steps.indexOf(serverTests));
-  assert.ok(steps.indexOf(mechanism) < steps.indexOf(gate));
-  assert.match(mechanism.run, /release-validation\.test\.js/u);
-  assert.equal(mechanism.if, undefined);
+  assert.equal(gate.env.SERVER_RESULT, '${{ needs.server.result }}');
+  assert.equal(gate.env.WEB_RESULT, '${{ needs.web.result }}');
+  assert.match(gate.run, /test "\$SERVER_RESULT" = success/u);
+  assert.match(gate.run, /test "\$WEB_RESULT" = success/u);
   assert.match(gate.run, /if \[ "\$REUSED_VALIDATION" = true \]/u);
   assert.match(gate.run, /test -s "\$VALIDATION_RECEIPT"/u);
 
-  for (const name of ['Браузер тестов', 'Песочница Chromium', 'Прогрев вариантов тестового ELF',
-    'Прогрев среды миграции', 'Проверка тестового ELF']) {
-    assert.equal(steps.find((step) => step.name === name).if,
-      "${{ steps.validation.outputs.reused != 'true' }}");
+  const serverGate = server.steps.find((step) => step.name === 'Подтверждение серверных проверок');
+
+  assert.equal(serverGate.if, '${{ !cancelled() }}');
+
+  for (const [id, result] of [
+    ['server_tests', 'SERVER_RESULT'],
+    ['shared_tests', 'SHARED_RESULT'],
+    ['guide_tests', 'GUIDE_RESULT'],
+  ]) {
+    const step = server.steps.find((entry) => entry.id === id);
+
+    assert.equal(step?.['continue-on-error'], true);
+    assert.equal(step.if, undefined);
+    assert.ok(server.steps.indexOf(step) < server.steps.indexOf(serverGate));
+    assert.equal(serverGate.env[result], '${{ steps.' + id + '.outcome }}');
+    assert.ok(serverGate.run.includes(`test "$${result}" = success`));
   }
 
-  const browser = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('node server/node_modules/playwright-core/cli.js install --with-deps chromium'));
-  const serverDependencies = workflow.jobs.release.steps.findIndex((step) =>
-    step.run === 'npm --prefix server ci');
+  const webTest = web.steps.find((step) => step.name === 'Тесты web');
+  const serverTest = server.steps.find((step) => step.id === 'server_tests');
 
-  assert.ok(browser > serverDependencies && browser < workflow.jobs.release.steps.indexOf(serverTests));
+  assert.equal(webTest.run, 'npm --prefix web test');
+  assert.equal(webTest['continue-on-error'], undefined);
+  assert.equal(webTest.env.NODE_OPTIONS, '--test-reporter=tap');
+  assert.equal(serverTest.env.NODE_OPTIONS, '--test-reporter=tap');
+  assert.match(serverTest.run, /df -h/u);
+  assert.match(serverTest.run, /free -m/u);
+  assert.match(serverTest.run, /available_kib.*df --output=avail/u);
+  assert.match(serverTest.run, /"\$available_kib" -lt 16777216/u);
+  assert.doesNotMatch(yaml.stringify(server), /secrets\.|tools\/bundle|release-publish/u);
+  assert.doesNotMatch(yaml.stringify(web), /secrets\.|tools\/bundle|release-publish/u);
 
-  const media = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('apt-get install -y --no-install-recommends ffmpeg'));
+  for (const job of [server, release]) {
+    const cleanup = job.steps.find((step) => step.name === 'Место для native-сборок');
 
-  assert.ok(media >= 0 && media < workflow.jobs.release.steps.indexOf(serverTests));
-  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
-  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg ripgrep python3-pil\s/u);
-  assert.match(workflow.jobs.release.steps[media].run, /rg --version/u);
-  assert.match(workflow.jobs.release.steps[media].run, /from PIL import Image/u);
+    assert.match(cleanup.run, /RUNNER_ENVIRONMENT:-.*github-hosted/u);
+    assert.match(cleanup.run, /sudo rm -rf -- \/usr\/share\/dotnet \/usr\/local\/\.ghcup/u);
+    assert.match(cleanup.run, /\/opt\/ghc \/opt\/hostedtoolcache\/CodeQL/u);
+    assert.doesNotMatch(cleanup.run, /android|\/node\b|\/python\b|chromium/u);
+  }
 
-  const sandbox = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));
+  for (const [job, testStep] of [[server, serverTest], [web, webTest]]) {
+    const browser = job.steps.findIndex((step) => step.name === 'Браузер тестов');
+    const dependencies = job.steps.findIndex((step) => step.run === 'npm --prefix server ci');
+    const chromiumSandbox = job.steps.findIndex((step) => step.name === 'Песочница Chromium');
+    const media = job.steps.findIndex((step) => step.name === 'Системные средства тестов');
+    const sandbox = job.steps.findIndex((step) => step.name === 'Песочница native-проверок');
+    const testIndex = job.steps.indexOf(testStep);
 
-  assert.ok(sandbox >= 0 && sandbox < workflow.jobs.release.steps.indexOf(serverTests));
-  assert.match(workflow.jobs.release.steps[sandbox].run, /bwrap --ro-bind \/ \/ --dev \/dev/u);
-  assert.match(workflow.jobs.release.steps[sandbox].run,
-    /profile grigdesk-ci-bwrap \/usr\/bin\/bwrap flags=\(unconfined\)/u);
-  assert.match(workflow.jobs.release.steps[sandbox].run,
-    /apparmor_parser -r \/etc\/apparmor.d\/grigdesk-ci-bwrap/u);
-  assert.match(workflow.jobs.release.steps[sandbox].run, /unshare -Urnm \/usr\/bin\/true/u);
+    assert.ok(dependencies < browser && browser < chromiumSandbox && chromiumSandbox < testIndex);
+    assert.match(job.steps[browser].run, /playwright-core\/cli\.js install --with-deps chromium/u);
+    assert.match(job.steps[chromiumSandbox].run, /chromiumSandbox: true/u);
+    assert.doesNotMatch(job.steps[chromiumSandbox].run, /--no-sandbox/u);
+    assert.ok(media >= 0 && media < testIndex);
+    assert.match(job.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
+    assert.match(job.steps[media].run, /ffmpeg ripgrep python3-pil\s/u);
+    assert.match(job.steps[media].run, /rg --version/u);
+    assert.match(job.steps[media].run, /from PIL import Image/u);
+    assert.ok(sandbox >= 0 && sandbox < testIndex);
+    assert.match(job.steps[sandbox].run, /bwrap --ro-bind \/ \/ --dev \/dev/u);
+    assert.match(job.steps[sandbox].run, /apparmor_parser -r \/etc\/apparmor.d\/grigdesk-ci-bwrap/u);
+    assert.match(job.steps[sandbox].run, /unshare -Urnm \/usr\/bin\/true/u);
+  }
 
-  const chromiumSandbox = steps.findIndex((step) => step.name === 'Песочница Chromium');
+  const snapshot = server.steps.findIndex((step) => step.name === 'Исходники тестового исполнителя');
+  const variants = server.steps.findIndex((step) => step.name === 'Прогрев вариантов тестового ELF');
+  const legacy = server.steps.findIndex((step) => step.name === 'Прогрев среды миграции');
+  const binary = server.steps.findIndex((step) => step.name === 'Проверка тестового ELF');
 
-  assert.ok(chromiumSandbox > browser && chromiumSandbox < steps.indexOf(serverTests));
-  assert.match(steps[chromiumSandbox].run, /chromiumSandbox: true/u);
-  assert.doesNotMatch(steps[chromiumSandbox].run, /--no-sandbox/u);
+  assert.ok(snapshot >= 0 && snapshot < variants && variants < legacy && legacy < binary);
+  assert.ok(binary < server.steps.indexOf(serverTest));
+  assert.equal(web.steps.some((step) => step.name === 'Прогрев вариантов тестового ELF'), false);
 
-  const snapshot = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('materializeDeepSeekSnapshot'));
-  const binary = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('tests/server/deepseek-binary-cache-root.test.js'));
-  const variants = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('tests/helpers/deepseekBinary.mts --prepare-suite'));
-  const legacy = workflow.jobs.release.steps.findIndex((step) =>
-    step.run?.includes('tests/helpers/deepseekRuntimeArtifact.mts'));
-  const suite = workflow.jobs.release.steps.indexOf(serverTests);
+  const validation = steps.find((step) => step.id === 'validation');
+  const mechanism = steps.find((step) => step.name === 'Проверка механизма подтверждения CI');
+  const bundle = steps.find((step) => step.name === 'Сборка комплекта');
+  const key = steps.find((step) => step.name === 'Ключ подписи');
+  const publish = steps.find((step) => step.name === 'Публикация на сайт');
+  const cleanup = steps.find((step) => step.name === 'Освобождение тестовых артефактов');
 
-  assert.ok(snapshot >= 0 && snapshot < variants && variants < legacy && legacy < binary && binary < suite,
-    'snapshot, варианты ELF и среда миграции готовятся последовательно до большого набора');
-
-  const publish = workflow.jobs.release.steps.find((step) =>
-    step.run?.includes('tools/release-publish.mts'));
-  const bundle = workflow.jobs.release.steps.find((step) =>
-    step.run?.includes('node tools/bundle.mts'));
-
-  assert.ok(publish, 'publisher остаётся отдельным шагом');
+  assert.equal(validation.run, 'node tools/releaseValidation.mts');
+  assert.equal(validation.env.VALIDATION_RUN, '${{ inputs.validation_run }}');
+  assert.ok(steps.indexOf(validation) < steps.indexOf(gate));
+  assert.ok(steps.indexOf(mechanism) < steps.indexOf(key));
+  assert.ok(production < steps.indexOf(key) && steps.indexOf(key) < steps.indexOf(bundle));
+  assert.match(mechanism.run, /release-validation\.test\.js/u);
+  assert.equal(mechanism.if, undefined);
   assert.equal(bundle.env.GRIGDESK_RELEASE_ORIGIN,
     "${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}");
-
-  const cleanup = workflow.jobs.release.steps.find((step) =>
-    step.name === 'Освобождение тестовых артефактов');
-
-  assert.ok(steps.indexOf(cleanup) > steps.findIndex((step) =>
-    step.run?.includes('npm --prefix web run build')));
-  assert.ok(steps.indexOf(cleanup) < steps.indexOf(bundle));
+  assert.ok(steps.indexOf(cleanup) > production && steps.indexOf(cleanup) < steps.indexOf(bundle));
   assert.match(cleanup.run, /test "\$GRIGDESK_TEST_DEEPSEEK_ROOT" = "\$RUNNER_TEMP\/deepseek-tests"/u);
   assert.match(cleanup.run, /rm -rf -- "\$GRIGDESK_TEST_DEEPSEEK_ROOT"/u);
   assert.match(publish.if ?? '', /inputs\.publish/u);

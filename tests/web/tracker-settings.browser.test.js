@@ -58,7 +58,14 @@ async function browserFixture(t, binary) {
       configureServer(devServer) {
         devServer.middlewares.use('/tracker-fixture', async (_request, response) => {
           const html = await devServer.transformIndexHtml('/tracker-fixture',
-            `<html><body><div id="app"></div>`
+            `<!doctype html><html><head><style>
+            #app { height: 100%; }
+            .tracker-fixture-host { padding: var(--page-gutter); min-width: 0; height: 100%;
+              overflow-y: auto; scrollbar-gutter: stable; }
+            @media (max-width: 600px) {
+              .tracker-fixture-host { padding: 0; scrollbar-gutter: auto; }
+            }
+            </style></head><body><div id="app"></div>`
             + `<script type="module" src="/@fs/${entry}"></script></body></html>`);
 
           response.setHeader('content-type', 'text/html');
@@ -80,13 +87,14 @@ async function browserFixture(t, binary) {
     await rm(root, { recursive: true, force: true });
   });
   await writeFile(entry, `
-import { createApp } from 'vue';
+import { createApp, h } from 'vue';
 import { createPinia } from 'pinia';
 import BoardView from '/src/views/BoardView.vue';
 import { setUiLocale } from '/src/services/locale.ts';
 import '/src/styles/index.css';
 setUiLocale(new URL(location.href).searchParams.get('locale') || 'ru');
-createApp(BoardView).use(createPinia()).mount('#app');
+createApp({ render: () => h('main', { class: 'tracker-fixture-host' }, h(BoardView)) })
+  .use(createPinia()).mount('#app');
 `);
   await server.listen();
 
@@ -161,7 +169,8 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
               data = {
                 tasks: [],
                 revision: 0,
-                trackerConfigured: false
+                trackerConfigured: false,
+                personalStateVersion: 1,
               };
             } else if (url.pathname.endsWith('/projects')) {
               data = { projects: [] };
@@ -216,12 +225,13 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
             errors.push(`${request.url()}: ${request.failure()?.errorText}`);
           });
           await page.goto(`${fixture.url}?locale=${locale}`);
-          await page.locator('.own-tasks').waitFor({ timeout: 10_000 }).catch(() => {
+          assert.equal(await page.evaluate(() => document.compatMode), 'CSS1Compat');
+          await page.locator('.board [data-role="board-new-task"]').waitFor({ timeout: 10_000 }).catch(() => {
             assert.fail(`Board fixture не загрузилась: ${JSON.stringify(errors)}`);
           });
           assert.deepEqual(errors, [], 'Реальная доска загружена без ошибок fixture');
 
-          const settings = page.getByRole('button', {
+          const settings = page.locator('.board-heading').getByRole('button', {
             name: /настро[йи].*(доск|трекер)|board settings|tracker settings|set up tracker/iu,
           });
 
@@ -244,7 +254,13 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
             await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
           }
 
-          await dialog.locator('[data-role="tracker-board-enabled"]').check();
+          const enabled = dialog.locator('[data-role="tracker-board-enabled"]');
+
+          if (!await enabled.isChecked()) {
+            await dialog.locator('label.ui-checkbox:has([data-role="tracker-board-enabled"])').click();
+          }
+
+          assert.equal(await enabled.isChecked(), true);
 
           await dialog.getByRole('button', { name: /сохранить|save/iu }).click();
           assert.ok(writes.some((call) => call.path === '/api/trackers/settings'

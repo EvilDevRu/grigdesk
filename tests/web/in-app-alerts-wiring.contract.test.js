@@ -32,12 +32,13 @@ test('P1/P2: хост после модалок и очистка при вых�
   assert.match(clearOnBrowserLogout[1], /clearAlertHistory\(\)/);
 });
 
-test('история: колокольчик стоит в верхней панели рядом с настройками', async (t) => {
+test('история: колокольчик стоит в верхней панели перед справкой и настройками', async (t) => {
   const { page } = await shellContractBrowser(t);
   const neighbour = await page.locator('[data-ui-topbar] .alert-bell').evaluate((bell) => ({
     tag: bell.nextElementSibling?.tagName,
     label: bell.nextElementSibling?.getAttribute('aria-label'),
+    settings: bell.nextElementSibling?.nextElementSibling?.getAttribute('aria-label'),
   }));
 
-  assert.deepEqual(neighbour, { tag: 'BUTTON', label: 'Настройки' });
+  assert.deepEqual(neighbour, { tag: 'BUTTON', label: 'Справка', settings: 'Настройки' });
 });

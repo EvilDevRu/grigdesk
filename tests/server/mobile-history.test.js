@@ -133,42 +133,45 @@ test('MC-35: stale PUT не стирает серверный финал; I/O fa
 test('MC-36: восстановление running после падения даёт один interrupted без запуска исполнителя',
   async (t) => {
   const root = await temporary(t);
-  const { executor, runs } = controlledExecutor();
-  const first = await chatAppFixture(t, {
-    executor,
-    root,
+
+  await t.test('серверы закрываются до удаления общей истории', async (scenario) => {
+    const { executor, runs } = controlledExecutor();
+    const first = await chatAppFixture(scenario, {
+      executor,
+      root,
+    });
+
+    await saveChat(first.app, 'mobile-crash');
+    await first.app.close();
+
+    const ledger = new ChatTurnLedger({ dir: path.join(root, 'chats/turns') });
+
+    await ledger.put({
+      turnId: 'mobile-crash-turn',
+      chatKey: 'mobile-crash',
+      state: 'running',
+      acceptedAt: Date.now(),
+      userText: 'Не повторять',
+      mobileOwner: owner,
+    });
+
+    const recovered = await chatAppFixture(scenario, {
+      executor,
+      root,
+    });
+
+    await recovered.app.ready();
+    await recovered.app.mobileChat.reconcile('mobile-crash');
+
+    const result = (await recovered.app.inject('/api/chat/store/chat/mobile-crash')).json().chat;
+
+    assert.equal(result.messages.filter((message) => message.role === 'user').length, 1);
+    assert.equal(
+      result.messages.filter((message) => message.interruptedBy === 'server_shutdown').length,
+      1,
+    );
+    assert.equal(runs.length, 0);
   });
-
-  await saveChat(first.app, 'mobile-crash');
-  await first.app.close();
-
-  const ledger = new ChatTurnLedger({ dir: path.join(root, 'chats/turns') });
-
-  await ledger.put({
-    turnId: 'mobile-crash-turn',
-    chatKey: 'mobile-crash',
-    state: 'running',
-    acceptedAt: Date.now(),
-    userText: 'Не повторять',
-    mobileOwner: owner,
-  });
-
-  const recovered = await chatAppFixture(t, {
-    executor,
-    root,
-  });
-
-  await recovered.app.ready();
-  await recovered.app.mobileChat.reconcile('mobile-crash');
-
-  const result = (await recovered.app.inject('/api/chat/store/chat/mobile-crash')).json().chat;
-
-  assert.equal(result.messages.filter((message) => message.role === 'user').length, 1);
-  assert.equal(
-    result.messages.filter((message) => message.interruptedBy === 'server_shutdown').length,
-    1,
-  );
-  assert.equal(runs.length, 0);
 });
 
 /**
@@ -178,54 +181,57 @@ test('MC-36: восстановление running после падения да
  */
 test('MC-36: старт модуля чата не ждёт фоновую сверку мобильной истории', async (t) => {
   const root = await temporary(t);
-  const { executor } = controlledExecutor();
-  const first = await chatAppFixture(t, {
-    executor,
-    root,
+
+  await t.test('серверы закрываются до удаления общей истории', async (scenario) => {
+    const { executor } = controlledExecutor();
+    const first = await chatAppFixture(scenario, {
+      executor,
+      root,
+    });
+
+    await saveChat(first.app, 'mobile-slow-start');
+    await first.app.close();
+
+    const ledger = new ChatTurnLedger({ dir: path.join(root, 'chats/turns') });
+
+    await ledger.put({
+      turnId: 'mobile-slow-start-turn',
+      chatKey: 'mobile-slow-start',
+      state: 'done',
+      acceptedAt: Date.now(),
+      userText: 'Принято с телефона',
+      mobileOwner: owner,
+    });
+
+    let releaseRegistry = () => {};
+    const registryGate = new Promise((resolve) => {
+      releaseRegistry = resolve;
+    });
+    const recovered = await chatAppFixture(scenario, {
+      executor,
+      root,
+      modelsRegistry: async () => {
+        await registryGate;
+
+        return { 'test-provider': [{ id: 'test-model', efforts: [] }] };
+      },
+    });
+    const started = await Promise.race([
+      recovered.app.ready().then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
+    ]);
+
+    releaseRegistry();
+    assert.equal(started, true);
+    await recovered.app.mobileChat.reconcile();
+
+    const result = (await recovered.app.inject('/api/chat/store/chat/mobile-slow-start')).json().chat;
+
+    assert.equal(
+      result.messages.filter((message) => message.turnId === 'mobile-slow-start-turn').length,
+      1,
+    );
   });
-
-  await saveChat(first.app, 'mobile-slow-start');
-  await first.app.close();
-
-  const ledger = new ChatTurnLedger({ dir: path.join(root, 'chats/turns') });
-
-  await ledger.put({
-    turnId: 'mobile-slow-start-turn',
-    chatKey: 'mobile-slow-start',
-    state: 'done',
-    acceptedAt: Date.now(),
-    userText: 'Принято с телефона',
-    mobileOwner: owner,
-  });
-
-  let releaseRegistry = () => {};
-  const registryGate = new Promise((resolve) => {
-    releaseRegistry = resolve;
-  });
-  const recovered = await chatAppFixture(t, {
-    executor,
-    root,
-    modelsRegistry: async () => {
-      await registryGate;
-
-      return { 'test-provider': [{ id: 'test-model', efforts: [] }] };
-    },
-  });
-  const started = await Promise.race([
-    recovered.app.ready().then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
-  ]);
-
-  releaseRegistry();
-  assert.equal(started, true);
-  await recovered.app.mobileChat.reconcile();
-
-  const result = (await recovered.app.inject('/api/chat/store/chat/mobile-slow-start')).json().chat;
-
-  assert.equal(
-    result.messages.filter((message) => message.turnId === 'mobile-slow-start-turn').length,
-    1,
-  );
 });
 
 test('MC-34: обычное тело запроса не назначает server-owned history', async (t) => {

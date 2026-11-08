@@ -2849,7 +2849,9 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 .ui-pane-header__actions .ui-button:not(.ui-icon-button)::after {
   content: '';
   position: absolute;
-  inset: min(0px, calc((var(--pane-header-action-h) - var(--toolbar-control-h)) / 2)) 0;
+  inset: 50% 0 auto;
+  height: max(100%, var(--toolbar-control-h));
+  transform: translateY(-50%);
 }
 
 @media (max-width: 600px) {

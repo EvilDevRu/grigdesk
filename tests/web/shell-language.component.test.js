@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { i18nComponent, prepareI18nWindow } from './helpers/i18nComponent.js';
 import { catalogMessage } from './helpers/i18nCatalog.js';
+import { pluginCard } from './helpers/pluginModuleContract.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -109,7 +110,11 @@ test('I18N-U01: EN/RU каркас, builtin/custom/disabled и прежний п
         order: 10 
       } 
     },
-  ];
+  ].map((plugin) => plugin.system || !plugin.enabled ? plugin : pluginCard({
+    ...plugin,
+    contributes: { panels: [{ title: plugin.name, group: plugin.nav.group }], slots: [] },
+    placements: [],
+  }));
   const { browser, origin } = await i18nBrowser(t, {
     responses: { '/api/plugins': { plugins } },
   });
@@ -204,15 +209,32 @@ test('I18N-U02: топбар без поиска команд, соседние 
         await settings.waitFor();
         await actions.locator('[data-context="connection-trigger"]').waitFor();
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
-        // Подключение, телефон, колокольчик и настройки.
-        assert.equal(await actions.getByRole('button').count(), 4);
+
+        const phone = width === 600;
+
+        // Телефон и справка на узком экране перенесены в «Разделы».
+        // Подключение, колокольчик и настройки остаются в основной полосе.
+        assert.equal(await actions.getByRole('button').count(), phone ? 3 : 5);
         assert.equal(
           await actions.getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).count(),
-          1,
+          phone ? 0 : 1,
         );
         assert.equal(await actions.locator('[data-context="alert-history"]').isVisible(), true);
+
+        if (phone) {
+          await page.locator('.phone-nav').getByRole('button', { name: /^(Разделы|Sections)$/ }).click();
+          await page.locator('[data-role="phone-sections"]')
+            .getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).waitFor();
+        }
+
         await page.locator('[data-context="topbar-network"]').waitFor();
         await page.locator('[data-context="provider-status"]').first().waitFor();
+
+        if (phone) {
+          await page.locator('[data-role="phone-sections"]')
+            .getByRole('button', { name: /^(Закрыть|Close)$/ }).click();
+          await page.locator('[data-role="phone-sections"]').waitFor({ state: 'hidden' });
+        }
 
         const unusedWidth = await actions.evaluate((element) => {
           const buttons = [...element.querySelectorAll('button')];
@@ -415,6 +437,7 @@ test('I18N-U05: исходное имя local переводится тольк�
     profile: profiles[0], 
     profiles, 
     status: 'online', 
+    localAvailable: true,
     capabilities: [] 
   });
 
@@ -505,9 +528,14 @@ test('RET-NAV: старая ссылка открывает маршруты б�
           assert.equal(await page.getByRole('link', { name: /^(Агенты|Agents)$/ }).count(), 0);
           assert.equal(await page.locator('[href="#/routes"]').count(), 1);
 
-          await page.locator('[href="#/board"]').click();
+          await page.getByRole('link', { name: /^(Доска|Board)( ·.*)?$/ }).click();
           await page.waitForURL(origin + '#/board');
-          await page.locator('[href="#/routes"]').click();
+
+          if (touch) {
+            await page.locator('.phone-nav').getByRole('button', { name: /^(Разделы|Sections)$/ }).click();
+          }
+
+          await page.getByRole('link', { name: /^(Маршруты|Routes)$/ }).click();
           await page.locator('.routes-page').waitFor();
           assert.equal(new URL(page.url()).hash, '#/routes');
           assert.deepEqual(errors, []);

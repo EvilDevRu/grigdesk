@@ -4,7 +4,7 @@ import { chromium } from '../../../desktop/node_modules/playwright-core/index.mj
 import path from 'node:path';
 import os from 'node:os';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { protocolRoutes, protocolSearch } from './chat-protocol.js';
+import { protocolPage, protocolRoutes, protocolSearch, protocolWindow } from './chat-protocol.js';
 import { freePort } from '../../server/helpers/pluginBootFixture.js';
 import { trackerMetadata } from './trackerCard.js';
 
@@ -169,9 +169,23 @@ export async function clientBrowser(t, options = {}) {
             || responses['/api/chat/store'];
           const chatRoutes = protocolRoutes(chatStore);
 
+          if (url.pathname === '/api/chat/store/list') {
+            chatRoutes[url.pathname + url.search] = protocolPage({ archived: [], ...chatStore }, url.href);
+          }
+
           if (url.pathname === '/api/chat/store/search') {
             chatRoutes[url.pathname] = protocolSearch(chatStore,
               url.searchParams.get('q') || '', url.searchParams.get('archived') === '1');
+          }
+
+          if (url.searchParams.get('window') === '1' && url.pathname.startsWith('/api/chat/store/chat/')) {
+            const id = decodeURIComponent(url.pathname.slice('/api/chat/store/chat/'.length));
+            const chat = [...chatStore.sessions, ...(chatStore.archived || [])]
+              .find((entry) => entry.id === id);
+
+            if (chat) {
+              chatRoutes[url.pathname + url.search] = protocolWindow(chat, url.href);
+            }
           }
 
           req.resume();
@@ -201,10 +215,30 @@ export async function clientBrowser(t, options = {}) {
     optimizeDeps: { noDiscovery: true, include: ['vue', 'pinia', 'vue-router'] },
   });
 
+  let browser;
+
+  // Закрытие регистрируется до listen/launch, поэтому ошибка старта также освобождает Vite.
+  // Каталог кэша удаляется после браузера, потоков и самого HTTP-сервера.
+  t.after(async () => {
+    try {
+      await browser?.close();
+    } finally {
+      for (const res of pending) {
+        res.destroy();
+      }
+
+      try {
+        await server.close();
+      } finally {
+        await rm(cacheDir, { recursive: true, force: true });
+      }
+    }
+  });
+
   await mkdir(artifacts, { recursive: true });
   await server.listen();
 
-  const browser = await chromium.launch({
+  browser = await chromium.launch({
     executablePath: process.env.CHROME_BIN,
     headless: true,
     args: ['--no-sandbox', '--disable-features=LocalNetworkAccessChecks'],
@@ -223,17 +257,6 @@ export async function clientBrowser(t, options = {}) {
       return result;
     };
   }
-
-  t.after(async () => {
-    await browser.close();
-
-    for (const res of pending) {
-      res.destroy();
-    }
-
-    await server.close();
-    await rm(cacheDir, { recursive: true, force: true });
-  });
 
   return {
     browser,
