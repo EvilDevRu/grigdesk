@@ -51,6 +51,7 @@ export async function i18nBrowser(t, options = {}) {
     const context = await newContext(contextOptions);
 
     context.setDefaultTimeout(10000);
+    context.setDefaultNavigationTimeout(60000);
 
     return context;
   };

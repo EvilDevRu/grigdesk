@@ -4,13 +4,14 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { trackerCatalog } from './helpers/trackerBoard.js';
 import { selectUiOption } from './helpers/selectUiOption.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
-const webRoot = path.resolve('web');
+const webRoot = fileURLToPath(new URL('../../web/', import.meta.url));
 
 /**
  * Те же системные пути, что у check-ui-geometry; отсутствие Chromium — явный skip.
@@ -68,7 +69,7 @@ async function browserFixture(t, binary) {
     server: {
       host: '127.0.0.1',
       port: 0,
-      fs: { allow: [webRoot, path.resolve('shared'), root] }
+      fs: { allow: [webRoot, fileURLToPath(new URL('../../shared/', import.meta.url)), root] }
     },
   });
   let browser;
