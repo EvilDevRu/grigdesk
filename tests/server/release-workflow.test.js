@@ -106,8 +106,19 @@ test('RW-CHANNELS: проверки параллельны, упаковка т�
   assert.equal(serverTest.env.NODE_OPTIONS, '--test-reporter=tap');
   assert.match(serverTest.run, /df -h/u);
   assert.match(serverTest.run, /free -m/u);
+  assert.match(serverTest.run, /available_kib.*df --output=avail/u);
+  assert.match(serverTest.run, /"\$available_kib" -lt 16777216/u);
   assert.doesNotMatch(yaml.stringify(server), /secrets\.|tools\/bundle|release-publish/u);
   assert.doesNotMatch(yaml.stringify(web), /secrets\.|tools\/bundle|release-publish/u);
+
+  for (const job of [server, release]) {
+    const cleanup = job.steps.find((step) => step.name === 'Место для native-сборок');
+
+    assert.match(cleanup.run, /RUNNER_ENVIRONMENT:-.*github-hosted/u);
+    assert.match(cleanup.run, /sudo rm -rf -- \/usr\/share\/dotnet \/usr\/local\/\.ghcup/u);
+    assert.match(cleanup.run, /\/opt\/ghc \/opt\/hostedtoolcache\/CodeQL/u);
+    assert.doesNotMatch(cleanup.run, /android|\/node\b|\/python\b|chromium/u);
+  }
 
   for (const [job, testStep] of [[server, serverTest], [web, webTest]]) {
     const browser = job.steps.findIndex((step) => step.name === 'Браузер тестов');

@@ -19,7 +19,7 @@
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
-- [Release workflow: параллельные server/web, строгие outcome-ворота, sandbox и упаковка](release-workflow-validation.md)
+- [Release workflow: параллельные server/web, дисковый бюджет native, строгие ворота и упаковка](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, сверка Git-дерева и свежая упаковка](release-validation-reuse.md)
 - [Фоновый реестр исполнителей: бюджет 1,2 с, общий сбор, явные wait и refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)

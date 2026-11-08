@@ -76,6 +76,15 @@ Job упаковки зависит через `needs` от обоих; его �
 последовательно. Упаковка получает свежий runner и собирает собственные бинарники.
 Контракт зависимостей — [GitHub jobs.needs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds).
 
+До native-подготовки server и release освобождают неиспользуемые этой поставкой
+предустановленные .NET SDK, GHC/GHCup и CodeQL. Очистка разрешена только при
+`RUNNER_ENVIRONMENT=github-hosted` и ограничена четырьмя явными каталогами.
+Node, Python, Android SDK, Rust и браузеры остаются доступными проверкам.
+После прогрева вариантов перед серверным набором требуется не менее 16 GiB свободного
+места. Низкий остаток останавливает запуск до длительных тестов: source-sync и standalone
+builder создают отдельные копии native dependencies и могут исчерпать несколько GiB.
+Состав исходного образа — [Ubuntu 24.04 runner image](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md).
+
 Для stable доступно явное [подтверждение успешного полного прогона тех же исходников](release-validation-reuse.md)
 через `validation_run`. До ключей проверяются metadata запуска, все outcome-ворота и полные
 Git-деревья. Свежие production UI, бинарники, verify/E0, подпись и deb выполняются всегда.
