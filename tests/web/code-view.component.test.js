@@ -3,6 +3,7 @@ import test, { after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { compileVue, webFile } from './helpers/compile-vue.js';
+import { DEFAULT_CODE_BRANCH_SETTINGS } from '../../shared/plugins/code/codeBranchContracts.ts';
 import {
   activeCodeReviewWorkers,
   drainCodeReviewWorkers,
@@ -22,6 +23,144 @@ let CodeViewDomWrapper = null;
 after(() => {
   sharedBrowser?.close();
   sharedBrowser = null;
+});
+
+/**
+ * Снимок runtime меняется только ответами двойника HTTP.
+ * Компонент проходит настоящие controls и подтверждение без сборки приложения.
+ */
+async function mountBranchPanel(t, approved) {
+  const posts = [];
+  const confirmations = [];
+  const state = {
+    branches: [
+      {
+        ref: 'refs/heads/dev',
+        name: 'dev',
+        kind: 'local',
+        commit: 'a'.repeat(40),
+        current: true,
+        occupied: '/demo',
+      },
+      {
+        ref: 'refs/heads/feature/demo',
+        name: 'feature/demo',
+        kind: 'local',
+        commit: 'b'.repeat(40),
+        current: false,
+        occupied: '',
+      },
+    ],
+    settings: { ...DEFAULT_CODE_BRANCH_SETTINGS },
+    job: null,
+    actualBranch: 'dev',
+    actualCommit: 'a'.repeat(40),
+    log: '',
+  };
+  const api = {
+    /**
+     * Чтения отдают только публичные данные панели и снимок временного runtime.
+     * Отсутствующая ручка должна уронить сценарий вместо ложного пустого ответа.
+     */
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{
+          key: 'demo',
+          dir: '/demo',
+          trees: [mainTree('/demo', 'dev')],
+        }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/branches?')) {
+        return state;
+      }
+
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, body) {
+      posts.push({ url, body });
+
+      if (url.includes('/branch-settings?')) {
+        state.settings = { ...body };
+      }
+
+      return state;
+    },
+  };
+  const mounted = await mountCodeView(t, {
+    api,
+    confirm: async (text) => {
+      confirmations.push(text);
+
+      return approved;
+    },
+  });
+
+  await mounted.wrapper.get('[data-action="code-branches"]').trigger('click');
+  await settle(mounted.flushPromises);
+
+  const dialog = new CodeViewDomWrapper(mounted.browser.document.body);
+
+  return {
+    ...mounted,
+    dialog,
+    state,
+    posts,
+    confirmations,
+  };
+}
+
+test('CODE-BRANCH-UI: выбор подтверждает папку и коммит, передаёт точные refs и HEAD', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  assert.match(h.dialog.get('[data-action="branch-actual"]').text(), /dev.*aaaaaaaaaa/);
+  await h.dialog.get('select[data-action="branch-choice"]').setValue('refs/heads/feature/demo');
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.match(h.confirmations[0], /feature\/demo.*bbbbbbbbbb/);
+  assert.match(h.confirmations[0], /\/demo/);
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/switch-branch\?repo=demo&root=%2Fdemo/);
+  assert.deepEqual(h.posts[0].body, {
+    ref: 'refs/heads/feature/demo',
+    expectedCommit: 'b'.repeat(40),
+    expectedHead: 'a'.repeat(40),
+    confirmed: true,
+  });
+
+  await h.dialog.get('[data-action="return-branch"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.posts[1].body.ref, 'refs/heads/dev');
+});
+
+test('CODE-BRANCH-CANCEL: отмена подтверждения не отправляет мутацию', async (t) => {
+  const h = await mountBranchPanel(t, false);
+
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.equal(h.posts.length, 0);
+});
+
+test('CODE-BRANCH-SETTINGS: сохранение команды не запускает переключение', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  await h.dialog.get('textarea[data-action="branch-setting-build"]').setValue('npm run build');
+  await h.dialog.get('[data-action="save-branch-settings"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/branch-settings\?/);
+  assert.equal(h.posts[0].body.build, 'npm run build');
+  assert.equal(h.confirmations.length, 0);
 });
 
 function deferred() {

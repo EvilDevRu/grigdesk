@@ -47,6 +47,11 @@
         </div>
         <span v-else-if="headContext" class="tlabel mono"
               v-tooltip="context?.treePath">{{ headContext }}</span>
+        <CodeBranchControl v-if="context?.main" :key="context.id"
+                           :context="{ project, repoKey, treePath }"
+                           :branch="git?.branch || context.branch"
+                           :disabled="contextLoading || gitActionBusy"
+                           @changed="activate({ preserve: true })" />
       </div>
     </div>
 
@@ -1436,6 +1441,7 @@ import type {
 import PatchReview from './PatchReview.vue';
 import CodeDiffView from './CodeDiffView.vue';
 import CodeGitMenu from './CodeGitMenu.vue';
+import CodeBranchControl from './CodeBranchControl.vue';
 import { useCodeReviewState } from '../../features/code/codeReviewState';
 import { readDiffPreferences, storeDiffPreferences } from '../../features/code/codeDiffPreferences';
 import type { DiffHunk, DiffPreferences, DiffSide } from '../../features/code/codeDiffModel';

@@ -58,7 +58,7 @@
 - [Переход на GrigDesk: подготовка, brandMove, журнал, откат и второй этап](brand-migration.md)
 - [Node SEA: готовый Linux-комплект, проверка, данные и ручной выбор версии](node-sea.md)
 - [SEA и единое приложение: труба UI, TLS-вход, устройства и общий модал настроек](sea-unified-client.md)
-- [Сборка ESM-помощников: контекст комплекта, ресурсы, явный вход и self-fork](sea-helpers.md)
+- [Сборка ESM-помощников: контекст, явный вход, self-fork и worker ветки в CJS payload](sea-helpers.md)
 - [Состав серверного комплекта: ресурсы, production npm, native ABI и лицензии](sea-package.md)
 - [Выпуск серверного SEA: сборка, manifest, атомарная публикация и проверка архива](sea-release.md)
 - [Обновление SEA-пакета: manifest status, ранние отказы и отделение source updater](sea-update-mode.md)
