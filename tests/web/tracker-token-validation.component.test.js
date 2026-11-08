@@ -116,17 +116,21 @@ test('Чип показывает сохранённый драйвер неза
   await openTrackerSettings(card);
   assert.equal(card.wrapper.findAll('[data-role="tracker-in-use"]').length, 1);
   assert.equal(card.wrapper.get('[data-driver="grigdesk-b24"] [data-role="tracker-in-use"]').text(),
-    'Используется');
+    'По умолчанию');
+  assert.equal(card.wrapper.get('[data-driver="grigdesk-b24"] [data-role="tracker-enabled"]').text(),
+    'Включён');
   await chooseExternal(card, 'grigdesk-b24-discript');
   assert.equal(card.wrapper.get('[data-driver="grigdesk-b24"] [data-role="tracker-in-use"]').exists(), true);
   assert.equal(card.wrapper.find('[data-driver="grigdesk-b24-discript"] [data-role="tracker-in-use"]')
     .exists(), false);
   assert.equal(card.wrapper.find('[data-role="tracker-editor-in-use"]').exists(), false);
+  assert.equal(card.wrapper.find('[data-role="tracker-editor-enabled"]').exists(), false);
   await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
   await card.flushPromises();
   assert.equal(card.wrapper.find('[data-driver="grigdesk-b24"] [data-role="tracker-in-use"]')
     .exists(), false);
   assert.equal(card.wrapper.get('[data-driver="grigdesk-b24-discript"] [data-role="tracker-in-use"]')
-    .text(), 'Используется');
-  assert.equal(card.wrapper.get('[data-role="tracker-editor-in-use"]').text(), 'Используется');
+    .text(), 'По умолчанию');
+  assert.equal(card.wrapper.get('[data-role="tracker-editor-in-use"]').text(), 'По умолчанию');
+  assert.equal(card.wrapper.get('[data-role="tracker-editor-enabled"]').text(), 'Включён');
 });
