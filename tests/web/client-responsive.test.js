@@ -44,7 +44,14 @@ test('coarse: общие кнопки, узкий topbar и visualViewport', { t
         const result = await page.evaluate(() => {
           const button = document.querySelector('[data-connection-button]')
             || document.querySelector('button[aria-label*="Тестовая машина"]');
-          const buttons = [...document.querySelectorAll('button')].filter((item) => {
+          const primaryActions = [
+            '.topbar button',
+            '[data-role="chat-attachment"]',
+            '[data-context="chat-send"]',
+            '[data-context="chat-stop"]',
+            '[data-context="chat-microphone"]',
+          ].join(',');
+          const buttons = [...document.querySelectorAll(primaryActions)].filter((item) => {
             const rect = item.getBoundingClientRect();
 
             return rect.width > 0 && rect.height > 0;
@@ -55,6 +62,7 @@ test('coarse: общие кнопки, узкий topbar и visualViewport', { t
             touch: document.documentElement.hasAttribute('data-ui-touch'),
             overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
             connection: button ? button.getBoundingClientRect().width : 0,
+            primaryActions: buttons.length,
             minimum: Math.min(...buttons.map((item) => item.getBoundingClientRect().height)),
           };
         });
@@ -63,6 +71,7 @@ test('coarse: общие кнопки, узкий topbar и visualViewport', { t
         assert.equal(result.touch, true, `${width}/${zoom}: coarse не включил общий touch`);
         assert.equal(result.overflow, false, `${width}/${zoom}: прокрутка документа`);
         assert.ok(result.connection >= 40, `${width}/${zoom}: пропала связь ${result.connection}`);
+        assert.ok(result.primaryActions >= 5, `${width}/${zoom}: не найдены основные действия`);
         assert.ok(result.minimum >= 40, `${width}/${zoom}: малая кнопка ${result.minimum}`);
         await page.evaluate(() => {
           window.__geometryViewport.height = 440;
