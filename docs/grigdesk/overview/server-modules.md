@@ -5,16 +5,16 @@
 
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
-| `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд, `POST /api/tasks/:id/arbitrate` — арбитр типизированной остановки | `~/.factory/state` + `<factoryHome>/bin/factory` |
+| `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд, `POST /api/tasks/:id/arbitrate` — арбитр типизированной остановки | `~/.grigdesk/factory/state` + `<factoryHome>/bin/factory` |
 | `tracker` | `/api/tracker/{dashboard,task/:id,users,groups}`, мутации `/api/tracker/{tasks,task/:id/*}` | `TrackerFacade` и выбранный драйвер реестра |
 | `task-favorites`, `task-shelf`, `task-seen` | `GET /api/tracker/task-favorites` + `PUT/DELETE .../:taskId`, `GET/PUT/DELETE /api/tracker/task-shelf[/:taskId]`, `GET/POST /api/tracker/task-seen` | личное состояние человека (избранное, полка, «просмотрено») — отдельные schema-versioned файлы по opaque-scope аккаунта портала ([детали](../b24/personal-task-state.md)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file,clip,clip/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; хранилище раздела — `lib/media/storage.ts` (запись кладётся по содержимому, уборка по возрасту, занятое место в `doctor`); разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр и фрагмент записи к задаче — декораторы `mediaFramePath`/`mediaClipPath`, байты фрагмента отдаются с Range ([детали](../media/README.md)) |
 | `settings` | `/api/settings/{prefs,factory-debug,speech*}` | prefs, speech, engine debug CLI |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; процесс исполнителя живёт между ходами (`lib/chat/liveSessions.ts`; список и гашение — `/api/chat/sessions`), непрошеный ход агента едет через `chats/pending`; browser/локальная диктовка использует тот же speech-контракт ([детали](../chat/README.md)) |
-| `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`GRIGDESK_ROUTES_DIR`); проекты GrigDesk — prefs |
+| `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.grigdesk/factory/routes` (`GRIGDESK_ROUTES_DIR`); проекты GrigDesk — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
-| `analysis` | gated `/api/analysis*`, analyze/clarifications и ручной triage-arbiter | системный плагин, очередь и локальные файлы в `~/.factory/analysis` |
+| `analysis` | gated `/api/analysis*`, analyze/clarifications и ручной triage-arbiter | системный плагин, очередь и локальные файлы в `~/.grigdesk/factory/analysis` |
 | `projects`, `code` | `/api/projects*`, `/api/code/{roots,:project/*}`: чтение дерева/дифа, stage/unstage, commit, push и генерация названия | профили/prefs + git/worktree + выбранный `runUntrusted` executor |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](../plugins/documents.md)) |
 | `inbox` | `GET /api/inbox[/{summary,status}]`, `POST /api/inbox/channels/:channel/{activate,deactivate}`, решения `POST /api/inbox/items/:ref/{task,dismiss,reset}` | общий merge Telegram/GitHub, account-owned `inbox-state.json`, единый draft/triage/worker и B24 task service; provider credentials здесь отсутствуют |
@@ -183,8 +183,9 @@ trusted поле стоит кнопка «Продолжить»: без нег
 явным действием человека и требует exact attempt.
 
 **Маршруты:** `/api/routes` — единственный namespace immutable route bundles.
-Хранилище опубликованных бандлов — `~/.factory/routes` (`config.routesDir`); движок
-`factory` читает тот же каталог по умолчанию. Legacy CRUD, reseed и API alias удалены.
+Хранилище опубликованных бандлов — `~/.grigdesk/factory/routes` (`config.routesDir`); движок
+`factory` получает тот же каталог явно от сервера, его собственный фоллбэк без окружения —
+прежний `~/.factory/routes`. Legacy CRUD, reseed и API alias удалены.
 Route/catalog публикуются полным immutable bundle, exact bytes перечислены в manifest,
 а `current.json` меняется через compare-and-swap. Catalog pin включает bootstrap Scout и
 точные route hashes. Server валидирует schema при публикации и чтении; engine перед

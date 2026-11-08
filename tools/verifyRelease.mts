@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { publishInstalledRelease } from './installedPublication.mts';
+import { publishInstalledRelease, verifyReleaseInstaller } from './installedPublication.mts';
 import { decodeReleaseChecks } from './releaseChecks.mts';
 import { decodeReleaseChannelIndex }
   from '../shared/runtime/installedUpdateContracts.ts';
@@ -18,6 +18,7 @@ import { decodeDeepSeekRuntimeInfo }
   from '../shared/chat/deepSeekBinary.ts';
 import { removePrivateTree }
   from '../shared/node/files.ts';
+import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 
 const execute = promisify(execFile);
 
@@ -116,6 +117,23 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
       timeout: 180000,
       maxBuffer: 1024 * 1024,
     };
+    const installerBinary = path.join(work, 'installer-probe');
+
+    await copyInstallFile(path.join(directory, 'grigdesk-install'), installerBinary);
+    await verifyReleaseInstaller(installerBinary, index.latest,
+      await fs.readFile(path.join(directory, 'grigdesk-install.sha256'), 'utf8'),
+      await fs.readFile(path.join(directory, 'grigdesk-install.sig'), 'utf8'));
+
+    const installer = await execute(installerBinary, ['--verify', '--json'], options);
+    const installerProof = JSON.parse(installer.stdout);
+
+    assert.equal(installer.stderr, '');
+    assert.equal(installerProof.verified, true);
+    assert.equal(installerProof.commit, expectedCommit);
+    assert.equal(installerProof.version, index.latest.payload.version);
+    assert.equal(installerProof.archiveHashesValid, true);
+    runtime.installer = installerProof;
+
     const server = path.join(work, 'server/bin/grigdesk-server');
     const metadata = await execute(server, ['--runtime-info', '--json'], options);
 

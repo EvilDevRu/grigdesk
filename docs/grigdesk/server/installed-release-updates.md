@@ -9,9 +9,9 @@
 ## Номер и доверие
 
 `VERSION` остаётся базовым X.Y.Z. CI до сборщиков проверяет ref: release требует
-`vX.Y.Z` с совпадающим VERSION/commit; dev требует ветку dev и даёт X.Y.Z-dev.N.
+main либо `vX.Y.Z` с совпадающим VERSION/commit; dev требует ветку dev и даёт X.Y.Z-dev.N.
 Build identity один для server manifest, payload VERSION, help, web и desktop main.
-Inputs workflow: channel, publish=false и необязательный notes — JSON с ru/en.
+Inputs workflow включают channel, publish=false, ручной test_mode=full/skip и notes — JSON с ru/en.
 `GRIGDESK_RELEASE_NOTES_JSON` поступает в подписанный payload; пустое описание — null.
 
 Индексы разделены: `/api/releases/v1/release.json` и `/api/releases/v1/dev.json` —
@@ -26,6 +26,9 @@ Cache/single-flight относятся к выбранному каналу. П�
 новому процессу CLI; ошибка сохраняется отдельно от последнего результата и времени.
 Publisher проверяет подписи/архивы до SSH, извлекает help из проверенного ELF, сохраняет
 immutable версии и переносит выбранный индекс последним. Другой канал не изменяется.
+
+Installer хранит архивы в [потоковом хвосте ELF](installer-archive-tail.md), сохраняя
+автономность. `--verify --json` проверяет подпись и оба архива без установки.
 
 ## Установка
 

@@ -147,7 +147,17 @@ public final class Upstream implements PipeTransport {
 
     RequestBody data = null;
 
-    if (!head.method().equals("GET") && !head.method().equals("HEAD")) {
+    // Мутации без объявленного тела (DELETE без Content-Length и chunked) уходят на машину
+    // без тела: произвольный RequestBody OkHttp пометил бы chunked без Content-Type, и
+    // Fastify ответил бы 415 ещё до обработчика. POST/PUT/PATCH требуют тело в OkHttp,
+    // поэтому для них поведение прежнее, включая настоящее chunked-пересылание.
+    boolean declaredBody = head.headers.containsKey("content-length")
+      || head.headers.containsKey("transfer-encoding");
+    boolean bodyRequiringMethod = head.method().equals("POST") || head.method().equals("PUT")
+      || head.method().equals("PATCH");
+
+    if (!head.method().equals("GET") && !head.method().equals("HEAD")
+      && (declaredBody || bodyRequiringMethod)) {
       data = new RequestBody() {
         @Override
         public MediaType contentType() {

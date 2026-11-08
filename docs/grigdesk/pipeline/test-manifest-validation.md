@@ -46,7 +46,7 @@ route-v2 runtime: TESTS evidence rejected runner result (rc=78)
 Проверка без маршрута:
 
 ```bash
-python3 profiles/<PROFILE>/feature-verify.py check <TASK> ~/.factory/state/t<TASK>.tests.sha256 \
+python3 profiles/<PROFILE>/feature-verify.py check <TASK> ~/.grigdesk/factory/state/t<TASK>.tests.sha256 \
   backend=<BE_WT> frontend=<FE_WT>
 bash profiles/<PROFILE>/unit.sh <TASK> tests/unit/<путь>.test.mjs
 ```

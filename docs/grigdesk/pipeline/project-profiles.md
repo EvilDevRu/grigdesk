@@ -47,7 +47,7 @@ profiles/<PROFILE>/
 |---|---|
 | `FACTORY_PROFILES_DIR` | Явный каталог профилей; сильнее умолчаний. Для движка нужен абсолютный физический путь без symlink-компонентов. |
 | `config.profilesDir` | Разрешённый сервером каталог: при запуске из исходников без override — `<корень кода>/profiles`, в пакете — `profiles` в папке данных. Сервер передаёт его фабрике через `FACTORY_PROFILES_DIR`. |
-| `GRIGDESK_ROUTES_DIR` / `config.routesDir` | Хранилище опубликованных неизменяемых каталогов и маршрутов; без override — `~/.factory/routes`. CLI получает его через `--routes-dir`. Это отдельное хранилище, не папка исходников `routes/` профиля. |
+| `GRIGDESK_ROUTES_DIR` / `config.routesDir` | Хранилище опубликованных неизменяемых каталогов и маршрутов; без override — `~/.grigdesk/factory/routes`. CLI получает его через `--routes-dir`. Это отдельное хранилище, не папка исходников `routes/` профиля. |
 | `GRIGDESK_ROUTES_AUTHORING_DIR` | Хранилище черновиков редактора; без override — `<config.routesDir>.authoring`. Не заменяет каталог опубликованных маршрутов. |
 | `GRIGDESK_FACTORY_PROFILE` | Явный профиль по умолчанию для сервера. Не создаёт профиль и не включает его возможности. |
 
