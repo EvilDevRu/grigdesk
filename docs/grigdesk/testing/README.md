@@ -78,7 +78,7 @@
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)
 - [Сквозные фикстуры чата: завершение SSE, ожидание состояния и закрытие окна до сервера](window-store-fixture-close.md)
 - [Версия шапки фикстуры фиксируется до нормализации store](chat-fixture-head-version.md)
-- [Фикстуры App: legacy meta до boot, постраничная история, ACK окна и metadata трекера](chat-catalog-fixtures.md)
+- [Фикстуры чата: meta до boot, история, ACK окна и завершение очереди](chat-catalog-fixtures.md)
 - [Очистка фикстуры: hooks, ChildProcess exit, общая история и dispose writer](node-test-hook-cleanup.md)
 - [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
 - [Тест ждёт сигнал HTTP-фикстуры после отказа исходного хода](async-fixture-producer-failure.md)
