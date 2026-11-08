@@ -387,7 +387,8 @@ jobs:
           npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
-          npm --prefix desktop ci
+          npm --prefix desktop ci --ignore-scripts
+          node desktop/node_modules/esbuild/install.js
       - name: Тесты web
         id: web_tests
         run: npm --prefix web test
@@ -489,7 +490,8 @@ jobs:
           npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
-          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm --prefix desktop ci
+          npm --prefix desktop ci --ignore-scripts
+          node desktop/node_modules/esbuild/install.js
       - name: Закреплённый Electron
         run: |
           sudo apt-get install -y --no-install-recommends unzip
@@ -507,6 +509,9 @@ jobs:
           done
           test -s "$target/$archive"
           (cd "$target" && sha256sum --check --strict --ignore-missing SHASUMS256.txt)
+          checksum="$(node -p 'require("./desktop/node_modules/electron/checksums.json")[process.argv[1]]' \
+            "$archive")"
+          printf '%s  %s\n' "$checksum" "$target/$archive" | sha256sum --check --strict
           unzip -q "$target/$archive" -d desktop/node_modules/electron/dist
           test "$(cat desktop/node_modules/electron/dist/version)" = "$version"
           if test -f desktop/node_modules/electron/dist/electron.d.ts; then

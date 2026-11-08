@@ -68,9 +68,13 @@ Workflow разделён на шесть узлов: `plan` → `server`/`web` 
 Комплект собирается в существующем observed-режиме: stdout/stderr дочерних сборщиков
 поступают прямо в Actions, события этапов из fd 3 перенаправляются туда же. Поэтому
 ошибка AppImage не теряет свой stdout, а сервер, CLI и окно видны в журнале по отдельности.
-`desktop ci` не скачивает Electron в postinstall. Отдельный ранний шаг получает runtime
+`desktop ci --ignore-scripts` исключает postinstall-загрузку Electron; esbuild install
+выполняется отдельно. Старый флаг ELECTRON_SKIP_BINARY_DOWNLOAD этой версией не читается.
+Web-job готовит те же зависимости без runtime: его набор не запускает Electron.
+Отдельный ранний шаг получает runtime
 версии из закреплённой зависимости desktop и SHASUMS256 через официальный GitHub API,
-проверяет архив и распаковывает штатный dist/path.txt. Явный `electronDist` исключает
+проверяет архив также по checksums.json закреплённого npm-пакета и готовит штатный
+dist/path.txt. Явный `electronDist` исключает
 повторную загрузку runtime и checksum в изолированном HOME упаковщика.
 До дорогой сборки runner получает `appimage-12.0.1.7z` через официальный GitHub API,
 сверяет закреплённый SHA256 из toolset текущего electron-builder и распаковывает его 7z.
