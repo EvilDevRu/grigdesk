@@ -6,6 +6,7 @@ import { setImmediate } from 'node:timers/promises';
 import { api, isReportedApiError, setApiLogSink } from '../../web/src/shared/apiClient.ts';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { useBoardStore } from '../../web/src/stores/board.ts';
+import { trackerReadRoute } from '../../web/src/shared/trackerReadBackoff.ts';
 
 /**
  * Продолжения fetch и очереди успевают пройти между шагами управляемых часов.
@@ -199,4 +200,26 @@ test('surface логического вызова сохраняется чер�
 
   assert.equal(complete.data.surface, 7);
   assert.equal(complete.data.outcome, 'success');
+});
+
+test('MD-LANES: один driver делит backoff разных task id, другой driver независим', async (t) => {
+  assert.equal(trackerReadRoute('/api/tracker/backoff-a/task/42?q=1'),
+    '/api/tracker/backoff-a/task/:id');
+  assert.equal(trackerReadRoute('/api/tracker/backoff-b/task/43'), '/api/tracker/backoff-b/task/:id');
+
+  let available = false;
+  const { calls } = fixture(t, () => new Response('{}', { status: available ? 200 : 502 }));
+  const options = { retry: false, timeoutMs: 0 };
+
+  await assert.rejects(api.get('/api/tracker/backoff-a/task/42', options), { status: 502 });
+  available = true;
+
+  const same = api.get('/api/tracker/backoff-a/task/43', options);
+  const other = api.get('/api/tracker/backoff-b/task/43', options);
+
+  await flush();
+  assert.equal(calls.some((call) => call.path === '/api/tracker/backoff-a/task/43'), false);
+  assert.equal(calls.some((call) => call.path === '/api/tracker/backoff-b/task/43'), true);
+  t.mock.timers.tick(2000);
+  await Promise.all([same, other]);
 });

@@ -75,6 +75,7 @@ export function startShellRelay(options: ShellRelayOptions): () => void {
 }
 
 interface BoardSnapshot {
+  epoch?: number;
   data: unknown;
   readAt: number;
   sourceKey: string;
@@ -92,7 +93,7 @@ interface BoardRelayOptions {
   channel?: RelayChannel;
 }
 
-const BOARD_RELAY_NAME = 'grigdesk-board-v1';
+const BOARD_RELAY_NAME = 'grigdesk-board-v2';
 
 /**
  * Снимок принимается только после локальной проверки его владельца, ключ из канала не доверенный.
@@ -102,6 +103,8 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
   const channel = options.channel ?? new BroadcastChannel(BOARD_RELAY_NAME);
   let active = true;
   let receivingInvalidation = false;
+  let acceptedEpoch = -1;
+  let receivedAt = -1;
   const post = (value: unknown) => {
     if (active) {
       channel.postMessage(value);
@@ -112,14 +115,20 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
       void options.recheck().catch(() => undefined);
     }
   };
+  /**
+   * Передаёт только собственное чтение, а принятый снимок не отражает обратно.
+   * Эпоха и закрытая форма v2 защищают несколько источников одного документа.
+   */
   const share = () => {
     const current = options.snapshot();
     const data = current?.data;
 
     if (current && data && typeof data === 'object' && !Array.isArray(data)
-      && !options.sourceState().suspended && current.sourceKey.length > 0) {
+      && !options.sourceState().suspended && current.sourceKey.length > 0
+      && current.readAt > receivedAt) {
       post({
-        version: 1,
+        version: current.epoch === undefined ? 1 : 2,
+        ...(current.epoch === undefined ? {} : { epoch: current.epoch }),
         type: 'board-snapshot',
         data,
         readAt: current.readAt,
@@ -158,7 +167,12 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
 
       return;
     }
-    if (relayType(data, 5) === 'board-snapshot' && data.data
+
+    const multi = data?.version === 2 && Object.keys(data).length === 6
+      && data.type === 'board-snapshot' && Number.isSafeInteger(data.epoch)
+      && data.epoch >= 0 && data.epoch >= acceptedEpoch;
+
+    if ((multi || relayType(data, 5) === 'board-snapshot') && data.data
       && typeof data.data === 'object' && !Array.isArray(data.data) && Number.isFinite(data.readAt)
       && typeof data.sourceKey === 'string' && data.sourceKey.length > 0) {
       const state = options.sourceState();
@@ -172,6 +186,11 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
         return;
       }
 
+      if (multi) {
+        acceptedEpoch = data.epoch;
+      }
+
+      receivedAt = Math.max(receivedAt, data.readAt);
       options.apply(data.data, data.readAt, data.sourceKey);
     } else if (options.role === 'source' && relayType(data, 2) === 'board-request') {
       share();

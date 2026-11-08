@@ -94,6 +94,7 @@
                   <span class="shelf-main">
                     <span class="shelf-meta">
                       <span class="shelf-id mono">#{{ row.taskId }}</span>
+                      <TaskSourceChip :source="row.taskSource" />
                       <template v-if="row.details?.project">
                         <span class="ui-visually-hidden">, </span>
                         <span class="shelf-project">{{ row.details.project }}</span>
@@ -225,6 +226,7 @@
 </template>
 
 <script setup lang="ts">
+import TaskSourceChip from '../../shared/TaskSourceChip.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';

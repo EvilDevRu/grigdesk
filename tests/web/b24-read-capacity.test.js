@@ -180,3 +180,44 @@ test('CAPACITY-04: локальная полоса общая, query и отме
     await Promise.allSettled([first, abandoned, last]);
   }
 });
+
+test('MD-LANES: адресные local и B не ждут тело A, следующий A ждёт', async (t) => {
+  const calls = [];
+  let body;
+  let closed = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      body = controller;
+    },
+  });
+
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls.push(url);
+
+    return url.endsWith('/dashboard') ? new Response(stream) : new Response('{}');
+  });
+
+  const options = { timeoutMs: 0, retry: false };
+  const first = api.get('/api/tracker/lane-a/dashboard', options);
+
+  await flush();
+
+  const nextA = api.get('/api/tracker/lane-a/task/42', options);
+  const b = api.get('/api/tracker/lane-b/task/42', options);
+  const local = api.get('/api/tracker/lane-a/task-favorites', options);
+
+  try {
+    await flush();
+    assert.equal(calls.includes('/api/tracker/lane-a/task/42'), false);
+    assert.equal(calls.includes('/api/tracker/lane-b/task/42'), true);
+    assert.equal(calls.includes('/api/tracker/lane-a/task-favorites'), true);
+  } finally {
+    if (!closed) {
+      body.enqueue(new TextEncoder().encode('{}'));
+      body.close();
+      closed = true;
+    }
+
+    await Promise.allSettled([first, nextA, b, local]);
+  }
+});

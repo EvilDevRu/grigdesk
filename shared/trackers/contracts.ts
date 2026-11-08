@@ -90,11 +90,16 @@ export interface TrackerDescriptor {
   schema: TrackerSettingsSchema;
   reason?: string;
   deleted?: boolean;
+  logoUrl?: string;
+  generation?: number;
+  dataRevision?: number;
 }
 
 export interface TrackerCatalog {
   drivers: TrackerDescriptor[];
   activeIds: string[];
+  enabledIds?: string[];
+  default?: string | null;
   externalId: string | null;
   revision: number;
 }

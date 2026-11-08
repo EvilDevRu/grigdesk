@@ -1556,5 +1556,7 @@
   "chatHistoryOlderFailed": "Could not load older messages",
   "chatHistoryBaseFailed": "Could not refresh the history base",
   "chatHistoryChanged": "The chat window has changed",
-  "chatHistoryWindowAckMissing": "The server did not confirm the history window base"
+  "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
+  "trackerSourceUnavailable": "unavailable",
+  "trackerDefaultBoard": "Default board"
 }

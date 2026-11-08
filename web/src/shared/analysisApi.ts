@@ -32,8 +32,8 @@ export const analysisApi = {
     return parseAnalysisDetail(value);
   },
 
-  async enqueue(id: string | number) {
-    const value: unknown = await api.post(taskPath(id, '/analyze'));
+  async enqueue(id: string | number, source?: string, options?: { headers?: Record<string, string> }) {
+    const value: unknown = await api.post(taskPath(id, '/analyze'), source ? { source } : undefined, options);
 
     return parseAnalysisQueue(value);
   },

@@ -1,3 +1,5 @@
+import type { TrackerTarget } from '../shared/trackerTarget.ts';
+import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
@@ -22,6 +24,7 @@ type TaskId = string | number;
 interface CachedTask {
   data: TaskDetail;
   loadedAt: number;
+  target?: TrackerTarget;
 }
 
 export const useTasksStore = defineStore('tasks', {
@@ -45,16 +48,22 @@ export const useTasksStore = defineStore('tasks', {
       const key = source ? taskReferenceKey({ id, source }) : String(id);
       const cached = this.details[key];
 
-      if (source && source !== 'grigdesk') {
-        const board = useBoardStore();
+      const board = useBoardStore();
+      const catalog = useTrackersStore().catalog;
+      const legacySource = source && board.data?.source === source
+        && !board.data?.multiSource && !catalog?.enabledIds;
 
-        if (!board.data?.source) {
-          await board.load();
-        }
-        if (board.data?.source !== source) {
-          throw new Error(t('core.taskSourceMismatch'));
-        }
+      if (cached?.target?.prefix === '/api/tracker' && source && source !== 'grigdesk'
+        && !catalog?.enabledIds && board.data?.source !== source) {
+        throw new Error(t('core.taskSourceMismatch'));
       }
+
+      const target = source === 'grigdesk' ? null : (!source || legacySource) ? {
+        prefix: '/api/tracker',
+        source,
+        options: useTrackersStore().mutationOptions(),
+      } : await resolveTrackerTarget(source, api, catalog ?? undefined);
+
       if (source === 'grigdesk' && !/^[1-9]\d{11}$/.test(String(id))) {
         throw new Error(t('core.taskSourceUnsupported'));
       }
@@ -80,14 +89,10 @@ export const useTasksStore = defineStore('tasks', {
       }
 
       const data = portal
-        ? decodeTaskDetail(await api.get(`/api/tracker/task/${id}`, {
-          signal, ...(source ? useTrackersStore().mutationOptions() : {}),
+        ? decodeTaskDetail(await api.get(`${target!.prefix}/task/${id}`, {
+          signal, ...target!.options,
         }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
-
-      if (source && source !== 'grigdesk' && useBoardStore().data?.source !== source) {
-        throw new DOMException('', 'AbortError');
-      }
 
       signal?.throwIfAborted();
 
@@ -95,33 +100,74 @@ export const useTasksStore = defineStore('tasks', {
         throw new DOMException('', 'AbortError');
       }
 
-      this.details[key] = { data, loadedAt: Date.now() };
+      this.details[key] = {
+        data,
+        loadedAt: Date.now(),
+        ...(target ? { target } : {}),
+      };
 
       return data;
     },
 
-    title(id: TaskId) {
-      return this.details[id]?.data?.title || null;
+    title(id: TaskId, source?: TaskSourceId) {
+      return this.details[source ? taskReferenceKey({ id, source }) : id]?.data?.title || null;
     },
 
     /**
      * Поля задачи сохраняются сервером, затем проверенная карточка заменяет кеш.
      * Доска перечитывается только после подтверждённого ответа обновления.
      */
-    async update(id: TaskId, fields: Record<string, unknown>): Promise<TaskDetail> {
+    async target(id: TaskId, source?: TaskSourceId): Promise<TrackerTarget> {
+      const cached = source ? this.details[taskReferenceKey({ id, source })] : undefined;
+
+      if (cached?.target && source) {
+        const driver = useTrackersStore().catalog?.drivers.find((entry) => entry.id === source.split('@')[0]);
+        const generation = cached.target.options.headers?.['x-grigdesk-tracker-generation'];
+
+        if (driver?.generation !== undefined && String(driver.generation) !== generation) {
+          throw new Error(t('core.boardSourceChanged'));
+        }
+
+        return cached.target;
+      }
+
+      if (!source) {
+        return { prefix: '/api/tracker', options: useTrackersStore().mutationOptions() };
+      }
+
+      return resolveTrackerTarget(source, api);
+    },
+
+    /**
+     * Поля записываются в захваченное подключение карточки.
+     * Ответ заменяет кеш той же пары до обновления общей ленты.
+     */
+    async update(id: TaskId, fields: Record<string, unknown>, source?: TaskSourceId): Promise<TaskDetail> {
+      const target = await this.target(id, source);
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
       const data = decodeTaskDetail(await api.put(
-        `/api/tracker/task/${id}`, fields, useTrackersStore().mutationOptions(),
+        `${target.prefix}/task/${id}`, fields, target.options,
       ));
 
-      this.details[id] = { data, loadedAt: Date.now() };
+      this.details[key] = {
+        data,
+        loadedAt: Date.now(),
+        ...(target ? { target } : {}),
+      };
       await useBoardStore().load(true);
 
       return data;
     },
 
-    async timer(id: TaskId, action: string) {
+    /**
+     * Таймер адресуется полному источнику независимо от дефолта.
+     * Повтор после отказа остаётся явным действием пользователя.
+     */
+    async timer(id: TaskId, action: string, source?: TaskSourceId) {
+      const target = await this.target(id, source);
+
       await api.post(
-        `/api/tracker/task/${id}/timer/${action}`, undefined, useTrackersStore().mutationOptions(),
+        `${target.prefix}/task/${id}/timer/${action}`, undefined, target.options,
       );
       await useBoardStore().load(true);
     },
@@ -130,11 +176,14 @@ export const useTasksStore = defineStore('tasks', {
      * После подтверждения завершения старая карточка перестаёт считаться свежей.
      * Заголовок остаётся доступным конвейеру до следующего чтения деталей.
      */
-    async complete(id: TaskId) {
-      await api.post(`/api/tracker/task/${id}/complete`, undefined, useTrackersStore().mutationOptions());
+    async complete(id: TaskId, source?: TaskSourceId) {
+      const target = await this.target(id, source);
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
 
-      if (this.details[id]) {
-        this.details[id].loadedAt = 0;
+      await api.post(`${target.prefix}/task/${id}/complete`, undefined, target.options);
+
+      if (this.details[key]) {
+        this.details[key].loadedAt = 0;
       }
 
       await useBoardStore().load(true);
@@ -144,10 +193,13 @@ export const useTasksStore = defineStore('tasks', {
      * Удалённая задача сразу исключается из кеша, затем доска перечитывается.
      * Заголовок поколения защищает удаление при смене подключения трекера.
      */
-    async deleteTask(id: TaskId) {
-      await api.del(`/api/tracker/task/${id}`, undefined, useTrackersStore().mutationOptions());
+    async deleteTask(id: TaskId, source?: TaskSourceId) {
+      const target = await this.target(id, source);
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
 
-      delete this.details[id];
+      await api.del(`${target.prefix}/task/${id}`, undefined, target.options);
+
+      delete this.details[key];
       await useBoardStore().load(true);
     },
 
@@ -155,11 +207,14 @@ export const useTasksStore = defineStore('tasks', {
      * Ответ возобновления не содержит новый статус задачи.
      * Прежний снимок помечается устаревшим перед обновлением доски.
      */
-    async renew(id: TaskId) {
-      await api.post(`/api/tracker/task/${id}/renew`, undefined, useTrackersStore().mutationOptions());
+    async renew(id: TaskId, source?: TaskSourceId) {
+      const target = await this.target(id, source);
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
 
-      if (this.details[id]) {
-        this.details[id].loadedAt = 0;
+      await api.post(`${target.prefix}/task/${id}/renew`, undefined, target.options);
+
+      if (this.details[key]) {
+        this.details[key].loadedAt = 0;
       }
 
       await useBoardStore().load(true);
@@ -169,10 +224,18 @@ export const useTasksStore = defineStore('tasks', {
      * Фиксирует поколение перед записью и не начинает чтение другого трекера после её ответа.
      * Общая граница используется новыми мутациями карточки без оптимистичной замены кеша.
      */
-    async mutateCard(id: TaskId, path: string, method: 'post' | 'put' | 'del', payload?: unknown) {
+    async mutateCard(
+      id: TaskId, path: string, method: 'post' | 'put' | 'del',
+      payload?: unknown, source?: TaskSourceId,
+    ) {
       const epoch = this.epoch;
+      const target = await this.target(id, source);
 
-      await api[method](`/api/tracker/task/${id}/${path}`, payload, useTrackersStore().mutationOptions());
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+
+      await api[method](`${target.prefix}/task/${id}/${path}`, payload, target.options);
 
       if (epoch !== this.epoch) {
         throw new DOMException('', 'AbortError');
@@ -183,66 +246,71 @@ export const useTasksStore = defineStore('tasks', {
      * Чек-лист перечитывается только после подтверждённого добавления пункта.
      * Ответ мутации не подмешивается в кеш деталей и не предсказывает структуру дерева.
      */
-    async addChecklistItem(id: TaskId, input: { title: string; parentId?: string }) {
-      await this.mutateCard(id, 'checklist', 'post', input);
+    async addChecklistItem(id: TaskId, input: { title: string; parentId?: string }, source?: TaskSourceId) {
+      await this.mutateCard(id, 'checklist', 'post', input, source);
 
-      return this.load(id, true);
+      return this.load(id, true, undefined, source);
     },
 
     /**
      * Переименование и отметка передаются как частичное изменение пункта.
      * После успеха авторитетной остаётся полная карточка драйвера.
      */
-    async updateChecklistItem(id: TaskId, itemId: string, input: { title?: string; complete?: boolean }) {
-      await this.mutateCard(id, `checklist/${itemId}`, 'put', input);
+    async updateChecklistItem(id: TaskId, itemId: string, input: { title?: string; complete?: boolean },
+      source?: TaskSourceId) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'put', input, source);
 
-      return this.load(id, true);
+      return this.load(id, true, undefined, source);
     },
 
     /**
      * Удаление не вырезает пункт из локального дерева до ответа сервера.
      * Повторное чтение учитывает портальное поведение вложенных пунктов.
      */
-    async deleteChecklistItem(id: TaskId, itemId: string) {
-      await this.mutateCard(id, `checklist/${itemId}`, 'del');
+    async deleteChecklistItem(id: TaskId, itemId: string, source?: TaskSourceId) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'del', undefined, source);
 
-      return this.load(id, true);
+      return this.load(id, true, undefined, source);
     },
 
     /**
      * Теги заменяются полным списком, затем читаются из прежнего page-ответа.
      * Пустой список значим: особую REST-сериализацию выполняет внешний пакет.
      */
-    async updateTaskTags(id: TaskId, tags: string[]) {
-      await this.mutateCard(id, 'tags', 'put', { tags });
+    async updateTaskTags(id: TaskId, tags: string[], source?: TaskSourceId) {
+      const target = await this.target(id, source);
 
-      return api.get(`/api/tracker/task/${id}/comments`);
+      await this.mutateCard(id, 'tags', 'put', { tags }, source);
+
+      return api.get(`${target.prefix}/task/${id}/comments`);
     },
 
     /**
      * Приёмка и возврат обновляют детали и доску после подтверждённой мутации.
      * Новый статус берётся чтением, чтобы кеш не зависел от формата ответа операции.
      */
-    async reviewTask(id: TaskId, action: 'approve' | 'disapprove') {
-      await this.mutateCard(id, action, 'post');
+    async reviewTask(id: TaskId, action: 'approve' | 'disapprove', source?: TaskSourceId) {
+      await this.mutateCard(id, action, 'post', undefined, source);
 
-      const data = await this.load(id, true);
+      const data = await this.load(id, true, undefined, source);
 
       await useBoardStore().load(true);
 
       return data;
     },
 
-    async approveTask(id: TaskId) {
-      return this.reviewTask(id, 'approve');
+    async approveTask(id: TaskId, source?: TaskSourceId) {
+      return this.reviewTask(id, 'approve', source);
     },
 
-    async disapproveTask(id: TaskId) {
-      return this.reviewTask(id, 'disapprove');
+    async disapproveTask(id: TaskId, source?: TaskSourceId) {
+      return this.reviewTask(id, 'disapprove', source);
     },
 
-    async comment(id: TaskId, text: string) {
-      await api.post(`/api/tracker/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
+    async comment(id: TaskId, text: string, source?: TaskSourceId) {
+      const target = await this.target(id, source);
+
+      await api.post(`${target.prefix}/task/${id}/comment`, { text }, target.options);
     },
 
     async launchOptions(id: TaskId, profile = '') {

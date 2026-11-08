@@ -1576,5 +1576,7 @@
   "chatHistoryOlderFailed": "Не загрузились старые сообщения",
   "chatHistoryBaseFailed": "Не обновилась база истории",
   "chatHistoryChanged": "Окно чата уже изменилось",
-  "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна"
+  "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна",
+  "trackerSourceUnavailable": "недоступен",
+  "trackerDefaultBoard": "Доска по умолчанию"
 }

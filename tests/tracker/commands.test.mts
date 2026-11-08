@@ -198,3 +198,40 @@ test('BM-03: start ждёт renew, подавляет его отказ и во�
     }
   }
 });
+
+test('MD-CLI-TARGET: все команды сохраняют тела и адресуют один board, включая обе части start', async () => {
+  const commands: ApiCommand[] = [
+    { kind: 'dashboard' },
+    { kind: 'task', id: '42' },
+    {
+      kind: 'comment',
+      id: '42',
+      text: 'Комментарий',
+    },
+    {
+      kind: 'timer',
+      id: '42',
+      action: 'pause',
+    },
+    { kind: 'complete', id: '42' },
+    { kind: 'renew', id: '42' },
+    { kind: 'create' },
+    { kind: 'users', query: 'Иван' },
+    { kind: 'start', id: '42' },
+  ];
+
+  for (const legacy of commands) {
+    const bytes = Buffer.from('{not json\r\n');
+    const original = recorder(bytes);
+    const targeted = recorder(bytes);
+    const command = { ...legacy, board: 'board/with space' };
+
+    await runCommand(legacy, CONNECTION, original);
+    await runCommand(command, CONNECTION, targeted);
+    assert.deepEqual(targeted.specs, original.specs.map((spec) => ({
+      ...spec,
+      path: spec.path.replace('/api/tracker/', '/api/tracker/board%2Fwith%20space/'),
+    })), legacy.kind);
+    assert.equal(targeted.stdinReads, original.stdinReads);
+  }
+});

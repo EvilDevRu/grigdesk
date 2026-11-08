@@ -1,3 +1,6 @@
+import { readDriverManifest } from '../../lib/trackers/driverPackage.ts';
+import { readTrackerLogo } from '../../lib/trackers/trackerLogo.ts';
+
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -123,6 +126,32 @@ async function trackersModule(app: FastifyInstance, options: {
     return { ...runtime.selection.read(), settings };
   };
 
+  app.get<{ Params: { id: string; digest: string } }>(
+    '/api/trackers/:id/logo/:digest', async (request, reply) => {
+      try {
+        const { id, digest } = request.params;
+        const entry = runtime.registry.descriptors().find((entry) => entry.id === id);
+
+        if (!entry?.logoUrl || !/^[a-f0-9]{64}$/.test(digest)) {
+          return reply.code(404).send({ error: 'not_found' });
+        }
+
+        const root = runtime.driverDirectory(id);
+        const manifest = await readDriverManifest(root);
+        const logo = readTrackerLogo(root, manifest.logo);
+
+        if (logo.digest !== digest) {
+          return reply.code(404).send({ error: 'not_found' });
+        }
+
+        return reply.header('Content-Type', 'image/png').header('X-Content-Type-Options', 'nosniff')
+          .header('Cache-Control', 'no-store').send(logo.bytes);
+      } catch {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+    },
+  );
+
   app.get('/api/trackers', async () => runtime.catalog());
   app.get('/api/trackers/sources', async () => ({
     sources: await readDriverSources(options.driverSourcesPath, app.log),
@@ -133,8 +162,10 @@ async function trackersModule(app: FastifyInstance, options: {
       return await serial(async () => {
         const body = request.body;
 
-        if (!isRecord(body) || (body.externalId !== null && typeof body.externalId !== 'string')
-          || Object.keys(body).some((key) => !['externalId', 'settings', 'expectedRevision'].includes(key))
+        if (!isRecord(body)
+          || Object.keys(body).some((key) => ![
+            'externalId', 'drivers', 'default', 'settings', 'expectedRevision',
+          ].includes(key))
           || (body.settings !== undefined && !isRecord(body.settings))) {
           throw new TrackerError('invalid_request', 'Некорректные настройки трекера');
         }
@@ -142,11 +173,22 @@ async function trackersModule(app: FastifyInstance, options: {
         runtime.selection.assertRevision(body.expectedRevision);
 
         const catalog = runtime.registry.descriptors();
+        const previous = runtime.selection.read();
+        const multi = Object.hasOwn(body, 'drivers');
+        const drivers = multi ? body.drivers : body.externalId === null
+          ? previous.drivers.filter((id) => id !== previous.default)
+          : [...new Set([...previous.drivers, body.externalId])];
+        const requested = multi ? body.default : body.externalId;
 
-        if (body.externalId === 'own' || (body.externalId !== null
-          && !catalog.some((entry) => entry.id === body.externalId && !entry.deleted))) {
-          throw new TrackerError('invalid_request', 'Неизвестный внешний драйвер');
+        if (!Array.isArray(drivers) || new Set(drivers).size !== drivers.length
+          || drivers.some((id) => typeof id !== 'string' || id === 'own'
+            || !catalog.some((entry) => entry.id === id && !entry.deleted))
+          || (requested !== null && !drivers.includes(requested))
+          || (multi && Object.hasOwn(body, 'externalId') && body.externalId !== requested)) {
+          throw new TrackerError('invalid_request', 'Неизвестный внешний драйвер или дефолт');
         }
+
+        const selection = { drivers: drivers as string[], default: requested as string | null };
 
         const rawChanges = isRecord(body.settings) ? body.settings : {};
         const changes = Object.fromEntries(Object.entries(rawChanges).map(([id, input]) => {
@@ -175,7 +217,7 @@ async function trackersModule(app: FastifyInstance, options: {
         }
 
         runtime.selection.assertRevision(body.expectedRevision);
-        await runtime.writeSettings(body.externalId, changes);
+        await runtime.writeSettings(selection, changes);
         await app.sse?.broadcast?.('trackers-changed', runtime.selection.read());
 
         return publicSettings();

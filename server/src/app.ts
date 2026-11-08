@@ -1419,7 +1419,11 @@ async function build(desktopParent: DesktopParent | null) {
   });
   analyzer.onAnalyzed = (id: string) => analysisArbiter.arbitrate(id, { automatic: true });
   await analyzer.start();
-  await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
+  await fastify.register(analysisModule, {
+    analyzer,
+    tracker,
+    arbiter: analysisArbiter,
+  });
 
   // Закрытые снимки и самостоятельное сообщение о запуске приложения — последними.
   await fastify.register(staticPlugin, {

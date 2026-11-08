@@ -247,9 +247,10 @@
                               @update:model-value="toggleSource('grigdesk', $event)">
                 {{ t('core.boardSourceGrigdesk') }}
               </UiToggleButton>
-              <UiToggleButton :model-value="selectedSources.includes('tracker')"
-                              @update:model-value="toggleSource('tracker', $event)">
-                {{ trackerName }}
+              <UiToggleButton v-for="driver in sourceDrivers" :key="driver.id"
+                              :model-value="selectedSources.includes(driver.id)"
+                              @update:model-value="toggleSource(driver.id, $event)">
+                {{ driver.name }}
               </UiToggleButton>
             </div>
             <label class="filter-section">
@@ -358,6 +359,7 @@
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
               <UiPressable
                 class="ttext"
+                :disabled="Boolean(data?.multiSource && !isTaskSourceId(t.source))"
                 data-role="task-title"
                 data-context="board-task"
                 @click="ui.openTask(t.id, isTaskSourceId(t.source) ? t.source : undefined)"
@@ -365,9 +367,7 @@
                 <span class="task-name">{{ t.title }}</span>
                 <span class="task-meta">
                   <span class="mono task-id">#{{ t.id }}</span>
-                  <span v-if="t.personalSource === 'grigdesk'" class="task-internal-flag">
-                    GrigDesk
-                  </span>
+                  <TaskSourceChip v-if="t.source || t.driverId" :source="t.source" :driver-id="t.driverId" />
                   <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
                   <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
                     <span
@@ -457,9 +457,10 @@
             :aria-labelledby="secondaryMode !== 'created' ? 'board-review-tab' : 'board-created-tab'"
           >
             <ul ref="relatedList" class="tasks related-list">
-              <li v-for="t in relatedTasks" :key="t.id" class="related-row">
+              <li v-for="t in relatedTasks" :key="taskReferenceKey(t)" class="related-row">
                 <UiPressable
                   class="ttext"
+                :disabled="Boolean(data?.multiSource && !isTaskSourceId(t.source))"
                   data-role="task-title"
                   data-context="board-task"
                   @click="ui.openTask(t.id, isTaskSourceId(t.source) ? t.source : undefined)"
@@ -467,9 +468,7 @@
                   <span class="task-name">{{ t.title }}</span>
                   <span class="task-meta">
                     <span class="mono task-id">#{{ t.id }}</span>
-                  <span v-if="t.personalSource === 'grigdesk'" class="task-internal-flag">
-                    GrigDesk
-                  </span>
+                  <TaskSourceChip v-if="t.source || t.driverId" :source="t.source" :driver-id="t.driverId" />
                     <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
                     <span v-if="t.responsible" class="task-responsible">{{ t.responsible }}</span>
                     <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
@@ -503,6 +502,7 @@
 </template>
 
 <script setup lang="ts">
+import TaskSourceChip from '../shared/TaskSourceChip.vue';
 import { taskReferenceKey, taskPersonalSource, isTaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import TrackerWidgets from './board/TrackerWidgets.vue';
 import BoardTrackerSettingsButton from './board/BoardTrackerSettingsButton.vue';
@@ -619,7 +619,6 @@ async function loadConveyor() {
 useSse((name) => {
   if (name === 'trackers-changed') {
     trackers.invalidate();
-    board.invalidate?.();
     void trackers.load(true);
     void board.load(true);
     void ownTasks.load();
@@ -685,7 +684,9 @@ function liveElapsed(t: BoardTask) {
 }
 
 // Иконки плиток (Lucide-контуры, stroke=currentColor).
-const supportsTimer = computed(() => boardSupportsTimer(data.value));
+const supportsTimer = computed(() => data.value?.multiSource
+  ? trackers.catalog?.drivers.some((driver) => driver.capabilities.timer) ?? false
+  : boardSupportsTimer(data.value));
 const activeTasks = computed(() => supportsTimer.value
   ? (data.value?.tasks || []).filter((task) => task.timerRunning) : []);
 // Поиск основного списка независим от поиска контроля и поручений.
@@ -699,6 +700,9 @@ const relatedSource = computed(() => secondaryMode.value === 'created'
   ? data.value?.created || []
   : data.value?.toReview || []);
 const relatedTasks = computed(() => relatedSource.value
+  .filter((task) => !trackers.catalog?.enabledIds || selectedSources.value.includes(
+    task.source?.split('@')[0] ?? 'tracker',
+  ))
   .filter((task) => matchesBoardTask(task, secondaryQuery.value)));
 
 // При первом ответе открываем непустой список. Дальше выбор принадлежит человеку,
@@ -732,9 +736,15 @@ const filtersOpen = ref(false);
 // загрузки (и до базовой линии) новых не бывает: см. геттер ready.
 const seen = useTaskSeenStore();
 const newOnly = ref(false);
-const favoriteState = (task: BoardTask) => task.personalSource === 'grigdesk' ? favorites.own : favorites;
-const seenState = (task: BoardTask) => task.personalSource === 'grigdesk' ? seen.own : seen;
-const shelfState = (task: BoardTask) => task.personalSource === 'grigdesk' ? shelf.own : shelf;
+const favoriteState = (task: BoardTask) => favorites.forSource?.(
+  isTaskSourceId(task.source) ? task.source : undefined,
+) ?? (task.personalSource === 'grigdesk' ? favorites.own : favorites);
+const seenState = (task: BoardTask) => seen.forSource?.(
+  isTaskSourceId(task.source) ? task.source : undefined,
+) ?? (task.personalSource === 'grigdesk' ? seen.own : seen);
+const shelfState = (task: BoardTask) => shelf.forSource?.(
+  isTaskSourceId(task.source) ? task.source : undefined,
+) ?? (task.personalSource === 'grigdesk' ? shelf.own : shelf);
 const isNewTask = (task: BoardTask) => seenState(task).ready && !seenState(task).isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
 const SORT_MODES = new Set(['created', 'risk', 'complexity', 'size', 'fresh']);
@@ -757,7 +767,7 @@ function readTriagePrefs() {
       // Один режим вместо двух независимых флагов: повреждённое старое значение
       // больше не может одновременно включить «без оценки» и «нужны уточнения».
       sources: Array.isArray(saved.sources) ? [...new Set(saved.sources.filter((source) =>
-        source === 'tracker' || source === 'grigdesk'))] : ['tracker', 'grigdesk'],
+        typeof source === 'string'))] : ['tracker', 'grigdesk'],
       group: typeof saved.group === 'string' ? saved.group : '',
       triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
     };
@@ -774,8 +784,15 @@ function readTriagePrefs() {
 const savedTriage = readTriagePrefs();
 const selectedSources = ref<string[]>(savedTriage.sources);
 const selectedGroup = ref(savedTriage.group);
+const sourceDrivers = computed(() => trackers.catalog?.enabledIds
+  ? trackers.catalog.drivers.filter((driver) => driver.id !== 'grigdesk'
+    && (trackers.catalog!.enabledIds!.includes(driver.id)
+      || data.value?.tasks?.some((task) => task.source?.startsWith(`${driver.id}@`))))
+  : [{ id: 'tracker', name: trackerName.value }]);
+
 const allTasks = computed(() => unifiedBoardTasks(
-  ownTasks.trackerConfigured === false ? [] : data.value?.tasks, ownTasks.tasks,
+  data.value?.multiSource || trackers.catalog?.enabledIds ? data.value?.tasks
+    : ownTasks.trackerConfigured === false ? [] : data.value?.tasks, ownTasks.tasks,
 ));
 const groupOptions = computed(() => [...new Set(allTasks.value
   .map((task) => String(task.group || '').trim()).filter(Boolean))].sort());
@@ -787,10 +804,18 @@ const sourceTasks = computed(() => selectBoardTasks({
   // после выбора сортировки; счётчикам сортировать строки незачем.
   sortBy: 'tracker',
 }));
-const showRelated = computed(() => selectedSources.value.includes('tracker')
-  && ownTasks.trackerConfigured !== false && !!data.value);
+const showRelated = computed(() => selectedSources.value.some((id) => id !== 'grigdesk')
+  && !!data.value);
 const trackerName = computed(() => trackers.catalog?.drivers
   .find((driver) => driver.id === trackers.catalog?.externalId)?.name || t('core.boardTrackerSource'));
+
+watch(sourceDrivers, (drivers) => {
+  if (selectedSources.value.includes('tracker') && trackers.catalog?.enabledIds) {
+    selectedSources.value = [...selectedSources.value.filter((id) => id !== 'tracker'),
+      ...drivers.map((driver) => driver.id)];
+  }
+}, { immediate: true });
+
 const favoritesReady = computed(() => selectedSources.value.every((source) =>
   (source === 'grigdesk' ? favorites.own : favorites).loaded));
 const seenReady = computed(() => selectedSources.value.every((source) =>
@@ -851,10 +876,12 @@ watch([sortBy, triageMode, selectedSources, selectedGroup], () => {
   } catch { /* приватный режим/запрет хранилища не должен ронять доску */ }
 });
 
-const triageOf = (t: BoardTask) => analysis.byTask[t.id] || null;
+const numericAllowed = (task: BoardTask) => task.source === 'grigdesk'
+  || task.source === data.value?.source || (!data.value?.multiSource && !isTaskSourceId(task.source));
+const triageOf = (task: BoardTask) => numericAllowed(task) ? analysis.byTask[task.id] || null : null;
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => allTasks.value.filter((t) => {
-  if (!analysisEnabled.value) {
+  if (!analysisEnabled.value || !numericAllowed(t)) {
     return false;
   }
 
@@ -882,17 +909,21 @@ async function analyzeAllUnrated() {
 
   for (const t of list) {
     try {
-      await analyzeTask(t.id, { source: taskPersonalSource(t.personalSource) });
+      await analyzeTask(t.id, { source: isTaskSourceId(t.source)
+        ? t.source : taskPersonalSource(t.personalSource) });
     } catch {
       // Отказ одной задачи не отменяет остальные элементы очереди.
     }
   }
 }
 
+const projectedAnalysis = computed(() => Object.fromEntries(allTasks.value
+  .filter(numericAllowed).map((task) => [taskReferenceKey(task), analysis.byTask[task.id]])));
+
 const myTasks = computed(() => {
   return selectBoardTasks({
     tasks: sourceTasks.value,
-    analysisByTask: analysis.byTask,
+    analysisByTask: projectedAnalysis.value,
     query: q.value,
     sortBy: analysisEnabled.value ? sortBy.value : 'created',
     onlyUnrated: analysisEnabled.value && onlyUnrated.value,
@@ -931,7 +962,7 @@ const hasListFilters = computed(() => !!q.value.trim()
 async function resetTaskFilters() {
   q.value = '';
   sortBy.value = 'created';
-  selectedSources.value = ['tracker', 'grigdesk'];
+  selectedSources.value = ['grigdesk', ...sourceDrivers.value.map((driver) => driver.id)];
   selectedGroup.value = '';
   triageMode.value = 'all';
   favoriteOnly.value = false;
