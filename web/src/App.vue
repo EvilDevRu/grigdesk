@@ -226,7 +226,8 @@ function startWindowSync() {
       callback,
       { flush: 'post' },
     ),
-    reload: () => Promise.allSettled([favorites.load(true), seen.load(true),
+    reload: () => Promise.allSettled([...favorites.external.map((branch) => branch.load(true)),
+      ...seen.external.map((branch) => branch.load(true)), favorites.load(true), seen.load(true),
       favorites.own.load(true), seen.own.load(true)]),
   });
   const stopSync = startTaskWindowSync({
@@ -239,6 +240,27 @@ function startWindowSync() {
     ],
     invalidate: () => refresh.request(),
   });
+  const branchSubscriptions = new Map<object, () => void>();
+  const stopBranches = watch(() => [favorites.external, seen.external], () => {
+    for (const branch of [...favorites.external, ...seen.external]) {
+      if (branchSubscriptions.has(branch)) {
+        continue;
+      }
+
+      branchSubscriptions.set(branch, branch.$onAction(({ name, after }) => {
+        if (name === 'setFavorite' || name === 'markSeen') {
+          after((result: unknown) => {
+            if (result !== false) {
+              const channel = new BroadcastChannel('grigdesk-task-data-v1');
+
+              channel.postMessage({ version: 1, type: 'task-data-changed' });
+              channel.close();
+            }
+          });
+        }
+      }));
+    }
+  }, { immediate: true });
   const stopShelf = surfaceDocument ? sseSubscribe((name) => {
     if (name === 'task-shelf-changed') {
       void shelf.load(true, { silent: true });
@@ -255,11 +277,12 @@ function startWindowSync() {
       }
     }),
     role: surfaceDocument ? 'mirror' : 'source',
-    channel: new BroadcastChannel('grigdesk-board-v1'),
+    channel: new BroadcastChannel('grigdesk-board-v2'),
     snapshot: () => (board.data ? {
       data: JSON.parse(JSON.stringify(board.data)),
       readAt: board.readAt,
       sourceKey: board.sourceKey,
+      epoch: board.sourceEpoch,
     } : null),
     watchLoads: (callback) => board.$onAction(({ name, after }: {
       name: string;
@@ -300,6 +323,8 @@ function startWindowSync() {
     stopToolShelf();
     stopShelfAcknowledge();
     stopSync();
+    stopBranches();
+    branchSubscriptions.forEach((stop) => stop());
     stopShelf();
     stopBoard();
     refresh.dispose();

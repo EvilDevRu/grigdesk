@@ -11,24 +11,89 @@ import type { TrackerCapabilities } from '../../../../shared/trackers/contracts.
 export interface TrackerContext {
   trackerId: string | null;
   revision: number;
+  dataRevision?: number;
 }
 
 export class TrackerFacade {
   private readonly registry: TrackerRegistry;
   private readonly selection: TrackerSettingsStore;
+  private readonly driverId?: string;
+  private readonly onChanged?: () => void | Promise<void>;
 
   constructor(options: {
     registry: TrackerRegistry;
     selection: TrackerSettingsStore;
+    driverId?: string;
+    onChanged?: () => void | Promise<void>;
   }) {
     this.registry = options.registry;
     this.selection = options.selection;
+    this.driverId = options.driverId;
+    this.onChanged = options.onChanged;
   }
 
-  captureContext(): TrackerContext {
-    const { externalId, revision } = this.selection.read();
+  forDriver(id: string): TrackerFacade {
+    return new TrackerFacade({
+      registry: this.registry,
+      selection: this.selection,
+      driverId: id,
+      onChanged: this.onChanged,
+    });
+  }
 
-    return { trackerId: externalId, revision };
+  /**
+   * Адресный фасад никогда не заменяет неизвестную или отключённую цель дефолтом.
+   * Причина отказа указывает человеку именно запрошенный драйвер.
+   */
+  private targetId(): string | null {
+    const selected = this.selection.read();
+    const id = this.driverId ?? selected.default;
+
+    if (this.driverId) {
+      const entry = this.registry.descriptors().find((entry) => entry.id === id);
+
+      if (!entry) {
+        throw new TrackerError('tracker_not_found', `Неизвестный драйвер ${id}`, 404);
+      }
+
+      if (!selected.drivers.includes(this.driverId)) {
+        throw new TrackerError('tracker_disabled', `Драйвер ${entry.name} (${id}) отключён`, 409);
+      }
+    }
+
+    return id;
+  }
+
+  /**
+   * Адресное поколение принадлежит драйверу, прежнее — общему выбору.
+   * Изменение дефолта не инвалидирует уже подготовленную адресную операцию.
+   */
+  captureContext(): TrackerContext {
+    const trackerId = this.targetId();
+    const context = trackerId ? this.registry.context(trackerId) : undefined;
+
+    return {
+      trackerId,
+      revision: this.driverId ? context!.generation : this.selection.read().revision,
+      ...(this.driverId ? { dataRevision: context!.dataRevision } : {}),
+    };
+  }
+
+  /**
+   * Прямой вход карточки подтверждает полный источник без загрузки общей доски.
+   * Проверка после identity не принимает ответ прежнего владельца.
+   */
+  async context() {
+    const context = this.captureContext();
+    const identity = await this.accountIdentity();
+
+    this.assertContext(context);
+
+    return {
+      source: `${context.trackerId}@${trackerAccountScope(identity)}`,
+      generation: context.revision,
+      capabilities: this.capabilities(),
+    };
   }
 
   /**
@@ -46,24 +111,24 @@ export class TrackerFacade {
   }
 
   capabilities(): TrackerCapabilities | undefined {
-    const id = this.selection.read().externalId;
+    const id = this.targetId();
 
     return this.registry.descriptors().find((entry) => entry.id === id)?.capabilities;
   }
 
   isConfigured(): boolean {
-    const id = this.selection.read().externalId;
+    const id = this.targetId();
 
     return !!id && this.registry.activeIds.includes(id)
       && !!this.registry.descriptors().find((entry) => entry.id === id)?.configured;
   }
 
   hasSelection(): boolean {
-    return this.selection.read().externalId !== null;
+    return this.selection.read().drivers.length > 0;
   }
 
   invalidate(): void {
-    this.selection.write(this.selection.read().externalId);
+    this.selection.write(this.selection.read());
   }
 
   /**
@@ -76,7 +141,7 @@ export class TrackerFacade {
     capability?: keyof TrackerCapabilities,
     method?: keyof TaskTracker,
   ): Promise<T> {
-    const { externalId } = this.selection.read();
+    const externalId = this.targetId();
 
     if (!externalId) {
       return Promise.reject(new TrackerError('tracker_unavailable', 'Внешний трекер не настроен'));
@@ -144,41 +209,56 @@ export class TrackerFacade {
    * Старые поля разворачиваются аддитивно, widgets и возможности принадлежат драйверу.
    * Legacy API остаётся адресом внешнего трекера, собственная группа читается отдельно.
    */
-  getDashboard(options: TrackerReadOptions = {}): Promise<Record<string, unknown>> {
+  async getDashboard(options: TrackerReadOptions = {}): Promise<Record<string, unknown>> {
     const context = this.captureContext();
 
-    return this.invoke(async (tracker) => {
-      const snapshot = await tracker.getDashboard(options);
-      let source: string | undefined;
+    try {
+      const result = await this.invoke(async (tracker) => {
+        const snapshot = await tracker.getDashboard(options);
+        let source: string | undefined;
 
-      try {
-        const identity = await tracker.accountIdentity(options);
+        try {
+          const identity = await tracker.accountIdentity(options);
 
-        source = `${tracker.id}@${trackerAccountScope(identity)}`;
-      } catch {
-        // Снимок доступен без identity, но источник для адресных операций неизвестен.
+          source = `${tracker.id}@${trackerAccountScope(identity)}`;
+        } catch {
+          // Снимок доступен без identity, но источник для адресных операций неизвестен.
+        }
+
+        this.assertContext(context);
+
+        const roles = Object.fromEntries(['tasks', 'toReview', 'created', 'accomplice', 'auditor']
+          .filter((key) => Array.isArray(snapshot[key]))
+          .map((key) => [key, (snapshot[key] as TaskData[]).map(({ source: _source, ...task }) => ({
+            ...task,
+            ...(source ? { source } : {}),
+          }))]));
+
+        return {
+          ...snapshot.compatibility,
+          ...snapshot,
+          ...roles,
+          source,
+          trackerId: tracker.id,
+          capabilities: { ...NO_TRACKER_CAPABILITIES, ...tracker.capabilities },
+          widgets: snapshot.widgets,
+          generation: context.revision,
+        };
+      });
+
+      if (context.trackerId && this.registry.reportHealth(context.trackerId)) {
+        await this.onChanged?.();
       }
 
-      this.assertContext(context);
+      return result;
+    } catch (error) {
+      if (context.trackerId && this.registry.reportHealth(context.trackerId,
+        'Драйвер временно недоступен')) {
+        await this.onChanged?.();
+      }
 
-      const roles = Object.fromEntries(['tasks', 'toReview', 'created', 'accomplice', 'auditor']
-        .filter((key) => Array.isArray(snapshot[key]))
-        .map((key) => [key, (snapshot[key] as TaskData[]).map(({ source: _source, ...task }) => ({
-          ...task,
-          ...(source ? { source } : {}),
-        }))]));
-
-      return {
-        ...snapshot.compatibility,
-        ...snapshot,
-        ...roles,
-        source,
-        trackerId: tracker.id,
-        capabilities: { ...NO_TRACKER_CAPABILITIES, ...tracker.capabilities },
-        widgets: snapshot.widgets,
-        generation: context.revision,
-      };
-    });
+      throw error;
+    }
   }
 
   taskDetail(id: unknown, options: TrackerReadOptions = {}): Promise<unknown> {
@@ -263,10 +343,15 @@ export class TrackerFacade {
    * Own получает unknown и сохраняет прежний отказ безопасной выдачи номера.
    */
   async probeTaskNumber(id: string) {
-    try {
-      return await this.invoke((tracker) => tracker.probeTaskNumber(id));
-    } catch {
-      return 'unknown' as const;
-    }
+    const ids = this.driverId ? [this.driverId] : this.selection.read().drivers;
+    const results = await Promise.all(ids.map(async (driverId) => {
+      try {
+        return await this.forDriver(driverId).invoke((tracker) => tracker.probeTaskNumber(id));
+      } catch {
+        return 'unknown' as const;
+      }
+    }));
+
+    return results.includes('exists') ? 'exists' : results.includes('unknown') ? 'unknown' : 'absent';
   }
 }

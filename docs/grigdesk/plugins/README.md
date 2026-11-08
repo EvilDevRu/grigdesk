@@ -22,8 +22,9 @@ Tripo остаются в ядре; библиотека, заказы, прос
 
 ## Устройство
 
+- [Ветка единственного стенда: выбор, команды запуска, возврат на dev, журнал и защита агентов](code-branch-runtime.md)
 - [Официальные пакеты: скрытие общих предупреждений при сохранении проверок и подтверждения](official-install-notices.md)
-- [Git в фоне: завершение после закрытия панели, общие тосты и свежий tracking](code-git-notifications.md)
+- [Git в фоне: fast-forward, fetch, завершение после закрытия панели и свежий tracking](code-git-notifications.md)
 - [Read-only diff: исходные координаты, Worker, отложенный resize, настройки и навигация блоков](code-diff-view.md)
 - [Проверка Git-изменений: fingerprints, частичный индекс, scoped actions и ignore](code-review.md)
 - [Ресурсы фонового плагина во всплывашке исполнителя: JSON, переводы и отмена](server-provider-resources.md)

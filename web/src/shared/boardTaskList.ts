@@ -61,7 +61,8 @@ export function matchesBoardTask(task: BoardTask, query: unknown): boolean {
 }
 
 function triageRow(analysisByTask: AnalysisByTask, task: BoardTask) {
-  return analysisByTask?.[task.id] || analysisByTask?.[String(task.id)] || null;
+  return analysisByTask?.[taskReferenceKey(task)] || analysisByTask?.[task.id]
+    || analysisByTask?.[String(task.id)] || null;
 }
 
 /**
@@ -126,7 +127,9 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
     list = list.filter((task) => {
       const personal = task.personalSource || (task.source === 'grigdesk' ? 'grigdesk' : 'tracker');
 
-      return sources.includes(personal) || (isTaskSourceId(task.source) && sources.includes(task.source));
+      return sources.includes(personal) || (isTaskSourceId(task.source) && sources.includes(task.source))
+        || (isTaskSourceId(task.source) && sources.includes(task.source.split('@')[0]!))
+        || (typeof task.driverId === 'string' && sources.includes(task.driverId));
     });
   }
   if (group) {

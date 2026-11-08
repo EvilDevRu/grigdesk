@@ -73,6 +73,9 @@ declare module 'fastify' {
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
     projects?: ProjectsService;
+    // Смена checkout и агент взаимно исключаются только в затронутой рабочей папке.
+    codeBranchBusy?(root: string): Promise<boolean>;
+    codeAgentsBusy?(root: string): Promise<boolean>;
     // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.
     shutdown?: ShutdownCoordinator;
   }

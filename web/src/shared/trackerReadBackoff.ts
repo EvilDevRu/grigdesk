@@ -21,7 +21,7 @@ export function trackerReadRoute(path: string): string | null {
   const route = path.split(/[?#]/u, 1)[0] ?? '';
 
   return route.startsWith('/api/tracker/')
-    ? route.replace(/^(\/api\/tracker\/task)\/[^/]+/u, '$1/:id') : null;
+    ? route.replace(/^(\/api\/tracker\/(?:[^/]+\/)?task)\/[^/]+/u, '$1/:id') : null;
 }
 
 /**

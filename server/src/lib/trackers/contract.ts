@@ -15,6 +15,7 @@ export type ChecklistItemInput = { title: string; parentId?: string };
 export type ChecklistItemUpdate = { title?: string; complete?: boolean };
 
 export interface DriverManifest {
+  logo?: string;
   id: string;
   name: string;
   version: string;

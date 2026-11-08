@@ -44,6 +44,8 @@ function publicError(reply: FastifyReply, error: unknown): unknown {
   });
 }
 
+type FavoriteRequest = { Params: { taskId: string; driverId?: string } };
+
 async function taskFavoritesModule(
   fastify: FastifyInstance,
   opts: { favorites: TaskFavoritesService },
@@ -51,9 +53,9 @@ async function taskFavoritesModule(
   const { favorites } = opts;
 
   const run = (
-    operation: (request: FastifyRequest<{ Params: { taskId: string } }>) => Promise<unknown>,
+    operation: (request: FastifyRequest<FavoriteRequest>) => Promise<unknown>,
   ) => async (
-    request: FastifyRequest<{ Params: { taskId: string } }>,
+    request: FastifyRequest<FavoriteRequest>,
     reply: FastifyReply,
   ) => {
     reply.header('Cache-Control', 'no-store');
@@ -67,20 +69,27 @@ async function taskFavoritesModule(
 
 
 
-  fastify.get<{ Params: { taskId: string } }>('/api/tracker/task-favorites', (request, reply) =>
-    withTrackerRequestRead(request, reply, (options) =>
-      run(() => favorites.list(options))(request, reply)));
-  fastify.put('/api/tracker/task-favorites/:taskId', run((request) => {
-    const taskId = normalizeFavoriteTaskId(request.params.taskId);
+  for (const prefix of ['/api/tracker', '/api/tracker/:driverId']) {
+    fastify.get<FavoriteRequest>(`${prefix}/task-favorites`, (request, reply) =>
+      withTrackerRequestRead(request, reply, (options) =>
+        run(() => favorites.list(options, {
+          driverId: (request.params as { driverId?: string }).driverId,
+        }))(request, reply)));
+    fastify.put(`${prefix}/task-favorites/:taskId`, run((request) => {
+      const taskId = normalizeFavoriteTaskId(request.params.taskId);
 
-    return favorites.add(taskId, trackerPersonalRequestOptions(request.headers));
-  }));
-  fastify.delete('/api/tracker/task-favorites/:taskId', run((request) => {
-    const taskId = normalizeFavoriteTaskId(request.params.taskId);
+      return favorites.add(taskId, trackerPersonalRequestOptions(request.headers,
+        (request.params as { driverId?: string }).driverId));
+    }));
+    fastify.delete(`${prefix}/task-favorites/:taskId`, run((request) => {
+      const taskId = normalizeFavoriteTaskId(request.params.taskId);
 
-    return favorites.remove(taskId, trackerPersonalRequestOptions(request.headers));
-  }));
-  fastify.get<{ Params: { taskId: string } }>('/api/grigdesk-tasks/task-favorites', (request, reply) =>
+      return favorites.remove(taskId, trackerPersonalRequestOptions(request.headers,
+        (request.params as { driverId?: string }).driverId));
+    }));
+  }
+
+  fastify.get<FavoriteRequest>('/api/grigdesk-tasks/task-favorites', (request, reply) =>
     withTrackerRequestRead(request, reply, (options) =>
       run(() => favorites.list(options, { source: 'grigdesk' }))(request, reply)));
   fastify.put('/api/grigdesk-tasks/task-favorites/:taskId', run((request) => {

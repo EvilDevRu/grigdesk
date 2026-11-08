@@ -103,6 +103,9 @@
       "id": "board",
       "state": {
         "data": null,
+        "branches": {},
+        "branchEpochs": {},
+        "suspendedIds": [],
         "loading": false,
         "error": null,
         "loadedAt": 0,

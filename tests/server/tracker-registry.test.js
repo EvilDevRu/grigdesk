@@ -11,7 +11,7 @@ const pair = async (config) => {
   await writeTracker(config, 'fixture-b');
 };
 
-test('TRACKER-REGISTRY-01: own постоянно активен, доска выбирает один внешний', async (t) => {
+test('TRACKER-REGISTRY-01: own постоянно активен, прежний выбор B сохраняет включённый A', async (t) => {
   const fixture = await trackerFixture(t, { setup: pair });
   const initial = await fixture.request('GET', '/api/trackers');
 
@@ -27,7 +27,7 @@ test('TRACKER-REGISTRY-01: own постоянно активен, доска в�
 
   const selected = (await fixture.request('GET', '/api/trackers')).json();
 
-  assert.deepEqual([...selected.activeIds].sort(), ['fixture-b', 'own']);
+  assert.deepEqual([...selected.activeIds].sort(), ['fixture-a', 'fixture-b', 'own']);
   assert.equal(selected.externalId, 'fixture-b');
 });
 

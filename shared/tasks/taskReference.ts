@@ -60,8 +60,13 @@ export function formatTaskReference(value: TaskReference): string {
  * Сериализует пару источника и номера для кешей и проекций интерфейса.
  * Неизвестный источник остаётся отдельным значением и не совпадает с подтверждённым.
  */
-export function taskReferenceKey(value: { id: string | number; source?: unknown }): string {
-  return JSON.stringify([isTaskSourceId(value.source) ? value.source : null, String(value.id)]);
+export function taskReferenceKey(value: {
+  id: string | number;
+  source?: unknown;
+  driverId?: unknown;
+}): string {
+  return JSON.stringify([isTaskSourceId(value.source) ? value.source
+    : typeof value.driverId === 'string' ? `driver:${value.driverId}` : null, String(value.id)]);
 }
 
 /**

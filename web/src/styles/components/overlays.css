@@ -310,8 +310,8 @@
   padding-top: 24px;
 }
 
-/* Настройки драйверов используют каталог рядом с редактором и постоянные действия.
-   На узком экране общий полноэкранный диалог вмещает мобильный выбор драйвера. */
+/* Смена драйвера, режима входа и результата проверки не двигает шапку и действия.
+   Длинные формы прокручиваются в теле; на телефоне действует полноэкранная оболочка. */
 .ui-dialog-overlay .ui-dialog[data-role='tracker-settings'] {
   width: min(980px, calc(100vw - 40px));
 }
@@ -329,6 +329,11 @@
    На телефоне его размеры заменяет общая полноэкранная оболочка ниже. */
 .ui-dialog-overlay .ui-dialog[data-role='tracker-install'] {
   width: min(640px, calc(100vw - 40px));
+}
+
+.ui-dialog-overlay .ui-dialog[data-role='tracker-settings'],
+.ui-dialog-overlay .ui-dialog[data-role='tracker-install'] {
+  height: min(780px, calc(var(--app-viewport-height, 100dvh) - 40px));
 }
 
 .ui-dialog[data-role='tracker-install'] .ui-dialog__title {

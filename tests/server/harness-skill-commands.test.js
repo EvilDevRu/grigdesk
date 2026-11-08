@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +9,9 @@ import { readHarnessSkillCommands } from '../../server/src/lib/deepseek/skillCom
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
+
+const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
+const { parse } = requireFromServer('yaml');
 
 /**
  * Изолирует каталог пользователя от навыков машины и приватных homes разговоров.
@@ -82,6 +86,34 @@ test('Harness соблюдает user-invocable и строгую граммат
 
   assert.deepEqual(commands.map((command) => command.cmd), ['/explicit-only', '/human']);
   assert.deepEqual(await readHarnessSkillCommands({ home: path.join(f.home, 'missing') }), []);
+});
+
+test('Источник grigdesk-connect-project распознаётся меню без запуска сервера', async (t) => {
+  const f = await fixture(t);
+  const source = new URL('../../tools/skills/grigdesk-connect-project/SKILL.md', import.meta.url);
+  const text = await fs.readFile(source, 'utf8');
+  const header = text.match(/^---\n([\s\S]*?)\n---\n/);
+
+  assert.ok(header, 'Нужен YAML frontmatter');
+
+  const metadata = parse(header[1]);
+
+  assert.equal(metadata.name, 'grigdesk-connect-project');
+  assert.equal(typeof metadata.description, 'string');
+  assert.match(metadata.description, /^[А-ЯЁ][^.?!\n]+\.$/u);
+  assert.ok(metadata.description.length <= 120, 'Описание должно помещаться в меню без обрезки');
+
+  const bundle = path.join(f.skills, 'grigdesk-connect-project');
+
+  await fs.mkdir(bundle);
+  await fs.copyFile(source, path.join(bundle, 'SKILL.md'));
+
+  assert.deepEqual(await readHarnessSkillCommands({ home: f.home }), [{
+    cmd: '/grigdesk-connect-project',
+    desc: metadata.description.replace(/\s+/g, ' ').trim(),
+    run: 'prompt',
+    kind: 'skill',
+  }]);
 });
 
 test('GLM и DeepSeek читают общий home, обновляют каталог и не берут проектные навыки', async (t) => {

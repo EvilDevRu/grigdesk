@@ -9,6 +9,7 @@ import { parseTrackerTaskId } from './trackers/taskId.ts';
 export const GRIGDESK_PERSONAL_SCOPE = 'grigdesk';
 
 export interface PersonalIdentitySource {
+  forDriver?(id: string): PersonalIdentitySource;
   accountIdentity(options?: TrackerReadOptions): Promise<TrackerIdentity | null>;
   captureContext?(): TrackerContext;
   assertContext?(context: TrackerContext | number): void;
@@ -16,6 +17,7 @@ export interface PersonalIdentitySource {
 
 export interface PersonalScopeOptions {
   source?: TaskPersonalSource;
+  driverId?: string;
   generation?: number;
 }
 
@@ -35,6 +37,8 @@ export async function resolvePersonalScope(
   if (options.source === 'grigdesk') {
     return GRIGDESK_PERSONAL_SCOPE;
   }
+
+  tracker = options.driverId ? tracker.forDriver!(options.driverId) : tracker;
 
   const context = tracker.captureContext?.();
 
@@ -85,6 +89,8 @@ export async function validateOwnPersonalTasks(
  * Смена трекера не позволяет старой мутации записать метку в уже покинутую доску.
  */
 export function personalWriteGuard(tracker: PersonalIdentitySource, options: PersonalScopeOptions) {
+  tracker = options.driverId ? tracker.forDriver!(options.driverId) : tracker;
+
   const context = options.source === 'grigdesk' ? undefined : tracker.captureContext?.();
 
   return () => {
@@ -98,12 +104,20 @@ export function personalWriteGuard(tracker: PersonalIdentitySource, options: Per
  * Заголовок поколения ограничивает новую внешнюю мутацию текущим подключением.
  * Own-обработчики выбирают своё пространство константой и этот parser не вызывают.
  */
-export function trackerPersonalRequestOptions(headers: Record<string, unknown>): PersonalScopeOptions {
+export function trackerPersonalRequestOptions(
+  headers: Record<string, unknown>,
+  driverId?: string,
+): PersonalScopeOptions {
   const generation = headers['x-grigdesk-tracker-generation'];
 
-  if (generation !== undefined && (typeof generation !== 'string' || !/^\d+$/.test(generation))) {
+  if (generation !== undefined && (typeof generation !== 'string' || !/^\d+$/.test(generation)
+    || !Number.isSafeInteger(Number(generation)))) {
     throw new TrackerError('tracker_context_changed', 'Некорректное поколение трекера', 409);
   }
 
-  return { source: 'tracker', ...(generation !== undefined ? { generation: Number(generation) } : {}) };
+  return {
+    source: 'tracker',
+    driverId,
+    ...(generation !== undefined ? { generation: Number(generation) } : {}),
+  };
 }
