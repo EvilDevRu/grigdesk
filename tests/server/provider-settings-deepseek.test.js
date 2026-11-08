@@ -289,7 +289,10 @@ test('DSH web CLI получает новый leaf до prompt и resume пос�
   const bin = path.join(root, 'dsh');
   const scenarioFile = path.join(root, 'scenario.json');
   const trace = path.join(root, 'trace.jsonl');
-  const info = { ...runtimeInfoFixture(), journal: { write: 3, read: [0, 1, 2, 3] } };
+  const info = {
+    ...runtimeInfoFixture({ toolPermissions: true }),
+    journal: { write: 3, read: [0, 1, 2, 3] },
+  };
   const fixture = new URL('../fixtures/deepseek-harness/fakeWeb.mjs', import.meta.url).pathname;
   const quote = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 

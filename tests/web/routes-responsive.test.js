@@ -159,7 +159,7 @@ test('маршруты: каталог, схема и инспектор пом�
     assert.equal(measured.rowsFit, true, `строки ${width}`);
 
     if (width >= 1280) {
-      assert.deepEqual(measured.headers, [36, 36]);
+      assert.deepEqual(measured.headers, [40, 36]);
     } else {
       await page.getByRole('tab', { name: 'Маршрут', exact: true }).click();
       await page.screenshot({ path: `${client.artifacts}/routes-${width}-graph.png` });

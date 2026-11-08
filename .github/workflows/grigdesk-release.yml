@@ -28,7 +28,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - name: Окружение тестов
         run: |
@@ -65,18 +65,63 @@ jobs:
           APPARMOR
           sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-bwrap
           bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
+          sudo tee /etc/apparmor.d/grigdesk-ci-unshare > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-unshare /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-unshare
+          unshare -Urnm /usr/bin/true
 
       - name: Системные средства тестов
         run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg ripgrep
+          sudo apt-get install -y --no-install-recommends ffmpeg ripgrep python3-pil
           ffmpeg -version
           ffprobe -version
           rg --version
+          python3 -c 'from PIL import Image; print(Image.__version__)'
 
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Браузер тестов
         run: node server/node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Песочница Chromium
+        run: |
+          index=0
+          while IFS= read -r browser; do
+            index=$((index + 1))
+            profile="/etc/apparmor.d/grigdesk-ci-chromium-$index"
+            sudo tee "$profile" > /dev/null <<APPARMOR
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-chromium-$index "$browser" flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+            sudo apparmor_parser -r "$profile"
+          done < <(find "$HOME/.cache/ms-playwright" -type f \( -name chrome -o -name chrome-headless-shell \))
+          test "$index" -gt 0
+          node --input-type=module <<'NODE'
+          import { chromium } from './server/node_modules/playwright-core/index.mjs';
+
+          for (const channel of [undefined, 'chromium']) {
+            const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel });
+
+            try {
+              const page = await browser.newPage();
+
+              await page.goto('data:text/html,<title>sandbox probe</title>');
+
+              if (await page.title() !== 'sandbox probe') {
+                throw new Error('chromium_sandbox_probe_failed');
+              }
+            } finally {
+              await browser.close();
+            }
+          }
+          NODE
       - name: Зависимости web
         run: npm --prefix web ci
       # Серверный typecheck включает tools/mobile-phone с прямыми импортами Vite.

@@ -6,21 +6,19 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { shellContractBrowser } from './helpers/shell-contract-browser.js';
+import { subscribedSseNames } from './helpers/sseSubscriptions.js';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { api } from '../../web/src/shared/apiClient.ts';
 
 const { useProvidersStore } = await loadProductModule('src/stores/providers.ts');
 
-const SSE_PATH = new URL('../../web/src/composables/useSse.ts', import.meta.url);
 const SHELL_PATH = new URL('../../web/src/shared/layout/AppShell.vue', import.meta.url);
 
 test('providers-usage входит в единственную SSE-подписку вкладки и обрабатывается шапкой', async () => {
-  const [sse, shell] = await Promise.all([readFile(SSE_PATH, 'utf8'), readFile(SHELL_PATH, 'utf8')]);
-  const list = sse.match(/const EVENT_NAMES = \[([\s\S]*?)\](?: as const)?;/);
+  const shell = await readFile(SHELL_PATH, 'utf8');
 
-  assert.ok(list, 'список EVENT_NAMES не найден');
-  assert.ok([...list[1].matchAll(/'([a-z-]+)'/g)].some((match) => match[1] === 'providers-usage'));
+  assert.ok((await subscribedSseNames()).has('providers-usage'));
   assert.match(shell, /name === 'providers-usage'/u);
   assert.match(shell, /prov\.applyUsage\(/u);
 });

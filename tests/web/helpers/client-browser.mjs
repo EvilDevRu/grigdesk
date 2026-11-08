@@ -76,8 +76,14 @@ export async function clientBrowser(t, options = {}) {
           if (url.pathname === '/api/events') {
             res.setHeader('Content-Type', 'text/event-stream');
             res.write('event: hello\ndata: {"boot":"fixture"}\n\n');
+
+            const heartbeat = setInterval(() => res.write(': ping\n\n'), 15_000);
+
             pending.add(res);
-            res.on('close', () => pending.delete(res));
+            res.on('close', () => {
+              clearInterval(heartbeat);
+              pending.delete(res);
+            });
 
             return;
           }
@@ -155,7 +161,11 @@ export async function clientBrowser(t, options = {}) {
           }
 
           req.resume();
-          res.end(JSON.stringify(options.responses?.[url.pathname] || chatRoutes[url.pathname]
+
+          const key = url.pathname + url.search;
+
+          res.end(JSON.stringify(options.responses?.[key] || options.responses?.[url.pathname]
+            || chatRoutes[key] || chatRoutes[url.pathname]
             || responses[url.pathname]
             || (url.pathname.startsWith("/api/tracker/task-seen/")
               ? responses["/api/tracker/task-seen"] : {})));
@@ -185,6 +195,20 @@ export async function clientBrowser(t, options = {}) {
     headless: true,
     args: ['--no-sandbox', '--disable-features=LocalNetworkAccessChecks'],
   });
+
+  // Фикстуры по умолчанию русские, явная locale сохраняет проверки системного выбора языка.
+  // Холодный граф Vite имеет собственный бюджет, отдельный от ожидания элемента.
+  for (const method of ['newContext', 'newPage']) {
+    const create = browser[method].bind(browser);
+
+    browser[method] = async (input) => {
+      const result = await create({ locale: 'ru-RU', ...input });
+
+      result.setDefaultNavigationTimeout(60_000);
+
+      return result;
+    };
+  }
 
   t.after(async () => {
     await browser.close();

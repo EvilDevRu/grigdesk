@@ -15,7 +15,7 @@ export const useChatStore = defineStore('loading-fixture-chat', {
         loadError: null,
         loadErrorMessage: null,
         activeId: 'fixture-chat',
-        openedChatIds: [],
+        openedChatIds: ['fixture-chat'],
         revealRequest: '',
         archived: [],
         compactWindow: 0,

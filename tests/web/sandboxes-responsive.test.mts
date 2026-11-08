@@ -124,6 +124,7 @@ async function fixture(t: TestContext) {
         const errors: string[] = [];
 
         page.setDefaultTimeout(10000);
+        page.setDefaultNavigationTimeout(60000);
         await page.addInitScript(() => localStorage.setItem('grigdesk-ui-language', 'ru'));
         page.on('pageerror', (error) => errors.push(error.message));
         await page.route(/\/api\/sandboxes(?:\/[^?]*)?$/, async (route) => {

@@ -77,6 +77,13 @@ test('PHONE-17: RU/EN, узкий touch и единственная SSE', { time
           assert.equal(sse, 1, 'Основной UI должен открыть единственный SSE до диалога');
 
           const caption = locale === 'ru' ? 'Подключить телефон' : /Connect (a |your )?phone/i;
+
+          if (width <= 600) {
+            await page.locator('.phone-nav').getByRole('button', {
+              name: locale === 'ru' ? 'Разделы' : 'Sections', exact: true,
+            }).click();
+          }
+
           const button = page.getByRole('button', { name: caption }).first();
 
           assert.equal(await button.count(), 1, 'В настоящем AppShell отсутствует действие телефона');

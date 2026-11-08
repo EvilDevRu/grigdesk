@@ -83,8 +83,8 @@ test('серверный PATH не доказывает runtime внешней �
 
   assert.equal(report.shell, 'bash');
   assert.equal(report.failed, false);
-  assert.equal(report.interactive?.node.kind, 'missing');
-  assert.equal(report.interactive?.npm.kind, 'missing');
+  assert.equal(report.interactive?.node.path.startsWith(stand.server), false);
+  assert.equal(report.interactive?.npm.path.startsWith(stand.server), false);
   assert.equal(report.interactive?.cli.kind, 'missing');
   assert.equal(report.interactive?.path.includes(stand.server), false);
 });

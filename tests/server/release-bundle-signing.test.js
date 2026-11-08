@@ -64,6 +64,7 @@ const baseOptions = (root, builders, sign) => {
   return ({
   root,
   builders,
+  env: { PATH: process.env.PATH },
   readSourceState: async () => {
     return ({
       commit: 'f'.repeat(40),

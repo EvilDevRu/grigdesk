@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 import { build } from '../../../web/node_modules/esbuild/lib/main.js';
@@ -21,7 +22,8 @@ import { png } from '../../helpers/pluginV1.js';
 import { startFakeTripo } from './fakeTripo.js';
 import { makeGlb } from './studio3dGlb.js';
 
-const artifactRoot = '/home/evildev/.grigdesk/artifacts/studio3d-extraction';
+const artifactRoot = path.join(process.env.GRIGDESK_ARTIFACTS_DIR
+  ?? path.join(os.homedir(), '.grigdesk/artifacts'), 'studio3d-extraction');
 const developmentDir = process.env.STUDIO3D_DEVELOPMENT_DIR;
 const providerStack = [];
 let providerBaseline;

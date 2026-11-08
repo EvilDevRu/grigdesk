@@ -120,9 +120,9 @@ function baseInput(packageDir, target, cacheDir) {
   };
 }
 
-test('SEA-BS-01: runtime закреплён и совпадает у b24, relay и server', async () => {
+test('SEA-BS-01: runtime закреплён и совпадает у tracker, relay и server', async () => {
   const server = JSON.parse(await readFile(path.join(ROOT, 'server/build/node-runtime.json'), 'utf8'));
-  const b24 = JSON.parse(await readFile(path.join(ROOT, 'b24/build/node-runtime.json'), 'utf8'));
+  const tracker = JSON.parse(await readFile(path.join(ROOT, 'tracker/build/node-runtime.json'), 'utf8'));
   const relay = JSON.parse(await readFile(path.join(ROOT, 'relay/build/node-runtime.json'), 'utf8'));
 
   assert.deepEqual(server, {
@@ -130,7 +130,7 @@ test('SEA-BS-01: runtime закреплён и совпадает у b24, relay 
     platform: 'linux-x64',
     sha256: 'fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6',
   });
-  assert.deepEqual(server, b24);
+  assert.deepEqual(server, tracker);
   assert.deepEqual(server, relay);
   assert.equal(nodeArchive(server).name, 'node-v24.21.0-linux-x64.tar.xz');
 });

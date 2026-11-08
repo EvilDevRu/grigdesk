@@ -16,10 +16,10 @@ test('LB-07 раздел 3D сохраняет параллельность об
   const server = JSON.parse(await fs.readFile(path.join(projectRoot, 'server/package.json'), 'utf8'));
   const web = JSON.parse(await fs.readFile(path.join(projectRoot, 'web/package.json'), 'utf8'));
 
-  assert.match(server.scripts.test, /NODE_TEST_MAX_RSS_MB=6144\b/);
-  assert.match(server.scripts.test, /--test-concurrency=6\b/);
-  assert.match(web.scripts['test:components'], /NODE_TEST_MAX_RSS_MB=6144\b/);
-  assert.match(web.scripts['test:components'], /--test-concurrency=4\b/);
+  assert.match(server.scripts.test, /NODE_TEST_MAX_RSS_MB=4096\b/);
+  assert.match(server.scripts.test, /--test-concurrency=2\b/);
+  assert.match(web.scripts['test:components'], /NODE_TEST_MAX_RSS_MB=4096\b/);
+  assert.match(web.scripts['test:components'], /--test-concurrency=2\b/);
 });
 
 test('LB-01 библиотека по умолчанию находится в dataHome/3d, env выбирает другой путь', async () => {
