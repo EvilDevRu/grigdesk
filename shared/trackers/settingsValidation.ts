@@ -33,11 +33,13 @@ export function isTrackerTokenField(field: TrackerSettingsField): boolean {
 }
 
 /**
- * Допускает непрозрачный токен переменной длины в алфавите b64token из RFC 6750.
- * Пустой ввод сохраняет прежний секрет; пароль похожего формата проверяется через testAuth.
+ * Непрозрачный токен не ограничивается алфавитом Bearer: транспорт задаёт драйвер.
+ * Отсекаются ошибки вставки; подлинность проверяет testAuth, пустой ввод сохраняет секрет.
  */
 export function isTrackerTokenInput(value: string): boolean {
-  return value === '' || (value.trim() === value && /^[A-Za-z0-9._~+/-]+=*$/u.test(value));
+  return value === '' || (!/[\s\p{C}]/u.test(value)
+    && !/^["']|["']$/u.test(value)
+    && !/^[a-z][a-z\d+.-]*:\/\//iu.test(value));
 }
 
 /**

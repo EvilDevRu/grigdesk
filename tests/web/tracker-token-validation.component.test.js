@@ -48,6 +48,30 @@ test('Ошибка формата видна у токена, блокирует
   assert.equal(actionButton(card.wrapper, /^Сохранить$/u).element.disabled, false);
 });
 
+test('Непрозрачный токен с внутренним = проходит проверку и сохранение без изменений', async (t) => {
+  const card = await mountTrackerBoard(t, {
+    catalog: tokenCatalog(),
+    handlers: {
+      post: async (url) => url === '/api/trackers/test-connection' ? { ok: true } : undefined,
+    },
+  });
+  const value = 'ATATTopaque==segment:fixture!';
+
+  await openTrackerSettings(card);
+  await card.wrapper.findAll('input[type="password"]')[0].setValue(value);
+
+  assert.equal(card.wrapper.findAll('input[type="password"]')[0].attributes('aria-invalid'), undefined);
+  assert.equal(card.wrapper.get('[data-role="tracker-test-connection"]').element.disabled, false);
+  await card.wrapper.get('[data-role="tracker-test-connection"]').trigger('click');
+  await card.flushPromises();
+  assert.equal(card.apiCalls.find((call) => call.url === '/api/trackers/test-connection')
+    .payload.settings.accessToken, value);
+  await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.apiCalls.find((call) => call.url === '/api/trackers/settings' && call.method === 'POST')
+    .payload.settings['grigdesk-b24'].accessToken, value);
+});
+
 test('Отказ подлинности отмечает поле и сохраняет введённый черновик', async (t) => {
   const card = await mountTrackerBoard(t, {
     catalog: tokenCatalog(),
