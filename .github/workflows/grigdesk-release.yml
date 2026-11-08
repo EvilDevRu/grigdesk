@@ -489,13 +489,32 @@ jobs:
           npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm --prefix desktop ci
+      - name: Закреплённый Electron
+        run: |
+          sudo apt-get install -y --no-install-recommends unzip
+          version="$(node -p "require('./desktop/package.json').devDependencies.electron")"
+          archive="electron-v$version-linux-x64.zip"
+          target="$RUNNER_TEMP/electron-runtime"
+          mkdir -p "$target"
           for attempt in 1 2 3; do
-            if npm --prefix desktop ci; then
+            if gh release download "v$version" --repo electron/electron --pattern "$archive" \
+              --pattern SHASUMS256.txt --dir "$target" --clobber; then
               break
             fi
             test "$attempt" -lt 3 || exit 1
             sleep 5
           done
+          test -s "$target/$archive"
+          (cd "$target" && sha256sum --check --strict --ignore-missing SHASUMS256.txt)
+          unzip -q "$target/$archive" -d desktop/node_modules/electron/dist
+          test "$(cat desktop/node_modules/electron/dist/version)" = "$version"
+          if test -f desktop/node_modules/electron/dist/electron.d.ts; then
+            mv desktop/node_modules/electron/dist/electron.d.ts desktop/node_modules/electron/electron.d.ts
+          fi
+          printf '%s' electron > desktop/node_modules/electron/path.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Закреплённые инструменты AppImage
         run: |
           sudo apt-get install -y --no-install-recommends p7zip-full
