@@ -79,7 +79,7 @@
 - [Сквозные фикстуры чата: завершение SSE, ожидание состояния и закрытие окна до сервера](window-store-fixture-close.md)
 - [Версия шапки фикстуры фиксируется до нормализации store](chat-fixture-head-version.md)
 - [Фикстуры App: каталог чатов, cursor истории, ACK окна, metadata трекера и личные ветки](chat-catalog-fixtures.md)
-- [Очистка фикстуры: область hooks, закрытие сервера до удаления каталога](node-test-hook-cleanup.md)
+- [Очистка фикстуры: область hooks, общая история, закрытие сервера и dispose writer](node-test-hook-cleanup.md)
 - [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
 - [Тест ждёт сигнал HTTP-фикстуры после отказа исходного хода](async-fixture-producer-failure.md)
 - [Намеренное удержание хода расходует общий срок тестовой фикстуры](fixture-held-turn-deadline.md)

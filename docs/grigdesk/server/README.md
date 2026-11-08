@@ -21,7 +21,7 @@
 - [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
 - [Release workflow: параллельные server/web, строгие outcome-ворота, sandbox и упаковка](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, сверка Git-дерева и свежая упаковка](release-validation-reuse.md)
-- [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
+- [Фоновый реестр исполнителей: бюджет 1,2 с, общий сбор, явные wait и refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
 - [Терминальное меню CLI: язык, прогресс, TERM=dumb, журналы и прерывание](cli-terminal-menu.md)
