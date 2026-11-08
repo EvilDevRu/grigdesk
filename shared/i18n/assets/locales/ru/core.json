@@ -1575,5 +1575,10 @@
   "chatHistoryOlderFailed": "Не загрузились старые сообщения",
   "chatHistoryBaseFailed": "Не обновилась база истории",
   "chatHistoryChanged": "Окно чата уже изменилось",
-  "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна"
+  "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна",
+  "routeUpdateTitle": "Изменить адрес",
+  "routeUpdateHint": "Обновление маршрута сохраняет ключ и доверие к выбранной машине.",
+  "routeUpdateQr": "Обновить маршрут по QR или строке",
+  "routeUpdateDirect": "Изменить прямой адрес",
+  "routeUpdateConfirm": "Обновить маршрут"
 }

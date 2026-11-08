@@ -1555,5 +1555,10 @@
   "chatHistoryOlderFailed": "Could not load older messages",
   "chatHistoryBaseFailed": "Could not refresh the history base",
   "chatHistoryChanged": "The chat window has changed",
-  "chatHistoryWindowAckMissing": "The server did not confirm the history window base"
+  "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
+  "routeUpdateTitle": "Change address",
+  "routeUpdateHint": "Updating the route preserves the key and trust of the selected machine.",
+  "routeUpdateQr": "Update route using QR or text",
+  "routeUpdateDirect": "Change direct address",
+  "routeUpdateConfirm": "Update route"
 }

@@ -268,7 +268,7 @@ export const usePhoneAccessStore = defineStore('phoneAccess', () => {
    * Открытие явно выпускает код только при готовом пути выбранного сервера.
    * Выключенный вход сначала показывает управляемое включение, без пустого POST.
    */
-  async function start(): Promise<void> {
+  async function start(selection: { relayId?: string } = {}): Promise<void> {
     close();
     open.value = true;
     busy.value = true;
@@ -281,7 +281,7 @@ export const usePhoneAccessStore = defineStore('phoneAccess', () => {
 
       if (current(epoch) && (status.value?.direct.state === 'online'
         || status.value?.relays.some(phoneRelayReady))) {
-        await issue();
+        await issue(selection);
       }
     } catch (cause) {
       if (current(epoch)) {

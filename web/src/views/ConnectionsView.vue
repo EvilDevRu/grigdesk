@@ -79,6 +79,8 @@
                           :current="menuProfile?.id === shell.profile?.id"
                           :disconnected="disconnected" @update:open="closeMenu" @action="menuAction" />
     <AddMachineDialog v-model:open="adding" />
+    <UpdateRoutesDialog v-if="routeProfile" :open="true" :profile="routeProfile"
+                        @update:open="routeProfile = $event ? routeProfile : null" />
   </main>
 </template>
 
@@ -93,6 +95,7 @@ import {
 } from '../../../shared/client/clientShell.ts';
 import { useShellStore } from '../stores/shell.ts';
 import { failureText } from '../shared/apiClient.ts';
+import UpdateRoutesDialog from '../shared/layout/UpdateRoutesDialog.vue';
 import AddMachineDialog from '../shared/layout/AddMachineDialog.vue';
 import MachineActionsDialog from '../shared/layout/MachineActionsDialog.vue';
 import MachineConnection from '../shared/layout/MachineConnection.vue';
@@ -103,6 +106,7 @@ const adding = ref(false);
 const busy = ref(false);
 const listRequested = ref(false);
 const menuProfile = ref<MachineProfile | null>(null);
+const routeProfile = ref<MachineProfile | null>(null);
 const error = ref<UiText>('');
 let actionProfile: MachineProfile | null = null;
 
@@ -128,6 +132,7 @@ const versionHint = computed(() => {
 watch(() => shell.profile?.id, () => {
   listRequested.value = false;
   menuProfile.value = null;
+  routeProfile.value = null;
 });
 
 function back(): void {
@@ -225,6 +230,12 @@ async function menuAction(action: string): Promise<void> {
  */
 async function changeAddress(profile: MachineProfile | null): Promise<void> {
   if (!profile) {
+    return;
+  }
+
+  if (shell.capabilities.includes('routeUpdate')) {
+    routeProfile.value = profile;
+
     return;
   }
 

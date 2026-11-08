@@ -137,9 +137,29 @@ export async function phoneHarness(t, options = {}) {
     profiles: [],
     status: 'online',
     capabilities: [],
+    localAvailable: true,
   });
   settings.setAuthenticated(true);
   module.setUiLocale(options.locale || 'ru');
+
+  /**
+   * Обнаружение оболочки подписывается на общий SSE сразу после снимка.
+   * В Node EventSource нет, поэтому телефонный стенд даёт заглушку без сети.
+   */
+  const previousEventSource = globalThis.EventSource;
+  const sseSources = [];
+
+  globalThis.EventSource = class {
+    constructor() {
+      sseSources.push(this);
+    }
+
+    addEventListener() {
+    }
+
+    close() {
+    }
+  };
 
   const host = defineComponent({
     setup: () => () => h('div', [
@@ -158,6 +178,12 @@ export async function phoneHarness(t, options = {}) {
     module.setUiLocale('ru');
     delete globalThis.__phoneApi;
     delete globalThis.__PhoneApiError;
+
+    if (previousEventSource === undefined) {
+      delete globalThis.EventSource;
+    } else {
+      globalThis.EventSource = previousEventSource;
+    }
   });
   await flushPromises();
   /**

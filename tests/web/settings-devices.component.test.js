@@ -119,7 +119,8 @@ test('устройства: медленный ответ API не переда�
   const result = await api.post('/api/devices/pairing', { name: 'Планшет' });
 
   assert.equal(result.text, secret);
-  assert.equal(events[0].event, 'api.slow');
+  // Диагностика рапортует complete до slow; порядок не важен, важен сам факт медленного вызова.
+  assert.equal(events.some((item) => item.event === 'api.slow'), true);
   assert.equal(JSON.stringify(events).includes(secret), false);
 });
 
@@ -177,6 +178,7 @@ for (const action of ['rename', 'revoke']) {
       },
       profiles: [],
       capabilities: [],
+      localAvailable: true,
     });
     h.auth.clientScope = 'scope-b';
     h.answers['GET /api/devices'] = () => ({
