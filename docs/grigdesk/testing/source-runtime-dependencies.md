@@ -1,7 +1,7 @@
 # Подготовленные зависимости source-проверок GLM
 
 Шесть source-наборов `tests/server/glm-{admission,factory-turn,factory-policy,profile,
-vendor-build,vendored-profile}.test.js` и SEA `runtime-probe.test.mts` получают dependencies
+vendor-build,vendored-profile}.test.js` и SEA `runtime-probe.test.mts`/`bootstrap.test.mts` получают dependencies
 через `testDeepSeekRuntimeDependencies()` из `tests/helpers/deepseekBinary.mts`.
 Binary candidate использует тот же helper. Выбор cache общий:
 
@@ -12,6 +12,8 @@ Binary candidate использует тот же helper. Выбор cache об�
 
 Dependencies находятся в `<cache>/runtime-deps-node24`, пакеты — в его `node_modules`.
 Соседний `<cache>/node-runtime/bin/node` — подготовленный pinned worker.
+Bootstrap берёт закреплённый архив Node из того же cache, используя `nodeArchive(pin)`.
+Папка `tracker/.cache` не является общим тестовым prefix и на чистом CI может отсутствовать.
 Обычная подготовка без `--node-cache-dir` использует `deepseek/.cache`, поэтому для
 тестов нужно явно указать cache, который выберет helper:
 

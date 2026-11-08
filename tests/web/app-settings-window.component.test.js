@@ -45,6 +45,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
   h.auth.stopRecovery = () => {};
   h.auth.watchUnauthorized = () => h.calls.push('auth.watch');
   h.store = {
+    external: [],
     startPolling: () => h.calls.push('poll'),
     stopPolling: () => { },
     load: () => h.calls.push('seen'),
@@ -61,6 +62,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
   h.store.$onAction = () => () => {};
   h.store.setMirror = () => {};
   h.store.applySnapshot = () => {};
+  h.store.own = { ...h.store };
   Object.assign(h.boardStore, {
     $onAction: h.store.$onAction,
     setMirror: h.store.setMirror,
