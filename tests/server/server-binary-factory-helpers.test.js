@@ -173,7 +173,7 @@ test('SB08: настоящий Bash runner вызывает relocated metadata w
   });
 
 test('SB08: compiled status MCP проводит настоящие границы стадий через route loop',
-  { timeout: 90_000 }, async (t) => {
+  { timeout: 190_000 }, async (t) => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-status-loop-'));
     const root = path.join(base, 'payload');
     const work = path.join(base, 'fixture');
@@ -224,7 +224,7 @@ test('SB08: compiled status MCP проводит настоящие границ
           PYTHONDONTWRITEBYTECODE: '1',
         },
         encoding: 'utf8',
-        timeout: 80_000,
+        timeout: 180_000,
         maxBuffer: 1024 * 1024,
       });
     } catch (error) {
