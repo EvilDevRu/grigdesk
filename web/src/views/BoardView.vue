@@ -21,7 +21,8 @@
       </template>
     </UiPaneHeader>
     <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
-    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event, 'grigdesk')" />
+    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen"
+                           @created="ui.openTask($event.id, $event.source)" />
 
     <div id="board-tracker-panel" class="tracker-board">
       <div v-if="(!phoneBoard && !data) || ownTasks.trackerConfigured === false || error
