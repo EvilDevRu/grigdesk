@@ -130,9 +130,11 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       const toolbarStyles = await page.locator('button[data-context="chat-session-toolbar"]')
         .evaluateAll((buttons) => buttons.map((button) => {
           const style = getComputedStyle(button);
+          const after = getComputedStyle(button, '::after');
 
           return {
             height: style.height,
+            targetHeight: Math.max(Number.parseFloat(style.height), Number.parseFloat(after.height) || 0),
             padding: style.padding,
             border: style.border,
             radius: style.borderRadius,
@@ -145,7 +147,8 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       assert.equal(toolbarStyles.length, 3);
       assert.deepEqual(toolbarStyles[0], toolbarStyles[1]);
       assert.deepEqual(toolbarStyles[1], toolbarStyles[2]);
-      assert.equal(toolbarStyles[0].height, touch ? '44px' : '28px');
+      assert.equal(toolbarStyles[0].height, touch ? (width <= 600 ? '44px' : '32px') : '28px');
+      assert.equal(toolbarStyles[0].targetHeight, touch ? 44 : 28);
       assert.equal(toolbarStyles[0].radius, '4px');
       await page.locator('.cs-top').screenshot({
         path: path.join(client.artifacts, `chat-header-${width}x${height}.png`),

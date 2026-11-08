@@ -231,7 +231,8 @@ test('I18N-U02: топбар без поиска команд, соседние 
         await page.locator('[data-context="provider-status"]').first().waitFor();
 
         if (phone) {
-          await page.keyboard.press('Escape');
+          await page.locator('[data-role="phone-sections"]')
+            .getByRole('button', { name: /^(Закрыть|Close)$/ }).click();
           await page.locator('[data-role="phone-sections"]').waitFor({ state: 'hidden' });
         }
 
