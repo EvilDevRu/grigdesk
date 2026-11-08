@@ -311,7 +311,9 @@ function installationFixture(t, options = {}) {
  * Терминальный результат освобождает lock в том же микротакте завершения задачи.
  */
 async function installedOutcome(service) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  const deadline = Date.now() + 15_000;
+
+  while (Date.now() < deadline) {
     const current = await service.current();
 
     if (current.job?.status !== 'running') {

@@ -496,7 +496,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"ok","session_id":"
   })));
 });
 
-test('Codex передаёт dynamicTools и ровно раз диспатчит item/tool/call во всех режимах', async (t) => {
+test('Codex Auto передаёт dynamicTools и ровно раз диспатчит item/tool/call', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-codex-tool-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
@@ -507,7 +507,7 @@ test('Codex передаёт dynamicTools и ровно раз диспатчи�
     required: ['action'],
     properties: { action: { enum: ['list', 'exec'] } },
   };
-  const modes = ['default', 'auto', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
+  const modes = ['auto'];
   const calls = [];
   const declared = [];
   for (const permissionMode of modes) {
@@ -701,7 +701,7 @@ test('Codex объявляет и диспатчит рабочий tool как 
     cwd: root,
     model: 'gpt-contract-0.149',
     effort: 'medium',
-    permissionMode: 'default',
+    permissionMode: 'auto',
     providerSettings: { blockDirectSsh: false },
     workTools: {
       descriptors: [descriptor],

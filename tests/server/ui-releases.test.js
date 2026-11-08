@@ -8,6 +8,7 @@ import test from 'node:test';
 import staticPlugin from '../../server/src/plugins/static.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = require('fastify');
@@ -34,12 +35,24 @@ async function fixture(t) {
   await mkdir(path.join(uiReleasesDir, base.slice(4)), { recursive: true });
   await writeFile(path.join(uiReleasesDir, base.slice(4), 'index.html'), '<p>СТАРЫЙ_ПАКЕТ</p>');
   await mkdir(path.join(root, 'plugins/viewer/web'), { recursive: true });
-  await writeFile(path.join(root, 'plugins/viewer/plugin.json'), JSON.stringify({
+  await writeFile(path.join(root, 'plugins/viewer/plugin.json'), JSON.stringify(manifestV1({
     id: 'viewer',
     name: 'Фикстура',
-    web: 'web',
-  }));
-  await writeFile(path.join(root, 'plugins/viewer/web/index.html'), '<h1>Страница плагина</h1>');
+    entrypoints: { web: {
+      dir: 'web',
+      entry: 'panel.js',
+      css: [],
+      locales: {},
+    } },
+    contributes: { panels: [{
+      title: 'Фикстура',
+      group: 'dock',
+      order: 10,
+    }] },
+  })));
+  await mkdir(path.join(root, 'plugins/viewer/assets'));
+  await writeFile(path.join(root, 'plugins/viewer/assets/icon.png'), png);
+  await writeFile(path.join(root, 'plugins/viewer/web/panel.js'), 'export const fixture = true;');
   await app.register(authPlugin, {
     authStore: { isValidSession: (id) => id === 'fixture-session' },
   });
@@ -84,7 +97,10 @@ test('сервер сообщает об приложении и не разда
 test('снимки и страницы плагинов остаются под общим гардом', async (t) => {
   const { app } = await fixture(t);
 
-  for (const url of ['/shots/fixture.txt', '/%73hots/fixture.txt', '/api/ext/viewer/web/']) {
+  const catalog = (await app.inject({ url: '/api/plugins', headers: { cookie } })).json();
+  const panel = catalog.plugins.find((plugin) => plugin.id === 'viewer').entrypoints.web.entry;
+
+  for (const url of ['/shots/fixture.txt', '/%73hots/fixture.txt', panel]) {
     assert.equal((await app.inject({ url })).statusCode, 401, url);
     assert.equal((await app.inject({ url, headers: { cookie } })).statusCode, 200, url);
   }

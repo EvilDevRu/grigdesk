@@ -30,6 +30,7 @@ function deepSeekFixture() {
       available: false,
     }),
     modes: async () => [],
+    scopedWorkspace: async () => false,
     settings: [],
     usage: async () => ({ state: 'unsupported', bars: [] }),
     catalog: async () => [],

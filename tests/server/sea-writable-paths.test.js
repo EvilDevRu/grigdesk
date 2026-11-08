@@ -25,7 +25,7 @@ async function scratch(t) {
   return root;
 }
 
-test('SEA-WP-01: defaults профилей едины, override сохраняется', () => {
+test('SEA-WP-01: defaults профилей соответствуют режиму, override сохраняется', () => {
   for (const kind of ['source', 'packaged']) {
     const input = {
       kind,
@@ -34,11 +34,13 @@ test('SEA-WP-01: defaults профилей едины, override сохраняе
       env: {}
     };
 
-    assert.equal(profilesDirFor(input), '/data/profiles');
+    const expected = kind === 'packaged' ? '/data/profiles' : '/tree/profiles';
+
+    assert.equal(profilesDirFor(input), expected);
     assert.equal(profilesDirFor({
       ...input,
       env: { FACTORY_PROFILES_DIR: '' },
-    }), '/data/profiles');
+    }), expected);
     assert.equal(profilesDirFor({
       ...input,
       env: { FACTORY_PROFILES_DIR: '/external/profiles' },
@@ -70,7 +72,7 @@ test('SEA-WP-02: конфигурация source сохраняет прежни
   const { config } = await import(`../../server/src/config.ts?source=${Date.now()}`);
 
   assert.equal(config.rootDir, ROOT);
-  assert.equal(config.profilesDir, path.join(home, 'profiles'));
+  assert.equal(config.profilesDir, path.join(ROOT, 'profiles'));
   assert.equal('webDist' in config, false);
   assert.equal('uiReleasesDir' in config, false);
   assert.ok(!config.routesDir.startsWith(`${ROOT}${path.sep}`));
