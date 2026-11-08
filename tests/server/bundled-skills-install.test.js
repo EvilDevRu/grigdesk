@@ -6,6 +6,32 @@ import test from 'node:test';
 
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { installBundledSkills } from '../../server/src/lib/skills/bundledSkills.ts';
+import { copyResources } from '../../server/scripts/sea/resources.mts';
+import { readHarnessSkillCommands } from '../../server/src/lib/deepseek/skillCommands.ts';
+
+test('Упакованные ресурсы доставляют connect-project в каталог навыков и меню', async (t) => {
+  const sourceRoot = path.resolve(import.meta.dirname, '../..');
+  const source = await fs.readFile(path.join(sourceRoot, 'tools/skills/connect-project/SKILL.md'), 'utf8');
+
+  for (const name of ['resources.json', 'binary-resources.json']) {
+    await t.test(name, async (t) => {
+      const f = await fixture(t);
+      const manifest = JSON.parse(await fs.readFile(path.join(sourceRoot, 'server/build', name), 'utf8'));
+      const resources = {
+        ...manifest,
+        entries: manifest.entries.filter((entry) => entry.source.startsWith('tools/skills')),
+      };
+
+      await copyResources(sourceRoot, f.root, resources);
+
+      assert.deepEqual(await installBundledSkills({ home: f.home, root: f.root }), ['connect-project']);
+      assert.equal(await fs.readFile(
+        path.join(f.home, '.agents/skills/connect-project/SKILL.md'), 'utf8'), source);
+      assert.ok((await readHarnessSkillCommands({ home: f.home }))
+        .some((command) => command.cmd === '/connect-project'));
+    });
+  }
+});
 
 /**
  * Создаёт изолированные корень комплекта и home пользователя внутри папки артефактов.
