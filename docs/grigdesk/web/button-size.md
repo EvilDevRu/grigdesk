@@ -22,3 +22,7 @@
 Первый потребитель — кнопка «▶ Продолжить ход» под оборванным ходом чата
 (`data-role="chat-resume-interrupted"`). Проверки: `tests/web/ui-button.component.test.js`
 и `tests/web/chat-resume-interrupted.component.test.js`.
+
+`UiButton` и `UiActionLink` также принимают `wrap`: длинное действие переносится,
+растёт по содержимому и сохраняет общий сенсорный минимум. Параметр не меняет `href`
+и блокировку ссылки; стиль принадлежит общей `.ui-button--wrap`.
