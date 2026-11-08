@@ -489,7 +489,32 @@ jobs:
           npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
-          npm --prefix desktop ci
+          for attempt in 1 2 3; do
+            if npm --prefix desktop ci; then
+              break
+            fi
+            test "$attempt" -lt 3 || exit 1
+            sleep 5
+          done
+      - name: Закреплённые инструменты AppImage
+        run: |
+          sudo apt-get install -y --no-install-recommends p7zip-full
+          target="$RUNNER_TEMP/appimage-tools"
+          mkdir -p "$target"
+          for attempt in 1 2 3; do
+            if gh release download appimage-12.0.1 --repo electron-userland/electron-builder-binaries \
+              --pattern appimage-12.0.1.7z --dir "$target" --clobber; then
+              break
+            fi
+            test "$attempt" -lt 3 || exit 1
+            sleep 5
+          done
+          printf '%s  %s\n' d12ff7eb8f1d1ec4652ca5237a7fbdca33acc0c758045636feca62dc6ecb8ec4 \
+            "$target/appimage-12.0.1.7z" | sha256sum --check --strict
+          7z x -y "-o$target/extracted" "$target/appimage-12.0.1.7z"
+          echo "GRIGDESK_APPIMAGE_TOOLS_PATH=$target/extracted" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Проверка механизма подтверждения CI
         run: NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
           tests/server/release-validation.test.js tests/server/release-workflow.test.js

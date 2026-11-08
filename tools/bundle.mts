@@ -142,11 +142,18 @@ async function main(): Promise<void> {
       /**
        * AppImage собирается вместе со свежим UI в явный выход, без desktop install.
        * Лишний второй образ считается неоднозначным результатом и не публикуется.
+       * Electron уже установлен pinned-зависимостью: изолированный HOME не должен
+       * заставлять упаковщик повторно скачивать тот же runtime и его checksum.
        */
       async window(input) {
+        const tools = process.env.GRIGDESK_APPIMAGE_TOOLS_PATH;
+        const env = tools ? { ...input.env, APPIMAGE_TOOLS_PATH: tools } : input.env;
+
         await run('npm', ['--prefix', path.join(root, 'desktop'), 'run', 'dist', '--',
           `--config.directories.output=${input.outDir}`,
-          `--config.extraMetadata.version=${input.env.GRIGDESK_RELEASE_VERSION}`], input);
+          `--config.extraMetadata.version=${input.env.GRIGDESK_RELEASE_VERSION}`,
+          `--config.electronDist=${path.join(root, 'desktop/node_modules/electron/dist')}`,
+        ], { ...input, env });
 
         const images = (await readdir(input.outDir)).filter((name) => name.endsWith('.AppImage'));
 
