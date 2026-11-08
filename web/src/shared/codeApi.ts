@@ -18,6 +18,7 @@ import {
   parseCodeCommitsDiff,
   parseCodePatch,
   parseCodeProjects,
+  parseCodePullResponse,
   parseCodePushResponse,
   parseCodeRepos,
   parseCodeRoots,
@@ -286,6 +287,12 @@ export const codeApi = {
     const value: unknown = await api.post(contextUrl(context, 'fetch'), {});
 
     return parseCodeFetchResponse(value);
+  },
+
+  async pull(context: CodeRequestContext) {
+    const value: unknown = await api.post(contextUrl(context, 'pull'), {});
+
+    return parseCodePullResponse(value);
   },
 
   async undoCommit(context: CodeRequestContext) {

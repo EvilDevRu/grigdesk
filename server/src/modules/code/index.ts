@@ -58,6 +58,7 @@ import {
   fetchRemote,
   gitTrackingStatus,
   patchText,
+  pullCurrentBranch,
   pushCurrentBranch,
   searchTree,
   stageWorktreeChanges,
@@ -1238,6 +1239,21 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
 
     return mutateRoot(ctx, reply, (root) => fetchRemote(root));
+  });
+
+  // Получение продвигает чистую ветку только через fast-forward, без merge-коммита и rebase.
+  fastify.post<CodeRoute>('/api/code/:project/pull', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => pullCurrentBranch(root));
   });
 
   // Модель читает только staged diff через model-only transport без инструментов.
