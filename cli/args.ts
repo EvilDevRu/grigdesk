@@ -1,4 +1,10 @@
-export type Action = 'start' | 'stop' | 'restart' | 'status' | 'logs'
+/**
+ * Новые ошибки аргументов имеют фиксированный ключ без значения из командной строки.
+ * Перевод выполняет оболочка, а чистый parser не читает окружение или локаль.
+ */
+export class CliArgumentError extends Error {}
+
+export type Action = 'setup' | 'restore' | 'start' | 'stop' | 'restart' | 'status' | 'logs'
   | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
 
 export type CliArgs = {
@@ -6,6 +12,10 @@ export type CliArgs = {
   deviceAction?: 'add' | 'list' | 'revoke';
   deviceValue?: string;
   address?: string;
+  sshPort?: number;
+  publicHost?: string;
+  publicPort?: number;
+  candidateHost?: string;
   action?: Action;
   restart?: boolean;
   rollback?: boolean;
@@ -34,6 +44,8 @@ grigdesk-ctl server update-status [--json]
 grigdesk-ctl server resume-update [--restart] [--json] [--force]
                                 [--rollback — вернуть прежний выпуск]
 grigdesk-ctl server update-channel release|dev
+grigdesk-ctl relay setup | restore [--ssh-port N] [--public-host h] [--public-port N]
+                                [--candidate-host h]  Мастер удалённого доступа на VPS
 grigdesk-ctl relay start | stop | restart
 grigdesk-ctl relay status [--json]
 grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
@@ -101,13 +113,16 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     const action = argv[index++];
 
     if (!action) {
-      throw new Error(`Не указано действие: grigdesk-ctl ${command} start | stop | restart | status | logs`);
+      throw new Error(`Не указано действие: grigdesk-ctl ${command} start | stop | restart | status | logs`
+        + (command === 'relay' ? ' | setup | restore' : ''));
     }
 
     const updates = ['check-updates', 'update', 'update-status', 'resume-update', 'update-channel'];
 
-    if (!['start', 'stop', 'restart', 'status', 'logs', ...(command === 'server' ? updates : [])]
-      .includes(action)) {
+    const allowed = ['start', 'stop', 'restart', 'status', 'logs',
+      ...(command === 'server' ? updates : ['setup', 'restore'])];
+
+    if (!allowed.includes(action)) {
       throw new Error(`Неизвестная команда: ${command} ${action}. ${HELP_HINT}`);
     }
 
@@ -137,7 +152,26 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   for (; index < argv.length; index++) {
     const flag = argv[index]!;
 
-    if (flag === '--json' && status) {
+    if (command === 'relay' && ['setup', 'restore'].includes(args.action ?? '')
+      && ['--ssh-port', '--public-host', '--public-port', '--candidate-host'].includes(flag)) {
+      const value = argv[++index];
+
+      if (!value) {
+        throw new CliArgumentError('remote.parameterMissing');
+      }
+
+      if (flag === '--ssh-port' || flag === '--public-port') {
+        const port = Number(value);
+
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          throw new CliArgumentError('remote.invalidPort');
+        }
+
+        args[flag === '--ssh-port' ? 'sshPort' : 'publicPort'] = port;
+      } else {
+        args[flag === '--public-host' ? 'publicHost' : 'candidateHost'] = value;
+      }
+    } else if (flag === '--json' && status) {
       args.json = true;
     } else if (flag === '--restart' && update) {
       args.restart = true;

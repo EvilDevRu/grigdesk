@@ -1,6 +1,4 @@
-import { readFile } from 'node:fs/promises';
-
-import { windowKeyPath } from '../shared/desktop/windowKeyPath.ts';
+import { serverSession } from './serverSession.ts';
 import type { CliArgs } from './args.ts';
 import type { Settings } from './commands.ts';
 import { renderTerminalQr } from './terminalQr.ts';
@@ -23,33 +21,7 @@ interface DeviceList {
 export async function deviceCommand(
   args: CliArgs, settings: Settings, output: CliOutput = plainOutput,
 ): Promise<number> {
-  const keyPath = windowKeyPath({
-    env: {
-      ...process.env,
-      ...(settings.windowKeyPath ? { GRIGDESK_WINDOW_KEY_PATH: settings.windowKeyPath } : {}),
-    },
-    uid: process.getuid?.(),
-    port: settings.port,
-  });
-  const key = keyPath ? await readFile(keyPath, 'utf8').catch(() => null) : null;
-
-  if (!key) {
-    throw new Error('Нет ключа окна: команда работает на машине с запущенным сервером');
-  }
-
-  const exchanged = await fetch(`${settings.origin}/api/auth/window-session?short=1`, {
-    method: 'POST',
-    headers: { 'x-grigdesk-window-key': key.trim() },
-    redirect: 'error',
-    signal: AbortSignal.timeout(3000),
-  });
-  const cookie = exchanged.headers.get('set-cookie')?.split(';')[0];
-
-  await exchanged.body?.cancel();
-
-  if (!exchanged.ok || !cookie) {
-    throw new Error('Не удалось войти по ключу окна. Проверьте запущенный сервер.');
-  }
+  const cookie = await serverSession(settings);
 
   const url = args.deviceAction === 'add' ? '/api/devices/pairing'
     : args.deviceAction === 'revoke' ? `/api/devices/${encodeURIComponent(args.deviceValue!)}/revoke`
