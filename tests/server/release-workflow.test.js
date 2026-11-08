@@ -96,8 +96,9 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
 
   assert.ok(media >= 0 && media < workflow.jobs.release.steps.indexOf(serverTests));
   assert.match(workflow.jobs.release.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
-  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg ripgrep\s/u);
+  assert.match(workflow.jobs.release.steps[media].run, /ffmpeg ripgrep python3-pil\s/u);
   assert.match(workflow.jobs.release.steps[media].run, /rg --version/u);
+  assert.match(workflow.jobs.release.steps[media].run, /from PIL import Image/u);
 
   const sandbox = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));
@@ -108,6 +109,13 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
     /profile grigdesk-ci-bwrap \/usr\/bin\/bwrap flags=\(unconfined\)/u);
   assert.match(workflow.jobs.release.steps[sandbox].run,
     /apparmor_parser -r \/etc\/apparmor.d\/grigdesk-ci-bwrap/u);
+  assert.match(workflow.jobs.release.steps[sandbox].run, /unshare -Urnm \/usr\/bin\/true/u);
+
+  const chromiumSandbox = steps.findIndex((step) => step.name === 'Песочница Chromium');
+
+  assert.ok(chromiumSandbox > browser && chromiumSandbox < steps.indexOf(serverTests));
+  assert.match(steps[chromiumSandbox].run, /chromiumSandbox: true/u);
+  assert.doesNotMatch(steps[chromiumSandbox].run, /--no-sandbox/u);
 
   const snapshot = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('materializeDeepSeekSnapshot'));

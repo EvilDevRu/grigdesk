@@ -102,3 +102,17 @@ actionlint .github/workflows/grigdesk-release.yml
 `tests/relay/release-workflow.test.js` проверяют ручной запуск без `push` и состав выпуска; они не заменяют
 валидацию доступности контекстов GitHub Actions. Уведомления настраиваются отдельно
 в [GitHub Actions notifications](https://docs.github.com/en/subscriptions-and-notifications/how-tos/managing-github-actions-notifications).
+
+Отдельный профиль AppArmor получает `/usr/bin/unshare`: проверка ENOSPC создаёт собственные
+user, mount и network namespaces. До тестов выполняется `unshare -Urnm /usr/bin/true`.
+После установки Playwright профили создаются для найденных исполняемых файлов Chromium
+и headless shell, затем оба режима действительно запускаются с `chromiumSandbox: true`.
+Отключение песочницы не заменяет эту пробу.
+
+Для воспроизводимой генерации raster-значков нужен `python3-pil`; его импорт проверяется
+до web-набора вместе с системными инструментами.
+
+Внутри серверного набора сторож выполняет source-sync отдельно от остальных файлов;
+это полная проверка, а не пропуск после metadata-пробы. Бюджет compiled status MCP составляет
+180 секунд на настоящий route loop при общем сроке случая 190 секунд: на двух CPU
+он уже занимает около минуты без параллельной сборки.
