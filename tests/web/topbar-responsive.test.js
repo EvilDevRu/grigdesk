@@ -135,38 +135,7 @@ test('узкая шапка сохраняет действия и полную 
 
       assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
       assert.equal(await overview.locator('[data-context="topbar-metrics"]').count(), 0);
-      const networkVisible = await overview.locator('[data-context="topbar-network"]').isVisible();
-      const networkCount = await page.locator('[data-context="topbar-network"]').count();
-
-      // Диагностическая ветка показывает владельца индикатора и скрывшего его предка.
-      // Эти сведения не читают рабочий API: здесь только синтетическая fixture.
-      const location = await page.locator('[data-context="topbar-network"]').evaluate((el) => {
-        const ancestors = [];
-
-        for (let node = el; node && ancestors.length < 15; node = node.parentElement) {
-          const style = getComputedStyle(node);
-          const rect = node.getBoundingClientRect();
-
-          ancestors.push({
-            tag: node.tagName,
-            id: node.id,
-            class: node.className,
-            hidden: node.hidden,
-            display: style.display,
-            visibility: style.visibility,
-            width: rect.width,
-            height: rect.height,
-          });
-        }
-
-        return {
-          inParking: Boolean(el.closest('#phone-actions-parking')),
-          inOverview: Boolean(el.closest('.shell-status-panel')),
-          ancestors,
-        };
-      });
-
-      assert.equal(networkVisible, true, `${width}: сеть ${networkCount} ${JSON.stringify(location, null, 2)}`);
+      await overview.locator('[data-context="topbar-network"]').waitFor();
       await overview.locator('[data-context="provider-status"]').last().click();
     }
 

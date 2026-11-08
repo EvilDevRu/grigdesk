@@ -43,7 +43,7 @@
 - [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
 - [Подготовка legacy fixture DeepSeek: ABI-кэш, последовательный CI preflight и восстановление](deepseek-legacy-preflight.md)
 - [Унаследованный ELF меняет установку CLI-фикстуры после переноса helper-а](cli-helper-binary-environment.md)
-- [Vite и i18n: холодный граф, импорт DOM, готовность шапки и формы настроек](browser-navigation-timeout.md)
+- [Vite и i18n: холодный граф, импорт DOM, готовность шапки, сети и формы настроек](browser-navigation-timeout.md)
 - [Типы тестов установки: реестр без UI и общие расширения Fastify](provider-install-type-boundaries.md)
 - [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
