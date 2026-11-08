@@ -156,7 +156,7 @@ test('узкая шапка сохраняет действия и полную 
 
     await settings.click();
 
-    const settingsDialog = page.getByRole('dialog', { name: 'Настройки', exact: true });
+    const settingsDialog = page.locator('[data-role="settings-modal"]');
 
     await settingsDialog.waitFor();
     await page.keyboard.press('Escape');
