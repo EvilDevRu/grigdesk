@@ -40,48 +40,73 @@ test('RW-2: отдельный relay-workflow удалён', async () => {
   );
 });
 
-test('RW-CHANNELS: проверки параллельны, упаковка требует оба успешных набора или доказанный reuse',
-  async () => {
-  const source = await fs.readFile(
-    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
-  );
+test('RW-CHANNELS: этапы выпуска связаны строгими воротами и неизменяемыми артефактами', async () => {
+  const source = await fs.readFile(path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8');
   const yaml = await import('../../server/node_modules/yaml/dist/index.js');
   const workflow = yaml.parse(source);
-  const inputs = workflow.on.workflow_dispatch?.inputs;
-  const { server, web, release } = workflow.jobs;
-  const steps = release.steps;
-  const gate = steps.find((step) => step.name === 'Подтверждение всех проверок');
-  const production = steps.findIndex((step) => step.run === 'npm --prefix web run build');
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  const { plan, server, web, build, verify, publish } = workflow.jobs;
 
   assert.deepEqual(inputs.channel.options, ['release', 'dev']);
-  assert.equal(inputs.channel.default, 'release');
-  assert.equal(inputs.publish.type, 'boolean');
+  assert.deepEqual(inputs.test_mode.options, ['full', 'skip']);
+  assert.equal(inputs.test_mode.default, 'full');
   assert.equal(inputs.publish.default, false);
-  assert.equal(inputs.validation_run.type, 'string');
-  assert.equal(inputs.validation_run.default, '');
+  assert.equal(inputs.skip_reason.type, 'string');
   assert.equal(workflow.permissions.actions, 'read');
   assert.equal(workflow.on.push, undefined);
-  assert.deepEqual(release.needs, ['server', 'web']);
-  assert.equal(release.if, '${{ !cancelled() }}');
-  assert.equal(server.needs, undefined);
-  assert.equal(web.needs, undefined);
-  assert.equal(server.if, "${{ inputs.validation_run == '' }}");
-  assert.equal(web.if, "${{ inputs.validation_run == '' }}");
-  assert.equal(server['timeout-minutes'], 240);
-  assert.equal(web['timeout-minutes'], 90);
-  assert.equal(release['timeout-minutes'], 120);
-  assert.ok(steps.indexOf(gate) < production);
-  assert.equal(gate.if, '${{ !cancelled() }}');
-  assert.equal(gate.env.SERVER_RESULT, '${{ needs.server.result }}');
-  assert.equal(gate.env.WEB_RESULT, '${{ needs.web.result }}');
-  assert.match(gate.run, /test "\$SERVER_RESULT" = success/u);
-  assert.match(gate.run, /test "\$WEB_RESULT" = success/u);
-  assert.match(gate.run, /if \[ "\$REUSED_VALIDATION" = true \]/u);
-  assert.match(gate.run, /test -s "\$VALIDATION_RECEIPT"/u);
+  assert.deepEqual(build.needs, ['plan', 'server', 'web']);
+  assert.deepEqual(verify.needs, ['plan', 'build']);
+  assert.deepEqual(publish.needs, ['plan', 'build', 'verify']);
+  assert.match(build.if, /!cancelled\(\).*needs.plan.result == 'success'/u);
+  assert.match(verify.if, /!cancelled\(\).*needs.build.result == 'success'/u);
+  assert.match(publish.if, /!cancelled\(\).*inputs.publish.*needs.verify.result == 'success'/u);
+  assert.equal(plan.steps.find((step) => step.name === 'Исходники').with['fetch-depth'], 0);
+  assert.match(plan.steps.find((step) => step.name === 'Происхождение выпуска из main').run,
+    /git merge-base --is-ancestor "\$GITHUB_SHA" refs\/remotes\/origin\/main/u);
+  assert.equal(plan.outputs.run_tests, '${{ steps.checks.outputs.run_tests }}');
+
+  for (const job of [server, web]) {
+    assert.deepEqual(job.needs, ['plan']);
+    assert.equal(job.if, "${{ needs.plan.outputs.run_tests == 'true' }}");
+    assert.doesNotMatch(yaml.stringify(job), /secrets\.|tools\/bundle|release-publish/u);
+  }
+
+  for (const job of [plan, verify]) {
+    assert.doesNotMatch(yaml.stringify(job), /secrets\./u);
+  }
+
+  const gate = build.steps.findIndex((step) => step.name === 'Подтверждение всех проверок');
+  const dependencies = build.steps.findIndex((step) => step.run === 'npm --prefix server ci');
+  const key = build.steps.findIndex((step) => step.name === 'Ключ подписи');
+  const bundle = build.steps.findIndex((step) => step.name === 'Сборка комплекта');
+  const artifact = build.steps.find((step) => step.id === 'artifacts');
+
+  assert.ok(gate >= 0 && gate < dependencies && dependencies < key && key < bundle);
+  assert.equal(build.steps[gate].env.SERVER_RESULT, '${{ needs.server.result }}');
+  assert.equal(build.steps[gate].env.WEB_RESULT, '${{ needs.web.result }}');
+  assert.match(build.steps[gate].run, /releaseChecks\.mts gate/u);
+  assert.equal(build.steps[bundle].env.GRIGDESK_RELEASE_NOTES_JSON, undefined);
+  assert.ok(build.steps.some((step) => /releaseChecks\.mts notes/u.test(step.run ?? '')));
+  assert.ok(build.steps.some((step) => /releaseChecks\.mts attach/u.test(step.run ?? '')));
+  assert.equal(build.outputs.artifact_id, '${{ steps.artifacts.outputs.artifact-id }}');
+  assert.equal(artifact.with['if-no-files-found'], 'error');
+  assert.doesNotMatch(yaml.stringify(build), /secrets\.RELEASE_SITE_KEY|release-publish/u);
+  assert.doesNotMatch(yaml.stringify(publish), /RELEASE_SIGNING_KEY|tools\/bundle/u);
+
+  for (const job of [verify, publish]) {
+    const download = job.steps.find((step) => step.name === 'Получение артефакта');
+
+    assert.equal(download.with['artifact-ids'], '${{ needs.build.outputs.artifact_id }}');
+    assert.equal(download.with.path, 'release-artifacts');
+  }
+
+  assert.match(verify.steps.find((step) => step.name === 'Проверка готовых пакетов').run,
+    /tests\/run-node-tests-safe\.sh tools\/verifyRelease\.mts/u);
+  assert.equal(verify.steps.some((step) => step['continue-on-error']), false);
+  assert.equal(publish.steps.find((step) => step.name === 'Публикация на сайт').env.RELEASE_SITE_PORT,
+    "${{ secrets.RELEASE_SITE_PORT || '22' }}");
 
   const serverGate = server.steps.find((step) => step.name === 'Подтверждение серверных проверок');
-
-  assert.equal(serverGate.if, '${{ !cancelled() }}');
 
   for (const [id, result] of [
     ['server_tests', 'SERVER_RESULT'],
@@ -90,88 +115,28 @@ test('RW-CHANNELS: проверки параллельны, упаковка т�
   ]) {
     const step = server.steps.find((entry) => entry.id === id);
 
-    assert.equal(step?.['continue-on-error'], true);
-    assert.equal(step.if, undefined);
-    assert.ok(server.steps.indexOf(step) < server.steps.indexOf(serverGate));
+    assert.equal(step['continue-on-error'], true);
     assert.equal(serverGate.env[result], '${{ steps.' + id + '.outcome }}');
     assert.ok(serverGate.run.includes(`test "$${result}" = success`));
   }
 
-  const webTest = web.steps.find((step) => step.name === 'Тесты web');
-  const serverTest = server.steps.find((step) => step.id === 'server_tests');
+  assert.equal(web.steps.find((step) => step.name === 'Тесты web')['continue-on-error'], undefined);
 
-  assert.equal(webTest.run, 'npm --prefix web test');
-  assert.equal(webTest['continue-on-error'], undefined);
-  assert.equal(webTest.env.NODE_OPTIONS, '--test-reporter=tap');
-  assert.equal(serverTest.env.NODE_OPTIONS, '--test-reporter=tap');
-  assert.match(serverTest.run, /df -h/u);
-  assert.match(serverTest.run, /free -m/u);
-  assert.match(serverTest.run, /available_kib.*df --output=avail/u);
-  assert.match(serverTest.run, /"\$available_kib" -lt 16777216/u);
-  assert.doesNotMatch(yaml.stringify(server), /secrets\.|tools\/bundle|release-publish/u);
-  assert.doesNotMatch(yaml.stringify(web), /secrets\.|tools\/bundle|release-publish/u);
+  for (const job of [server, web]) {
+    const browser = job.steps.findIndex((step) => step.name === 'Браузер тестов');
+    const sandbox = job.steps.findIndex((step) => step.name === 'Песочница Chromium');
+    const testIndex = job.steps.findIndex((step) => /npm --prefix (server|web) test/u.test(step.run ?? ''));
 
-  for (const job of [server, release]) {
+    assert.ok(browser >= 0 && browser < sandbox && sandbox < testIndex);
+    assert.match(job.steps[sandbox].run, /chromiumSandbox: true/u);
+    assert.doesNotMatch(job.steps[sandbox].run, /--no-sandbox/u);
+  }
+
+  for (const job of [server, build]) {
     const cleanup = job.steps.find((step) => step.name === 'Место для native-сборок');
 
     assert.match(cleanup.run, /RUNNER_ENVIRONMENT:-.*github-hosted/u);
     assert.match(cleanup.run, /sudo rm -rf -- \/usr\/share\/dotnet \/usr\/local\/\.ghcup/u);
-    assert.match(cleanup.run, /\/opt\/ghc \/opt\/hostedtoolcache\/CodeQL/u);
     assert.doesNotMatch(cleanup.run, /android|\/node\b|\/python\b|chromium/u);
   }
-
-  for (const [job, testStep] of [[server, serverTest], [web, webTest]]) {
-    const browser = job.steps.findIndex((step) => step.name === 'Браузер тестов');
-    const dependencies = job.steps.findIndex((step) => step.run === 'npm --prefix server ci');
-    const chromiumSandbox = job.steps.findIndex((step) => step.name === 'Песочница Chromium');
-    const media = job.steps.findIndex((step) => step.name === 'Системные средства тестов');
-    const sandbox = job.steps.findIndex((step) => step.name === 'Песочница native-проверок');
-    const testIndex = job.steps.indexOf(testStep);
-
-    assert.ok(dependencies < browser && browser < chromiumSandbox && chromiumSandbox < testIndex);
-    assert.match(job.steps[browser].run, /playwright-core\/cli\.js install --with-deps chromium/u);
-    assert.match(job.steps[chromiumSandbox].run, /chromiumSandbox: true/u);
-    assert.doesNotMatch(job.steps[chromiumSandbox].run, /--no-sandbox/u);
-    assert.ok(media >= 0 && media < testIndex);
-    assert.match(job.steps[media].run, /ffmpeg -version\s+ffprobe -version/u);
-    assert.match(job.steps[media].run, /ffmpeg ripgrep python3-pil\s/u);
-    assert.match(job.steps[media].run, /rg --version/u);
-    assert.match(job.steps[media].run, /from PIL import Image/u);
-    assert.ok(sandbox >= 0 && sandbox < testIndex);
-    assert.match(job.steps[sandbox].run, /bwrap --ro-bind \/ \/ --dev \/dev/u);
-    assert.match(job.steps[sandbox].run, /apparmor_parser -r \/etc\/apparmor.d\/grigdesk-ci-bwrap/u);
-    assert.match(job.steps[sandbox].run, /unshare -Urnm \/usr\/bin\/true/u);
-  }
-
-  const snapshot = server.steps.findIndex((step) => step.name === 'Исходники тестового исполнителя');
-  const variants = server.steps.findIndex((step) => step.name === 'Прогрев вариантов тестового ELF');
-  const legacy = server.steps.findIndex((step) => step.name === 'Прогрев среды миграции');
-  const binary = server.steps.findIndex((step) => step.name === 'Проверка тестового ELF');
-
-  assert.ok(snapshot >= 0 && snapshot < variants && variants < legacy && legacy < binary);
-  assert.ok(binary < server.steps.indexOf(serverTest));
-  assert.equal(web.steps.some((step) => step.name === 'Прогрев вариантов тестового ELF'), false);
-
-  const validation = steps.find((step) => step.id === 'validation');
-  const mechanism = steps.find((step) => step.name === 'Проверка механизма подтверждения CI');
-  const bundle = steps.find((step) => step.name === 'Сборка комплекта');
-  const key = steps.find((step) => step.name === 'Ключ подписи');
-  const publish = steps.find((step) => step.name === 'Публикация на сайт');
-  const cleanup = steps.find((step) => step.name === 'Освобождение тестовых артефактов');
-
-  assert.equal(validation.run, 'node tools/releaseValidation.mts');
-  assert.equal(validation.env.VALIDATION_RUN, '${{ inputs.validation_run }}');
-  assert.ok(steps.indexOf(validation) < steps.indexOf(gate));
-  assert.ok(steps.indexOf(mechanism) < steps.indexOf(key));
-  assert.ok(production < steps.indexOf(key) && steps.indexOf(key) < steps.indexOf(bundle));
-  assert.match(mechanism.run, /release-validation\.test\.js/u);
-  assert.equal(mechanism.if, undefined);
-  assert.equal(bundle.env.GRIGDESK_RELEASE_ORIGIN,
-    "${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}");
-  assert.ok(steps.indexOf(cleanup) > production && steps.indexOf(cleanup) < steps.indexOf(bundle));
-  assert.match(cleanup.run, /test "\$GRIGDESK_TEST_DEEPSEEK_ROOT" = "\$RUNNER_TEMP\/deepseek-tests"/u);
-  assert.match(cleanup.run, /rm -rf -- "\$GRIGDESK_TEST_DEEPSEEK_ROOT"/u);
-  assert.match(publish.if ?? '', /inputs\.publish/u);
-  assert.equal(publish.env.RELEASE_SITE_PORT, "${{ secrets.RELEASE_SITE_PORT || '22' }}");
-  assert.equal(publish.env.RELEASE_SITE_MIRROR_PORT, "${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}");
 });
