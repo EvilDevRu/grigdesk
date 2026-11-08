@@ -15,7 +15,6 @@ import { promises as fs } from 'node:fs';
 
 const run = promisify(execFile);
 
-const MIN_BYTES = 12_000;
 const FLAT_SPREAD = 8;
 
 export interface ClipCheckResult {
@@ -90,8 +89,10 @@ export async function checkSceneClip(
     return { ...empty, reason: 'Файл записи не появился.' };
   }
 
-  if (info.size < MIN_BYTES) {
-    return { ...empty, reason: `Запись подозрительно мала: ${info.size} Б.` };
+  // Короткий статичный интерфейс даёт валидный WebM меньше килобайта.
+  // Качество определяют длительность и кадры, а не степень сжатия файла.
+  if (info.size === 0) {
+    return { ...empty, reason: 'Файл записи пуст.' };
   }
 
   const durationMs = await probeDurationMs(file);

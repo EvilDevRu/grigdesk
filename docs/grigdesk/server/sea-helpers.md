@@ -17,6 +17,8 @@ Source использует копию `.mts`, пакет — копию соб�
 сгенерированный ESM-вход по-прежнему ожидает `main` и вызывает его один раз.
 `tests/server/server-binary-bundle.test.js` проверяет импорт настоящего worker-а
 в перенесённом CJS payload, `code-branches.test.js` — запуск его source-копии.
+Guard по `import.meta.url` учтён отдельной helper-точкой в
+`server/build/sea-inventory.json`; каталог helpers не заменяет эту опись.
 
 Сгенерированный вход передаётся через stdin с постоянным sourcefile и разрешением импортов
 от корня исходников. Случайный workDir не попадает в комментарии или байты бандла:

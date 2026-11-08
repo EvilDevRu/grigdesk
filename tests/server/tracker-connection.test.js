@@ -237,7 +237,7 @@ for (const action of ['замена пакета', 'смена реквизит�
     let changeReady = false;
     const change = action === 'замена пакета'
       ? fixture.runtime.registry.prepareReplace('fixture-probe', new AbortController().signal)
-      : fixture.runtime.writeSettings(null, { 'fixture-probe': {} });
+      : fixture.runtime.writeSettings(null, { 'fixture-probe': { token: 'changed-token' } });
     const changing = change.then((lease) => {
       changeReady = true;
 

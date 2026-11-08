@@ -51,6 +51,7 @@ export async function desktopExitApp(t, options = {}) {
     stopRecovery() {},
   });
   const other = {
+    external: [],
     load: async () => {},
     startPolling() {},
     stopPolling() {},
@@ -61,6 +62,9 @@ export async function desktopExitApp(t, options = {}) {
     setPassive() {},
     clearSource() {},
   };
+
+  other.$onAction = () => () => {};
+  other.own = { ...other };
 
   globalThis.__desktopExitApp = { auth, other };
 

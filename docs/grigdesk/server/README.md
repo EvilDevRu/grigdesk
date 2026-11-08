@@ -52,7 +52,7 @@
 - [Внешний DeepSeek: опись SEA, обычный Node Factory и граница исходников](sea-deepseek-boundary.md)
 - [Привязка полного приложения: строка, QR, срок и повтор потерянного ответа](device-pairing.md)
 - [Версия контрактов API: заголовок ответов, отпечаток и сторож после первого выпуска](api-version.md)
-- [Обновление отпечатка контрактов и перечня переменных после объединения исходников](source-metadata-checks.md)
+- [Отпечаток контрактов, переменные хоста, опись helpers и VERSION source-entry](source-metadata-checks.md)
 - [Субъект устройства: реестр TLS-сокетов, приоритет авторизации и отзыв](client-device-principal.md)
 - [Клиентский TLS-вход: явная настройка, scope, лимиты и изоляция отказов](client-listener.md)
 - [Переход на GrigDesk: подготовка, brandMove, журнал, откат и второй этап](brand-migration.md)
