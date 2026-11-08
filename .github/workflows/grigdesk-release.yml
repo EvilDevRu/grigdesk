@@ -1,12 +1,15 @@
+# Сервер и web проверяются параллельно; упаковка ждёт оба результата.
+# Stable может использовать только подтверждённый полный прогон тех же исходников.
 name: Релиз GrigDesk — сборка и публикация
-
 on:
   workflow_dispatch:
     inputs:
       channel:
         description: Канал выпуска
         type: choice
-        options: [release, dev]
+        options:
+          - release
+          - dev
         default: release
         required: true
       publish:
@@ -16,22 +19,21 @@ on:
       notes:
         description: Описание RU/EN в JSON (необязательно)
         type: string
-        default: ''
+        default: ""
       validation_run:
         description: Успешный полный прогон тех же исходников для stable (необязательно)
         type: string
-        default: ''
-
+        default: ""
 permissions:
   contents: read
   actions: read
-
 concurrency:
   group: grigdesk-release
   cancel-in-progress: false
-
 jobs:
-  release:
+  server:
+    name: Сервер, shared и руководство
+    if: ${{ inputs.validation_run == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -41,30 +43,18 @@ jobs:
             "GRIGDESK_TEST_DEEPSEEK_ROOT=$RUNNER_TEMP/deepseek-tests" \
             "GRIGDESK_ARTIFACTS_DIR=$RUNNER_TEMP/deepseek-tests" \
             "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-tests/node-cache" >> "$GITHUB_ENV"
-
       - name: Исходники
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
       - name: Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24.21.0
-
       - name: Идентичность выпуска
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
-
-      - name: Подтверждение прежних проверок
-        id: validation
-        run: node tools/releaseValidation.mts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VALIDATION_RUN: ${{ inputs.validation_run }}
-          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
-
       - name: Песочница native-проверок
         run: |
           sudo apt-get update
@@ -87,7 +77,6 @@ jobs:
           APPARMOR
           sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-unshare
           unshare -Urnm /usr/bin/true
-
       - name: Системные средства тестов
         run: |
           sudo apt-get install -y --no-install-recommends ffmpeg ripgrep python3-pil
@@ -95,31 +84,37 @@ jobs:
           ffprobe -version
           rg --version
           python3 -c 'from PIL import Image; print(Image.__version__)'
-
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Браузер тестов
-        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: node server/node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Песочница Chromium
-        if: ${{ steps.validation.outputs.reused != 'true' }}
-        run: |
+        run: >
           index=0
+
           while IFS= read -r browser; do
             index=$((index + 1))
             profile="/etc/apparmor.d/grigdesk-ci-chromium-$index"
             sudo tee "$profile" > /dev/null <<APPARMOR
           abi <abi/4.0>,
+
           include <tunables/global>
+
           profile grigdesk-ci-chromium-$index "$browser" flags=(unconfined) {
             userns,
           }
+
           APPARMOR
             sudo apparmor_parser -r "$profile"
-          done < <(find "$HOME/.cache/ms-playwright" -type f \( -name chrome -o -name chrome-headless-shell \))
+          done < <(find "$HOME/.cache/ms-playwright" -type f \( -name chrome -o -name chrome-headless-shell
+          \))
+
           test "$index" -gt 0
+
           node --input-type=module <<'NODE'
+
           import { chromium } from './server/node_modules/playwright-core/index.mjs';
+
 
           for (const channel of [undefined, 'chromium']) {
             const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel });
@@ -136,30 +131,20 @@ jobs:
               await browser.close();
             }
           }
+
           NODE
       - name: Зависимости web
         run: npm --prefix web ci
-      # Серверный typecheck включает tools/mobile-phone с прямыми импортами Vite.
-      # Поэтому зависимости клиента нужны до проверки сервера даже без сборки APK.
       - name: Зависимости мобильных инструментов
         run: npm --prefix mobile ci
-      # Сборщик комплекта не вызывает install (tools/bundle.mts), а билдеры всех
-      # пакетов импортируют esbuild из своих node_modules — ставим их явно.
       - name: Зависимости комплекта
         run: |
           npm --prefix tracker ci
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci
-      - name: Проверка механизма подтверждения CI
-        run: >-
-          NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test
-          --test-concurrency=2 tests/server/release-validation.test.js
-          tests/server/release-workflow.test.js tests/relay/release-workflow.test.js
       - name: Подготовка среды тестового исполнителя
-        run: >-
-          npm --prefix deepseek run prepare:runtime --
-          --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
+        run: npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
       - name: Исходники тестового исполнителя
         run: |
           node --input-type=module <<'NODE'
@@ -167,24 +152,15 @@ jobs:
           await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
           NODE
       - name: Прогрев вариантов тестового ELF
-        if: ${{ steps.validation.outputs.reused != 'true' }}
-        run: >-
-          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
-          tests/helpers/deepseekBinary.mts --prepare-suite
-          > "$RUNNER_TEMP/deepseek-test-suite.json"
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh tests/helpers/deepseekBinary.mts
+          --prepare-suite > "$RUNNER_TEMP/deepseek-test-suite.json"
       - name: Прогрев среды миграции
-        if: ${{ steps.validation.outputs.reused != 'true' }}
-        run: >-
-          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
-          tests/helpers/deepseekRuntimeArtifact.mts
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh tests/helpers/deepseekRuntimeArtifact.mts
       - name: Проверка тестового ELF
-        if: ${{ steps.validation.outputs.reused != 'true' }}
-        run: >-
-          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
           tests/server/deepseek-binary-cache-root.test.js
       - name: Тесты сервера
         id: server_tests
-        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
         env:
           NODE_OPTIONS: --test-reporter=tap
@@ -193,61 +169,259 @@ jobs:
           free -m
           getconf _NPROCESSORS_ONLN
           npm --prefix server test
-      - name: Тесты web
-        id: web_tests
-        if: ${{ steps.validation.outputs.reused != 'true' }}
-        continue-on-error: true
-        run: npm --prefix web test
       - name: Тесты shared-контрактов
         id: shared_tests
-        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
-        run: >-
-          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
-          --test-concurrency=2 tests/shared/*.test.mts
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
+          tests/shared/*.test.mts
       - name: Руководство выпуска
         id: guide_tests
-        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
-        run: >-
-          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
-          --test-concurrency=2 tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs
-      - name: Подтверждение всех проверок
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
+          tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs
+      - name: Подтверждение серверных проверок
         if: ${{ !cancelled() }}
         env:
           SERVER_RESULT: ${{ steps.server_tests.outcome }}
-          WEB_RESULT: ${{ steps.web_tests.outcome }}
           SHARED_RESULT: ${{ steps.shared_tests.outcome }}
           GUIDE_RESULT: ${{ steps.guide_tests.outcome }}
+        run: |
+          printf '%s\n' "server=$SERVER_RESULT" "shared=$SHARED_RESULT" "guide=$GUIDE_RESULT"
+          test "$SERVER_RESULT" = success
+          test "$SHARED_RESULT" = success
+          test "$GUIDE_RESULT" = success
+  web:
+    name: Web-проверки
+    if: ${{ inputs.validation_run == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Окружение тестов
+        run: |
+          printf '%s\n' \
+            "GRIGDESK_TEST_DEEPSEEK_ROOT=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_ARTIFACTS_DIR=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-tests/node-cache" >> "$GITHUB_ENV"
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+      - name: Песочница native-проверок
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap apparmor
+          sudo tee /etc/apparmor.d/grigdesk-ci-bwrap > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-bwrap
+          bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
+          sudo tee /etc/apparmor.d/grigdesk-ci-unshare > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-unshare /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-unshare
+          unshare -Urnm /usr/bin/true
+      - name: Системные средства тестов
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg ripgrep python3-pil
+          ffmpeg -version
+          ffprobe -version
+          rg --version
+          python3 -c 'from PIL import Image; print(Image.__version__)'
+      - name: Зависимости сервера
+        run: npm --prefix server ci
+      - name: Браузер тестов
+        run: node server/node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Песочница Chromium
+        run: >
+          index=0
+
+          while IFS= read -r browser; do
+            index=$((index + 1))
+            profile="/etc/apparmor.d/grigdesk-ci-chromium-$index"
+            sudo tee "$profile" > /dev/null <<APPARMOR
+          abi <abi/4.0>,
+
+          include <tunables/global>
+
+          profile grigdesk-ci-chromium-$index "$browser" flags=(unconfined) {
+            userns,
+          }
+
+          APPARMOR
+            sudo apparmor_parser -r "$profile"
+          done < <(find "$HOME/.cache/ms-playwright" -type f \( -name chrome -o -name chrome-headless-shell
+          \))
+
+          test "$index" -gt 0
+
+          node --input-type=module <<'NODE'
+
+          import { chromium } from './server/node_modules/playwright-core/index.mjs';
+
+
+          for (const channel of [undefined, 'chromium']) {
+            const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel });
+
+            try {
+              const page = await browser.newPage();
+
+              await page.goto('data:text/html,<title>sandbox probe</title>');
+
+              if (await page.title() !== 'sandbox probe') {
+                throw new Error('chromium_sandbox_probe_failed');
+              }
+            } finally {
+              await browser.close();
+            }
+          }
+
+          NODE
+      - name: Зависимости web
+        run: npm --prefix web ci
+      - name: Зависимости мобильных инструментов
+        run: npm --prefix mobile ci
+      - name: Зависимости комплекта
+        run: |
+          npm --prefix tracker ci
+          npm --prefix relay ci
+          npm --prefix deepseek ci
+          npm --prefix desktop ci
+      - name: Тесты web
+        id: web_tests
+        run: npm --prefix web test
+        env:
+          NODE_OPTIONS: --test-reporter=tap
+  release:
+    name: Упаковка и публикация
+    needs:
+      - server
+      - web
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Окружение тестов
+        run: |
+          printf '%s\n' \
+            "GRIGDESK_TEST_DEEPSEEK_ROOT=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_ARTIFACTS_DIR=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-tests/node-cache" >> "$GITHUB_ENV"
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+      - name: Идентичность выпуска
+        run: node tools/release-identity.mts
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+      - name: Подтверждение прежних проверок
+        id: validation
+        run: node tools/releaseValidation.mts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
+      - name: Подтверждение всех проверок
+        if: ${{ !cancelled() }}
+        env:
+          SERVER_RESULT: ${{ needs.server.result }}
+          WEB_RESULT: ${{ needs.web.result }}
           REUSED_VALIDATION: ${{ steps.validation.outputs.reused }}
           VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
         run: |
-          printf '%s\n' "server=$SERVER_RESULT" "web=$WEB_RESULT" \
-            "shared=$SHARED_RESULT" "guide=$GUIDE_RESULT"
+          printf '%s\n' "server=$SERVER_RESULT" "web=$WEB_RESULT"
           if [ "$REUSED_VALIDATION" = true ]; then
             test -s "$VALIDATION_RECEIPT"
           else
             test "$SERVER_RESULT" = success
             test "$WEB_RESULT" = success
-            test "$SHARED_RESULT" = success
-            test "$GUIDE_RESULT" = success
           fi
+      - name: Песочница native-проверок
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap apparmor
+          sudo tee /etc/apparmor.d/grigdesk-ci-bwrap > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-bwrap
+          bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
+          sudo tee /etc/apparmor.d/grigdesk-ci-unshare > /dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile grigdesk-ci-unshare /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser -r /etc/apparmor.d/grigdesk-ci-unshare
+          unshare -Urnm /usr/bin/true
+      - name: Системные средства тестов
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg ripgrep python3-pil
+          ffmpeg -version
+          ffprobe -version
+          rg --version
+          python3 -c 'from PIL import Image; print(Image.__version__)'
+      - name: Зависимости сервера
+        run: npm --prefix server ci
+      - name: Зависимости web
+        run: npm --prefix web ci
+      - name: Зависимости мобильных инструментов
+        run: npm --prefix mobile ci
+      - name: Зависимости комплекта
+        run: |
+          npm --prefix tracker ci
+          npm --prefix relay ci
+          npm --prefix deepseek ci
+          npm --prefix desktop ci
+      - name: Проверка механизма подтверждения CI
+        run: NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
+          tests/server/release-validation.test.js tests/server/release-workflow.test.js
+          tests/relay/release-workflow.test.js
+      - name: Подготовка среды тестового исполнителя
+        run: npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
+      - name: Исходники тестового исполнителя
+        run: |
+          node --input-type=module <<'NODE'
+          import { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';
+          await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
+          NODE
       - name: Production-сборка web
         run: npm --prefix web run build
-
       - name: Освобождение тестовых артефактов
         run: |
           test "$GRIGDESK_TEST_DEEPSEEK_ROOT" = "$RUNNER_TEMP/deepseek-tests"
           rm -rf -- "$GRIGDESK_TEST_DEEPSEEK_ROOT"
           df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
-
       - name: Ключ подписи
         env:
           SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           install -m 600 /dev/null "$RUNNER_TEMP/release-signing.pem"
           printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
-
       - name: Ключ сайта
         if: ${{ inputs.publish }}
         env:
@@ -260,32 +434,24 @@ jobs:
             install -m 600 /dev/null "$RUNNER_TEMP/release-site-mirror-key"
             printf '%s' "$MIRROR_KEY" > "$RUNNER_TEMP/release-site-mirror-key"
           fi
-
       - name: Сборка комплекта
         run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
         env:
           GRIGDESK_RELEASE_NOTES_JSON: ${{ inputs.notes }}
           GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
-
       - name: Deb-пакет
-        # Bootstrap-пакет для apt: ставит только загрузчик и подписанный installer,
-        # установка и обновления остаются в пределах пользователя.
         run: node tools/buildDeb.mts
-
       - name: Свидетельство прежних проверок
         if: ${{ steps.validation.outputs.reused == 'true' }}
         run: cp "$RUNNER_TEMP/release-validation.json" release-artifacts/validation-receipt.json
-
       - name: Артефакты проверочного выпуска
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: grigdesk-${{ inputs.channel }}-${{ github.run_number }}
           path: release-artifacts/
           if-no-files-found: error
-
       - name: Публикация на сайт
         if: ${{ inputs.publish }}
-        # Новый сборщик кладёт installer, компоненты и v2-индекс в release-artifacts/.
         run: node tools/release-publish.mts "$PWD"
         env:
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
@@ -300,3 +466,4 @@ jobs:
           RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
           RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
           RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}
+run-name: "${{ inputs.channel }}: проверка и выпуск #${{ github.run_number }}"
