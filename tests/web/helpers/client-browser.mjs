@@ -6,6 +6,7 @@ import os from 'node:os';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { protocolRoutes, protocolSearch } from './chat-protocol.js';
 import { freePort } from '../../server/helpers/pluginBootFixture.js';
+import { trackerMetadata } from './trackerCard.js';
 
 export const chatSession = {
   id: 'geometry-chat',
@@ -107,9 +108,22 @@ export async function clientBrowser(t, options = {}) {
             '/api/grigdesk-tasks': {
               tasks: [],
               revision: 0,
-              trackerConfigured: true
+              trackerConfigured: true,
+              personalStateVersion: 1,
             },
             '/api/grigdesk-tasks/projects': { projects: [] },
+            '/api/grigdesk-tasks/task-favorites': {
+              scope: 'own-fixture',
+              revision: 1,
+              taskIds: [],
+            },
+            '/api/grigdesk-tasks/task-seen': {
+              scope: 'own-fixture',
+              revision: 1,
+              taskIds: [],
+              initialized: true,
+            },
+            '/api/trackers': trackerMetadata(),
             '/__shell/state': options.shell || shell,
             '/api/auth/state': {
               authenticated: true,
