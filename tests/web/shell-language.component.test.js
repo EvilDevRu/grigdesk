@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { i18nComponent, prepareI18nWindow } from './helpers/i18nComponent.js';
 import { catalogMessage } from './helpers/i18nCatalog.js';
+import { waitForShellActions } from './helpers/client-browser.mjs';
 import { pluginCard } from './helpers/pluginModuleContract.js';
 
 process.env.NODE_ENV = 'test';
@@ -211,6 +212,8 @@ test('I18N-U02: топбар без поиска команд, соседние 
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
 
         const phone = width === 600;
+
+        await waitForShellActions(page, phone);
 
         // Телефон и справка на узком экране перенесены в «Разделы».
         // Подключение, колокольчик и настройки остаются в основной полосе.

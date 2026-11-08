@@ -268,6 +268,22 @@ export async function clientBrowser(t, options = {}) {
 }
 
 /**
+ * CSS-медиа и реактивный Teleport сходятся после кадра активной страницы.
+ * Барьер ждёт настоящую компоновку шапки, сохраняя точные проверки её действий.
+ */
+export async function waitForShellActions(page, phone) {
+  await page.bringToFront();
+  await page.waitForFunction((isPhone) => {
+    const parking = document.querySelector('#phone-actions-parking');
+    const actions = document.querySelector('.topbar-actions');
+
+    return parking && actions
+      && parking.querySelectorAll('button').length === (isPhone ? 2 : 0)
+      && actions.querySelectorAll('button').length === (isPhone ? 3 : 5);
+  }, phone);
+}
+
+/**
  * Увеличиваются размеры букв и строк реальных элементов без увеличения площадок кнопок.
  * Снимок вычисляется до записи стилей, поэтому наследуемый текст не масштабируется дважды.
  */
