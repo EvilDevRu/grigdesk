@@ -30,7 +30,7 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
     'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
     'server/runtime/helpers/helpers.json', 'engine/bin/factory', 'engine/lib/core.sh',
-    'tools/skills/connect-project/SKILL.md',
+    'tools/skills/grigdesk-connect-project/SKILL.md',
     'schemas/analytics/lifecycle-event.schema.json',
     'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
     'deploy/require-vpn.sh', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',

@@ -22,7 +22,7 @@ const required = [
   'server/runtime/helpers/helpers.json', 'server/runtime/helpers/fixture.mjs',
   'server/node_modules/fastify/package.json', ...options.native,
   'engine/bin/factory', 'engine/lib/core.sh',
-  'tools/skills/connect-project/SKILL.md',
+  'tools/skills/grigdesk-connect-project/SKILL.md',
   'schemas/analytics/lifecycle-event.schema.json',
   'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
   'deploy/require-vpn.sh', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',

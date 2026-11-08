@@ -45,7 +45,7 @@
 - [Host hooks DeepSeek и GLM в payload](server-binary-hooks.md)
 - [Guard данных и внешние команды payload](server-binary-placement.md)
 - [CJS payload и ленивый запуск приложения](server-binary-entry.md)
-- [Ресурсы payload, встроенные навыки и физическая установка сервера](server-binary-paths.md)
+- [Ресурсы payload, grigdesk-connect-project и пути установки](server-binary-paths.md)
 - [Кэш payload: marker, leases/pins, продолжение попытки и ручной GC](server-binary-cache.md)
 - [Лишний `__pycache__` в поколении ломает prepare и установку окна; источник — юниты конвейера](stray-pycache-in-package.md)
 - [Контракт metadata и CLI автономного сервера](server-binary-contract.md)

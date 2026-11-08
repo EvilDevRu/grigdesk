@@ -13,8 +13,8 @@ Helper вычисляет R по собственному URL. Новый host-o
 
 Встроенные навыки лежат в R/tools/skills. Оба allowlist ресурсов копируют этот
 каталог из исходников, а аудит автономного payload требует
-`tools/skills/connect-project/SKILL.md`; другие ресурсы tools вне skills запрещены.
+`tools/skills/grigdesk-connect-project/SKILL.md`; другие ресурсы tools вне skills запрещены.
 При старте сервер зеркалит навыки в общий пользовательский каталог, который читают
 меню и исполнители. Проверка доставки копирует настоящий ресурс обоих allowlist,
 устанавливает его в изолированный home и проверяет пункт меню —
-[контракт навыка](../chat/connect-project-skill.md).
+[контракт навыка](../chat/grigdesk-connect-project-skill.md).
