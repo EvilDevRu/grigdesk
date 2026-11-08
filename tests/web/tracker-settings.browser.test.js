@@ -222,7 +222,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
           });
           assert.deepEqual(errors, [], 'Реальная доска загружена без ошибок fixture');
 
-          const settings = page.getByRole('button', {
+          const settings = page.locator('.board-heading').getByRole('button', {
             name: /настро[йи].*(доск|трекер)|board settings|tracker settings|set up tracker/iu,
           });
 

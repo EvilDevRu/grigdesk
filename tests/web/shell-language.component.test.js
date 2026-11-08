@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { i18nComponent, prepareI18nWindow } from './helpers/i18nComponent.js';
 import { catalogMessage } from './helpers/i18nCatalog.js';
+import { pluginCard } from './helpers/pluginModuleContract.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -109,7 +110,11 @@ test('I18N-U01: EN/RU каркас, builtin/custom/disabled и прежний п
         order: 10 
       } 
     },
-  ];
+  ].map((plugin) => plugin.system || !plugin.enabled ? plugin : pluginCard({
+    ...plugin,
+    contributes: { panels: [{ title: plugin.name, group: plugin.nav.group }], slots: [] },
+    placements: [],
+  }));
   const { browser, origin } = await i18nBrowser(t, {
     responses: { '/api/plugins': { plugins } },
   });
@@ -508,7 +513,12 @@ test('RET-NAV: старая ссылка открывает маршруты б�
 
           await page.getByRole('link', { name: /^(Доска|Board)( ·.*)?$/ }).click();
           await page.waitForURL(origin + '#/board');
-          await page.locator('[href="#/routes"]').click();
+
+          if (touch) {
+            await page.locator('.phone-nav').getByRole('button', { name: /^(Разделы|Sections)$/ }).click();
+          }
+
+          await page.getByRole('link', { name: /^(Маршруты|Routes)$/ }).click();
           await page.locator('.routes-page').waitFor();
           assert.equal(new URL(page.url()).hash, '#/routes');
           assert.deepEqual(errors, []);

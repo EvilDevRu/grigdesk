@@ -105,7 +105,7 @@ test('проекты: каталог, карточка и создание на 
             node.getBoundingClientRect().height
           )));
 
-          assert.deepEqual(headers, [40, 36], 'Каталог вмещает действия, паспорт сохраняет общую шапку');
+          assert.deepEqual(headers, [36, 36], 'Обе панели имеют общую desktop-геометрию шапки');
         }
 
         assert.equal(result.documentOverflow, false, label);

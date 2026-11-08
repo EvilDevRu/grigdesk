@@ -219,6 +219,7 @@ test('телефон: полная ширина, меню разделов, ча
       const menu = page.getByRole('dialog', { name: 'Разделы', exact: true });
 
       await menu.getByRole('link', { name: 'Проекты', exact: true }).click();
+      await menu.waitFor({ state: 'hidden' });
       await page.locator('[data-role="project-row"]').first().waitFor();
       assert.equal(await menu.isVisible(), false);
       await assertPhoneFrame(page, width, 844);

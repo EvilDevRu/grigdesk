@@ -32,12 +32,12 @@
 - [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)
 - [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)
 - [Фикстуры трекеров и оболочки: смешанные источники, Pinia, ApiError и выбор драйвера](tracker-dev-fixtures.md)
-- [Loading-фикстуры: каталог трекера, личные ветки, порты App и геометрия единой доски](tracker-loading-fixtures.md)
+- [Loading-фикстуры: каталог трекера, личные ветки, порты App, настоящий хост Docker и геометрия единой доски](tracker-loading-fixtures.md)
 - [Снимок после recovery нового владельца для проверки повторного close установщика](installer-recovery-close-snapshot.md)
 - [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
 - [Общий выбор в фикстурах: видимый список, native adapter, touch-фокус и required](select-fixtures.md)
 - [Отказ запуска браузера оставляет Vite открытым](browser-fixture-startup-cleanup.md) —
-  поздняя регистрация очистки превращает отсутствие браузера в таймаут всего прогона.
+  ранняя регистрация и закрытие браузера/Vite до удаления кэша и корня артефактов.
 
 - [Замер press включает остановку драйвера, если HTTP-приёмник делит его Node event loop](chat-performance-isolation.md)
 - [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
@@ -78,7 +78,7 @@
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)
 - [Сквозные фикстуры чата: завершение SSE, ожидание состояния и закрытие окна до сервера](window-store-fixture-close.md)
 - [Версия шапки фикстуры фиксируется до нормализации store](chat-fixture-head-version.md)
-- [Фикстуры App: каталог чатов, cursor истории, ACK окна, metadata трекера и личные ветки](chat-catalog-fixtures.md)
+- [Фикстуры App: постраничный поиск чатов, cursor истории, ACK окна и metadata трекера](chat-catalog-fixtures.md)
 - [Очистка фикстуры: область hooks, общая история, закрытие сервера и dispose writer](node-test-hook-cleanup.md)
 - [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
 - [Тест ждёт сигнал HTTP-фикстуры после отказа исходного хода](async-fixture-producer-failure.md)

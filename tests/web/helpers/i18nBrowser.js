@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { protocolRoutes } from './chat-protocol.js';
 import { clientBrowser, chatSession } from './client-browser.mjs';
 import { selectUiOption } from './selectUiOption.ts';
 import data from '../fixtures/settings-modal/data.json' with { type: 'json' };
@@ -14,8 +13,18 @@ import data from '../fixtures/settings-modal/data.json' with { type: 'json' };
  */
 export async function i18nBrowser(t, options = {}) {
   const artifacts = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-i18n-'));
+  /** @type {Array<() => Promise<void>>} */
+  const cleanups = [];
 
-  t.after(() => rm(artifacts, { recursive: true, force: true }));
+  t.after(async () => {
+    try {
+      for (const cleanup of cleanups) {
+        await cleanup();
+      }
+    } finally {
+      await rm(artifacts, { recursive: true, force: true });
+    }
+  });
 
   const chatStore = {
     sessions: [{
@@ -31,7 +40,12 @@ export async function i18nBrowser(t, options = {}) {
     activeId: chatSession.id,
   };
 
-  const result = await clientBrowser(t, {
+  const lifecycle = {
+    after(cleanup) {
+      cleanups.push(cleanup);
+    },
+  };
+  const result = await clientBrowser(lifecycle, {
     artifacts,
     shell: null,
     chatStore,
@@ -42,7 +56,6 @@ export async function i18nBrowser(t, options = {}) {
       '/api/providers': structuredClone(data.providers),
       '/api/plugins': structuredClone(data.plugins),
       '/api/plugin-installs/jobs/current': { job: null, recoveryError: null },
-      ...protocolRoutes(chatStore),
       ...options.responses,
     },
   });
