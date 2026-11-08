@@ -9,6 +9,8 @@ import { PairingCodes } from './pairing.ts';
 import { RelayHub } from './relayHub.ts';
 import { DeviceStore, RelayStore } from './store.ts';
 import type { Relay } from './store.ts';
+import { RelayDeploymentService } from './relayDeployment/service.ts';
+import type { DeploymentOptions } from './relayDeployment/service.ts';
 
 type MobileServer = {
   port: number;
@@ -29,6 +31,7 @@ type Options = {
   log?: (event: string) => void;
   registerRoutes?: (app: MobileApp) => void | Promise<void>;
   recoverOperation?: Parameters<typeof startMobileServer>[0]['recoverOperation'];
+  relayDeployment?: DeploymentOptions;
   makeHub?: (options: ConstructorParameters<typeof RelayHub>[0]) => Hub;
   makeServer?: (options: Parameters<typeof startMobileServer>[0]) => Promise<MobileServer>;
 };
@@ -46,6 +49,7 @@ export class MobileService {
   private hub: Hub | null = null;
   private identity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
   private error: string | null = null;
+  private deployments?: RelayDeploymentService;
   private clientTarget?: () => Promise<number>;
 
   setClientTarget(target: () => Promise<number>): void {
@@ -105,6 +109,28 @@ export class MobileService {
         changed: this.options.changed,
       });
       this.hub.sync(relays);
+
+      if (this.options.relayDeployment) {
+        this.deployments = new RelayDeploymentService(this.options.directory, this,
+          this.options.relayDeployment, {
+            fp: () => this.identity!.fp,
+            vpnGate: this.options.vpnGate,
+            clientTarget: async () => {
+              if (!this.clientTarget) {
+                throw new Error('client_listener_unavailable');
+              }
+
+              return this.clientTarget();
+            },
+            changed: () => this.options.changed?.(),
+            sync: async () => this.hub!.sync(await this.relays.list()),
+          });
+
+        await this.deployments.recover().catch(() => {
+          this.deployments = undefined;
+          this.options.log?.('deployment_store_unavailable');
+        });
+      }
     } catch {
       await this.close();
       this.error = 'Мобильный доступ не запущен. Проверьте настройки и порт.';
@@ -124,6 +150,7 @@ export class MobileService {
         server: {
           up: !!this.server,
           port: this.server?.port ?? this.options.port,
+          fp: this.identity?.fp ?? null,
           error: this.error,
         },
         relays: (await this.relays.list()).map((relay) => ({
@@ -147,12 +174,25 @@ export class MobileService {
         server: {
           up: false,
           port: this.options.port,
+          fp: this.identity?.fp ?? null,
           error: this.error,
         },
         relays: [],
         devices: [],
       };
     }
+  }
+
+  /**
+   * Повреждённый deployment journal закрывает только мастер, сохраняя прежний mobile/direct.
+   * Экземпляр создаётся после загрузки identity и принадлежит серверному lifecycle.
+   */
+  deploymentService(): RelayDeploymentService {
+    if (!this.deployments) {
+      throw new MobileInputError('deployment_unavailable', 'Мастер удалённого доступа недоступен.', 503);
+    }
+
+    return this.deployments;
   }
 
   requireReady() {
@@ -186,6 +226,11 @@ export class MobileService {
    */
   async removeRelay(id: string) {
     this.requireReady();
+
+    if (await this.deployments?.busy(id)) {
+      throw new MobileInputError('deployment_busy', 'Сначала завершите задание удалённого доступа.', 409);
+    }
+
     await this.relays.remove(id);
     this.hub!.sync(await this.relays.list());
     this.options.changed?.();
@@ -283,6 +328,8 @@ export class MobileService {
    * Повторное закрытие не затрагивает чужие процессы.
    */
   async close() {
+    await this.deployments?.close();
+    this.deployments = undefined;
     this.hub?.close();
     this.hub = null;
 

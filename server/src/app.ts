@@ -1448,6 +1448,7 @@ async function build(desktopParent: DesktopParent | null) {
   const mobile = new MobileService({
     directory: config.mobileDir,
     port: config.mobilePort,
+    relayDeployment: { transport: sshTransport, hostKeys: sshHostKeys },
     vpnGate: relayVpnGate,
     registerRoutes: (app) => registerMobileFacade(app, {
       callApi: internalCallApi,

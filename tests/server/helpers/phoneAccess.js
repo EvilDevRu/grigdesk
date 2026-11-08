@@ -124,6 +124,11 @@ export async function phoneFixture(t, options = {}) {
       dependencies
     },
   });
+
+  if (options.registerAdmin) {
+    await options.registerAdmin(app, { mobile, identity });
+  }
+
   await app.listen({ host: '127.0.0.1', port: 0 });
   listener = await startClientListener({
     addresses: config.clientAccess.addresses,

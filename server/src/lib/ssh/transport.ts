@@ -12,6 +12,8 @@ export interface SshTransportConnection {
   user?: string;
   username?: string;
   password?: Buffer | string;
+  privateKey?: Buffer | string;
+  passphrase?: string;
   readyTimeout?: number;
   hostVerifier?: (fingerprint: string) => boolean;
 }
@@ -90,7 +92,9 @@ export function createSshTransport(options: SshTransportOptions = {}): SshTransp
       host: connection.host,
       port: Number(connection.port) || 22,
       username: connection.user || connection.username,
-      password,
+      ...(connection.privateKey
+        ? { privateKey: connection.privateKey, passphrase: connection.passphrase }
+        : { password }),
       readyTimeout: Number(connection.readyTimeout) || 20_000,
       ...(verifier
         ? {

@@ -43,7 +43,7 @@ interface ServerIdentity {
  * Читает только настройки указанной установки, не подхватывая адрес выбранной remote-машины.
  * Секретный CLI-токен остаётся локальным заголовком и не попадает в журнал задания.
  */
-async function serverSettings(receipt: InstallationReceipt) {
+export async function serverSettings(receipt: InstallationReceipt) {
   let file: NodeJS.ProcessEnv = {};
 
   try {
