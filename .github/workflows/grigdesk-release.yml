@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 79df35233babd9fb7122e546b4a856c8af6d5509
+          ref: 60ece2b6e49c64abb771508133dac274b4f448eb
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -125,16 +125,13 @@ jobs:
     env:
       GRIGDESK_RELEASE_VERSION: 0.1.0-dev.18
       GRIGDESK_RELEASE_CHANNEL: dev
-      GRIGDESK_RELEASE_COMMIT: 79df35233babd9fb7122e546b4a856c8af6d5509
-      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/79df35233babd9fb7122e546b4a856c8af6d5509
+      GRIGDESK_RELEASE_COMMIT: 60ece2b6e49c64abb771508133dac274b4f448eb
+      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/60ece2b6e49c64abb771508133dac274b4f448eb
     name: ${{ matrix.file }}
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
         file:
-          - computer-resources-baseline.component.test.js
-          - shell-language.component.test.js
-          - tracker-settings.browser.test.js
           - ui-select.browser.test.js
-run-name: "Web: ожидания и хосты четырёх файлов 79df3523"
+run-name: "Web: селекты и сенсорные 44 px 60ece2b6"
