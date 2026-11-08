@@ -20,6 +20,7 @@
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
 - [Release workflow: userns, sandbox Chromium, FFmpeg/ripgrep/Pillow, ELF и бюджет 240 минут](release-workflow-validation.md)
+- [Stable из проверенных исходников: полный run, сверка Git-дерева и свежая упаковка](release-validation-reuse.md)
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)

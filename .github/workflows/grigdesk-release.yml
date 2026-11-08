@@ -17,9 +17,14 @@ on:
         description: Описание RU/EN в JSON (необязательно)
         type: string
         default: ''
+      validation_run:
+        description: Успешный полный прогон тех же исходников для stable (необязательно)
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: grigdesk-release
@@ -51,6 +56,14 @@ jobs:
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
+
+      - name: Подтверждение прежних проверок
+        id: validation
+        run: node tools/releaseValidation.mts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
 
       - name: Песочница native-проверок
         run: |
@@ -86,8 +99,10 @@ jobs:
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Браузер тестов
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: node server/node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Песочница Chromium
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: |
           index=0
           while IFS= read -r browser; do
@@ -136,6 +151,11 @@ jobs:
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci
+      - name: Проверка механизма подтверждения CI
+        run: >-
+          NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test
+          --test-concurrency=2 tests/server/release-validation.test.js
+          tests/server/release-workflow.test.js tests/relay/release-workflow.test.js
       - name: Подготовка среды тестового исполнителя
         run: >-
           npm --prefix deepseek run prepare:runtime --
@@ -147,20 +167,24 @@ jobs:
           await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
           NODE
       - name: Прогрев вариантов тестового ELF
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
           tests/helpers/deepseekBinary.mts --prepare-suite
           > "$RUNNER_TEMP/deepseek-test-suite.json"
       - name: Прогрев среды миграции
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh
           tests/helpers/deepseekRuntimeArtifact.mts
       - name: Проверка тестового ELF
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
           tests/server/deepseek-binary-cache-root.test.js
       - name: Тесты сервера
         id: server_tests
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
         env:
           NODE_OPTIONS: --test-reporter=tap
@@ -171,16 +195,19 @@ jobs:
           npm --prefix server test
       - name: Тесты web
         id: web_tests
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
         run: npm --prefix web test
       - name: Тесты shared-контрактов
         id: shared_tests
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
           --test-concurrency=2 tests/shared/*.test.mts
       - name: Руководство выпуска
         id: guide_tests
+        if: ${{ steps.validation.outputs.reused != 'true' }}
         continue-on-error: true
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
@@ -192,13 +219,19 @@ jobs:
           WEB_RESULT: ${{ steps.web_tests.outcome }}
           SHARED_RESULT: ${{ steps.shared_tests.outcome }}
           GUIDE_RESULT: ${{ steps.guide_tests.outcome }}
+          REUSED_VALIDATION: ${{ steps.validation.outputs.reused }}
+          VALIDATION_RECEIPT: ${{ runner.temp }}/release-validation.json
         run: |
           printf '%s\n' "server=$SERVER_RESULT" "web=$WEB_RESULT" \
             "shared=$SHARED_RESULT" "guide=$GUIDE_RESULT"
-          test "$SERVER_RESULT" = success
-          test "$WEB_RESULT" = success
-          test "$SHARED_RESULT" = success
-          test "$GUIDE_RESULT" = success
+          if [ "$REUSED_VALIDATION" = true ]; then
+            test -s "$VALIDATION_RECEIPT"
+          else
+            test "$SERVER_RESULT" = success
+            test "$WEB_RESULT" = success
+            test "$SHARED_RESULT" = success
+            test "$GUIDE_RESULT" = success
+          fi
       - name: Production-сборка web
         run: npm --prefix web run build
 
@@ -238,6 +271,10 @@ jobs:
         # Bootstrap-пакет для apt: ставит только загрузчик и подписанный installer,
         # установка и обновления остаются в пределах пользователя.
         run: node tools/buildDeb.mts
+
+      - name: Свидетельство прежних проверок
+        if: ${{ steps.validation.outputs.reused == 'true' }}
+        run: cp "$RUNNER_TEMP/release-validation.json" release-artifacts/validation-receipt.json
 
       - name: Артефакты проверочного выпуска
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
