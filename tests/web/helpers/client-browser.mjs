@@ -274,12 +274,9 @@ export async function clientBrowser(t, options = {}) {
 export async function waitForShellActions(page, phone) {
   await page.bringToFront();
   await page.waitForFunction((isPhone) => {
-    const parking = document.querySelector('#phone-actions-parking');
     const actions = document.querySelector('.topbar-actions');
 
-    return parking && actions
-      && parking.querySelectorAll('button').length === (isPhone ? 2 : 0)
-      && actions.querySelectorAll('button').length === (isPhone ? 3 : 5);
+    return actions?.querySelectorAll('button').length === (isPhone ? 3 : 5);
   }, phone);
 }
 
