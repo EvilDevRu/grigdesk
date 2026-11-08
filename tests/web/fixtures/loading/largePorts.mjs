@@ -29,6 +29,8 @@ export const board = reactive({
   activity: { unseenCount: 0 },
   error: ref(null),
   loading: ref(true),
+  readAt: ref(0),
+  clearSource() {},
   async load() {},
   startPolling() {},
   stopPolling() {}
@@ -44,11 +46,34 @@ export const auth = reactive({
 export const shell = reactive({
   initialized: true,
   present: true,
+  localAvailable: false,
+  capabilities: [],
   status: 'connecting',
   showConnections: false,
   profile: { id: 'fixture', name: 'Синтетическая машина' },
   async start() {},
   stop() {}
+});
+const ownPersonal = defineStore('loading-large-own-personal', {
+  state: () => ({
+    loaded: true,
+    loading: false,
+    error: null,
+    initialized: true,
+    taskIds: [],
+    pending: {},
+  }),
+  getters: {
+    ready: () => true,
+    isFavorite: () => () => false,
+    isPending: () => () => false,
+    isSeen: () => () => true,
+    isOnShelf: () => () => false,
+  },
+  actions: {
+    async load() {},
+    clear() {},
+  },
 });
 export const passive = defineStore('loading-large-passive', {
   state: () => ({
@@ -76,12 +101,14 @@ export const passive = defineStore('loading-large-passive', {
     isOpen: false,
   }),
   getters: {
+    own: () => ownPersonal(),
     isFavorite: () => () => false,
     isPending: () => () => false,
     isSeen: () => () => true,
     isOnShelf: () => () => false,
   },
   actions: {
+    clear() {},
     async load() {},
     start() {},
     stop() {},

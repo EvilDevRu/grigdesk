@@ -38,7 +38,15 @@ await router.push(route);
 await router.isReady();
 
 const app = createApp({
-  render: () => workspace ? h(App) : h(mode === 'board' ? BoardView : PipelineView),
+  render: () => workspace ? h(App) : h('main', {
+    style: {
+      padding: 'var(--page-gutter)',
+      minWidth: '0',
+      height: '100%',
+      overflowY: 'auto',
+      scrollbarGutter: 'stable',
+    },
+  }, h(mode === 'board' ? BoardView : PipelineView)),
 });
 
 app.use(createPinia());
