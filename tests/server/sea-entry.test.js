@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -205,6 +205,7 @@ test('SEA-ENTRY-04: режим запуска загружает сервер р
 test('SEA-ENTRY-05: help/version/license не читают и не создают D', async (t) => {
   const root = await scratch(t);
   const dataHome = path.join(root, 'отсутствующая папка');
+  const version = (await readFile(path.join(ROOT, 'VERSION'), 'utf8')).trim();
   const env = {
     PATH: '/usr/bin:/bin',
     HOME: root,
@@ -213,7 +214,7 @@ test('SEA-ENTRY-05: help/version/license не читают и не создаю�
 
   for (const [args, check] of [
     [['--help'], (stdout) => assert.match(stdout, /GrigDesk/)],
-    [['--version', '--json'], (stdout) => assert.equal(JSON.parse(stdout).version, '0.1.0')],
+    [['--version', '--json'], (stdout) => assert.equal(JSON.parse(stdout).version, version)],
     [['--license'], (stdout) => assert.match(stdout, /Node\.js is licensed/)],
   ]) {
     const result = await spawnNode([SEA_ENTRY, ...args], env);
