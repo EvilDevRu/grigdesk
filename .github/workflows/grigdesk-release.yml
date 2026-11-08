@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: c99a5662fd3a307b9b79c57e48a94173a4b1c2a4
+          ref: 0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -125,23 +125,16 @@ jobs:
     env:
       GRIGDESK_RELEASE_VERSION: 0.1.0-dev.18
       GRIGDESK_RELEASE_CHANNEL: dev
-      GRIGDESK_RELEASE_COMMIT: c99a5662fd3a307b9b79c57e48a94173a4b1c2a4
-      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/c99a5662fd3a307b9b79c57e48a94173a4b1c2a4
+      GRIGDESK_RELEASE_COMMIT: 0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
+      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
     name: ${{ matrix.file }}
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
         file:
-          - client-phone.test.js
           - computer-resources-baseline.component.test.js
-          - i18n-browser.test.js
-          - i18n-preservation.test.js
-          - in-app-alerts-wiring.contract.test.js
-          - loading-layouts.browser.test.js
-          - loading-major.browser.test.js
-          - projects-responsive.test.js
           - shell-language.component.test.js
           - tracker-settings.browser.test.js
           - ui-select.browser.test.js
-run-name: "Web: 11 файлов отдельно c99a5662"
+run-name: "Web: четыре оставшихся файла 0d3d1f9c"
