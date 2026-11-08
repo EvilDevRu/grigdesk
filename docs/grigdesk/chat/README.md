@@ -209,6 +209,7 @@
 - [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
 - [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
 - [Навыки GLM и DeepSeek в меню: общий каталог и обычный ход по /имени](harness-skill-menu.md)
+- [Навык подключения проекта: источник connect-project, интервью и автоматическая доставка](connect-project-skill.md)
 - [Субагенты GLM: исследование наследования и пробелов прежнего корневого сторожа](glm-subagent-boundaries.md)
 - [Native-контракты делегирования GLM: child never, окончательный guard, каталог, страницы истории и remote owner](glm-delegation-contracts.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
