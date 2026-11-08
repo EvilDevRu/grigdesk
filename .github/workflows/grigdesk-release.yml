@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
+          ref: 79df35233babd9fb7122e546b4a856c8af6d5509
       - name: Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -125,8 +125,8 @@ jobs:
     env:
       GRIGDESK_RELEASE_VERSION: 0.1.0-dev.18
       GRIGDESK_RELEASE_CHANNEL: dev
-      GRIGDESK_RELEASE_COMMIT: 0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
-      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/0d3d1f9c9fe24a982fe060c6bd8d5f90139233c6
+      GRIGDESK_RELEASE_COMMIT: 79df35233babd9fb7122e546b4a856c8af6d5509
+      GRIGDESK_RELEASE_ID: dev/0.1.0-dev.18/79df35233babd9fb7122e546b4a856c8af6d5509
     name: ${{ matrix.file }}
     strategy:
       fail-fast: false
@@ -137,4 +137,4 @@ jobs:
           - shell-language.component.test.js
           - tracker-settings.browser.test.js
           - ui-select.browser.test.js
-run-name: "Web: четыре оставшихся файла 0d3d1f9c"
+run-name: "Web: ожидания и хосты четырёх файлов 79df3523"
