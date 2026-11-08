@@ -197,7 +197,9 @@ export async function runMaintenance(argv: string[]): Promise<number> {
 }
 
 if (isSea() || process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  void runMaintenance(process.argv.slice(isSea() ? 1 : 2)).then((code) => {
+  // SEA сохраняет два служебных элемента argv, как запуск обычного файла Node.
+  // Команда начинается с третьего элемента в обоих вариантах запуска.
+  void runMaintenance(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : 'maintenance_failed'}\n`);

@@ -12,7 +12,8 @@ type Archives = Record<Component, Pick<ReleaseArtifact, 'size' | 'sha256'>>;
  * Их подписанные размеры задают границы; blob postject остаётся маленьким.
  */
 export async function appendInstallerArchives(binary: string, sources: Record<Component, string>): Promise<void> {
-  const output = await fs.open(binary, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  const output = await fs.open(binary,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_NONBLOCK | constants.O_NOFOLLOW);
 
   try {
     if (!(await output.stat()).isFile()) {

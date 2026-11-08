@@ -494,6 +494,7 @@ jobs:
         run: NODE_TEST_MAX_RSS_MB=2048 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
           tests/server/release-validation.test.js tests/server/release-workflow.test.js
           tests/relay/release-workflow.test.js tests/server/release-checks.test.js
+          tests/server/installer-archive-tail.test.js
       - name: Подготовка среды тестового исполнителя
         run: npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
       - name: Исходники тестового исполнителя
