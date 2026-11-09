@@ -81,7 +81,12 @@ async function mountPanel(t, rows, { error = null, mirror = false, pending = [] 
   } catch (error) {
     assert.fail(`Панель полки ещё не реализована или не монтируется: ${error.message}`);
   }
+
+  const { createPinia } = await import(
+    '../../web/node_modules/pinia/dist/pinia.mjs'
+  );
   const wrapper = mount(Panel, {
+    global: { plugins: [createPinia()] },
     attachTo: browser.document.querySelector('#mount'),
   });
   t.after(() => {

@@ -80,7 +80,11 @@ test('AppShell использует public UI controls и общую повер�
     assert.match(source, /<PipelineTopbarPopover\s+v-if="!phoneLayout && pipelineTopbar\.total"/u);
     assert.match(source, /v-if="topbarTimerTasks\.length \|\| \(!phoneLayout && pipelineTopbar\.total\)"/u);
     assert.match(source, /useTasksStore/u);
-    assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
+    assert.match(source, new RegExp(
+      'await taskStore\\.timer\\(task\\.id, action,\\s*'
+      + 'isTaskSourceId\\(task\\.source\\) \\? task\\.source : undefined\\)',
+      'u',
+    ));
     assert.match(source, /boardStore\.data\?\.today\?\.hours \?\? 0/u);
     assert.ok(
       source.indexOf('<SystemResourcesButton') < source.indexOf('<BoardTimerPopover'),

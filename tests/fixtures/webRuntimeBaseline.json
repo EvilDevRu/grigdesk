@@ -288,6 +288,7 @@
     "web/src/stores/taskFavorites.ts": {
       "id": "taskFavorites",
       "state": {
+        "sources": [],
         "scope": "",
         "revision": -1,
         "taskIds": [],
@@ -303,6 +304,7 @@
     "web/src/stores/taskSeen.ts": {
       "id": "taskSeen",
       "state": {
+        "sources": [],
         "scope": "",
         "revision": -1,
         "initialized": false,

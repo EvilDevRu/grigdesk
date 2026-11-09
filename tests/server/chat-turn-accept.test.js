@@ -274,6 +274,12 @@ test('несколько сообщений одного чата принима
     [[ids[0], 'Ответ 1'], [ids[1], 'Ответ 2'], [ids[2], 'Ответ 3']],
   );
 
+  // Pending записывается до chat-done: третий итог ещё не означает закрытие очереди.
+  // Ждём число сигналов, а порядок и queued по-прежнему проверяем отдельными assertions.
+  await waitFor(() => events.filter((entry) => entry.event === 'chat-done').length === ids.length, {
+    what: 'сигналы завершения трёх ходов',
+  });
+
   const starts = events
     .filter((entry) => entry.event === 'chat-turn-start')
     .map((entry) => entry.data.turnId);
