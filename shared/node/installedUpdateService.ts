@@ -28,6 +28,8 @@ export interface InstalledUpdateCheck {
 /**
  * Пробы запускают только проверенные байты в отдельной HOME и папке данных.
  * Ответ должен подтвердить identity компонента, а не просто успешный exit code.
+ * Шум запуска в stderr (например, ERROR dbus/bus.cc у Electron без DBUS-адреса)
+ * не свидетельствует о подмене: он логируется рядом с заданием, но не проваливает проверку.
  */
 export async function probeInstalledComponent(
   component: 'desktop' | 'server',
@@ -35,30 +37,67 @@ export async function probeInstalledComponent(
   job: InstalledUpdateJob,
 ): Promise<void> {
   const work = path.join(path.dirname(directory), `probe-${component}`);
+  const logFile = path.join(path.dirname(directory), `probe-${component}.log`);
 
   await fs.mkdir(work, { recursive: true, mode: 0o700 });
 
   const binary = path.join(directory, component === 'server' ? 'bin/grigdesk-server' : 'GrigDesk');
   const args = component === 'server' ? ['--version', '--json'] : ['--grigdesk-release-probe'];
-  const result = await execute(binary, args, {
-    cwd: work,
-    timeout: 30_000,
-    maxBuffer: 65536,
-    env: {
-      HOME: work,
-      GRIGDESK_HOME: work,
-      PATH: '/usr/bin:/bin',
-      LANG: 'C.UTF-8',
-    },
-  });
-  const identity = JSON.parse(result.stdout) as {
+
+  /**
+   * Вывод пробы сохраняется рядом с заданием до любого отказа: в job.error остаётся
+   * только код, а разбор сбоя без фактических байтов вывода невозможен.
+   */
+  const saveLog = async (result: { stdout: string; stderr: string } | null,
+    failure: string | null): Promise<void> => {
+    await fs.writeFile(logFile, JSON.stringify({
+      component,
+      binary,
+      args,
+      failure,
+      stdout: result?.stdout ?? null,
+      stderr: result?.stderr ?? null,
+    }, null, 2) + '\n', { mode: 0o600 });
+  };
+
+  let result;
+
+  try {
+    result = await execute(binary, args, {
+      cwd: work,
+      timeout: 30_000,
+      maxBuffer: 65536,
+      env: {
+        HOME: work,
+        GRIGDESK_HOME: work,
+        PATH: '/usr/bin:/bin',
+        LANG: 'C.UTF-8',
+      },
+    });
+  } catch (error) {
+    await saveLog(null, error instanceof Error ? error.message : 'probe_launch_failed')
+      .catch(() => {});
+
+    throw error;
+  }
+
+  await saveLog(result, null).catch(() => {});
+
+  let identity: {
     version?: string;
     packageId?: string;
     releaseId?: string;
   };
+
+  try {
+    identity = JSON.parse(result.stdout) as typeof identity;
+  } catch {
+    throw new Error('release_component_probe_invalid');
+  }
+
   const payload = job.envelope.payload;
 
-  if (identity.version !== payload.version || result.stderr.trim()
+  if (identity.version !== payload.version
     || component === 'server' && identity.packageId !== payload.artifacts.server.packageId
     || component === 'desktop' && identity.releaseId !== payload.releaseId) {
     throw new Error('release_component_probe_invalid');

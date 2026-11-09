@@ -62,6 +62,10 @@ Job фиксирует requestId, подписанный envelope/digest, scope,
 Потоковое скачивание проверяет размер/SHA; ustar-распаковка принимает только подписанные
 ordinary files. Links, лишние записи, traversal и превышение объёма запрещены.
 Пробы работают в отдельной HOME/D, до ready current и процессы остаются прежними.
+Проба подтверждает identity: версию, releaseId desktop либо packageId server и валидный
+JSON на stdout. Шум запуска в stderr (например, ERROR dbus/bus.cc у Electron пробы
+без DBUS-адреса) подмену не доказывает и провалом не считается: фактический вывод
+сохраняется в update/<job>/probe-<компонент>.log до любого отказа, включая отказ запуска.
 
 InstalledApplication подключает автономный сервис к main до соединения с машиной.
 Optional appUpdates и снимок передаются существующим shell long-poll, без нового SSE.
@@ -89,7 +93,10 @@ start подтверждает runtime; обычный выход/запуск �
 Shared installedServer проверяет точный unit, ExecStart/WorkingDirectory/installationId,
 uid/PID/starttime и boot instance. Manual требует lease канонического launcher.
 Чужой owner не получает stop/start. Зарегистрированная служба active/inactive имеет
-приоритет над child supervisor; второй сервер не создаётся.
+приоритет над child supervisor; второй сервер не создаётся. Локальный сервер может быть
+не запущен или поднят откуда угодно с любой папкой данных: осмотр определяет stopped
+по отказу порта (ECONNREFUSED) ещё до чтения CLI-токена; живой порт без читаемого
+токена установки даёт release_server_token_unreadable вместо сырого ENOENT.
 
 При ожидании завершения `ENOENT` и `ESRCH` от чтения `/proc` означают, что процесс
 уже завершился: он может исчезнуть между открытием `stat` и чтением его содержимого.
