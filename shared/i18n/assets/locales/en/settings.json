@@ -1802,7 +1802,7 @@
   "appUpdateFailure": "Could not continue: {code}. Check your connection and retry; the prepared update is retained.",
   "appUpdateRemoteCli": "Update the remote server separately: grigdesk-ctl server update on that machine.",
   "appUpdateCheckButton": "Check for updates",
-  "appUpdateRestart": "Restart now",
+  "appUpdateRestart": "Apply and restart",
   "appUpdatePrepare": "Update",
   "appUpdateLater": "Later",
   "appUpdateConsequences": "The application will close. Its local server will shut down gracefully; active turns may be interrupted. Continue?",

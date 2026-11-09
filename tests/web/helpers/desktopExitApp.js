@@ -164,7 +164,10 @@ export async function desktopExitApp(t, options = {}) {
     desktopExit: { skipConfirmation: false },
   };
 
-  shell.apply(options.shellSnapshot === undefined ? snapshot : options.shellSnapshot);
+  const appliedSnapshot = typeof options.shellSnapshot === 'function'
+    ? options.shellSnapshot(snapshot) : options.shellSnapshot;
+
+  shell.apply(appliedSnapshot === undefined ? snapshot : appliedSnapshot);
   shell.initialized = true;
   shell.start = async () => {};
   module.setUiLocale(options.locale ?? 'ru');

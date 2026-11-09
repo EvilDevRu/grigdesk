@@ -105,4 +105,4 @@
 
 - [История: Исторический embedded переход DeepSeek: публикация и восстановление](deepseek-release-transition.md)
 
-- [Обычная установка, подписанный v2, внешний worker, гонка выхода процесса и восстановление](installed-release-updates.md)
+- [Обычная установка, подписанный v2, внешний worker, применение до обычного Stop и восстановление](installed-release-updates.md)

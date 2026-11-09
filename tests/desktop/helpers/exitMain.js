@@ -81,6 +81,9 @@ export async function exitMain(t, options = {}) {
     status: 'online',
   });
   const supervisor = {
+    get stopping() {
+      return !!serverStopping;
+    },
     get ownership() {
       return state.ownership;
     },
@@ -219,6 +222,23 @@ export async function exitMain(t, options = {}) {
     setBounds() {}
 
     /**
+     * Последнее уничтоженное окно порождает системное событие Electron.
+     * Оно нужно для проверки выхода при ошибке ещё до появления main.
+     */
+    destroy() {
+      if (this.destroyed) {
+        return;
+      }
+
+      this.destroyed = true;
+      this.emit('closed');
+
+      if (options.emitAllClosed && windows.every((window) => window.isDestroyed())) {
+        app.emit('window-all-closed');
+      }
+    }
+
+    /**
      * Fake Electron соблюдает close → beforeunload → closed и отмену обоих событий.
      * Guard несохранённых правок снимается только реальным will-prevent-unload listener.
      */
@@ -253,8 +273,7 @@ export async function exitMain(t, options = {}) {
       }
 
       calls.push('native-close');
-      this.emit('closed');
-      this.destroyed = true;
+      this.destroy();
 
       return event;
     }
@@ -385,7 +404,17 @@ export async function exitMain(t, options = {}) {
       selectedOrigin = f.selectedOrigin;
       client = f.client;
       pipeOrigins.add(f.origin);
+
+      if (f.options.startupOnly) {
+        splashWindow = new BrowserWindow();
+
+        return;
+      }
+
       await createMainWindow(f.origin, f.stored);
+    }
+    export function setUpdateFixture(updates) {
+      applicationUpdates = updates;
     }
     export { quit, createSurfaceWindow };
   `;
