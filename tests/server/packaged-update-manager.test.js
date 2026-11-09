@@ -620,6 +620,33 @@ const { installedFixture, installedRelease } = await import('../helpers/installe
   await box.preserved();
 });
 
+/**
+ * Electron пробы без DBUS-адреса печатает ERROR dbus/bus.cc в stderr при валидном
+ * stdout: шум запуска не доказывает подмену, поэтому подготовка продолжается,
+ * а фактический вывод сохраняется в probe-лог рядом с заданием.
+ */
+test('PREP-NOISE: шум stderr пробы логируется, но не проваливает подготовку', async (t) => {
+  const release = installedRelease({
+    script: (component, identity, defaultText) => component === 'desktop'
+      ? '#!/bin/sh\nprintf \'%s\\n\' \'' + JSON.stringify(identity) + '\'\n'
+        + 'printf \'[123:ERROR:dbus/bus.cc:406] Failed to connect to the bus\\n\' >&2\n'
+      : defaultText,
+  });
+  const box = await installedFixture(t, { release });
+  const job = await box.create();
+  const ready = await box.manager.prepare(job.id);
+
+  assert.equal(ready.stage, 'ready');
+
+  const log = JSON.parse(await fs.readFile(path.join(box.root, 'update', job.id,
+    'probe-desktop.log'), 'utf8'));
+
+  assert.equal(log.failure, null);
+  assert.match(log.stdout, /"version"/u);
+  assert.match(log.stderr, /ERROR:dbus\/bus\.cc/u);
+  await box.preserved();
+});
+
 test('JOB-IDEMPOTENT/JOB-PINNED: потеря ответа и новый latest не меняют job', async (t) => {
   const release = installedRelease();
   let latest = release.envelope;

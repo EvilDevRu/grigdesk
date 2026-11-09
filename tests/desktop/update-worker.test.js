@@ -210,6 +210,54 @@ test('JOB-PROFILE: смена профиля и latest не меняет гот�
   assert.deepEqual(await box.pointer(), box.previous);
 });
 
+/**
+ * Закрытие окна считается подтверждением только для готового задания своего профиля.
+ * Чужой профиль и отсутствие задания дают idle без диалога и без запуска worker.
+ */
+test('QUIT-APPLY: чужой профиль и пустой журнал дают idle без confirm и worker', async (t) => {
+  const box = await installedFixture(t);
+  const { createInstalledApplication } = await loadInstalledModule(t,
+    'desktop/src/installedApplication.ts', box.release.publicKeyPem);
+  const executable = path.join(box.root, 'generations/0.2.0/desktop/GrigDesk');
+  let confirmCalls = 0;
+
+  await fs.mkdir(path.dirname(executable), { recursive: true, mode: 0o700 });
+  await fs.writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(box.release.index)));
+
+  const app = await createInstalledApplication({
+    executable,
+    identity: { ...box.release.identity, version: '0.2.0' },
+    localSelected: () => false,
+    ownsLocal: () => false,
+    remoteApi: () => null,
+    confirm: async () => {
+      confirmCalls += 1;
+
+      return true;
+    },
+    drainLogs: async () => {},
+    save: async () => {},
+    flushCookies: async () => {},
+    exit: async () => {},
+  });
+
+  t.after(() => app.close());
+
+  assert.equal(await app.applyReadyOnQuit(), 'idle');
+  assert.equal(confirmCalls, 0);
+
+  await box.manager.prepare((await box.create()).id);
+  await app.port.action('check', {});
+  assert.equal((await box.job()).stage, 'ready');
+  assert.equal(app.port.state().job.stage, 'ready');
+  assert.equal(app.canApplyReadyOnQuit(), false);
+  assert.equal(await app.applyReadyOnQuit(), 'idle');
+  assert.equal(confirmCalls, 0);
+  assert.deepEqual(await box.pointer(), box.previous);
+  await box.preserved();
+});
+
 for (const changed of ['notes', 'serverApi']) {
   test(`TRUST-PARITY adapters: ${changed}, desktop и настоящая CLI-команда отклоняют подпись`, async (t) => {
     const box = await installedFixture(t, { mode: 'remote' });

@@ -1259,7 +1259,7 @@
   "trackerSettings": "Настройки трекеров",
   "trackerDriversTitle": "Драйверы трекеров",
   "trackerDriverParameters": "Параметры выбранного драйвера",
-  "trackerUseOnBoard": "Использовать на доске",
+  "trackerUseOnBoard": "Включить",
   "trackerUpdates": "Обновления",
   "trackerInstalledVersion": "Установлена версия {version}",
   "trackerExternalHint": "Выберите установленную интеграцию.",

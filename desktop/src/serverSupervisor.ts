@@ -33,6 +33,7 @@ export interface SupervisorAdapters {
 
 export interface ServerSupervisor {
   readonly ownership: Ownership;
+  readonly stopping: boolean;
   readonly generation: number;
   readonly waitReason: string | null;
   readonly stage: ServerStartupStage | null;
@@ -616,6 +617,9 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
   }
 
   return {
+    get stopping() {
+      return stopping;
+    },
     get ownership() {
       return ownership;
     },

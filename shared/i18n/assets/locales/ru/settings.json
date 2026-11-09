@@ -1802,7 +1802,7 @@
   "appUpdateFailure": "Не удалось продолжить: {code}. Проверьте связь и повторите проверку; подготовленное задание сохранено.",
   "appUpdateRemoteCli": "Удалённый сервер обновляется отдельно: grigdesk-ctl server update на той машине.",
   "appUpdateCheckButton": "Проверить обновления",
-  "appUpdateRestart": "Перезапустить сейчас",
+  "appUpdateRestart": "Применить и перезапустить",
   "appUpdatePrepare": "Обновить",
   "appUpdateLater": "Позже",
   "appUpdateConsequences": "Приложение будет закрыто. Свой местный сервер штатно завершит работу; активные ходы могут прерваться. Продолжить?",
