@@ -1239,7 +1239,7 @@
   "trackerSettings": "Tracker settings",
   "trackerDriversTitle": "Tracker drivers",
   "trackerDriverParameters": "Selected driver settings",
-  "trackerUseOnBoard": "Use on the board",
+  "trackerUseOnBoard": "Enable",
   "trackerUpdates": "Updates",
   "trackerInstalledVersion": "Installed version {version}",
   "trackerExternalHint": "Choose an installed integration.",
