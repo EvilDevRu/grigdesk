@@ -28,7 +28,35 @@
         <strong>{{ steps[stepIndex] }}</strong>
       </p>
 
-      <UiLoadingState v-if="store.loading" :label="t('core.loading')" />
+      <UiLoadingState v-if="store.loading" :label="t('core.loading')">
+        <div v-if="displayScreen === 'source'" class="driver-source-list"
+             aria-hidden="true" data-loading-region="tracker-sources">
+          <div v-for="index in 3" :key="index" class="driver-source__copy driver-install__loading-source">
+            <UiSkeleton width="65%" height="21px" />
+            <UiSkeleton width="90%" height="18px" />
+          </div>
+        </div>
+        <div v-else-if="displayScreen === 'manage'" class="driver-installed"
+             aria-hidden="true" data-loading-region="tracker-packages">
+          <div v-for="index in packages.length || 2" :key="index" class="driver-package">
+            <div class="driver-package__identity">
+              <UiSkeleton width="min(60%, 180px)" height="21px" />
+              <UiSkeleton width="60px" height="18px" />
+            </div>
+            <UiSkeleton width="65%" height="18px" />
+            <UiSkeleton width="40%" height="18px" />
+            <UiFormActions align="start">
+              <UiSkeleton shape="block" width="110px" height="var(--control-height)" />
+              <UiSkeleton shape="block" width="150px" height="var(--control-height)" />
+            </UiFormActions>
+          </div>
+        </div>
+        <div v-else class="driver-job" aria-hidden="true" data-loading-region="tracker-operation">
+          <UiSkeleton width="45%" height="21px" />
+          <UiSkeleton width="65%" height="18px" />
+          <UiSkeleton width="85%" height="18px" />
+        </div>
+      </UiLoadingState>
       <template v-else>
         <UiInlineMessage v-if="store.recoveryError || store.job?.status === 'recovery_required'" tone="danger">
           {{ store.recoveryError || t('core.trackerRecovery') }}
@@ -142,7 +170,14 @@
           <UiInlineMessage v-if="store.replaceModified" tone="warning">
             {{ t('core.trackerRestoreHint') }}
           </UiInlineMessage>
-          <UiLoadingState v-if="store.busy" :label="t('core.trackerVersionsLoading')" />
+          <UiLoadingState v-if="store.busy && !store.manualVersion" :label="t('core.trackerVersionsLoading')">
+            <div class="driver-install__loading-field" aria-hidden="true" data-loading-region="tracker-version">
+              <UiSkeleton width="min(100%, 180px)" height="18px" />
+              <UiSkeleton shape="block" height="var(--control-height)" />
+              <UiSkeleton width="min(100%, 220px)" height="17px" />
+            </div>
+          </UiLoadingState>
+          <UiLoadingState v-else-if="store.busy" variant="inline" :label="t('core.trackerVersionsLoading')" />
           <UiInlineMessage v-if="store.versionsEmpty" tone="warning">{{ t('core.trackerNoVersions') }}</UiInlineMessage>
           <UiField v-if="store.versions.length && !store.manualVersion" :label="t('core.trackerAvailableVersions')"
                    :hint="t('core.trackerStableVersions')">
@@ -256,12 +291,13 @@
 
     <template #footer>
       <div class="driver-install__footer">
-        <template v-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
+        <UiLoadingState v-if="store.loading && !['manage', 'source'].includes(displayScreen)" variant="inline" />
+        <template v-else-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
           <UiButton :loading="store.busy" :disabled="store.busy" @click="store.current()">
             {{ t('core.trackerCheckingOutcome') }}
           </UiButton>
         </template>
-        <template v-else-if="store.screen === 'manage'">
+        <template v-else-if="displayScreen === 'manage'">
           <UiButton variant="link" :disabled="store.blocked || store.loading" @click="store.check()">
             {{ t('core.trackerCheckUpdates') }}
           </UiButton>
@@ -273,9 +309,12 @@
                       @click="beginInstall()">{{ t('core.trackerAdd') }}</UiButton>
           </UiFormActions>
         </template>
-        <template v-else-if="store.screen === 'source'">
-          <UiButton :disabled="store.busy" @click="manage()">{{ t('core.trackerBackToList') }}</UiButton>
-          <UiButton variant="solid" tone="accent" data-primary :disabled="store.busy || !store.url.trim()"
+        <template v-else-if="displayScreen === 'source'">
+          <UiButton :disabled="store.loading || store.busy" @click="manage()">
+            {{ t('core.trackerBackToList') }}
+          </UiButton>
+          <UiButton variant="solid" tone="accent" data-primary
+                    :disabled="store.loading || store.busy || !store.url.trim()"
                     @click="nextVersion()">{{ t('core.trackerNext') }}</UiButton>
         </template>
         <template v-else-if="store.screen === 'version'">
@@ -335,7 +374,7 @@ import { sameCatalogSource } from '../../../../shared/plugins/pluginCatalogPolic
 import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import {
   confirmDialog, messageRef, t, UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSpinner,
+  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSkeleton, UiSpinner,
 } from '../../ui.ts';
 
 const props = defineProps<{
@@ -364,30 +403,37 @@ const packages = computed(() => {
     record: store.installed[id],
   }));
 });
+const displayScreen = computed(() => store.loading && store.screen === 'manage'
+  ? props.startUpdate ? 'review' : props.startInstall ? 'source' : 'manage'
+  : store.screen);
+const displayFlow = computed(() => store.loading && store.screen === 'manage'
+  ? props.startUpdate ? 'update' : props.startInstall ? 'install' : store.flow
+  : store.flow);
 const validVersion = computed(() => /^v?\d+\.\d+\.\d+$/u.test(store.tag.trim()));
 const working = computed(() => store.busy || store.unknownOutcome
   || !!store.job && ['running', 'applying'].includes(store.job.status));
 const completed = computed(() => store.screen === 'result' && store.job?.status === 'done'
   && !store.unknownOutcome);
-const title = computed(() => t(store.screen === 'manage' ? 'core.trackerManagerTitle'
+const title = computed(() => t(displayScreen.value === 'manage' ? 'core.trackerManagerTitle'
   : completed.value ? store.flow === 'rollback' ? 'core.trackerRollbackDoneTitle'
     : store.flow === 'update' ? 'core.trackerUpdateDoneTitle' : 'core.trackerInstallDoneTitle'
-  : store.flow === 'rollback' ? 'core.trackerRollbackTitle'
-  : store.flow === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'));
-const description = computed(() => working.value ? '' : completed.value
+  : displayFlow.value === 'rollback' ? 'core.trackerRollbackTitle'
+  : displayFlow.value === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'));
+const description = computed(() =>
+  working.value && !['manage', 'source', 'version'].includes(displayScreen.value) ? '' : completed.value
   ? t('core.trackerVersionInstalled', {
     version: store.job?.preview?.version ?? store.job?.target?.version ?? '',
   })
-  : t(store.screen === 'manage' ? 'core.trackerManagerIntro'
-  : store.screen === 'source' ? 'core.trackerChooseSourceHint'
-  : store.screen === 'version' ? 'core.trackerChooseVersionHint'
-  : store.screen === 'rollback' ? 'core.trackerRollbackHint'
+  : t(displayScreen.value === 'manage' ? 'core.trackerManagerIntro'
+  : displayScreen.value === 'source' ? 'core.trackerChooseSourceHint'
+  : displayScreen.value === 'version' ? 'core.trackerChooseVersionHint'
+  : displayScreen.value === 'rollback' ? 'core.trackerRollbackHint'
   : 'core.trackerReviewHint'));
-const steps = computed(() => ['manage', 'result'].includes(store.screen) ? []
-  : store.flow === 'rollback' ? [
+const steps = computed(() => ['manage', 'result'].includes(displayScreen.value) ? []
+  : displayFlow.value === 'rollback' ? [
     t('core.trackerConfirmStep'), t('core.trackerRollback'), t('core.trackerResultStep'),
   ]
-  : store.flow === 'update' ? [
+  : displayFlow.value === 'update' ? [
     t('core.trackerPrepareStep'), t('core.trackerConfirmStep'), t('core.trackerInstall'),
   ]
   : [
@@ -395,16 +441,17 @@ const steps = computed(() => ['manage', 'result'].includes(store.screen) ? []
     t('core.trackerInstall'),
   ]);
 const stepIndex = computed(() => {
-  if (store.flow === 'rollback') {
-    return store.screen === 'rollback' ? 0 : store.screen === 'progress' ? 1 : 2;
+  if (displayFlow.value === 'rollback') {
+    return displayScreen.value === 'rollback' ? 0 : displayScreen.value === 'progress' ? 1 : 2;
   }
 
-  if (store.flow === 'update') {
-    return store.screen === 'version' || store.job?.status === 'running' ? 0
-      : store.screen === 'review' ? 1 : 2;
+  if (displayFlow.value === 'update') {
+    return displayScreen.value === 'version' || store.job?.status === 'running' ? 0
+      : displayScreen.value === 'review' ? 1 : 2;
   }
 
-  return store.screen === 'source' ? 0 : store.screen === 'version' ? 1 : store.screen === 'review' ? 2 : 3;
+  return displayScreen.value === 'source' ? 0 : displayScreen.value === 'version' ? 1
+    : displayScreen.value === 'review' ? 2 : 3;
 });
 const statusLabel = computed(() => store.job ? t(({
   running: 'core.trackerJobRunning',
@@ -744,6 +791,16 @@ onUnmounted(() => {
   gap: 6px;
   padding: 8px 0;
   text-align: left;
+}
+
+.driver-install__loading-source {
+  padding: 17px 11px;
+}
+
+.driver-install__loading-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .driver-source__title {

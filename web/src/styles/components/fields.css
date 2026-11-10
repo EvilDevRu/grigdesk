@@ -526,7 +526,7 @@ button.ui-select {
 }
 
 .ui-field__hint {
-  color: var(--ink-mid);
+  color: var(--ink-low);
 }
 
 .ui-field__error {

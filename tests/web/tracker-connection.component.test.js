@@ -59,6 +59,7 @@ test('Проверка Jira отправляет черновик без сох�
   assert.equal(actionButton(card.wrapper, /^Сохранить$/u).element.disabled, true);
   assert.equal(card.wrapper.get('input[type="password"]').element.disabled, true);
   assert.equal(card.wrapper.get('[data-driver="grigdesk-b24"]').element.disabled, true);
+  assert.equal(card.wrapper.get('[data-role="tracker-make-default"]').element.disabled, true);
   assert.equal(card.wrapper.get('button[aria-label="Закрыть"]').element.disabled, true);
   await button.trigger('click');
   assert.deepEqual(card.apiCalls.filter((call) => call.method === 'POST'), [{

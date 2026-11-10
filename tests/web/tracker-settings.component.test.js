@@ -148,6 +148,12 @@ test('TRACKER-SETTINGS-05: медленное чтение не позволяе
 
     assert.equal(dialog.exists(), true);
     assert.equal(dialog.find('[data-ui-loading]').exists(), true);
+    assert.equal(dialog.get('.tracker-settings').attributes('aria-busy'), 'true');
+    assert.equal(dialog.findAll('[data-ui-loading] [role="status"]').length, 1);
+    assert.equal(dialog.find('[data-ui-loading] .tracker-settings__sidebar').exists(), true);
+    assert.equal(dialog.find('[data-ui-loading] .tracker-settings__editor').exists(), true);
+    assert.equal(dialog.find('[data-ui-loading] [data-layout="form"]').exists(), false);
+    assert.equal(dialog.find('[data-ui-loading] input, [data-ui-loading] button').exists(), false);
     assert.equal(dialog.find('select').exists(), false);
     assert.equal(actionButton(dialog, /^Сохранить$/u).element.disabled, true);
     assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
@@ -157,6 +163,7 @@ test('TRACKER-SETTINGS-05: медленное чтение не позволяе
     const loaded = card.wrapper.find('[data-role="tracker-settings"]');
 
     assert.equal(loaded.find('[data-ui-loading]').exists(), false);
+    assert.equal(loaded.get('.tracker-settings').attributes('aria-busy'), 'false');
     assert.equal(loaded.find('select').exists(), true);
     assert.equal(actionButton(loaded, /^Сохранить$/u).element.disabled, false);
   });

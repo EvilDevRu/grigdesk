@@ -18,9 +18,55 @@
       </div>
     </template>
 
-    <div class="tracker-settings">
+    <div class="tracker-settings" :aria-busy="loading || busy">
       <UiLoadingState v-if="loading">
-        <UiSkeletonLayout layout="form" :header="false" :rows="3" />
+        <div class="tracker-settings__workspace" aria-hidden="true" data-loading-region="tracker-settings">
+          <div class="tracker-settings__sidebar">
+            <div class="tracker-settings__picker">
+              <div class="tracker-settings__loading-field">
+                <UiSkeleton width="120px" height="18px" />
+                <UiSkeleton shape="block" height="var(--control-height)" />
+              </div>
+            </div>
+            <div class="tracker-settings__catalog">
+              <h3><UiSkeleton width="65%" height="18px" /></h3>
+              <div v-for="index in externalDrivers.length || 3" :key="index"
+                   class="tracker-settings__loading-driver">
+                <UiSkeleton width="72%" height="18px" />
+                <UiSkeleton width="30%" height="14px" />
+              </div>
+            </div>
+            <div class="tracker-settings__catalog-actions">
+              <UiSkeleton shape="block" height="var(--control-height)" width="min(100%, 180px)" />
+              <UiSkeleton shape="block" height="var(--control-height)" width="min(100%, 140px)" />
+            </div>
+          </div>
+          <div class="tracker-settings__editor">
+            <div class="tracker-settings__driver-heading">
+              <UiSkeleton width="45%" height="24px" />
+              <UiSkeleton width="80px" height="18px" />
+            </div>
+            <UiSkeleton width="60%" height="18px" />
+            <UiFormActions align="start">
+              <UiSkeleton shape="block" width="100px" height="var(--control-height)" />
+              <UiSkeleton shape="block" width="140px" height="var(--control-height)" />
+            </UiFormActions>
+            <div class="tracker-settings__section">
+              <h4><UiSkeleton width="min(100%, 200px)" height="21px" /></h4>
+              <UiFormActions align="start">
+                <UiSkeleton shape="block" width="140px" height="var(--control-height)" />
+                <UiSkeleton width="90px" height="var(--control-height)" />
+              </UiFormActions>
+              <div class="tracker-settings__fields">
+                <div v-for="index in 3" :key="index" class="tracker-settings__loading-field">
+                  <UiSkeleton width="35%" height="18px" />
+                  <UiSkeleton shape="block" height="var(--control-height)" />
+                </div>
+              </div>
+              <UiSkeleton shape="block" width="min(100%, 190px)" height="var(--control-height)" />
+            </div>
+          </div>
+        </div>
       </UiLoadingState>
       <div v-else class="tracker-settings__workspace">
         <aside class="tracker-settings__sidebar" :aria-label="t('core.trackerInstalled')">
@@ -104,18 +150,18 @@
 
             <section class="tracker-settings__section" :aria-label="t('core.trackerConnectionSettings')">
               <h4>{{ t('core.trackerConnectionSettings') }}</h4>
-              <UiCheckbox :model-value="enabledIds.includes(editorId)" data-role="tracker-board-enabled"
-                          :disabled="busy || (!driverAvailable && !enabledIds.includes(editorId))"
-                          @update:model-value="setEnabled(Boolean($event))">
-                {{ t('core.trackerUseOnBoard') }}
-              </UiCheckbox>
-              <UiField :label="t('core.trackerDefaultBoard')">
-                <UiSelect v-model="externalId" :aria-label="t('core.trackerDefaultBoard')" :disabled="busy">
-                  <option v-for="id in enabledIds" :key="id" :value="id">
-                    {{ externalDrivers.find((driver) => driver.id === id)?.name ?? id }}
-                  </option>
-                </UiSelect>
-              </UiField>
+              <UiFormActions align="start">
+                <UiButton :pressed="externalId === editorId" data-role="tracker-make-default"
+                          :disabled="busy || !driverAvailable || externalId === editorId"
+                          @click="makeDefault()">
+                  {{ t('core.trackerInUse') }}
+                </UiButton>
+                <UiCheckbox :model-value="enabledIds.includes(editorId)" data-role="tracker-board-enabled"
+                            :disabled="busy || (!driverAvailable && !enabledIds.includes(editorId))"
+                            @update:model-value="setEnabled(Boolean($event))">
+                  {{ t('core.trackerUseOnBoard') }}
+                </UiCheckbox>
+              </UiFormActions>
               <UiInlineMessage v-if="externalId !== (trackers.catalog?.externalId ?? '')">
                 {{ externalId ? t('core.trackerSwitchConnection', { name: activeDriverName })
                   : t('core.trackerDisconnectConnection') }}
@@ -144,11 +190,14 @@
               </div>
               <UiFormActions align="start">
                 <UiButton :loading="testing" :disabled="busy || !driverAvailable || invalidTokenInput"
-                          data-role="tracker-test-connection" @click="checkConnection()">
+                          data-role="tracker-test-connection" aria-describedby="tracker-connection-hint"
+                          @click="checkConnection()">
                   {{ t('core.trackerTestConnection') }}
                 </UiButton>
+                <span id="tracker-connection-hint" class="tracker-settings__note tracker-settings__connection-hint">
+                  {{ t('core.trackerTestConnectionHint') }}
+                </span>
               </UiFormActions>
-              <p class="tracker-settings__note">{{ t('core.trackerTestConnectionHint') }}</p>
               <UiInlineMessage v-if="connectionResult" :tone="connectionResult.ok ? 'success' : 'danger'"
                                role="status" data-role="tracker-connection-result">
                 {{ connectionResult.ok ? t('core.trackerConnectionSuccess', { name: selected.name })
@@ -199,7 +248,7 @@ import { useDriverInstallStore } from '../../stores/driverInstall.ts';
 import { api, ApiError, failureText } from '../../shared/apiClient.ts';
 import {
   t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeletonLayout,
+  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeleton,
 } from '../../ui.ts';
 import TrackerInstallDialog from './TrackerInstallDialog.vue';
 import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
@@ -362,6 +411,19 @@ function setEnabled(enabled: boolean) {
   if (!enabledIds.value.includes(externalId.value)) {
     externalId.value = enabledIds.value[0] ?? '';
   }
+}
+
+/**
+ * Выбранный редактором драйвер становится основной доской и включается при необходимости.
+ * Назначение меняет только черновик, сохранённые чипы обновятся после записи настроек.
+ */
+function makeDefault() {
+  if (busy.value || loading.value || !driverAvailable.value) {
+    return;
+  }
+
+  setEnabled(true);
+  externalId.value = editorId.value;
 }
 
 function fieldError(key: string): string | undefined {
@@ -633,6 +695,18 @@ onMounted(() => {
   display: none;
 }
 
+.tracker-settings__loading-driver,
+.tracker-settings__loading-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tracker-settings__loading-driver {
+  gap: 4px;
+  padding: 11px;
+}
+
 .tracker-settings__catalog h3 {
   margin: 0 0 4px;
   color: var(--ink-mid);
@@ -672,6 +746,10 @@ onMounted(() => {
 
 .tracker-settings__actions {
   width: 100%;
+}
+
+.tracker-settings__connection-hint {
+  flex: 1 1 240px;
 }
 
 @container tracker-settings (max-width: 680px) {
