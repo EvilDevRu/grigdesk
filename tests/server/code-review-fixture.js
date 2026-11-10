@@ -33,7 +33,7 @@ export const git = async (root, args, options = {}) => {
  * Служебные данные фикстуры находятся вне репозитория и удаляются после закрытия приложения.
  */
 export async function reviewFixture(t, { files = { 'app.txt': 'a\nb\nc\nd\n' }, unborn = false,
-  auth = false } = {}) {
+  auth = false, branchRuntime = false, agentsBusy = () => false } = {}) {
   const temp = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-review-'));
   const root = path.join(temp, 'repo');
   let enabled = true;
@@ -65,6 +65,14 @@ export async function reviewFixture(t, { files = { 'app.txt': 'a\nb\nc\nd\n' }, 
 
   app = Fastify({ logger: false });
 
+  if (branchRuntime) {
+    await mkdir(path.join(temp, 'state'));
+    app.addHook('onRequest', async (request) => {
+      request.authKind = request.headers['x-test-auth'] || 'session';
+    });
+    app.decorate('codeAgentsBusy', agentsBusy);
+  }
+
   if (auth) {
     const authStore = new AuthStore({
       legacyAccountPath: path.join(temp, 'account.json'),
@@ -79,7 +87,7 @@ export async function reviewFixture(t, { files = { 'app.txt': 'a\nb\nc\nd\n' }, 
     config: {
       profilesDir: path.join(temp, 'profiles'),
       chatsDir: path.join(root, 'chats'),
-      dataStateDir: path.join(root, 'private-state'),
+      dataStateDir: branchRuntime ? path.join(temp, 'state') : path.join(root, 'private-state'),
     },
     prefs: { read: () => ({ projects: { demo: { repos: [{ key: 'main', dir: root }] } } }) },
   });

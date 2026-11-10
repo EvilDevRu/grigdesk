@@ -29,7 +29,8 @@
               <UiSelect v-model="editorId" :disabled="busy">
                 <option v-if="!externalDrivers.length" value="">{{ t('core.trackerNone') }}</option>
                 <option v-for="driver in externalDrivers" :key="driver.id" :value="driver.id">
-                  {{ driver.name }}{{ trackers.catalog?.externalId === driver.id
+                  {{ driver.name }}{{ savedEnabledIds.includes(driver.id)
+                    ? ` · ${t('core.trackerEnabled')}` : '' }}{{ savedDefaultId === driver.id
                     ? ` · ${t('core.trackerInUse')}` : '' }}
                 </option>
               </UiSelect>
@@ -43,8 +44,10 @@
               <span class="ui-settings-catalog-copy">
                 <span class="ui-settings-catalog-heading">
                   <span class="ui-settings-catalog-title">{{ driver.name }}</span>
-                  <span v-if="trackers.catalog?.externalId === driver.id" class="ui-status-chip"
-                        data-tone="success" data-role="tracker-in-use">{{ t('core.trackerInUse') }}</span>
+                  <span v-if="savedEnabledIds.includes(driver.id)" class="ui-status-chip"
+                        data-tone="success" data-role="tracker-enabled">{{ t('core.trackerEnabled') }}</span>
+                  <span v-if="savedDefaultId === driver.id" class="ui-status-chip"
+                        data-role="tracker-in-use">{{ t('core.trackerInUse') }}</span>
                 </span>
                 <span class="ui-settings-catalog-status">
                   {{ installer.installed[driver.id]?.version || driver.version || '' }}
@@ -68,8 +71,10 @@
           <template v-if="selected">
             <div class="tracker-settings__driver-heading">
               <h3>{{ selected.name }}</h3>
-              <span v-if="trackers.catalog?.externalId === selected.id" class="ui-status-chip"
-                    data-tone="success" data-role="tracker-editor-in-use">{{ t('core.trackerInUse') }}</span>
+              <span v-if="savedEnabledIds.includes(selected.id)" class="ui-status-chip"
+                    data-tone="success" data-role="tracker-editor-enabled">{{ t('core.trackerEnabled') }}</span>
+              <span v-if="savedDefaultId === selected.id" class="ui-status-chip"
+                    data-role="tracker-editor-in-use">{{ t('core.trackerInUse') }}</span>
               <span v-if="packageInfo?.version || selected.version" class="tracker-settings__version">
                 {{ t('core.trackerInstalledVersion', { version: packageInfo?.version || selected.version || '' }) }}
               </span>
@@ -233,6 +238,9 @@ let settingsReady: Promise<void> | null = null;
 const externalDrivers = computed(() =>
   trackers.catalog?.drivers.filter((driver) => driver.id !== 'own' && !driver.deleted) ?? [],
 );
+const savedDefaultId = computed(() => trackers.catalog?.default ?? trackers.catalog?.externalId);
+const savedEnabledIds = computed(() => trackers.catalog?.enabledIds
+  ?? (savedDefaultId.value ? [savedDefaultId.value] : []));
 const selected = computed(() => externalDrivers.value.find((driver) => driver.id === editorId.value));
 const packageInfo = computed(() => installer.installed[editorId.value]);
 const driverAvailable = computed(() => ['active', 'available'].includes(selected.value?.status ?? ''));

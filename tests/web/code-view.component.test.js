@@ -3,6 +3,7 @@ import test, { after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { compileVue, webFile } from './helpers/compile-vue.js';
+import { DEFAULT_CODE_BRANCH_SETTINGS } from '../../shared/plugins/code/codeBranchContracts.ts';
 import {
   activeCodeReviewWorkers,
   drainCodeReviewWorkers,
@@ -22,6 +23,144 @@ let CodeViewDomWrapper = null;
 after(() => {
   sharedBrowser?.close();
   sharedBrowser = null;
+});
+
+/**
+ * Снимок runtime меняется только ответами двойника HTTP.
+ * Компонент проходит настоящие controls и подтверждение без сборки приложения.
+ */
+async function mountBranchPanel(t, approved) {
+  const posts = [];
+  const confirmations = [];
+  const state = {
+    branches: [
+      {
+        ref: 'refs/heads/dev',
+        name: 'dev',
+        kind: 'local',
+        commit: 'a'.repeat(40),
+        current: true,
+        occupied: '/demo',
+      },
+      {
+        ref: 'refs/heads/feature/demo',
+        name: 'feature/demo',
+        kind: 'local',
+        commit: 'b'.repeat(40),
+        current: false,
+        occupied: '',
+      },
+    ],
+    settings: { ...DEFAULT_CODE_BRANCH_SETTINGS },
+    job: null,
+    actualBranch: 'dev',
+    actualCommit: 'a'.repeat(40),
+    log: '',
+  };
+  const api = {
+    /**
+     * Чтения отдают только публичные данные панели и снимок временного runtime.
+     * Отсутствующая ручка должна уронить сценарий вместо ложного пустого ответа.
+     */
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{
+          key: 'demo',
+          dir: '/demo',
+          trees: [mainTree('/demo', 'dev')],
+        }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/branches?')) {
+        return state;
+      }
+
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, body) {
+      posts.push({ url, body });
+
+      if (url.includes('/branch-settings?')) {
+        state.settings = { ...body };
+      }
+
+      return state;
+    },
+  };
+  const mounted = await mountCodeView(t, {
+    api,
+    confirm: async (text) => {
+      confirmations.push(text);
+
+      return approved;
+    },
+  });
+
+  await mounted.wrapper.get('[data-action="code-branches"]').trigger('click');
+  await settle(mounted.flushPromises);
+
+  const dialog = new CodeViewDomWrapper(mounted.browser.document.body);
+
+  return {
+    ...mounted,
+    dialog,
+    state,
+    posts,
+    confirmations,
+  };
+}
+
+test('CODE-BRANCH-UI: выбор подтверждает папку и коммит, передаёт точные refs и HEAD', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  assert.match(h.dialog.get('[data-action="branch-actual"]').text(), /dev.*aaaaaaaaaa/);
+  await h.dialog.get('select[data-action="branch-choice"]').setValue('refs/heads/feature/demo');
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.match(h.confirmations[0], /feature\/demo.*bbbbbbbbbb/);
+  assert.match(h.confirmations[0], /\/demo/);
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/switch-branch\?repo=demo&root=%2Fdemo/);
+  assert.deepEqual(h.posts[0].body, {
+    ref: 'refs/heads/feature/demo',
+    expectedCommit: 'b'.repeat(40),
+    expectedHead: 'a'.repeat(40),
+    confirmed: true,
+  });
+
+  await h.dialog.get('[data-action="return-branch"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.posts[1].body.ref, 'refs/heads/dev');
+});
+
+test('CODE-BRANCH-CANCEL: отмена подтверждения не отправляет мутацию', async (t) => {
+  const h = await mountBranchPanel(t, false);
+
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.equal(h.posts.length, 0);
+});
+
+test('CODE-BRANCH-SETTINGS: сохранение команды не запускает переключение', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  await h.dialog.get('textarea[data-action="branch-setting-build"]').setValue('npm run build');
+  await h.dialog.get('[data-action="save-branch-settings"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/branch-settings\?/);
+  assert.equal(h.posts[0].body.build, 'npm run build');
+  assert.equal(h.confirmations.length, 0);
 });
 
 function deferred() {
@@ -2683,6 +2822,93 @@ async function mountGitPanel(t, gitPayload, {
   return mounted;
 }
 
+test('CODE-PULL-UI: стрелка получает изменения, блокирует повтор и обновляет историю', async (t) => {
+  const pending = deferred();
+  const posts = [];
+  const payload = {
+    tracking: {
+      detached: false,
+      upstream: 'origin/main',
+      remote: 'origin',
+      ahead: 0,
+      behind: 3,
+    },
+    log: [],
+  };
+  const h = await mountGitPanel(t, payload, {
+    post: (url, body) => {
+      posts.push({ url, body });
+
+      return pending.promise;
+    },
+  });
+
+  assert.equal(h.wrapper.get('button.pull-action').attributes('aria-label'), 'Получить изменения');
+  await h.wrapper.get('button.pull-action').trigger('click');
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+  assert.equal(h.wrapper.get('button.fetch-action').element.disabled, true);
+  assert.equal(h.wrapper.get('button.push-action').element.disabled, true);
+  await h.wrapper.get('button.pull-action').trigger('click');
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/pull\?/);
+  assert.deepEqual(posts[0].body, {});
+
+  payload.tracking = { ...payload.tracking, behind: 0 };
+  payload.log = [{
+    hash: 'a'.repeat(40),
+    subject: 'Полученный коммит',
+    when: '2026-01-01',
+  }];
+  pending.resolve({
+    ok: true,
+    branch: 'main',
+    updated: true,
+    tracking: payload.tracking,
+  });
+  await settle(h.flushPromises);
+
+  assert.equal(h.wrapper.vm.git.tracking.behind, 0);
+  assert.equal(h.wrapper.vm.git.log[0].subject, 'Полученный коммит');
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, false);
+  assert.match(String(h.toasts.list().at(-1)?.body), /Ветка main обновлена/);
+});
+
+test('CODE-PULL-ERROR: отказ fast-forward виден тостом и освобождает кнопку', async (t) => {
+  const h = await mountGitPanel(t, {
+    tracking: {
+      detached: false,
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 3,
+    },
+  }, {
+    post: async () => {
+      throw new Error('История веток разошлась. Fast-forward невозможен.');
+    },
+  });
+
+  await h.wrapper.get('button.pull-action').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.toasts.list().at(-1)?.tone, 'danger');
+  assert.match(String(h.toasts.list().at(-1)?.body), /Fast-forward невозможен/);
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, false);
+  assert.equal(h.wrapper.vm.git.tracking.behind, 3);
+});
+
+test('CODE-PULL-UNAVAILABLE: без upstream и при detached HEAD стрелка недоступна', async (t) => {
+  const h = await mountGitPanel(t, {});
+
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+  h.wrapper.vm.git.tracking = {
+    detached: true,
+    upstream: 'origin/main',
+    ahead: 0,
+    behind: 1,
+  };
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+});
+
 /**
  * Задерживает только HTTP-ответ push, сохраняя настоящий компонент и общий центр тостов.
  * Метаданные меняются явно, чтобы повторное открытие читало подтверждённое состояние.
@@ -2892,7 +3118,7 @@ test('композер стоит в нижнем footer и отдаёт пол�
   );
   assert.deepEqual(
     wrapper.findAll('.git-remote-actions > button').map((node) => node.classes()[0]),
-    ['fetch-action', 'push-action'],
+    ['fetch-action', 'pull-action', 'push-action'],
   );
   assert.equal(wrapper.get('.git-footer > .git-sync-row').exists(), true);
   assert.equal(wrapper.find('.git-compose-actions input').exists(), false);

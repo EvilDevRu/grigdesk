@@ -31,26 +31,48 @@ test('MD-SETTINGS-UI: включения A/B независимы, default вы�
   });
 
   await openTrackerSettings(card);
+  assert.equal(card.wrapper.findAll('[data-role="tracker-enabled"]').length, 2);
+  assert.equal(card.wrapper.get('[data-driver="fixture-a"] [data-role="tracker-enabled"]').text(), 'Включён');
+  assert.equal(card.wrapper.get('[data-driver="fixture-b"] [data-role="tracker-in-use"]').text(),
+    'По умолчанию');
+  assert.equal(card.wrapper.find('[data-driver="fixture-a"] [data-role="tracker-in-use"]').exists(), false);
+
+  const choices = card.wrapper.get('#tracker-driver-native').findAll('option').map((option) => option.text());
+
+  assert.deepEqual(choices, ['Альфа · Включён', 'Бета · Включён · По умолчанию']);
   await card.wrapper.get('[data-driver="fixture-a"]').trigger('click');
   await card.flushPromises();
   assert.equal(card.wrapper.get('[data-role="tracker-board-enabled"]').element.checked, true,
     'A включён одновременно с B, хотя default B');
+  assert.equal(card.wrapper.get('[data-role="tracker-editor-enabled"]').text(), 'Включён');
+  assert.equal(card.wrapper.find('[data-role="tracker-editor-in-use"]').exists(), false);
+  await card.wrapper.get('[data-role="tracker-board-enabled"]').setValue(false);
+  assert.equal(card.wrapper.get('[data-driver="fixture-a"] [data-role="tracker-enabled"]').text(), 'Включён',
+    'Несохранённый флажок не меняет чип действующего подключения');
+  await card.wrapper.get('[data-role="tracker-board-enabled"]').setValue(true);
   await card.wrapper.get('[data-driver="fixture-b"]').trigger('click');
   await card.flushPromises();
   assert.equal(card.wrapper.get('[data-role="tracker-board-enabled"]').element.checked, true);
+  assert.equal(card.wrapper.get('[data-role="tracker-editor-enabled"]').text(), 'Включён');
+  assert.equal(card.wrapper.get('[data-role="tracker-editor-in-use"]').text(), 'По умолчанию');
 
-  const defaultControl = card.wrapper.findAll('select').find((select) =>
-    /умолчанию|default/iu.test(select.attributes('aria-label') || select.element.parentElement.textContent));
+  const defaultControl = card.wrapper.find('select[aria-label="Доска по умолчанию"]');
 
-  assert.ok(defaultControl, 'Доска по умолчанию выбирается отдельным control');
+  assert.ok(defaultControl.exists(), 'Доска по умолчанию выбирается отдельным control');
   await defaultControl.setValue('fixture-a');
+  assert.equal(card.wrapper.get('[data-driver="fixture-b"] [data-role="tracker-in-use"]').text(),
+    'По умолчанию', 'Несохранённый дефолт не перемещает чип');
   await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
   await card.flushPromises();
 
   const write = card.apiCalls.find((call) => call.method === 'POST' && call.url === '/api/trackers/settings');
 
-  assert.deepEqual(write.payload.drivers, ['fixture-a', 'fixture-b']);
+  assert.deepEqual(write.payload.drivers.toSorted(), ['fixture-a', 'fixture-b']);
   assert.equal(write.payload.default, 'fixture-a');
+  assert.equal(card.wrapper.get('[data-driver="fixture-a"] [data-role="tracker-in-use"]').text(),
+    'По умолчанию');
+  assert.equal(card.wrapper.find('[data-role="tracker-editor-in-use"]').exists(), false);
+  assert.equal(card.wrapper.findAll('[data-role="tracker-enabled"]').length, 2);
 });
 
 test('MD-CHIPS: лента, related и избранное показывают PNG A, монограмму B и GrigDesk', async (t) => {

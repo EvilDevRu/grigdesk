@@ -342,6 +342,12 @@ const fetchResult = objectOf({
   remote: text,
   tracking,
 });
+const pull = objectOf({
+  ok: success,
+  branch: text,
+  updated: boolean,
+  tracking,
+});
 const undoCommit = objectOf({
   ok: success,
   message: text,
@@ -410,6 +416,7 @@ export type CodeStageResponse = ReturnType<typeof stage>;
 export type CodeCommitResponse = ReturnType<typeof commit>;
 export type CodePushResponse = ReturnType<typeof push>;
 export type CodeFetchResponse = ReturnType<typeof fetchResult>;
+export type CodePullResponse = ReturnType<typeof pull>;
 export type CodeUndoCommitResponse = ReturnType<typeof undoCommit>;
 export type CodePatchResponse = ReturnType<typeof patchResult>;
 export type CodeFileLogEntry = ReturnType<typeof fileLogEntry>;
@@ -487,6 +494,14 @@ export function parseCodePushResponse(value: unknown): CodePushResponse {
 
 export function parseCodeFetchResponse(value: unknown): CodeFetchResponse {
   return fetchResult(value, 'fetch');
+}
+
+/**
+ * Подтверждение получения проверяется до обновления клиентского снимка.
+ * Тип ответа выводится из того же декодера, что проверяет сетевые поля.
+ */
+export function parseCodePullResponse(value: unknown): CodePullResponse {
+  return pull(value, 'pull');
 }
 
 export function parseCodeUndoCommitResponse(value: unknown): CodeUndoCommitResponse {

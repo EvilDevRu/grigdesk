@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { selectTracker, trackerFixture, writeTracker } from './helpers/trackerFixture.js';
 
-const validToken = 'opaque-valid-token-with-variable-length';
+const validToken = 'ATATTopaque==segment:fixture!';
 
 /**
  * Подлинность токена определяет драйвер: даже пароль допустимого алфавита получает отказ.
@@ -82,13 +82,13 @@ test('Проверка соединения отклоняет формат до
   const response = await fixture.request('POST', '/api/trackers/test-connection', {
     driverId: 'fixture-token',
     expectedRevision: 0,
-    settings: { apiToken: 'Пароль!123' },
+    settings: { apiToken: 'Пароль с пробелом!' },
   });
 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().field, 'apiToken');
   assert.equal(fixture.runtime.registry.isLoaded('fixture-token'), false);
-  assert.equal(response.body.includes('Пароль!123'), false);
+  assert.equal(response.body.includes('Пароль с пробелом!'), false);
 });
 
 test('Настройки всех драйверов проверяются до первой сетевой пробы токена', async (t) => {

@@ -216,12 +216,15 @@ test('inspect убирает запись мёртвого holder, блокир�
   assert.deepEqual(JSON.parse(await fs.readFile(await recordsFileOf(input), 'utf8')), []);
 });
 
-test('terminate закрывает живую цепочку holder/CLI по подтверждению и снимает запись', async (t) => {
+test('terminate закрывает живую цепочку holder/CLI по подтверждению и снимает запись', {
+  timeout: 15000,
+}, async (t) => {
   const input = await fixture(t);
   // Detached node-процесс повторяет реального helper: собственная сессия и группа,
   // а записанный child — «CLI», который переживает группу теста.
   const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'],
     { detached: true, stdio: 'ignore' });
+  const holderExited = once(holder, 'exit');
 
   t.after(() => {
     try { process.kill(-holder.pid, 'SIGKILL'); } catch { /* Группа уже завершилась. */ }
@@ -229,6 +232,10 @@ test('terminate закрывает живую цепочку holder/CLI по п�
 
   const child = spawn(process.execPath, ['-e', 'process.stdout.write(String(process.pid));'
     + ' setInterval(() => {}, 1000);'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const childExited = once(child, 'exit');
+
+  t.after(() => child.kill('SIGKILL'));
+
   const childPid = Number((await once(child.stdout, 'data')).toString());
 
   await fs.mkdir(path.dirname(await recordsFileOf(input)), { recursive: true });
@@ -256,6 +263,7 @@ test('terminate закрывает живую цепочку holder/CLI по п�
   assert.equal(before[0].chatKey, 'smvsh2vwj3uw');
 
   await terminateCliLeaseHolders(input);
+  await Promise.all([holderExited, childExited]);
 
   const holderDead = await fs.access(`/proc/${holder.pid}`).then(() => false, () => true);
   const childDead = await fs.access(`/proc/${childPid}`).then(() => false, () => true);

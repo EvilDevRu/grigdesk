@@ -36,7 +36,12 @@ test('DRIVER-REMOVE-01: свободный пакет удаляется, рек
   assert.deepEqual(response.json(), { id: driverId, restartRequired: true });
   assert.equal(existsSync(path.join(fixture.config.driversDir, driverId)), false);
   assert.equal(await readFile(fixture.config.trackerCredentialsPath, 'utf8'), credentials);
-  assert.deepEqual(fixture.runtime.selection.read(), { externalId: null, revision: 0 });
+  assert.deepEqual(fixture.runtime.selection.read(), {
+    drivers: [],
+    default: null,
+    externalId: null,
+    revision: 0,
+  });
 
   const descriptor = fixture.runtime.catalog().drivers.find((driver) => driver.id === driverId);
 
@@ -89,9 +94,20 @@ test('DRIVER-REMOVE-02: выбранный пакет ждёт вызов, за�
   release.resolve();
   assert.equal(await accepted, 'finished');
   assert.equal((await removal).statusCode, 200);
-  assert.deepEqual(fixture.runtime.selection.read(), { externalId: null, revision: revision + 1 });
+  assert.deepEqual(fixture.runtime.selection.read(), {
+    drivers: [],
+    default: null,
+    externalId: null,
+    revision: revision + 1,
+  });
   assert.deepEqual(fixture.events.filter((event) => event.name === 'trackers-changed'), [{
-    name: 'trackers-changed', payload: { externalId: null, revision: revision + 1 },
+    name: 'trackers-changed',
+    payload: {
+      drivers: [],
+      default: null,
+      externalId: null,
+      revision: revision + 1,
+    },
   }]);
   assert.equal((await fixture.request('GET', '/api/grigdesk-tasks')).json().trackerConfigured, false);
   assert.deepEqual(fixture.credsStore.readFor(driverId), { token: 'fixture-owner-secret' });

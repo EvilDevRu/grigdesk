@@ -21,6 +21,10 @@ POST ожидает native loadURL, поэтому одновременные PO
 | `grigdesk-board-v1` | прежние окна сохраняют single-default API и протокол своей сборки |
 | `grigdesk-task-data-v1` | task-data-changed после успешных setFavorite/markSeen; shelf-acknowledge с каноническим taskId |
 
+Список событий SSE сохраняет прежний префикс projects-changed, hello,
+diagnostic-logging, task-shelf-changed. Новые имена, включая trackers-changed,
+добавляются в конец, чтобы расширение не меняло порядок прежних подписок.
+
 Новый `sourceKey` включает область авторизации, профиль и ревизии владельцев драйверов.
 В multi-source data передаются агрегированные роли и `driverSnapshots`: снимок, dataRevision
 и ошибка каждой ветки. Приём проверяет форму, локально подтверждённый ключ, readAt и эпоху;

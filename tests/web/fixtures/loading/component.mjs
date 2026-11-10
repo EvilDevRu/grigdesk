@@ -54,7 +54,11 @@ export async function mountSurface(t, spec) {
 
 
     const component = await compileVue(webFile(spec.file), { stubs });
-    const wrapper = mount(component, { props: spec.pending });
+    const { createPinia } = await import('../../../../web/node_modules/pinia/dist/pinia.mjs');
+    const wrapper = mount(component, {
+        props: spec.pending,
+        global: { plugins: [createPinia()] },
+    });
 
     t.after(() => {
         wrapper.unmount();

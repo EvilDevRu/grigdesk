@@ -19,6 +19,7 @@ declare global {
  */
 export function createDesktopExitRenderer(options: {
   sessions(): readonly { id: string; title?: string }[];
+  update(): { version: string } | null;
 }) {
   const state = reactive({
     phase: 'idle' as 'idle' | 'prompt' | 'stopping',
@@ -83,9 +84,17 @@ export function createDesktopExitRenderer(options: {
     lifetime.signal.addEventListener('abort', cancel, { once: true });
 
     try {
-      return await Promise.race([
+      const activity = await Promise.race([
         inspectDesktopExitActivity(options.sessions(), controller.signal), unavailable,
       ]);
+
+      if ('unavailable' in activity) {
+        return activity;
+      }
+
+      const update = options.update();
+
+      return update ? { ...activity, update } : activity;
     } finally {
       clearTimeout(timer);
       lifetime.signal.removeEventListener('abort', cancel);

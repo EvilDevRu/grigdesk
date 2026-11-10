@@ -221,6 +221,64 @@ function chats(count = 95) {
   }));
 }
 
+test('PAGE-REMOTE-NEW: чат другого окна сразу появляется в открытом списке', async (t) => {
+  const world = await serverWorld(t, chats());
+  const view = await world.open();
+  const remote = sampleChat('remote-created-chat', {
+    title: 'Макеты настройки досок',
+    updatedAt: Date.now(),
+  });
+  const cursor = view.chat.pageFor('', false).nextCursor;
+  const before = view.calls.length;
+
+  await jsonRequest(world.app, 'PUT', '/api/chat/store/chat', { chat: remote, archived: false });
+  view.sse('chat-store', {
+    id: remote.id,
+    archived: false,
+    origin: 'another-window',
+  });
+  await waitFor(() => view.chat.sessions.some((chat) => chat.id === remote.id));
+  assert.equal(view.chat.list('').some((chat) => chat.id === remote.id), true,
+    'Полученная по SSE карточка видна без поиска, reconnect и перезагрузки');
+  assert.equal(view.chat.pageFor('', false).nextCursor, cursor);
+  assert.equal(view.calls.slice(before).some((call) => call.url.includes('/store/chat/')), false,
+    'Новая карточка не требует скачивать переписку');
+});
+
+test('PAGE-REMOTE-KNOWN: обновление найденного чата дополняет список и сохраняет поиск', async (t) => {
+  const records = chats();
+  const remote = records.at(-1);
+
+  remote.title = 'Уникальный макет';
+
+  const world = await serverWorld(t, records);
+  const view = await world.open();
+
+  await view.chat.searchChats('Уникальный макет', false);
+  assert.equal(view.chat.list('').some((chat) => chat.id === remote.id), false);
+  assert.deepEqual(view.chat.list('Уникальный макет').map((chat) => chat.id), [remote.id]);
+
+  const cursor = view.chat.pageFor('', false).nextCursor;
+
+  await jsonRequest(world.app, 'PUT', '/api/chat/store/chat', {
+    chat: {
+      ...remote,
+      title: 'Уникальный макет обновлён',
+      updatedAt: Date.now(),
+    },
+    archived: false,
+  });
+  view.sse('chat-store', {
+    id: remote.id,
+    archived: false,
+    origin: 'another-window',
+  });
+  await waitFor(() => view.chat.session(remote.id)?.title === 'Уникальный макет обновлён');
+  assert.equal(view.chat.list('').some((chat) => chat.id === remote.id), true);
+  assert.deepEqual(view.chat.list('Уникальный макет').map((chat) => chat.id), [remote.id]);
+  assert.equal(view.chat.pageFor('', false).nextCursor, cursor);
+});
+
 test('PAGE-OPEN: restored activeId и видимость не читают историю до выбора', async (t) => {
   const world = await serverWorld(t, chats());
   const id = 'web-page-0';

@@ -27,6 +27,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
 import { projectRepos } from '../../lib/projects.ts';
 import { generateCommitTitle } from '../../lib/codeCommitMessage.ts';
+import { CodeBranchRuns } from '../../lib/codeBranchRuns.ts';
 import type { CommitTargetResolver } from '../../lib/codeCommitMessage.ts';
 import type {
   CodeBlameResponse,
@@ -58,6 +59,7 @@ import {
   fetchRemote,
   gitTrackingStatus,
   patchText,
+  pullCurrentBranch,
   pushCurrentBranch,
   searchTree,
   stageWorktreeChanges,
@@ -69,6 +71,7 @@ import {
 export interface CodeModuleConfig extends Record<string, unknown> {
   profilesDir: string;
   dataStateDir?: string;
+  rootDir?: string;
   mobileDir?: string;
   envPath?: string;
   chatsDir?: string | null;
@@ -307,6 +310,27 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
   } = opts;
   const hidden = hiddenDirs(config);
   const mutatingRoots = new Set<string>();
+  const branchRuns = config.dataStateDir ? new CodeBranchRuns(config.dataStateDir, config.rootDir) : null;
+
+  fastify.decorate('codeBranchBusy', async (root: string) => {
+    let canonical = await fs.realpath(root).catch(() => root);
+
+    while (branchRuns) {
+      if (await branchRuns.busy(canonical)) {
+        return true;
+      }
+
+      const parent = path.dirname(canonical);
+
+      if (parent === canonical) {
+        break;
+      }
+
+      canonical = parent;
+    }
+
+    return false;
+  });
 
   // Живой гейт (как у video): тумблер в настройках действует без рестарта.
   const gate = (reply: FastifyReply) => fastify.pluginEnabled('code') ? null : reply.code(403).send({
@@ -439,11 +463,15 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
   ): Promise<Result | FastifyReply> {
     const root = ctx.tree.path;
 
-    if (mutatingRoots.has(root)) {
+    if (mutatingRoots.has(root) || await fastify.codeBranchBusy?.(root)) {
       return reply.code(409).send({
         error: 'git_busy',
         message: 'В этой рабочей копии уже выполняется другое Git-действие.',
       });
+    }
+
+    if (mutatingRoots.has(root)) {
+      return reply.code(409).send({ error: 'git_busy' });
     }
 
     mutatingRoots.add(root);
@@ -512,6 +540,110 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
         trees: await worktrees(r.dir).catch(() => []),
       }))),
     } satisfies CodeReposResponse;
+  });
+
+  /**
+   * Runtime меняет только основную папку и только по сессии человека.
+   * Существующие worktree остаются доступными для просмотра и своих Git-действий.
+   */
+  async function branchRoot(req: FastifyRequest<CodeRoute>, reply: FastifyReply) {
+    if (gate(reply)) {
+      return null;
+    }
+    if (req.authKind !== 'session') {
+      reply.code(403).send({ error: 'session_required' });
+
+      return null;
+    }
+    if (!branchRuns) {
+      reply.code(409).send({ error: 'branch_runtime_unavailable' });
+
+      return null;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return null;
+    }
+    if (!ctx.tree.main) {
+      reply.code(409).send({
+        error: 'main_checkout_required',
+        message: 'Для переключения стенда выберите основную рабочую папку репозитория.',
+      });
+
+      return null;
+    }
+
+    const root = await fs.realpath(ctx.tree.path);
+    const state = await fs.realpath(config.dataStateDir!);
+
+    if (state === root || state.startsWith(`${root}${path.sep}`)) {
+      reply.code(409).send({
+        error: 'branch_state_in_checkout',
+        message: 'Для переключения веток папка данных GrigDesk должна находиться вне репозитория.',
+      });
+
+      return null;
+    }
+
+    return { ctx, root };
+  }
+
+  fastify.get<CodeRoute>('/api/code/:project/branches', async (req, reply) => {
+    const target = await branchRoot(req, reply);
+
+    if (!target) {
+      return reply;
+    }
+
+    try {
+      return await branchRuns!.overview(target.root);
+    } catch (error) {
+      return sendGitError(reply, error);
+    }
+  });
+
+  fastify.post<CodeRoute>('/api/code/:project/branch-settings', async (req, reply) => {
+    const target = await branchRoot(req, reply);
+
+    if (!target) {
+      return reply;
+    }
+
+    try {
+      await branchRuns!.configure(target.root, req.body);
+
+      return await branchRuns!.overview(target.root);
+    } catch (error) {
+      return sendGitError(reply, error);
+    }
+  });
+
+  fastify.post<CodeRoute>('/api/code/:project/switch-branch', async (req, reply) => {
+    const target = await branchRoot(req, reply);
+
+    if (!target) {
+      return reply;
+    }
+
+    const body = requestBody(req);
+
+    if (typeof body.ref !== 'string' || body.confirmed !== true
+      || typeof body.expectedCommit !== 'string' || typeof body.expectedHead !== 'string') {
+      return reply.code(400).send({ error: 'branch_confirmation_required' });
+    }
+
+    return mutateRoot(target.ctx, reply, async () => {
+      await branchRuns!.start(target.root, body.ref as string, {
+        commit: body.expectedCommit as string,
+        head: body.expectedHead as string,
+      }, () => (
+        fastify.codeAgentsBusy?.(target.root) ?? Promise.resolve(false)
+      ));
+
+      return branchRuns!.overview(target.root);
+    });
   });
 
   // Содержимое каталога — дерево ленивое, каталог читается при раскрытии.
@@ -1238,6 +1370,21 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
 
     return mutateRoot(ctx, reply, (root) => fetchRemote(root));
+  });
+
+  // Получение продвигает чистую ветку только через fast-forward, без merge-коммита и rebase.
+  fastify.post<CodeRoute>('/api/code/:project/pull', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => pullCurrentBranch(root));
   });
 
   // Модель читает только staged diff через model-only transport без инструментов.

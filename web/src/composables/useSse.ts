@@ -50,7 +50,6 @@ export type SseRelayRole = 'off' | 'source' | 'mirror';
 // События, нужные окну карточки: журнал окна, полка и речь. Поток ходов чата и прогресс
 // через канал не идут. Новый подписчик внутри карточки — добавить его событие сюда.
 const RELAYED_EVENTS: readonly SseEventName[] = [
-  'trackers-changed',
   'projects-changed',
   'hello',
   'diagnostic-logging',
@@ -62,6 +61,7 @@ const RELAYED_EVENTS: readonly SseEventName[] = [
   'db-sessions',
   'db-queries',
   'db-audit',
+  'trackers-changed',
 ];
 const SSE_RELAY_NAME = 'grigdesk-sse-v1';
 const defaultRelayFactory = (): RelayChannel => new BroadcastChannel(SSE_RELAY_NAME);

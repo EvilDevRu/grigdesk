@@ -1014,6 +1014,37 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     log: fastify.log,
   });
 
+  // Проверка учитывает принятые и фоновые ходы, включая ожидание своей очереди.
+  // Разрешение их папок не публикует содержимое переписки или id сессий.
+  fastify.decorate('codeAgentsBusy', async (root: string) => {
+    const keys = new Set([
+      ...acceptedTurns.keys(),
+      ...activeRuns.keys(),
+      ...backgroundRuns.list().map((run) => String(run.chatKey)),
+    ]);
+
+    for (const key of keys) {
+      try {
+        const record = key ? await history.readOne(key) : null;
+        const workspace = await workspaceOf(record || { workdir: { kind: 'grigdesk' } });
+
+        for (const candidate of [workspace.cwd, ...workspace.extraDirs]) {
+          const canonical = await fs.realpath(candidate);
+
+          if (canonical === root || canonical.startsWith(`${root}${path.sep}`)
+            || root.startsWith(`${canonical}${path.sep}`)) {
+            return true;
+          }
+        }
+      } catch {
+        // Неизвестная папка живого хода не доказывает, что checkout свободен.
+        return true;
+      }
+    }
+
+    return false;
+  });
+
   /** Отказ новому ходу на остановке: окно покажет причину, человек повторит после подъёма. */
   function restartingReply(reply: FastifyReply) {
     return reply.code(503).send({
@@ -2641,6 +2672,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         taskId: opts.id,
         modelRef: { provider: target.provider, model: target.model },
       });
+
+      for (const root of [target.workspace.cwd, ...target.workspace.extraDirs]) {
+        if (await fastify.codeBranchBusy?.(root)) {
+          throw new ChatWorkdirError('branch_busy', 'В этой папке переключается и запускается ветка.');
+        }
+      }
 
       if (opts.workspaceKey && opts.workspaceKey !== target.workspace.workspaceKey) {
         throw new ChatWorkdirError('stale_chat_workdir', 'Рабочие пути изменились после предпросмотра.');
