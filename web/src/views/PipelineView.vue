@@ -1144,6 +1144,7 @@ import type {
   NodeMetadata, NodeVerdict, ArbiterCard, PipelineActivity, PipelineReply,
 } from '../shared/pipelineContracts.ts';
 import type { BoardTask } from '../shared/boardContracts.ts';
+import { boardAllRoleTasks } from '../shared/boardTimerTasks.ts';
 
 type TaskId = string | number;
 type BulkAction = 'resume' | 'stop';
@@ -1279,9 +1280,19 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
   return task?.source === 'grigdesk' ? task.title || null : trackerTitle(taskNum) || task?.title || null;
 }
 
-const boardTasksById = computed(() => new Map(
-  (board.data?.tasks || []).map((task) => [Number(task.id), task]),
-));
+const boardTasksById = computed(() => {
+  const map = new Map<number, BoardTask>();
+
+  for (const task of boardAllRoleTasks(board.data)) {
+    const id = Number(task.id);
+
+    if (!map.has(id)) {
+      map.set(id, task);
+    }
+  }
+
+  return map;
+});
 
 function boardTask(t: PipelineViewTask) {
   return boardTasksById.value.get(Number(t.task));
@@ -1292,7 +1303,7 @@ function boardTask(t: PipelineViewTask) {
  * Статус существует только для явного булева значения из снимка доски.
  */
 function trackerTimerState(t: PipelineViewTask) {
-  if (!boardSupportsTimer(board.data)) {
+  if (!board.data?.multiSource && !boardSupportsTimer(board.data)) {
     return null;
   }
 
@@ -1316,7 +1327,8 @@ function trackerTimerState(t: PipelineViewTask) {
 function trackerTimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
 
-  if (!boardSupportsTimer(board.data) || !task || typeof task.timerRunning !== 'boolean') {
+  if ((!board.data?.multiSource && !boardSupportsTimer(board.data))
+    || !task || typeof task.timerRunning !== 'boolean') {
     return '';
   }
 
@@ -1331,11 +1343,11 @@ const outsideTimers = computed(() => {
 
   const d = board.data;
 
-  if (!d || !boardSupportsTimer(d)) {
+  if (!d || (!d.multiSource && !boardSupportsTimer(d))) {
     return [];
   }
 
-  return (d.tasks || []).filter((t) => (
+  return boardAllRoleTasks(d).filter((t) => (
     t.timerRunning && !factoryIds.value.has(Number(t.id))
   ));
 });

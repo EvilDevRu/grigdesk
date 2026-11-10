@@ -240,3 +240,21 @@ test('TIP-MIG-01: каждая иконка постоянной рейки им
     assert.equal(named, true, `${node.tag}:${node.loc.start.line}`);
   }
 });
+
+test('топбар таймеров собирается сборщиком всех ролей', async (t) => {
+  const source = await readFile(APP_SHELL_PATH, 'utf8');
+
+  assert.match(source, /selectTopbarTimerTasks\(/u);
+  assert.match(source, /\? boardStore\.data : null/u);
+});
+
+test('поповер получает срок отказа источника из стора', async () => {
+  const source = await readFile(APP_SHELL_PATH, 'utf8');
+
+  assert.match(source, /:stale-notice="boardStaleNotice"/u);
+  assert.match(source, /<BoardTimerPopover\s+v-if="topbarTimerTasks\.length \|\| boardStaleNotice"/u);
+  assert.match(source, /return t\('core\.boardTrackerUnavailable'\);/u);
+  assert.match(source, /const since = boardStore\.staleSinceMs;/u);
+  assert.match(source, /boardStore\.lastRefreshAttemptAt/u);
+  assert.doesNotMatch(source, /!topbarTimerTasks\.value\.length \|\| !boardStore\.refreshProblem/u);
+});

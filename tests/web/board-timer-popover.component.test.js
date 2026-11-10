@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
+// Vue сохраняет document при первом импорте: все сценарии Teleport используют одно окно.
+// Каждый сценарий снимает свой компонент, а окно закрывается после всего файла.
+const browser = await installUiBrowser({ after }, 'https://grigdesk.test/#/pipeline');
+
 test('BOARD-TIMERS-03: топбар раскрывает таймеры и связывает задачи с доской', async (t) => {
-  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/pipeline');
   const [{ nextTick }, { mount }, BoardTimerPopover] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -103,4 +106,64 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
   await nextTick();
   assert.equal(wrapper.emitted('openBoard')?.length, 1);
   assert.equal(Boolean(browser.document.querySelector('.board-timers-popover')), false);
+});
+
+test('BOARD-TIMERS-05: поповер показывает подпись устаревания', async (t) => {
+  const [{ nextTick }, { mount }, BoardTimerPopover] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/features/board/BoardTimerPopover.vue')),
+  ]);
+  const wrapper = mount(BoardTimerPopover, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      tasks: [{
+        id: 11,
+        title: 'Таймер',
+        timerRunning: true,
+        timerElapsed: 11
+      }],
+      staleNotice: 'Данные не обновлялись 3 мин — учёт может быть неточным.',
+    },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  await wrapper.get('[data-context="board-timers-topbar"]').trigger('mouseenter');
+  await nextTick();
+
+  const notice = browser.document.querySelector('.board-timers-popover-stale');
+
+  assert.ok(notice);
+  assert.match(notice.textContent ?? '', /не обновлялись 3 мин/u);
+});
+
+test('BOARD-TIMERS-06: общий отказ виден без строк, восстановление скрывает панель', async (t) => {
+  const [{ nextTick }, { mount }, BoardTimerPopover] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/features/board/BoardTimerPopover.vue')),
+  ]);
+  const wrapper = mount(BoardTimerPopover, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { tasks: [], staleNotice: 'Данные не обновлялись 5 мин — учёт может быть неточным.' },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.find('[data-context="board-timers-topbar"]').exists(), true);
+
+  const trigger = wrapper.get('[data-context="board-timers-topbar"]');
+
+  assert.equal(trigger.get('.board-timers-topbar-count').text(), '—');
+  assert.match(trigger.attributes('aria-label'), /не обновлялись 5 мин/u);
+  await trigger.trigger('mouseenter');
+  await nextTick();
+  assert.match(browser.document.querySelector('.board-timers-popover-stale')?.textContent ?? '',
+    /не обновлялись 5 мин/u);
+  assert.equal(browser.document.querySelectorAll('[data-context="topbar-timer-task"]').length, 0);
+  assert.equal(browser.document.querySelectorAll('.board-timers-popover-summary').length, 0);
+  await wrapper.setProps({ staleNotice: '' });
+  await nextTick();
+  assert.equal(wrapper.find('[data-context="board-timers-topbar"]').exists(), false);
 });

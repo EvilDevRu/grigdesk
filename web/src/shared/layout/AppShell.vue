@@ -151,8 +151,9 @@
       <div class="status">
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <BoardTimerPopover
-          v-if="topbarTimerTasks.length"
+          v-if="topbarTimerTasks.length || boardStaleNotice"
           :tasks="topbarTimerTasks"
+          :stale-notice="boardStaleNotice"
           :worked-today-hours="workedTodayHours"
           :busy-task-id="timerActionTaskId ?? undefined"
           :error="timerActionError"
@@ -464,6 +465,7 @@ import { taskReferenceKey, isTaskSourceId } from '../../../../shared/tasks/taskR
 import PluginIcon from '../PluginIcon.vue';
 
 import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
+import { selectTopbarTimerTasks } from '../boardTimerTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
@@ -803,16 +805,31 @@ const taskStore = useTasksStore();
 const recentPausedTimerIds = ref<string[]>([]);
 const timerActionTaskId = ref<string | null>(null);
 const timerActionError = ref('');
-const boardTasks = computed(() => boardStore.data?.multiSource || boardSupportsTimer(boardStore.data)
-  ? boardStore.data?.tasks || [] : []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
-const topbarTimerTasks = computed(() => {
-  const recentIds = new Set(recentPausedTimerIds.value);
+const topbarTimerTasks = computed(() => selectTopbarTimerTasks(
+  boardStore.data?.multiSource || boardSupportsTimer(boardStore.data) ? boardStore.data : null,
+  new Set(recentPausedTimerIds.value),
+));
 
-  return boardTasks.value.filter((task) => (
-    task.timerRunning || recentIds.has(taskReferenceKey(task))
-  ));
+// Подпись устаревания считается от последнего успеха отказавшей ветки; число минут
+// обновляется при событиях стора, между ними остаётся прежним (принятое упрощение).
+const boardStaleNotice = computed(() => {
+  if (!boardStore.refreshProblem) {
+    return '';
+  }
+
+  const since = boardStore.staleSinceMs;
+
+  if (!since) {
+    return t('core.boardTrackerUnavailable');
+  }
+
+  const observed = boardStore.lastRefreshAttemptAt || boardStore.loadedAt;
+  const minutes = Math.max(1, Math.floor((observed - since) / 60000));
+
+  return t('core.boardTimersStale', { minutes });
 });
+
 
 /**
  * Таймер передаёт полную ссылку в прежнюю границу размещения карточки.

@@ -1328,6 +1328,7 @@
   "trackerResetOrder": "Restore tracker order and show all tasks",
   "chatContextLabel": "Context",
   "boardSnapshotStale": "Could not refresh the board. Showing the last received data.",
+  "boardTimersStale": "Data has not been refreshed for {minutes} min — timers may be stale.",
   "boardSnapshotUpdated": "Updated: {time}",
   "boardSourceChanged": "The board source changed. Refresh the data.",
   "grigdeskB24Disconnected": "B24 is not connected",

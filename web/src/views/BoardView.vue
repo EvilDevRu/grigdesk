@@ -10,7 +10,7 @@
         <BoardTrackerSettingsButton v-if="phoneBoard" @click="trackerSettingsOpen = true" />
         <p v-else-if="data && ownTasks.trackerConfigured !== false" class="board-updated muted"
            role="status" data-role="board-snapshot-status">
-          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
+          <span v-if="snapshotStale">{{ t('core.boardSnapshotStale') }} </span>
           <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
         </p>
       </template>
@@ -493,7 +493,7 @@
     <footer v-if="phoneBoard && ownTasks.trackerConfigured !== false" class="board-phone-footer">
       <p role="status" data-role="board-snapshot-status">
         <template v-if="data">
-          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
+          <span v-if="snapshotStale">{{ t('core.boardSnapshotStale') }} </span>
           <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
         </template>
         <span v-else>{{ error ? trackerUnavailableLabel : t('core.loading') }}</span>
@@ -510,6 +510,7 @@ import BoardTrackerSettingsButton from './board/BoardTrackerSettingsButton.vue';
 import { useBoardPhonePages } from './board/useBoardPhonePages.ts';
 import type { BoardPhonePage } from './board/useBoardPhonePages.ts';
 import TrackerSettingsDialog from './board/TrackerSettingsDialog.vue';
+import { boardAllRoleTasks } from '../shared/boardTimerTasks.ts';
 import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import { useTrackersStore } from '../stores/trackers.ts';
 import BoardLoading from './BoardLoading.vue';
@@ -570,6 +571,11 @@ const trackerUnavailableLabel = computed(() => {
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
+
+// Пометка устаревания обязана реагировать и на отказ отдельной ветки мультиисточника:
+// общий error остаётся пустым, когда не обновляется только один трекер.
+const snapshotStale = computed(() => !!error.value || !!board.refreshProblem);
+
 const performanceInitialFailure = computed(() => (!data.value && !!error.value && !loading.value)
   || (!ownTasks.loaded && !!ownTasks.error && !ownTasks.loading));
 const performanceInitialPending = computed(() => !performanceInitialFailure.value
@@ -689,7 +695,7 @@ const supportsTimer = computed(() => data.value?.multiSource
   ? trackers.catalog?.drivers.some((driver) => driver.capabilities.timer) ?? false
   : boardSupportsTimer(data.value));
 const activeTasks = computed(() => supportsTimer.value
-  ? (data.value?.tasks || []).filter((task) => task.timerRunning) : []);
+  ? boardAllRoleTasks(data.value).filter((task) => task.timerRunning) : []);
 // Поиск основного списка независим от поиска контроля и поручений.
 const q = ref('');
 const taskSearch = ref<UiFieldHandle<HTMLInputElement> | null>(null);

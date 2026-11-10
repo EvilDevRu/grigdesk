@@ -1,22 +1,23 @@
 <template>
-  <span v-if="tasks.length" class="board-timers-topbar">
+  <span v-if="tasks.length || staleNotice" class="board-timers-topbar">
     <UiTopbarPanel :title="t('core.taskTimers')">
       <template #trigger>
         <UiButton
           data-context="board-timers-topbar"
           variant="ghost"
-          :aria-label="t('core.taskTimersActiveWorkedToday', { activeCount: activeCount, workedToday: workedToday })"
+          :aria-label="staleNotice && !tasks.length
+            ? staleNotice : t('core.taskTimersActiveWorkedToday', { activeCount, workedToday })"
         >
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
           </svg>
-          <span class="board-timers-topbar-count mono">{{ activeCount }}</span>
+          <span class="board-timers-topbar-count mono">{{ tasks.length ? activeCount : '—' }}</span>
           <span class="topbar-status-label">{{ t('core.taskTimers') }}</span>
         </UiButton>
       </template>
 
       <template #meta>
-        <span class="board-timers-popover-summary">
+        <span v-if="tasks.length" class="board-timers-popover-summary">
           {{ t('core.active') }}
           <span class="board-timers-popover-active mono">{{ activeCount }}</span>
           <span aria-hidden="true">·</span>
@@ -83,6 +84,11 @@
             </li>
           </ul>
 
+          <UiInlineMessage v-if="staleNotice" tone="warning" class="board-timers-popover-stale">
+            {{ staleNotice }}
+          </UiInlineMessage>
+
+
           <UiInlineMessage v-if="error" tone="danger">
             {{ error }}
           </UiInlineMessage>
@@ -125,6 +131,10 @@ const props = defineProps({
     default: null,
   },
   error: {
+    type: String,
+    default: '',
+  },
+  staleNotice: {
     type: String,
     default: '',
   },

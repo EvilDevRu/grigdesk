@@ -1348,6 +1348,7 @@
   "trackerResetOrder": "Вернуть порядок трекера и показать все задачи",
   "chatContextLabel": "Контекст",
   "boardSnapshotStale": "Не удалось обновить доску. Показаны последние полученные данные.",
+  "boardTimersStale": "Данные не обновлялись {minutes} мин — учёт может быть неточным.",
   "boardSnapshotUpdated": "Обновлено: {time}",
   "boardSourceChanged": "Источник доски изменился. Обновите данные.",
   "grigdeskB24Disconnected": "Б24 не подключён",
