@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { isolatedFetch } from '../isolatedFetch.ts';
 import { ensurePrivateDir } from './env.ts';
 import {
   type DeepSeekPricingStatus,
@@ -352,7 +353,7 @@ async function pricingStatusSafely(
 export async function deepSeekUsage({
   config,
   env = process.env,
-  fetchImpl = fetch,
+  fetchImpl = isolatedFetch,
   now = Date.now,
   timeZone,
 }: {

@@ -10,6 +10,7 @@
 
 ## Устройство
 
+- [Изоляция запросов статистики: отдельный Node, жёсткий срок и освобождение зависшего DNS](isolated-statistics-fetch.md)
 - [Ротация stdout/stderr, gzip-архивы и чтение всех частей журнала окна](log-rotation.md)
 - [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
