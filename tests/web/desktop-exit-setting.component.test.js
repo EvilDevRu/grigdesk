@@ -23,6 +23,7 @@ async function interfacePage(t, options = {}) {
     status: 'none',
     detail: null,
     capabilities: [],
+    localAvailable: false,
     desktopExit: { skipConfirmation: options.skipConfirmation ?? true },
   };
   const h = await i18nComponent(t, {

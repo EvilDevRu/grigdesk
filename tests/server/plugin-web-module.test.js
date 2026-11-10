@@ -8,6 +8,7 @@ import { scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
 import { AuthStore } from '../../server/src/lib/authStore.ts';
+import { png } from '../helpers/pluginV1.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -43,9 +44,12 @@ async function packageAt(root, id = 'ui-module', extra = {}) {
   await writeFile(path.join(directory, 'plugin.json'), JSON.stringify({
     id,
     name: id,
-    api: 2,
+    api: 1,
     version: '1.0.0',
-    webModule: declaration,
+    description: 'Тестовый модуль интерфейса',
+    icon: 'assets/icon.png',
+    entrypoints: { web: declaration },
+    contributes: { panels: [{}] },
     ...extra,
   }));
 
@@ -81,23 +85,21 @@ async function startApp(t, root, enabled = ['ui-module']) {
   return { app, headers: { cookie: `grigdesk_sid=${authStore.createSession().id}` } };
 }
 
-test('PM-SCAN: api2 без index получает модуль и nav по умолчанию; api1 игнорирует поле', async (t) => {
+test('PM-SCAN: v1 без index получает объявленный модуль и панель; api2 несовместим', async (t) => {
   const root = await fixture(t);
 
   await packageAt(root);
-  await packageAt(root, 'legacy', { api: 1 });
+  await packageAt(root, 'legacy', { api: 2 });
 
   const plugins = await scanUserPlugins(path.join(root, 'plugins'));
   const module = plugins.find((item) => item.id === 'ui-module');
 
-  assert.ok(module.webModule, 'Scanner должен обнаружить JS-модуль api2 без index.html');
-  assert.equal(module.webModule.dir, path.join(root, 'plugins/ui-module/ui'));
-  assert.equal(module.web, null);
+  assert.ok(module.entrypoints.web, 'Scanner обнаруживает объявленный JS-модуль без index.html');
+  assert.equal(module.entrypoints.web.dir, path.join(root, 'plugins/ui-module/ui'));
   assert.equal(module.nav.path, '/ext/ui-module');
   assert.equal(module.nav.group, 'dock');
-  assert.equal(module.nav.icon, 'plugin');
   assert.equal(module.nav.label, module.name);
-  assert.equal(plugins.find((item) => item.id === 'legacy').webModule ?? null, null);
+  assert.equal(plugins.find((item) => item.id === 'legacy').compatibility.status, 'incompatible');
 });
 
 for (const [label, webModule] of Object.entries({
@@ -113,7 +115,7 @@ for (const [label, webModule] of Object.entries({
   test(`PM-SCAN: неверный ${label} отбрасывает только модуль с предупреждением`, async (t) => {
     const root = await fixture(t);
 
-    await packageAt(root, 'bad', { webModule });
+    await packageAt(root, 'bad', { entrypoints: { web: webModule } });
     await packageAt(root, 'healthy');
 
     const warnings = [];
@@ -122,9 +124,9 @@ for (const [label, webModule] of Object.entries({
     });
 
     assert.equal(list.length, 2);
-    assert.equal(list.find((item) => item.id === 'bad').webModule ?? null, null);
+    assert.equal(list.find((item) => item.id === 'bad').entrypoints.web ?? null, null);
     assert.ok(warnings.includes('bad'), 'Отказ объявления должен быть назван в журнале');
-    assert.ok(list.find((item) => item.id === 'healthy').webModule);
+    assert.ok(list.find((item) => item.id === 'healthy').entrypoints.web);
   });
 }
 
@@ -136,12 +138,11 @@ test('PM-SCAN: entry-ссылка наружу отвергнута, явная 
   await rm(path.join(dir, 'ui/panel.js'));
   await symlink(path.join(root, 'outside.js'), path.join(dir, 'ui/panel.js'));
   await packageAt(root, 'nav', {
-    nav: {
-       path: '/custom',
-      label: 'Своё имя',
+    contributes: { panels: [{
+      title: 'Своё имя',
       group: 'tools',
-      order: 7
-    },
+      order: 7,
+    }] },
   });
 
   const warnings = [];
@@ -149,7 +150,7 @@ test('PM-SCAN: entry-ссылка наружу отвергнута, явная 
     warn: (meta) => warnings.push(meta.plugin),
   });
 
-  assert.equal(list.find((item) => item.id === 'linked').webModule ?? null, null);
+  assert.equal(list.find((item) => item.id === 'linked').entrypoints.web ?? null, null);
   assert.ok(warnings.includes('linked'));
   assert.equal(list.find((item) => item.id === 'nav').nav.group, 'tools');
   assert.equal(list.find((item) => item.id === 'nav').nav.order, 7);
@@ -157,7 +158,9 @@ test('PM-SCAN: entry-ссылка наружу отвергнута, явная 
 
 test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; off/api99 закрыты', async (t) => {
   const root = await fixture(t);
-  const dir = await packageAt(root);
+  const dir = await packageAt(root, 'ui-module', {
+    entrypoints: { server: 'server.js', web: declaration },
+  });
 
   await writeFile(path.join(dir, 'server.js'), `
     export default async function register(app, options) {
@@ -175,10 +178,10 @@ test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; 
   const catalog = (await app.inject({ url: '/api/plugins', headers })).json().plugins;
   const card = catalog.find((item) => item.id === 'ui-module');
 
-  const prefix = card.webModule.entry.replace(/panel\.js$/, '');
+  const prefix = card.entrypoints.web.entry.replace(/panel\.js$/, '');
 
   assert.match(prefix, /^\/api\/ext\/ui-module\/module\/[a-f0-9-]+\/$/);
-  assert.deepEqual(card.webModule, {
+  assert.deepEqual(card.entrypoints.web, {
     entry: `${prefix}panel.js`,
     css: [`${prefix}panel.css`],
     locales: {
@@ -186,7 +189,7 @@ test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; 
       en: `${prefix}en.json`,
     },
   });
-  assert.ok(catalog.every((item) => item.web === null || typeof item.web === 'string'));
+  assert.ok(catalog.every((item) => !Object.hasOwn(item, 'webModule')));
 
   for (const [file, mime] of [
     ['panel.js', /javascript/], ['helper.js', /javascript/],
@@ -221,23 +224,26 @@ test('PM-AUTH-PATH: сессия обязательна, dotfiles/выход/с�
   await symlink(path.join(root, 'outside.js'), path.join(dir, 'ui/link.js'));
 
   const { app, headers } = await startApp(t, root);
-  const url = '/api/ext/ui-module/module/panel.js';
+  const card = (await app.inject({ url: '/api/plugins', headers })).json().plugins
+    .find((item) => item.id === 'ui-module');
+  const url = card.entrypoints.web.entry;
+  const prefix = url.replace(/panel\.js$/u, '');
 
   assert.equal((await app.inject({ url, headers })).statusCode, 200);
   assert.equal((await app.inject({ url })).statusCode, 401);
 
   for (const file of ['.hidden', 'link.js', '../plugin.json', '%2e%2e/plugin.json']) {
-    const response = await app.inject({ url: `/api/ext/ui-module/module/${file}`, headers });
+    const response = await app.inject({ url: `${prefix}${file}`, headers });
 
     assert.notEqual(response.statusCode, 200, file);
     assert.doesNotMatch(response.body, /СЕКРЕТ_ФИКСТУРЫ/);
   }
 });
 
-test('PM-DOCS-V2: документация api2 доступна, api99 исключена', async (t) => {
+test('PM-DOCS-V1: документация v1 доступна, api99 исключена', async (t) => {
   const root = await fixture(t);
 
-  for (const [id, api] of [['ui-module', 2], ['future', 99]]) {
+  for (const [id, api] of [['ui-module', 1], ['future', 99]]) {
     const dir = await packageAt(root, id, { api });
 
     await mkdir(path.join(dir, 'docs'));
@@ -249,15 +255,19 @@ test('PM-DOCS-V2: документация api2 доступна, api99 искл
   assert.deepEqual((await app.pluginDocs()).map((item) => item.id), ['ui-module']);
 });
 
-for (const startOnLogin of [true, false]) {
-  test(`PM-START-DTO: scanner и HTTP сохраняют startOnLogin=${startOnLogin}`, async (t) => {
+for (const background of ['background.js', 'background.mjs']) {
+  test(`PM-BACKGROUND-DTO: scanner и HTTP сохраняют ${background}`, async (t) => {
     const root = await fixture(t);
 
-    await packageAt(root, 'ui-module', { webModule: { ...declaration, startOnLogin } });
+    const dir = await packageAt(root, 'ui-module', {
+      entrypoints: { web: { ...declaration, background } },
+    });
+
+    await writeFile(path.join(dir, 'ui', background), 'export function start() {}');
 
     const list = await scanUserPlugins(path.join(root, 'plugins'));
 
-    assert.equal(list[0].webModule.startOnLogin, startOnLogin);
+    assert.equal(list[0].entrypoints.web.background, `/api/ext/ui-module/module/${background}`);
 
     const { app, headers } = await startApp(t, root);
     const response = await app.inject({ url: '/api/plugins', headers });
@@ -267,17 +277,18 @@ for (const startOnLogin of [true, false]) {
     const card = response.json().plugins.find((item) => item.id === 'ui-module');
 
     assert.ok(card, 'HTTP-каталог содержит тестовый плагин');
-    assert.equal(card.webModule.startOnLogin, startOnLogin);
+    assert.ok(card.entrypoints.web.background.endsWith(`/${background}`));
+    assert.equal((await app.inject({ url: card.entrypoints.web.background, headers })).statusCode, 200);
   });
 }
 
-for (const startOnLogin of ['true', 1, null]) {
-  test(`PM-START-DTO: ${JSON.stringify(startOnLogin)} отбрасывает только модуль`, async (t) => {
+for (const background of [true, 1, '../outside.js']) {
+  test(`PM-BACKGROUND-DTO: ${JSON.stringify(background)} отвергает модуль`, async (t) => {
     const root = await fixture(t);
 
-    await packageAt(root, 'bad', { webModule: { ...declaration, startOnLogin } });
+    await packageAt(root, 'bad', { entrypoints: { web: { ...declaration, background } } });
     await packageAt(root, 'healthy');
-    await packageAt(root, 'legacy', { api: 1, webModule: { ...declaration, startOnLogin } });
+    await packageAt(root, 'legacy', { api: 2 });
 
     const warnings = [];
     const list = await scanUserPlugins(path.join(root, 'plugins'), {
@@ -285,27 +296,25 @@ for (const startOnLogin of ['true', 1, null]) {
     });
 
     assert.equal(list.length, 3);
-    assert.equal(list.find((item) => item.id === 'bad').webModule ?? null, null);
+    assert.equal(list.find((item) => item.id === 'bad').entrypoints.web ?? null, null);
     assert.ok(warnings.includes('bad'));
-    assert.ok(list.find((item) => item.id === 'healthy').webModule);
-    assert.equal(list.find((item) => item.id === 'legacy').webModule ?? null, null);
+    assert.ok(list.find((item) => item.id === 'healthy').entrypoints.web);
+    assert.equal(list.find((item) => item.id === 'legacy').compatibility.status, 'incompatible');
   });
 }
 
 
-test('PM-ICON: контур из пакета сохраняется scanner и HTTP даже у выключенного плагина', async (t) => {
+test('PM-ICON: файловая иконка доступна scanner и HTTP даже у выключенного плагина', async (t) => {
   const root = await fixture(t);
-  const icon = 'svg:M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3z';
 
   for (const id of ['ui-module', 'off']) {
-    await packageAt(root, id, {
-      nav: { path: `/ext/${id}`, label: id, icon, group: 'dock' },
-    });
+    await packageAt(root, id);
   }
 
   const list = await scanUserPlugins(path.join(root, 'plugins'));
 
-  assert.equal(list.find((item) => item.id === 'ui-module').nav.icon, icon);
+  assert.match(list.find((item) => item.id === 'ui-module').icon,
+    /^\/api\/plugins\/ui-module\/icon\/[a-f0-9]+$/u);
 
   const { app, headers } = await startApp(t, root);
   const response = await app.inject({ url: '/api/plugins', headers });
@@ -317,7 +326,10 @@ test('PM-ICON: контур из пакета сохраняется scanner и 
   for (const id of ['ui-module', 'off']) {
     const card = cards.find((item) => item.id === id);
 
-    assert.equal(card.nav.icon, icon);
+    const response = await app.inject({ url: card.icon, headers });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.rawPayload, png);
     assert.equal(card.enabled, id === 'ui-module');
   }
 });

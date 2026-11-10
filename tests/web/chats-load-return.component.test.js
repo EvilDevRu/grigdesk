@@ -19,6 +19,7 @@ test('CHATS-RETURN-01', async (t) => {
     state: () => ({
       loaded: false,
       activeId: 'saved-chat',
+      openedChatIds: ['saved-chat'],
       revealRequest: '',
     }),
     actions: {

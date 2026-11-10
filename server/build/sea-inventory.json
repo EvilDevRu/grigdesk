@@ -821,6 +821,15 @@
       "detail": "MCP разрешений собирается как helper; guard использует isDirectRun."
     },
     {
+      "file": "server/src/lib/codeBranchWorker.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "helper",
+      "detail": "Worker ветки собирается как code-branch-worker; URL нужен только прямому CLI guard исходника."
+    },
+    {
       "file": "server/src/lib/db/engineDirectory.ts",
       "construct": "dynamic-import",
       "target": "<computed>",

@@ -350,7 +350,8 @@ test('GS13: Git tree отклоняет gitlink без gitmodules и symlink д�
     const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-tree-modes-'));
     const directory = path.join(root, 'package');
     const source = new GitPluginSource({
-      run: (file, args, options) => runCommand(file, ['-c', 'core.symlinks=false', ...args], options),
+      run: (file, args, options) => runCommand(file,
+        file === '/usr/bin/git' ? ['-c', 'core.symlinks=false', ...args] : args, options),
     });
 
     t.after(() => rm(root, { recursive: true, force: true }));

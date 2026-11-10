@@ -1,3 +1,5 @@
+import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
+import { useTrackersStore } from './trackers.ts';
 import { useGrigdeskTasksStore } from './grigdeskTasks.ts';
 import { useTaskFavoritesStore } from './taskFavorites.ts';
 // Кеш доски B24. При переходе в раздел данные показываются мгновенно из кеша,
@@ -17,6 +19,64 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeBoardDashboard, isBoardDashboard } from '../shared/boardContracts.ts';
 import type { BoardDashboard } from '../shared/boardContracts.ts';
 
+type BoardCatalog = Pick<TrackerCatalog, 'enabledIds' | 'default' | 'externalId' | 'revision'> & {
+  drivers: Array<Pick<TrackerCatalog['drivers'][number], 'id' | 'dataRevision'>>;
+};
+
+/**
+ * Доске нужны только владельцы снимков, а не схемы настроек и capabilities драйверов.
+ * Чтение проверяет эти поля явно; старый каталог без enabledIds сохраняет legacy-путь.
+ */
+function boardCatalog(raw: Record<string, unknown>): BoardCatalog {
+  const invalid = () => new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
+
+  if ((raw.externalId !== null && typeof raw.externalId !== 'string')
+    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
+    throw invalid();
+  }
+
+  const catalog: BoardCatalog = {
+    externalId: raw.externalId,
+    revision: Number(raw.revision),
+    drivers: [],
+  };
+
+  if (raw.enabledIds === undefined) {
+    return catalog;
+  }
+
+  if (!Array.isArray(raw.enabledIds) || !raw.enabledIds.every((id) => typeof id === 'string')
+    || !Array.isArray(raw.drivers)) {
+    throw invalid();
+  }
+
+  catalog.drivers = raw.drivers.map((driver) => {
+    if (!isRecord(driver) || typeof driver.id !== 'string'
+      || (driver.dataRevision !== undefined && (!Number.isSafeInteger(driver.dataRevision)
+        || Number(driver.dataRevision) < 0))) {
+      throw invalid();
+    }
+
+    return {
+      id: driver.id,
+      ...(driver.dataRevision === undefined ? {} : { dataRevision: Number(driver.dataRevision) }),
+    };
+  });
+
+  const preferred = raw.default === undefined ? catalog.externalId : raw.default;
+
+  if (!raw.enabledIds.every((id) => catalog.drivers.some((driver) => driver.id === id))
+    || (preferred !== null && typeof preferred !== 'string')
+    || (preferred !== null && !raw.enabledIds.includes(preferred))) {
+    throw invalid();
+  }
+
+  catalog.enabledIds = raw.enabledIds;
+  catalog.default = preferred;
+
+  return catalog;
+}
+
 const mirrors = new WeakMap<object, () => void>();
 const reads = new WeakMap<object, AbortController>();
 const loadingJobs = new WeakMap<object, Promise<number | undefined>>();
@@ -26,23 +86,29 @@ const forcedJobs = new WeakMap<object, Promise<number | undefined>>();
  * Владелец снимка проверяется по локальному API, независимо от доступности портала.
  * Ни секреты, ни ключ источника не передаются в диагностику или наружный запрос.
  */
-async function readBoardSource(signal?: AbortSignal): Promise<string> {
+async function readBoardSource(
+  signal?: AbortSignal, receive?: (catalog: BoardCatalog) => void,
+): Promise<string> {
   const raw = await api.get('/api/trackers', {
     signal,
     timeoutMs: 5000,
     retry: false,
   });
 
-  if (!isRecord(raw) || (raw.externalId !== null && typeof raw.externalId !== 'string')
-    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
+  if (!isRecord(raw)) {
     throw new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
   }
+
+  const catalog = boardCatalog(raw);
+
+  receive?.(catalog);
 
   return JSON.stringify([
     useAuthStore().clientScope,
     useShellStore().profile?.id ?? '',
-    raw.externalId,
-    raw.revision,
+    ...(Array.isArray(raw.enabledIds) ? [
+      catalog.drivers.map((driver) => [driver.id, driver.dataRevision]),
+    ] : [raw.externalId, raw.revision]),
   ]);
 }
 
@@ -50,6 +116,13 @@ async function readBoardSource(signal?: AbortSignal): Promise<string> {
 export const useBoardStore = defineStore('board', {
   state: () => ({
     data: null as BoardDashboard | null,
+    branches: {} as Record<string, {
+      snapshot: BoardDashboard;
+      dataRevision?: number;
+      error?: string;
+    }>,
+    branchEpochs: {} as Record<string, number>,
+    suspendedIds: [] as string[],
     loading: false,
     error: null as string | null,
     loadedAt: 0,
@@ -67,7 +140,16 @@ export const useBoardStore = defineStore('board', {
     activity: (s) => {
       const seen = useTaskSeenStore();
 
-      const external = boardActivity(s.data, seen.taskIds, { ready: seen.ready });
+      const activities = s.data?.multiSource ? Object.values(s.branches).map((branch) => {
+        const marks = useTaskSeenStore().forSource(branch.snapshot.source);
+
+        return boardActivity(branch.snapshot, marks.taskIds, { ready: marks.ready });
+      }) : [boardActivity(s.data, seen.taskIds, { ready: seen.ready })];
+      const external = {
+        activeTimerCount: activities.reduce((total, activity) => total + activity.activeTimerCount, 0),
+        unseenCount: activities.reduce((total, activity) => total + activity.unseenCount, 0),
+        unseenTaskIds: activities.flatMap((activity) => activity.unseenTaskIds),
+      };
       const own = useGrigdeskTasksStore();
       const internal = boardActivity({ tasks: own.tasks }, seen.own.taskIds, { ready: seen.own.ready });
 
@@ -149,7 +231,20 @@ export const useBoardStore = defineStore('board', {
       this.loading = true;
 
       try {
-        const source = await readBoardSource(controller.signal);
+        let catalog: BoardCatalog | undefined;
+        const source = await readBoardSource(controller.signal, (value) => {
+          catalog = value;
+        });
+
+        if (catalog?.enabledIds && this.sourceKey && JSON.stringify(JSON.parse(this.sourceKey).slice(0, 2))
+          !== JSON.stringify(JSON.parse(source).slice(0, 2))) {
+          this.clearSource();
+
+          return this.load(force);
+        }
+        if (catalog?.enabledIds) {
+          return await this.loadMulti(catalog, source, force, controller, epoch);
+        }
 
         if (controller.signal.aborted || epoch !== this.sourceEpoch || this.sourceSuspended) {
           return;
@@ -246,6 +341,126 @@ export const useBoardStore = defineStore('board', {
       }
     },
     /**
+     * Публикует каждый источник сразу после его ответа, сохраняя последний успешный снимок.
+     * Поколение владельца и локальная эпоха не дают вернуть прежний аккаунт после записи.
+     */
+    async loadMulti(
+      catalog: BoardCatalog, source: string, force: boolean, controller: AbortController, epoch: number,
+    ): Promise<number | undefined> {
+      this.sourceKey = source;
+
+      for (const [id, branch] of Object.entries(this.branches)) {
+        const descriptor = catalog.drivers.find((entry) => entry.id === id);
+
+        if (descriptor && descriptor.dataRevision !== branch.dataRevision) {
+          this.dropDriver(id);
+        }
+      }
+
+      const mirror = mirrors.get(this);
+
+      if (mirror && !force) {
+        mirror();
+
+        return;
+      }
+
+      this.mergeBranches(catalog);
+
+      await Promise.all((catalog.enabledIds ?? []).map(async (id) => {
+        if (this.suspendedIds.includes(id)) {
+          return;
+        }
+
+        const token = this.branchEpochs[id] ?? 0;
+        const descriptor = catalog.drivers.find((entry) => entry.id === id);
+
+        try {
+          const raw = await api.get(`/api/tracker/${encodeURIComponent(id)}/dashboard`, {
+            signal: controller.signal, retry: false,
+          });
+          const snapshot = decodeBoardDashboard(raw);
+          const context = await api.get(`/api/tracker/${encodeURIComponent(id)}/context`, {
+            signal: controller.signal, retry: false,
+          }) as { source: string; generation: number };
+
+          if (controller.signal.aborted || epoch !== this.sourceEpoch
+            || token !== (this.branchEpochs[id] ?? 0) || this.suspendedIds.includes(id)
+            || context.source !== snapshot.source || context.generation !== snapshot.generation) {
+            return;
+          }
+
+          this.branches[id] = { snapshot, dataRevision: descriptor?.dataRevision };
+          this.mergeBranches(catalog);
+
+          if (snapshot.source) {
+            void useTaskFavoritesStore().forSource(snapshot.source).load();
+
+            const seen = useTaskSeenStore().forSource(snapshot.source);
+
+            await seen.load();
+
+            if (seen.loaded && !seen.initialized && Array.isArray(snapshot.tasks)) {
+              await seen.markSeen(boardTaskIds(snapshot.tasks), { baseline: true });
+            }
+          }
+        } catch (error) {
+          if (!controller.signal.aborted && token === (this.branchEpochs[id] ?? 0)) {
+            const branch = this.branches[id];
+
+            if (branch) {
+              branch.error = errorMessage(error, 'Доска недоступна');
+            }
+          }
+        }
+      }));
+
+      await useTrackersStore().load(true);
+
+      return this.readAt;
+    },
+    /**
+     * Метрики принадлежат дефолтной доске; списки ролей объединяются без склейки номеров.
+     * Выключенный пакет остаётся в памяти до смены владельца или выхода из сессии.
+     */
+    mergeBranches(catalog: BoardCatalog) {
+      const ids = [...new Set([...Object.keys(this.branches), ...(catalog.enabledIds ?? [])])];
+      const primary = this.branches[catalog.default ?? catalog.externalId ?? '']?.snapshot;
+      const data: BoardDashboard = {
+        ...primary,
+        multiSource: true,
+        driverSnapshots: { ...this.branches },
+      };
+
+      for (const role of ['tasks', 'toReview', 'created', 'accomplice', 'auditor'] as const) {
+        data[role] = ids.flatMap((id) => (this.branches[id]?.snapshot[role] ?? []).map((task) => ({
+          ...task,
+          source: this.branches[id]!.snapshot.source,
+          driverId: id,
+        })));
+      }
+
+      this.data = data;
+      this.readAt = Math.max(Date.now(), this.readAt + 1);
+      this.loadedAt = Date.now();
+      this.error = null;
+    },
+    /**
+     * Удаляет только данные затронутого подключения перед сменой реквизитов.
+     * Остальные источники и их личные отметки сохраняют свои эпохи.
+     */
+    dropDriver(id: string) {
+      const source = this.branches[id]?.snapshot.source;
+
+      this.branchEpochs[id] = (this.branchEpochs[id] ?? 0) + 1;
+      delete this.branches[id];
+
+      if (source) {
+        useTaskFavoritesStore().forSource(source).clear();
+        useTaskSeenStore().forSource(source).clear();
+      }
+    },
+    /**
      * Очистка отсекает поздний HTTP и ожидающие refresh прежнего источника.
      * Пауза включается только владельцем незавершённой записи credentials.
      */
@@ -257,6 +472,8 @@ export const useBoardStore = defineStore('board', {
       reads.delete(this);
       loadingJobs.delete(this);
       forcedJobs.delete(this);
+      this.branches = {};
+      this.suspendedIds = [];
       this.data = null;
       this.loadedAt = 0;
       this.readAt = 0;
@@ -269,7 +486,22 @@ export const useBoardStore = defineStore('board', {
      * Начало смены credentials закрывает восстановление снимка до исхода POST.
      * Токен является эпохой этого источника и не разблокирует более новую запись.
      */
-    beginSourceChange(): number {
+    beginSourceChange(settings?: Record<string, Record<string, unknown>>): number {
+      const catalog = useTrackersStore().catalog;
+
+      if (catalog?.enabledIds) {
+        this.suspendedIds = Object.keys(settings ?? {}).filter((id) =>
+          Object.keys(settings![id] ?? {}).length > 0);
+
+        for (const id of this.suspendedIds) {
+          this.dropDriver(id);
+        }
+
+        this.mergeBranches(catalog);
+
+        return this.sourceEpoch;
+      }
+
       this.clearSource(true);
 
       return this.sourceEpoch;
@@ -279,6 +511,12 @@ export const useBoardStore = defineStore('board', {
      * Неизвестный результат не разрешает повтор POST или восстановление старого снимка.
      */
     finishSourceChange(token: number): Promise<number | undefined> {
+      if (token === this.sourceEpoch && this.suspendedIds.length) {
+        this.suspendedIds = [];
+
+        return this.load(true);
+      }
+
       if (token !== this.sourceEpoch || !this.sourceSuspended) {
         return Promise.resolve(undefined);
       }
@@ -312,6 +550,7 @@ export const useBoardStore = defineStore('board', {
       }
 
       this.data = data;
+      this.branches = data.driverSnapshots ?? {};
       this.readAt = readAt;
       this.loadedAt = Date.now();
       this.error = null;

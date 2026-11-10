@@ -7,6 +7,8 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import http from 'node:http';
 
+import { manifestV1, png } from '../helpers/pluginV1.js';
+
 import {
   BUSY_UNKNOWN,
   PluginAdmission,
@@ -487,7 +489,13 @@ test('B13: failed import/register остаётся potentially loaded, marker н
     };
 
     await import('node:fs/promises').then(({ mkdir }) => mkdir(boomDir, { recursive: true }));
-    await writeFile(path.join(boomDir, 'plugin.json'), JSON.stringify({ id: 'boom', version: '1.0.0' }));
+    await writeFile(path.join(boomDir, 'icon.png'), png);
+    await writeFile(path.join(boomDir, 'plugin.json'), JSON.stringify(manifestV1({
+      id: 'boom',
+      icon: 'icon.png',
+      entrypoints: { server: 'server.js' },
+      contributes: {},
+    })));
     await writeFile(path.join(boomDir, 'server.js'), `
       import { appendFileSync } from 'node:fs';
       const marker = ${JSON.stringify(marker)};

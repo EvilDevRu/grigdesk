@@ -5,6 +5,7 @@ import { setImmediate } from 'node:timers/promises';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { chatListPagingStub } from './helpers/chat-list.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -128,6 +129,7 @@ async function fixture(t, { defer = false, sessions = [session()] } = {}) {
   const selected = [];
   const renamed = [];
   const state = vue.reactive({
+    ...chatListPagingStub(),
     loaded: true,
     loading: false,
     loadError: null,
@@ -308,7 +310,7 @@ test('LIST-MEMO-01: копия строк сохраняет DOM, видимые
 
   f.state.rows = f.state.rows.map((row) => ({ ...row }));
   await settle();
-  assert.equal(wrapper.find('.row').element, element);
+  assert.equal(wrapper.find('.row').element === element, true);
 
   const row = f.state.rows[0];
 

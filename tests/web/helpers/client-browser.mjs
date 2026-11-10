@@ -4,8 +4,9 @@ import { chromium } from '../../../desktop/node_modules/playwright-core/index.mj
 import path from 'node:path';
 import os from 'node:os';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { protocolRoutes, protocolSearch } from './chat-protocol.js';
+import { protocolPage, protocolRoutes, protocolSearch, protocolWindow } from './chat-protocol.js';
 import { freePort } from '../../server/helpers/pluginBootFixture.js';
+import { trackerMetadata } from './trackerCard.js';
 
 export const chatSession = {
   id: 'geometry-chat',
@@ -76,8 +77,14 @@ export async function clientBrowser(t, options = {}) {
           if (url.pathname === '/api/events') {
             res.setHeader('Content-Type', 'text/event-stream');
             res.write('event: hello\ndata: {"boot":"fixture"}\n\n');
+
+            const heartbeat = setInterval(() => res.write(': ping\n\n'), 15_000);
+
             pending.add(res);
-            res.on('close', () => pending.delete(res));
+            res.on('close', () => {
+              clearInterval(heartbeat);
+              pending.delete(res);
+            });
 
             return;
           }
@@ -101,9 +108,22 @@ export async function clientBrowser(t, options = {}) {
             '/api/grigdesk-tasks': {
               tasks: [],
               revision: 0,
-              trackerConfigured: true
+              trackerConfigured: true,
+              personalStateVersion: 1,
             },
             '/api/grigdesk-tasks/projects': { projects: [] },
+            '/api/grigdesk-tasks/task-favorites': {
+              scope: 'own-fixture',
+              revision: 1,
+              taskIds: [],
+            },
+            '/api/grigdesk-tasks/task-seen': {
+              scope: 'own-fixture',
+              revision: 1,
+              taskIds: [],
+              initialized: true,
+            },
+            '/api/trackers': trackerMetadata(),
             '/__shell/state': options.shell || shell,
             '/api/auth/state': {
               authenticated: true,
@@ -149,13 +169,31 @@ export async function clientBrowser(t, options = {}) {
             || responses['/api/chat/store'];
           const chatRoutes = protocolRoutes(chatStore);
 
+          if (url.pathname === '/api/chat/store/list') {
+            chatRoutes[url.pathname + url.search] = protocolPage({ archived: [], ...chatStore }, url.href);
+          }
+
           if (url.pathname === '/api/chat/store/search') {
             chatRoutes[url.pathname] = protocolSearch(chatStore,
               url.searchParams.get('q') || '', url.searchParams.get('archived') === '1');
           }
 
+          if (url.searchParams.get('window') === '1' && url.pathname.startsWith('/api/chat/store/chat/')) {
+            const id = decodeURIComponent(url.pathname.slice('/api/chat/store/chat/'.length));
+            const chat = [...chatStore.sessions, ...(chatStore.archived || [])]
+              .find((entry) => entry.id === id);
+
+            if (chat) {
+              chatRoutes[url.pathname + url.search] = protocolWindow(chat, url.href);
+            }
+          }
+
           req.resume();
-          res.end(JSON.stringify(options.responses?.[url.pathname] || chatRoutes[url.pathname]
+
+          const key = url.pathname + url.search;
+
+          res.end(JSON.stringify(options.responses?.[key] || options.responses?.[url.pathname]
+            || chatRoutes[key] || chatRoutes[url.pathname]
             || responses[url.pathname]
             || (url.pathname.startsWith("/api/tracker/task-seen/")
               ? responses["/api/tracker/task-seen"] : {})));
@@ -177,25 +215,48 @@ export async function clientBrowser(t, options = {}) {
     optimizeDeps: { noDiscovery: true, include: ['vue', 'pinia', 'vue-router'] },
   });
 
+  let browser;
+
+  // Закрытие регистрируется до listen/launch, поэтому ошибка старта также освобождает Vite.
+  // Каталог кэша удаляется после браузера, потоков и самого HTTP-сервера.
+  t.after(async () => {
+    try {
+      await browser?.close();
+    } finally {
+      for (const res of pending) {
+        res.destroy();
+      }
+
+      try {
+        await server.close();
+      } finally {
+        await rm(cacheDir, { recursive: true, force: true });
+      }
+    }
+  });
+
   await mkdir(artifacts, { recursive: true });
   await server.listen();
 
-  const browser = await chromium.launch({
+  browser = await chromium.launch({
     executablePath: process.env.CHROME_BIN,
     headless: true,
     args: ['--no-sandbox', '--disable-features=LocalNetworkAccessChecks'],
   });
 
-  t.after(async () => {
-    await browser.close();
+  // Фикстуры по умолчанию русские, явная locale сохраняет проверки системного выбора языка.
+  // Холодный граф Vite имеет собственный бюджет, отдельный от ожидания элемента.
+  for (const method of ['newContext', 'newPage']) {
+    const create = browser[method].bind(browser);
 
-    for (const res of pending) {
-      res.destroy();
-    }
+    browser[method] = async (input) => {
+      const result = await create({ locale: 'ru-RU', ...input });
 
-    await server.close();
-    await rm(cacheDir, { recursive: true, force: true });
-  });
+      result.setDefaultNavigationTimeout(60_000);
+
+      return result;
+    };
+  }
 
   return {
     browser,
@@ -204,6 +265,19 @@ export async function clientBrowser(t, options = {}) {
     cacheDir: server.config.cacheDir,
     artifacts,
   };
+}
+
+/**
+ * CSS-медиа и реактивный Teleport сходятся после кадра активной страницы.
+ * Барьер ждёт настоящую компоновку шапки, сохраняя точные проверки её действий.
+ */
+export async function waitForShellActions(page, phone) {
+  await page.bringToFront();
+  await page.waitForFunction((isPhone) => {
+    const actions = document.querySelector('.topbar-actions');
+
+    return actions?.querySelectorAll('button').length === (isPhone ? 3 : 5);
+  }, phone);
 }
 
 /**

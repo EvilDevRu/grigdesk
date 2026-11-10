@@ -81,7 +81,12 @@ async function mountPanel(t, rows, { error = null, mirror = false, pending = [] 
   } catch (error) {
     assert.fail(`Панель полки ещё не реализована или не монтируется: ${error.message}`);
   }
+
+  const { createPinia } = await import(
+    '../../web/node_modules/pinia/dist/pinia.mjs'
+  );
   const wrapper = mount(Panel, {
+    global: { plugins: [createPinia()] },
     attachTo: browser.document.querySelector('#mount'),
   });
   t.after(() => {
@@ -509,6 +514,7 @@ async function mountToolHost(t, rows) {
           '}];',
           'export const TOOL_BY_ID = new Map(TOOL_REGISTRY.map((item) => [item.id, item]));',
           'export const toolsOf = () => TOOL_REGISTRY;',
+          'export const pluginTools = () => [];',
           'export const toolById = (plugins, id) => TOOL_BY_ID.get(id) || null;',
           'export const toolAvailability = (item, plugins) =>',
           '  item && plugins.enabled(item.plugin) ? "enabled" : "disabled";',

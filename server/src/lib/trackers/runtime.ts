@@ -99,11 +99,14 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     removed: (id) => registry.deleted(id),
     installed: (id) => registry.installed(id),
     refresh: async () => {
-      const selected = selection.read().externalId;
-      const entry = registry.descriptors().find((driver) => driver.id === selected);
+      const current = selection.read();
+      const drivers = current.drivers.filter((id) => !installs.removedIds().includes(id));
 
-      if (selected && installs.removedIds().includes(selected) && (!entry || entry.deleted)) {
-        selection.write(null);
+      if (drivers.length !== current.drivers.length) {
+        selection.write({
+          drivers,
+          default: drivers.includes(current.default ?? '') ? current.default : null,
+        });
       }
 
       await registry.refresh();
@@ -127,13 +130,19 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   const selection = new TrackerSettingsStore(config.trackerSettingsPath);
 
-  if (installs.removedIds().includes(selection.read().externalId ?? '')
-    && !registry.descriptors().some((entry) => entry.id === selection.read().externalId
-      && entry.status !== 'unavailable')) {
-    selection.write(null);
+  const current = selection.read();
+  const remaining = current.drivers.filter((id) => !installs.removedIds().includes(id));
+
+  if (remaining.length !== current.drivers.length) {
+    selection.write({ drivers: remaining, default: remaining.includes(current.default ?? '')
+      ? current.default : null });
   }
 
-  const tracker = new TrackerFacade({ registry, selection });
+  const tracker = new TrackerFacade({
+    registry,
+    selection,
+    onChanged: options.onChanged,
+  });
   const own = createGrigdeskTasksService({
     ...options,
     tracker: {
@@ -143,27 +152,27 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
   });
 
   /**
-   * Ограничение одного внешнего применяется к настройкам доски, а не общему реестру.
+   * Все включённые внешние драйверы получают независимый допуск рядом с own.
    * Недоступный выбор сохраняется, чтобы действие не сменило аккаунт незаметно.
    */
   async function activateSelection() {
-    const { externalId } = selection.read();
+    const { drivers } = selection.read();
 
     for (const id of registry.activeIds) {
-      if (id !== externalId) {
+      if (id !== 'own' && !drivers.includes(id)) {
         registry.deactivate(id);
       }
     }
 
-    if (externalId) {
-      if (registry.descriptors().find((entry) => entry.id === externalId)?.status === 'restartRequired') {
-        return;
+    for (const id of drivers) {
+      if (registry.descriptors().find((entry) => entry.id === id)?.status === 'restartRequired') {
+        continue;
       }
 
       try {
-        await registry.activate(externalId);
+        await registry.activate(id);
       } catch {
-        registry.unavailable(externalId, 'Выбранный драйвер не настроен или недоступен');
+        registry.unavailable(id, 'Выбранный драйвер не настроен или недоступен');
       }
     }
   }
@@ -216,6 +225,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   return {
     registry,
+    driverDirectory: (id: string) => path.join(config.driversDir, id),
     selection,
     credsStore,
     tracker,
@@ -223,25 +233,46 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     installs,
     activateSelection,
     testConnection,
-    writeSettings: async (externalId: string | null, changes: Record<string, Record<string, unknown>>) => {
-      await registry.changeCredentials(Object.keys(changes), () => {
-        if (externalId && registry.descriptors().some((entry) => entry.id === externalId && entry.deleted)) {
-          throw new TrackerError('tracker_busy', 'Драйвер удалён и требует перезапуска', 409);
+    writeSettings: async (
+      input: import('./settingsStore.ts').TrackerSelectionInput | string | null,
+      changes: Record<string, Record<string, unknown>>,
+    ) => {
+      const previous = selection.read();
+      const changed = Object.keys(changes).filter((id) => JSON.stringify(credsStore.readFor(id) ?? {})
+        !== JSON.stringify(credsStore.mergeFor(id, changes[id]!)));
+      const drivers = typeof input === 'object' && input !== null ? input.drivers
+        : input ? [...new Set([...previous.drivers, input])]
+          : previous.drivers.filter((id) => id !== previous.default);
+      const removed = previous.drivers.filter((id) => !drivers.includes(id));
+      const affected = [...new Set([...changed, ...removed])];
+
+      await registry.changeCredentials(affected, () => {
+        for (const id of changed) {
+          credsStore.writeFor(id, changes[id]!);
+          registry.bumpContext(id, true);
         }
 
-        for (const [id, values] of Object.entries(changes)) {
-          credsStore.writeFor(id, values);
+        for (const id of new Set([...removed, ...drivers.filter((id) => !previous.drivers.includes(id))])) {
+          registry.bumpContext(id);
         }
 
-        selection.write(externalId);
+        selection.write(input);
       });
       await activateSelection();
     },
-    catalog: () => ({
-      drivers: registry.descriptors(),
-      activeIds: registry.activeIds,
-      ...selection.read(),
-    }),
+    catalog: () => {
+      const selected = selection.read();
+
+      return {
+        drivers: registry.descriptors(),
+        activeIds: registry.activeIds,
+        enabledIds: selected.drivers,
+        default: selected.default,
+        externalId: selected.default,
+        revision: selected.revision,
+      };
+    },
+
     close: async () => {
       await registry.close();
       await installs.close();

@@ -3,6 +3,7 @@ import test, { after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { compileVue, webFile } from './helpers/compile-vue.js';
+import { DEFAULT_CODE_BRANCH_SETTINGS } from '../../shared/plugins/code/codeBranchContracts.ts';
 import {
   activeCodeReviewWorkers,
   drainCodeReviewWorkers,
@@ -22,6 +23,144 @@ let CodeViewDomWrapper = null;
 after(() => {
   sharedBrowser?.close();
   sharedBrowser = null;
+});
+
+/**
+ * Снимок runtime меняется только ответами двойника HTTP.
+ * Компонент проходит настоящие controls и подтверждение без сборки приложения.
+ */
+async function mountBranchPanel(t, approved) {
+  const posts = [];
+  const confirmations = [];
+  const state = {
+    branches: [
+      {
+        ref: 'refs/heads/dev',
+        name: 'dev',
+        kind: 'local',
+        commit: 'a'.repeat(40),
+        current: true,
+        occupied: '/demo',
+      },
+      {
+        ref: 'refs/heads/feature/demo',
+        name: 'feature/demo',
+        kind: 'local',
+        commit: 'b'.repeat(40),
+        current: false,
+        occupied: '',
+      },
+    ],
+    settings: { ...DEFAULT_CODE_BRANCH_SETTINGS },
+    job: null,
+    actualBranch: 'dev',
+    actualCommit: 'a'.repeat(40),
+    log: '',
+  };
+  const api = {
+    /**
+     * Чтения отдают только публичные данные панели и снимок временного runtime.
+     * Отсутствующая ручка должна уронить сценарий вместо ложного пустого ответа.
+     */
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{
+          key: 'demo',
+          dir: '/demo',
+          trees: [mainTree('/demo', 'dev')],
+        }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/branches?')) {
+        return state;
+      }
+
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, body) {
+      posts.push({ url, body });
+
+      if (url.includes('/branch-settings?')) {
+        state.settings = { ...body };
+      }
+
+      return state;
+    },
+  };
+  const mounted = await mountCodeView(t, {
+    api,
+    confirm: async (text) => {
+      confirmations.push(text);
+
+      return approved;
+    },
+  });
+
+  await mounted.wrapper.get('[data-action="code-branches"]').trigger('click');
+  await settle(mounted.flushPromises);
+
+  const dialog = new CodeViewDomWrapper(mounted.browser.document.body);
+
+  return {
+    ...mounted,
+    dialog,
+    state,
+    posts,
+    confirmations,
+  };
+}
+
+test('CODE-BRANCH-UI: выбор подтверждает папку и коммит, передаёт точные refs и HEAD', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  assert.match(h.dialog.get('[data-action="branch-actual"]').text(), /dev.*aaaaaaaaaa/);
+  await h.dialog.get('select[data-action="branch-choice"]').setValue('refs/heads/feature/demo');
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.match(h.confirmations[0], /feature\/demo.*bbbbbbbbbb/);
+  assert.match(h.confirmations[0], /\/demo/);
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/switch-branch\?repo=demo&root=%2Fdemo/);
+  assert.deepEqual(h.posts[0].body, {
+    ref: 'refs/heads/feature/demo',
+    expectedCommit: 'b'.repeat(40),
+    expectedHead: 'a'.repeat(40),
+    confirmed: true,
+  });
+
+  await h.dialog.get('[data-action="return-branch"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.posts[1].body.ref, 'refs/heads/dev');
+});
+
+test('CODE-BRANCH-CANCEL: отмена подтверждения не отправляет мутацию', async (t) => {
+  const h = await mountBranchPanel(t, false);
+
+  await h.dialog.get('[data-action="switch-branch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.confirmations.length, 1);
+  assert.equal(h.posts.length, 0);
+});
+
+test('CODE-BRANCH-SETTINGS: сохранение команды не запускает переключение', async (t) => {
+  const h = await mountBranchPanel(t, true);
+
+  await h.dialog.get('textarea[data-action="branch-setting-build"]').setValue('npm run build');
+  await h.dialog.get('[data-action="save-branch-settings"]').trigger('click');
+  await settle(h.flushPromises);
+
+  assert.equal(h.posts.length, 1);
+  assert.match(h.posts[0].url, /\/branch-settings\?/);
+  assert.equal(h.posts[0].body.build, 'npm run build');
+  assert.equal(h.confirmations.length, 0);
 });
 
 function deferred() {
@@ -565,6 +704,8 @@ async function mountCodeView(t, {
   }
 
   let wrapper = null;
+  let released = false;
+  let unmount = null;
 
   slot.busy = true;
   slot.ports = {
@@ -575,11 +716,26 @@ async function mountCodeView(t, {
   };
   globalThis.__codeViewModuleSlot = slot;
 
-  t.after(() => {
-    wrapper?.unmount();
+  /**
+   * Явное размонтирование при reload освобождает граф сразу, ещё внутри сценария.
+   * Повторный after прежнего mount не очищает порты уже переиспользованного слота.
+   */
+  function release() {
+    if (released) {
+      return;
+    }
+
+    released = true;
     slot.toasts?.clear();
     slot.ports = null;
     slot.busy = false;
+    wrapper = null;
+    unmount = null;
+  }
+
+  t.after(() => {
+    wrapper?.unmount();
+    release();
     delete globalThis.__codeViewApi;
     delete globalThis.__codeViewMonaco;
     delete globalThis.__codeViewConfirm;
@@ -591,7 +747,7 @@ async function mountCodeView(t, {
     delete globalThis.__codeViewModuleSlot;
   });
 
-  const [{ mount, flushPromises, DOMWrapper }, CodeView] = await Promise.all([
+  const [{ mount, flushPromises, DOMWrapper, VueWrapper }, CodeView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     slot.component ||= compileCodeView(),
   ]);
@@ -605,9 +761,30 @@ async function mountCodeView(t, {
     attachTo: browser.document.querySelector('#mount'),
     props,
     global: {
+      mixins: [{
+        /**
+         * Test Utils очищает историю emit только корневого wrapper, но дети тоже передают DOM.
+         * После их unmount публичный reader позволяет освободить аргументы завершённых событий.
+         */
+        unmounted() {
+          const history = VueWrapper.prototype.emitted.call({ vm: this });
+
+          for (const key of Object.keys(history)) {
+            delete history[key];
+          }
+        },
+      }],
       stubs: { RouterLink: { template: '<a href="/projects"><slot /></a>' } },
     },
   });
+  unmount = wrapper.unmount.bind(wrapper);
+
+  wrapper.unmount = () => {
+    if (!released) {
+      unmount();
+      release();
+    }
+  };
   await settle(flushPromises);
 
   return {
@@ -1360,7 +1537,7 @@ test('откат и удаление требуют подтверждения, 
   const trackedMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(trackedMenu.querySelector('[data-action="discard-file"]'));
-  assert.equal(trackedMenu.querySelector('[data-action="clean-file"]'), null);
+  assert.equal(trackedMenu.querySelector('[data-action="clean-file"]') === null, true);
   trackedMenu.querySelector('[data-action="discard-file"]').click();
   await settle(flushPromises);
   assert.equal(posts.length, 0, 'отказ в диалоге не запускает мутацию');
@@ -1380,8 +1557,8 @@ test('откат и удаление требуют подтверждения, 
   const stagedMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(stagedMenu.querySelector('[data-action="unstage-file"]'));
-  assert.equal(stagedMenu.querySelector('[data-action="discard-file"]'), null);
-  assert.equal(stagedMenu.querySelector('[data-action="clean-file"]'), null);
+  assert.equal(stagedMenu.querySelector('[data-action="discard-file"]') === null, true);
+  assert.equal(stagedMenu.querySelector('[data-action="clean-file"]') === null, true);
   browser.document.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await settle(flushPromises);
   await wrapper.get('button[data-action="row-more"][data-file="new.js"]').trigger('click');
@@ -1390,7 +1567,7 @@ test('откат и удаление требуют подтверждения, 
   const newMenu = browser.document.querySelector('[role="menu"]');
 
   assert.ok(newMenu.querySelector('[data-action="clean-file"]'));
-  assert.equal(newMenu.querySelector('[data-action="discard-file"]'), null);
+  assert.equal(newMenu.querySelector('[data-action="discard-file"]') === null, true);
   assert.equal(posts.length, 1, 'Просмотр меню не запускает действие');
 });
 
@@ -1466,7 +1643,7 @@ test('конфликт помечен в Git, разрешается через 
   }
 
   for (const action of ['discard-file', 'clean-file', 'partial-stage', 'ignore-shared', 'ignore-local']) {
-    assert.equal(menu.querySelector(`[data-action="${action}"]`), null, action);
+    assert.equal(menu.querySelector(`[data-action="${action}"]`) === null, true, action);
   }
 
   assert.equal(posts.length, 0, 'Чтение меню конфликта не помечает файл разрешённым');
@@ -2645,6 +2822,93 @@ async function mountGitPanel(t, gitPayload, {
   return mounted;
 }
 
+test('CODE-PULL-UI: стрелка получает изменения, блокирует повтор и обновляет историю', async (t) => {
+  const pending = deferred();
+  const posts = [];
+  const payload = {
+    tracking: {
+      detached: false,
+      upstream: 'origin/main',
+      remote: 'origin',
+      ahead: 0,
+      behind: 3,
+    },
+    log: [],
+  };
+  const h = await mountGitPanel(t, payload, {
+    post: (url, body) => {
+      posts.push({ url, body });
+
+      return pending.promise;
+    },
+  });
+
+  assert.equal(h.wrapper.get('button.pull-action').attributes('aria-label'), 'Получить изменения');
+  await h.wrapper.get('button.pull-action').trigger('click');
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+  assert.equal(h.wrapper.get('button.fetch-action').element.disabled, true);
+  assert.equal(h.wrapper.get('button.push-action').element.disabled, true);
+  await h.wrapper.get('button.pull-action').trigger('click');
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/pull\?/);
+  assert.deepEqual(posts[0].body, {});
+
+  payload.tracking = { ...payload.tracking, behind: 0 };
+  payload.log = [{
+    hash: 'a'.repeat(40),
+    subject: 'Полученный коммит',
+    when: '2026-01-01',
+  }];
+  pending.resolve({
+    ok: true,
+    branch: 'main',
+    updated: true,
+    tracking: payload.tracking,
+  });
+  await settle(h.flushPromises);
+
+  assert.equal(h.wrapper.vm.git.tracking.behind, 0);
+  assert.equal(h.wrapper.vm.git.log[0].subject, 'Полученный коммит');
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, false);
+  assert.match(String(h.toasts.list().at(-1)?.body), /Ветка main обновлена/);
+});
+
+test('CODE-PULL-ERROR: отказ fast-forward виден тостом и освобождает кнопку', async (t) => {
+  const h = await mountGitPanel(t, {
+    tracking: {
+      detached: false,
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 3,
+    },
+  }, {
+    post: async () => {
+      throw new Error('История веток разошлась. Fast-forward невозможен.');
+    },
+  });
+
+  await h.wrapper.get('button.pull-action').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.toasts.list().at(-1)?.tone, 'danger');
+  assert.match(String(h.toasts.list().at(-1)?.body), /Fast-forward невозможен/);
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, false);
+  assert.equal(h.wrapper.vm.git.tracking.behind, 3);
+});
+
+test('CODE-PULL-UNAVAILABLE: без upstream и при detached HEAD стрелка недоступна', async (t) => {
+  const h = await mountGitPanel(t, {});
+
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+  h.wrapper.vm.git.tracking = {
+    detached: true,
+    upstream: 'origin/main',
+    ahead: 0,
+    behind: 1,
+  };
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('button.pull-action').element.disabled, true);
+});
+
 /**
  * Задерживает только HTTP-ответ push, сохраняя настоящий компонент и общий центр тостов.
  * Метаданные меняются явно, чтобы повторное открытие читало подтверждённое состояние.
@@ -2854,7 +3118,7 @@ test('композер стоит в нижнем footer и отдаёт пол�
   );
   assert.deepEqual(
     wrapper.findAll('.git-remote-actions > button').map((node) => node.classes()[0]),
-    ['fetch-action', 'push-action'],
+    ['fetch-action', 'pull-action', 'push-action'],
   );
   assert.equal(wrapper.get('.git-footer > .git-sync-row').exists(), true);
   assert.equal(wrapper.find('.git-compose-actions input').exists(), false);
@@ -5677,10 +5941,10 @@ test('CODE-LAYOUT: фильтры и групповые команды появ�
 test('CODE-LAYOUT: меню выбирает блок, быстрый список заменяет скрытое дерево', async (t) => {
   const h = await mountReviewPanel(t);
 
-  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]') === null, true);
   assert.equal(h.wrapper.find('[data-action="diff-file-list"]').exists(), false);
   await clickReviewMenuAction(h, 'select-diff-hunk');
-  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]') === null, true);
   assert.ok(reviewEditors(h).some((editor) => editor.getSelection()?.startLineNumber === 5));
   await h.wrapper.get('button.navigator-toggle').trigger('click');
   await reviewControl(h.wrapper, 'diff-file-list').setValue('work:b.txt');
@@ -6325,7 +6589,7 @@ test('CODE-MENU-KEYBOARD: contextmenu, Shift+F10, стрелки, Escape воз�
   assert.ok(menu, 'Правая кнопка открывает меню');
   menu.dispatchEvent(new h.browser.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await settle(h.flushPromises);
-  assert.equal(h.browser.document.activeElement, row.element);
+  assert.equal(h.browser.document.activeElement === row.element, true);
   await row.trigger('keydown', { key: 'F10', shiftKey: true });
   await settle(h.flushPromises);
   menu = h.browser.document.querySelector('[role="menu"]');

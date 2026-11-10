@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { startHttpFixture } from '../b24/helpers/httpFixture.mts';
+import { startHttpFixture } from '../tracker/helpers/httpFixture.mts';
 import { selectTracker, STOCK_CAPABILITIES, trackerFixture } from './helpers/trackerFixture.js';
 
 import { copyStockPackage } from './helpers/trackerPackage.js';

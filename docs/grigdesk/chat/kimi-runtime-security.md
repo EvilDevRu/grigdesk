@@ -5,7 +5,7 @@
 `server/src/lib/kimi/hostLaunch.ts` строит запуск `kimi acp` прямым spawn-ом сервера с
 `KIMI_CODE_HOME = config.kimiHome` (реальный `~/.kimi-code`) и caller-env chat-модуля —
 тем же, что получает claude. Мотивация: contained-профиль не давал read-доступа к
-диагностике движка (`~/.factory/**`), что блокировало разборы инцидентов из чата.
+диагностике движка (`~/.grigdesk/factory/**`), что блокировало разборы инцидентов из чата.
 
 Настройка исполнителя `blockDirectSsh` по умолчанию включена. В штатном server transport
 (`kimi web`) host использует [канал команд GrigDesk](kimi-command-policy.md): отдельная
@@ -25,7 +25,7 @@ Kimi. Выключение не расширяет contained-сеть; оно в
 Что осознанно отключается относительно contained:
 
 - mount/pid/net namespace изоляция и маски control state: процесс видит host FS целиком,
-  включая `~/.factory`, всю папку данных, токены окружения сервера (как claude);
+  включая `~/.grigdesk/factory`, всю папку данных, токены окружения сервера (как claude);
 - egress allowlist: сеть прямая (как у claude/codex);
 - cgroup-лимиты (CPU/memory/RuntimeMaxSec): остаётся chat watchdog модуля;
 - per-chat KIMI_CODE_HOME и broker config: host config/skills/plugins/hooks/MCP

@@ -6,6 +6,20 @@
 Каталог `server/build/helpers.json` задаёт id, исходный вход, вид запуска и exports
 собственных служебных программ. `server/scripts/sea/helpers.mts` собирает их в ESM:
 npm-зависимости остаются внешними, предупреждение esbuild останавливает сборку.
+
+`code-branch-worker` — standalone main-helper переключения основной ветки стенда.
+Его runtime imports ограничены Node built-ins: сервер копирует готовый вход в папку
+данных перед checkout, и последующие этапы не зависят от наличия исходного файла.
+Source использует копию `.mts`, пакет — копию собранного `.mjs`; оба запускаются
+соответствующим Node из `helperCommand`. [Контракт runtime](../plugins/code-branch-runtime.md).
+Прямой вход вызывает `void main()` без top-level await: Git-функции этого же модуля
+импортируются сервером и входят в CJS payload. Импорт сам не запускает задание;
+сгенерированный ESM-вход по-прежнему ожидает `main` и вызывает его один раз.
+`tests/server/server-binary-bundle.test.js` проверяет импорт настоящего worker-а
+в перенесённом CJS payload, `code-branches.test.js` — запуск его source-копии.
+Guard по `import.meta.url` учтён отдельной helper-точкой в
+`server/build/sea-inventory.json`; каталог helpers не заменяет эту опись.
+
 Сгенерированный вход передаётся через stdin с постоянным sourcefile и разрешением импортов
 от корня исходников. Случайный workDir не попадает в комментарии или байты бандла:
 [детерминированный вход](sea-helper-staging-comments.md).

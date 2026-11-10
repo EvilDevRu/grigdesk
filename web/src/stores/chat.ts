@@ -1,5 +1,5 @@
 import { chatPageKey } from '../../../shared/chat/chatPaging.ts';
-import type { ChatCatalogPage, ChatCatalogSummary } from '../../../shared/chat/chatPaging.ts';
+import type { ChatCatalogPage } from '../../../shared/chat/chatPaging.ts';
 import { messageKey } from '../../../shared/chat/chatMessageIdentity.ts';
 
 import { isChatSpeed, chatSpeedModes } from '../../../shared/chat/chatSpeed.ts';
@@ -1542,7 +1542,11 @@ export const useChatStore = defineStore('chat', {
           const local = !chatLoadRuntimeFor(this).headOnly.has(sess.id)
             && !historyPersistenceFor(this).isSent(sess,
               fingerprintOf(archived ? archivedSlimOf(sess) : slimOf(sess)))
-            ? chatSearchSnippet(sess as unknown as Record<string, unknown>, t) : null;
+            ? chatSearchSnippet({
+              title: sess.title,
+              taskId: sess.taskId,
+              messages: sess.messages,
+            }, t) : null;
 
           if (remote === undefined && local === null) {
             return null;
@@ -1769,6 +1773,21 @@ export const useChatStore = defineStore('chat', {
       return this.loadChatPage(query, archived, true);
     },
     /**
+     * Адресная карточка дополняет обычный список своей группы без сброса cursor.
+     * Членство поисковых страниц остаётся за подтверждённой выдачей поиска.
+     */
+    _includeChatPage(id: string, archived: boolean) {
+      if (!this.pagingEnabled) {
+        return;
+      }
+
+      const target = this.pageFor('', archived);
+
+      if (!target.ids.includes(id) && !target.overlayIds.includes(id)) {
+        target.overlayIds.push(id);
+      }
+    },
+    /**
      * Явная смена группы обновляет массивы и членство страниц одной операцией.
      * Поиск не объявляет совпадение лишь по наличию новой шапки.
      */
@@ -1786,11 +1805,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
-      const target = this.pageFor('', archived);
-
-      if (!target.ids.includes(id) && !target.overlayIds.includes(id)) {
-        target.overlayIds.push(id);
-      }
+      this._includeChatPage(id, archived);
     },
     /**
      * Поправка сравнивается с последней принятой суммой, а не произвольным ACK головы.
@@ -1842,7 +1857,14 @@ export const useChatStore = defineStore('chat', {
         runtime.retiredSummaries.add(this.catalogSummary.epoch);
       }
 
-      this.catalogSummary = value as unknown as ChatCatalogSummary;
+      this.catalogSummary = {
+        active: Number(value.active),
+        archived: Number(value.archived),
+        unread: Number(value.unread),
+        waiting: Number(value.waiting),
+        epoch: value.epoch,
+        sequence: Number(value.sequence),
+      };
       runtime.counterEdits.clear();
     },
     /**
@@ -2524,6 +2546,9 @@ export const useChatStore = defineStore('chat', {
         }
 
         this._movePageMembership(head.id, !!head.archived);
+      }
+      if (!runtime.applyingPage) {
+        this._includeChatPage(head.id, local ? this.isArchived(head.id) : !!head.archived);
       }
       if (full || dirty) {
         // Метка прочтения — состояние сервера, а не местная правка ленты. Загруженная

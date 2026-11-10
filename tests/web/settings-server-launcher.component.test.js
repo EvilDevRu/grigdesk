@@ -80,6 +80,8 @@ test('удалённый сервер: автозапуск окна и ярлы
       name: 'Удалённая машина',
       kind: 'remote',
     },
+    profiles: [],
+    localAvailable: false,
     capabilities: ['applicationLauncher'],
   });
   await h.wrapper.setProps({ active: false });

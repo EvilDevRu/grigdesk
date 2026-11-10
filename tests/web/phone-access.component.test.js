@@ -99,6 +99,7 @@ for (const completion of ['resolve', 'reject']) {
       },
       profiles: [],
       capabilities: [],
+      localAvailable: false,
     });
     h.auth.clientScope = 'scope-b';
     h.status.name = 'Сервер Б';

@@ -45,6 +45,7 @@ interface ExitOptions {
   revealed(): boolean;
   quitting(): boolean;
   preference(): DesktopExitPreference;
+  applyUpdate?(): Promise<boolean> | null;
   log(message: string): void;
   exit(): void;
 }
@@ -302,6 +303,26 @@ export function createDesktopExitController(options: ExitOptions) {
         await closeNative(operation, false);
 
         return;
+      }
+
+      const update = options.applyUpdate?.();
+
+      if (update) {
+        // Строгий updater владеет сливом и сроками; обычный deadline не заменяет его proof.
+        clearTimeout(operation.deadline);
+        operation.deadline = undefined;
+
+        if (await update) {
+          return;
+        }
+
+        if (!current(operation)) {
+          await closeNative(operation, false);
+
+          return;
+        }
+
+        startDeadline(operation);
       }
 
       await send(operation, 'stop-pipelines', 20000, refreshed);

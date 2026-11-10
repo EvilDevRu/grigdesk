@@ -59,6 +59,7 @@ interface ShelfPipelineSource {
 
 interface ShelfBoardTask {
   id: unknown;
+  source?: string;
   title?: string | null;
   status?: string | null;
   statusKind?: string | null;
@@ -72,6 +73,7 @@ interface ShelfBoardTask {
 }
 
 interface ShelfBoardSource {
+  branchEpochs?: Record<string, number>;
   sourceEpoch?: number;
   loadedAt: number;
   error: unknown;
@@ -92,6 +94,7 @@ interface ShelfTaskDetail {
 
 interface ShelfController {
   source: TaskPersonalSource;
+  taskSource?: TaskSourceId;
   passive: boolean;
   analysis: ShelfAnalysisSource;
   pipeline: ShelfPipelineSource;
@@ -159,7 +162,9 @@ type ShelfViewAction = (
 ) => boolean;
 
 export interface TaskShelfState {
+  taskSources: TaskSourceId[];
   personalSource: TaskPersonalSource;
+  taskSource?: TaskSourceId;
   _viewMirror: boolean;
   _viewAction: ShelfViewAction | null;
   scope: string;
@@ -235,7 +240,10 @@ function emptySnapshot(): ShelfObservedSnapshot {
  * Нереактивная обвязка полки живёт рядом со стором, а не в его состоянии: соседние
  * сторы, кэш карточек и отписки не должны попадать в реактивность и в снимок вкладки.
  */
-function ensureController(store: { personalSource?: TaskPersonalSource }): ShelfController {
+function ensureController(store: {
+  personalSource?: TaskPersonalSource;
+  taskSource?: TaskSourceId;
+}): ShelfController {
   let controller = controllers.get(store);
 
   if (controller) {
@@ -244,6 +252,7 @@ function ensureController(store: { personalSource?: TaskPersonalSource }): Shelf
 
   controller = {
     source: store.personalSource ?? 'tracker',
+    taskSource: store.taskSource,
     passive: false,
     // Соседние сторы объявлены собственным контрактом чтения выше: пока они на
     // JavaScript, вывод типов из них не был бы проверенным знанием.
@@ -340,7 +349,8 @@ async function hydrateTaskDetail(
   const scope = store.scope;
   const epoch = store._epoch;
   const signal = controller.detailAbort.signal;
-  const prefix = controller.source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker/task';
+  const prefix = controller.source === 'grigdesk' ? 'grigdesk-tasks'
+    : controller.taskSource ? `tracker/${controller.taskSource.split('@')[0]}/task` : 'tracker/task';
   const request: Promise<unknown> = api.get(`/api/${prefix}/${encodeURIComponent(taskId)}`, {
     signal,
     retry: false,
@@ -409,7 +419,8 @@ function setting(controller: ShelfController, key: string, fallback: unknown = t
  * Личное пространство tracker не заменяет идентичность портала в межоконном действии.
  */
 function shelfTaskSource(controller: ShelfController) {
-  const source = (controller.board.data as unknown as { source?: unknown } | null)?.source;
+  const source = controller.taskSource
+    ?? (controller.board.data as unknown as { source?: unknown } | null)?.source;
 
   return controller.source === 'grigdesk' ? 'grigdesk' as const
     : isTaskSourceId(source) && source !== 'grigdesk' ? source : undefined;
@@ -432,7 +443,8 @@ function boardTask(controller: ShelfController, taskId: string): ShelfBoardTask 
 
   for (const name of BOARD_LISTS) {
     const task = (controller.board.data?.[name] || [])
-      .find((item) => taskKey(item.id) === taskId);
+      .find((item) => taskKey(item.id) === taskId
+        && (!controller.taskSource || item.source === controller.taskSource));
 
     if (task) {
       return task;
@@ -449,7 +461,10 @@ function boardTask(controller: ShelfController, taskId: string): ShelfBoardTask 
 function observedTask(controller: ShelfController, taskId: string): ShelfObservedSnapshot {
   let analysis = null;
 
-  if (controller.analysis.loadedAt > 0 && !controller.analysis.error) {
+  const defaultSource = (controller.board.data as { source?: string } | null)?.source;
+
+  if ((!controller.taskSource || controller.taskSource === defaultSource)
+    && controller.analysis.loadedAt > 0 && !controller.analysis.error) {
     const row = controller.analysis.byTask?.[taskId];
 
     if (row?.status?.state) {
@@ -467,7 +482,7 @@ function observedTask(controller: ShelfController, taskId: string): ShelfObserve
     ? controller.pipeline.observedByReference
       ? controller.pipeline.observedByReference[taskReferenceKey({
         id: taskId, source: controller.source === 'grigdesk' ? 'grigdesk'
-          : (controller.board.data as unknown as { source?: string } | null)?.source,
+          : controller.taskSource ?? (controller.board.data as unknown as { source?: string } | null)?.source,
       })] || null
       : controller.source === 'tracker' ? controller.pipeline.observedByTask?.[taskId] || null : null
     : null;
@@ -792,9 +807,13 @@ interface ShelfBranch extends TaskShelfState {
   stop(): void;
 }
 
-const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => defineStore(storeId, {
+const createTaskShelfStore = (
+  storeId: string, source: TaskPersonalSource, taskSource?: TaskSourceId,
+) => defineStore(storeId, {
   state: (): TaskShelfState => ({
+    taskSources: [],
     personalSource: source,
+    taskSource,
     _viewMirror: false,
     _viewAction: null,
     scope: '',
@@ -814,9 +833,11 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
     _reloadSilent: false,
   }),
   getters: {
+    external: (state): ShelfBranch[] => state.taskSources.map((id) => externalBranches.get(id)!()),
     own: (): ShelfBranch => useGrigdeskTaskShelfStore(),
-    allRows: (state): ShelfRow[] => source === 'tracker' && !state._viewMirror
-      ? [...state.rows, ...useGrigdeskTaskShelfStore().rows] : state.rows,
+    allRows: (state): ShelfRow[] => source === 'tracker' && !taskSource && !state._viewMirror
+      ? [...state.rows, ...state.taskSources.flatMap((id) => externalBranches.get(id)!().rows),
+        ...useGrigdeskTaskShelfStore().rows] : state.rows,
     totalCount: (state) => state.rows.length,
     litCount: (state) => state.rows.filter((row) => row.state === 'lit').length,
     isOnShelf: (state) => (id: unknown) => (
@@ -825,6 +846,31 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
     isPending: (state) => (id: unknown) => !!state.pending[taskKey(id)],
   },
   actions: {
+    /**
+     * Каждая учётная запись получает тот же алгоритм полки с отдельным состоянием.
+     * Полная ссылка сохраняется при гидратации и в уведомлениях.
+     */
+    forSource(target?: TaskSourceId): ShelfBranch {
+      if (target === 'grigdesk') {
+        return useGrigdeskTaskShelfStore();
+      }
+      if (!target) {
+        return this;
+      }
+
+      if (!taskSource && !this.taskSources.includes(target)) {
+        this.taskSources.push(target);
+      }
+
+      let useBranch = externalBranches.get(target);
+
+      if (!useBranch) {
+        useBranch = createTaskShelfStore(`taskShelf-${target}`, 'tracker', target);
+        externalBranches.set(target, useBranch);
+      }
+
+      return useBranch();
+    },
     /**
      * Режим принадлежит документу карточки и переживает очистку данных при выходе.
      * Главное окно строит строки полки, читает детали и отправляет оповещения.
@@ -854,8 +900,9 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
       this.error = value.error as typeof this.error;
     },
     setPassive(value: boolean) {
-      if (source === 'tracker') {
+      if (!taskSource && source === 'tracker') {
         useGrigdeskTaskShelfStore().setPassive(value);
+        this.external.forEach((branch) => branch.setPassive(value));
       }
 
       ensureController(this).passive = value;
@@ -941,7 +988,7 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
       this.error = null;
 
       try {
-        const snapshot = await shelfApi.list(source);
+        const snapshot = await shelfApi.list(source, taskSource);
 
         if (epoch !== this._epoch) {
           return false;
@@ -1029,7 +1076,7 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
             target: {
               kind: 'task',
               taskId: String(entry.taskId),
-              ...(source === 'grigdesk' ? { source: 'grigdesk' as const } : {})
+              ...(shelfTaskSource(controller) ? { source: shelfTaskSource(controller) } : {})
             },
           });
         }
@@ -1102,7 +1149,7 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
           reason,
           snapshot,
           createIfMissing,
-        }, source);
+        }, source, taskSource);
 
         if (epoch !== this._epoch) {
           return false;
@@ -1136,6 +1183,10 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * первая, а состояние всё равно приедет подтверждённым снимком сервера.
      */
     async remove(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (!taskSource && !this._viewMirror && options.taskSource) {
+        return this.forSource(options.taskSource).remove(id);
+      }
+
       if (!this._viewMirror && (options.source ?? source) === source && options.taskSource
         && options.taskSource !== shelfTaskSource(ensureController(this))) {
         return false;
@@ -1164,7 +1215,7 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
       this.error = null;
 
       try {
-        const response = await shelfApi.remove(key, source);
+        const response = await shelfApi.remove(key, source, taskSource);
 
         if (epoch !== this._epoch) {
           return false;
@@ -1193,6 +1244,10 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * Изменения подтверждаются полным серверным снимком соответствующей полки.
      */
     toggle(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (!taskSource && !this._viewMirror && options.taskSource) {
+        return this.forSource(options.taskSource).toggle(id);
+      }
+
       if (options.source === 'grigdesk' && source !== 'grigdesk') {
         return useGrigdeskTaskShelfStore().toggle(id);
       }
@@ -1207,6 +1262,10 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * Настройка плагина проверяется до любого запроса или изменения состояния.
      */
     autoAdd(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (!taskSource && !this._viewMirror && options.taskSource) {
+        return this.forSource(options.taskSource).autoAdd(id);
+      }
+
       if (options.source === 'grigdesk' && source !== 'grigdesk') {
         return useGrigdeskTaskShelfStore().autoAdd(id);
       }
@@ -1225,6 +1284,10 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * Карточка передаёт намерение главному окну, не подставляя неполный pipeline-снимок.
      */
     acknowledge(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (!taskSource && !this._viewMirror && options.taskSource) {
+        return this.forSource(options.taskSource).acknowledge(id);
+      }
+
       if (!this._viewMirror && (options.source ?? source) === source && options.taskSource
         && options.taskSource !== shelfTaskSource(ensureController(this))) {
         return false;
@@ -1276,8 +1339,9 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * перечитывает полку молча: накопленный за время выключения огонь не оповещает.
      */
     start(): void {
-      if (source === 'tracker') {
+      if (!taskSource && source === 'tracker') {
         useGrigdeskTaskShelfStore().start();
+        this.external.forEach((branch) => branch.start());
       }
 
       if (this._viewMirror) {
@@ -1297,6 +1361,30 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
       }
 
       controller.started = true;
+
+      if (taskSource) {
+        const driverId = taskSource.split('@')[0]!;
+
+        controller.stops.push(watch(() => controller.board.branchEpochs?.[driverId], () => {
+          this.clear({ source: 'tracker' });
+        }, { flush: 'sync' }));
+      }
+
+      if (!taskSource && source === 'tracker') {
+        controller.stops.push(watch(() => controller.board.data, () => {
+          for (const role of BOARD_LISTS) {
+            for (const task of controller.board.data?.[role] ?? []) {
+              if (isTaskSourceId(task.source)) {
+                this.forSource(task.source);
+              }
+            }
+          }
+        }, { immediate: true }));
+        controller.stops.push(watch(() => this.taskSources.slice(), () => {
+          this.external.forEach((branch) => branch.start());
+        }));
+      }
+
       controller.stops.push(sseSubscribe((name: string) => {
         if (name === 'task-shelf-changed' && enabled(controller)) {
           void this.load(true);
@@ -1349,8 +1437,9 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * ни состав полки, и после повторного start перечитывать его незачем.
      */
     stop(): void {
-      if (source === 'tracker') {
+      if (!taskSource && source === 'tracker') {
         useGrigdeskTaskShelfStore().stop();
+        this.external.forEach((branch) => branch.stop());
       }
 
       const controller = controllers.get(this);
@@ -1374,7 +1463,11 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
      * которые улетели до выхода: их данные принадлежат уже другой области.
      */
     clear(options: TaskSourceOptions = {}): void {
-      if (source === 'tracker' && options.source !== 'tracker') {
+      if (!taskSource && source === 'tracker') {
+        this.external.forEach((branch) => branch.clear());
+      }
+
+      if (!taskSource && source === 'tracker' && options.source !== 'tracker') {
         useGrigdeskTaskShelfStore().clear();
       }
 
@@ -1402,6 +1495,8 @@ const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => de
     },
   },
 });
+
+const externalBranches = new Map<string, ReturnType<typeof createTaskShelfStore>>();
 
 export const useTaskShelfStore = createTaskShelfStore('taskShelf', 'tracker');
 export const useGrigdeskTaskShelfStore = createTaskShelfStore('grigdeskTaskShelf', 'grigdesk');

@@ -1,4 +1,6 @@
 import { api } from './apiClient.ts';
+import { parseCodeBranchOverview } from '../../../shared/plugins/code/codeBranchContracts.ts';
+import type { CodeBranchSettings } from '../../../shared/plugins/code/codeBranchContracts.ts';
 import {
   parseCodeReviewFingerprints,
   parseCodeConflict,
@@ -18,6 +20,7 @@ import {
   parseCodeCommitsDiff,
   parseCodePatch,
   parseCodeProjects,
+  parseCodePullResponse,
   parseCodePushResponse,
   parseCodeRepos,
   parseCodeRoots,
@@ -99,6 +102,23 @@ function actionUrl(
  * HTTP, а конкретный декодер подтверждает форму до обновления состояния «Кода».
  */
 export const codeApi = {
+  async branches(context: CodeRequestContext) {
+    return parseCodeBranchOverview(await api.get(contextUrl(context, 'branches')));
+  },
+
+  async branchSettings(context: CodeRequestContext, settings: CodeBranchSettings) {
+    return parseCodeBranchOverview(await api.post(contextUrl(context, 'branch-settings'), settings));
+  },
+
+  async switchBranch(context: CodeRequestContext, ref: string, expectedCommit: string, expectedHead: string) {
+    return parseCodeBranchOverview(await api.post(contextUrl(context, 'switch-branch'), {
+      ref,
+      expectedCommit,
+      expectedHead,
+      confirmed: true,
+    }));
+  },
+
   async projects() {
     const value: unknown = await api.get('/api/projects');
 
@@ -286,6 +306,12 @@ export const codeApi = {
     const value: unknown = await api.post(contextUrl(context, 'fetch'), {});
 
     return parseCodeFetchResponse(value);
+  },
+
+  async pull(context: CodeRequestContext) {
+    const value: unknown = await api.post(contextUrl(context, 'pull'), {});
+
+    return parseCodePullResponse(value);
   },
 
   async undoCommit(context: CodeRequestContext) {

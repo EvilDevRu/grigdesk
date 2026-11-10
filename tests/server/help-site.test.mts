@@ -42,5 +42,9 @@ test('HELP-W1: реальный static build содержит тот же кор
   assert.doesNotMatch(html, /\/api\/help|web\/src|localhost|\.state/u);
   assert.ok(packages.some((file) => file.endsWith('/node_modules/marked')));
   assert.ok(packages.some((file) => file.endsWith('/node_modules/mermaid')));
-  assert.match(await readFile(path.join(output, 'latest.js'), 'utf8'), /channel\.json/u);
+
+  const latest = await readFile(path.join(output, 'latest.js'), 'utf8');
+
+  assert.match(latest, /api\/releases\/v1/u);
+  assert.doesNotMatch(latest, /channel\.json/u);
 });

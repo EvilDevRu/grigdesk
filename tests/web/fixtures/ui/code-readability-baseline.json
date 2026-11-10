@@ -78,9 +78,7 @@
         "function pump(): void { if (!host || active || queue.length === 0) return; active = queue.shift() ?? null; if (active) host.controller.show(active.request); }": 1,
         "export function registerDialogHost(controller: DialogHostController): () => void { const token = Symbol('ui-dialog-host'); host = { token, controller }; if (active) controller.show": 1,
         "export function completeDialogRequest(requestId: number, result: DialogResult): boolean { const item = active; if (!item || item.request.id !== requestId) return false; if (isConfi": 1,
-        "export function confirmDialog(text: string, options: ConfirmDialogOptions = {}): Promise<boolean> { return new Promise<boolean>((resolve) => { const request: ConfirmDialogRequest =": 1,
         "export function promptDialog(options: PromptDialogOptions = {}): Promise<string | null> { return new Promise<string | null>((resolve) => { const request: PromptDialogRequest = Obje": 1,
-        "export function alertDialog(text: string, options: AlertDialogOptions = {}): Promise<void> { return new Promise<void>((resolve) => { const request: AlertDialogRequest = Object.free": 1,
         "export function pendingDialogCount(): number { return queue.length + (active ? 1 : 0); }": 1
       }
     },

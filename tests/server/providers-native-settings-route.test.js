@@ -49,6 +49,7 @@ export async function nativeRouteFixture(t, provider = syntheticProvider(), {
     },
     prefs,
     getProviderAdapters: async () => new Map([[provider.id, provider]]),
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 
@@ -78,7 +79,7 @@ test('настоящий candidate публикует binary readiness и общ
   const { app, root, prefs } = await nativeRouteFixture(t, provider, {
     config: { deepseekBin: candidate.binary, deepseekCacheDir: candidate.cacheDir },
   });
-  const registry = (await app.inject('/api/providers')).json().providers;
+  const registry = (await app.inject('/api/providers?wait=1')).json().providers;
   const card = registry.find((entry) => entry.id === 'deepseek');
 
   assert.equal(card.distribution.kind, 'binary');
@@ -148,7 +149,8 @@ test('отсутствующий binary объясняет причину и к�
   const { app, root } = await nativeRouteFixture(t, provider, {
     config: { deepseekBin: path.join(generationRoot, 'missing-binary') },
   });
-  const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
+  const card = (await app.inject('/api/providers?wait=1')).json().providers
+    .find((entry) => entry.id === 'deepseek');
 
   assert.equal(card.distribution.ready, false);
   assert.equal(card.distribution.error, 'deepseek_binary_missing');
@@ -171,7 +173,8 @@ test('прежний installed flag не возвращает stock устано
   const { app } = await nativeRouteFixture(t, provider, {
     config: { deepseekRuntimeMode: 'installed', deepseekBin: '/missing-fixture/dsh' },
   });
-  const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
+  const card = (await app.inject('/api/providers?wait=1')).json().providers
+    .find((entry) => entry.id === 'deepseek');
 
   assert.equal(card.distribution.kind, 'binary');
   assert.equal(card.install, null);

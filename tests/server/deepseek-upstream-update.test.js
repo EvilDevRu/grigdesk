@@ -49,7 +49,20 @@ test('настоящий новый SHA проходит build/transport gates; 
     });
 
     assert.notEqual(commit, before.commit);
-    await publishDeepSeekSync(candidate);
+
+    try {
+      await publishDeepSeekSync(candidate);
+    } catch (error) {
+      // execFile помещает TAP вложенного gate в stdout, которого нет в error.message.
+      // Ошибка раннего unit не должна исчезнуть за длинным хвостом успешных случаев.
+      const output = String(error.stdout || '');
+      const lines = output.split('\n');
+      const failures = lines.flatMap((line, index) => /^\s*not ok /u.test(line)
+        ? lines.slice(index, index + 60) : []).join('\n').slice(0, 24576);
+
+      throw new Error(`${error.message}\n${failures}\n${output.slice(-16384)}`, { cause: error });
+    }
+
     assert.equal((await verifyDeepSeekSnapshot(vendorDir)).commit, commit);
     assert.equal(await fs.readlink(path.join(runtimeRoot, 'current')), 'builds/previous');
 

@@ -22,8 +22,9 @@ Tripo остаются в ядре; библиотека, заказы, прос
 
 ## Устройство
 
+- [Ветка единственного стенда: выбор, команды запуска, возврат на dev, журнал и защита агентов](code-branch-runtime.md)
 - [Официальные пакеты: скрытие общих предупреждений при сохранении проверок и подтверждения](official-install-notices.md)
-- [Git в фоне: завершение после закрытия панели, общие тосты и свежий tracking](code-git-notifications.md)
+- [Git в фоне: fast-forward, fetch, завершение после закрытия панели и свежий tracking](code-git-notifications.md)
 - [Read-only diff: исходные координаты, Worker, отложенный resize, настройки и навигация блоков](code-diff-view.md)
 - [Проверка Git-изменений: fingerprints, частичный индекс, scoped actions и ignore](code-review.md)
 - [Ресурсы фонового плагина во всплывашке исполнителя: JSON, переводы и отмена](server-provider-resources.md)
@@ -36,7 +37,7 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Серверные сервисы core: проекты, единая среда с защищёнными путями, песочницы и model-only](plugin-core-runtime.md)
 - [Сборка деклараций: файловые ссылки и видимая пометка служебных экспортов](plugin-types-declarations.md)
 - [Модульные панели v1: фасады Vue/UI, контекст, ошибки и сборка](plugin-ui-modules.md)
-- [Сервисы модуля v1: binary API, настройки, события, адресные уведомления, retry и intents панели](plugin-module-services.md)
+- [Сервисы модуля v1: binary API, настройки, события, уведомления, intents и холодная загрузка чата](plugin-module-services.md)
 - [Серверные оповещения: generation, snapshot, dedup/импорт прежнего seen, темы и RU/EN](plugin-notifications.md)
 - [Отдельный background entry: boot без панели, готовность, retry и очистка эпохи](plugin-background.md)
 - [Отзыв модуля после выключения в другом окне: каталог через общий SSE](plugin-module-catalog-sync.md)
@@ -51,7 +52,7 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Удаление пользовательского пакета: несовместимые пакеты, identity recovery и сохранение данных](user-plugin-removal.md)
 - [Установка v1: проверка модуля, доверие, обновление и единый каталог](plugin-module-install.md)
 - [Installer boot: пути, VERSION, SYSTEM, recovery до import и close](plugin-install-boot.md)
-- [Runtime lease, drain потоков, user dataDir и строгий HTTP установки](plugin-install-runtime.md)
+- [Runtime lease, drain, объявленные входы v1, поколения модуля и строгий HTTP установки](plugin-install-runtime.md)
 - [Сервис подготовки: admission, owned reads, managed update и snapshot rollback](user-plugin-install-service.md)
 - [Замена папок: durable intent, identity resolver, cleanup и process-crash barriers](user-plugin-apply-recovery.md)
 - [Подготовка npm: реальный offline fixture, изоляция config и durable state](user-plugin-npm-state.md)
@@ -90,4 +91,4 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Плагин «Докер» — подробный контракт](docker-contract.md)
 - [Плагины: слоты, размещения и область — подробный контракт](placements.md)
 - [Раздел «Песочницы» — подробный контракт](sandbox-operations.md)
-- [Раздел «Презентации» — подробный контракт](showcase-reference.md)
+- [Раздел «Презентации»: контракт, запись и проверка сжатых клипов по кадрам](showcase-reference.md)

@@ -112,7 +112,11 @@ const routes: RouteRecordRaw[] = [
     path: '/db',
     name: 'db',
     component: () => import('./views/DbView.vue'),
-    meta: { title: 'Базы', tool: 'db', layout: 'workspace' },
+    meta: {
+      title: 'Базы',
+      tool: 'db',
+      layout: 'workspace',
+    },
   },
   {
     path: '/docker',
@@ -153,7 +157,11 @@ const routes: RouteRecordRaw[] = [
     path: '/shelf',
     name: 'shelf',
     component: () => import('./views/ShelfView.vue'),
-    meta: { title: 'Полка', tool: 'shelf', layout: 'workspace' },
+    meta: {
+      title: 'Полка',
+      tool: 'shelf',
+      layout: 'workspace',
+    },
   },
   {
     path: '/tools',

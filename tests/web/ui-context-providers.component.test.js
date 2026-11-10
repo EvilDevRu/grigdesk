@@ -62,8 +62,10 @@ async function compileToolHostPublisher() {
       '../../composables/useUiContextSource.ts': `
         export const useUiContextSource = (...args) => globalThis.__uiContextSourceHelper(...args);
       `,
-      '../navIcons.ts': 'export const NAV_ICONS = { code: "", plugin: "" };',
+      '../navIcons.ts': 'export const NAV_ICONS = { code: "", plugin: "" };'
+        + 'export const navIconPath = () => "";',
       '../tools/registry.ts': `
+        export const pluginTools = () => [];
         export const TOOL_REGISTRY = globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
         export const TOOL_BY_ID = globalThis.__uiContextToolRegistry.TOOL_BY_ID;
         export const toolsOf = () => globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
@@ -273,9 +275,16 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     progress: { done: 1, total: 1, current: null },
     loops: {},
   };
+
   globalThis.__uiContextPipelineApi = {
+    /**
+     * Pipeline и граф используют согласованную задачу синтетического источника.
+     * Контекст считывается после настоящей загрузки страницы.
+     */
     async get(url) {
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
       if (url === '/api/tasks/101/graph') return graph;
       if (url === '/api/factory/runners') return { runners: [] };
       if (url === '/api/tasks/101/doc/review') return { text: '' };
@@ -284,9 +293,15 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     async post() { return {}; },
   };
   globalThis.__uiContextTaskApi = {
+    /**
+     * Карточка получает пустую сводку конвейеров и свои уточнения.
+     * Остальные запросы не создают рабочую активность в фикстуре.
+     */
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };
-      if (url === '/api/tasks') return { tasks: [] };
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [] };
+      }
       return {};
     },
     async post() { return {}; },

@@ -32,6 +32,9 @@
       <span class="ui-dialog-host__message">{{ description }}</span>
     </template>
     <div class="desktop-exit-content">
+      <p v-if="state.snapshot.update" class="desktop-exit-update" role="status">
+        {{ t('desktop.exitUpdate', { version: state.snapshot.update.version }) }}
+      </p>
       <section v-if="state.snapshot.chats.length" class="desktop-exit-group">
         <h3 class="desktop-exit-group__heading">
           {{ t('desktop.exitChats') }}
@@ -90,10 +93,19 @@ import { computed, onBeforeUnmount, onMounted } from 'vue';
 
 import { t, UiButton, UiCheckbox, UiDialog, UiSpinner } from '../../ui.ts';
 import { useChatStore } from '../../stores/chat.ts';
+import { useApplicationUpdateStore } from '../../stores/applicationUpdate.ts';
 import { createDesktopExitRenderer } from '../desktopExit.ts';
 
 const chat = useChatStore();
-const renderer = createDesktopExitRenderer({ sessions: () => chat.sessions });
+const updates = useApplicationUpdateStore();
+const renderer = createDesktopExitRenderer({
+  sessions: () => chat.sessions,
+  update: () => {
+    const job = updates.snapshot?.job;
+
+    return job?.stage === 'ready' ? { version: job.version } : null;
+  },
+});
 const state = renderer.state;
 const title = computed(() => state.phase === 'stopping'
   ? t('desktop.exitStoppingTitle') : t('desktop.exitConfirmTitle'));
@@ -124,6 +136,14 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.desktop-exit-update {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
 }
 
 .desktop-exit-group {

@@ -103,6 +103,7 @@
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
+| `node/installerArchiveTail.ts` | Потоковое размещение и чтение архивов за ELF установщика: подписанные размеры/SHA, O_NOFOLLOW и эксклюзивная копия |
 | `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
 | `node/readContainedText.ts` | Ограниченное чтение обычного текста внутри корня без вложенных симлинков; core API 2 и Showcase |
 | `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, своим release и [повтором захвата после reclaim](directory-lock-recovery.md), в том числе без ожидания |

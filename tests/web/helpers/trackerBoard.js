@@ -189,8 +189,16 @@ export async function mountTrackerBoard(t, {
 
       if (url === '/api/trackers/settings') {
         Object.assign(state.settings, payload, { revision: state.settings.revision + 1 });
-        state.catalog.externalId = payload.externalId;
-        state.catalog.activeIds = ['own', ...[payload.externalId].filter(Boolean)];
+        state.catalog.externalId = payload.default ?? payload.externalId ?? null;
+        state.catalog.activeIds = ['own', ...(payload.drivers
+          ?? [state.catalog.externalId].filter(Boolean))];
+
+        if (payload.drivers) {
+          state.catalog.enabledIds = [...payload.drivers];
+          state.catalog.default = payload.default;
+          state.settings.externalId = payload.default;
+        }
+
         state.catalog.revision = state.settings.revision;
 
         return structuredClone(state.settings);
@@ -356,7 +364,9 @@ export async function openTrackerManager(card) {
  * Тест выбирает реальное поле по его значению и проверяет эффект через HTTP.
  */
 export async function chooseExternal(card, id) {
-  if (!card.wrapper.find('select').exists()) {
+  if (!card.wrapper.find(`input[type="radio"][value="${id}"]`).exists()
+    && !card.wrapper.findAll('select')
+      .some((candidate) => candidate.find(`option[value="${id}"]`).exists())) {
     await actionButton(card.wrapper, /^(?:Подключение доски|Board connection)$/u).trigger('click');
     await card.flushPromises();
   }

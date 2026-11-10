@@ -270,7 +270,7 @@ test('I18N-S02: все страницы, публичные метаданные
     const intro = document.querySelector('.settings-page-intro')?.textContent || '';
 
     assert.doesNotMatch(intro, /[А-Яа-яЁё]/, `${pageId}: описание`);
-    assert.equal(document.querySelector('.settings-page-loading'), null, pageId);
+    assert.equal(document.querySelector('.settings-page-loading') === null, true, pageId);
     assert.doesNotMatch(ownText(document.querySelector('.settings-page-area')), /[А-Яа-яЁё]/, pageId);
     assert.doesNotMatch(ownText(document.querySelector('.settings-page-area')),
       /\bsettings\.[a-z]+\./, pageId);

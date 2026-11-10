@@ -10,6 +10,7 @@ import { serviceFixture } from './helpers/pluginServiceFixture.js';
 import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/sources.ts';
 import { installError } from '../../server/src/lib/packageInstall/errors.ts';
 import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 
 /**
  * Установка проходит обычный service API и ждёт подготовки через fixture seam.
@@ -360,8 +361,10 @@ test('M19b: sourceChanged учитывает kind при равных canonical 
     }],
     fetch: async ({ destination }) => {
       await mkdir(destination, { recursive: true });
+      await mkdir(path.join(destination, 'assets'), { recursive: true });
+      await writeFile(path.join(destination, 'assets/icon.png'), png);
       await writeFile(path.join(destination, 'plugin.json'),
-        JSON.stringify({ id: 'demo', version: '1.0.0' }));
+        JSON.stringify(manifestV1({ entrypoints: {}, contributes: {} })));
     },
     changes: async () => null,
     inspectInstalled: async (_dir, expected) => ({ sha: expected.sha, modified: false }),

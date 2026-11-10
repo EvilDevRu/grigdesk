@@ -32,3 +32,7 @@ Helper `factory-runner-models` собирает metadata конвейерных 
 `server/scripts/factoryRunnerModels.mts` относителен перемещаемому комплекту; callback
 раннера использует Node закреплённого runtime. Контракт и состав проверки —
 [модель и effort этапа](../pipeline/node-model-and-effort.md).
+
+Status port получает `engine/lib/stage-progress.sh` и `stage-result.sh` через общий
+`runtimeRoot()`. Относительный `import.meta.url` серверного исходника не сохраняется
+в собранном helper: после переноса команды принадлежат `R/engine`.

@@ -41,6 +41,11 @@ const moduleGroups = {
  */
 function filesBelow(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && ['plans', 'local'].includes(entry.name)
+      && directory === path.join(root, 'docs')) {
+      return [];
+    }
+
     const filename = path.join(directory, entry.name);
 
     return entry.isDirectory() ? filesBelow(filename) : [filename];

@@ -5,7 +5,8 @@
 Подготовка пакета — условие выполнения зависимых проверок, а не действие теста.
 
 Имена пакетов владельца: `grigdesk-b24` — стоковый REST, `grigdesk-b24-discript` — кастомный портал.
-В `driver.json` и `package.json` stock указана версия `0.1.1`, discript — `0.1.0`.
+Версию и форму подключения задаёт подготовленный пакет: прежний discript использует
+сессию портала, пакет с `createDiscriptTracker` — HTTPS API и токен CRM.
 
 `tests/server/helpers/trackerPackage.js` использует `GRIGDESK_CUSTOM_DRIVER_DIR`.
 Без переменной он ожидает `grigdesk-desk-drivers/grigdesk-b24-discript` рядом с checkout GrigDesk.
@@ -39,3 +40,9 @@ bash "$task_test_wrapper" "$task_number" \
 `grigdesk-desk-drivers/grigdesk-b24`. Фикстуры явно копируют stock в свой `driversDir`;
 наличие stock в каждом каталоге ядро больше не гарантирует. Собственные тесты stock
 импортируют его точку входа и работают без runtime-импортов ядра.
+
+`tracker-custom-protocol` выбирает протокол по экспортам настоящего подготовленного пакета.
+Сессионный `B24Client` сохраняет проверку CSRF/upload и прежних виджетов; API-пакет проходит
+настоящий HTTP через transport seam, проверяя Bearer, запрет redirect и optimistic version
+в transition. Его пустые widgets не заменяются прежними диаграммами. HTTP helper принадлежит
+`tests/tracker/helpers/httpFixture.mts`, а не удалённой папке `tests/b24`.

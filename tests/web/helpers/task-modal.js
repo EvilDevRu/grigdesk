@@ -134,7 +134,8 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `  arbitrate: (id) => globalThis.${prefix}Api.post('/api/tasks/' + id + '/analysis/arbitrate', {}),`,
         '};',
       ].join('\n'),
-      '../shared/grigdeskPersonalState.ts': 'export const grigdeskPersonalStateVersion = { value: 1 };',
+      '../shared/grigdeskPersonalState.ts':
+        'import { ref } from "vue"; export const grigdeskPersonalStateVersion = ref(1);',
       '../stores/taskFavorites.ts': (
         `export const useTaskFavoritesStore = globalThis.${prefix}FavoritesStore;`
       ),

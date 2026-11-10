@@ -98,13 +98,14 @@
 - [Клиент (web/src/shared/graphGeom.ts)](graph-client.md)
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md) — exact API, scoped storage, каталог и restart.
-- [Область настройки этапа](stage-runner-settings-scope.md) — решение задачи №100000000015: локальный выбор и оба режима живого этапа.
+- [Область настройки этапа](stage-runner-settings-scope.md) — локальный выбор и оба режима живого этапа.
 - [Предыдущая раскладка и причины разделения содержимого и решения](stage-dialog-layout.md)
 - [Текст человека в модалке: у ворот и у возврата он разный](gate-and-rewind-comments.md)
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
 
 ## Грабли
 
+- [Изолированный стенд пуст: приёмка редактора упирается в отсутствие данных](stand-empty-editor-acceptance.md)
 - [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)

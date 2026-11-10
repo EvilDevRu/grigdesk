@@ -3,7 +3,7 @@
 ```
 web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140, только 127.0.0.1)  ──▶  источники
                                      │
-   Pinia stores                      ├─ adapters/factory-state ─▶ ~/.factory/state
+   Pinia stores                      ├─ adapters/factory-state ─▶ ~/.grigdesk/factory/state
    (chat, tasks, providers,          ├─ engine/bin/factory* ────▶ engine + CLI runners
     plugins, auth, system…)          ├─ adapters/b24 ────────────▶ B24Client (портал)
                                      ├─ adapters/system ───────▶ /proc/meminfo, os.cpus
@@ -13,7 +13,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140, тольк
 `*` — встроенный путь по умолчанию; внешний engine возможен только через явный config/env.
 
 Сервер — **host-native** (см. [эксплуатационные грабли](../server/host-native-runtime.md)). Окна (браузер) ходят
-на свой origin. Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.factory/state`.
+на свой origin. Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.grigdesk/factory/state`.
 
 Речь имеет один серверный lifecycle: `server/src/app.ts` создаёт `SpeechRuntime` и инъецирует его в
 chat/media/settings. Runtime разрешает валидированный preset в полный immutable job,

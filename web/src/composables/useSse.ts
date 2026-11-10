@@ -61,6 +61,7 @@ const RELAYED_EVENTS: readonly SseEventName[] = [
   'db-sessions',
   'db-queries',
   'db-audit',
+  'trackers-changed',
 ];
 const SSE_RELAY_NAME = 'grigdesk-sse-v1';
 const defaultRelayFactory = (): RelayChannel => new BroadcastChannel(SSE_RELAY_NAME);

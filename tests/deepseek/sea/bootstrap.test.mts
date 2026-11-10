@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { buildBootstrapBinary } from '../../helpers/deepseekBootstrapBuild.mts';
+import { testDeepSeekRuntimeDependencies } from '../../helpers/deepseekBinary.mts';
+import { nodeArchive } from '../../../shared/node/seaBuild.ts';
 import { artifactsPath } from '../../../shared/runtime/dataHome.ts';
 
 const root = fileURLToPath(new URL('../../..', import.meta.url));
@@ -30,6 +32,7 @@ test('SEA из пути с пробелами запускает ESM worker и �
   const copiedDirectory = path.join(temporary, 'путь с пробелами');
   const cache = path.join(temporary, 'cache с пробелами');
   const pin = JSON.parse(await readFile(path.join(root, 'deepseek/build/node-runtime.json'), 'utf8'));
+  const dependencies = await testDeepSeekRuntimeDependencies();
 
   await mkdir(payload);
   await mkdir(copiedDirectory);
@@ -65,7 +68,7 @@ console.log(JSON.stringify({
     entry: 'worker.mjs',
     outputFile,
     workDirectory: path.join(temporary, 'build-cache'),
-    nodeArchive: path.join(root, 'tracker/.cache', `node-v${pin.version}-${pin.platform}.tar.xz`),
+    nodeArchive: path.join(dependencies.cacheDir, nodeArchive(pin).name),
   });
 
   const binary = path.join(copiedDirectory, 'deepseek');

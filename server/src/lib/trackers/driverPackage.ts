@@ -1,3 +1,5 @@
+import { readTrackerLogo } from './trackerLogo.ts';
+
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -72,6 +74,10 @@ export async function validateDriverPackage(
     || PLUGIN_FIELDS.some((field) => Object.hasOwn(manifest, field))
     || tree.some((entry) => entry.relative === 'plugin.json')) {
     throw installError('manifest_invalid');
+  }
+
+  if (manifest.logo !== undefined) {
+    readTrackerLogo(directory, manifest.logo);
   }
 
   const entry = await lstat(path.join(directory, 'driver.ts')).catch(() => null);

@@ -183,7 +183,7 @@ async function checkPromptFields(browser, t) {
 
     assert.ok(disclosure);
     assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
-    assert.equal(browser.document.querySelector('.ui-dialog-host__code'), null);
+    assert.equal(browser.document.querySelector('.ui-dialog-host__code') === null, true);
     await new DOMWrapper(disclosure).trigger('keydown', { key: 'Enter' });
     assert.equal(results.length, 2, 'Enter на раскрытии не подтверждает удаление');
     await new DOMWrapper(disclosure).trigger('click');

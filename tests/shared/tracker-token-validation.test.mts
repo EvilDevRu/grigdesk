@@ -29,14 +29,16 @@ test('Токен объявляется схемой, прежняя общая 
 test('Непрозрачный токен не имеет фиксированной длины или обязательного префикса', () => {
   for (const value of [
     '', 'a'.repeat(24), 'a'.repeat(32), 'ATATT' + 'a'.repeat(187),
-    'a'.repeat(5000), 'opaque._~+/-token==',
+    'a'.repeat(5000), 'opaque._~+/-token==', 'ATATTopaque==segment:fixture!',
+    'opaque!$%&()*,:;<=>?@[\\]^`{|}token', 'пароль', 'Pass!word',
   ]) {
     assert.equal(isTrackerTokenInput(value), true);
   }
 
   for (const value of [
     ' password', 'password ', 'token\n', 'token\tvalue', 'Bearer token',
-    '"token"', "'token'", 'пароль', 'Pass!word', 'https://tracker.invalid/token',
+    '"token"', "'token'", 'https://tracker.invalid/token',
+    'token\u0000value', 'token\u007fvalue', 'token\u200bvalue',
   ]) {
     assert.equal(isTrackerTokenInput(value), false);
   }

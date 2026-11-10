@@ -1,4 +1,4 @@
-type Lane = 'portal' | 'local';
+type Lane = string;
 
 interface Waiter {
   lane: Lane;
@@ -8,7 +8,7 @@ interface Waiter {
   cancel: () => void;
 }
 
-const active: Record<Lane, boolean> = { portal: false, local: false };
+const active = new Set<Lane>();
 const waiting: Waiter[] = [];
 
 /**
@@ -17,13 +17,14 @@ const waiting: Waiter[] = [];
  */
 function drain(): void {
   for (const entry of [...waiting]) {
-    if (active[entry.lane]) {
+    if (active.has(entry.lane)
+      || (entry.lane !== 'local' && [...active].filter((lane) => lane !== 'local').length >= 2)) {
       continue;
     }
 
     waiting.splice(waiting.indexOf(entry), 1);
     entry.signal?.removeEventListener('abort', entry.cancel);
-    active[entry.lane] = true;
+    active.add(entry.lane);
 
     let released = false;
 
@@ -33,7 +34,7 @@ function drain(): void {
       }
 
       released = true;
-      active[entry.lane] = false;
+      active.delete(entry.lane);
       drain();
     });
   }
@@ -49,8 +50,10 @@ export function acquireB24Capacity(route: string, signal?: AbortSignal): Promise
   }
 
   const path = route.split(/[?#]/u, 1)[0] ?? '';
-  const local = ['/api/tracker/task-favorites', '/api/tracker/task-seen', '/api/tracker/task-shelf'];
-  const lane: Lane = local.includes(path) ? 'local' : 'portal';
+  const local = /^\/api\/tracker\/(?:[^/]+\/)?task-(?:favorites|seen|shelf)$/u.test(path);
+  const driver = /^\/api\/tracker\/([^/]+)\//u.exec(path)?.[1];
+  const legacy = ['task', 'task-favorites', 'task-seen', 'task-shelf'].includes(driver ?? '');
+  const lane: Lane = local ? 'local' : legacy ? 'portal' : `portal:${driver ?? 'default'}`;
 
   return new Promise((resolve, reject) => {
     const entry: Waiter = {

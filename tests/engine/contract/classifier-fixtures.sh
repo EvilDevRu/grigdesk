@@ -62,6 +62,8 @@ done
 fixture_root="$TEST_ROOT/classifier-fixtures"
 mkdir -p "$fixture_root"
 
+# Копия хранит version/events из Git, а игнорируемые stdout/stderr создаются явно.
+# Поэтому чистый checkout проверяет те же сигнатуры, что локальная offline-фикстура.
 materialize_fixture() {
   local name=$1 source="$FACTORY_TESTS_HOME/fixtures/classifiers/$1" target="$fixture_root/$1"
   cp -a "$source" "$target"
@@ -102,6 +104,15 @@ materialize_fixture() {
         'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
         >"$target/stderr.log"
       : >"$target/stdout.log" ;;
+    deepseek-auth-no-work|deepseek-auth-after-work)
+      printf 'Authentication Fails, Your api key: synthetic-fixture-key is invalid\n' \
+        >"$target/stderr.log"
+      : >"$target/stdout.log"
+      ;;
+    deepseek-*)
+      : >"$target/stderr.log"
+      : >"$target/stdout.log"
+      ;;
     # Логи GLM-fixtures создаются здесь: *.log игнорируется git, а fixture обязана
     # воспроизводиться из чистого checkout. Текст ошибки остаётся только в stderr.
     glm-auth-after-work|glm-auth-no-work)

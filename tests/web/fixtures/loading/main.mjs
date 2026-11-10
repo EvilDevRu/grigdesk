@@ -23,9 +23,9 @@ prepareStore(store);
 
 // Уборка использует настоящий DockerPanel с его container queries и внутренними отступами.
 // Порт предоставляет только состояние демона; хост и вкладки остаются продуктовыми.
-if (mode === 'docker-usage') {
+if (mode === 'docker-usage' || mode === 'docker-containers') {
     Object.assign(store, {
-        loading: false,
+        loading: mode === 'docker-containers' ? store.loading : false,
         error: null,
         health: {
             available: true,
@@ -68,7 +68,7 @@ const loaders = {
     'settings-mcp': () => import('../../../../web/src/views/settings/ProviderMcpStatus.vue'),
     'document-file': () => import('../../../../web/src/features/documents/DocumentPanel.vue'),
     'pipeline-deferred': () => import('../../../../web/src/views/pipeline/DeferredFindings.vue'),
-    'docker-containers': () => import('../../../../web/src/views/docker/DockerContainers.vue'),
+    'docker-containers': () => import('../../../../web/src/views/docker/DockerPanel.vue'),
     'docker-usage': () => import('../../../../web/src/views/docker/DockerPanel.vue'),
 };
 const Surface = spec ? (await loaders[spec.id]()).default : null;

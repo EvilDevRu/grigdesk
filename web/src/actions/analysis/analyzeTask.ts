@@ -1,3 +1,6 @@
+import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
+import { resolveTrackerTarget } from '../../shared/trackerTarget.ts';
 import { analysisApi } from '../../shared/analysisApi.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
@@ -15,7 +18,7 @@ interface AnalysisPluginsSource {
  * собирается за неё браться, и следить за ней он всё равно будет. Настройка полки
  * это отключает, а её отказ не отменяет уже принятую очередью оценку.
  */
-async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | 'grigdesk'): Promise<void> {
+async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | TaskSourceId): Promise<void> {
   const plugins = usePluginsStore() as unknown as AnalysisPluginsSource;
 
   if (!plugins.enabled('shelf') || plugins.byId('shelf')?.values?.autoAddOnAnalysis === false) {
@@ -23,7 +26,10 @@ async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | '
   }
 
   try {
-    await useTaskShelfStore().autoAdd(id, { source: source === 'grigdesk' ? 'grigdesk' : 'tracker' });
+    const shelf = useTaskShelfStore();
+    const branch = isTaskSourceId(source) ? shelf.forSource(source) : shelf;
+
+    await branch.autoAdd(id, { source: source === 'grigdesk' ? 'grigdesk' : 'tracker' });
   } catch {
     /* запуск оценки уже принят */
   }
@@ -36,7 +42,7 @@ async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | '
  */
 export async function analyzeTask(
   id: string | number,
-  { source = 'b24' }: { source?: 'b24' | 'tracker' | 'grigdesk' } = {},
+  { source = 'b24' }: { source?: 'b24' | 'tracker' | TaskSourceId } = {},
 ): Promise<AnalysisQueueResponse> {
   const store = useAnalysisStore();
 
@@ -46,7 +52,9 @@ export async function analyzeTask(
     return { outcome: 'plugin_disabled', position: null };
   }
 
-  const result = await analysisApi.enqueue(id);
+  const target = isTaskSourceId(source) && source !== 'grigdesk'
+    ? await resolveTrackerTarget(source) : null;
+  const result = await analysisApi.enqueue(id, isTaskSourceId(source) ? source : undefined, target?.options);
 
   store.markQueued(id);
 

@@ -103,6 +103,8 @@ test('LOCAL-CARD-03: plain text сохранён, ответы уходят од
 
   const fields = wrapper.findAll('[data-role="task-clarification"]');
 
+  assert.equal(fields.length, 2, 'сохранённая оценка прочитана после подтверждения собственной задачи');
+
   for (const [index, field] of fields.entries()) {
     await field.setValue(index ? 'Назвать «Проверить»' : 'Оставить ручной');
   }

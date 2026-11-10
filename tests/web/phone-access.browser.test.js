@@ -77,17 +77,27 @@ test('PHONE-17: RU/EN, узкий touch и единственная SSE', { time
           assert.equal(sse, 1, 'Основной UI должен открыть единственный SSE до диалога');
 
           const caption = locale === 'ru' ? 'Подключить телефон' : /Connect (a |your )?phone/i;
+
+          if (width <= 600) {
+            await page.locator('.phone-nav').getByRole('button', {
+              name: locale === 'ru' ? 'Разделы' : 'Sections', exact: true,
+            }).click();
+          }
+
           const button = page.getByRole('button', { name: caption }).first();
 
           assert.equal(await button.count(), 1, 'В настоящем AppShell отсутствует действие телефона');
           await button.click();
-          await page.locator('.ui-dialog img').waitFor();
-          await scaleClientText(page, scale, '.ui-dialog');
+
+          const dialog = page.locator('[data-role="phone-connect"]');
+
+          await dialog.locator('img').waitFor();
+          await scaleClientText(page, scale, '[data-role="phone-connect"]');
           assert.equal(issued, 1);
           assert.equal(sse, 1);
-          assert.match(await page.locator('.ui-dialog').innerText(), /Выбранный сервер/);
+          assert.match(await dialog.innerText(), /Выбранный сервер/);
 
-          const geometry = await page.locator('.ui-dialog').evaluate((dialog) => {
+          const geometry = await dialog.evaluate((dialog) => {
             const rect = dialog.getBoundingClientRect();
             const buttons = [...dialog.querySelectorAll('button')].filter((element) =>
               element.getBoundingClientRect().height > 0);
@@ -109,7 +119,7 @@ test('PHONE-17: RU/EN, узкий touch и единственная SSE', { time
             path: path.join(artifacts, `${locale}-${width}-${scale}.png`),
           });
           await page.keyboard.press('Escape');
-          await page.locator('.ui-dialog').waitFor({ state: 'detached' });
+          await dialog.waitFor({ state: 'detached' });
           assert.equal(sse, 1);
           assert.equal(await page.locator('textarea').filter({ hasText: 'GRIGDESK:PHONE:2:' }).count(), 0);
           assert.equal(await button.evaluate((element) => document.activeElement === element), true);

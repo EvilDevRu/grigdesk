@@ -32,7 +32,7 @@ async function fixture(reply) {
     },
   };
 
-  const { useTasksStore } = await loadMigrationModule('src/stores/tasks.js', 'src/stores/tasks.ts');
+  const { useTasksStore } = await loadMigrationModule('src/stores/tasks.ts', 'src/stores/tasks.ts');
 
   return { store: useTasksStore(), calls };
 }
@@ -168,7 +168,7 @@ test('LOCAL-SOURCE: кеш различает own и внешний source с о
     },
   };
 
-  const { useTasksStore } = await loadMigrationModule('src/stores/tasks.js', 'src/stores/tasks.ts', {
+  const { useTasksStore } = await loadMigrationModule('src/stores/tasks.ts', 'src/stores/tasks.ts', {
     './board.ts': 'export const useBoardStore = () => globalThis.__sourceBoard;',
     './trackers.ts': 'export const useTrackersStore = () => ({ mutationOptions: () => ({}) });',
   });

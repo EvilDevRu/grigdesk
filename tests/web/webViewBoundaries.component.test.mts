@@ -187,7 +187,7 @@ test('NET-pipeline', async (t) => {
     async get(url: string) {
       calls.push(url);
 
-      if (url === '/api/tasks') {
+      if (url === '/api/tasks?sources=1') {
         return { tasks: initial ? [] : [{ task: '42', title: 'Задача' }] };
       }
 
@@ -220,6 +220,16 @@ for (const scenario of ['comments', 'lists', 'attachment']) {
     const calls: string[] = [];
 
     viewHarness.stores = {
+      useTrackersStore: {
+        capabilities: {
+          comments: true,
+          tags: true,
+          users: true,
+          projects: true,
+        },
+        epoch: 0,
+        load: async () => {},
+      },
       useUiStore: ui,
       useTasksStore: { load: async () => ({ id: '42', title: 'Задача' }) },
       useBoardStore: { data: { tasks: [] } },
@@ -286,12 +296,14 @@ for (const scenario of ['comments', 'lists', 'attachment']) {
       return;
     }
 
+    const initialReads = calls.filter((url) => url.endsWith('/comments')).length;
+
     await state.loadComments();
     assert.deepEqual(state.comments, []);
     reply = { comments: 'bad' };
     await state.loadComments();
     assert.deepEqual(state.comments, [], 'неверный список комментариев не попадает в UI');
-    assert.equal(calls.filter((url) => url.endsWith('/comments')).length, 2);
+    assert.equal(calls.filter((url) => url.endsWith('/comments')).length - initialReads, 2);
   });
 }
 

@@ -142,6 +142,7 @@ test('SB-HOOK: команды profiles из payload выполняют собр�
     };
     const glm = {
       ...common,
+      transport: 'acp',
       launchDir: path.join(base, 'glm'),
       projectRoot: project,
       accessMode: 'api',

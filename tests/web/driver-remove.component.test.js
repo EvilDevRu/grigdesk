@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { migrationHarness, webFile } from './helpers/compile-vue.js';
+import { ApiError } from '../../web/src/shared/apiClient.ts';
+import { webFile } from './helpers/compile-vue.js';
 import {
   actionButton, liveTrackerDialog, mountTrackerBoard, openTrackerManager, prepareTracker, trackerCatalog,
 } from './helpers/trackerBoard.js';
@@ -113,7 +114,7 @@ test('DRIVER-REMOVE-UI-03: отказ 409 сохраняет пакет, выб�
   const card = await removalCard(t, {
     post: async (url) => {
       if (url.endsWith('/remove')) {
-        throw new migrationHarness.ApiError('Драйвер занят установкой', 409, { error: 'install_busy' });
+        throw new ApiError('Драйвер занят установкой', 409, { error: 'install_busy' });
       }
     },
   });
@@ -125,7 +126,12 @@ test('DRIVER-REMOVE-UI-03: отказ 409 сохраняет пакет, выб�
   assert.match(card.dialog.text(), /Драйвер занят установкой/u);
   assert.equal(card.state.catalog.externalId, 'grigdesk-b24-discript');
   assert.equal(card.dialog.text().includes('Удалён, перезапустите сервер'), false);
-  assert.equal(actionButton(card.packageCard, /^\s*Удалить\s*$/u).element.disabled, false);
+
+  const current = card.dialog.findAll('.driver-package')
+    .find((entry) => entry.text().includes('Кастомный Б24'));
+
+  assert.ok(current);
+  assert.equal(actionButton(current, /^\s*Удалить\s*$/u).element.disabled, false);
 });
 
 test('DRIVER-REMOVE-UI-04: SSE показывает удаление managed-пакета при отказе повторного check', async (t) => {

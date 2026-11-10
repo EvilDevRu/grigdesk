@@ -22,6 +22,7 @@
           </template>
           <template #meta>
             <span class="mid mono">#{{ taskId }}</span>
+            <TaskSourceChip v-if="taskSource || ownTask" :source="ownTask ? 'grigdesk' : taskSource" />
           </template>
           <template #actions>
             <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
@@ -103,7 +104,7 @@
             <span class="context-label">{{ t('core.taskAuditors') }}</span>{{ taskAuditors }}
           </span>
           <UiButton v-if="taskParentId" size="compact" data-role="task-parent"
-                    @click="ui.openTask(taskParentId)">
+                    @click="ui.openTask(taskParentId, taskSource)">
             {{ t('core.taskParent', { id: taskParentId }) }}
           </UiButton>
           <span v-if="!hasTaskMeta" class="context-empty">
@@ -1300,6 +1301,9 @@
 </template>
 
 <script setup lang="ts">
+import TaskSourceChip from '../shared/TaskSourceChip.vue';
+import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
+import { trackerCapabilities } from '../shared/trackerCapabilities.ts';
 import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
 import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import TaskLoading from './TaskLoading.vue';
@@ -1392,15 +1396,26 @@ const router = useRouter();
 const ui = useUiStore();
 const tasks = useTasksStore();
 const trackers = useTrackersStore();
-const trackerCaps = computed(() => trackers.capabilities);
+const trackerCaps = computed(() => {
+  if (!taskSource.value || !trackers.catalog?.enabledIds) {
+    return trackers.capabilities;
+  }
+
+  const driver = trackers.catalog.drivers.find((entry) => entry.id === taskSource.value?.split('@')[0]);
+
+  return trackerCapabilities(driver?.status === 'active' ? driver.capabilities : undefined);
+});
 const board = useBoardStore();
 const trackerFavorites = useTaskFavoritesStore();
-const favorites = computed(() => ownTask.value ? trackerFavorites.own : trackerFavorites);
+const favorites = computed(() => trackerFavorites.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
+  ?? (ownTask.value ? trackerFavorites.own : trackerFavorites));
 const trackerShelf = useTaskShelfStore();
-const shelf = computed(() => ownTask.value ? trackerShelf.own : trackerShelf);
+const shelf = computed(() => trackerShelf.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
+  ?? (ownTask.value ? trackerShelf.own : trackerShelf));
 const plugins = usePluginsStore();
 const trackerSeen = useTaskSeenStore();
-const seen = computed(() => ownTask.value ? trackerSeen.own : trackerSeen);
+const seen = computed(() => trackerSeen.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
+  ?? (ownTask.value ? trackerSeen.own : trackerSeen));
 const { taskId } = storeToRefs(ui);
 const taskSource = computed(() => ui.taskSource);
 
@@ -1414,10 +1429,6 @@ const currentTaskKey = computed(() => taskReferenceKey({
 // Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
 // Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
 const isB24Task = computed(() => {
-  if (taskSource.value && taskSource.value !== 'grigdesk' && taskSource.value !== board.data?.source) {
-    return false;
-  }
-
   return detail.value !== null ? !ownTask.value
     : taskSource.value ? taskSource.value !== 'grigdesk'
       : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value));
@@ -1427,7 +1438,8 @@ const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
 const canUsePersonal = computed(() => isB24Task.value
   || (ownTask.value && grigdeskPersonalStateVersion.value === 1));
-const canAnalyzeTask = computed(() => isB24Task.value || (ownTask.value && !loading.value));
+const canAnalyzeTask = computed(() => (!taskSource.value || taskSource.value === board.data?.source)
+  && isB24Task.value || (ownTask.value && !loading.value));
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
 const commentText = ref('');
@@ -1446,7 +1458,8 @@ const boardTask = computed(() => {
   const id = Number(taskId.value!);
 
   for (const list of [d.tasks, d.toReview, d.created, d.accomplice, d.auditor]) {
-    const t = (list || []).find((x) => x.id === id);
+    const t = (list || []).find((x) => Number(x.id) === id
+      && (!taskSource.value || x.source === taskSource.value));
 
     if (t) {
       return t;
@@ -1620,13 +1633,14 @@ async function mutateChecklist(
   }
 
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const epoch = trackers.epoch;
 
   checklistSavedTitle.value = '';
   await act(`checklist-${itemId}`, async () => {
     const updated = await mutation(id);
 
-    if (taskId.value === id && trackers.epoch === epoch) {
+    if (currentTaskKey.value === reference && trackers.epoch === epoch) {
       detail.value = updated;
       success?.();
     }
@@ -1670,7 +1684,7 @@ function toggleChecklistItem(item: ChecklistRow, event: Event) {
 
   return mutateChecklist(item.id, (id) => tasks.updateChecklistItem(id, item.id, {
     complete: !item.complete,
-  }));
+  }, taskSource.value));
 }
 
 /**
@@ -1687,7 +1701,7 @@ function addChecklistItem(parentId: string) {
   return mutateChecklist(parentId, (id) => tasks.addChecklistItem(id, {
     title,
     parentId,
-  }), () => {
+  }, taskSource.value), () => {
     checklistDrafts.value[parentId] = '';
     checklistAdding.value = null;
     checklistSavedTitle.value = title;
@@ -1712,7 +1726,7 @@ function createChecklistList() {
     return;
   }
 
-  return mutateChecklist('new-list', (id) => tasks.addChecklistItem(id, { title }), () => {
+  return mutateChecklist('new-list', (id) => tasks.addChecklistItem(id, { title }, taskSource.value), () => {
     checklistCreating.value = false;
     checklistListTitle.value = '';
   });
@@ -1730,7 +1744,9 @@ function renameChecklistItem() {
     return;
   }
 
-  return mutateChecklist(itemId, (id) => tasks.updateChecklistItem(id, itemId, { title }), () => {
+  return mutateChecklist(itemId, (id) => tasks.updateChecklistItem(
+    id, itemId, { title }, taskSource.value,
+  ), () => {
     checklistEditing.value = null;
   });
 }
@@ -1741,6 +1757,7 @@ function renameChecklistItem() {
  */
 async function deleteChecklistItem(item: ChecklistRow) {
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const epoch = trackers.epoch;
   const confirmation = item.depth === 0
     ? 'core.taskChecklistListDeleteConfirmation' : 'core.taskChecklistDeleteConfirmation';
@@ -1749,11 +1766,11 @@ async function deleteChecklistItem(item: ChecklistRow) {
     okText: t(item.depth === 0 ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete'),
   });
 
-  if (!confirmed || taskId.value !== id || trackers.epoch !== epoch) {
+  if (!confirmed || currentTaskKey.value !== reference || trackers.epoch !== epoch) {
     return;
   }
 
-  await mutateChecklist(item.id, (task) => tasks.deleteChecklistItem(task, item.id));
+  await mutateChecklist(item.id, (task) => tasks.deleteChecklistItem(task, item.id, taskSource.value));
 }
 
 /**
@@ -1766,13 +1783,14 @@ async function updateTags(tags: string[]) {
   }
 
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const epoch = trackers.epoch;
   let updated = false;
 
   await act('tags', async () => {
-    const page = await tasks.updateTaskTags(id, tags);
+    const page = await tasks.updateTaskTags(id, tags, taskSource.value);
 
-    if (taskId.value === id && trackers.epoch === epoch) {
+    if (currentTaskKey.value === reference && trackers.epoch === epoch) {
       taskTags.value = decodeTaskTags(page);
       taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
       comments.value = decodeTaskComments(page);
@@ -1792,6 +1810,7 @@ async function updateTags(tags: string[]) {
 async function addTag() {
   const tag = tagDraft.value.trim();
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const epoch = trackers.epoch;
 
   if (!tag || taskTags.value.includes(tag) || taskTags.value.length >= 50) {
@@ -1801,7 +1820,7 @@ async function addTag() {
   if (await updateTags([...taskTags.value, tag])) {
     await nextTick();
 
-    if (taskId.value === id && trackers.epoch === epoch) {
+    if (currentTaskKey.value === reference && trackers.epoch === epoch) {
       taskTagInput.value?.focus();
     }
   }
@@ -1817,12 +1836,14 @@ async function reviewTask(approve: boolean) {
   }
 
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const epoch = trackers.epoch;
 
   await act(approve ? 'approve' : 'disapprove', async () => {
-    const updated = approve ? await tasks.approveTask(id) : await tasks.disapproveTask(id);
+    const updated = approve ? await tasks.approveTask(id, taskSource.value)
+      : await tasks.disapproveTask(id, taskSource.value);
 
-    if (taskId.value === id && trackers.epoch === epoch) {
+    if (currentTaskKey.value === reference && trackers.epoch === epoch) {
       detail.value = updated;
       await loadComments(true);
     }
@@ -2031,9 +2052,10 @@ async function loadEditOptions() {
   editOptionsBusy.value = true;
   editOptionsError.value = null;
 
+  const target = await resolveTrackerTarget(taskSource.value, api);
   const [users, groups] = await Promise.allSettled([
-    api.get('/api/tracker/users'),
-    api.get('/api/tracker/groups'),
+    api.get(`${target.prefix}/users`, target.options),
+    api.get(`${target.prefix}/groups`, target.options),
   ]);
 
   if (requestId !== editOptionsRequest || !editForm.value) {
@@ -2107,7 +2129,7 @@ async function saveTaskEdit() {
   const fields = taskEditPayload();
 
   await act('edit', async () => {
-    const updated = await tasks.update(id, fields);
+    const updated = await tasks.update(id, fields, taskSource.value);
 
     if (String(taskId.value) !== id) {
       return;
@@ -2205,6 +2227,7 @@ async function loadDetail(force = false) {
   }
 
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const request = ++detailRequest;
 
   detailAbort?.abort();
@@ -2215,7 +2238,7 @@ async function loadDetail(force = false) {
   try {
     const loaded = await tasks.load(id, force, detailAbort.signal, taskSource.value);
 
-    if (request !== detailRequest || taskId.value !== id) {
+    if (request !== detailRequest || currentTaskKey.value !== reference) {
       return;
     }
 
@@ -2224,12 +2247,18 @@ async function loadDetail(force = false) {
 
     loadPersonalState();
   } catch (e) {
-    if (request === detailRequest && taskId.value === id) {
+    if (request === detailRequest && currentTaskKey.value === reference) {
       err.value = failureText(e);
     }
   } finally {
     if (request === detailRequest) {
       loading.value = false;
+
+      // Источник собственной задачи подтверждается только ответом details.
+      // Первый параллельный loadTriage ещё закрыт loading и не прочитает оценку.
+      if (ownTask.value) {
+        void loadTriage();
+      }
     }
   }
 }
@@ -2469,7 +2498,7 @@ function setComposerOpen(questionId: string, open: boolean) {
  * Ошибка этого блока не закрывает карточку и не создаёт второй таймер опроса.
  */
 async function loadTriage() {
-  if (!taskId.value || !analysisEnabled.value) {
+  if (!taskId.value || !analysisEnabled.value || !canAnalyzeTask.value) {
     return;
   }
 
@@ -2491,7 +2520,7 @@ const analyzeNow = () => act('analyze', async () => {
     return;
   }
 
-  await analyzeTask(taskId.value!, ownTask.value ? { source: 'grigdesk' } : undefined);
+  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
   await loadTriage();
 });
 
@@ -2603,7 +2632,7 @@ const sendClarify = () => act('clarify', async () => {
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analyzeTask(taskId.value!, ownTask.value ? { source: 'grigdesk' } : undefined);
+  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
   await loadTriage();
 });
 
@@ -2692,6 +2721,7 @@ async function loadComments(force = false) {
   }
 
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const request = ++commentsRequest;
 
   commentsAbort?.abort();
@@ -2699,19 +2729,21 @@ async function loadComments(force = false) {
   comLoading.value = true;
 
   try {
-    const page = await api.get(`/api/tracker/task/${id}/comments`, {
+    const target = await resolveTrackerTarget(taskSource.value, api);
+    const page = await api.get(`${target.prefix}/task/${id}/comments`, {
+      ...target.options,
       signal: commentsAbort.signal,
     });
     const result = decodeTaskComments(page);
 
-    if (taskId.value === id && request === commentsRequest && isB24Task.value) {
+    if (currentTaskKey.value === reference && request === commentsRequest && isB24Task.value) {
       comments.value = result;
       taskTags.value = decodeTaskTags(page);
       taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
       taskSubtasks.value = decodeTaskSubtasks(page);
     }
   } catch (error) {
-    if (taskId.value === id && request === commentsRequest) {
+    if (currentTaskKey.value === reference && request === commentsRequest) {
       if (trackerCaps.value.tags) {
         err.value = failureText(error);
       }
@@ -2722,7 +2754,7 @@ async function loadComments(force = false) {
       taskSubtasks.value = [];
     }
   } finally {
-    if (taskId.value === id && request === commentsRequest) {
+    if (currentTaskKey.value === reference && request === commentsRequest) {
       comLoading.value = false;
     }
   }
@@ -2864,7 +2896,9 @@ async function act(name: string, fn: () => Promise<unknown>) {
   }
 }
 
-const toggleTimer = () => act('timer', () => tasks.timer(taskId.value!, running.value ? 'pause' : 'start'));
+const toggleTimer = () => act('timer', () => tasks.timer(
+  taskId.value!, running.value ? 'pause' : 'start', taskSource.value,
+));
 
 /**
  * Подтверждение относится к исходной задаче и поколению подключения.
@@ -2873,14 +2907,16 @@ const toggleTimer = () => act('timer', () => tasks.timer(taskId.value!, running.
 const complete = async () => {
   const epoch = trackers.epoch;
   const id = taskId.value;
+  const source = taskSource.value;
+  const reference = currentTaskKey.value;
 
   if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) {
-    if (epoch !== trackers.epoch || taskId.value !== id) {
+    if (epoch !== trackers.epoch || currentTaskKey.value !== reference) {
       return;
     }
 
     act('complete', async () => {
-      await tasks.complete(id!);
+      await tasks.complete(id!, source);
       ui.close();
     });
   }
@@ -2897,19 +2933,21 @@ async function deleteTask() {
 
   const epoch = trackers.epoch;
   const id = taskId.value;
+  const source = taskSource.value;
+  const reference = currentTaskKey.value;
   const confirmed = await confirmDialog(t('core.taskDeleteConfirmation'), {
     danger: true,
     okText: t('core.taskDelete'),
   });
 
-  if (!confirmed || epoch !== trackers.epoch || taskId.value !== id || busy.value) {
+  if (!confirmed || epoch !== trackers.epoch || currentTaskKey.value !== reference || busy.value) {
     return;
   }
 
   await act('delete', async () => {
-    await tasks.deleteTask(id!);
+    await tasks.deleteTask(id!, source);
 
-    if (epoch === trackers.epoch && taskId.value === id) {
+    if (epoch === trackers.epoch && currentTaskKey.value === reference) {
       ui.close();
     }
   });
@@ -2920,17 +2958,19 @@ async function deleteTask() {
 async function renew() {
   const epoch = trackers.epoch;
   const id = taskId.value;
+  const source = taskSource.value;
+  const reference = currentTaskKey.value;
 
   if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
     return;
   }
 
-  if (epoch !== trackers.epoch || taskId.value !== id) {
+  if (epoch !== trackers.epoch || currentTaskKey.value !== reference) {
     return;
   }
 
   await act('renew', async () => {
-    await tasks.renew(id!);
+    await tasks.renew(id!, source);
     await loadDetail(true);
   });
 }
@@ -2994,6 +3034,7 @@ async function refreshLaunchOptions() {
 
   const requestId = ++launchOptionsRequest;
   const id = taskId.value;
+  const reference = currentTaskKey.value;
   const profile = launchForm.value?.profile || (ownTask.value ? detail.value?.projectId : undefined);
 
   launchOptionsBusy.value = true;
@@ -3042,6 +3083,24 @@ async function refreshLaunchOptions() {
 
 const stopLaunchEvents = sseSubscribe((name, payload) => {
   if (name === 'trackers-changed') {
+    if (taskSource.value && trackers.catalog?.enabledIds) {
+      const id = taskSource.value.split('@')[0];
+      const previous = trackers.catalog.drivers.find((entry) => entry.id === id);
+
+      void trackers.load(true).then(() => {
+        const next = trackers.catalog?.drivers.find((entry) => entry.id === id);
+
+        if (previous?.dataRevision !== next?.dataRevision || previous?.generation !== next?.generation) {
+          detailAbort?.abort();
+          commentsAbort?.abort();
+          detail.value = null;
+          void loadDetail(true);
+        }
+      });
+
+      return;
+    }
+
     detailRequest += 1;
     commentsRequest += 1;
     detailAbort?.abort();
@@ -3438,16 +3497,21 @@ const launchSelected = () => {
   return doLaunch(launchPayload());
 };
 const sendComment = () => act('comment', async () => {
-  await tasks.comment(taskId.value!, commentText.value);
+  await tasks.comment(taskId.value!, commentText.value, taskSource.value);
   commentText.value = '';
   loadComments(true);
 });
+/**
+ * Принудительное чтение сохраняет выбранную пару карточки.
+ * Обсуждение не переходит к другому источнику после ожидания деталей.
+ */
 const refresh = async () => {
   const id = taskId.value;
+  const reference = currentTaskKey.value;
 
   await loadDetail(true);
 
-  if (taskId.value === id && isB24Task.value) {
+  if (currentTaskKey.value === reference && isB24Task.value) {
     board.load(true);
     void loadComments(true);
   }

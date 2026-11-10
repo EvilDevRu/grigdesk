@@ -20,6 +20,27 @@ import { normalizeStageModes } from '../server/scripts/sea/stage.mts';
 
 const execute = promisify(execFile);
 
+/**
+ * Подпись installer связывает точные байты ELF с уже проверенным конвертом выпуска.
+ * Тот же verifier используется перед публикацией и перед запуском приватной копии.
+ */
+export async function verifyReleaseInstaller(
+  binary: string,
+  envelope: ReleaseEnvelope,
+  proof: string,
+  signature: string,
+  publicKey: string = RELEASE_SIGNING_PUBLIC_KEY,
+): Promise<void> {
+  const digest = verifyReleaseEnvelope(envelope, publicKey);
+  const installer = await sha256File(binary);
+  const expected = `GrigDesk installer v1\n${installer}  grigdesk-install\n${digest}\n`;
+
+  if (proof !== expected || !verify(null, Buffer.from(proof), createPublicKey(publicKey),
+    Buffer.from(signature.trim(), 'base64'))) {
+    throw new Error('release_installer_signature_invalid');
+  }
+}
+
 interface InstalledSiteTarget {
   host: string;
   user: string;
@@ -166,16 +187,14 @@ export async function publishInstalledRelease(
 
   const publicKey = process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE
     ? await fs.readFile(process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE, 'utf8') : RELEASE_SIGNING_PUBLIC_KEY;
-  const digest = verifyReleaseEnvelope(index.latest, publicKey);
-  const installer = await sha256File(path.join(directory, 'grigdesk-install'));
+
+  verifyReleaseEnvelope(index.latest, publicKey);
+
   const proof = await fs.readFile(path.join(directory, 'grigdesk-install.sha256'), 'utf8');
   const signature = await fs.readFile(path.join(directory, 'grigdesk-install.sig'), 'utf8');
-  const expected = `GrigDesk installer v1\n${installer}  grigdesk-install\n${digest}\n`;
 
-  if (proof !== expected || !verify(null, Buffer.from(proof), createPublicKey(publicKey),
-    Buffer.from(signature.trim(), 'base64'))) {
-    throw new Error('release_installer_signature_invalid');
-  }
+  await verifyReleaseInstaller(path.join(directory, 'grigdesk-install'), index.latest,
+    proof, signature, publicKey);
 
   for (const component of ['desktop', 'server'] as const) {
     const artifact = index.latest.payload.artifacts[component];

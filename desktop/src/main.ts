@@ -311,6 +311,7 @@ const desktopExit = createDesktopExitController({
   revealed: () => revealed(),
   quitting: () => quit.stopping,
   preference: () => desktopExitPreference(),
+  applyUpdate: () => tryApplyUpdateOnQuit(),
   log: writeLog,
   exit: () => {
     exiting = true;
@@ -920,7 +921,7 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   });
   window.on('closed', () => {
     mainWindow = null;
-    void quit.request({ reason: 'main-closed', exitCode: 0 });
+    void quitOrApply('main-closed');
   });
   window.webContents.on('did-navigate', (_event, url, httpResponseCode) => {
     if (sameOrigin(url, pipeOrigins)) {
@@ -1679,6 +1680,36 @@ const quit = createQuitController({
 });
 
 /**
+ * Перед обычной остановкой отдаёт готовое задание строгому updater выбранного профиля.
+ * Начавшийся обычный stop запрещает поздний apply: его SIGKILL не доказывает update-drain.
+ */
+function tryApplyUpdateOnQuit(): Promise<boolean> | null {
+  if (exiting || quit.stopping || supervisor.stopping || !applicationUpdates?.canApplyReadyOnQuit()) {
+    return null;
+  }
+
+  return applicationUpdates.applyReadyOnQuit()
+    .then((outcome) => outcome === 'applied', () => false);
+}
+
+/**
+ * Закрытие окна с готовым обновлением считается подтверждением применения:
+ * строгий путь обновления сам завершает процесс, и обычный quit не запускается.
+ * Сигналы завершения идут мимо применения, чтобы обрыв не длился на весь слив.
+ */
+async function quitOrApply(reason: 'user' | 'main-closed'): Promise<void> {
+  if (exiting || quit.stopping) {
+    return;
+  }
+
+  if (await tryApplyUpdateOnQuit()) {
+    return;
+  }
+
+  void quit.request({ reason, exitCode: 0 });
+}
+
+/**
  * Связка ключей проверяется до заставки: её запрос пароля появится раньше окна.
  * Отказ проверки — тот же выход с диалогом и кодом 1.
  */
@@ -1729,16 +1760,10 @@ if (process.argv.includes('--grigdesk-release-probe')) {
     }
 
     event.preventDefault();
-    void quit.request({
-      reason: 'user',
-      exitCode: 0,
-    });
+    void quitOrApply('user');
   });
   app.on('window-all-closed', () => {
-    void quit.request({
-      reason: 'user',
-      exitCode: 0,
-    });
+    void quitOrApply('user');
   });
   process.on('SIGTERM', () => {
     desktopExit.bypass();

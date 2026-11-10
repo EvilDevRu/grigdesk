@@ -51,6 +51,7 @@ export async function desktopExitApp(t, options = {}) {
     stopRecovery() {},
   });
   const other = {
+    external: [],
     load: async () => {},
     startPolling() {},
     stopPolling() {},
@@ -59,7 +60,11 @@ export async function desktopExitApp(t, options = {}) {
     clear() {},
     stopPoll() {},
     setPassive() {},
+    clearSource() {},
   };
+
+  other.$onAction = () => () => {};
+  other.own = { ...other };
 
   globalThis.__desktopExitApp = { auth, other };
 
@@ -117,6 +122,8 @@ export async function desktopExitApp(t, options = {}) {
     '../router.ts': 'export const router = { push: async () => {} };',
   };
 
+  delete stubs['./shared/layout/DesktopExitHost.vue'];
+
   for (const [name, exported] of [
     ['board', 'useBoardStore'], ['system', 'useSystemStore'], ['taskFavorites', 'useTaskFavoritesStore'],
     ['taskShelf', 'useTaskShelfStore'],
@@ -153,10 +160,14 @@ export async function desktopExitApp(t, options = {}) {
     status: 'online',
     detail: null,
     capabilities: [],
+    localAvailable: true,
     desktopExit: { skipConfirmation: false },
   };
 
-  shell.apply(options.shellSnapshot === undefined ? snapshot : options.shellSnapshot);
+  const appliedSnapshot = typeof options.shellSnapshot === 'function'
+    ? options.shellSnapshot(snapshot) : options.shellSnapshot;
+
+  shell.apply(appliedSnapshot === undefined ? snapshot : appliedSnapshot);
   shell.initialized = true;
   shell.start = async () => {};
   module.setUiLocale(options.locale ?? 'ru');

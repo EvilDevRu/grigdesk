@@ -18,10 +18,10 @@
         <div class="media-viewer__actions">
           <UiIconButton
             v-if="preview.image"
-            :label="actualSize ? t('core.mediaFitToScreen') : t('core.mediaActualSize')"
-            v-tooltip="actualSize ? t('core.mediaFitToScreen') : t('core.mediaActualSize')"
-            :pressed="actualSize"
-            @click="actualSize = !actualSize"
+            :label="enlarged ? t('core.mediaFitToScreen') : t('core.mediaActualSize')"
+            v-tooltip="enlarged ? t('core.mediaFitToScreen') : t('core.mediaActualSize')"
+            :pressed="enlarged"
+            @click="zoom.toggle()"
           ><span class="media-viewer__scale" aria-hidden="true">1:1</span></UiIconButton>
           <UiActionLink
             :href="media.src"
@@ -53,19 +53,36 @@
         </div>
       </header>
 
-      <!-- Пустое место вокруг картинки пропускает клик к затемнению: его закрывает UiDialog. -->
-      <div class="media-viewer__stage" :data-actual="actualSize ? 'true' : 'false'">
+      <!-- Жесты принадлежат только сцене: панели остаются на месте при любом увеличении. -->
+      <div
+        ref="stage"
+        class="media-viewer__stage"
+        :data-image="Boolean(preview.image)"
+        :data-zoomed="enlarged"
+        @pointerdown="zoom.pointerDown"
+        @pointermove="zoom.pointerMove"
+        @pointerup="zoom.pointerEnd"
+        @pointercancel="zoom.pointerEnd"
+        @lostpointercapture="zoom.pointerEnd"
+        @dblclick.prevent="zoom.doubleClick"
+        @wheel="zoom.wheel"
+        @click="onStageClick"
+      >
         <img
           v-if="preview.image"
           :key="preview.image.src"
+          ref="image"
           :src="preview.image.src"
           :alt="preview.image.name"
+          :style="zoom.style.value"
+          draggable="false"
           @load="onImageLoad"
         />
         <UiVideo
           v-else-if="preview.video"
           :key="preview.video.src"
           class="media-viewer__video"
+          data-context="media-viewer"
           :src="preview.video.src"
           :label="preview.video.name"
           autoplay
@@ -102,9 +119,13 @@ import { computed, ref, watch } from 'vue';
 
 import { UiActionLink, UiDialog, UiIconButton, UiVideo, t, vTooltip } from '../ui.ts';
 import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
+import { useMediaImageZoom } from './mediaImageZoom.ts';
 
 const preview = useDocumentPreviewStore();
-const actualSize = ref(false);
+const stage = ref<HTMLElement | null>(null);
+const image = ref<HTMLImageElement | null>(null);
+const zoom = useMediaImageZoom(stage, image);
+const { enlarged } = zoom;
 const natural = ref<{ width: number; height: number } | null>(null);
 
 const media = computed(() => preview.image || preview.video);
@@ -142,6 +163,12 @@ function onOpenChange(open: boolean): void {
   }
 }
 
+function onStageClick(event: MouseEvent): void {
+  if (zoom.canClose(event)) {
+    preview.close();
+  }
+}
+
 /**
  * Стрелки клавиатуры листают картинки ленты, как кнопки по краям.
  * Видео стрелки не перехватывает: ими управляет его собственная шкала.
@@ -157,7 +184,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 // Новая картинка открывается вписанной в экран; её размеры читаются заново после загрузки.
 watch(() => media.value?.src, () => {
-  actualSize.value = false;
+  zoom.reset();
   natural.value = null;
 });
 </script>
@@ -177,10 +204,6 @@ watch(() => media.value?.src, () => {
 .media-viewer__video,
 .media-viewer__nav,
 .media-viewer__count {
-  pointer-events: auto;
-}
-
-.media-viewer__stage[data-actual='true'] {
   pointer-events: auto;
 }
 
@@ -244,32 +267,35 @@ watch(() => media.value?.src, () => {
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   min-height: 0;
+  overflow: hidden;
 }
 
-.media-viewer__stage img,
-.media-viewer__video {
+.media-viewer__stage[data-image='true'] {
+  pointer-events: auto;
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+}
+
+.media-viewer__stage[data-zoomed='true'] {
+  cursor: grab;
+}
+
+.media-viewer__stage[data-zoomed='true']:active {
+  cursor: grabbing;
+}
+
+.media-viewer__stage img {
   display: block;
   max-width: 100%;
   max-height: 100%;
   border-radius: 6px;
   box-shadow: 0 30px 90px rgb(0 0 0 / 80%);
+  transform-origin: center;
 }
 
 .media-viewer__stage img {
   object-fit: contain;
-}
-
-.media-viewer__stage[data-actual='true'] {
-  inset: 64px 0 0;
-  place-items: start center;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.media-viewer__stage[data-actual='true'] img {
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
 }
 
 .media-viewer__nav {
@@ -310,8 +336,7 @@ watch(() => media.value?.src, () => {
     inset: 56px 0 72px;
   }
 
-  .media-viewer__stage img,
-  .media-viewer__video {
+  .media-viewer__stage img {
     border-radius: 0;
   }
 

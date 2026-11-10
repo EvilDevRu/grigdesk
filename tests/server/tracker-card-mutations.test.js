@@ -50,8 +50,16 @@ async function fixture(t, override = {}) {
     ...override,
   };
   const tracker = new TrackerFacade({
-    selection: { read: () => ({ externalId: 'fixture', revision: 7 }) },
-    registry: { call: async (_id, operation) => operation(driver) },
+    selection: { read: () => ({
+      drivers: ['fixture'],
+      default: 'fixture',
+      externalId: 'fixture',
+      revision: 7,
+    }) },
+    registry: {
+      context: () => ({ generation: 7, dataRevision: 0 }),
+      call: async (_id, operation) => operation(driver),
+    },
   });
   const app = require('fastify')({ logger: false });
 

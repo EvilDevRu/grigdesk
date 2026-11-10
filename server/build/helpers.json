@@ -148,6 +148,13 @@
       "description": "Worker приёма медиа: статус и результат задания."
     },
     {
+      "id": "code-branch-worker",
+      "entry": "server/src/lib/codeBranchWorker.mts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Переключение основной ветки и запуск стенда по явным командам проекта."
+    },
+    {
       "id": "showcase-worker",
       "entry": "server/scripts/showcaseWorker.mts",
       "entryKind": "script",

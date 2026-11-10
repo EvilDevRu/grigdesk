@@ -35,8 +35,10 @@ if (factoryRuntime.ignored.length > 0) {
 const chatsDir = process.env.GRIGDESK_CHATS_DIR || dataPath(dataHome, 'chats');
 const telegramDir = process.env.GRIGDESK_TELEGRAM_DIR || dataPath(dataHome, 'telegram');
 const githubDir = process.env.GRIGDESK_GITHUB_DIR || dataPath(dataHome, 'github');
-const routesDir = process.env.GRIGDESK_ROUTES_DIR || path.join(home, '.factory', 'routes');
-const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
+// Каталоги фабрики по умолчанию живут в папке данных (перенос из ~/.factory: старый
+// путь после переезда не существует). Переменные окружения важнее этих умолчаний.
+const routesDir = process.env.GRIGDESK_ROUTES_DIR || path.join(dataHome, 'factory', 'routes');
+const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(dataHome, 'factory', 'state');
 const deepseekRuntimeHome = process.env.GRIGDESK_DEEPSEEK_RUNTIME_HOME
   || path.join(factoryStateDir, 'grigdesk-deepseek');
 // Корень private homes GLM. Абсолютность проверяет адаптер: кривое значение закрывает
@@ -99,9 +101,9 @@ export const config = {
   studio3dDir: process.env.GRIGDESK_3D_DIR || dataPath(dataHome, 'studio3d'),
   stateDir: factoryStateDir,
   // Доверенный control-каталог протокола маршрутов (движок пишет туда то, что провайдеру
-  // менять нельзя). Задаём явно, а не полагаемся на дефолт по $HOME: прогон уезжает
+  // менять нельзя). Задаём явно, а не полагаемся на умолчание: прогон уезжает
   // в transient-юнит systemd, окружение вызывающего он не наследует.
-  factoryControlDir: process.env.FACTORY_CONTROL_ROOT || path.join(home, '.factory', 'control'),
+  factoryControlDir: process.env.FACTORY_CONTROL_ROOT || path.join(dataHome, 'factory', 'control'),
   // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
   factoryHome,
   // Проектные профили живут отдельно от движка, в корне репозитория.
@@ -120,7 +122,7 @@ export const config = {
     }),
   factoryBin: factoryRuntime.bin,
   // Debug settings принадлежат engine writer-у, GrigDesk передаёт этот root его CLI.
-  factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
+  factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(dataHome, 'factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
   factoryProfile: process.env.GRIGDESK_FACTORY_PROFILE || '',
   // Бинарь Claude для чата с агентом по задаче.
@@ -209,8 +211,8 @@ export const config = {
   artifactsDir: process.env.GRIGDESK_ARTIFACTS_DIR || dataPath(dataHome, 'artifacts'),
 
   // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов — runtime-артефакт движка,
-  // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Каталог
-  // принадлежит единственному route-store; движок читает тот же путь.
+  // как state/control, поэтому живёт в папке данных (factory/routes), а не в
+  // репозитории. Каталог принадлежит единственному route-store; движок читает тот же путь.
   routesDir,
   // Черновики — отдельная область авторства рядом с опубликованным store.
   routesAuthoringDir: process.env.GRIGDESK_ROUTES_AUTHORING_DIR || `${routesDir}.authoring`,
@@ -310,7 +312,7 @@ export const config = {
 
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.
-  analysisDir: process.env.GRIGDESK_ANALYSIS_DIR || path.join(home, '.factory', 'analysis'),
+  analysisDir: process.env.GRIGDESK_ANALYSIS_DIR || path.join(dataHome, 'factory', 'analysis'),
   analysisTimeoutMs: Number(process.env.GRIGDESK_ANALYSIS_TIMEOUT_MS) || 20 * 60 * 1000,
   // Параллельных оценок триажа: один воркер на большой очереди создаёт часы ожидания.
   analysisConcurrency: Number(process.env.GRIGDESK_ANALYSIS_CONCURRENCY) || 2,

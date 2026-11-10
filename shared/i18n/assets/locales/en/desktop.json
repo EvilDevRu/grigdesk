@@ -107,6 +107,7 @@
   "exitStoppingHint": "Saving chats and stopping pipelines. The window will close when this finishes.",
   "exitChats": "Chats",
   "exitPipelines": "Pipelines",
+  "exitUpdate": "Update {version} is ready: it will be applied after the shutdown, and the app will reopen on the new version.",
   "exitRemember": "Don't ask again",
   "exitConfirm": "Quit",
   "exitCancel": "Cancel",

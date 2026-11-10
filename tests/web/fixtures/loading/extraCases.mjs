@@ -294,7 +294,7 @@ extraPorts.push({
             }]
     },
     readySelector: '[data-plugin-setup] b',
-    geometry: ['row', '[data-plugin-setup] > div', ['x', 'width']],
+    geometry: ['row', '[data-setup-item="fixture"]', ['x', 'width']],
 });
 extraPorts.push({
     id: 'github',

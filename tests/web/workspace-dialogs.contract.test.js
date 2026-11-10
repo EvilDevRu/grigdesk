@@ -35,7 +35,7 @@ test('Действия TaskModal используют общее оформле�
 
   assert.equal(
     [...taskModal.matchAll(/data-context="task-footer-action"/gu)].length,
-    8,
+    9,
   );
 
   const footerRule = actions.match(/data-context='task-footer-action'\]\s*\{([^}]+)\}/u)?.[1];

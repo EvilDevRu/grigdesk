@@ -336,9 +336,9 @@ test('чистый run-all передаёт один ELF всем наборам
 
   const nestedBinary = path.join(root, 'nested/deepseek');
 
-  // Группа браузера добавляет одного потребителя к прежней фиксированной описи.
-  // Остальные ступени этого ожидания здесь не пересматриваются.
-  assert.equal(observed.filter((binary) => binary === candidate.binary).length, 15);
+  // Самостоятельный chat-list-benchmark добавляет потребителя к общей описи наборов.
+  // Вложенный candidate gate отдельно проверяет те же пять ступеней своего пакета.
+  assert.equal(observed.filter((binary) => binary === candidate.binary).length, 16);
   assert.equal(observed.filter((binary) => binary === nestedBinary).length, 5);
   assert.ok(observed.every((binary) => binary === candidate.binary || binary === nestedBinary));
 

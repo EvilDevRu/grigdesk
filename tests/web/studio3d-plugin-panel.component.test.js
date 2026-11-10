@@ -103,11 +103,11 @@ for (const [width, presentation] of [[899, 'page'], [900, 'dock'], [1280, 'page'
       await f.settle();
       f.props.active = false;
       await f.settle();
-      assert.equal(f.element.querySelector('textarea'), textarea);
+      assert.equal(f.element.querySelector('textarea') === textarea, true);
       f.props.active = true;
       f.props.presentation = presentation === 'dock' ? 'page' : 'dock';
       await f.settle();
-      assert.equal(f.element.querySelector('textarea'), textarea);
+      assert.equal(f.element.querySelector('textarea') === textarea, true);
       assert.equal(textarea.value, 'Черновик настоящей панели');
       assert.deepEqual(f.counts(), { panel: 1, background: 1 });
       assert.equal(f.sources.length, 1);

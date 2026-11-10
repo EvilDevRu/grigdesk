@@ -95,31 +95,32 @@ test('RL-45: посредник выпускается через общий wor
   assert.match(text, /^permissions:\n  contents: read$/m);
   assert.match(text, /persist-credentials: false/);
   assert.ok(text.includes(`node-version: ${runtime.version}`));
-  assert.equal(uses.length, 3);
+  assert.equal(new Set(uses).size, 4);
 
   for (const action of uses) {
     assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
   }
 
-  let previous = -1;
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = yaml.parse(text);
 
-  for (const command of [
-    'npm --prefix server ci',
-    'npm --prefix web ci',
-    'npm --prefix mobile ci',
-    'npm --prefix tracker ci',
-    'npm --prefix relay ci',
-    'npm --prefix deepseek ci',
-    'npm --prefix desktop ci',
-    'npm --prefix server test',
-    'npm --prefix web test',
-    'node tools/bundle.mts',
-    'node tools/release-publish.mts "$PWD"',
-  ]) {
-    const index = text.indexOf(command);
+  assert.deepEqual(workflow.jobs.build.needs, ['plan', 'server', 'web']);
+  assert.deepEqual(workflow.jobs.publish.needs, ['plan', 'build', 'verify']);
 
-    assert.ok(index > previous, command);
-    previous = index;
+  for (const job of [workflow.jobs.server, workflow.jobs.web, workflow.jobs.build]) {
+    let previous = -1;
+    const jobSource = yaml.stringify(job);
+
+    for (const command of [
+      'npm --prefix server ci', 'npm --prefix web ci', 'npm --prefix mobile ci',
+      'npm --prefix tracker ci', 'npm --prefix relay ci', 'npm --prefix deepseek ci',
+      'npm --prefix desktop ci',
+    ]) {
+      const index = jobSource.indexOf(command);
+
+      assert.ok(index > previous, command);
+      previous = index;
+    }
   }
 
   assert.doesNotMatch(text, /gh release create|contents: write/);

@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { t } from '../services/locale.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import { ARBITER_LIMITS, sameStop } from '../../../shared/pipeline/arbiterConversation.ts';
@@ -11,6 +12,8 @@ import { ApiError } from '../shared/apiClient.ts';
 import type { CurrentArbiterStop } from '../shared/arbiterConversationApi.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import type { SseEventName } from '../composables/useSse.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 interface PendingIntent {
   id: string | null;

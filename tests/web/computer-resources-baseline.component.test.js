@@ -77,8 +77,11 @@ test('PRES-02: исходная панель, старый mem и stale', { time
 
     assert.deepEqual(after, before);
     await h.page.keyboard.press('Escape');
+    await h.panel.waitFor({ state: 'hidden' });
     await h.page.setViewportSize({ width: 390, height: 844 });
-    await h.trigger.waitFor({ state: 'hidden' });
-    assert.equal(await h.page.locator('[data-shell-status-trigger]').isVisible(), true);
+    await h.page.locator('[data-context="phone-status-metrics"]').waitFor({ state: 'visible' });
+    assert.equal(await h.trigger.getAttribute('data-context'), 'phone-status-metrics');
+    await h.open();
+    assert.ok((await h.panel.innerText()).includes(text.noFreshDataTheServerDidNot));
   }
 });

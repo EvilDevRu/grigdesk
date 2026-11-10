@@ -37,8 +37,8 @@ for (const locale of ['ru', 'en']) {
     assert.ok(dialog.textContent.includes(snapshot.chats[0].title));
     assert.ok(dialog.textContent.includes(snapshot.pipelines[0].title));
     assert.match(dialog.textContent, /#?7/);
-    assert.equal(dialog.querySelector('img'), null);
-    assert.equal(dialog.querySelector('b'), null);
+    assert.equal(dialog.querySelector('img') === null, true);
+    assert.equal(dialog.querySelector('b') === null, true);
     assert.equal(dialog.closest('[data-ui-layer]')?.getAttribute('data-ui-layer'), 'confirm');
     assert.ok(dialog.querySelector('input[type="checkbox"]'));
     await button(h, 'Выйти', locale);
@@ -81,6 +81,61 @@ for (const action of ['cancel', 'escape', 'confirm']) {
     assert.equal(h.stops().length, 0, 'Решение само по себе не отправляет Stop');
   });
 }
+
+/**
+ * Готовое обновление в снимке предупреждает о применении при выходе и перезапуске.
+ * Оболочка передаёт applicationUpdate из long-poll, host добавляет версию в снимок.
+ */
+const shellWithUpdate = (base) => ({
+  ...base,
+  applicationUpdate: {
+    channel: 'release',
+    running: '0.2.0',
+    targetVersion: '0.1.2',
+    notes: null,
+    scope: 'pair',
+    checkState: 'current',
+    checkedAt: null,
+    error: null,
+    job: {
+      id: 'exit-ready-job',
+      stage: 'ready',
+      version: '0.1.2',
+      scope: 'pair',
+      downloadedBytes: null,
+      totalBytes: null,
+      nextAction: null,
+      recoverable: true,
+    },
+  },
+});
+
+test('UI-UPDATE: готовое обновление в модале выхода предупреждает о применении', async (t) => {
+  const h = await desktopExitApp(t, { shellSnapshot: (base) => shellWithUpdate(base) });
+  const source = 'Готово обновление до {version}: после остановки оно применится, '
+    + 'и приложение перезапустится новой версией.';
+  const message = (await catalogMessage('desktop', source)).ru.replace('{version}', '0.1.2');
+
+  await h.command('prompt', { snapshot: { ...snapshot, update: { version: '0.1.2' } } });
+
+  const dialog = h.dialogs()[0];
+
+  assert.ok(dialog, 'модал выхода показан');
+  assert.ok(dialog.textContent.includes(message), 'модал предупреждает о применении обновления');
+  assert.ok(dialog.textContent.includes(snapshot.chats[0].title), 'список работы остаётся в модале');
+});
+
+test('UI-UPDATE: без готового обновления строка применения не показывается', async (t) => {
+  const h = await desktopExitApp(t);
+
+  await h.command('prompt', { snapshot });
+
+  const dialog = h.dialogs()[0];
+
+  assert.ok(dialog, 'модал выхода показан');
+  assert.equal(dialog.textContent.includes('0.1.2'), false,
+    'без готового обновления строка применения не показывается');
+});
 
 test('MAIN04/UI: второй close после dirty beforeunload снова проверяет работу и спрашивает', async (t) => {
   const h = await desktopExitApp(t, {

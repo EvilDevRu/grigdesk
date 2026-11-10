@@ -11,3 +11,8 @@ Fastify-стенд с фиктивными адаптерами внедряет
 Так тест не запускает настоящий discovery соседних CLI через GET карточек или
 его принудительный refresh. Примеры — `chat-slash-commands.test.js`,
 `providers-usage-tick.test.js` и `tripo-provider.test.js` в `tests/server/`.
+
+То же требуется `nativeRouteFixture` в `providers-native-settings-route.test.js`.
+Настройки native проверяют собственный discovery, а не каталог соседних моделей.
+Без подмены models реестр может исчерпать штатные 1200 мс фонового чтения и вернуть
+пустой снимок: отсутствие карточки тогда не доказывает отказ binary readiness.

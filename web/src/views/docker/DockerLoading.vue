@@ -58,7 +58,7 @@ withDefaults(defineProps<{
 .containers .group { border: 0; border-radius: 0; }
 .containers .group-head { min-height: 42px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .containers .row { grid-template-columns: minmax(180px, 1fr) minmax(130px, .7fr) 54px 84px 156px;
-  gap: 12px; min-height: 62px; padding: 10px; }
+  gap: 12px; min-height: 58px; padding: 8px 10px; }
 .table { width: 100%; }
 .table-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 20% 25%;
   align-items: center; gap: 8px; padding: 14px 12px; min-height: 64px; border-bottom: 1px solid var(--line); }
@@ -74,7 +74,7 @@ withDefaults(defineProps<{
   .containers .actions { grid-column: 2 / 4; grid-row: 2; }
 }
 @container docker-loading (max-width: 600px) {
-  .containers .row { grid-template-columns: 1fr 1fr; min-height: 160px; padding: 10px 0; gap: 8px; }
+  .containers .row { grid-template-columns: 1fr 1fr; min-height: 155px; padding: 10px 0; gap: 8px; }
   .containers .row > :nth-child(1) { grid-column: 1 / -1; }
   .containers .row > :nth-child(2) { grid-column: 1 / -1; }
   .containers .row > :nth-child(3) { grid-column: 1; grid-row: 3; }

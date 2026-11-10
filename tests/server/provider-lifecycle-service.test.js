@@ -38,8 +38,12 @@ async function fixture(t, options = {}) {
   const refreshes = [];
   let gate = null;
   let nativeVersion = '1.0.0';
+  let service;
 
-  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  t.after(async () => {
+    await service?.dispose();
+    await fs.rm(home, { recursive: true, force: true });
+  });
   await fs.mkdir(bin, { recursive: true });
   await fs.symlink(process.execPath, path.join(bin, 'node'));
   await fs.writeFile(path.join(bin, 'npm'), '#!/bin/sh\nprintf "%s\\n" "$FIXTURE_PREFIX"\n', { mode: 0o755 });
@@ -121,7 +125,7 @@ async function fixture(t, options = {}) {
 
   await fs.writeFile(config.envPath, `KEEP=value\n${options.pinned ? `FIXTURE_BIN=${alias}\n` : ''}`);
 
-  const service = new ProviderInstallService({
+  service = new ProviderInstallService({
     statePath: path.join(data, 'state.json'),
     config,
     roots: {

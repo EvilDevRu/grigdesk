@@ -83,7 +83,13 @@ export default function createDriver() {
  * Фикстура собирает тот же реестр и фасад, что приложение, в отдельном каталоге.
  * Старый файл создаётся только для проверки, что ядро не читает прежнее подключение.
  */
-export async function trackerFixture(t, { legacy = false, setup = null, fetch: transport } = {}) {
+export async function trackerFixture(t, {
+  legacy = false,
+  setup = null,
+  fetch: transport,
+  register = null,
+  pluginEnabled = () => false,
+} = {}) {
   const ownCleanups = [];
   const own = await tasksFixture({ after: (cleanup) => ownCleanups.push(cleanup) });
   const { config, root } = own;
@@ -160,13 +166,19 @@ export async function trackerFixture(t, { legacy = false, setup = null, fetch: t
 
   await app.register(trackersModule, { runtime, driverSourcesPath: config.driverSourcesPath });
 
-  app.decorate('pluginEnabled', () => false);
+  app.decorate('pluginEnabled', pluginEnabled);
   app.decorate('analyzer', { enqueue: async () => {} });
   await app.register(trackerModule, { tracker });
   await app.register(ownModule, {
     ...options,
     tracker,
     service: runtime?.own
+  });
+
+  await register?.({
+    app,
+    runtime,
+    config,
   });
   await app.ready();
 

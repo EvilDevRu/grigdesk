@@ -23,6 +23,13 @@ test('LEGACY-FULL: полная выдача сохраняет историю, 
   const observed = [];
 
   const fixture = await listFixture(t, [active, archived], {
+    beforeChat: async (_app, { config }) => {
+      await fs.writeFile(path.join(config.chatsDir, 'meta.json'), JSON.stringify({
+        activeId: active.id,
+        defEffort: 'high',
+        defMode: 'plan',
+      }));
+    },
     extraRoutes: async (app) => {
       app.addHook('onResponse', async (request) => {
         observed.push(request.url);
@@ -30,12 +37,6 @@ test('LEGACY-FULL: полная выдача сохраняет историю, 
     },
     prefs: { chatAutoCompactWindow: 71 },
   });
-
-  await fs.writeFile(path.join(fixture.config.chatsDir, 'meta.json'), JSON.stringify({
-    activeId: active.id,
-    defEffort: 'high',
-    defMode: 'plan',
-  }));
 
   const data = await jsonRequest(fixture.app, 'GET', '/api/chat/store');
 

@@ -73,7 +73,7 @@
               Ранее принятые обращения доступны только для чтения до переподключения.
             </p>
             <div class="channel-actions">
-              <UiActionLink v-if="channelSettingsHref(channel.id)" class="btn"
+              <UiActionLink v-if="channelSettingsHref(channel.id)" class="btn" wrap
                 :href="channelSettingsHref(channel.id)">
                 Подключение и настройки
               </UiActionLink>
@@ -271,7 +271,7 @@
                 <span v-if="item.messages.some(selectable)" class="selected-count">
                   Выбрано: {{ selectedRefs(item).length }}
                 </span>
-                <UiActionLink v-for="link in taskLinks(item)" :key="link.url" class="btn task-link"
+                <UiActionLink v-for="link in taskLinks(item)" :key="link.url" class="btn task-link" wrap
                 :href="link.url" target="_blank" rel="noreferrer">{{ link.label }}</UiActionLink>
                 <template v-if="selectionMode(item) === 'new'">
                   <UiButton class="btn accent" tone="accent" :loading="busy === `${item.ref}:task`"

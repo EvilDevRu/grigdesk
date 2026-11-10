@@ -1,8 +1,11 @@
+import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from '../shared/trackerMutation.ts';
 // Серверные отметки двух личных пространств синхронизируются между устройствами.
 // Пока базовой линии нет, давние задачи не объявляются новыми.
 import { defineStore } from 'pinia';
+import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -36,7 +39,7 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-interface SeenBranch {
+interface SeenBranch extends Pick<StoreGeneric, '$onAction'> {
   scope: string;
   revision: number;
   taskIds: string[];
@@ -54,12 +57,20 @@ interface SeenBranch {
   }): Promise<boolean>;
 }
 
-const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+/**
+ * Один алгоритм личного состояния создаётся для каждой подтверждённой учётной записи.
+ * Раздельные эпохи и очереди сохраняют соседние источники при смене реквизитов.
+ */
+const createTaskSeenStore = (
+  storeId: string, source: TaskPersonalSource, taskSource?: string,
+) => {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
+    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
   const url = `/api/${prefix}/task-seen`;
 
   return defineStore(storeId, {
   state: () => ({
+    sources: [] as string[],
     scope: '',
     revision: -1,
     initialized: false,
@@ -74,12 +85,38 @@ const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
     _inflight: null as Promise<boolean> | null,
   }),
   getters: {
+    external: (state): SeenBranch[] => state.sources.map((id) => externalBranches.get(id)!()),
     own: (): SeenBranch => useGrigdeskTaskSeenStore(),
     count: (state) => state.taskIds.length,
     isSeen: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     ready: (state) => state.loaded && state.initialized,
   },
   actions: {
+    /**
+     * Полный источник выбирает независимую ветку личного состояния.
+     * Собственные задачи и прежний default сохраняют свои публичные обращения.
+     */
+    forSource(target?: string): SeenBranch {
+      if (target === 'grigdesk') {
+        return useGrigdeskTaskSeenStore();
+      }
+      if (!target || !target.includes('@')) {
+        return this;
+      }
+
+      if (!taskSource && !this.sources.includes(target)) {
+        this.sources.push(target);
+      }
+
+      let useBranch = externalBranches.get(target);
+
+      if (!useBranch) {
+        useBranch = createTaskSeenStore(`taskSeen-${target}`, 'tracker', target);
+        externalBranches.set(target, useBranch);
+      }
+
+      return useBranch();
+    },
     /**
      * Принимает только актуальный ответ текущего или более нового scope.
      * Старая ревизия одного владельца не откатывает уже показанные отметки.
@@ -133,7 +170,8 @@ const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
       this.error = null;
       this._inflight = (async () => {
         try {
-          const snapshot = await api.get(url);
+          const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
+          const snapshot = await api.get(url, target?.options);
 
           if (epoch !== this._epoch) {
             return false;
@@ -191,12 +229,13 @@ const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
       this.error = null;
 
       try {
+        const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
         const snapshot = await api.post(url, {
           taskIds,
           baseline,
           ...(baselineId ? { baselineId } : {})
         },
-          source === 'tracker' ? trackerMutationOptions() : {});
+          target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
 
         if (epoch !== this._epoch) {
           return false;
@@ -223,7 +262,11 @@ const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
      * Базовая линия нового владельца будет загружена заново.
      */
     clear(options: TaskSourceOptions = {}): void {
-      if (source === 'tracker' && options.source !== 'tracker') {
+      if (!taskSource && source === 'tracker') {
+        this.external.forEach((branch) => branch.clear());
+      }
+
+      if (!taskSource && source === 'tracker' && options.source !== 'tracker') {
         useGrigdeskTaskSeenStore().clear();
       }
 
@@ -243,6 +286,8 @@ const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
   },
   });
 };
+
+const externalBranches = new Map<string, ReturnType<typeof createTaskSeenStore>>();
 
 export const useTaskSeenStore = createTaskSeenStore('taskSeen', 'tracker');
 export const useGrigdeskTaskSeenStore = createTaskSeenStore('grigdeskTaskSeen', 'grigdesk');

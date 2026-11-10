@@ -45,7 +45,6 @@ test('SSH зарегистрирован системным плагином и 
     nav: {
       path: '/ssh',
       label: 'SSH',
-      icon: 'ssh',
       group: 'dock',
       order: 40,
     },

@@ -15,10 +15,20 @@ POST ожидает native loadURL, поэтому одновременные PO
 
 | Канал | Контракт |
 |---|---|
-| `grigdesk-sse-v1` | `{version:1,name,data}`; только hello, diagnostic-logging, task-shelf-changed, speech-settings, projects-changed, chat-done, ssh-sessions, ssh-audit, db-sessions, db-queries, db-audit |
+| `grigdesk-sse-v1` | `{version:1,name,data}`; только trackers-changed, hello, diagnostic-logging, task-shelf-changed, speech-settings, projects-changed, chat-done, ssh-sessions, ssh-audit, db-sessions, db-queries, db-audit |
 | `grigdesk-shell-v1` | `{version:1,type:'shell-changed'}`; карточка делает короткий refresh без rev |
-| `grigdesk-board-v1` | board-request или board-snapshot с object data и конечным числом readAt |
+| `grigdesk-board-v2` | board-snapshot версии 2: data, readAt, sourceKey, epoch; закрытый набор полей |
+| `grigdesk-board-v1` | прежние окна сохраняют single-default API и протокол своей сборки |
 | `grigdesk-task-data-v1` | task-data-changed после успешных setFavorite/markSeen; shelf-acknowledge с каноническим taskId |
+
+Список событий SSE сохраняет прежний префикс projects-changed, hello,
+diagnostic-logging, task-shelf-changed. Новые имена, включая trackers-changed,
+добавляются в конец, чтобы расширение не меняло порядок прежних подписок.
+
+Новый `sourceKey` включает область авторизации, профиль и ревизии владельцев драйверов.
+В multi-source data передаются агрегированные роли и `driverSnapshots`: снимок, dataRevision
+и ошибка каждой ветки. Приём проверяет форму, локально подтверждённый ключ, readAt и эпоху;
+чужой профиль, прежняя эпоха и лишнее поле отвергаются. Принятое чтение не отражается назад.
 
 Главное окно отвечает на запрос доски своим кешем. После собственного завершённого чтения
 любой документ делится снимком; чужой снимок не запускает GET dashboard и не отправляется
@@ -28,7 +38,7 @@ POST ожидает native loadURL, поэтому одновременные PO
 начатого до свежего снимка. Время завершения запроса не делает его данные новее;
 подробнее — [порядок снимков доски](board-snapshot-order.md).
 
-Избранное и просмотренное перечитываются быстрыми локальными API. Сигнал во время старого GET
+Избранное и просмотренное имеют независимые ветки источников и перечитываются адресными локальными API. Сигнал во время старого GET
 оставляет один последующий запрос, dispose отменяет отложенный запуск. Полка карточки принимает
 полные серверные entries в passive-режиме без построения rows, гидратации деталей и оповещений.
 Отметку полки исполняет main с полным наблюдением конвейера и оценки. Основная полка сохраняет

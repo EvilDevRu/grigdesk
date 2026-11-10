@@ -277,17 +277,23 @@ test('отказ с комментарием: commentDelivered false', async (t)
   assert.equal((await running).statusCode, 200);
 });
 
-test('Factory, триаж, plan и scoped отклоняются до процесса без правки allowedMode', async (t) => {
+test('чат отклоняет Factory, plan, scoped и untrusted; model-only объявлен отдельно', async (t) => {
   const f = await fixture(t);
   const providers = await f.app.inject({ url: '/api/providers', headers: f.headers });
   const card = providers.json().providers?.find((item) => item.id === 'glm')
     ?? providers.json().find?.((item) => item.id === 'glm');
 
-  assert.equal(card.capabilities.untrustedText, false, 'триаж требует untrusted-ввода');
+  assert.equal(card.capabilities.untrustedText, true, 'триаж использует отдельный model-only вход');
+  assert.equal(typeof f.adapter.runUntrusted, 'function');
   assert.equal(card.capabilities.scopedWorkspace, false, 'анализатор требует scoped workspace');
   assert.equal(await supportsScopedWorkspace(f.executor, f.config), false);
 
-  for (const options of [{ permissionMode: 'plan' }, { factory: true }, { scopedWorkspace: true }]) {
+  for (const options of [
+    { permissionMode: 'plan' },
+    { factory: true },
+    { scopedWorkspace: true },
+    { untrustedInput: true },
+  ]) {
     await assert.rejects(f.adapter.run({
       config: f.config,
       cwd: f.project,
