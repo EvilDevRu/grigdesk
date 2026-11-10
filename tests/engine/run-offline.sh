@@ -7,18 +7,6 @@ FACTORY_HOME="$PROJECT_ROOT/engine"
 FACTORY_TESTS_HOME="$PROJECT_ROOT/tests/engine"
 HOST_NODE_BIN=$(command -v node 2>/dev/null || true)
 
-# Очистка действует и в родителе очереди, а env -i ниже изолирует каждого воркера.
-# Старый префикс читается из общего модуля совместимости без доступа к настройкам.
-LEGACY_ENV_PREFIX=$("$HOST_NODE_BIN" -e '
-  const path = require("node:path");
-  const legacy = require(path.resolve(process.argv[1]));
-  process.stdout.write(legacy.LEGACY.envPrefix);
-' "$PROJECT_ROOT/shared/runtime/legacyBrand.ts") || exit $?
-while IFS= read -r key; do
-  if [[ "$key" == "$LEGACY_ENV_PREFIX"* ]]; then
-    unset "$key"
-  fi
-done < <(compgen -e)
 unset GRIGDESK_ENV_FILE GRIGDESK_UI_RELEASES_DIR GRIGDESK_LOG
 
 # Режим воркера: скрипт запускает сам себя по одному файлу на процесс. Изоляция

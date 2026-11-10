@@ -138,15 +138,12 @@ test('SB19: приватные npm берутся строго по production l
   await assert.rejects(copyProductionDependencies({ sourceRoot, stageRoot }), /lock/);
 });
 
-test('SB19: shared допускает только явную compatibility обёртку legacyBrand', async (t) => {
+test('SB19: shared-исходники в payload запрещены', async (t) => {
   const root = await fixture(t);
-  const wrapper = 'shared/runtime/legacyBrand.ts';
 
-  await put(root, wrapper);
+  await put(root, 'shared/runtime/legacyBrand.ts');
 
-  const files = await auditPayload(root, { ...options, wrappers: [wrapper] }).catch(() => []);
-
-  assert.ok(files.some((file) => file.path === wrapper), 'разрешённая compatibility обёртка сохраняется');
-  await put(root, 'shared/runtime/extra.ts');
-  await assert.rejects(auditPayload(root, { ...options, wrappers: [wrapper] }), /исходник/);
+  await assert.rejects(auditPayload(root,
+    { ...options, wrappers: ['shared/runtime/legacyBrand.ts'] }),
+  /Запрещён корень состава payload|Лишний собственный исходник/u);
 });

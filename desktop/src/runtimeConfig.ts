@@ -17,7 +17,6 @@ import {
 } from '../../shared/node/serverBinaryRuntime.ts';
 
 import { dataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
-import { legacyRootProblem } from '../../shared/runtime/legacyBrand.ts';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
@@ -275,10 +274,11 @@ async function loadBinaryRuntime(
     const dotenv: Record<string, string> = fileText === null ? {}
       : Object.fromEntries(Object.entries(parseEnv(fileText))
         .filter((entry): entry is [string, string] => entry[1] !== undefined));
-    const problem = legacyRootProblem(parent) || legacyRootProblem(dotenv, true);
-
-    if (problem) {
-      throw new Error(problem);
+    // Файл окружения не переназначает корни данных; старые имена не распознаются вовсе.
+    for (const reserved of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
+      if (Object.hasOwn(dotenv, reserved)) {
+        throw new Error(`Ключ ${reserved} запрещён в файле настроек.`);
+      }
     }
 
     const port = effectivePort(parent, dotenv);
@@ -533,12 +533,6 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   let selectedHome: string;
 
   try {
-    const problem = legacyRootProblem(parent);
-
-    if (problem) {
-      throw new Error(problem);
-    }
-
     selectedHome = dataHome({ env: parent, home: input.home });
     envPath = envFilePath({ env: parent, home: input.home });
   } catch (error) {
@@ -559,13 +553,13 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
     };
   }
 
-  const problem = legacyRootProblem(dotenv, true);
-
-  if (problem) {
-    return {
-      problem: 'invalid',
-      message: problem,
-    };
+  for (const reserved of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
+    if (Object.hasOwn(dotenv, reserved)) {
+      return {
+        problem: 'invalid',
+        message: `Ключ ${reserved} запрещён в файле настроек.`,
+      };
+    }
   }
 
   const dist = effectiveValue(input.env, dotenv, 'GRIGDESK_WEB_DIST') || path.join(root, 'web/dist');

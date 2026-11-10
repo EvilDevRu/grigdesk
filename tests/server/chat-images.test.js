@@ -12,7 +12,6 @@ import { CHAT_IMAGE_FIXTURES } from '../fixtures/chatImages.mjs';
 import { chatAppFixture, TEST_MODEL_REF } from './helpers/chat-turns.js';
 import { config } from '../../server/src/config.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 /**
  * Временная рабочая область содержит настоящие растры и отдельный внешний каталог.
@@ -36,7 +35,7 @@ async function fixture(t) {
 }
 
 for (const [id, layout, status] of [
-  ['GA-01', 'same-link', 200],
+  ['GA-01', 'same-link', 403],
   ['GA-02', 'foreign-link', 403],
   ['GA-03', 'directory', 403],
 ]) {
@@ -45,7 +44,7 @@ for (const [id, layout, status] of [
     const previousHome = process.env.HOME;
     const previousData = config.dataHome;
     const data = path.join(f.root, '.grigdesk');
-    const old = path.join(f.root, LEGACY.dataHomeDir);
+    const old = path.join(f.root, '.cockpit');
     const target = layout === 'same-link' ? data : f.outside;
 
     await fs.mkdir(path.join(data, 'artifacts'), { recursive: true });
@@ -70,9 +69,7 @@ for (const [id, layout, status] of [
 
       assert.equal(result.status ?? 200, status);
 
-      if (status === 200) {
-        assert.deepEqual(result.bytes, CHAT_IMAGE_FIXTURES.png);
-      }
+      assert.equal(result.bytes, undefined);
     } finally {
       config.dataHome = previousData;
 

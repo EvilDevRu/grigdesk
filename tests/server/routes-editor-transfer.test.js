@@ -7,8 +7,6 @@ import test from 'node:test';
 
 import routesModule from '../../server/src/modules/routes/index.ts';
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
-import { parseRouteTransferBundle } from '../../shared/pipeline/routesEditorContracts.ts';
-import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 import { makeDraft } from '../fixtures/routes-editor.mjs';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -65,10 +63,6 @@ test('RE-G4-01: полный JSON export/import создаёт новый editin
     assert.equal(exported.statusCode, 200);
     const bundle = exported.json();
     assert.equal(bundle.format, 'grigdesk-route-authoring');
-    assert.equal(
-      parseRouteTransferBundle({ ...bundle, format: LEGACY_VALUES.routeAuthoringFormat }).format,
-      'grigdesk-route-authoring',
-    );
     assert.equal(bundle.schema, 1);
     assert.equal(bundle.sourceProfile, 'sample');
     assert.deepEqual(bundle.dependencies, []);

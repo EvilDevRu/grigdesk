@@ -6,7 +6,6 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
 
 const execute = promisify(execFile);
@@ -46,7 +45,6 @@ async function fixture(t) {
   for (const file of [
     'deploy/lib/runtime-env.sh',
     'shared/runtime/dataHome.ts',
-    'shared/runtime/legacyBrand.ts',
     'shared/package.json',
     'server/scripts/dataHomeCheck.mts',
     'server/src/lib/dataHomeBoot.ts',
@@ -219,27 +217,7 @@ test('GP-01: приложение имеет новый пакет, версию
   assert.match(client, /versionCode parts\[0\] \* 10000 \+ parts\[1\] \* 100 \+ parts\[2\]/);
 });
 
-test('GP-02: прежний каталог подписи останавливает выпуск до генерации ключа', async (t) => {
-  const fx = await fixture(t);
-  const oldSigning = path.join(fx.env.HOME, '.config', LEGACY.configDir, 'android-signing');
 
-  await mkdir(oldSigning, { recursive: true });
-  await rm(fx.signing, { recursive: true });
-
-  const env = { ...fx.env };
-
-  delete env.GRIGDESK_ANDROID_SIGNING_DIR;
-  await assert.rejects(execute(process.execPath, ['tools/mobile-phone/release.mts'], {
-    cwd: fx.project, env,
-  }), (error) => {
-    assert.ok(error.stderr.includes(`mv ~/.config/${LEGACY.configDir} ~/.config/grigdesk`));
-
-    return true;
-  });
-  assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
-  await assert.rejects(readFile(path.join(fx.env.HOME, '.config/grigdesk/android-signing/release.jks')),
-    { code: 'ENOENT' });
-});
 
 test('GP-04: рост versionCode сверяется только с выпусками GrigDesk', async (t) => {
   const fx = await fixture(t);
@@ -250,7 +228,7 @@ test('GP-04: рост versionCode сверяется только с выпус�
 
   // Номер прежнего приложения (другой applicationId) больше, но выпуск 0.1.0 не останавливает.
   await rm(path.join(output, 'grigdesk-mobile.json'));
-  await writeFile(path.join(output, `${LEGACY.apkBase}.json`), '{"versionCode":109}');
+  await writeFile(path.join(output, 'unrelated-mobile.json'), '{"versionCode":109}');
   await assert.rejects(run(), (error) => /кодом 19/.test(error.stderr));
   assert.match(await readFile(fx.logs, 'utf8'), /gradle:/);
 

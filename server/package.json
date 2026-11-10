@@ -12,7 +12,7 @@
     "test:sea": "node scripts/testSea.mts",
     "start": "node src/app.ts",
     "dev": "node --watch src/app.ts",
-    "test": "npm run typecheck && npm run typecheck:tests && GRIGDESK_RELEASE_PUBLISH_CONTRACT=2 NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=2 ../tests/server/*.test.js ../tests/server/help-*.test.mts ../tests/shared/help-*.test.mts ../tests/server/codex-scoped-workspace-profile.test.mts ../tests/server/triage-scoped-tools.test.mts ../tests/server/triage-scoped-runners.test.mts ../tests/server/loopback-only.test.mts ../tests/server/data-home-boot.test.mts ../tests/server/data-home.test.mts ../tests/server/brand-move.test.mts ../tests/server/brand-env.test.mts ../tests/server/factory-stand-restore.test.mts",
+    "test": "npm run typecheck && npm run typecheck:tests && GRIGDESK_RELEASE_PUBLISH_CONTRACT=2 NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=2 ../tests/server/*.test.js ../tests/server/help-*.test.mts ../tests/shared/help-*.test.mts ../tests/server/codex-scoped-workspace-profile.test.mts ../tests/server/triage-scoped-tools.test.mts ../tests/server/triage-scoped-runners.test.mts ../tests/server/loopback-only.test.mts ../tests/server/data-home-boot.test.mts ../tests/server/data-home.test.mts ../tests/server/brand-env.test.mts ../tests/server/factory-stand-restore.test.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "tsc -p tsconfig.code.json --noEmit",

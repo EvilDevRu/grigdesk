@@ -1,4 +1,3 @@
-import { LEGACY_VALUES } from '../runtime/legacyBrand.ts';
 import type { DraftMachine } from './routeDefinition.ts';
 
 export const ROUTES_EDITOR_LIMITS = {
@@ -623,8 +622,7 @@ export function parseRouteTransferBundle(value: unknown): RouteTransferBundle {
     'format', 'schema', 'sourceProfile', 'content', 'dependencies',
   ], [], 'routeTransfer');
 
-  // Выгрузки до второго этапа переименования несут прежнее имя формата.
-  const formats: readonly unknown[] = ['grigdesk-route-authoring', LEGACY_VALUES.routeAuthoringFormat];
+  const formats: readonly unknown[] = ['grigdesk-route-authoring'];
 
   if (!formats.includes(bundle.format) || bundle.schema !== 1) {
     throw new RoutesEditorContractError('routeTransfer.format/schema');
