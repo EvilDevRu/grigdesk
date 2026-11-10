@@ -13,6 +13,8 @@
 - [Где конвейер спрашивает человека](../guide/gates.md)
 - [Задача: постановка и триаж](../guide/tasks.md)
 
+- [Восстановление сохранённого перехода](pending-transition-recovery.md) — host receipt, runtime gap, exact human projection и журнал для карточки.
+
 ## Устройство
 
 - [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)

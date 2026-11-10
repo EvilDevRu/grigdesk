@@ -1064,6 +1064,63 @@ runtime_lifecycle_gate_decided_v2() {
 
 # Вмешательство человека связывается с визитом, на котором возникла остановка.
 # Отсутствие визита — отказ контракта с видимой причиной, без записи события lifecycle.
+# Все human-проекторы используют один существующий закрытый словарь причин.
+# Граница stage stop не расширяет enums lifecycle.
+runtime_lifecycle_stop_reason_v2() {
+  case "$1" in
+    rewind-limit|loop-ceiling) printf '%s\n' rewind_limit ;;
+    no-progress) printf '%s\n' no_progress ;;
+    human) printf '%s\n' manual_resume_required ;;
+    *) printf '%s\n' operator_requested ;;
+  esac
+}
+
+# Читает только валидированную историю; 3 означает отсутствие именно этой проекции.
+# Другой вопрос того же визита — конфликт, а не основание записать дубль.
+runtime_lifecycle_human_lookup_v2() {
+  local reason=$1 evidence=$2 output=$3 ledger rc
+  ledger=$(mktemp "$(factory_control_root)/.human-lookup.XXXXXX") || return 74
+  attempt_lifecycle_read_v2 "${FACTORY_LIFECYCLE_TASK_ID#t}" \
+    "$FACTORY_LIFECYCLE_ATTEMPT_ID" >"$ledger"
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_analytics_python_v2 find-human-stop "$ledger" "$evidence" "$reason" >"$output"
+    rc=$?
+  fi
+  rm -f -- "$ledger"
+  return "$rc"
+}
+
+# Под orchestrator lock вопрос открывается один раз для принятого exact stage event.
+# Повтор после append не генерирует новый event с тем же id и другим временем.
+runtime_lifecycle_human_begin_once_v2() {
+  local reason=$1 evidence=$2 event rc hash
+  runtime_lifecycle_enabled_v2 || return 0
+  if [[ -z "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+    runtime_lifecycle_human_begin_v2 "$reason" "$evidence"
+    return
+  fi
+  event=$(mktemp "$(factory_control_root)/.human-once.XXXXXX") || return 74
+  runtime_lifecycle_human_lookup_v2 "$reason" "$evidence" "$event"
+  rc=$?
+  if (( rc == 0 )); then
+    hash=$(runtime_analytics_json_get_v2 "$event" eventHash) || rc=$?
+    RUNTIME_LIFECYCLE_HUMAN_SPAN_ID=$(runtime_analytics_json_get_v2 "$event" spanId) || rc=$?
+    RUNTIME_LIFECYCLE_HUMAN_STARTED_AT=$(runtime_analytics_json_get_v2 "$event" at) || rc=$?
+    export RUNTIME_LIFECYCLE_HUMAN_SPAN_ID RUNTIME_LIFECYCLE_HUMAN_STARTED_AT
+    if (( rc == 0 )); then
+      RUNTIME_LIFECYCLE_LAST_EVENT_HASH=$hash
+      export RUNTIME_LIFECYCLE_LAST_EVENT_HASH
+      printf '%s\n' "$hash"
+    fi
+  elif (( rc == 3 )); then
+    runtime_lifecycle_human_begin_v2 "$reason" "$evidence"
+    rc=$?
+  fi
+  rm -f -- "$event"
+  return "$rc"
+}
+
 runtime_lifecycle_human_begin_v2() {
   local reason=$1 evidence=${2:-} at mono boot details evidence_type=null
   runtime_lifecycle_enabled_v2 || return 0

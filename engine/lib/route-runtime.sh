@@ -33,6 +33,7 @@ source "$FACTORY_HOME/lib/workspace-guard.sh"
 source "$FACTORY_HOME/lib/instrumentation-transaction.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/runtime-analytics.sh"
+source "$FACTORY_HOME/lib/pending-transition.sh"
 
 _route_v2_fail() {
   printf 'route-v2 runtime: %s\n' "$*" >&2
@@ -745,16 +746,10 @@ _route_v2_no_result_label() {
 # хост может синхронно обновить вторичную UI-проекцию из последнего проверенного
 # события. Ошибка проекции останавливает dispatch: следующий resume прочитает то
 # же immutable событие и безопасно повторит reset до запуска очередного узла.
-_route_v2_commit_and_project() {
-  local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
-  local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
-  local target_budget=${9:-0} reject_feedback=${10:-} loop_max_rounds=${11:-0} cursor rc
-  local expected_sequence=${12:-} expected_hash=${13:-}
-  cursor=$(attempt_stage_state_commit_v2 \
-    "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
-    "$reject_feedback" "$loop_max_rounds" "$expected_sequence" "$expected_hash") || return
-  _route_v2_lifecycle_finish_visit_after_commit "$task" "$attempt" "$outcome" || return
+# Восстанавливает только вторичные представления уже проверенного stage ledger.
+# Точка используется обычным gate commit и replay host receipt без второго коммита.
+_route_v2_project_completed_node() {
+  local task=$1 attempt=$2 node=$3 outcome=$4 loop_max_rounds=$5 rc
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
       rc=$?
@@ -767,10 +762,23 @@ _route_v2_commit_and_project() {
     route_v2_project_work_time "$task" "$attempt" || true
   fi
   if (( loop_max_rounds > 0 )) && declare -F route_v2_project_loop >/dev/null; then
-    # Витрина цикла (круг, этап, потолок, последний отчёт) и снятие записи с отчёта
-    # исполнителя: следующий визит пишет свой отчёт, прошлый остаётся доказательством.
+    # Витрина цикла и снятие записи: старый отчёт остаётся доказательством.
     route_v2_project_loop "$task" "$attempt" "$node" "$outcome" || true
   fi
+  return 0
+}
+
+_route_v2_commit_and_project() {
+  local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
+  local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
+  local target_budget=${9:-0} reject_feedback=${10:-} loop_max_rounds=${11:-0} cursor
+  local expected_sequence=${12:-} expected_hash=${13:-}
+  cursor=$(attempt_stage_state_commit_v2 \
+    "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
+    "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
+    "$reject_feedback" "$loop_max_rounds" "$expected_sequence" "$expected_hash") || return
+  _route_v2_lifecycle_finish_visit_after_commit "$task" "$attempt" "$outcome" || return
+  _route_v2_project_completed_node "$task" "$attempt" "$node" "$outcome" "$loop_max_rounds" || return
   printf '%s\n' "$cursor"
 }
 
@@ -799,6 +807,60 @@ route_v2_loop_max_rounds() {
 # падение. Только чтение. Код 11 — потолок не поднят, 78 — потолок профиля испорчен
 # (причина — в журнал этапов); 0 — это не такая остановка или потолок поднят. Курсор,
 # который ещё не читается, — не повод отказывать: строгую проверку сделает общий путь.
+# Повтор завершённого recovery не открывает новую сессию и не закрывает тот же вопрос.
+# Обычный legacy done/skipped stop без доказанной cross-session проекции не меняется.
+route_v2_recovered_stop_held() {
+  local task=$1 attempt=$2 temp rc state stop outcome node sequence hash
+  _route_v2_load_attempt "$task" "$attempt" || return
+  temp=$(mktemp -d "$(factory_control_root)/.recovered-stop.XXXXXX") || return 74
+  attempt_stage_state_read_v2 "$task" "$attempt" >"$temp/state"
+  rc=$?
+  # Новая recover-попытка ещё не имеет cursor; штатный resume создаст его ниже.
+  # Только документированный 73 пропускается, integrity 78 и I/O остаются отказами.
+  if (( rc == 73 )); then
+    rm -rf -- "$temp"
+    return 0
+  fi
+  if (( rc == 0 )); then
+    state=$(runtime_analytics_json_get_v2 "$temp/state" state) || rc=$?
+    stop=$(runtime_analytics_json_get_v2 "$temp/state" stop) || rc=$?
+  fi
+  if (( rc == 0 )) && [[ "$state" != stopped || "$stop" != human && "$stop" != failed ]]; then
+    rm -rf -- "$temp"
+    return 0
+  fi
+  if (( rc == 0 )); then
+    outcome=$(runtime_analytics_json_get_v2 "$temp/state" lastCommit.outcome) || rc=$?
+    node=$(runtime_analytics_json_get_v2 "$temp/state" lastCommit.node) || rc=$?
+    sequence=$(runtime_analytics_json_get_v2 "$temp/state" eventSequence) || rc=$?
+    hash=$(runtime_analytics_json_get_v2 "$temp/state" headEventHash) || rc=$?
+  fi
+  if (( rc != 0 )); then
+    rm -rf -- "$temp"
+    return "$rc"
+  fi
+  if [[ "$outcome" == exhausted ]]; then
+    rm -rf -- "$temp"
+    return 0
+  fi
+  attempt_lifecycle_read_v2 "$task" "$attempt" >"$temp/ledger"
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_analytics_python_v2 find-recovered-stop "$temp/ledger" "$task" "$attempt" \
+      "$ROUTE_V2_PROFILE" "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" "$node" \
+      "$sequence" "$hash" >"$temp/human"
+    rc=$?
+  fi
+  rm -rf -- "$temp"
+  if (( rc == 3 )); then return 0; fi
+  (( rc == 0 )) || return "$rc"
+  if declare -F v2_log >/dev/null; then
+    v2_log "recovery: восстановленный вопрос сохранён; для нового исполнения нужен goto"
+    v2_log "${node^^}: маршрут остановлен: $stop"
+  fi
+  return 11
+}
+
 route_v2_loop_ceiling_held() {
   local task attempt cursor_tmp event_tmp state stop last_node last_outcome kind rounds
   local max_rounds
@@ -2096,6 +2158,13 @@ route_v2_dispatch_next() {
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   _route_v2_require_runner_invariant "$task" || return
   _route_v2_load_attempt "$task" "$attempt" || return
+  _route_v2_pending_drive "$task" "$attempt" 1 >/dev/null
+  rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) ;;
+    *) return "$rc" ;;
+  esac
 
   cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
   attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" || {
@@ -2496,7 +2565,7 @@ route_v2_dispatch_next() {
   if [[ "$executor" == agent && "$outcome" == skipped ]]; then
     skipped_reason=$(_route_v2_evidence_reason "${ROUTE_V2_NODE_COMMENT:-}")
   fi
-  _route_v2_commit_and_project \
+  _route_v2_commit_pending_node "$sequence" \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
     "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" "$skipped_reason" \
     "$loop_max_rounds" || {

@@ -950,3 +950,14 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 
 Schema, prompts, переходы и no-ship topology проверяет source-тест маршрутов профиля до
 live-публикации.
+
+## Host command готовности и восстановление перехода
+
+Профильная проверка/ограниченный ремонт стенда объявляются как обычный commandId с
+state-only capability. Hook проверяет task/attempt/workspace ownership до первого эффекта
+и печатает command verdict; stdout обязательно проверяется настоящим `_route_v2_command_result`.
+Маршрут задаёт возврат environment в эту команду явно. Агенту не выдаются Docker/DB права.
+
+Сохранённым исходом agent/command и повторами записи владеет общий host runtime; профиль
+не читает receipt как полномочие продвинуть курсор. Публичный API существующих hooks не
+изменяется. Подробности: [pending transition](../grigdesk/pipeline/pending-transition-recovery.md).

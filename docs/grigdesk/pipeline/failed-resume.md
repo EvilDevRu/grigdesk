@@ -49,3 +49,12 @@
 - `tests/engine/unit/runtime-human-diagnostic.sh` и
   `tests/engine/integration/route-human-resume-diagnostic.sh`: видимая причина ошибки без визита.
 - `tests/server/stall-human-stop.test.js`: разбор строки удержанного resume в карточке.
+
+## Восстановленный accepted stop
+
+Если сбой записи оставил host receipt, public resume сперва достраивает exact stage/runtime
+и проекции исходного вопроса, затем удерживает его. Повтор не завершает вопрос и не
+открывает новый visit/session. Ordinary legacy diagnostic и exhausted/loop ceiling
+не меняются. В журнале recovery-пояснение отделено от канонической stop-строки: сервер
+сохраняет stage/comment и правильное действие вопроса.
+Контракт — [восстановление перехода](pending-transition-recovery.md).
