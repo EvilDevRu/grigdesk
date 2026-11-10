@@ -75,7 +75,7 @@ test('MD-SETTINGS-UI: включения A/B независимы, default вы�
   await card.wrapper.get('[data-driver="fixture-b"]').trigger('click');
   assert.equal(card.wrapper.get('[data-driver="fixture-b"] [data-role="tracker-in-use"]').text(),
     'По умолчанию', 'Несохранённый дефолт не перемещает чип');
-  await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
   await card.flushPromises();
 
   const write = card.apiCalls.find((call) => call.method === 'POST' && call.url === '/api/trackers/settings');

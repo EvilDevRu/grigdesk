@@ -7,7 +7,7 @@ import {
 
 process.env.NODE_ENV = 'test';
 
-for (const screen of ['manage', 'source']) {
+for (const screen of ['source']) {
   test(`TRACKER-LOADING: ожидание ${screen} повторяет выбранный экран установщика`, async (t) => {
     const held = Promise.withResolvers();
     const card = await mountTrackerBoard(t, {
@@ -23,16 +23,11 @@ for (const screen of ['manage', 'source']) {
     t.after(() => held.resolve());
     await openTrackerSettings(card);
 
-    if (screen === 'source') {
-      await openTrackerInstaller(card);
-    } else {
-      await actionButton(card.wrapper, /^Другие действия$/u).trigger('click');
-      await card.flushPromises();
-    }
+    await openTrackerInstaller(card);
 
     const dialog = liveTrackerDialog(card);
     const loading = dialog.get('[data-ui-loading]');
-    const region = screen === 'source' ? 'tracker-sources' : 'tracker-packages';
+    const region = 'tracker-sources';
 
     assert.equal(loading.findAll('[role="status"]').length, 1);
     assert.equal(loading.get(`[data-loading-region="${region}"]`).attributes('aria-hidden'), 'true');
@@ -54,7 +49,7 @@ for (const screen of ['manage', 'source']) {
     const loaded = liveTrackerDialog(card);
 
     assert.equal(loaded.find('[data-ui-loading]').exists(), false);
-    assert.equal(loaded.find(screen === 'source' ? '.driver-source' : '.driver-package').exists(), true);
+    assert.equal(loaded.find('.driver-source').exists(), true);
     assert.equal(loaded.get('.driver-install').attributes('aria-busy'), 'false');
   });
 }

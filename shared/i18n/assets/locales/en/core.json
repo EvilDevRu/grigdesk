@@ -1405,6 +1405,7 @@
   "trackerResultStep": "Result",
   "trackerPrepareStep": "Preparation",
   "trackerBackToList": "Back to trackers",
+  "trackerBackToSettings": "Back to settings",
   "trackerCancelReview": "Cancel preparation",
   "trackerTechnicalDetails": "Technical details",
   "trackerPackageId": "Package identifier",
