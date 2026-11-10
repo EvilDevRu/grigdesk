@@ -1623,6 +1623,7 @@
   "chatHistoryOlderFailed": "Не загрузились старые сообщения",
   "chatHistoryBaseFailed": "Не обновилась база истории",
   "chatHistoryChanged": "Окно чата уже изменилось",
+  "chatSelectionConflict": "Не удалось согласовать настройки чата. Повторите отправку.",
   "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна",
   "trackerSourceUnavailable": "недоступен",
   "trackerDefaultBoard": "Доска по умолчанию"

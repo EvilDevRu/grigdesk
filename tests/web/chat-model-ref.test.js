@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { projectWebChatHead } from '../../shared/chat/chatListProjection.ts';
 import { apiHarness, chatStoreFixture, setChatProviders } from './helpers/chat-store.js';
 
 const RETIRED_MODEL_REF = Object.freeze({ provider: 'retired-provider', model: 'retired-model' });
@@ -81,7 +82,7 @@ test('выбор модели сохраняет provider/model, legacy model и
   assert.equal(session.surface, 'chats');
 });
 
-test('stale durable save повторяет CAS и запускает ход ровно один раз с выбранной моделью', async () => {
+test('stale durable save повторяет CAS и запускает ход ровно один раз с выбранной моделью', async (t) => {
   const chat = await chatStoreFixture({
     sessions: [{
       id: 'stale-chat',
@@ -93,7 +94,12 @@ test('stale durable save повторяет CAS и запускает ход р�
       updatedAt: 1,
     }],
   });
+
+  t.after(() => chat.$dispose());
+
   const puts = [];
+  let headReads = 0;
+
   apiHarness.put = async (_url, body) => {
     puts.push(JSON.parse(JSON.stringify(body.chat)));
     if (puts.length === 1) {
@@ -114,13 +120,16 @@ test('stale durable save повторяет CAS и запускает ход р�
     };
   };
   apiHarness.get = async (url) => {
-    assert.equal(url, '/api/chat/store/chat/stale-chat');
+    assert.equal(url, '/api/chat/store/head/stale-chat');
+    headReads += 1;
 
-    return { chat: {
+    return { head: projectWebChatHead({
       ...chat.sessions[0],
       revision: 3,
+      model: 'other-model',
       modelRef: { provider: 'test-provider', model: 'other-model' },
-    } };
+      speed: null,
+    }, 'stale-model-head') };
   };
 
   let posts = 0;
@@ -142,6 +151,7 @@ test('stale durable save повторяет CAS и запускает ход р�
   await chat.send('stale-chat', 'Составь план в md');
 
   assert.equal(puts.length, 2);
+  assert.equal(headReads, 1, 'другая модель подтверждается шапкой перед повтором CAS');
   assert.equal(puts[0].revision, 2);
   assert.equal(puts[1].revision, 3, 'повтор использует revision из stale-ack');
   assert.deepEqual(puts[1].modelRef, { provider: 'test-provider', model: 'chosen-model' });
@@ -159,7 +169,7 @@ test('stale durable save повторяет CAS и запускает ход р�
   assert.equal(puts[0].messages[0].sentAt, userMessage.sentAt, 'время попадает в durable историю до model POST');
 });
 
-test('неисчерпаемый stale не маскируется под обрыв и не запускает агента', async () => {
+test('несогласованная модель после stale не маскируется под обрыв и не запускает агента', async (t) => {
   const chat = await chatStoreFixture({
     sessions: [{
       id: 'busy-chat',
@@ -171,8 +181,13 @@ test('неисчерпаемый stale не маскируется под обр
       updatedAt: 1,
     }],
   });
+
+  t.after(() => chat.$dispose());
+
   let puts = 0;
   let posts = 0;
+  let headReads = 0;
+
   apiHarness.put = async () => ({
     stale: true,
     revision: 6 + puts++,
@@ -181,24 +196,29 @@ test('неисчерпаемый stale не маскируется под обр
     modelRef: { provider: 'test-provider', model: 'other-model' },
   });
   apiHarness.get = async (url) => {
-    assert.equal(url, '/api/chat/store/chat/busy-chat');
+    assert.equal(url, '/api/chat/store/head/busy-chat');
+    headReads += 1;
 
-    return { chat: {
+    return { head: projectWebChatHead({
       ...chat.sessions[0],
       revision: 5 + puts,
+      model: 'other-model',
       modelRef: { provider: 'test-provider', model: 'other-model' },
-    } };
+      speed: null,
+    }, `busy-model-head-${puts}`) };
   };
   apiHarness.post = async () => { posts += 1; return {}; };
 
   await chat.send('busy-chat', 'Не потеряй это сообщение');
 
   assert.equal(puts, 3, 'конфликт повторяется ограниченно');
+  assert.equal(headReads, 3, 'каждая свежая шапка подтверждает несовпадение выбранной модели');
   assert.equal(posts, 0, 'до снятия конфликта executor не запускается');
   assert.equal(chat.sessions[0].offline, false);
   assert.equal(chat.sessions[0].sending, false);
   assert.equal(chat.sessions[0].messages.at(-1).role, 'error');
-  assert.match(chat.sessions[0].messages.at(-1).text, /одновременно меняется/);
+  assert.match(chat.sessions[0].messages.at(-1).text, /Не удалось согласовать настройки чата/);
+  assert.doesNotMatch(chat.sessions[0].messages.at(-1).text, /Закрой|лишние окна/);
 });
 
 test('сеть на durable save означает «не отправлено», а не «ход продолжается»', async () => {

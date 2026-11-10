@@ -1603,6 +1603,7 @@
   "chatHistoryOlderFailed": "Could not load older messages",
   "chatHistoryBaseFailed": "Could not refresh the history base",
   "chatHistoryChanged": "The chat window has changed",
+  "chatSelectionConflict": "Could not synchronize the chat settings. Try sending again.",
   "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
   "trackerSourceUnavailable": "unavailable",
   "trackerDefaultBoard": "Default board"

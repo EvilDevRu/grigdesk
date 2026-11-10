@@ -754,8 +754,50 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const projectWorkspaces = new ChatProjectWorkspaces(config.chatsDir);
   const chatBrowserOwners = createChatBrowserOwnerSource({ history, trustedProject: trustedWorkProject });
   const removeBrowserOwners = opts.browser?.owners.register('chat', () => chatBrowserOwners.list());
+  const storeBroadcasts = new Map<string, { origin: string }>();
+
+  /**
+   * Рассылка изменения чата всем окнам вместе со свежей шапкой: получателю не нужен
+   * отдельный GET head, чтобы поправить строку списка или метку непрочитанного.
+   * Читается только изменённый файл: полная сверка каталога здесь задерживала ACK
+   * всех писателей при непрерывных изменениях. Более новый вызов или удаление
+   * отменяют старую рассылку, чтобы задержанное чтение не возвращало прежнюю шапку.
+   * Разные источники объединяются с пустым origin: ни одно окно не вправе
+   * пропустить чужие изменения как собственное эхо последней записи.
+   */
+  const broadcastChatStore = async (id: string, extra: Record<string, unknown> = {}): Promise<void> => {
+    const prior = storeBroadcasts.get(id);
+    const origin = typeof extra.origin === 'string' ? extra.origin : '';
+    const token = { origin: prior && prior.origin !== origin ? '' : origin };
+    let head: ReturnType<typeof projectWebChatHead> | null = null;
+
+    storeBroadcasts.set(id, token);
+
+    try {
+      const entry = await history.readEntry(id);
+
+      head = entry ? projectWebChatHead(entry.chat, history.versionOf(entry.json)) : null;
+    } catch {
+      // Адресное чтение недоступно — получатель сверит шапку следующим запросом.
+    }
+
+    if (storeBroadcasts.get(id) !== token) {
+      return;
+    }
+
+    storeBroadcasts.delete(id);
+    fastify.sse.broadcast('chat-store', {
+      id,
+      ...extra,
+      origin: token.origin,
+      head,
+      ...(head ? { archived: !!head.archived } : {}),
+      at: Date.now(),
+    });
+  };
 
   fastify.addHook('onClose', async () => {
+    storeBroadcasts.clear();
     removeBrowserOwners?.();
   });
 
@@ -1363,11 +1405,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     memory: workspaceMemory,
     summary: workspaceSummary,
     reset: resetWorkspaceMemory,
-    notify: (id) => fastify.sse.broadcast('chat-store', {
-      id,
-      origin: '',
-      at: Date.now()
-    }),
+    notify: (id) => {
+      void broadcastChatStore(id);
+    },
   });
 
   /**
@@ -2433,11 +2473,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     readPending: readPendingRecords,
     pendingDir,
     activeRunId: (chatKey) => activeRuns.get(chatKey)?.runId ?? null,
-    changed: (chatKey) => fastify.sse.broadcast('chat-store', {
-      id: chatKey,
-      origin: '',
-      at: Date.now(),
-    }),
+    changed: (chatKey) => {
+      void broadcastChatStore(chatKey);
+    },
   });
   const mobileHistoryTimer = setInterval(() => {
     void mobileHistory.reconcile().catch(() => {
@@ -3606,7 +3644,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           await history.patchExecution(chatKey, (record) => ({
             messages: [...(record.messages || []), { role: 'note', text: rotationNote }],
           }));
-          fastify.sse.broadcast('chat-store', { id: chatKey, origin: '' });
+          await broadcastChatStore(chatKey);
         }
 
         providerBinding = await bindingStore.rotate(providerIdentity, current?.generation ?? null);
@@ -5131,11 +5169,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         || turnLocks.isBusy({ chatKey: id }) || backgroundRuns.has(id)),
       lock: (id, action) => turnLocks.run({ chatKey: id }, action),
       reset: resetWorkspaceMemory,
-      changed: (id) => fastify.sse.broadcast('chat-store', {
-        id,
-        origin: '',
-        at: Date.now(),
-      }),
+      changed: (id) => {
+        void broadcastChatStore(id);
+      },
     }),
     compactWindow: () => Math.max(0, Number(prefs.read().chatAutoCompactWindow) || 0),
     defaults: () => history.readMetaRaw(),
@@ -5449,7 +5485,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     let changed = false;
 
     try {
-      const saved = await history.patchExecution(id, (current) => {
+      await history.patchExecution(id, (current) => {
         changed = Object.entries(patch).some(([key, value]) => (current[key] ?? null) !== value);
 
         return {
@@ -5460,16 +5496,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }, { skipUnchanged: true });
 
       if (changed) {
-        fastify.sse.broadcast('chat-store', {
-          id,
-          origin: request.body?.origin || '',
-          at: Date.now(),
-        });
+        await broadcastChatStore(id, { origin: request.body?.origin || '' });
       }
 
       const entry = await history.readEntry(id);
 
-      return { head: projectWebChatHead(saved, history.versionOf(entry!.json)) };
+      // Блокировка savingChats держит DELETE, но адресное чтение обязано переживать
+      // и будущее удаление файла другим путём: честный 404 лучше 500 от TypeError.
+      if (!entry) {
+        return reply.code(404).send({ error: 'no_chat' });
+      }
+
+      return { head: projectWebChatHead(entry.chat, history.versionOf(entry.json)) };
     } catch (error) {
       if (error instanceof ChatHistoryError) {
         return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -5653,12 +5691,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         });
       }
       const result = await history.ensureByPurpose({ purpose, taskId: canonicalTaskId });
-      if (result.created || result.restored) {
-        fastify.sse.broadcast('chat-store', {
-          id: result.chat!.id,
+
+      if (result.chat?.id && (result.created || result.restored)) {
+        await broadcastChatStore(result.chat.id, {
           archived: false,
           origin: String(origin || ''),
-          at: Date.now(),
           ensured: true,
         });
       }
@@ -5772,9 +5809,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const { written, restored, dropped, stale, chat: saved } = result;
       // Ничего не изменилось — молчим: лишний persist не повод будить остальные окна.
       if (written) {
-        fastify.sse.broadcast('chat-store', {
-          id: chat.id, archived: !!archived, origin: origin || '', at: Date.now(),
-        });
+        await broadcastChatStore(chatId, { archived: !!archived, origin: origin || '' });
       }
       // Окно прислало отставшую копию, сервер дописал в неё недостающее (см. merge-chat.js) —
       // значит у самого окна лента неполная и перечитать её должно и оно. Своё эхо оно
@@ -5784,8 +5819,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (restored || dropped) {
         fastify.log.warn({ chat: chat.id, restored, dropped }, 'история чата слита с серверной копией');
         setTimeout(() => {
-          fastify.sse.broadcast('chat-store', {
-            id: chat.id, archived: !!archived, origin: '', at: Date.now(), merged: true,
+          void broadcastChatStore(chatId, {
+            archived: !!archived,
+            origin: '',
+            merged: true,
           });
         }, 500).unref?.();
       }
@@ -5885,6 +5922,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
     deletingChats.add(id);
+    storeBroadcasts.delete(id);
     try {
       // Живой процесс агента удалённого чата держать не за чем: разговора больше нет,
       // а он занимает память и свои MCP-серверы.
