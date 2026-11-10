@@ -836,6 +836,24 @@
               >
                 {{ translate('core.stageRestartAction') }}
               </UiButton>
+              <!-- Перепривязка рантайма: этап отразил отказ среды из-за устаревшего
+                   инструмента закреплённой поставки. Снятие закрепления включает
+                   свежий инструмент на следующем запуске этой же попытки. -->
+              <UiButton
+                class="btn rebind"
+                variant="outline"
+                block
+                :loading="rebindBusy"
+                :disabled="Boolean(stageBusy)"
+                loading-label="Снимаю закрепление"
+                @click="rebindRuntime"
+              >
+                Перепривязать рантайм
+              </UiButton>
+              <p class="gate-hint">
+                Попытка закреплена за поставкой сервера. Снятие закрепления
+                включает обновлённый инструмент этапа на следующем запуске.
+              </p>
             </div>
           </aside>
 
@@ -1834,6 +1852,9 @@ const stageFindingsReady = ref(false);
 const gateRejecting = ref(false);
 const gateNoteEl = ref<InstanceType<typeof UiTextarea> | null>(null);
 const rewindComment = ref('');
+// Перепривязка рантайма остановленной попытки: отдельное busy, чтобы действие
+// не смешивалось с возвратом курсора и не блокировалось им в обратную сторону.
+const rebindBusy = ref(false);
 // Ответы на вопросы узла: id находки → текст. Отдельно от свободного поля, потому что
 // каждый ответ обязан приехать агенту привязанным к ЕГО вопросу, а не сплошняком.
 const rewindAnswers = ref<Record<string, string>>({});
@@ -2392,6 +2413,45 @@ async function forceStatus(status: string) {
     finishStageAction(opened);
   }
 }
+/**
+ * Снимает закрепление рантайма у остановленной попытки. Следующий запуск попытки
+ * закрепит текущую поставку сервера — так доезжают обновления инструмента этапа
+ * (например, новые действия браузера) без перезапуска задачи с нуля.
+ */
+async function rebindRuntime() {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value || rebindBusy.value) {
+    return;
+  }
+
+  if (!await confirmDialog(
+    'Снять закрепление рантайма этой попытки? '
+      + 'Следующий запуск продолжит попытку на текущей поставке сервера.',
+    { okText: 'Перепривязать' },
+  )) {
+    return;
+  }
+
+  rebindBusy.value = true;
+
+  try {
+    const res = decodePipelineReply(await api.post(
+      `/api/tasks/${opened.task}/runtime-rebind`,
+      {},
+    ));
+
+    alertDialog(res.note || 'Готово.');
+    await load();
+  }
+  catch (e) {
+    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+  }
+  finally {
+    rebindBusy.value = false;
+  }
+}
+
 // Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
 // а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
 // приезжает обычным путём — load() → watch(stageLive) → stage.meta.
