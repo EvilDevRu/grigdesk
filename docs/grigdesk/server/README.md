@@ -87,7 +87,7 @@
 
 ## Грабли
 
-- [Синхронность ожидания версии серверного ELF: рассинхрон с VERSION ломает установку окна](runtime-env-version-sync.md)
+- [Версия продукта не закрепляется в host-скрипте: формат stable/dev и совместимость ELF](runtime-env-version-sync.md)
 - [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)

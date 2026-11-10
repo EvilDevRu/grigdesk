@@ -22,7 +22,7 @@ grigdesk-ctl build apk
 затем три цепочки собираются **параллельно**: сервер (`prepare-runtime`, `build:binary`,
 `install:binary`), окно (`npm run build` в web и `npm --prefix desktop run dist`) и задачи
 Б24 (`npm --prefix tracker run build`). Установка окна идёт строго после всех цепочек:
-`deploy/desktop.sh install` проверяет метаданные `bin/grigdesk-server` по текущей VERSION
+`deploy/desktop.sh install` проверяет метаданные и совместимость `bin/grigdesk-server`
 ([декодер runtime-env](runtime-env-version-sync.md)), поэтому не может конкурировать
 с `install:binary`. Отдельные цели остаются последовательными: `server` вызывает
 `build:binary` и `install:binary`; `web` сохраняет подготовку зависимостей и
