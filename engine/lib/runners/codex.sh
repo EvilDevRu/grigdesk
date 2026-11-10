@@ -328,3 +328,10 @@ runner_codex_dialect() {
 runner_codex_interrupt() {
   return 0
 }
+
+# Варианты запуска подтверждаются metadata раннера, отдельно от каталога чатов.
+# Callback не вызывает модель и не пишет реестр пользовательских настроек.
+runner_codex_model_options() {
+  source "$FACTORY_HOME/lib/runner-model-options.sh"
+  _runner_model_options codex
+}

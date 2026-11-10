@@ -15,6 +15,7 @@ source "$FACTORY_HOME/lib/runtime-switch.sh"
 source "$FACTORY_HOME/lib/coverage.sh"
 source "$FACTORY_HOME/lib/adapters/index.sh"
 source "$FACTORY_HOME/lib/execution-plan.sh"
+source "$FACTORY_HOME/lib/stage-runner-settings.sh"
 
 multi_runner_config_file() {
   local profiles_dir=${FACTORY_PROFILES_DIR:-"$(cd "$FACTORY_HOME/.." && pwd)/profiles"}
@@ -76,6 +77,12 @@ _multi_catalog_model() {
       MULTI_RESOLVED_MODEL=$model
       return 0
     }
+    if [[ -z "$exact" ]] && declare -F "runner_${provider}_family_alias" >/dev/null &&
+       runner_call "$provider" family_alias "$family"; then
+      MULTI_RESOLVED_MODEL=$family
+      MULTI_CATALOG_REVISION=provider-alias
+      return 0
+    fi
     return "$rc"
   fi
 
@@ -216,15 +223,47 @@ _multi_resolve() {
     variant=$(awk -F= '$1=="VARIANT"{print $2}' <<<"$defaults")
     effort=$(awk -F= '$1=="EFFORT"{print $2}' <<<"$defaults")
   fi
-  if ! _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
-    # Смену сборки runtime-sensitive runner-а уже отсекла проба выше. Здесь каталог
-    # отказал той же сборке: это выбор модели, а не runtime_changed без failover.
+  [[ -n "$effort" ]] || effort=high
+  local settings_selection=${MULTI_SETTINGS:-null} selected_model="" selected_effort="" models=""
+  local has_settings=0
+  if [[ -n "${MULTI_FROZEN_RESTART:-}" ]]; then
+    settings_selection=$(jq '{selection:{parametersFor:.effective.primary,
+      model:.effective.model,effort:.effective.effort}}' <<<"$MULTI_FROZEN_RESTART")
+  fi
+  if [[ "$settings_selection" != null &&
+        "$(jq -r .selection.parametersFor <<<"$settings_selection")" == "$provider" ]]; then
+    has_settings=1
+    selected_model=$(jq -r '.selection.model // empty' <<<"$settings_selection")
+    if [[ "$(jq -r '.selection.effort | type' <<<"$settings_selection")" == string ]]; then
+      effort=$(jq -r .selection.effort <<<"$settings_selection")
+    fi
+    models=$(_stage_settings_models "$provider") || {
+      DISPATCH_RESOLVE_RESULT=invalid_config
+      return 4
+    }
+  fi
+  if [[ -n "$selected_model" ]]; then
+    # Canonical pin уже принадлежит metadata раннера, включая opaque JSON modelRef.
+    # Старый profile exact не может отменить явно выбранную доступную модель.
+    MULTI_RESOLVED_MODEL=$selected_model
+    MULTI_CATALOG_REVISION=node-settings
+    fallback=""
+  elif ! _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
     if [[ -n "$exact" ]]; then
       DISPATCH_RESOLVE_RESULT=invalid_config
     else
       DISPATCH_RESOLVE_RESULT=route_unavailable
     fi
     return 4
+  fi
+  if (( has_settings )); then
+    if ! jq -e --arg model "$MULTI_RESOLVED_MODEL" --arg effort "$effort" \
+      'any(.models[]; (.id == $model or ((.aliases // []) | index($model)))
+        and (.efforts | index($effort)))' <<<"$models" >/dev/null; then
+      printf 'invalid_config: недоступная model/effort %s / %s\n' "$MULTI_RESOLVED_MODEL" "$effort" >&2
+      DISPATCH_RESOLVE_RESULT=invalid_config
+      return 4
+    fi
   fi
   provider_key=$(_multi_provider_key "$provider")
   auth_profile=$(profile_config_get "$config" "RUNNER_${provider_key}_AUTH_PROFILE")
@@ -276,6 +315,28 @@ _multi_postamble_reclassify_v2() {
   local task=$1 stage=$2 run_id=$3 epoch=$4 current=$5
   local request_id target
   RUNNER_POSTAMBLE_RESULT_CLASS=$current
+  if [[ -n "${MULTI_SETTINGS_IDENTITY:-}" ]]; then
+    local pending lock_fd task_fd consume_rc
+    pipeline_lock_acquire "$task" lock_fd || return 1
+    _attempt_state_lock "$task" task_fd || {
+      pipeline_lock_release "$lock_fd"
+      return 1
+    }
+    pending=$(_stage_settings_tool consume "$MULTI_SETTINGS_IDENTITY" "$run_id" "$epoch")
+    consume_rc=$?
+    _attempt_state_unlock "$task_fd"
+    pipeline_lock_release "$lock_fd"
+    if (( consume_rc == 0 )); then
+      MULTI_SETTINGS_RESTART=$pending
+      MULTI_MANUAL_TARGET=$(jq -r .effective.primary <<<"$pending")
+      RUNNER_POSTAMBLE_RESULT_CLASS=manual_switch
+      return 0
+    elif (( consume_rc != 3 )); then
+      MULTI_SWITCH_CONSUME_FAILED=1
+      RUNNER_POSTAMBLE_RESULT_CLASS=unknown
+      return 0
+    fi
+  fi
   _multi_request_matches "$task" "$stage" "$run_id" "$epoch" || return 0
   request_id=$(_run_state_get "$(_runtime_switch_file "$task" "$stage")" REQUEST_ID)
   target=$(runtime_switch_consume "$task" "$stage" "$run_id" "$epoch" "$request_id") || {
@@ -317,11 +378,40 @@ _multi_invoke() {
   MULTI_LAST_RUN_ID=$run_id
   MULTI_LAST_RUN_EPOCH=$epoch
   MULTI_LAST_RUNNER=$provider
-  run_state_begin "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token" || {
-    DISPATCH_INVOKE_RESULT=unknown
+  # Настройки могут измениться после resolver. До создания capability перечитываем
+  # целый снимок; повтор пересобирает цепочку и не расходует автоматический retry.
+  local settings_before=${MULTI_SETTINGS:-null} admission_lock admission_rc admission_task_lock=""
+  pipeline_lock_acquire "$MULTI_TASK" admission_lock || return 1
+  if [[ -n "${MULTI_SETTINGS_IDENTITY:-}" ]]; then
+    _attempt_state_lock "$MULTI_TASK" admission_task_lock || {
+      pipeline_lock_release "$admission_lock"
+      return 1
+    }
+  fi
+  _stage_settings_load "$MULTI_TASK" "$MULTI_STAGE" || {
+    [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
+    pipeline_lock_release "$admission_lock"
+    DISPATCH_INVOKE_RESULT=invalid_config
     DISPATCH_INVOKE_STARTED=0
     return 0
   }
+  if [[ "$settings_before" != "$MULTI_SETTINGS" ]]; then
+    [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
+    pipeline_lock_release "$admission_lock"
+    MULTI_SETTINGS_RETRY=1
+    DISPATCH_INVOKE_RESULT=invalid_config
+    DISPATCH_INVOKE_STARTED=0
+    return 0
+  fi
+  run_state_begin_unlocked "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token"
+  admission_rc=$?
+  [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
+  pipeline_lock_release "$admission_lock"
+  if (( admission_rc != 0 )); then
+    DISPATCH_INVOKE_RESULT=unknown
+    DISPATCH_INVOKE_STARTED=0
+    return 0
+  fi
   # Bash передаёт local-переменные вызывающей функции динамически: dispatcher
   # держит здесь доказанную причину перехода (limit/preflight/manual). Публикуем
   # её до запуска provider, иначе весь долгий run GrigDesk показывает устаревшую
@@ -408,9 +498,34 @@ tests — дефект/неполнота теста; environment —
   export FACTORY_DEBUG_CATALOG_REVISION="${MULTI_CATALOG_REVISION:-unknown}"
   export FACTORY_DEBUG_PLAN_LEVEL="${MULTI_PLAN_LEVEL[$provider]:-unknown}"
   export FACTORY_DEBUG_REASON="$active_reason"
+  local previous_session_mode=${FACTORY_PROVIDER_SESSION_MODE-}
+  local previous_requested_scope=${FACTORY_PROVIDER_REQUESTED_SCOPE-}
+  if [[ -n "${MULTI_RESTART_REQUEST:-}" ]]; then
+    export FACTORY_PROVIDER_SESSION_MODE=fresh FACTORY_PROVIDER_REQUESTED_SCOPE=""
+  fi
   runner_launch "$provider" "$MULTI_TASK" "$prompt" "$MULTI_STAGE" "$model" \
-    "${DISPATCH_RESOLVED_EFFORT:-high}" "$MULTI_TIMEOUT" "$run_dir" "$run_id" "$epoch" "$token"
+    "${DISPATCH_RESOLVED_EFFORT-high}" "$MULTI_TIMEOUT" "$run_dir" "$run_id" "$epoch" "$token"
   rc=$?
+  if [[ -n "${MULTI_RESTART_REQUEST:-}" ]]; then
+    if [[ -n "$previous_session_mode" ]]; then
+      export FACTORY_PROVIDER_SESSION_MODE=$previous_session_mode
+    else
+      unset FACTORY_PROVIDER_SESSION_MODE
+    fi
+    if [[ -n "$previous_requested_scope" ]]; then
+      export FACTORY_PROVIDER_REQUESTED_SCOPE=$previous_requested_scope
+    else
+      unset FACTORY_PROVIDER_REQUESTED_SCOPE
+    fi
+  fi
+  if [[ -n "${MULTI_RESTART_REQUEST:-}" && -z "$MULTI_MANUAL_TARGET" ]]; then
+    if [[ "$rc" == 0 ]]; then
+      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" started ''
+    else
+      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" failed \
+        'launch: новый процесс завершился с ошибкой'
+    fi
+  fi
   if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" && "$rc" != 0 ]]; then
     DISPATCH_INVOKE_RESULT=invalid_config
     DISPATCH_INVOKE_DETAIL="браузерный транспорт: $BROWSER_TRANSPORT_ERROR"
@@ -565,11 +680,16 @@ _multi_require_coverage() {
 multi_runner_run() {
   local task=$1 prompt=$2 stage=$3 timeout_s=$4
   local config route primary failover rc manual_count=0 switched=0
+  MULTI_TASK=$task
+  MULTI_STAGE=$stage
+  MULTI_FROZEN_RESTART=""
   config=$(multi_runner_config_file)
   profile_config_validate "$config" || return 78
   route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
   primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
   failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+  _stage_settings_load "$task" "$stage" || return 78
+  _stage_settings_route
   MULTI_COVERAGE_REQUIRED=0
   if [[ "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
     MULTI_COVERAGE_REQUIRED=1
@@ -591,6 +711,10 @@ multi_runner_run() {
   MULTI_TIMEOUT=$timeout_s
   MULTI_MANUAL_TARGET=""
   MULTI_SWITCH_CONSUME_FAILED=0
+  MULTI_SETTINGS_RESTART=""
+  MULTI_RESTART_REQUEST=""
+  MULTI_SETTINGS_RETRY=0
+  local admission_retries=0
   MULTI_LAST_RUN_ID=""
   MULTI_LAST_RUN_EPOCH=""
   MULTI_LAST_RUNNER=""
@@ -613,6 +737,21 @@ multi_runner_run() {
     dispatcher_run_chain "$task" "$stage" "$primary" "$failover" "$(date +%s)" \
       _multi_resolve _multi_invoke "$human_choice"
     rc=$?
+    if [[ "$MULTI_SETTINGS_RETRY" == 1 ]]; then
+      admission_retries=$((admission_retries + 1))
+      if (( admission_retries >= 3 )); then
+        _multi_catalog_cleanup
+        return 75
+      fi
+      MULTI_SETTINGS_RETRY=0
+      route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
+      primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
+      failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+      _stage_settings_route
+      MULTI_PRIMARY=$primary
+      MULTI_FAILOVER=$failover
+      continue
+    fi
     if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
       primary=$MULTI_MANUAL_TARGET
       # Кнопка переключения нажата прямо во время хода — это тот же явный выбор.
@@ -621,7 +760,15 @@ multi_runner_run() {
       MULTI_PRIMARY=$primary
       MULTI_FAILOVER=$failover
       MULTI_MANUAL_TARGET=""
-      manual_count=$((manual_count + 1))
+      if [[ -n "$MULTI_SETTINGS_RESTART" ]]; then
+        MULTI_RESTART_REQUEST=$(jq -r .requestId <<<"$MULTI_SETTINGS_RESTART")
+        MULTI_FROZEN_RESTART=$MULTI_SETTINGS_RESTART
+        _stage_settings_load "$task" "$stage" || return 78
+        _stage_settings_route
+        MULTI_SETTINGS_RESTART=""
+      else
+        manual_count=$((manual_count + 1))
+      fi
       switched=1
       MULTI_DISPATCH_ORDINAL=$((MULTI_DISPATCH_ORDINAL + 1))
       MULTI_DISPATCH_SOURCE_OVERRIDE=manual-switch

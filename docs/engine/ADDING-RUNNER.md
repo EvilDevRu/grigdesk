@@ -66,6 +66,13 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
   не понимает «Aug 8th, 2026»). Разбор чужого текста ошибается, поэтому границы срока
   раннера не касаются: потолок и отбрасывание прошедшей даты сделаны в `breaker_record` —
   см. [MULTI-AI.md](MULTI-AI.md), «Предохранитель».
+- **Варианты модели и effort.** Необязательный `model_options` печатает JSON schema 1:
+  `models: [{id, label, efforts, aliases}]`. Каждый список усилий относится к своей модели;
+  `""` означает явно разрешённое отсутствие флага. Alias должен указывать на подтверждённую
+  модель текущего CLI. Callback не вызывает модель и не пишет реестр чатов; отсутствие
+  metadata означает недоступность редактора. Общий `runner-model-options.sh` вызывает
+  helper `factory-runner-models` из той же закреплённой поставки и её Node. Options, apply
+  и запуск повторно проверяют пару; explicit pin не получает family downgrade.
 - **Runtime usage dialect.** После quiescence launcher разбирает retained original
   `events.jsonl` и пишет расход в schema-2 блок `meta.env` — см.
   [ENGINE.md](ENGINE.md#retained-fd-usage-и-diagnostic-meta-mirror). Для нового provider

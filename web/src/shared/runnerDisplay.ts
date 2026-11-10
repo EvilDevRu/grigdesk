@@ -164,7 +164,7 @@ export function runnerEffortLabel(
   const attempts = Array.isArray(runner.attempts) ? runner.attempts : [];
   const latest = attempts.findLast((attempt: RunnerAttempt) => attempt?.runner === provider);
 
-  if (latest?.effort) {
+  if (latest?.effort !== null && latest?.effort !== undefined) {
     return String(latest.effort);
   }
 
@@ -181,8 +181,11 @@ export function runnerModelEffortLabel(
 ): string {
   const model = runnerModelLabel(runner, provider);
   const effort = runnerEffortLabel(runner, provider);
+  const latest = runner?.attempts?.findLast((attempt) => attempt.runner === provider);
+  const effortLabel = latest?.effort === ''
+    ? translate('core.stageNoEffort') : effort ? `effort ${effort}` : '';
 
-  return [model, effort ? `effort ${effort}` : ''].filter(Boolean).join(' · ');
+  return [model, effortLabel].filter(Boolean).join(' · ');
 }
 
 /**
@@ -192,8 +195,10 @@ export function runnerModelEffortLabel(
 export function runnerAttemptModelLabel(attempt: RunnerAttempt | null | undefined): string {
   const model = String(attempt?.model || '');
   const effort = String(attempt?.effort || '');
+  const effortLabel = attempt?.effort === ''
+    ? translate('core.stageNoEffort') : effort ? `effort ${effort}` : '';
 
-  return [model, effort ? `effort ${effort}` : ''].filter(Boolean).join(' · ');
+  return [model, effortLabel].filter(Boolean).join(' · ');
 }
 
 /**

@@ -2,6 +2,14 @@ import { config as runtimeConfig } from '../config.ts';
 
 import { execFile } from 'node:child_process';
 import type { ExecFileOptions } from 'node:child_process';
+import { routePathArgs, runRouteEngine } from './factoryRouteCli.ts';
+import type { RouteConfig } from './factoryRouteCli.ts';
+import {
+  decodeStageRunnerApply, decodeStageRunnerIdentity, decodeStageRunnerOptions, stageRunnerSelectionError,
+} from '../../../shared/pipeline/stageRunnerSettings.ts';
+import type {
+  StageRunnerApply, StageRunnerIdentity, StageRunnerOptions,
+} from '../../../shared/pipeline/stageRunnerSettings.ts';
 
 const TASK_RE = /^\d+$/;
 const STAGE_RE = /^[A-Z][A-Z0-9_]*$/;
@@ -9,6 +17,15 @@ const PROVIDER_RE = /^[a-z][a-z0-9_-]*$/;
 
 export class RunnerControlInputError extends Error {}
 export class RunnerControlCommandError extends Error {}
+
+export class StageRunnerCommandError extends Error {
+  readonly code: number;
+
+  constructor(code: number, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 // Потоки завершённой команды. Ошибку запуска отдаёт reject, а не поле результата.
 export interface RunnerRunResult {
@@ -54,18 +71,22 @@ export class FactoryRunnerControl {
 
   readonly run: RunnerRunner;
 
+  readonly routeConfig?: RouteConfig;
+
   constructor({
     factoryBin,
     stateDir,
     configRoot,
     profilesDir = '',
     run = defaultRun,
+    routeConfig,
   }: {
     factoryBin: string;
     stateDir: string;
     configRoot: string;
     profilesDir?: string;
     run?: RunnerRunner;
+    routeConfig?: RouteConfig;
   }) {
     if (!factoryBin || !stateDir || !configRoot) {
       throw new Error('FactoryRunnerControl: factoryBin/stateDir/configRoot are required');
@@ -75,6 +96,92 @@ export class FactoryRunnerControl {
     this.configRoot = configRoot;
     this.profilesDir = profilesDir;
     this.run = run;
+    this.routeConfig = routeConfig;
+  }
+
+  /**
+   * Новые команды используют полный маршрутный контекст и закреплённый runtime.
+   * Старые set/clear/switch сохраняют прежний публичный контракт.
+   */
+  async settingsCommand(
+    operation: 'options' | 'apply' | 'show', identity: StageRunnerIdentity, extra: string[] = [],
+  ): Promise<StageRunnerOptions> {
+    identity = decodeStageRunnerIdentity(identity);
+
+    if (!this.routeConfig) {
+      throw new RunnerControlInputError('Нет контекста закреплённого движка.');
+    }
+
+    const args = [identity.task, 'runner', 'settings', operation,
+      '--profile', identity.profile, '--attempt', identity.attempt,
+      '--node', identity.node, '--stage', identity.stage, ...extra, ...routePathArgs(this.routeConfig)];
+    const result = await runRouteEngine(this.routeConfig, args);
+
+    if (!result.ok) {
+      throw new StageRunnerCommandError(result.code, result.stderr || result.message);
+    }
+
+    return decodeStageRunnerOptions(JSON.parse(result.stdout));
+  }
+
+  /**
+   * Каталог читается лениво для выбранного исполнителя и точного узла.
+   * Provider не нормализуется удалением недопустимых символов.
+   */
+  async settingsOptions({ identity, provider }: {
+    identity: StageRunnerIdentity; provider: string;
+  }): Promise<StageRunnerOptions> {
+    if (!PROVIDER_RE.test(provider)) {
+      throw new RunnerControlInputError('Некорректный исполнитель.');
+    }
+
+    return this.settingsCommand('options', identity, ['--provider', provider]);
+  }
+
+  /**
+   * Передаёт целый apply без per-field мутаций; CAS повторно проверяет сам движок.
+   * Неопределённый исход команды восстанавливается чтением receipt того же запроса.
+   */
+  async applySettings(input: StageRunnerApply): Promise<StageRunnerOptions> {
+    const payload = decodeStageRunnerApply(input);
+    let options;
+
+    try {
+      options = await this.settingsOptions({
+        identity: payload.identity,
+        provider: payload.selection.parametersFor,
+      });
+    } catch (error) {
+      const current = await this.settingsCommand('show', payload.identity);
+
+      if (current.receipt?.requestId !== payload.requestId) {
+        throw error;
+      }
+
+      options = current;
+    }
+
+    if (options.receipt?.requestId !== payload.requestId) {
+      const invalid = stageRunnerSelectionError(payload.selection, options);
+
+      if (invalid) {
+        throw new StageRunnerCommandError(75, invalid);
+      }
+    }
+
+    try {
+      return await this.settingsCommand('apply', payload.identity, ['--payload', JSON.stringify(payload)]);
+    } catch (error) {
+      if (error instanceof StageRunnerCommandError && /не уложился/u.test(error.message)) {
+        const current = await this.settingsCommand('show', payload.identity);
+
+        if (current.receipt?.requestId === payload.requestId) {
+          return current;
+        }
+      }
+
+      throw error;
+    }
   }
 
   async exec(args: string[]): Promise<RunnerControlResult> {

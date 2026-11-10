@@ -343,7 +343,7 @@ export async function readRunnerAttempts(
         epoch: /^\d+$/.test(meta.EPOCH || '') ? Number(meta.EPOCH) : null,
         runner: PROVIDER_ID.test(meta.RUNNER || '') ? meta.RUNNER ?? null : null,
         model: runnerModelName(meta.RESOLVED_MODEL || meta.MODEL),
-        effort: meta.EFFORT || null,
+        effort: meta.EFFORT ?? null,
         reason: meta.ROUTE_REASON || null,
         result: meta.RESULT_CLASS || null,
         rc: /^-?\d+$/.test(meta.RC || '') ? Number(meta.RC) : null,

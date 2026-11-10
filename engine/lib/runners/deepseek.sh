@@ -265,3 +265,10 @@ runner_deepseek_interrupt() {
   # Host quiescence в обоих случаях добивает tool/MCP children этой сессии.
   return 0
 }
+
+# Варианты запуска подтверждаются metadata раннера, отдельно от каталога чатов.
+# Callback не вызывает модель и не пишет реестр пользовательских настроек.
+runner_deepseek_model_options() {
+  source "$FACTORY_HOME/lib/runner-model-options.sh"
+  _runner_model_options deepseek
+}

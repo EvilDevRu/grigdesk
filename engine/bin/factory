@@ -14,7 +14,7 @@ if [[ "${1:-}" == capabilities ]]; then
     printf '%s\n' 'factory: capabilities требует --format json' >&2
     exit 78
   fi
-  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1"]}'
+  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1","stage-runner-settings-v1"]}'
   exit 0
 fi
 

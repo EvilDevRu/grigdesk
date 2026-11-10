@@ -38,7 +38,7 @@
 - [Пересборка проверяет совместимость сервера с установленными DeepSeek/GLM до замены](server-executor-install-guard.md)
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
 - [Движок поставки и физические профили одиночного ELF](server-binary-factory.md)
-- [Factory helpers и полный статусный протокол payload](server-binary-factory-helpers.md)
+- [Factory helpers, metadata моделей и полный статусный протокол payload](server-binary-factory-helpers.md)
 - [Host hooks DeepSeek и GLM в payload](server-binary-hooks.md)
 - [Guard данных и внешние команды payload](server-binary-placement.md)
 - [CJS payload и ленивый запуск приложения](server-binary-entry.md)

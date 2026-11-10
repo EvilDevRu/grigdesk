@@ -313,6 +313,11 @@ _runner_cli_task() {
   local task=${1#[tT]} noun=${2:-} verb=${3:-}
   shift 3 2>/dev/null || return 2
   [[ "$task" =~ ^[0-9]+$ && ( "$noun" == runner || "$noun" == debug ) ]] || return 2
+  if [[ "$noun" == runner && "$verb" == settings ]]; then
+    source "$FACTORY_HOME/lib/stage-runner-settings.sh"
+    stage_runner_settings_cli "$task" "$@"
+    return
+  fi
   local file
   file=$(pipeline_store_file "$task")
   [[ -f "$file" ]] || {

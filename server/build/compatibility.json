@@ -40,6 +40,11 @@
       "path": "server/scripts/glmRuntimeInfo.mts",
       "helper": "glm-runtime-info",
       "kind": "script"
+    },
+    {
+      "path": "server/scripts/factoryRunnerModels.mts",
+      "helper": "factory-runner-models",
+      "kind": "script"
     }
   ]
 }

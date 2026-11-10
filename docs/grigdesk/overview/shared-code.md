@@ -73,6 +73,7 @@
 | `plugins/providerUsageResources.ts` | Проверка JSON-ресурсов фонового плагина, безопасных ссылок и собственных переводов для всплывашки исполнителя |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |
 | `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
+| `pipeline/stageRunnerSettings.ts` | Строгие exact DTO редактора этапа и общая проверка пары model/effort | Node, браузер |
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |
 | `server/src/lib/executors/scopedDsh.ts`, `server/src/lib/deepseek/abortableOperation.ts` | Общий одноразовый профиль DSH для scoped triage и отдельного текстового model-only; proof, cleanup и отмена ожидания caller без остановки shared metadata probe ([контракт](../chat/dsh-model-only.md)) |
 | `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |

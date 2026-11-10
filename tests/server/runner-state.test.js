@@ -406,3 +406,22 @@ test('runner work time sums process spans instead of gaps between route events',
     { sinceMs: Date.now() + 60_000 },
   ), null, 'run-каталоги предыдущей attempt не попадают в новый счётчик');
 });
+
+// К4: отсутствие поля в legacy и явно пустой effort запуска различаются.
+test('explicit-empty-effort-is-not-missing', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'stage-empty-effort-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  for (const [id, effort] of [['empty', 'EFFORT=\n'], ['legacy', '']]) {
+    const run = path.join(root, 'logs/runs/t81/PLAN', id);
+
+    await mkdir(run, { recursive: true });
+    await writeFile(path.join(run, 'meta.env'), `RUNNER=codex\nMODEL=model-a\n${effort}`);
+  }
+
+  const attempts = await readRunnerAttempts(root, '81', 'PLAN');
+
+  assert.equal(attempts.find((attempt) => attempt.id === 'empty').effort, '');
+  assert.equal(attempts.find((attempt) => attempt.id === 'legacy').effort, null);
+});

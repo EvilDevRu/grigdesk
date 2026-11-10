@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { compilePipelineView } from './helpers/pipeline-view.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { settingsButton, settingsFields, stageSettingsOptions } from './helpers/stage-runner-settings.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -23,7 +24,7 @@ async function mountPipelines(t, { running = false } = {}) {
     task,
     profile: `project-${task}`,
     route: 'feature',
-    attempt: `attempt-${task}`,
+    attempt: `a_${String(task).padStart(32, '0')}`,
     daemonAlive: running,
     readOnly: false,
     result: null,
@@ -59,6 +60,14 @@ async function mountPipelines(t, { running = false } = {}) {
   const writes = new Map();
   const posts = [];
   const alerts = [];
+  const optionsRequests = [];
+  const pendingOptions = new Map();
+  const confirmedByTask = new Map(tasks.map((task) => [task.task, stageSettingsOptions({
+    ...task,
+    node: 'browser',
+    stage: 'BROWSER',
+    running,
+  })]));
   const api = {
     /**
      * Читает синтетические снимки и удерживает только явно задержанные запросы.
@@ -71,6 +80,26 @@ async function mountPipelines(t, { running = false } = {}) {
       if (url === '/api/tasks?sources=1') {
         return { tasks };
       }
+      if (url.includes('/runner/options')) {
+        optionsRequests.push(url);
+
+        const task = Number(url.match(/tasks\/(\d+)/)[1]);
+
+        if (pendingOptions.has(task)) {
+          return pendingOptions.get(task).promise;
+        }
+
+        const provider = new URL(url, 'http://fixture').searchParams.get('provider') || 'claude';
+        const confirmed = confirmedByTask.get(task);
+
+        return provider === confirmed.selection.parametersFor ? confirmed : stageSettingsOptions({
+          ...tasks.find((entry) => entry.task === task),
+          node: 'browser',
+          stage: 'BROWSER',
+          provider,
+          running,
+        });
+      }
       if (url === '/api/factory/runners') {
         return { runners: ['claude', 'codex'] };
       }
@@ -79,10 +108,22 @@ async function mountPipelines(t, { running = false } = {}) {
 
       return index < 0 ? {} : graphs[index];
     },
+    /**
+     * Запоздалые ответы мутаций завершаются только по команде сценария.
+     * Подтверждённая настройка затем читается тем же options, как после ответа настоящего API.
+     */
     async post(url, body) {
       posts.push({ url, body });
 
-      return writes.has(url) ? writes.get(url).promise : { ok: true, resumed: true };
+      const result = writes.has(url) ? await writes.get(url).promise : { ok: true, resumed: true };
+
+      if (url.endsWith('/runner/settings') && result.selection) {
+        const task = Number(url.match(/tasks\/(\d+)/)[1]);
+
+        confirmedByTask.set(task, result);
+      }
+
+      return result;
     },
   };
 
@@ -108,6 +149,12 @@ async function mountPipelines(t, { running = false } = {}) {
       },
       title() {
         return null;
+      },
+      async getStageRunnerOptions(task, query) {
+        return api.get(`/api/tasks/${task}/runner/options?${new URLSearchParams(query)}`);
+      },
+      async applyStageRunnerSettings(task, payload) {
+        return api.post(`/api/tasks/${task}/runner/settings`, payload);
       },
       async setStageRunner(task, stage, primary) {
         return api.post(`/api/tasks/${task}/runner`, { stage, primary });
@@ -146,6 +193,8 @@ async function mountPipelines(t, { running = false } = {}) {
     writes,
     posts,
     alerts,
+    optionsRequests,
+    pendingOptions,
     /**
      * Закрывает прежнее окно и открывает узел публичным событием нужного графа.
      * Все ожидающие ответы при этом продолжают принадлежать прежним запросам.
@@ -228,7 +277,7 @@ test('ответ ворот прежнего конвейера не закры�
   assert.deepEqual(fx.posts[0].body, {
     comment: '',
     profile: 'project-42',
-    attempt: 'attempt-42',
+    attempt: `a_${'42'.padStart(32, '0')}`,
   });
 });
 
@@ -287,8 +336,8 @@ test('завершение выбора исполнителя не сбрасы
   const first = Promise.withResolvers();
   const second = Promise.withResolvers();
 
-  fx.writes.set('/api/tasks/42/runner', first);
-  fx.writes.set('/api/tasks/43/runner', second);
+  fx.writes.set('/api/tasks/42/runner/settings', first);
+  fx.writes.set('/api/tasks/43/runner/settings', second);
 
   for (const index of [0, 1]) {
     await fx.open(index);
@@ -299,17 +348,35 @@ test('завершение выбора исполнителя не сбрасы
     assert.equal(picks[1].element.disabled, false);
     await picks[1].trigger('click');
     await fx.flushPromises();
+    await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+    await fx.flushPromises();
   }
 
-  first.resolve({ ok: true });
+  const confirmed = (index) => ({
+    ...stageSettingsOptions({
+      ...fx.tasks[index],
+      node: 'browser',
+      stage: 'BROWSER',
+      provider: 'codex',
+    }),
+    selection: {
+      primary: 'codex',
+      parametersFor: 'codex',
+      model: null,
+      effort: null
+    },
+    revision: 1,
+  });
+
+  first.resolve(confirmed(0));
   await fx.flushPromises();
 
   const selected = fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1];
 
   assert.equal(selected.attributes('aria-pressed'), 'true');
-  assert.equal(fx.wrapper.findAll('.executor-row')[1].attributes('aria-busy'), 'true');
+  assert.equal(settingsButton(fx.wrapper, /^Применить$/).element.disabled, true);
   assert.equal(selected.element.disabled, true);
-  second.resolve({ ok: true });
+  second.resolve(confirmed(1));
   await fx.flushPromises();
   assert.equal(fx.wrapper.vm.stageBusy, null);
 });
@@ -327,11 +394,78 @@ test('занятый узел блокирует повтор и соседни�
   assert.equal(fx.wrapper.get('.executor-row .ui-selectable-row__primary').element.disabled, true);
   assert.equal(fx.posts.length, 1);
 
-  fx.tasks[0].attempt = 'next-attempt';
+  fx.tasks[0].attempt = `a_${'9'.repeat(32)}`;
   await fx.wrapper.vm.load();
   await fx.open(0);
   assert.equal(fx.wrapper.get('.rewind-sect .play').element.disabled, false);
   pending.resolve({ ok: true, resumed: true });
   await fx.flushPromises();
-  assert.equal(fx.wrapper.vm.stage?.attempt, 'next-attempt');
+  assert.equal(fx.wrapper.vm.stage?.attempt, `a_${'9'.repeat(32)}`);
+});
+
+// К6: оба await принадлежат прежнему opening, даже если stage ID совпадает.
+test('late-options-and-confirmation-ignore-new-opening', async (t) => {
+  const fx = await mountPipelines(t, { running: true });
+  const pending = Promise.withResolvers();
+
+  fx.pendingOptions.set(42, pending);
+  await fx.open(0);
+  await fx.wrapper.get('#stage-executors-tab').trigger('click');
+  assert.ok(fx.optionsRequests.some((url) => url.includes('/tasks/42/runner/options')));
+  await fx.open(1);
+  await fx.wrapper.get('#stage-executors-tab').trigger('click');
+
+  const foreign = stageSettingsOptions({
+    task: 42,
+    profile: 'project-42',
+    attempt: fx.tasks[0].attempt,
+    node: 'browser',
+    stage: 'BROWSER',
+  });
+
+  foreign.models = [{
+    id: 'foreign-model',
+    label: 'Модель прежнего окна',
+    efforts: ['high'],
+    aliases: [],
+  }];
+  foreign.effective.model = 'foreign-model';
+  foreign.effective.effort = 'high';
+  pending.resolve(foreign);
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.vm.stage.task, 43);
+  assert.equal(settingsFields(fx.wrapper)[0].findAll('option')
+    .some((option) => option.element.value === 'foreign-model'), false);
+
+  const confirmation = Promise.withResolvers();
+
+  globalThis[`${fx.prefix}ConfirmDialog`] = () => confirmation.promise;
+  await settingsFields(fx.wrapper)[1].setValue('high');
+  await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
+  await fx.open(0);
+  confirmation.resolve(true);
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.vm.stage.task, 42);
+  assert.equal(fx.posts.some((post) => post.url.endsWith('/runner/settings')), false);
+});
+
+test('dirty-draft-survives-refresh', async (t) => {
+  const fx = await mountPipelines(t);
+
+  await fx.open(0);
+  await fx.wrapper.get('#stage-executors-tab').trigger('click');
+
+  const fields = settingsFields(fx.wrapper);
+
+  assert.equal(fields[0].element.disabled, false);
+  await fields[0].setValue('opus-other');
+  await fields[1].setValue('low');
+
+  fx.graphs[0].nodeMeta.browser.runner.actual = 'claude';
+  fx.graphs[0].nodeMeta.browser.runner.model = 'actual-after-refresh';
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+  assert.equal(settingsFields(fx.wrapper)[0].element.value, 'opus-other');
+  assert.equal(settingsFields(fx.wrapper)[1].element.value, 'low');
+  assert.equal(fx.posts.some((post) => post.url.endsWith('/runner/settings')), false);
 });

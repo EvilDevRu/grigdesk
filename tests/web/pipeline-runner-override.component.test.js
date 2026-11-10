@@ -5,6 +5,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compilePipelineView } from './helpers/pipeline-view.js';
+import { settingsButton, settingsFields, stageSettingsOptions } from './helpers/stage-runner-settings.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -23,7 +24,7 @@ function makeFixture({
     route: 'feature',
     readOnly,
     daemonAlive,
-    attempt: null,
+    attempt: 'a_0123456789abcdef0123456789abcdef',
     result: null,
     stall: null,
   };
@@ -34,6 +35,7 @@ function makeFixture({
     nodes: { plan: [0, '📋 План'], gate_plan: [1, '🚦 Ворота плана'] },
     pos: { plan: 0, gate_plan: 1 },
     keys: { plan: 'PLAN', gate_plan: 'GATE_PLAN' },
+    runnerKeys: { plan: 'PLAN', gate_plan: 'GATE_PLAN' },
     statuses: { plan: status, gate_plan: 'pending' },
     nodeMeta: {
       plan: {
@@ -72,9 +74,13 @@ function makeFixture({
   return { factoryTask, graph };
 }
 
-// Стенд страницы конвейера: happy-dom + заглушки сторов, api — перехватчик.
+/**
+ * Стенд страницы держит раздельные confirmed/options и telemetry графа.
+ * Happy-dom и сторы изолируют только внешние границы настоящего редактора.
+ */
 async function mountPipeline(t, {
   factoryTask, graph, runners = ['claude', 'codex'], applyOverride = false,
+  optionsHandler = null, applyHandler = null, settings = null,
 }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
@@ -109,6 +115,16 @@ async function mountPipeline(t, {
   ]);
   const getCalls = [];
   const runnerCalls = [];
+  const applyCalls = [];
+  const optionCalls = [];
+  let confirmed = settings || stageSettingsOptions({
+    running: graph.statuses.plan === 'run' && graph.daemonAlive,
+  });
+
+  if (!settings && graph.nodeMeta.plan.runner.source === 'task-stage') {
+    confirmed.selection.primary = graph.nodeMeta.plan.runner.primary;
+    confirmed.sources.primary = 'task-stage';
+  }
 
   globalThis.__pipelineRunnerApi = {
     /**
@@ -127,14 +143,56 @@ async function mountPipeline(t, {
       if (url === '/api/factory/runners') {
         return { runners };
       }
+      if (url.includes('/runner/options')) {
+        optionCalls.push(url);
+
+        if (optionsHandler) {
+          return optionsHandler(url, confirmed);
+        }
+
+        const provider = new URL(url, 'http://fixture').searchParams.get('provider') || 'claude';
+
+        return provider === confirmed.selection.parametersFor
+          ? confirmed
+          : stageSettingsOptions({ provider });
+      }
       if (url.includes('/instruction')) {
         return { text: '' };
       }
 
       return {};
     },
-    async post() {
-       return { ok: true };
+    /**
+     * Подтверждает целую selection после явного действия и сохраняет actual отдельно.
+     * Повторное открытие читает обновлённый снимок через тот же options endpoint.
+     */
+    async post(url, payload) {
+      if (url.endsWith('/runner/settings')) {
+        applyCalls.push([url, payload]);
+
+        if (applyHandler) {
+          return applyHandler(payload);
+        }
+
+        const next = stageSettingsOptions({ provider: payload.selection.parametersFor });
+
+        confirmed = {
+          ...next,
+          actual: confirmed.actual,
+          effective: {
+            primary: payload.selection.primary || payload.selection.parametersFor,
+            model: payload.selection.model ?? next.effective.model,
+            effort: payload.selection.effort ?? next.effective.effort,
+          },
+          selection: { ...payload.selection },
+          revision: confirmed.revision + 1,
+          receipt: { requestId: payload.requestId, state: payload.mode === 'restart' ? 'pending' : 'saved' },
+        };
+
+        return confirmed;
+      }
+
+      return { ok: true };
     },
   };
   globalThis.__pipelineRunnerConfirmDialog = async () => true;
@@ -155,6 +213,14 @@ async function mountPipeline(t, {
       },
       title() {
          return null;
+      },
+      async getStageRunnerOptions(id, query) {
+        return globalThis.__pipelineRunnerApi.get(
+          `/api/tasks/${id}/runner/options?${new URLSearchParams(query)}`,
+        );
+      },
+      async applyStageRunnerSettings(id, payload) {
+        return globalThis.__pipelineRunnerApi.post(`/api/tasks/${id}/runner/settings`, payload);
       },
       async setStageRunner(id, stage, primary) {
         runnerCalls.push([id, stage, primary]);
@@ -215,59 +281,63 @@ async function mountPipeline(t, {
     flushPromises,
     getCalls,
     runnerCalls,
+    applyCalls,
+    optionCalls,
+    readConfirmed: () => confirmed,
     openStage,
     openPlanStage
   };
 }
 
-test('небегущий этап: карточки всех исполнителей, текущий подсвечен, клик шлёт override', async (t) => {
-  const { wrapper, getCalls, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+test('selection-is-draft', async (t) => {
+  const fx = await mountPipeline(t, makeFixture());
 
-  await openPlanStage('wait');
+  await fx.openPlanStage('wait');
+  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.flushPromises();
+  assert.deepEqual(fx.runnerCalls, [], 'выбор исполнителя не вызывает legacy override');
+  assert.deepEqual(fx.applyCalls, [], 'черновик не сохраняется до явного действия');
 
-  const block = wrapper.get('.runner-override');
+  const fields = settingsFields(fx.wrapper);
 
-  assert.match(block.text(), /Исполнитель этапа/);
-  // Все установленные исполнители — карточками, а не пунктами скрытого списка.
-  const picks = wrapper.findAll('.executor-row .ui-selectable-row__primary');
-
-  assert.deepEqual(picks.map((pick) => pick.get('b').text()), ['Claude', 'Codex']);
-  // Текущее эффективное значение — runner.primary, источник виден рядом (RUNNER_SOURCE).
-  assert.deepEqual(
-    picks.map((pick) => pick.attributes('aria-pressed')),
-    ['true', 'false'],
-  );
-  assert.equal(picks[0].attributes('aria-selected'), 'true');
-  assert.match(wrapper.get('.runner-sect').text(), /политика этапа/);
-  // Список исполнителей приехал из /api/factory/runners.
-  assert.ok(getCalls.includes('/api/factory/runners'));
-
-  await picks[1].trigger('click');
-  assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
+  assert.ok(fields.length >= 2);
+  assert.equal(fields[0].element.disabled, false);
+  await fields[0].setValue('sol-other');
+  await fields[1].setValue('low');
+  assert.deepEqual(fx.applyCalls, []);
 });
 
-// Модалка живёт дольше одного решения: человек сравнивает исполнителей и перебирает их.
-// Закрытие после каждого клика заставляло заново искать узел на графе.
-test('выбор исполнителя не закрывает модалку, а обновляет её на месте', async (t) => {
-  const { wrapper, flushPromises, runnerCalls, openPlanStage } = await mountPipeline(
-    t, { ...makeFixture(), applyOverride: true },
-  );
+test('apply-one-tuple-keeps-dialog', async (t) => {
+  const fx = await mountPipeline(t, makeFixture());
 
-  await openPlanStage('wait');
+  await fx.openPlanStage('wait');
+  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.flushPromises();
 
-  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
-  assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
-  assert.ok(wrapper.find('.smodal').exists(), 'модалка этапа осталась открытой');
+  const fields = settingsFields(fx.wrapper);
 
-  await flushPromises();
-  assert.ok(wrapper.find('.smodal').exists(), 'модалка не закрылась и после ответа сервера');
-  // Новое состояние узла приезжает обычным путём: load() → watch(stageLive) → stage.meta.
-  const picks = wrapper.findAll('.executor-row .ui-selectable-row__primary');
-
-  assert.equal(picks[0].attributes('aria-selected'), 'false');
-  assert.equal(picks[1].attributes('aria-selected'), 'true');
-  assert.match(wrapper.get('.runner-sect').text(), /переопределение этапа задачи/);
-  assert.ok(wrapper.find('.runner-reset').exists(), 'появилась кнопка сброса override');
+  assert.equal(fields[0].element.disabled, false);
+  await fields[0].setValue('sol-other');
+  await fields[1].setValue('low');
+  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 1);
+  assert.deepEqual(fx.applyCalls[0][1].selection, {
+    primary: 'codex',
+    parametersFor: 'codex',
+    model: 'sol-other',
+    effort: 'low',
+  });
+  assert.deepEqual(fx.applyCalls[0][1].identity, {
+    task: '42',
+    profile: 'project-alpha',
+    attempt: 'a_0123456789abcdef0123456789abcdef',
+    node: 'plan',
+    stage: 'PLAN',
+  });
+  assert.equal(fx.applyCalls[0][1].mode, 'next');
+  assert.equal(fx.wrapper.find('.smodal').exists(), true);
+  assert.deepEqual(fx.runnerCalls, []);
 });
 
 test('карточка текущего исполнителя запроса не шлёт', async (t) => {
@@ -279,17 +349,20 @@ test('карточка текущего исполнителя запроса н
   assert.deepEqual(runnerCalls, []);
 });
 
-test('модель и effort показывают политику, но остаются недоступны для изменения', async (t) => {
-  const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+test('options-models-and-efforts-match-selected-provider', async (t) => {
+  const fx = await mountPipeline(t, makeFixture());
 
-  await openPlanStage('wait');
+  await fx.openPlanStage('wait');
 
-  const fields = wrapper.findAll('.executor-fields select');
+  const fields = settingsFields(fx.wrapper);
 
-  assert.deepEqual(fields.map((field) => field.element.value), ['opus', 'max', 'sol', 'ultra']);
-  assert.ok(fields.every((field) => field.element.disabled));
-  assert.match(wrapper.get('#stage-executor-preview').text(), /Выбор модели и effort появится позже/);
-  assert.deepEqual(runnerCalls, []);
+  assert.equal(fields[0].element.disabled, false);
+  assert.ok(fields[0].findAll('option').some((item) => item.element.value === 'opus-other'));
+  await fields[0].setValue('opus-other');
+  await fx.flushPromises();
+  assert.ok(fields[1].findAll('option').some((item) => item.element.value === 'low'));
+  assert.equal(fields[1].findAll('option').some((item) => item.element.value === 'max'), false);
+  assert.deepEqual(fx.applyCalls, []);
 });
 
 test('результат открывается первым, переход между вкладками сохраняет указание агенту', async (t) => {
@@ -430,21 +503,16 @@ test('ручной запуск без Bitrix показывает заголо�
   assert.equal(wrapper.text().includes('загрузка названия'), false);
 });
 
-test('источник task-stage: видна «Сбросить» с честной подписью, клик шлёт пустой primary', async (t) => {
-  const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
-    t, makeFixture({ source: 'task-stage' }),
-  );
+test('reset-executor-is-draft', async (t) => {
+  const fx = await mountPipeline(t, makeFixture({ source: 'task-stage' }));
 
-  await openPlanStage('idle');
-
-  const reset = wrapper.get('.runner-reset');
-
-  assert.match(reset.text(), /Сбросить/);
-  // Подпись обязана говорить, к чему вернётся этап: к override задачи или к профилю.
-  assert.match(wrapper.get('.runner-override').text(), /запуске задачи|профил/);
-
-  await reset.trigger('click');
-  assert.deepEqual(runnerCalls, [[42, 'PLAN', '']]);
+  await fx.openPlanStage('idle');
+  await fx.wrapper.get('.runner-reset').trigger('click');
+  assert.deepEqual(fx.runnerCalls, []);
+  assert.deepEqual(fx.applyCalls, []);
+  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls[0][1].selection.primary, null);
 });
 
 test('источник не task-stage: кнопки «Сбросить» нет', async (t) => {
@@ -456,19 +524,38 @@ test('источник не task-stage: кнопки «Сбросить» нет
   assert.equal(wrapper.find('.runner-reset').exists(), false);
 });
 
-test('этап в run: блока выбора нет, остаются только switch-кнопки', async (t) => {
-  const { wrapper, openPlanStage } = await mountPipeline(t, makeFixture({ status: 'run', actual: 'claude' }));
+test('active-next-preserves-fact', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
 
-  await openPlanStage('run');
+  fixture.graph.nodeMeta.plan.runner.model = 'opus';
+  fixture.graph.nodeMeta.plan.runner.attempts = [{
+    id: 'run-current',
+    epoch: 1,
+    runner: 'claude',
+    model: 'opus',
+    effort: 'high',
+    result: null,
+  }];
 
-  assert.equal(wrapper.find('.runner-override').exists(), false);
+  const fx = await mountPipeline(t, fixture);
 
-  const switches = wrapper.get('.runner-switches');
+  await fx.openPlanStage('run');
 
-  assert.match(switches.text(), /Переключить сейчас на Codex/);
+  const fields = settingsFields(fx.wrapper);
+
+  assert.equal(fields[0].element.disabled, false);
+  await fields[0].setValue('opus-other');
+  await fields[1].setValue('low');
+  await settingsButton(fx.wrapper, /Сохранить для следующего запуска/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 1);
+  assert.equal(fx.applyCalls[0][1].mode, 'next');
+  assert.match(fx.wrapper.get('.runner-attempt').text(), /opus · effort high/);
+  assert.equal(fixture.graph.nodeMeta.plan.runner.model, 'opus');
+  assert.equal(fx.wrapper.find('.smodal').exists(), true);
 });
 
-test('остановленный run: вместо live-switch показывается override для следующего resume', async (t) => {
+test('остановленный run: черновик сохраняется для следующего resume', async (t) => {
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
     t,
     makeFixture({
@@ -488,7 +575,8 @@ test('остановленный run: вместо live-switch показыва�
   assert.match(block.text(), /Продолжить прогон/);
 
   await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
-  assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
+  assert.deepEqual(runnerCalls, []);
+  assert.ok(settingsButton(wrapper, /^Применить$/).exists());
 });
 
 test('readOnly: блока выбора исполнителя нет', async (t) => {
@@ -533,4 +621,135 @@ test('tasks.setStageRunner шлёт POST /api/tasks/:id/runner/override (пус�
     ['/api/tasks/42/runner/override', { stage: 'PLAN', primary: '' }],
   ]);
   delete globalThis.__pipelineRunnerStoreApi;
+});
+
+// К2/К6: тот же provider, изменение только effort, отмена и явное подтверждение.
+test('same-provider-effort-restart', async (t) => {
+  const fx = await mountPipeline(t, makeFixture({ status: 'run', actual: 'claude' }));
+  const confirmations = [];
+
+  globalThis.__pipelineRunnerConfirmDialog = async (...args) => {
+    confirmations.push(args);
+
+    return false;
+  };
+  await fx.openPlanStage('run');
+
+  const fields = settingsFields(fx.wrapper);
+
+  assert.equal(fields[1].element.disabled, false);
+  await fields[1].setValue('high');
+  await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(confirmations.length, 1);
+  assert.match(JSON.stringify(confirmations[0]), /останов|заверш|прерв/i);
+  assert.deepEqual(fx.applyCalls, []);
+
+  globalThis.__pipelineRunnerConfirmDialog = async () => true;
+  await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 1);
+  assert.equal(fx.applyCalls[0][1].mode, 'restart');
+  assert.deepEqual(fx.applyCalls[0][1].selection, {
+    primary: null,
+    parametersFor: 'claude',
+    model: null,
+    effort: 'high',
+  });
+  assert.deepEqual(fx.applyCalls[0][1].expectedRun, { id: 'run-current', epoch: 1 });
+});
+
+// К3: каждое поле возвращается к наследованию без сброса второго.
+test('independent-inheritance-and-remount', async (t) => {
+  const settings = stageSettingsOptions();
+
+  settings.selection = {
+    primary: null,
+    parametersFor: 'claude',
+    model: 'opus-other',
+    effort: 'high'
+  };
+
+  const fx = await mountPipeline(t, { ...makeFixture(), settings });
+
+  await fx.openPlanStage('wait');
+
+  const fields = settingsFields(fx.wrapper);
+
+  assert.equal(fields[0].element.disabled, false);
+
+  const inheritModel = fields[0].findAll('option').find((option) => /профил|наслед/i.test(option.text()));
+
+  assert.ok(inheritModel, 'у модели есть независимое наследование');
+  await fields[0].setValue(inheritModel.element.value);
+  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.at(-1)[1].selection.model, null);
+  assert.equal(fx.applyCalls.at(-1)[1].selection.effort, 'high');
+
+  const inheritEffort = fields[1].findAll('option').find((option) => /профил|наслед/i.test(option.text()));
+
+  assert.ok(inheritEffort, 'у effort есть независимое наследование');
+  await fields[1].setValue(inheritEffort.element.value);
+  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.at(-1)[1].selection.effort, null);
+
+  const restored = await mountPipeline(t, { ...makeFixture(), settings: fx.readConfirmed() });
+
+  await restored.openPlanStage('wait');
+  assert.match(restored.wrapper.get('#stage-executors-panel').text(), /профил|наслед/i);
+  assert.equal(restored.optionCalls.length > 0, true, 'после remount authority читается из API');
+  assert.deepEqual(restored.applyCalls, []);
+});
+
+test('options-loading-empty-error-retry', async (t) => {
+  await t.test('loading не разрешает сохранение до каталога', async (sub) => {
+    const pending = Promise.withResolvers();
+    const fx = await mountPipeline(sub, { ...makeFixture(), optionsHandler: () => pending.promise });
+
+    await fx.openPlanStage('wait');
+    assert.match(fx.wrapper.get('#stage-executors-panel').text(), /загруз|получаем/i);
+    assert.deepEqual(fx.applyCalls, []);
+    pending.resolve(stageSettingsOptions());
+    await fx.flushPromises();
+    assert.equal(settingsFields(fx.wrapper)[0].element.disabled, false);
+  });
+
+  await t.test('пустой каталог имеет явное состояние', async (sub) => {
+    const options = stageSettingsOptions();
+
+    options.models = [];
+
+    const fx = await mountPipeline(sub, { ...makeFixture(), optionsHandler: () => options });
+
+    await fx.openPlanStage('wait');
+    assert.match(fx.wrapper.get('#stage-executors-panel').text(),
+      /нет доступных|каталог.*пуст|модели.*недоступ/i);
+    assert.deepEqual(fx.applyCalls, []);
+  });
+
+  await t.test('ошибка оставляет окно и даёт повторить discovery', async (sub) => {
+    let count = 0;
+    const fx = await mountPipeline(sub, {
+      ...makeFixture(),
+      optionsHandler: () => {
+        count += 1;
+
+        if (count === 1) {
+          throw new Error('Каталог временно недоступен');
+        }
+
+        return stageSettingsOptions();
+      },
+    });
+
+    await fx.openPlanStage('wait');
+    assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Каталог временно недоступен/);
+    await settingsButton(fx.wrapper, /Повторить|Обновить/).trigger('click');
+    await fx.flushPromises();
+    assert.equal(count, 2);
+    assert.equal(settingsFields(fx.wrapper)[0].element.disabled, false);
+    assert.equal(fx.wrapper.find('.smodal').exists(), true);
+  });
 });
