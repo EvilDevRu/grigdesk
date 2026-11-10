@@ -38,7 +38,7 @@
   "devices": "Устройства",
   "devicesDescription": "привязать телефон по QR, список, отозвать",
   "build": "Сборка",
-  "buildDescription": "сервер, веб, окно, DeepSeek, APK, переносимый комплект",
+  "buildDescription": "сервер, веб, окно, tasks, DeepSeek, APK, переносимый комплект",
   "development": "Разработка",
   "developmentDescription": "dev-режим, зависимости, run",
   "exit": "Выход",
@@ -60,7 +60,7 @@
   "namePrompt": "Введите имя устройства (Esc — отмена):",
   "idPrompt": "Введите id устройства (Esc — отмена):",
   "all": "Всё",
-  "allDescription": "сервер → веб → окно, сборка и установка",
+  "allDescription": "(server, desktop, tasks) — параллельная сборка и установка",
   "serverOnly": "Только сервер",
   "serverOnlyDescription": "собрать и установить серверный ELF",
   "web": "Только веб",
@@ -89,7 +89,7 @@
   "failed": "Ошибка: {step}, код {code}",
   "interrupted": "прервано",
   "total": "Общее время: {time}",
-  "summaryAll": "Поставлены сервер, веб и окно.",
+  "summaryAll": "Поставлены сервер, веб, окно и tasks.",
   "summaryServer": "Поставлен сервер: {path}",
   "summaryWeb": "Собран веб: {path}",
   "summaryWindow": "Поставлено окно: {path}; веб собран.",
@@ -134,6 +134,10 @@
     "window": {
       "package": "Окно: упаковка",
       "install": "Окно: установка"
+    },
+    "tracker": {
+      "deps": "Tasks: зависимости",
+      "build": "Tasks: сборка"
     },
     "deepseek": {
       "deps": "DeepSeek: зависимости",

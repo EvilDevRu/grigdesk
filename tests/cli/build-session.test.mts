@@ -303,12 +303,19 @@ for (const [command, argument, code] of [
       assert.match(log.text, /tail-1\n/u);
       assert.match(log.text, /tail-25\n/u);
 
+      // Параллельные цепочки добавляют в хвост журнала свои строки, а длинные строки
+      // переносятся на 80 колонках терминала, поэтому сравнение идёт по плоскому
+      // тексту: без ANSI-кодов и разбивки по пробелам.
+      const flat = (value: string) => value
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/gu, '')
+        .replace(/\s+/gu, '');
       const failureScreen = session.output().slice(session.output().lastIndexOf('✗'));
+      const flatScreen = flat(failureScreen);
 
       const tail = log.text.trimEnd().split(/\r?\n/u).slice(-20);
 
       for (const line of tail) {
-        assert.ok(failureScreen.includes(line), `Нет строки хвоста: ${line}`);
+        assert.ok(flatScreen.includes(flat(line)), `Нет строки хвоста: ${line}`);
       }
 
       assert.doesNotMatch(failureScreen, /tail-[1-5](?:\r?\n|$)/u);

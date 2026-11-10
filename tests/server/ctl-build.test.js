@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { fixture, expectedBuildCalls } from './helpers/ctlBuildFixture.js';
+import { fixture, expectedBuildCalls, expectedAllPhases, assertInterleavedPhases } from './helpers/ctlBuildFixture.js';
 
 const sourceMarkers = ['server/src/app.ts', 'web/package.json', 'desktop/package.json'];
 
@@ -86,10 +86,21 @@ test('build: deps/mobile/release в исходниках обходят уста
   }
 });
 
-test('build: all по умолчанию и отдельные цели соблюдают точный порядок и argv', async (t) => {
-  for (const target of [undefined, 'all', 'server', 'web', 'window', 'apk']) {
+test('build: all собирает сервер, окно и tasks параллельными цепочками', async (t) => {
+  for (const target of [undefined, 'all']) {
     const box = await fixture(t);
     const result = await box.run(['build', ...target ? [target] : []]);
+
+    assert.equal(result.code, 0, `${target}: ${result.stderr}`);
+    assertInterleavedPhases(await box.calls(), expectedAllPhases(box));
+    assert.match(result.stdout, /Закройте окно и откройте снова — запустится новый код/u);
+  }
+});
+
+test('build: отдельные цели соблюдают точный порядок и argv', async (t) => {
+  for (const target of ['server', 'web', 'window', 'apk']) {
+    const box = await fixture(t);
+    const result = await box.run(['build', target]);
 
     assert.equal(result.code, 0, `${target}: ${result.stderr}`);
     assert.deepEqual(await box.calls(), expectedBuildCalls(box, target));
@@ -276,27 +287,68 @@ test('build: сервер и DeepSeek получают фактический р
   }
 });
 
-test('build: первая ошибка обрывает all и сохраняет код отказавшей стадии', async (t) => {
+test('build: отказ цепочки в all не отменяет параллельные, код — первой отказавшей', async (t) => {
   const failures = [
-    ['npm', 'build:binary', 21, 1, 'server'],
-    ['npm', 'install:binary', 22, 2, 'server'],
-    ['npm', 'build', 23, 4, 'web'],
-    ['npm', 'dist', 24, 5, 'window'],
-    ['desktop', 'install', 25, 6, 'window'],
+    ['npm', 'build:binary', 21, 'server'],
+    ['npm', 'install:binary', 22, 'server'],
+    ['npm', 'build', 23, 'web'],
+    ['npm', 'dist', 24, 'window'],
+    ['desktop', 'install', 25, 'window'],
   ];
 
-  for (const [command, argument, code, count, step] of failures) {
+  for (const [command, argument, code, step] of failures) {
     const box = await fixture(t);
 
     await box.fail(command, argument, code);
 
     const result = await box.run(['build']);
+    const calls = await box.calls();
+    const installed = calls.some((call) => call.command === 'desktop'
+      && call.args.includes('install'));
 
     assert.equal(result.code, code, result.stderr);
     assert.match(result.stderr, new RegExp(`не удалось: ${step}`));
-    assert.deepEqual(await box.calls(), expectedBuildCalls(box).slice(0, count));
+    assert.ok(calls.some((call) => call.command === 'npm'
+      && call.args.includes(path.join(box.root, 'tracker'))), 'tasks не собирался параллельно');
+    assert.equal(installed, argument === 'install');
     assert.doesNotMatch(result.stdout, /Закройте окно/);
   }
+});
+
+test('build: отказ tasks оставляет установку окна несостоявшейся, код сохранён', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', path.join(box.root, 'tracker'), 27);
+
+  const result = await box.run(['build']);
+  const calls = await box.calls();
+
+  assert.equal(result.code, 27, result.stderr);
+  assert.match(result.stderr, /не удалось: tasks/u);
+  assert.ok(calls.some((call) => call.args.includes('install:binary')),
+    'сервер не собирался параллельно');
+  assert.ok(!calls.some((call) => call.command === 'desktop' && call.args.includes('install')));
+  assert.doesNotMatch(result.stdout, /Закройте окно/);
+});
+
+test('build all: без node_modules tasks ставит зависимости перед сборкой', async (t) => {
+  const box = await fixture(t);
+
+  await fs.rm(path.join(box.root, 'tracker/node_modules'), { recursive: true });
+
+  const result = await box.run(['build']);
+  const calls = await box.calls();
+  const deps = calls.find((call) => call.args.includes('install')
+    && call.args.includes('--no-audit') && call.args.includes(path.join(box.root, 'tracker')));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(deps, 'зависимости tasks не ставились');
+  assert.ok(deps.args.includes('--no-fund'));
+
+  const build = calls.findIndex((call) => call.args.includes(path.join(box.root, 'tracker'))
+    && call.args.includes('build'));
+
+  assert.ok(calls.indexOf(deps) < build, 'сборка tasks началась до зависимостей');
 });
 
 test('build server: D и кэш по умолчанию вычисляются из временного HOME', async (t) => {
@@ -318,17 +370,23 @@ test('build server: D и кэш по умолчанию вычисляются �
   assert.deepEqual(await box.calls(), expected);
 });
 
-test('build server: отказ подготовки Node останавливает all до npm и установщиков', async (t) => {
+test('build server: отказ подготовки Node валит только серверную цепочку all', async (t) => {
   const box = await fixture(t);
 
   await fs.writeFile(path.join(box.root, 'server/build/node-runtime.json'), '{}');
 
   const result = await box.run(['build']);
+  const calls = await box.calls();
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Некорректный.*node-runtime/);
   assert.match(result.stderr, /не удалось: server/);
-  assert.deepEqual(await box.calls(), []);
+  assert.ok(!calls.some((call) => call.args.includes('build:binary')
+    || call.args.includes('install:binary')), 'серверная цепочка не должна дойти до npm');
+  assert.ok(calls.some((call) => call.args.includes(path.join(box.root, 'tracker'))),
+    'параллельная цепочка tasks должна собираться');
+  assert.ok(!calls.some((call) => call.command === 'desktop' && call.args.includes('install')),
+    'установка окна не выполняется без успеха всех цепочек');
 });
 
 test('build server: подсказка выбора только для другого descriptor, файл не меняется', async (t) => {
@@ -392,7 +450,7 @@ test('build all: прежний release/bin заменяется отложен�
   const result = await box.run(['build', 'all']);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(await box.calls(), expectedBuildCalls(box));
+  assertInterleavedPhases(await box.calls(), expectedAllPhases(box));
   assert.equal(await fs.readFile(file, 'utf8'), previous);
 
   const pending = JSON.parse(await fs.readFile(`${file}.build-selection`, 'utf8'));

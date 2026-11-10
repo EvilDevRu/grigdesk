@@ -3,6 +3,10 @@
 # Общий host и DeepSeek используют один Node со снятием TypeScript-типов.
 # Закреплённый Harness допускает ветку 22 с 22.19 или Node 24 и новее.
 GRIGDESK_MIN_NODE=22.19.0
+# Версия серверного ELF, с которой умеет работать этот host-скрипт. Обязана совпадать
+# с VERSION репозитория: рассинхрон ломает установку окна («Некорректное описание
+# серверного ELF»). Соответствие держит tests/server/runtime-env-version.test.mts.
+GRIGDESK_EXPECTED_SERVER_VERSION=0.1.1
 _grigdesk_verified_package_root=''
 _grigdesk_packaged_node=''
 _grigdesk_server_binary=''
@@ -23,7 +27,7 @@ grigdesk_decode_binary_json() {
 import json, os, re, sys
 
 try:
-    mode, binary, data, text = sys.argv[1:]
+    mode, binary, data, text, expected_version = sys.argv[1:]
     value = json.loads(text)
     if not isinstance(value, dict):
         raise ValueError()
@@ -34,7 +38,7 @@ try:
         for key, expected in [("format", 1), ("hostContract", 1), ("packagingVersion", 2)]:
             if type(value.get(key)) is not int or value[key] != expected:
                 raise ValueError()
-        if value.get("version") != "0.1.0" or value.get("runtime") != {
+        if value.get("version") != expected_version or value.get("runtime") != {
             "node": "24.21.0", "abi": "137", "platform": "linux", "arch": "x64"
         }:
             raise ValueError()
@@ -81,7 +85,7 @@ try:
         print(package, root, value["node"], value["preparationToken"], sep="\n")
 except (ValueError, TypeError, AttributeError):
     sys.exit(1)
-' "$mode" "$_grigdesk_server_binary" "$data" "$value"
+' "$mode" "$_grigdesk_server_binary" "$data" "$value" "$GRIGDESK_EXPECTED_SERVER_VERSION"
 }
 
 # Наличие внешнего файла выбирает standalone до source и прежнего комплекта.
