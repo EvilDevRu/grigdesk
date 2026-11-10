@@ -779,7 +779,7 @@
       "file": "server/src/binary/workerBootstrap.ts",
       "construct": "exec-path",
       "target": "",
-      "count": 1,
+      "count": 3,
       "owner": "task-19",
       "fate": "package",
       "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."

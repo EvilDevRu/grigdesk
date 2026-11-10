@@ -86,6 +86,8 @@ export class TelegramAccountPoller {
 
   running: boolean;
 
+  controller: AbortController;
+
   timer: ReturnType<typeof setTimeout> | null;
 
   queue: Promise<unknown>;
@@ -156,6 +158,7 @@ export class TelegramAccountPoller {
     this.timeoutSec = timeoutSec;
 
     this.running = false;
+    this.controller = new AbortController();
     this.timer = null;
     this.queue = Promise.resolve();
     this.pending = 0;
@@ -227,7 +230,20 @@ export class TelegramAccountPoller {
     return { ...this.lastError };
   }
 
-  async _handle(raw: unknown, lease: PollerLease, context: PollerContext): Promise<boolean> {
+  /**
+   * Проверяет отмену до приёма очередного update и до пользовательского callback.
+   * Уже завершённый callback учитывается в offset, даже если stop пришёл во время него.
+   */
+  async _handle(
+    raw: unknown,
+    lease: PollerLease,
+    context: PollerContext,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (signal.aborted) {
+      return false;
+    }
+
     if (!this._current(lease) || !await this._enabled()) return false;
     const update = normalizeUpdate(raw);
     if (update.type === 'reaction') {
@@ -245,14 +261,32 @@ export class TelegramAccountPoller {
     // context; новый context он физически получить не может.
     if (!this._current(lease) || !await this._enabled()) return false;
     await context.archive.append(update.msg);
+
+    if (signal.aborted) {
+      return false;
+    }
+
     if (!this._current(lease) || !await this._enabled()) return false;
     this.lastMessageAt = Number(update.msg.date || 0) * 1_000 || null;
     await this.onMessage?.(update.msg as unknown as Payload, update.type, lease);
     return this._current(lease) && await this._enabled();
   }
 
-  async _tick(): Promise<TickResult> {
+  /**
+   * Один immutable lease охватывает long poll и запись принятого префикса updates.
+   * Отмена прекращает сеть и следующий update, сохраняя уже подтверждённую обработку.
+   */
+  async _tick(signal: AbortSignal): Promise<TickResult> {
+    if (signal.aborted) {
+      return { polled: false, reason: 'stopped' };
+    }
+
     if (!await this._enabled()) return { polled: false, reason: 'plugin_disabled' };
+
+    if (signal.aborted) {
+      return { polled: false, reason: 'stopped' };
+    }
+
 
     let lease: PollerLease;
 
@@ -286,6 +320,10 @@ export class TelegramAccountPoller {
         this.conflict = false;
       }
 
+      if (signal.aborted) {
+        return { polled: false, reason: 'stopped' };
+      }
+
       let updates: unknown;
 
       try {
@@ -294,12 +332,24 @@ export class TelegramAccountPoller {
           limit: 100,
           timeout: this.timeoutSec,
           allowed_updates: ALLOWED_UPDATES,
-        }, { timeoutMs: (this.timeoutSec + 10) * 1_000 });
+        }, { timeoutMs: (this.timeoutSec + 10) * 1_000, signal });
       } catch (error) {
+        if (signal.aborted) {
+        return { polled: false, reason: 'stopped' };
+      }
+
         return { polled: true, error: this._failure(error, credentials.token) };
       }
       if (!this._current(lease) || !await this._enabled()) {
         return { polled: true, discarded: true, reason: 'account_changed' };
+      }
+
+      if (signal.aborted) {
+        return {
+          polled: true,
+          discarded: true,
+          reason: 'stopped',
+        };
       }
 
       this.lastPollAt = this.now();
@@ -307,9 +357,18 @@ export class TelegramAccountPoller {
       this.conflict = false;
       let nextOffset = offset;
       let done = 0;
+
       for (const raw of (Array.isArray(updates) ? updates : []) as Payload[]) {
+        if (signal.aborted) {
+          break;
+        }
+
         try {
-          if (!await this._handle(raw, lease, context)) {
+          if (!await this._handle(raw, lease, context, signal)) {
+            if (signal.aborted) {
+          break;
+        }
+
             return { polled: true, updates: done, discarded: true, reason: 'account_changed' };
           }
         } catch (error) {
@@ -348,12 +407,21 @@ export class TelegramAccountPoller {
     }
   }
 
-  /** Все tick-и сериализованы: один bot token никогда не получает двух getUpdates. */
+  /**
+   * Сериализация исключает параллельный getUpdates с одним token.
+   * Сигнал захватывается при постановке: stop/start не оживляет старые queued ticks.
+   */
   tick(): Promise<TickResult> {
+    const signal = this.controller.signal;
+
     this.pending += 1;
 
+    // Завершение tick будит stop только после release его account lease.
+    // Отмена queued tick также проходит finally и снимает pending ровно один раз.
     const operation = async () => {
-      try { return await this._tick(); } finally {
+      try {
+        return await this._tick(signal);
+      } finally {
         this.pending -= 1;
         if (this.pending === 0) {
           for (const resolve of this.drainWaiters.splice(0)) resolve();
@@ -365,9 +433,18 @@ export class TelegramAccountPoller {
     return result;
   }
 
+  /**
+   * Новый запуск получает новый сигнал, прежние операции сохраняют свою отмену.
+   * Следующий timer ставится только после завершения текущего tick.
+   */
   start(): void {
     if (this.running) return;
     this.running = true;
+
+    if (this.controller.signal.aborted) {
+      this.controller = new AbortController();
+    }
+
     const loop = async () => {
       if (!this.running) return;
       let pause = IDLE_PAUSE_MS;
@@ -385,9 +462,13 @@ export class TelegramAccountPoller {
     void loop();
   }
 
-  /** Запрещает следующий loop и ждёт уже начатые/поставленные tick-и. */
+  /**
+   * Запрещает следующие tick-и и отменяет текущий getUpdates с ожиданием его close.
+   * Уже обработанный префикс updates сохраняет offset; оставшиеся примет новый запуск.
+   */
   async stop(): Promise<void> {
     this.running = false;
+    this.controller.abort();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.pending > 0) {

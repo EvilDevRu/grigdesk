@@ -9,7 +9,7 @@
 ## Устройство
 
 - [Владелец (безопасность)](owner-security.md)
-- [Вотчер (lib/telegram/pult/watch.ts)](watcher.md)
+- [Вотчер (lib/telegram/pult/watch.ts): обход, карточки, отмена сети и сохранение остатка при остановке](watcher.md)
 - [Гигиена текста](text-sanitization.md)
 - [Грабли, ради которых тут всё так](operational-pitfalls.md)
 - [Действия (lib/telegram/pult/actions.ts)](actions.md)
@@ -17,4 +17,4 @@
 - [Классификация входящего текста](message-classification.md)
 - [Ключевой принцип: пульт — ещё одно «окно» GrigDesk](control-panel-principle.md)
 - [Разговор с ассистентом (lib/telegram/pult/assistant.ts)](assistant-conversation.md)
-- [HTTP и хранение](http-and-storage.md)
+- [HTTP и хранение: изолированная сеть, сроки и лимиты](http-and-storage.md)

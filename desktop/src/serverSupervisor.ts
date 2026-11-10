@@ -578,17 +578,37 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       return;
     }
 
+    const startedAt = adapters.now();
+
+    adapters.log(JSON.stringify({ event: 'server.stop.start', budgetMs: child.runtime.graceMs }));
     child.handle.kill('SIGTERM');
 
     if (await exitedWithin(child, child.runtime.graceMs)) {
+      adapters.log(JSON.stringify({
+        event: 'server.stop.end',
+        outcome: 'exit',
+        tookMs: adapters.now() - startedAt,
+      }));
+
       return;
     }
 
     if (alive(child)) {
+      adapters.log(JSON.stringify({
+        event: 'server.stop.deadline',
+        phase: 'process-exit',
+        tookMs: adapters.now() - startedAt,
+      }));
       child.handle.kill('SIGKILL');
     }
 
-    await exitedWithin(child, 5000);
+    const exited = await exitedWithin(child, 5000);
+
+    adapters.log(JSON.stringify({
+      event: 'server.stop.end',
+      outcome: exited ? 'killed' : 'unconfirmed',
+      tookMs: adapters.now() - startedAt,
+    }));
   }
 
   /**

@@ -10,7 +10,8 @@
 
 ## Устройство
 
-- [Изоляция запросов статистики: отдельный Node, жёсткий срок и освобождение зависшего DNS](isolated-statistics-fetch.md)
+- [Остановка до выхода ОС: независимые сторожа worker, потеря launcher, код 75 и поэтапный журнал](shutdown-watchdogs.md)
+- [Изоляция статистики и Telegram: отдельный Node, сроки, лимиты и освобождение DNS](isolated-statistics-fetch.md)
 - [Ротация stdout/stderr, gzip-архивы и чтение всех частей журнала окна](log-rotation.md)
 - [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
@@ -87,13 +88,14 @@
 
 ## Грабли
 
+- [Зависший TCP DNS удерживает process.exit: нативный стек, повторение и границы диагноза](shutdown-dns-threadpool.md)
 - [Версия продукта не закрепляется в host-скрипте: формат stable/dev и совместимость ELF](runtime-env-version-sync.md)
 - [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)
 - [Ворота VPN проверяют маршрут, а не конкретный клиент](vpn-route-check.md)
 - [Вход в GrigDesk: один пользователь, сессионная cookie, гард на ВЕСЬ /api](session-authentication.md)
-- [Владельцы порта: служба, ручной запуск и дочерний сервер приложения](server-port-ownership.md)
+- [Владельцы порта и сокета браузера: служба, ручной запуск, приложение и зависшая остановка](server-port-ownership.md)
 - [Браузерный удалённый доступ снят; приложение использует отдельный туннель](remote-access-options.md)
 - [Машинные переменные — .env в папке данных, общий для всех способов запуска](machine-environment.md)
 - [Первичная настройка пароля снята](local-password-bootstrap.md)
