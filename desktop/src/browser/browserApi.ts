@@ -100,6 +100,13 @@ export function createBrowserApi(options: {
     driver: ReturnType<typeof createBrowserDriver>;
     command: NativeCommand | null;
     dispatched: boolean;
+    emulated: {
+      width: number;
+      height: number;
+      grantEpoch: number;
+      owner: string
+    } | null;
+    clearEmulation(): void;
   }>();
   const queues = new Map<string, Promise<unknown>>();
   const completed = new Map<string, Promise<unknown>>();
@@ -241,6 +248,7 @@ export function createBrowserApi(options: {
           if (views.has(tabId)) {
             tabs.beginNavigation(tabId);
             views.get(tabId)!.protocol.reset();
+            views.get(tabId)!.clearEmulation();
           }
         },
         navigated: (url) => {
@@ -257,6 +265,7 @@ export function createBrowserApi(options: {
           if (views.has(tabId)) {
             tabs.revoke(tabId);
             views.get(tabId)!.protocol.reset();
+            views.get(tabId)!.clearEmulation();
           }
         },
         popup: (url) => {
@@ -307,13 +316,34 @@ export function createBrowserApi(options: {
         send,
         command: null as NativeCommand | null,
         dispatched: false,
+        emulated: null as {
+          width: number;
+          height: number;
+          grantEpoch: number;
+          owner: string
+        } | null,
         protocol: createBrowserProtocol({
           send,
           epoch: () => tabs.get(tabId).pageEpoch,
           allowed: (): boolean => Boolean(bundle.command && allowed(bundle.command, tabId)),
         }),
         driver: null as unknown as ReturnType<typeof createBrowserDriver>,
+        clearEmulation,
       };
+
+      /**
+       * Эмуляция размеров живёт ровно пока доступ вкладки не сменился: навигация,
+       * отзыв, пауза или ручное действие человека возвращают странице её размер,
+       * чтобы выданная человеком вкладка не осталась телефонной.
+       */
+      function clearEmulation(): void {
+        if (!bundle.emulated) {
+          return;
+        }
+
+        bundle.emulated = null;
+        void view.send('Emulation.clearDeviceMetricsOverride', {}).catch(() => undefined);
+      }
 
       bundle.driver = createBrowserDriver({
         allowed: () => Boolean(bundle.command && allowed(bundle.command, tabId)),
@@ -353,6 +383,7 @@ export function createBrowserApi(options: {
     for (const tab of tabs.list()) {
       tabs.revoke(tab.id, reconnect);
       views.get(tab.id)?.protocol.reset();
+      views.get(tab.id)?.clearEmulation();
     }
 
     changed();
@@ -461,6 +492,7 @@ export function createBrowserApi(options: {
 
       tabs.grant(tabId, value.owner);
       bundle.protocol.reset();
+      bundle.clearEmulation();
 
       return snapshot();
     }
@@ -473,6 +505,17 @@ export function createBrowserApi(options: {
 
     bundle.command = value;
     bundle.dispatched = false;
+
+    /**
+     * Эмуляция прошлой сессии не переживает смену владельца или эпохи доступа:
+     * новый grant и новая команда обязаны увидеть страницу натурального размера.
+     */
+    const tab = tabs.get(tabId);
+
+    if (bundle.emulated && (bundle.emulated.grantEpoch !== tab.grantEpoch
+      || bundle.emulated.owner !== value.owner)) {
+      bundle.clearEmulation();
+    }
 
     try {
       if (value.action === 'snapshot') {
@@ -519,6 +562,30 @@ export function createBrowserApi(options: {
         tabs.close(tabId);
 
         return { ok: true };
+      }
+
+      if (value.action === 'resize') {
+        const size = {
+          width: Number(value.width),
+          height: Number(value.height)
+        };
+
+        /**
+         * Эмуляция меняет viewport страницы, не двигая окно приложения: скриншот
+         * и snapshot отражают телефонный размер, refs переизмеряются при resolve.
+         */
+        await bundle.send('Emulation.setDeviceMetricsOverride', {
+          ...size,
+          deviceScaleFactor: 0,
+          mobile: false
+        });
+        bundle.emulated = {
+          ...size,
+          grantEpoch: tabs.get(tabId).grantEpoch,
+          owner: value.owner,
+        };
+
+        return { ok: true, ...size };
       }
 
       /**
@@ -954,24 +1021,30 @@ export function createBrowserApi(options: {
       } else if (operation === 'pause' || operation === 'resume') {
         tabs.pause(tabId, operation === 'pause');
         views.get(tabId)!.protocol.reset();
+        views.get(tabId)!.clearEmulation();
       } else if (operation === 'revoke') {
         tabs.revoke(tabId);
         views.get(tabId)!.protocol.reset();
+        views.get(tabId)!.clearEmulation();
       } else if (operation === 'close') {
+        // Поверхность вкладки уничтожается вместе с target: эмуляция умирает с ней.
         tabs.close(tabId);
       } else if (operation === 'navigate') {
         const release = tabs.use(tabId);
 
         try {
+          views.get(tabId)!.clearEmulation();
           await views.get(tabId)!.view.navigate(browserUrl(value.url));
         } finally {
           release();
         }
       } else if (operation === 'back' || operation === 'forward') {
         tabs.touch(tabId);
+        views.get(tabId)!.clearEmulation();
         views.get(tabId)!.view.history(operation === 'back' ? -1 : 1);
       } else if (operation === 'reload') {
         tabs.touch(tabId);
+        views.get(tabId)!.clearEmulation();
         views.get(tabId)!.view.reload();
       } else if (operation === 'zoom') {
         if (typeof value.percent !== 'number' || !Number.isFinite(value.percent)
