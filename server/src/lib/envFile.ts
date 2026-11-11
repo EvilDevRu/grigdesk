@@ -24,6 +24,15 @@ export type EnvFileErrorCode =
   | 'env_file_too_large'
   | 'env_file_conflict';
 
+// Коды о состоянии самого файла: причина на стороне машины (порча, чужой владелец,
+// параллельная правка), поэтому HTTP-ответ таким ошибкам — конфликт, а не плохой запрос.
+export const ENV_FILE_STATE_ERROR_CODES: ReadonlySet<EnvFileErrorCode> = new Set([
+  'env_file_unsupported',
+  'env_file_not_regular',
+  'env_file_too_large',
+  'env_file_conflict',
+]);
+
 // Ошибка правки называет переменную и строку файла, но никогда не несёт значение:
 // в .env лежат ключи, а сообщение уходит в журнал и в окно браузера.
 export class EnvFileError extends Error {

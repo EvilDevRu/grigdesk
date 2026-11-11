@@ -76,6 +76,7 @@
           {{ t('settings.restartServer') }}
         </UiButton>
       </SettingsSection>
+      <VpnGatePanel />
     </template>
     <template v-else>
       <SettingsSection
@@ -193,6 +194,7 @@ import type { LauncherState } from '../../../../../shared/runtime/launcherContra
 import type { ReleaseStatus } from '../../../../../shared/runtime/grigDeskUpdateContracts.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsFacts from '../SettingsFacts.vue';
+import VpnGatePanel from '../VpnGatePanel.vue';
 import PackagedServerVersion from '../PackagedServerVersion.vue';
 import PackageUpdateDialog from '../../../shared/PackageUpdateDialog.vue';
 import { useShellStore } from '../../../stores/shell.ts';

@@ -7,8 +7,9 @@
 
 Файл `.env` в папке данных читают сервер, окно, CLI, systemd (`EnvironmentFile=`),
 `node --env-file` (`bin/grigdesk-ctl`, `deploy/restart.sh`) и человек. Код GrigDesk правит его одним модулем
-`server/src/lib/envFile.ts`. Окно «Ключи доступа» в карточках исполнителей
-пишет через `updateEnvFile`. Второй самописный writer заводить нельзя.
+`server/src/lib/envFile.ts`. Окно «Ключи доступа» в карточках исполнителей и раздел
+«Система → Запуск → Ворота VPN» (`server/src/lib/vpnGate.ts`) пишут через `updateEnvFile`.
+Второй самописный writer заводить нельзя.
 У двух писателей не было бы общей очереди, и параллельные правки теряли бы друг друга.
 
 ## Что гарантирует `updateEnvFile(path, { KEY: value | null })`

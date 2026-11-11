@@ -344,6 +344,7 @@ test('SB28-vpn: ExecStartPre не пропускает маршрут мимо T
     GRIGDESK_VPN_SYS_CLASS_NET: sys,
     GRIGDESK_IP_BIN: ip,
     GRIGDESK_VPN_IFACE: 'tun0',
+    GRIGDESK_REQUIRE_VPN: '1',
   };
   const blocked = await box.run('deploy/require-vpn.sh', [], env);
 
