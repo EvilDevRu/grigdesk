@@ -189,17 +189,51 @@ test('MAIN01/cookies: реальная уборка не снимает пред
   assert.ok(f.calls.includes('exit:0'), 'К9: зависшие cookies не держат процесс после срока');
 });
 
-for (const options of [{ decision: 'cancel' }, { ownership: 'external' }]) {
-  test(`MAIN04 unload-guard: прежняя защита правок при ${JSON.stringify(options)}`, async (t) => {
-    const f = await exitMain(t, { ...options, dirtyPage: true });
+test('MAIN04 unload-guard: отмена вопроса сохраняет защиту несохранённых правок', async (t) => {
+  const f = await exitMain(t, { decision: 'cancel', dirtyPage: true });
 
-    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 0 });
-    f.window.close();
-    await f.settle();
-    t.mock.timers.tick(1000);
-    await f.settle();
-    assert.equal(f.calls.includes('unload-overridden'), false);
-    assert.equal(f.calls.includes('server-stop'), false);
-    assert.equal(f.window.isDestroyed(), false);
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 0 });
+  f.window.close();
+  await f.settle();
+  t.mock.timers.tick(1000);
+  await f.settle();
+  assert.equal(f.calls.includes('unload-overridden'), false);
+  assert.equal(f.calls.includes('server-stop'), false);
+  assert.equal(f.window.isDestroyed(), false);
+});
+
+test('MAIN05: внешний местный сервер получает вопрос, гасит конвейеры и не сливается', async (t) => {
+  const f = await exitMain(t, {
+    decision: 'confirm',
+    ownership: 'external',
+    dirtyPage: true,
   });
-}
+
+  f.window.close();
+  await f.settle();
+  assert.ok(f.commands.some((command) => command.type === 'prompt'), 'Внешний сервер тоже спрашивает');
+  assert.ok(f.calls.includes('stopping'));
+  assert.ok(f.calls.includes('pipelines-stopped'));
+  assert.ok(f.calls.includes('unload-overridden'), 'Подтверждённый выход снимает защиту правок');
+  assert.equal(f.calls.includes('server-stop'), false);
+  assert.ok(f.calls.includes('server-stop-skipped'), 'Слив чужого процесса не запускается');
+  assert.ok(f.calls.indexOf('pipelines-stopped') < f.calls.indexOf('server-stop-skipped'));
+  assert.ok(f.calls.includes('exit:0'));
+});
+
+test('MAIN05: отмена на внешнем сервере оставляет работу и защиту страницы', async (t) => {
+  const f = await exitMain(t, {
+    decision: 'cancel',
+    ownership: 'external',
+    dirtyPage: true,
+  });
+
+  f.window.close();
+  await f.settle();
+  assert.ok(f.commands.some((command) => command.type === 'prompt'));
+  assert.equal(f.calls.includes('pipelines-stopped'), false);
+  assert.equal(f.calls.includes('server-stop'), false);
+  assert.equal(f.calls.includes('server-stop-skipped'), false);
+  assert.equal(f.calls.includes('unload-overridden'), false);
+  assert.equal(f.window.isDestroyed(), false);
+});

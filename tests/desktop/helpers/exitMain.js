@@ -100,6 +100,17 @@ export async function exitMain(t, options = {}) {
         return serverStopping;
       }
 
+      /**
+       * Внешний сервер не сливается: supervisor не посылает сигналов чужому процессу.
+       * Отдельный след отличает осознанный пропуск drain от ошибочной остановки.
+       */
+      if (state.ownership !== 'owned') {
+        calls.push('server-stop-skipped');
+        serverStopping = Promise.resolve();
+
+        return serverStopping;
+      }
+
       calls.push('server-stop');
       serverStopping = (async () => {
         if (options.blockServer) {
