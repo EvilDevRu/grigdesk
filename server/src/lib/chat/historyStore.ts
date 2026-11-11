@@ -59,6 +59,13 @@ export const WORKDIR_MEMORY_KEYS = [
 const COMPANION_PURPOSE = 'companion';
 const COMPANION_TASK_RE = /^[1-9][0-9]{0,18}$/;
 
+// Памятки об удалённых чатах живут в chats/deleted.json и переживают рестарт
+// процесса: без них страховочный снимок спящего телефона воскресал стёртый на
+// другом устройстве разговор — saveOne без прежнего файла просто создавал его заново.
+const TOMBSTONES_FILE = 'deleted.json';
+const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const TOMBSTONE_MAX = 2000;
+
 // Запись чата на диске. Форма открытая: клиент владеет своими полями, сервер —
 // перечисленными в SERVER_CHAT_KEYS.
 export interface StoredChat extends ChatRecord {
@@ -307,6 +314,12 @@ export class ChatHistoryStore {
 
   private headsRefresh: Promise<void> | null = null;
   private catalogWriteEpoch = 0;
+
+  // id удалённого чата → время удаления. Кэш читается с диска один раз,
+  // обновляется собственной очередью и переживает рестарт вместе с файлом.
+  private tombstones = new Map<string, number>();
+  private tombstonesLoaded = false;
+  private tombstoneQueue: Promise<unknown> = Promise.resolve();
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
@@ -1116,6 +1129,18 @@ export class ChatHistoryStore {
       await this.ensureDir();
       // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
       const prev = await this.readEntry(incoming.id);
+      // Чат удалён человеком — страховочная копия спящего устройства не имеет права
+      // воскресить его: телефон ставил отсутствующий на сервере чат в очередь
+      // восстановления, и стёртый разговор возвращался во все окна. Проверка нужна
+      // только при отсутствии файла: существующий чат живёт своей ревизией.
+      // Companion-записи с identity-полями не проходят здесь: их ждёт прежний
+      // identity gate с контрактным отказом chat_identity_rebind.
+      const declaresIdentity = incoming.purpose === COMPANION_PURPOSE
+        || Object.hasOwn(incoming, 'logicalIdentity');
+
+      if (!prev && !declaresIdentity && await this.isDeletedChat(incoming.id!)) {
+        throw new ChatHistoryError('chat_deleted', 'Чат удалён.', { statusCode: 409 });
+      }
       /**
        * Подготовленный снимок и запись остаются под блокировкой одного разговора.
        * Новая запись дополнительно удерживает очередь регистраций до завершения commit.
@@ -1558,6 +1583,74 @@ export class ChatHistoryStore {
     return found ? found.chat : null;
   }
 
+  /**
+   * Памятки об удалении читаются с диска один раз за жизнь процесса и дальше
+   * держатся в памяти. Отсутствующий или битый файл означает пустой набор:
+   * это не должно блокировать ни удаления, ни сохранения остальных чатов.
+   */
+  private async loadTombstones(): Promise<void> {
+    if (this.tombstonesLoaded) {
+      return;
+    }
+
+    try {
+      const raw = JSON.parse(await fs.readFile(path.join(this.dir, TOMBSTONES_FILE), 'utf8'));
+      const deleted = Array.isArray((raw as { deleted?: unknown }).deleted)
+        ? (raw as { deleted: unknown[] }).deleted
+        : [];
+
+      for (const entry of deleted) {
+        const record = entry !== null && typeof entry === 'object' ? entry as { id?: unknown; at?: unknown } : {};
+        const at = Number(record.at);
+
+        if (typeof record.id === 'string' && record.id && Number.isFinite(at)) {
+          this.tombstones.set(record.id, at);
+        }
+      }
+    } catch {
+      // Файла ещё нет или он повреждён — памяток просто нет.
+    }
+
+    this.tombstonesLoaded = true;
+  }
+
+  /**
+   * Удаление чата оставляет памятку: файл больше не может быть молча воссоздан
+   * страховочным снимком другого устройства. Записи идут отдельной очередью, чтобы
+   * параллельные удаления разных чатов не затирали друг друга, а набор обрезается
+   * по возрасту и количеству — файл обязан оставаться маленьким.
+   */
+  private async rememberDeleted(id: string, at: number): Promise<void> {
+    const run = this.tombstoneQueue.then(async () => {
+      await this.loadTombstones();
+      this.tombstones.set(id, at);
+
+      const fresh = [...this.tombstones.entries()]
+        .sort(([, first], [, second]) => second - first)
+        .filter(([, deletedAt]) => at - deletedAt <= TOMBSTONE_TTL_MS)
+        .slice(0, TOMBSTONE_MAX);
+
+      this.tombstones = new Map(fresh);
+      await this.ensureDir();
+      await this.writeAtomic(
+        path.join(this.dir, TOMBSTONES_FILE),
+        stableJson({
+          schema: 1,
+          deleted: fresh.map(([chatId, deletedAt]) => ({ id: chatId, at: deletedAt })),
+        }),
+      );
+    });
+
+    this.tombstoneQueue = run.then(() => {}, () => {});
+    await run;
+  }
+
+  /** Жив ли чат только в страховочных копиях клиентов: удалён и ещё не забыт. */
+  private async isDeletedChat(id: string): Promise<boolean> {
+    await this.loadTombstones();
+    return this.tombstones.has(id);
+  }
+
   /** Удаление чата (человек стёр его в списке). Файла нет — значит уже удалён. */
   async remove(id: unknown): Promise<boolean> {
     if (!id) return false;
@@ -1573,6 +1666,10 @@ export class ChatHistoryStore {
       // rename воскресить durable companion identity.
       const prev = await this.readEntry(chatId);
       if (!prev) return false;
+      // Памятка пишется до удаления файла: отказ её записи откатывает удаление
+      // целиком, а обратный порядок оставлял окно, в котором рестарт сервера
+      // снимал защиту уже после исчезновения файла.
+      await this.rememberDeleted(chatId, this.now());
       await fs.rm(prev.path, { force: true });
       this.catalogWriteEpoch += 1;
 

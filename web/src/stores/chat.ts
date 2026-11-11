@@ -249,6 +249,16 @@ function chatFailure(value: unknown) {
 }
 
 /**
+ * Так сервер отвечает на попытку записать чат, удалённый человеком: памятка об
+ * удалении живёт на сервере и переживает рестарт. Единственная правильная реакция —
+ * забыть чат целиком вместе со страховочной копией, а не показывать ошибку
+ * сохранения и не повторять запрос: ретраи воскрешали удалённый разговор.
+ */
+function isChatDeletedFailure(failure: ReturnType<typeof chatFailure> | null): boolean {
+  return failure?.data?.error === 'chat_deleted';
+}
+
+/**
  * Node-тесты могут вернуть объект таймера, браузер возвращает число.
  * Освобождаем удержание процесса только там, где такая возможность существует.
  */
@@ -1340,6 +1350,35 @@ function readSnapshot() {
     return decodeChatEnvelope(JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Выбрасывает один чат из страховочного снимка навсегда — чат удалён на сервере.
+ * Без этого удалённая копия пережидала удаление в localStorage, и следующая
+ * загрузка ставила её в очередь восстановления, воскрешая разговор на всех устройствах.
+ */
+function dropSnapshotEntry(id: string) {
+  try {
+    const stored = readSnapshot();
+
+    if (!stored) {
+      return;
+    }
+
+    const sessions = (stored.sessions || []).filter((entry) => entry.id !== id);
+    const archived = (stored.archived || []).filter((entry) => entry.id !== id);
+
+    if (sessions.length === (stored.sessions || []).length
+      && archived.length === (stored.archived || []).length) {
+      return;
+    }
+
+    stored.sessions = sessions;
+    stored.archived = archived;
+    localStorage.setItem(SNAP_KEY, JSON.stringify(stored));
+  } catch {
+    // Недоступный storage не мешает остальной уборке: снимок перезапишет следующая запись.
   }
 }
 
@@ -2547,6 +2586,15 @@ export const useChatStore = defineStore('chat', {
         return response;
       } catch (caught) {
         const error = chatFailure(caught);
+
+        // Чат удалён на сервере: это не ошибка сохранения и не повод для повтора.
+        // Забываем чат вместе со страховкой — иначе восстановление воскрешало
+        // удалённый разговор, а окно продолжало писать в стёртую переписку.
+        if (isChatDeletedFailure(error)) {
+          this._dropRemoteChat(id);
+
+          return null;
+        }
 
         if (error.status === 409
           && ['chat_window_changed', 'chat_steps_changed'].includes(String(error.data?.error))
@@ -4430,6 +4478,14 @@ export const useChatStore = defineStore('chat', {
       } catch (caught) {
         let error: ReturnType<typeof chatFailure> | null = chatFailure(caught);
 
+        // Чат удалён на сервере: не показываем ошибку сохранения и не повторяем
+        // запрос — чат и его страховка забываются совсем, как при событии gone.
+        if (isChatDeletedFailure(error)) {
+          this._dropRemoteChat(id);
+
+          return null;
+        }
+
         if (!request.reuseSteps || (!isHistoryStepsChanged(error)
           && error.status !== 404 && error.status !== 405)) {
           throw error;
@@ -5921,6 +5977,18 @@ export const useChatStore = defineStore('chat', {
       if (!id) {
         return;
       }
+
+      // Удалённый чат выбывает и из очереди восстановления, и из страховочной
+      // копии localStorage: иначе копия пережидала удаление, и следующая загрузка
+      // возвращала стёртый разговор на сервер и во все окна.
+      const runtime = chatLoadRuntimeFor(this);
+
+      runtime.snapshots.delete(id);
+      runtime.snapshotSources.delete(id);
+      runtime.snapshotDelays.delete(id);
+      runtime.mergedSnapshots.delete(id);
+      delete this.snapshotRecovery[id];
+      dropSnapshotEntry(id);
 
       for (const list of [this.sessions, this.archived || []]) {
         const i = list.findIndex((c) => c.id === id);
