@@ -30,6 +30,7 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
     'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
     'server/runtime/helpers/helpers.json', 'engine/bin/factory', 'engine/lib/core.sh',
+    'tools/skills/grigdesk-connect-project/SKILL.md',
     'schemas/analytics/lifecycle-event.schema.json',
     'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
     'deploy/require-vpn.sh', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',
@@ -37,11 +38,9 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     ...options.dependencies.map((name) => `server/node_modules/${name}/package.json`),
     ...options.native,
   ];
-  const allowed = new Set(['VERSION', 'runtime', 'server', 'engine', 'schemas', 'deploy', 'licenses']);
-
-  if (options.wrappers?.includes('shared/runtime/legacyBrand.ts')) {
-    allowed.add('shared');
-  }
+  const allowed = new Set([
+    'VERSION', 'runtime', 'server', 'engine', 'schemas', 'deploy', 'licenses', 'tools',
+  ]);
 
   for (const name of await readdir(root)) {
     if (!allowed.has(name)) {
@@ -55,6 +54,10 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     sourceRoot: options.sourceRoot,
     forbiddenRoots: options.forbiddenRoots,
   });
+
+  if (files.some((file) => file.path.startsWith('tools/') && !file.path.startsWith('tools/skills/'))) {
+    throw new Error('Запрещён ресурс tools вне встроенных навыков payload');
+  }
 
   if (files.some((file) => file.path === 'server/grigdesk-server'
     || file.path.startsWith('server/src/') && /\.[cm]?[jt]sx?$/.test(file.path))) {

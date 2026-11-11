@@ -17,6 +17,17 @@ let mountNonce = 0;
  * Точечные HTTP/графические подмены передаются сценарием без изменения соседних тестов.
  */
 export async function compileBoardView({ stubs = {} } = {}) {
+  const apiStub = `
+    export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};
+    export const api = {
+      get: async (url, options) => globalThis.__boardViewOwnApi?.get(url, options) || (
+        url === '/api/grigdesk-tasks/projects' ? { projects: [] }
+          : { tasks: [], revision: 0, trackerConfigured: true }
+      ),
+      post: async (url, payload, options) => globalThis.__boardViewOwnApi?.post(url, payload, options),
+    };
+  `;
+
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/format.ts': `
@@ -26,6 +37,9 @@ export async function compileBoardView({ stubs = {} } = {}) {
         export const signed = (value) => String(value ?? 0);
       `,
       '../stores/board.ts': `
+        export const useBoardStore = (...args) => globalThis.__boardViewStores.board(...args);
+      `,
+      '../../stores/board.ts': `
         export const useBoardStore = (...args) => globalThis.__boardViewStores.board(...args);
       `,
       '../stores/ui.ts': `
@@ -67,16 +81,8 @@ export async function compileBoardView({ stubs = {} } = {}) {
             + ' @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
         };
       `,
-      '../shared/apiClient.ts': `
-        export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};
-        export const api = {
-          get: async (url) => globalThis.__boardViewOwnApi?.get(url) || (
-            url === '/api/grigdesk-tasks/projects' ? { projects: [] }
-              : { tasks: [], revision: 0, trackerConfigured: true }
-          ),
-          post: async (url, payload) => globalThis.__boardViewOwnApi?.post(url, payload),
-        };
-      `,
+      '../shared/apiClient.ts': apiStub,
+      '../../shared/apiClient.ts': apiStub,
       ...stubs,
       '../composables/useSse.ts': `
         import { onUnmounted } from 'vue';
@@ -169,6 +175,8 @@ export async function mountBoardView(t, {
   const nonce = `${prefix}-${mountNonce++}`;
   const calls = {
     opened: [],
+    openedReferences: [],
+    boardLoad: [],
     toggled: [],
     favoritesLoad: [],
     shelfLoad: [],
@@ -189,14 +197,28 @@ export async function mountBoardView(t, {
           created,
           ...snapshot,
         },
+        branches: {},
         error: boardError,
         readAt: 1_800_000_000_000,
         loading: pending,
       }),
-      actions: { async load() {} },
+      getters: {
+        refreshProblem: (s) => s.error
+          || Object.values(s.branches ?? {}).find((branch) => branch.error)?.error || '',
+      },
+      actions: {
+        async load(force) {
+          calls.boardLoad.push(force);
+        },
+      },
     }),
     ui: defineStore(`board-view-ui-${nonce}`, {
-      actions: { openTask(id) { calls.opened.push(String(id)); } },
+      actions: {
+        openTask(id, source) {
+          calls.opened.push(String(id));
+          calls.openedReferences.push({ id: String(id), source });
+        },
+      },
     }),
     analysis: defineStore(`board-view-analysis-${nonce}`, {
       state: () => ({ byTask: analysis }),

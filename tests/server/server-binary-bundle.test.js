@@ -10,7 +10,7 @@ import { bundlePayloadServer } from '../../server/scripts/sea/bundle.mts';
 
 const SOURCE = fileURLToPath(new URL('../../', import.meta.url));
 
-test('SB07: relocated CJS использует свой require и ленивый entry ровно один раз', async (t) => {
+test('SB07: relocated CJS импортирует worker ветки и запускает ленивый entry ровно один раз', async (t) => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-payload-bundle-'));
   const root = path.join(base, 'payload with space');
   const outfile = path.join(root, 'server/payload.cjs');
@@ -34,9 +34,10 @@ test('SB07: relocated CJS использует свой require и ленивы�
         builder.onLoad({ filter: /server\/src\/app\.ts$/ }, () => ({
           contents: [
             'import { runtimeRoot, runtimeInstallationBin } from "./lib/runtimePaths.ts";',
+            'import { listCodeBranches } from "./lib/codeBranchWorker.mts";',
             'globalThis.boots = (globalThis.boots ?? 0) + 1;',
             'globalThis.details = { root: runtimeRoot(), bin: runtimeInstallationBin(),',
-            '  dependency: require("fixture-package") };',
+            '  dependency: require("fixture-package"), branches: typeof listCodeBranches };',
           ].join('\n'),
           loader: 'ts',
           resolveDir: path.join(SOURCE, 'server/src'),
@@ -67,6 +68,7 @@ test('SB07: relocated CJS использует свой require и ленивы�
     root,
     bin: path.dirname(binary),
     dependency: 42,
+    branches: 'function',
   });
   assert.deepEqual(result.warnings, []);
   assert.equal((await fs.readFile(outfile, 'utf8')).includes(SOURCE), false);

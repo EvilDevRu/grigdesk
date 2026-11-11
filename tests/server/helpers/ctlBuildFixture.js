@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,10 +11,15 @@ const execute = promisify(execFile);
 const repository = path.resolve(import.meta.dirname, '../../..');
 const sourceMarkers = ['server/src/app.ts', 'web/package.json', 'desktop/package.json'];
 const archiveBytes = Buffer.from('тестовый закреплённый архив');
+
+// Продуктовая версия ELF обязана совпадать с VERSION: runtime-env проверяет её при
+// выборе сервера, и захардкоженное значение в фикстуре разъезжалось при бампе.
+const productVersion = readFileSync(path.join(repository, 'VERSION'), 'utf8').trim();
+
 const metadata = {
   format: 1,
   hostContract: 1,
-  version: '0.1.0',
+  version: productVersion,
   packagingVersion: 2,
   packageId: 'a'.repeat(64),
   runtime: {
@@ -66,8 +72,8 @@ export async function fixture(t, { source = true, binary = true, release = false
   await fs.cp(path.join(repository, 'deploy'), path.join(root, 'deploy'), { recursive: true });
 
   for (const directory of ['bin', 'cli', 'tools', 'server/src', 'server/node_modules',
-    'web/node_modules', 'desktop', 'shared/desktop', 'shared/runtime', 'shared/node',
-    'server/scripts', 'server/build', 'server/src/lib']) {
+    'web/node_modules', 'tracker/node_modules', 'desktop', 'shared/desktop', 'shared/runtime',
+    'shared/node', 'server/scripts', 'server/build', 'server/src/lib']) {
     await fs.mkdir(path.join(root, directory), { recursive: true });
   }
 
@@ -205,10 +211,105 @@ export async function fixture(t, { source = true, binary = true, release = false
 }
 
 /**
- * Контракт all перечислен полностью: веб собирается один раз до упаковки окна.
- * Отдельные цели получают только свои стадии, без управления живыми компонентами.
+ * Контракт all: общие зависимости, затем параллельные цепочки сервера, окна и tasks,
+ * установка окна строго последней. Цепочки могут интерливиться в любом порядке.
  */
-export function expectedBuildCalls(box, target = 'all') {
+export function expectedAllPhases(box) {
+  const cache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/server-binary');
+  const trackerCache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/tracker-binary');
+
+  return {
+    deps: [{
+      command: 'npm',
+      cwd: path.join(box.root, 'server'),
+      args: ['run', '--silent', 'deepseek:prepare'],
+    }],
+    tracks: [
+      [
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'server'), 'run', 'build:binary', '--',
+            '--out-dir', path.join(cache, 'out'), '--cache-dir', path.join(cache, 'cache')],
+        },
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'server'), 'run', 'install:binary', '--',
+            '--binary', path.join(cache, 'out/grigdesk-server'),
+            '--target', path.join(box.root, 'bin/grigdesk-server'),
+            '--releases-dir', path.join(box.env.GRIGDESK_HOME, 'runtimes/server/releases'),
+            '--glm-mode', 'api'],
+        },
+      ],
+      [
+        {
+          command: 'npm',
+          cwd: path.join(box.root, 'web'),
+          args: ['run', 'build'],
+        },
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'desktop'), 'run', 'dist'],
+        },
+      ],
+      [
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'tracker'), 'run', 'build', '--',
+            '--out-dir', path.join(box.root, 'bin'),
+            '--cache-dir', path.join(trackerCache, 'cache')],
+        },
+      ],
+    ],
+    install: [{
+      command: 'desktop',
+      cwd: '/',
+      args: ['install', '--keep-runtime'],
+    }],
+  };
+}
+
+/**
+ * Параллельные цепочки узнаются по содержимому вызова: фазы deps и install держат
+ * свои места, а вызовы каждой цепочки сохраняют внутренний порядок без общей
+ * последовательности между цепочками.
+ */
+export function assertInterleavedPhases(actual, phases) {
+  const middle = actual.slice(phases.deps.length, actual.length - phases.install.length);
+
+  assert.deepEqual(actual.slice(0, phases.deps.length), phases.deps);
+  assert.deepEqual(actual.slice(actual.length - phases.install.length), phases.install);
+
+  const remaining = [...middle];
+
+  for (const track of phases.tracks) {
+    const found = [];
+
+    for (const call of track) {
+      const index = remaining.findIndex((item) => item.command === call.command
+        && item.cwd === call.cwd && JSON.stringify(item.args) === JSON.stringify(call.args));
+
+      assert.ok(index >= 0, `Отсутствует вызов сборки: ${JSON.stringify(call)}`);
+      found.push(index);
+    }
+
+    assert.deepEqual(found, [...found].sort((a, b) => a - b), 'Нарушен порядок внутри цепочки');
+
+    for (const index of found.reverse()) {
+      remaining.splice(index, 1);
+    }
+  }
+
+  assert.deepEqual(remaining, [], 'Лишние вызовы вне ожидаемых цепочек');
+}
+
+/**
+ * Контракт отдельных целей перечислен полностью: веб собирается до упаковки окна.
+ */
+export function expectedBuildCalls(box, target) {
   if (target === 'apk') {
     return [{
       command: 'mobile',
@@ -256,7 +357,7 @@ export function expectedBuildCalls(box, target = 'all') {
     {
       command: 'desktop',
       cwd: '/',
-      args: target === 'all' ? ['install', '--keep-runtime'] : ['install'],
+      args: ['install'],
     },
   ];
 
@@ -322,6 +423,6 @@ export function expectedBuildCalls(box, target = 'all') {
     return web;
   }
 
-  return target === 'window' ? [...web, ...window] : [...server, ...web, ...window];
+  return [...web, ...window];
 }
 

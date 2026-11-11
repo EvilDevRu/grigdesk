@@ -12,6 +12,7 @@ process.env.NODE_ENV = 'test';
 await prepareI18nWindow();
 
 const { i18nBrowser, chooseLanguage } = await import('./helpers/i18nBrowser.js');
+const { waitForShellActions } = await import('./helpers/client-browser.mjs');
 
 test('I18N-U01: EN/RU каркас, builtin/custom/disabled и прежний порядок rail/tools/dock', {
   timeout: 120000,
@@ -211,6 +212,8 @@ test('I18N-U02: топбар без поиска команд, соседние 
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
 
         const phone = width === 600;
+
+        await waitForShellActions(page, phone);
 
         // Телефон и справка на узком экране перенесены в «Разделы».
         // Подключение, колокольчик и настройки остаются в основной полосе.

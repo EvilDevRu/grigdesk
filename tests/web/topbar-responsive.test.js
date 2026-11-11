@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
 
-import { clientBrowser, scaleClientText } from './helpers/client-browser.mjs';
+import { clientBrowser, scaleClientText, waitForShellActions } from './helpers/client-browser.mjs';
 
 const providers = Array.from({ length: 10 }, (_, index) => ({
   id: `fixture-${index}`,
@@ -50,11 +50,25 @@ test('узкая шапка сохраняет действия и полную 
   const page = await context.newPage();
 
   for (const width of [320, 390, 600, 800, 1100, 1280]) {
+    await page.bringToFront();
     await page.setViewportSize({ width, height: 900 });
     await page.goto(origin + '#/chats');
-    await page.getByRole('button', { name: 'Настройки', exact: true }).waitFor();
-    await page.waitForFunction(() => document.querySelector('#app').__vue_app__
-      .config.globalProperties.$pinia._s.get('providers')?.providers.length === 10);
+
+    try {
+      await page.getByRole('button', { name: 'Настройки', exact: true }).waitFor();
+    } catch (error) {
+      const state = await page.locator('body').innerText();
+
+      throw new Error(`${width}px: настройки не готовы; ${state.slice(0, 2000)}`, { cause: error });
+    }
+
+    await waitForShellActions(page, width <= 600);
+    await page.waitForFunction(() => {
+      const stores = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s;
+
+      return stores.get('providers')?.providers.length === 10
+        && stores.get('system')?.data?.net?.ip === '192.0.2.1';
+    });
 
     if (width === 390 || width === 800) {
       await scaleClientText(page, 1.3);
@@ -121,7 +135,7 @@ test('узкая шапка сохраняет действия и полную 
 
       assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
       assert.equal(await overview.locator('[data-context="topbar-metrics"]').count(), 0);
-      assert.equal(await overview.locator('[data-context="topbar-network"]').isVisible(), true);
+      await overview.locator('[data-context="topbar-network"]').waitFor();
       await overview.locator('[data-context="provider-status"]').last().click();
     }
 
@@ -145,8 +159,12 @@ test('узкая шапка сохраняет действия и полную 
     const settings = page.getByRole('button', { name: 'Настройки', exact: true });
 
     await settings.click();
-    await page.getByRole('dialog', { name: 'Настройки', exact: true }).waitFor();
+
+    const settingsDialog = page.locator('[data-role="settings-modal"]');
+
+    await settingsDialog.waitFor();
     await page.keyboard.press('Escape');
+    await settingsDialog.waitFor({ state: 'hidden' });
   }
 
   await page.setViewportSize({ width: 390, height: 844 });

@@ -23,7 +23,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
@@ -132,109 +131,17 @@ function previousInstallation(box) {
   writeFileSync(box.destination, 'прежнее окно', { mode: 0o755 });
 }
 
-/**
- * Старый профиль содержит настройки и обе базы браузера, но только искусственные данные.
- * Служебные файлы и кэши позволяют проверить исключения при копировании профиля.
- */
-function legacyProfile(box) {
-  const directory = path.join(box.home, 'config', LEGACY.profileDir);
-  const partition = `Partitions/${LEGACY.partition}`;
-  const caches = ['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache',
-    'DawnWebGPUCache', 'GPUPersistentCache'];
-  const files = ['settings.json', `${partition}/Local Storage/leveldb/settings`,
-    `${partition}/IndexedDB/marker`, 'SingletonCookie', 'SingletonSocket',
-    `${partition}/Cookies`, `${partition}/Cookies-journal`, `${partition}/Network/Cookies`,
-    ...caches.flatMap((name) => [`${name}/cache`, `${partition}/${name}/cache`])];
 
-  for (const file of files) {
-    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
-    writeFileSync(path.join(directory, file), `fixture:${file}`);
-  }
 
-  return {
-    directory,
-    partition,
-    caches,
-  };
-}
 
-test('GO-03: установка копирует профиль, переименовывает раздел и исключает cookie и кэши', (t) => {
-  const box = sandbox(t);
-  const old = legacyProfile(box);
-  const target = path.join(box.home, 'config/GrigDesk');
-  const result = box.run('install');
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(existsSync(target), true, 'Профиль должен быть скопирован');
-  assert.equal(statSync(target).mode & 0o777, 0o700);
-  assert.equal(readFileSync(path.join(target, 'settings.json'), 'utf8'), 'fixture:settings.json');
 
-  for (const file of ['Local Storage/leveldb/settings', 'IndexedDB/marker']) {
-    assert.equal(readFileSync(path.join(target, 'Partitions/grigdesk-local', file), 'utf8'),
-      `fixture:${old.partition}/${file}`);
-  }
 
-  for (const file of ['SingletonCookie', 'SingletonSocket', old.partition,
-    'Partitions/grigdesk-local/Cookies', 'Partitions/grigdesk-local/Cookies-journal',
-    'Partitions/grigdesk-local/Network/Cookies',
-    ...old.caches.flatMap((name) => [name, `Partitions/grigdesk-local/${name}`])]) {
-    assert.equal(existsSync(path.join(target, file)), false, file);
-  }
 
-  assert.equal(existsSync(path.join(old.directory, old.partition, 'Cookies')), true);
-});
 
-test('GO-04: существующий новый профиль не меняется', (t) => {
-  const box = sandbox(t);
-  const target = path.join(box.home, 'config/GrigDesk');
 
-  legacyProfile(box);
-  mkdirSync(target);
-  writeFileSync(path.join(target, 'own'), 'new profile');
-  assert.equal(box.run('install').status, 0);
-  assert.deepEqual(readdirSync(target), ['own']);
-});
 
-test('GO-05: живой замок старого профиля запрещает перенос без копии', (t) => {
-  const box = sandbox(t);
-  const old = legacyProfile(box);
 
-  symlinkSync(`${os.hostname()}-${process.pid}`, path.join(old.directory, 'SingletonLock'));
-
-  const result = box.run('install');
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /профиль.*занят/i);
-  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
-});
-
-test('GO-06: явный каталог данных окна отключает перенос профиля', (t) => {
-  const box = sandbox(t);
-
-  legacyProfile(box);
-  assert.equal(box.run('install', { GRIGDESK_DESKTOP_DATA_DIR: path.join(box.home, 'custom') }).status, 0);
-  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
-});
-
-test('GO-07: ошибка копирования не публикует частичный профиль и убирает временный каталог', (t) => {
-  const box = sandbox(t);
-
-  legacyProfile(box);
-  rmSync(path.join(box.fakeBin, 'cp'));
-  writeFileSync(path.join(box.fakeBin, 'cp'), '#!/bin/bash\nexit 17\n', { mode: 0o755 });
-
-  const result = box.run('install');
-
-  assert.notEqual(result.status, 0);
-  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
-});
-
-test('GO-09: Bash использует старые имена из единого контракта', () => {
-  const source = readFileSync(path.join(repository, 'deploy/lib/desktop-app.sh'), 'utf8');
-
-  assert.equal(source.match(/local legacy_profile='([^']+)'/)?.[1], LEGACY.profileDir);
-  assert.equal(source.match(/local legacy_partition='([^']+)'/)?.[1], LEGACY.partition);
-});
 
 test('DW-I1: install и status', (t) => {
   const box = sandbox(t);
@@ -567,7 +474,7 @@ function serverInstaller(t, {
 
   for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/tracker-cli.sh',
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
-    'shared/package.json', 'shared/runtime/legacyBrand.ts',
+    'shared/package.json',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts',
     ...SOURCE_RUNTIME_FILES]) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });

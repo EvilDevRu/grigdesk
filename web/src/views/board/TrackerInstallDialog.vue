@@ -14,7 +14,7 @@
       </div>
     </template>
 
-    <div class="driver-install" :aria-busy="store.busy || store.loading || removing">
+    <div class="driver-install" :aria-busy="store.busy || store.loading || store.removing">
       <ol v-if="steps.length" class="driver-steps" :class="{ 'driver-steps--three': steps.length === 3 }"
           :aria-label="t('core.trackerWizardSteps')">
         <li v-for="(step, index) in steps" :key="step" :aria-current="index === stepIndex ? 'step' : undefined"
@@ -28,12 +28,28 @@
         <strong>{{ steps[stepIndex] }}</strong>
       </p>
 
-      <UiLoadingState v-if="store.loading" :label="t('core.loading')" />
+      <UiLoadingState v-if="store.loading" :label="t('core.loading')">
+        <div v-if="displayScreen === 'source'" class="driver-source-list"
+             aria-hidden="true" data-loading-region="tracker-sources">
+          <div v-for="index in 3" :key="index" class="driver-source__copy driver-install__loading-source">
+            <UiSkeleton width="65%" height="21px" />
+            <UiSkeleton width="90%" height="18px" />
+          </div>
+        </div>
+        <div v-else class="driver-job" aria-hidden="true" data-loading-region="tracker-operation">
+          <UiSkeleton width="45%" height="21px" />
+          <UiSkeleton width="65%" height="18px" />
+          <UiSkeleton width="85%" height="18px" />
+        </div>
+      </UiLoadingState>
       <template v-else>
         <UiInlineMessage v-if="store.recoveryError || store.job?.status === 'recovery_required'" tone="danger">
           {{ store.recoveryError || t('core.trackerRecovery') }}
         </UiInlineMessage>
         <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
+        <UiInlineMessage v-if="store.previousUnavailable" tone="warning">
+          {{ t('core.trackerPreviousUnavailable') }}
+        </UiInlineMessage>
         <UiInlineMessage v-if="store.refreshError" tone="warning">
           {{ t('core.trackerRefreshFailed') }} {{ store.refreshError }}
           <UiButton variant="link" :disabled="store.busy" @click="store.refreshAfterMutation()">
@@ -41,72 +57,7 @@
           </UiButton>
         </UiInlineMessage>
 
-        <section v-if="store.screen === 'manage'" class="driver-installed"
-                 :aria-label="t('core.trackerInstalled')">
-          <p v-if="!packages.length" class="driver-install__note">{{ t('core.trackerEmpty') }}</p>
-          <article v-for="entry in packages" :key="entry.id" class="driver-package">
-            <div class="driver-package__identity">
-              <h3>{{ entry.name }}</h3>
-              <span>{{ entry.record?.version || entry.version }}</span>
-              <span v-if="entry.id === trackers.catalog?.externalId" class="driver-package__selected">
-                {{ t('core.trackerConnected') }}
-              </span>
-            </div>
-            <p v-if="entry.record" class="driver-install__note">{{ entry.record.source.url }}</p>
-            <UiInlineMessage v-if="entry.deleted">{{ t('core.trackerDeleted') }}</UiInlineMessage>
-            <template v-else>
-              <TrackerUpdateStatus :record="entry.record" />
-              <UiInlineMessage v-if="entry.status === 'restartRequired' || entry.record?.restartRequired">
-                {{ t('core.trackerRestart') }}
-              </UiInlineMessage>
-              <UiInlineMessage v-else-if="entry.reason" tone="warning">{{ entry.reason }}</UiInlineMessage>
-              <UiFormActions align="start">
-                <UiButton :disabled="store.blocked || !canConfigure(entry.id)" @click="configure(entry.id)">
-                  {{ t('core.trackerConfigure') }}
-                </UiButton>
-                <UiButton v-if="entry.record?.updateAvailable" :disabled="store.blocked"
-                          @click="store.update(entry.id)">
-                  {{ t('core.trackerUpdate') }}
-                </UiButton>
-                <UiDisclosureButton :open="expandedId === entry.id" :controls="`${baseId}-${entry.id}`"
-                                    @update:open="expandedId = $event ? entry.id : ''">
-                  {{ t('core.trackerMoreActions') }}
-                </UiDisclosureButton>
-              </UiFormActions>
-              <div v-if="expandedId === entry.id" :id="`${baseId}-${entry.id}`" class="driver-package__actions">
-                <template v-if="entry.record">
-                  <UiInlineMessage v-if="entry.record.localChanges" tone="warning">
-                    {{ t('core.trackerLocalChanges') }}
-                  </UiInlineMessage>
-                  <UiButton v-if="entry.record.localChanges" :disabled="store.blocked"
-                            @click="chooseVersion(entry.id, true)">
-                    {{ t('core.trackerRestorePackage') }}
-                  </UiButton>
-                  <UiButton :disabled="store.blocked || entry.record.localChanges" @click="chooseVersion(entry.id)">
-                    {{ t('core.trackerOtherVersion') }}
-                  </UiButton>
-                  <UiButton :disabled="store.blocked || !entry.record.rollbackAvailable || entry.record.localChanges"
-                            @click="store.openRollback(entry.id)">
-                    {{ t('core.trackerRollback') }}
-                  </UiButton>
-                  <p v-if="!entry.record.rollbackAvailable" class="driver-install__note">
-                    {{ entry.record.rollbackError?.message || t('core.trackerPreviousUnavailable') }}
-                  </p>
-                </template>
-                <p v-else class="driver-install__note">{{ t('core.trackerUnmanaged') }}</p>
-                <UiButton variant="ghost" tone="danger" :disabled="store.blocked || removing"
-                          @click="removeDriver(entry.id, entry.name)">
-                  {{ t('core.trackerRemove') }}
-                </UiButton>
-              </div>
-            </template>
-          </article>
-          <UiInlineMessage v-if="store.previousUnavailable" tone="warning">
-            {{ t('core.trackerPreviousUnavailable') }}
-          </UiInlineMessage>
-        </section>
-
-        <section v-else-if="store.screen === 'source'" class="driver-sources"
+        <section v-if="store.screen === 'source'" class="driver-sources"
                  :aria-label="t('core.trackerSource')">
           <UiInlineMessage v-if="store.sourcesError" tone="warning">
             {{ store.sourcesError }}
@@ -142,7 +93,14 @@
           <UiInlineMessage v-if="store.replaceModified" tone="warning">
             {{ t('core.trackerRestoreHint') }}
           </UiInlineMessage>
-          <UiLoadingState v-if="store.busy" :label="t('core.trackerVersionsLoading')" />
+          <UiLoadingState v-if="store.busy && !store.manualVersion" :label="t('core.trackerVersionsLoading')">
+            <div class="driver-install__loading-field" aria-hidden="true" data-loading-region="tracker-version">
+              <UiSkeleton width="min(100%, 180px)" height="18px" />
+              <UiSkeleton shape="block" height="var(--control-height)" />
+              <UiSkeleton width="min(100%, 220px)" height="17px" />
+            </div>
+          </UiLoadingState>
+          <UiLoadingState v-else-if="store.busy" variant="inline" :label="t('core.trackerVersionsLoading')" />
           <UiInlineMessage v-if="store.versionsEmpty" tone="warning">{{ t('core.trackerNoVersions') }}</UiInlineMessage>
           <UiField v-if="store.versions.length && !store.manualVersion" :label="t('core.trackerAvailableVersions')"
                    :hint="t('core.trackerStableVersions')">
@@ -178,7 +136,8 @@
           </UiInlineMessage>
         </section>
 
-        <section v-else class="driver-job" :class="{ 'driver-job--working': working }" :aria-label="statusLabel">
+        <section v-else-if="store.job || working" class="driver-job"
+                 :class="{ 'driver-job--working': working }" :aria-label="statusLabel">
           <div class="driver-job__activity" role="status" aria-live="polite">
             <UiSpinner v-if="working" decorative />
             <div class="driver-job__activity-copy">
@@ -256,26 +215,22 @@
 
     <template #footer>
       <div class="driver-install__footer">
-        <template v-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
+        <UiLoadingState v-if="store.loading && displayScreen !== 'source'" variant="inline" />
+        <template v-else-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
           <UiButton :loading="store.busy" :disabled="store.busy" @click="store.current()">
             {{ t('core.trackerCheckingOutcome') }}
           </UiButton>
         </template>
-        <template v-else-if="store.screen === 'manage'">
-          <UiButton variant="link" :disabled="store.blocked || store.loading" @click="store.check()">
-            {{ t('core.trackerCheckUpdates') }}
-          </UiButton>
-          <UiFormActions>
-            <UiButton :disabled="store.blocked || store.loading" @click="configure()">
-              {{ t('core.trackerConnectionSettings') }}
-            </UiButton>
-            <UiButton variant="solid" tone="accent" data-primary :disabled="store.blocked || store.loading"
-                      @click="beginInstall()">{{ t('core.trackerAdd') }}</UiButton>
-          </UiFormActions>
+        <template v-else-if="initializationError">
+          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
+          <UiButton :disabled="store.busy" @click="initialize()">{{ t('core.trackerRefresh') }}</UiButton>
         </template>
-        <template v-else-if="store.screen === 'source'">
-          <UiButton :disabled="store.busy" @click="manage()">{{ t('core.trackerBackToList') }}</UiButton>
-          <UiButton variant="solid" tone="accent" data-primary :disabled="store.busy || !store.url.trim()"
+        <template v-else-if="displayScreen === 'source'">
+          <UiButton :disabled="store.loading || store.busy" @click="configure()">
+            {{ t('core.trackerBackToSettings') }}
+          </UiButton>
+          <UiButton variant="solid" tone="accent" data-primary
+                    :disabled="store.loading || store.busy || !store.url.trim()"
                     @click="nextVersion()">{{ t('core.trackerNext') }}</UiButton>
         </template>
         <template v-else-if="store.screen === 'version'">
@@ -286,7 +241,7 @@
           </UiButton>
         </template>
         <template v-else-if="store.screen === 'rollback'">
-          <UiButton :disabled="store.busy" @click="manage()">{{ t('core.trackerBack') }}</UiButton>
+          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBack') }}</UiButton>
           <UiButton v-if="store.errorCode" :disabled="store.busy"
                     @click="store.openRollback(store.rollbackPreview!.id)">
             {{ t('core.trackerRefresh') }}
@@ -307,12 +262,12 @@
           <p v-else class="driver-install__note">{{ t('core.trackerCloseKeepsOperation') }}</p>
         </template>
         <template v-else>
-          <UiButton :disabled="store.busy" @click="manage()">{{ t('core.trackerBackToList') }}</UiButton>
+          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
           <UiButton v-if="store.job?.status === 'done' && canConfigure(store.job.driverId)"
                     variant="solid" tone="accent" data-primary @click="configure(store.job.driverId!)">
             {{ t('core.trackerConfigureConnection') }}
           </UiButton>
-          <UiButton v-else-if="store.job?.status === 'done'" variant="solid" tone="accent" @click="finish()">
+          <UiButton v-else-if="store.job?.status === 'done'" variant="solid" tone="accent" @click="configure(store.job?.driverId ?? undefined)">
             {{ t('core.trackerFinish') }}
           </UiButton>
           <UiButton v-else-if="store.flow !== 'rollback'" variant="solid" tone="accent" @click="editVersion()">
@@ -328,66 +283,59 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
+import type { DriverInstallRequest } from '../../stores/driverInstall.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
-import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
 import { BUILTIN_DRIVER_SOURCES } from '../../../../shared/trackers/driverSources.ts';
 import { sameCatalogSource } from '../../../../shared/plugins/pluginCatalogPolicy.ts';
 import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import {
-  confirmDialog, messageRef, t, UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSpinner,
+  t, UiButton, UiDialog, UiDisclosureButton, UiField,
+  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSkeleton, UiSpinner,
 } from '../../ui.ts';
 
 const props = defineProps<{
   open: boolean;
-  startInstall?: boolean;
-  startUpdate?: string;
+  request: DriverInstallRequest;
 }>();
 const emit = defineEmits<{ 'update:open': [open: boolean]; configure: [id?: string] }>();
 const store = useDriverInstallStore();
 const trackers = useTrackersStore();
-const removing = ref(false);
-const expandedId = ref('');
+const initializationError = ref(false);
 const changesOpen = ref(false);
 const detailsOpen = ref(false);
 const baseId = `driver-wizard-${useId().replaceAll(':', '')}`;
 let timer: ReturnType<typeof setInterval> | null = null;
 
-const packages = computed(() => {
-  const descriptors = trackers.catalog?.drivers.filter((driver) => driver.id !== 'own') ?? [];
-  const ids = new Set([...descriptors.map((driver) => driver.id), ...Object.keys(store.installed)]);
-
-  return [...ids].map((id) => ({
-    ...descriptors.find((driver) => driver.id === id),
-    id,
-    name: descriptors.find((driver) => driver.id === id)?.name ?? id,
-    record: store.installed[id],
-  }));
-});
+const displayScreen = computed(() => store.loading && store.screen === 'idle'
+  ? props.request.kind === 'install' ? 'source'
+    : props.request.kind === 'version' || props.request.kind === 'restore' ? 'version' : 'review'
+  : store.screen);
+const displayFlow = computed(() => store.loading && store.screen === 'idle'
+  ? props.request.kind === 'install' ? 'install' : props.request.kind === 'rollback' ? 'rollback' : 'update'
+  : store.flow);
 const validVersion = computed(() => /^v?\d+\.\d+\.\d+$/u.test(store.tag.trim()));
 const working = computed(() => store.busy || store.unknownOutcome
   || !!store.job && ['running', 'applying'].includes(store.job.status));
 const completed = computed(() => store.screen === 'result' && store.job?.status === 'done'
   && !store.unknownOutcome);
-const title = computed(() => t(store.screen === 'manage' ? 'core.trackerManagerTitle'
-  : completed.value ? store.flow === 'rollback' ? 'core.trackerRollbackDoneTitle'
+const title = computed(() => t(completed.value ? store.flow === 'rollback' ? 'core.trackerRollbackDoneTitle'
     : store.flow === 'update' ? 'core.trackerUpdateDoneTitle' : 'core.trackerInstallDoneTitle'
-  : store.flow === 'rollback' ? 'core.trackerRollbackTitle'
-  : store.flow === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'));
-const description = computed(() => working.value ? '' : completed.value
+  : displayFlow.value === 'rollback' ? 'core.trackerRollbackTitle'
+  : displayFlow.value === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'));
+const description = computed(() =>
+  working.value && !['source', 'version'].includes(displayScreen.value) ? '' : completed.value
   ? t('core.trackerVersionInstalled', {
     version: store.job?.preview?.version ?? store.job?.target?.version ?? '',
   })
-  : t(store.screen === 'manage' ? 'core.trackerManagerIntro'
-  : store.screen === 'source' ? 'core.trackerChooseSourceHint'
-  : store.screen === 'version' ? 'core.trackerChooseVersionHint'
-  : store.screen === 'rollback' ? 'core.trackerRollbackHint'
+  : t(displayScreen.value === 'source' ? 'core.trackerChooseSourceHint'
+  : displayScreen.value === 'version' ? 'core.trackerChooseVersionHint'
+  : displayScreen.value === 'rollback' ? 'core.trackerRollbackHint'
   : 'core.trackerReviewHint'));
-const steps = computed(() => ['manage', 'result'].includes(store.screen) ? []
-  : store.flow === 'rollback' ? [
+const steps = computed(() => ['idle', 'result'].includes(displayScreen.value) ? []
+  : displayFlow.value === 'rollback' ? [
     t('core.trackerConfirmStep'), t('core.trackerRollback'), t('core.trackerResultStep'),
   ]
-  : store.flow === 'update' ? [
+  : displayFlow.value === 'update' ? [
     t('core.trackerPrepareStep'), t('core.trackerConfirmStep'), t('core.trackerInstall'),
   ]
   : [
@@ -395,16 +343,17 @@ const steps = computed(() => ['manage', 'result'].includes(store.screen) ? []
     t('core.trackerInstall'),
   ]);
 const stepIndex = computed(() => {
-  if (store.flow === 'rollback') {
-    return store.screen === 'rollback' ? 0 : store.screen === 'progress' ? 1 : 2;
+  if (displayFlow.value === 'rollback') {
+    return displayScreen.value === 'rollback' ? 0 : displayScreen.value === 'progress' ? 1 : 2;
   }
 
-  if (store.flow === 'update') {
-    return store.screen === 'version' || store.job?.status === 'running' ? 0
-      : store.screen === 'review' ? 1 : 2;
+  if (displayFlow.value === 'update') {
+    return displayScreen.value === 'version' || store.job?.status === 'running' ? 0
+      : displayScreen.value === 'review' ? 1 : 2;
   }
 
-  return store.screen === 'source' ? 0 : store.screen === 'version' ? 1 : store.screen === 'review' ? 2 : 3;
+  return displayScreen.value === 'source' ? 0 : displayScreen.value === 'version' ? 1
+    : displayScreen.value === 'review' ? 2 : 3;
 });
 const statusLabel = computed(() => store.job ? t(({
   running: 'core.trackerJobRunning',
@@ -429,12 +378,12 @@ const warnings = computed(() => [...new Set(store.job?.preview?.warnings ?? [])]
     && (!officialSource.value || !isPackageCodeWarning(warning))));
 const resultRestartRequired = computed(() => store.jobRestartRequired
   || !!store.job?.driverId && !!store.installed[store.job.driverId]?.restartRequired);
-const driverName = (id: string) => packages.value.find((entry) => entry.id === id)?.name ?? id;
+const driverName = (id: string) => trackers.catalog?.drivers.find((entry) => entry.id === id)?.name ?? id;
 const canConfigure = (id: string | null) => !!id
   && !(store.job?.driverId === id && store.jobRestartRequired)
-  && packages.value.some((entry) => entry.id === id
-  && !entry.deleted && !entry.record?.restartRequired
-  && ['active', 'available'].includes(entry.status ?? 'unavailable'));
+  && !store.installed[id]?.restartRequired
+  && trackers.catalog?.drivers.some((entry) => entry.id === id
+    && !entry.deleted && ['active', 'available'].includes(entry.status));
 
 /**
  * Черновик своего источника переживает переключение карточек и закрытие мастера.
@@ -536,88 +485,85 @@ async function editVersion() {
 
 function backFromVersion() {
   store.error = '';
-  store.screen = store.flow === 'update' ? 'manage' : 'source';
-}
 
-function manage() {
-  if (!store.blocked) {
-    store.acknowledge();
-    store.screen = 'manage';
+  if (store.flow === 'update') {
+    configure(store.updateDriverId ?? undefined);
+  } else {
+    store.screen = 'source';
   }
 }
 
-function configure(id?: string) {
-  store.acknowledge();
-  emit('configure', id);
-}
-
-function finish() {
-  manage();
-  emit('update:open', false);
-}
-
 /**
- * Удаление использует общий подтверждающий диалог и блокирует повторный клик.
- * Реквизиты сохраняются, а выбранный внешний трекер отключает сервер.
+ * Выход из мастера возвращает выбранный драйвер в единственный каталог настроек.
+ * Завершённый результат отмечается просмотренным, активный серверный job не сбрасывается.
  */
-async function removeDriver(id: string, name: string) {
-  if (removing.value || store.blocked) {
+function configure(id?: string) {
+  if (store.blocked) {
     return;
   }
 
-  removing.value = true;
+  const driverId = id ?? store.job?.driverId ?? store.updateDriverId ?? undefined;
 
-  try {
-    const accepted = await confirmDialog(messageRef('core.trackerRemoveConfirmation', { name }), {
-      title: messageRef('core.trackerRemoveTitle'),
-      okText: messageRef('core.trackerRemove'),
-      danger: true,
-    });
-
-    if (accepted) {
-      await store.remove(id);
-    }
-  } finally {
-    removing.value = false;
-  }
+  store.acknowledge();
+  store.screen = 'idle';
+  emit('configure', driverId);
 }
 
 /**
- * Незавершённая операция сохраняет приоритет над новым маршрутом установки.
- * Прежний подтверждённый успех не подменяет менеджер; восстановление неизвестного исхода
- * оставляет результат видимым и не выполняет повторное применение.
+ * Прямой вход выполняет запрошенное действие после восстановления серверной операции.
+ * Прежние завершённые попытки не подменяют новый выбор; активный и неизвестный исход сохраняются.
  */
 async function initialize() {
   const recoveringOperation = store.blocked;
 
+  initializationError.value = false;
   store.loading = true;
-  await store.loadSources();
-  await store.current();
 
+  if (props.request.kind === 'install') {
+    await store.loadSources();
+  }
+
+  const restored = await store.current();
   const restoreError = store.error;
+  const installed = await store.run(() => store.readInstalled());
 
-  await store.run(() => store.readInstalled());
   store.error ||= restoreError;
   store.loading = false;
 
-  if (!recoveringOperation && !store.blocked && !store.error
-    && store.job?.status === 'done' && !props.startUpdate) {
-    store.acknowledge();
-    store.screen = 'manage';
-  }
-
-  if (props.startUpdate && !store.blocked && !store.error) {
-    await store.update(props.startUpdate);
+  if (!restored || !installed) {
+    initializationError.value = true;
 
     return;
   }
 
-  if (store.selectedSource === undefined) {
-    store.url ||= store.sources[0]?.url ?? '';
-    store.selectedSource = store.sources.some((source) => source.url === store.url) ? store.url : null;
+  if (store.blocked || store.job?.status === 'recovery_required'
+    || store.job?.status === 'awaiting_restart') {
+    return;
   }
 
-  if (!store.blocked && store.screen === 'manage' && (props.startInstall || !packages.value.length)) {
+  if (recoveringOperation || props.request.kind === 'resume') {
+    if (!store.job) {
+      configure();
+    }
+
+    return;
+  }
+
+  store.acknowledge();
+  store.screen = 'idle';
+
+  if (props.request.kind === 'update') {
+    await store.update(props.request.id);
+  } else if (props.request.kind === 'version' || props.request.kind === 'restore') {
+    await chooseVersion(props.request.id, props.request.kind === 'restore');
+  } else if (props.request.kind === 'rollback') {
+    await store.openRollback(props.request.id);
+  } else {
+    if (store.selectedSource === undefined) {
+      store.url ||= store.sources[0]?.url ?? '';
+      store.selectedSource = store.sources.some((source) => source.url === store.url) ? store.url : null;
+    }
+
     beginInstall();
   }
 }
@@ -651,12 +597,9 @@ onUnmounted(() => {
 
 <style scoped>
 .driver-install,
-.driver-installed,
 .driver-sources,
 .driver-install__fields,
-.driver-job,
-.driver-package,
-.driver-package__actions {
+.driver-job {
   display: grid;
   gap: 16px;
   min-width: 0;
@@ -696,8 +639,7 @@ onUnmounted(() => {
 }
 
 .driver-install__heading,
-.driver-job__identity,
-.driver-package__identity {
+.driver-job__identity {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -726,8 +668,7 @@ onUnmounted(() => {
 }
 
 .driver-install__note,
-.driver-source__copy small,
-.driver-package__identity > span {
+.driver-source__copy small {
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.5;
@@ -746,12 +687,21 @@ onUnmounted(() => {
   text-align: left;
 }
 
+.driver-install__loading-source {
+  padding: 17px 11px;
+}
+
+.driver-install__loading-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
 .driver-source__title {
   font-size: 14px;
   font-weight: 500;
 }
 
-.driver-package,
 .driver-job {
   align-content: start;
   padding: 18px;
@@ -760,13 +710,6 @@ onUnmounted(() => {
   background: var(--surface-2);
 }
 
-.driver-package__actions {
-  justify-items: start;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.driver-package__selected,
 .driver-job__version,
 .driver-job__status {
   color: var(--accent);
@@ -876,8 +819,7 @@ onUnmounted(() => {
     font-weight: 500;
   }
 
-  .driver-job,
-  .driver-package {
+  .driver-job {
     gap: 12px;
     padding: 16px;
   }

@@ -80,7 +80,11 @@ test('AppShell использует public UI controls и общую повер�
     assert.match(source, /<PipelineTopbarPopover\s+v-if="!phoneLayout && pipelineTopbar\.total"/u);
     assert.match(source, /v-if="topbarTimerTasks\.length \|\| \(!phoneLayout && pipelineTopbar\.total\)"/u);
     assert.match(source, /useTasksStore/u);
-    assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
+    assert.match(source, new RegExp(
+      'await taskStore\\.timer\\(task\\.id, action,\\s*'
+      + 'isTaskSourceId\\(task\\.source\\) \\? task\\.source : undefined\\)',
+      'u',
+    ));
     assert.match(source, /boardStore\.data\?\.today\?\.hours \?\? 0/u);
     assert.ok(
       source.indexOf('<SystemResourcesButton') < source.indexOf('<BoardTimerPopover'),
@@ -235,4 +239,22 @@ test('TIP-MIG-01: каждая иконка постоянной рейки им
 
     assert.equal(named, true, `${node.tag}:${node.loc.start.line}`);
   }
+});
+
+test('топбар таймеров собирается сборщиком всех ролей', async (t) => {
+  const source = await readFile(APP_SHELL_PATH, 'utf8');
+
+  assert.match(source, /selectTopbarTimerTasks\(/u);
+  assert.match(source, /\? boardStore\.data : null/u);
+});
+
+test('поповер получает срок отказа источника из стора', async () => {
+  const source = await readFile(APP_SHELL_PATH, 'utf8');
+
+  assert.match(source, /:stale-notice="boardStaleNotice"/u);
+  assert.match(source, /<BoardTimerPopover\s+v-if="topbarTimerTasks\.length \|\| boardStaleNotice"/u);
+  assert.match(source, /return t\('core\.boardTrackerUnavailable'\);/u);
+  assert.match(source, /const since = boardStore\.staleSinceMs;/u);
+  assert.match(source, /boardStore\.lastRefreshAttemptAt/u);
+  assert.doesNotMatch(source, /!topbarTimerTasks\.value\.length \|\| !boardStore\.refreshProblem/u);
 });

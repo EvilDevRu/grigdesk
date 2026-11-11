@@ -1,9 +1,20 @@
 import { createRequire } from 'node:module';
 
+import { startProcessWatchdog } from '../lib/processWatchdog.ts';
+
 const entry = process.argv[2]!;
 const binary = process.argv[3]!;
 const desktopParent = process.env.GRIGDESK_DESKTOP_CHILD === '1';
 let stopping = false;
+
+// fd 4 принадлежит launcher и не наследуется фабрикой. Сторож переживает launcher
+// и добивает только своего родителя, даже если worker уже застрял внутри process.exit.
+startProcessWatchdog({
+  node: process.execPath,
+  phase: 'launcher',
+  launcherPipe: true,
+  graceMs: 45_000,
+});
 
 /**
  * Внутренний IPC всегда принадлежит launcher, даже при standalone запуске.
@@ -31,6 +42,11 @@ function requestStop(): void {
  */
 function earlySignal(signal: NodeJS.Signals): void {
   if (process.listenerCount(signal) === 1) {
+    startProcessWatchdog({
+      node: process.execPath,
+      deadline: Date.now() + 45_000,
+      phase: 'startup-signal',
+    });
     process.exit(0);
   }
 }

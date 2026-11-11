@@ -47,6 +47,11 @@
         </div>
         <span v-else-if="headContext" class="tlabel mono"
               v-tooltip="context?.treePath">{{ headContext }}</span>
+        <CodeBranchControl v-if="context?.main" :key="context.id"
+                           :context="{ project, repoKey, treePath }"
+                           :branch="git?.branch || context.branch"
+                           :disabled="contextLoading || gitActionBusy"
+                           @changed="activate({ preserve: true })" />
       </div>
     </div>
 
@@ -256,11 +261,27 @@
                 role="embedded"
                 data-context="code-commit"
                 data-action="fetch"
-                label="Проверить удалённый репозиторий"
-                v-tooltip="'Проверить удалённый репозиторий'"
+                :label="t('core.codeGitFetchLabel')"
+                v-tooltip="t('core.codeGitFetchHint')"
                 :loading="gitBusy === 'fetch'"
                 :disabled="gitActionBusy || !fetchRemoteLabel"
                 @click="fetchGitRemote"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M13 6a5 5 0 0 0-8.5-2L2 6m0-3v3h3M3 10a5 5 0 0 0 8.5 2l2.5-2m0 3v-3h-3" />
+                </svg>
+              </UiIconButton>
+              <UiIconButton
+                class="pull-action"
+                role="embedded"
+                data-context="code-commit"
+                data-action="pull"
+                :label="t('core.codeGitPullLabel')"
+                v-tooltip="t('core.codeGitPullHint')"
+                :loading="gitBusy === 'pull'"
+                :disabled="gitActionBusy || !git.tracking?.upstream || git.tracking?.detached"
+                @click="pullGitChanges"
               >
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1420,6 +1441,7 @@ import type {
 import PatchReview from './PatchReview.vue';
 import CodeDiffView from './CodeDiffView.vue';
 import CodeGitMenu from './CodeGitMenu.vue';
+import CodeBranchControl from './CodeBranchControl.vue';
 import { useCodeReviewState } from '../../features/code/codeReviewState';
 import { readDiffPreferences, storeDiffPreferences } from '../../features/code/codeDiffPreferences';
 import type { DiffHunk, DiffPreferences, DiffSide } from '../../features/code/codeDiffModel';
@@ -4702,6 +4724,31 @@ function pushGitChanges() {
 }
 
 /**
+ * Получение обновляет рабочие файлы и историю, поэтому перечитывает весь Git-снимок.
+ * Сервер допускает только fast-forward и возвращает понятный отказ при расхождении.
+ */
+function pullGitChanges() {
+  if (!git.value?.tracking?.upstream || git.value.tracking.detached) {
+    return null;
+  }
+
+  return performGitAction({
+    execute: (snapshot) => codeApi.pull(snapshot),
+    key: 'pull',
+    onSuccess: (result) => {
+      gitRequestId += 1;
+
+      if (git.value) {
+        git.value = { ...git.value, tracking: result.tracking };
+      }
+    },
+    successMessage: (result) => t(result.updated ? 'core.codeGitPulled' : 'core.codeGitUpToDate', {
+      branch: result.branch,
+    }),
+  });
+}
+
+/**
  * Fetch не меняет рабочую ветку: сервер обновляет только refs выбранного remote,
  * а клиент подменяет tracking из ответа без второго чтения тяжёлого списка diff.
  */
@@ -4715,10 +4762,13 @@ function fetchGitRemote() {
     key: 'fetch',
     refreshGit: false,
     onSuccess: (result) => {
+      gitRequestId += 1;
+
       if (git.value) {
         git.value = { ...git.value, tracking: result.tracking };
       }
     },
+    successMessage: (result) => t('core.codeGitFetched', { remote: result.remote }),
   });
 }
 

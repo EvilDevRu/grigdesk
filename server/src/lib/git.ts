@@ -28,6 +28,7 @@ import type {
   CodeGitFile,
   CodeGitTracking,
   CodePatchResponse,
+  CodePullResponse,
   CodePushResponse,
   CodeSearchResponse,
   CodeStageResponse,
@@ -1390,6 +1391,71 @@ export async function fetchRemote(cwd: string): Promise<CodeFetchResponse> {
   return {
     ok: true,
     remote,
+    tracking: await gitTrackingStatus(cwd),
+  };
+}
+
+/**
+ * Получает upstream и продвигает только чистую рабочую ветку через fast-forward.
+ * Явный запрет autostash сохраняет правки на месте даже при пользовательской настройке Git.
+ */
+export async function pullCurrentBranch(cwd: string): Promise<CodePullResponse> {
+  const branch = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    .catch(() => '')).trim();
+  const tracking = await gitTrackingStatus(cwd);
+
+  if (!branch) {
+    throw new CodeGitError('detached_head', 'Для получения изменений выберите рабочую ветку.');
+  }
+
+  if (!tracking.upstream || await gitConfig(cwd, `branch.${branch}.remote`) === '.') {
+    throw new CodeGitError('no_upstream', 'Для получения изменений настройте удалённую upstream-ветку.');
+  }
+
+  const status = await git(cwd, ['status', '--porcelain=v1', '--untracked-files=normal']);
+
+  if (status.trim()) {
+    throw new CodeGitError(
+      'dirty_worktree',
+      'Сначала сохраните локальные изменения: получение доступно только в чистой рабочей копии.',
+    );
+  }
+
+  const before = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+  const fetched = await fetchRemote(cwd);
+  const currentBranch = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    .catch(() => '')).trim();
+
+  if (currentBranch !== branch) {
+    throw new CodeGitError('branch_changed', 'Ветка сменилась во время получения. Обновите рабочую копию.');
+  }
+
+  if (!fetched.tracking.upstream) {
+    throw new CodeGitError('no_upstream', 'Удалённая upstream-ветка больше недоступна.');
+  }
+
+  if (fetched.tracking.ahead > 0 && fetched.tracking.behind > 0) {
+    throw new CodeGitError(
+      'pull_diverged',
+      'История веток разошлась. Fast-forward невозможен; согласуйте изменения вручную.',
+    );
+  }
+
+  const target = (await git(cwd, ['rev-parse', '--verify', '@{u}^{commit}'])).trim();
+
+  try {
+    await git(cwd, ['merge', '--ff-only', '--no-autostash', '--no-squash', target]);
+  } catch {
+    throw new CodeGitError(
+      'pull_failed',
+      'Не удалось обновить ветку через fast-forward. Проверьте локальные изменения и состояние Git.',
+    );
+  }
+
+  return {
+    ok: true,
+    branch,
+    updated: before !== (await git(cwd, ['rev-parse', 'HEAD'])).trim(),
     tracking: await gitTrackingStatus(cwd),
   };
 }

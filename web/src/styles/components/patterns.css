@@ -273,7 +273,6 @@
 }
 
 .ui-workspace .ui-field__hint {
-  color: var(--ink-mid);
   font-size: 12px;
   line-height: 18px;
 }

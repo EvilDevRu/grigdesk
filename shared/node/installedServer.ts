@@ -171,24 +171,36 @@ export async function updateProcessAlive(expected: UpdateProcess): Promise<boole
 export async function inspectInstalledServer(receipt: InstallationReceipt): Promise<InstalledServerOwner> {
   const unit = await installedServerUnit(receipt);
   const settings = await serverSettings(receipt);
+
+  /**
+   * Сервер установки может быть не запущен или поднят откуда угодно с другой папкой
+   * данных: отказ порта по ECONNREFUSED означает stopped ещё до чтения CLI-токена,
+   * поэтому незапущенный сервер не требует токена и не роняет осмотр.
+   */
+  const refused = await fetch(settings.origin + '/api/health',
+    { redirect: 'error', signal: AbortSignal.timeout(1500) })
+    .then(() => false,
+      (network: unknown) => (network as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED');
+
+  if (refused && (!unit || ['inactive', 'failed'].includes(unit.ActiveState!))) {
+    return {
+      kind: unit ? 'service' : 'stopped',
+      running: false,
+      instanceId: null,
+      process: null,
+    };
+  }
+
   let identity: ServerIdentity;
 
   try {
     identity = await installedServerRequest(receipt, '/api/system/runtime-identity') as ServerIdentity;
   } catch (error) {
-    try {
-      await fetch(settings.origin + '/api/health', { signal: AbortSignal.timeout(1500) });
-    } catch (network) {
-      const cause = (network as { cause?: { code?: string } }).cause?.code;
+    const message = error instanceof Error ? error.message : '';
 
-      if (cause === 'ECONNREFUSED' && (!unit || ['inactive', 'failed'].includes(unit.ActiveState!))) {
-        return {
-          kind: unit ? 'service' : 'stopped',
-          running: false,
-          instanceId: null,
-          process: null,
-        };
-      }
+    // Живой порт без читаемого токена этой установки даёт диагностический код вместо сырого ENOENT.
+    if (message.includes('cli-token')) {
+      throw new Error('release_server_token_unreadable');
     }
 
     throw error;

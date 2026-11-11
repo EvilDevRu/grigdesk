@@ -160,16 +160,20 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
-     * Таймер адресуется полному источнику независимо от дефолта.
-     * Повтор после отказа остаётся явным действием пользователя.
+     * Подтверждённая пауза адресована источнику и не считается случайным пропуском CRM.
+     * Ошибка POST и поздний ответ прежнего владельца не меняют состояние удержания.
      */
     async timer(id: TaskId, action: string, source?: TaskSourceId) {
       const target = await this.target(id, source);
+      const board = useBoardStore();
+      const epoch = board.sourceEpoch;
+      const timerSource = source ?? board.data?.source;
 
       await api.post(
         `${target.prefix}/task/${id}/timer/${action}`, undefined, target.options,
       );
-      await useBoardStore().load(true);
+      board.confirmTimerAction(id, action, timerSource, epoch);
+      await board.load(true);
     },
 
     /**

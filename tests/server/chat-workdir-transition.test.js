@@ -74,6 +74,40 @@ async function send(app, turnId) {
   });
 }
 
+test('CODE-BRANCH-CHAT: занятый checkout отклоняет новый ход до запуска исполнителя', async (t) => {
+  const f = await fixture(t);
+
+  f.app.codeBranchBusy = async (root) => root === f.first;
+
+  const response = await send(f.app);
+
+  assert.equal(response.statusCode, 409, response.body);
+  assert.equal(response.json().error, 'branch_busy');
+  assert.equal(f.runs.length, 0);
+});
+
+test('CODE-BRANCH-CHAT-ACTIVE: проверка занятости относится к папке активного хода', async (t) => {
+  const f = await fixture(t);
+  let release;
+
+  f.executor.respond = () => new Promise((resolve) => {
+    release = () => resolve({ reply: 'готово' });
+  });
+
+  const inFlight = send(f.app);
+
+  try {
+    await waitFor(() => f.runs.length === 1, 'агент запущен');
+    assert.equal(await f.app.codeAgentsBusy(f.first), true);
+    assert.equal(await f.app.codeAgentsBusy(f.second), false);
+  } finally {
+    release?.();
+    await inFlight;
+  }
+
+  assert.equal(await f.app.codeAgentsBusy(f.first), false);
+});
+
 /**
  * Переход собирается из реального предпросмотра, включая CAS и эффективные корни.
  * Повтор использует неизменное исходное тело, как при потере HTTP-ответа.

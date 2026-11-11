@@ -140,6 +140,7 @@ export interface BoardChart {
 }
 
 export interface DriverBoardSnapshot {
+  lastOkAt?: number;
   snapshot: BoardDashboard;
   dataRevision?: number;
   error?: string;

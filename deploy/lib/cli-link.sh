@@ -2,14 +2,12 @@
 
 # Ссылка в пользовательском PATH обновляется при смене копии GrigDesk.
 # Чужой обычный файл или каталог сохраняется с предупреждением вместо перезаписи.
-# Прежние имена команды (grigdesk и имя до переименования продукта) убираются, только если это
-# ссылки в bin/ этой же копии: после переименования команды они ведут в несуществующий файл.
+# Прежняя ссылка grigdesk убирается, только если ведёт в bin/ этой копии.
+# После переименования команды она ведёт в несуществующий файл.
 grigdesk_link_cli() {
   local grigdesk_root=${1:?корень grigdesk обязателен}
   local target_bin=${2:?каталог bin обязателен}
   local link_file="$target_bin/grigdesk-ctl"
-  # Равно LEGACY.cliLink из shared/runtime/legacyBrand.ts; сверяется тестом.
-  local legacy_cli='cockpit'
   local legacy
 
   mkdir -p "$target_bin" || return 1
@@ -21,9 +19,9 @@ grigdesk_link_cli() {
 
   ln -sfn "$grigdesk_root/bin/grigdesk-ctl" "$link_file"
 
-  for legacy in grigdesk "$legacy_cli"; do
+  for legacy in grigdesk; do
     case "$(readlink -- "$target_bin/$legacy" 2>/dev/null)" in
-      "$grigdesk_root/bin/grigdesk" | "$grigdesk_root/bin/$legacy_cli")
+      "$grigdesk_root/bin/grigdesk")
         rm -f -- "$target_bin/$legacy"
         ;;
     esac

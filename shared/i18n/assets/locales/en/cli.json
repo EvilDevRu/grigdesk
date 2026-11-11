@@ -38,7 +38,7 @@
   "devices": "Devices",
   "devicesDescription": "pair with QR, list, revoke",
   "build": "Build",
-  "buildDescription": "server, web, window, DeepSeek, APK, portable bundle",
+  "buildDescription": "server, web, window, tasks, DeepSeek, APK, portable bundle",
   "development": "Development",
   "developmentDescription": "dev mode, dependencies, run",
   "exit": "Exit",
@@ -60,7 +60,7 @@
   "namePrompt": "Device name (Esc to cancel):",
   "idPrompt": "Device id (Esc to cancel):",
   "all": "Everything",
-  "allDescription": "server → web → window, build and install",
+  "allDescription": "(server, desktop, tasks) — parallel build and install",
   "serverOnly": "Server only",
   "serverOnlyDescription": "build and install server ELF",
   "web": "Web only",
@@ -89,7 +89,7 @@
   "failed": "Failed: {step}, code {code}",
   "interrupted": "interrupted",
   "total": "Total time: {time}",
-  "summaryAll": "Installed server, web and window.",
+  "summaryAll": "Installed server, web, window and tasks.",
   "summaryServer": "Installed server: {path}",
   "summaryWeb": "Built web: {path}",
   "summaryWindow": "Installed window: {path}; web built.",
@@ -135,6 +135,10 @@
       "package": "Window: package",
       "install": "Window: install"
     },
+    "tracker": {
+      "deps": "Tasks: dependencies",
+      "build": "Tasks: build"
+    },
     "deepseek": {
       "deps": "DeepSeek: dependencies",
       "prepare": "DeepSeek: prepare runtime",
@@ -146,16 +150,6 @@
       "smoke-coding-plan": "DeepSeek: live smoke (coding-plan)",
       "install": "DeepSeek: install",
       "prune": "DeepSeek: prune cache"
-    },
-    "bundle": {
-      "server": "Bundle: server",
-      "tracker": "Bundle: tracker",
-      "relay": "Bundle: relay",
-      "deepseek": "Bundle: DeepSeek",
-      "window": "Bundle: window",
-      "verify": "Bundle: verify",
-      "pack": "Bundle: pack",
-      "publish": "Bundle: publish"
     }
   },
   "screens": {

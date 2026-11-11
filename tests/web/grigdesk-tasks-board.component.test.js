@@ -17,6 +17,14 @@ async function fixture(t, {
   initialTasks = [],
   pipelineTasks = [],
   boardError = 'Ошибка B24 → Настройки',
+  catalog = {
+    drivers: [],
+    activeIds: ['own'],
+    externalId: null,
+    revision: 1,
+  },
+  externalGet,
+  externalPost,
 } = {}) {
   const rows = [...initialTasks];
   const posts = [];
@@ -37,6 +45,14 @@ async function fixture(t, {
      */
     async get(url) {
       reads.push(url);
+
+      if (url === '/api/trackers') {
+        return structuredClone(catalog);
+      }
+
+      if (url.startsWith('/api/tracker/') && externalGet) {
+        return externalGet(url);
+      }
 
       if (url === '/api/grigdesk-tasks/projects') {
         return { projects };
@@ -62,8 +78,16 @@ async function fixture(t, {
      * Отказ происходит до записи и сохраняет серверный список пустым.
      * Успех публикует ровно одну серверную запись с новым номером.
      */
-    async post(url, payload) {
-      posts.push({ url, payload });
+    async post(url, payload, options) {
+      posts.push({
+        url,
+        payload,
+        options,
+      });
+
+      if (url.startsWith('/api/tracker/') && externalPost) {
+        return externalPost(url, payload);
+      }
 
       if (refuse) {
         throw new Error('Сохранение отклонено');
@@ -122,7 +146,7 @@ async function fillForm(fx, title = 'Своя задача') {
     : fx.wrapper;
   const input = dialog.find('input:not([type="hidden"])');
   const description = dialog.find('textarea');
-  const project = dialog.find('select');
+  const project = dialog.find('#grigdesk-task-project-native');
 
   assert.ok(input.exists(), 'Форма содержит название');
   assert.ok(description.exists(), 'Форма содержит описание');
@@ -143,6 +167,171 @@ async function submit(fx) {
   await button.trigger('click');
   await fx.flushPromises();
 }
+
+/**
+ * Две включённые доски имеют разные проекты, поколения и источники аккаунтов.
+ * Выключенный пакет и пакет без создания не должны стать целью новой задачи.
+ */
+function multiBoardCatalog() {
+  const drivers = ['alpha-board', 'beta-board', 'disabled-board', 'readonly-board'].map((id) => ({
+    id,
+    name: id === 'alpha-board' ? 'Доска Альфа' : 'Доска Бета',
+    status: 'active',
+    configured: true,
+    generation: id === 'alpha-board' ? 7 : 8,
+    capabilities: { create: id !== 'readonly-board', projects: true },
+  }));
+
+  return {
+    drivers,
+    activeIds: ['own', 'alpha-board', 'beta-board', 'readonly-board'],
+    enabledIds: ['alpha-board', 'beta-board', 'readonly-board'],
+    default: 'beta-board',
+    externalId: 'beta-board',
+    revision: 3,
+  };
+}
+
+/**
+ * Ответ context фиксирует конкретный аккаунт перед чтением его проектов.
+ * Одинаковый номер создаваемой задачи не должен стирать различие двух источников.
+ */
+function externalGet(url) {
+  const alpha = url.includes('/alpha-board/');
+
+  return url.endsWith('/context') ? {
+    source: `${alpha ? 'alpha-board' : 'beta-board'}@${(alpha ? 'a' : 'b').repeat(64)}`,
+    generation: alpha ? 7 : 8,
+  } : { groups: [{ id: alpha ? 91 : 92, name: alpha ? 'Внешний Альфа' : 'Внешний Бета' }] };
+}
+
+test('NEW-TASK: выбор содержит GrigDesk и обе доски, начальная цель — сохранённый дефолт', async (t) => {
+  const fx = await fixture(t, {
+    catalog: multiBoardCatalog(),
+    externalGet,
+    projects: [],
+  });
+
+  await openForm(fx);
+
+  const board = fx.wrapper.get('#grigdesk-task-board-native');
+
+  assert.deepEqual(board.findAll('option').map((option) => option.element.value),
+    ['own', 'alpha-board', 'beta-board']);
+  assert.equal(board.element.value, 'beta-board');
+  assert.deepEqual(fx.wrapper.get('#grigdesk-task-project-native').findAll('option')
+    .map((option) => option.text()), ['Выберите проект', 'Внешний Бета']);
+  assert.ok(fx.reads.includes('/api/tracker/beta-board/context'));
+  assert.ok(fx.reads.includes('/api/tracker/beta-board/groups'));
+});
+
+test('NEW-TASK: выбранная доска получает POST и её источник открывает созданную карточку', async (t) => {
+  const fx = await fixture(t, {
+    catalog: multiBoardCatalog(),
+    externalGet,
+    externalPost: async () => ({ ok: true, id: 42 }),
+    projects: [],
+  });
+
+  await openForm(fx);
+  await fx.wrapper.get('#grigdesk-task-board-native').setValue('alpha-board');
+  await fx.flushPromises();
+  await fx.wrapper.get('#grigdesk-task-title').setValue('Задача Альфа');
+  await fx.wrapper.get('textarea').setValue('Описание внешней задачи');
+  await fx.wrapper.get('#grigdesk-task-project-native').setValue('91');
+  await submit(fx);
+  assert.deepEqual(fx.posts, [{
+    url: '/api/tracker/alpha-board/tasks',
+    payload: {
+      title: 'Задача Альфа',
+      description: 'Описание внешней задачи',
+      groupId: 91,
+    },
+    options: { headers: { 'x-grigdesk-tracker-generation': '7' } },
+  }]);
+  assert.deepEqual(fx.calls.openedReferences, [{ id: '42', source: `alpha-board@${'a'.repeat(64)}` }]);
+  assert.equal(fx.rows.length, 0);
+  assert.ok(fx.calls.boardLoad.includes(true));
+});
+
+test('NEW-TASK: возврат к GrigDesk использует внутренний проект и собственный API', async (t) => {
+  const fx = await fixture(t, { catalog: multiBoardCatalog(), externalGet });
+
+  await openForm(fx);
+  await fx.wrapper.get('#grigdesk-task-board-native').setValue('own');
+  await fx.flushPromises();
+  await fillForm(fx);
+  await submit(fx);
+  assert.equal(fx.posts[0].url, '/api/grigdesk-tasks?sources=1');
+  assert.equal(fx.posts[0].payload.projectId, 'beta');
+  assert.deepEqual(fx.calls.openedReferences, [{ id: LOCAL_TASK.id, source: 'grigdesk' }]);
+});
+
+test('NEW-TASK: поздний справочник прежней доски не заменяет проекты текущей', async (t) => {
+  const groups = Promise.withResolvers();
+  const fx = await fixture(t, {
+    catalog: multiBoardCatalog(),
+    externalGet: (url) => url === '/api/tracker/alpha-board/groups' ? groups.promise : externalGet(url),
+  });
+
+  await openForm(fx);
+  await fx.wrapper.get('#grigdesk-task-board-native').setValue('alpha-board');
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.get('#grigdesk-task-project-native').element.disabled, true);
+  await submit(fx);
+  assert.equal(fx.posts.length, 0);
+  await fx.wrapper.get('#grigdesk-task-board-native').setValue('beta-board');
+  await fx.flushPromises();
+  groups.resolve({ groups: [{ id: 91, name: 'Поздний проект Альфа' }] });
+  await fx.flushPromises();
+  assert.deepEqual(fx.wrapper.get('#grigdesk-task-project-native').findAll('option')
+    .map((option) => option.text()), ['Выберите проект', 'Внешний Бета']);
+  assert.equal(fx.wrapper.get('#grigdesk-task-project-native').element.disabled, false);
+});
+
+test('NEW-TASK: отказ внешней доски сохраняет черновик без повтора и подмены цели', async (t) => {
+  const fx = await fixture(t, {
+    catalog: multiBoardCatalog(),
+    externalGet,
+    externalPost: async () => {
+      throw new Error('Доска отклонила создание');
+    },
+  });
+
+  await openForm(fx);
+  await fx.wrapper.get('#grigdesk-task-title').setValue('Черновик');
+  await fx.wrapper.get('textarea').setValue('Сохранённое описание');
+  await submit(fx);
+  assert.equal(fx.posts.length, 0, 'Проект внешней доски обязателен');
+  await fx.wrapper.get('#grigdesk-task-project-native').setValue('92');
+  await submit(fx);
+  assert.equal(fx.posts.length, 1);
+  assert.equal(fx.posts[0].url, '/api/tracker/beta-board/tasks');
+  assert.match(fx.wrapper.text(), /Доска отклонила создание/u);
+  assert.equal(fx.wrapper.get('#grigdesk-task-title').element.value, 'Черновик');
+  assert.equal(fx.wrapper.get('textarea').element.value, 'Сохранённое описание');
+  assert.equal(fx.wrapper.get('#grigdesk-task-board-native').element.value, 'beta-board');
+  assert.deepEqual(fx.calls.openedReferences, []);
+});
+
+test('NEW-TASK: доска без справочника проектов создаёт по названию без groupId', async (t) => {
+  const catalog = multiBoardCatalog();
+
+  catalog.drivers[1].capabilities.projects = false;
+
+  const fx = await fixture(t, {
+    catalog,
+    externalGet,
+    externalPost: async () => ({ ok: true, id: 42 }),
+  });
+
+  await openForm(fx);
+  assert.equal(fx.wrapper.find('#grigdesk-task-project-native').exists(), false);
+  await fx.wrapper.get('#grigdesk-task-title').setValue('Без проекта');
+  await submit(fx);
+  assert.deepEqual(fx.posts[0].payload, { title: 'Без проекта', description: '' });
+  assert.equal(fx.reads.includes('/api/tracker/beta-board/groups'), false);
+});
 
 test('LOCAL-BOARD-01: без Б24 форма доступна, сохранённая задача видна и открывается', async (t) => {
   const fx = await fixture(t);

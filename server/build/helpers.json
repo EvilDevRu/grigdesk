@@ -59,17 +59,6 @@
       "description": "Единая команда GrigDesk из готового комплекта."
     },
     {
-      "id": "legacy-brand",
-      "entry": "shared/runtime/legacyBrand.ts",
-      "entryKind": "library",
-      "exports": [
-        "LEGACY",
-        "legacyRootProblem",
-        "legacyEnvWarnings"
-      ],
-      "description": "Библиотечные exports прежнего shell-контракта имён."
-    },
-    {
       "id": "routes-publish-kit",
       "entry": "server/src/modules/routes/publishKit.ts",
       "entryKind": "library",
@@ -146,6 +135,13 @@
         "runIngestWorker"
       ],
       "description": "Worker приёма медиа: статус и результат задания."
+    },
+    {
+      "id": "code-branch-worker",
+      "entry": "server/src/lib/codeBranchWorker.mts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Переключение основной ветки и запуск стенда по явным командам проекта."
     },
     {
       "id": "showcase-worker",

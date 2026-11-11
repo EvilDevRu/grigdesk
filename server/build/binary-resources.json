@@ -7,6 +7,11 @@
       "kind": "file"
     },
     {
+      "source": "tools/skills",
+      "target": "tools/skills",
+      "kind": "dir"
+    },
+    {
       "source": "engine/bin",
       "target": "engine/bin",
       "kind": "dir"

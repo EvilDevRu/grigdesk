@@ -88,9 +88,9 @@ test('Harness соблюдает user-invocable и строгую граммат
   assert.deepEqual(await readHarnessSkillCommands({ home: path.join(f.home, 'missing') }), []);
 });
 
-test('Источник connect-project распознаётся меню без установки навыка и запуска сервера', async (t) => {
+test('Источник grigdesk-connect-project распознаётся меню без запуска сервера', async (t) => {
   const f = await fixture(t);
-  const source = new URL('../../tools/skills/connect-project/SKILL.md', import.meta.url);
+  const source = new URL('../../tools/skills/grigdesk-connect-project/SKILL.md', import.meta.url);
   const text = await fs.readFile(source, 'utf8');
   const header = text.match(/^---\n([\s\S]*?)\n---\n/);
 
@@ -98,18 +98,18 @@ test('Источник connect-project распознаётся меню без 
 
   const metadata = parse(header[1]);
 
-  assert.equal(metadata.name, 'connect-project');
+  assert.equal(metadata.name, 'grigdesk-connect-project');
   assert.equal(typeof metadata.description, 'string');
   assert.match(metadata.description, /^[А-ЯЁ][^.?!\n]+\.$/u);
   assert.ok(metadata.description.length <= 120, 'Описание должно помещаться в меню без обрезки');
 
-  const bundle = path.join(f.skills, 'connect-project');
+  const bundle = path.join(f.skills, 'grigdesk-connect-project');
 
   await fs.mkdir(bundle);
   await fs.copyFile(source, path.join(bundle, 'SKILL.md'));
 
   assert.deepEqual(await readHarnessSkillCommands({ home: f.home }), [{
-    cmd: '/connect-project',
+    cmd: '/grigdesk-connect-project',
     desc: metadata.description.replace(/\s+/g, ' ').trim(),
     run: 'prompt',
     kind: 'skill',

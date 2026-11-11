@@ -1,4 +1,3 @@
-import { LEGACY_VALUES } from '../runtime/legacyBrand.ts';
 
 export type ChatWorkdir =
   | { kind: 'grigdesk'; }
@@ -29,8 +28,7 @@ export function normalizeChatWorkdir(value: unknown): ChatWorkdir | null {
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source);
 
-  // Чаты до второго этапа переименования хранят прежнее значение; оно читается как текущее.
-  if ((source.kind === 'grigdesk' || source.kind === LEGACY_VALUES.workdirKind) && keys.length === 1) {
+  if (source.kind === 'grigdesk' && keys.length === 1) {
     return { kind: 'grigdesk' };
   }
   if (source.kind === 'path' && keys.every((key) => ['kind', 'path'].includes(key))) {

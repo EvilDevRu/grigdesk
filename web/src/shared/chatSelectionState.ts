@@ -73,6 +73,14 @@ function same(group: Group, left: Selection, right: Selection): boolean {
 }
 
 /**
+ * Барьер отправки сравнивает фактические настройки запуска, а не общую revision.
+ * Переименование или чужой черновик не меняют модель, режим, скорость и усилие.
+ */
+export function sameChatSelections(left: Source, right: Source): boolean {
+  return groups.every((group) => same(group, read(left, group), read(right, group)));
+}
+
+/**
  * Применяется только одна группа настроек: история, черновик и runtime остаются у окна.
  * Пара модели меняется вместе, чтобы legacy-id не расходился с modelRef.
  */
@@ -91,11 +99,12 @@ function assign(target: ChatRecord, group: Group, value: Selection): void {
 }
 
 /**
- * Намерения принадлежат экземпляру окна и живут только до подтверждения записи.
- * Поколение отличает новый выбор от снимка, который уже находится в полёте.
+ * Намерения живут до подтверждения, а поколения — до удаления чата или окна.
+ * Даже уже сохранённый новый выбор должен отменить запуск со старым снимком.
  */
 export function createChatSelectionState() {
   const chats = new Map<string, Choices>();
+  const versions = new Map<string, Generations>();
   let generation = 0;
 
   return {
@@ -129,18 +138,22 @@ export function createChatSelectionState() {
 
       choices[group] = intent;
       chats.set(id, choices);
+      versions.set(id, { ...versions.get(id), [group]: intent.generation });
 
       return intent.generation;
     },
     capture(id: string): Generations {
-      const choices = chats.get(id);
-
-      return Object.fromEntries(groups.map((group) => [group, choices?.[group]?.generation]));
+      return { ...versions.get(id) };
     },
     newerModel(id: string, sent: Generations): boolean {
       const intent = chats.get(id)?.model;
 
       return !!intent && intent.generation !== sent.model;
+    },
+    newer(id: string, sent: Generations): boolean {
+      const current = versions.get(id);
+
+      return groups.some((group) => current?.[group] !== sent[group]);
     },
     /**
      * ACK снимает только отправленное поколение; более поздний выбор остаётся dirty.
@@ -172,9 +185,10 @@ export function createChatSelectionState() {
     },
     /**
      * Чужое изменение того же поля побеждает как в серверном CAS.
+     * Поздний ответ не отменяет выбор, сделанный после отправки его снимка.
      * Независимые локальные правки сохраняются, а нетронутые поля берутся с сервера.
      */
-    rebase(id: string, live: ChatRecord, remote: Source): void {
+    rebase(id: string, live: ChatRecord, remote: Source, sent?: Generations): void {
       const choices = chats.get(id) || {};
       let rejectedModel: number | undefined;
 
@@ -184,8 +198,10 @@ export function createChatSelectionState() {
         const dependent = (group === 'effort' || group === 'speed') && intent?.modelGeneration !== undefined
           && intent.modelGeneration === rejectedModel;
 
+        const newer = intent && sent && intent.generation !== sent[group];
+
         if (intent && !dependent
-          && (same(group, actual, intent.base) || same(group, actual, intent.value))) {
+          && (newer || same(group, actual, intent.base) || same(group, actual, intent.value))) {
           intent.base = actual;
           assign(live, group, intent.value);
 
@@ -203,11 +219,16 @@ export function createChatSelectionState() {
         chats.delete(id);
       }
     },
+    reset(id: string): void {
+      chats.delete(id);
+    },
     forget(id: string): void {
       chats.delete(id);
+      versions.delete(id);
     },
     clear(): void {
       chats.clear();
+      versions.clear();
     },
   };
 }

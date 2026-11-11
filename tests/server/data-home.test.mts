@@ -11,28 +11,12 @@ import {
 } from '../../shared/runtime/dataHome.ts';
 import type { DataHomeEnv } from '../../shared/runtime/dataHome.ts';
 import { isolatedEnv } from './helpers/pluginBootFixture.js';
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const runtimeHelper = fileURLToPath(new URL('../../deploy/lib/runtime-env.sh', import.meta.url));
 const home = '/home/user';
 const pathError = /GRIGDESK_HOME должен быть абсолютным путём/;
 
-test('GT-01: сторож снимает все старые переменные окружения', () => {
-  const key = `${LEGACY.envPrefix}ENV_FILE`;
-  const result = spawnSync('bash', [runner, '-e',
-    `process.stdout.write(String(process.env[${JSON.stringify(key)}] ?? ''))`], {
-    env: {
-      PATH: process.env.PATH,
-      HOME: os.tmpdir(),
-      [key]: '/should/not/leak',
-    },
-    encoding: 'utf8',
-    timeout: 10000,
-  });
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, '');
-});
 
 test('GT-02: сторож не создаёт отсутствующую настоящую папку ради артефактов', (t) => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-empty-home-'));
@@ -78,13 +62,7 @@ test('GT-03: сборщик тестового runtime требует явные
   assert.equal(existsSync(path.join(directory, '.grigdesk')), false);
 });
 
-test('GT-04: движок снимает старые ключи до запуска воркеров', () => {
-  const source = readFileSync(new URL('../engine/run-offline.sh', import.meta.url), 'utf8');
 
-  assert.match(source, /compgen -e/);
-  assert.match(source, /legacyBrand\.ts/);
-  assert.match(source, /unset "\$key"/);
-});
 
 const expectedLayout = {
   env: '.env',

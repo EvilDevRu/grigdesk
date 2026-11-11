@@ -160,6 +160,7 @@ async function fixture(t, { confirmed = true, stateFile = null, liveEditMinMs } 
     store,
     file,
     connection,
+    botApi,
     ownerKey: `${accountRef}:${T0}:${OWNER_CHAT}`,
     accountRef,
     sends,
@@ -840,4 +841,129 @@ test('отказ deleteMessage для live не роняет обход: пов�
   await watch.check();
   assert.equal(deletes().length, 2, 'следующий обход повторил удаление');
   assert.equal((await store.read()).cards['live:4190:a_0123456789abcdef'].messageId, null);
+});
+
+/**
+ * Сохраняет все порты старого экземпляра, меняя только lifecycle вотчера.
+ * Это моделирует следующий запуск на тех же синтетических durable-карточках.
+ */
+function nextWatch(previous) {
+  return new TelegramPultWatch({ ...previous });
+}
+
+test('stop прерывает удаление, сохраняет остаток и не начинает следующие операции', async (t) => {
+  const f = await fixture(t);
+  const cards = Object.fromEntries([1, 2, 3].map((id) => [`old:${id}`, {
+    messageId: id,
+    at: T0,
+    ownerKey: f.ownerKey,
+  }]));
+
+  await f.store.write({ cards });
+
+  let entered;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const calls = [];
+  let networkClosed = false;
+
+  f.botApi.callBotApi = async (_token, method, body, { signal }) => {
+    calls.push({ method, id: body.message_id });
+
+    if (calls.length === 1) {
+      return true;
+    }
+
+    entered();
+
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        setTimeout(() => {
+          networkClosed = true;
+          reject(signal.reason);
+        }, 20);
+      }, { once: true });
+    });
+  };
+
+  const check = f.watch.check();
+
+  await started;
+  await f.watch.stop();
+  await check;
+  await f.watch.check();
+  assert.equal(networkClosed, true, 'stop ждёт подтверждения завершения сети');
+  assert.deepEqual(calls.map((call) => call.id), [1, 2]);
+  assert.deepEqual(Object.keys((await f.store.read()).cards), ['old:2', 'old:3']);
+
+  f.botApi.callBotApi = async (_token, method, body) => {
+    calls.push({ method, id: body.message_id });
+
+    return true;
+  };
+
+  await nextWatch(f.watch).check();
+  assert.deepEqual(calls.map((call) => call.id), [1, 2, 2, 3]);
+  assert.deepEqual((await f.store.read()).cards, {});
+});
+
+test('отмена начатой отправки сохраняет неизвестный исход без повторного sendMessage', async (t) => {
+  const f = await fixture(t);
+
+  await f.watch.check();
+  f.world.tasks = [{ task: 4187, daemonAlive: false }];
+  f.world.graphs['4187'] = gateGraph();
+
+  let entered;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let sends = 0;
+
+  f.botApi.callBotApi = async (_token, method, _body, { signal }) => {
+    assert.equal(method, 'sendMessage');
+    sends += 1;
+    entered();
+
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  };
+
+  const check = f.watch.check();
+
+  await started;
+  await f.watch.stop();
+  await check;
+
+  const saved = (await f.store.read()).cards['wait:4187'];
+
+  assert.equal(saved.messageId, null);
+  assert.equal(saved.delivery, 'unknown');
+  await nextWatch(f.watch).check();
+  assert.equal(sends, 1);
+});
+
+test('общая очередь снимает только отменённые задания конкретного обхода', async () => {
+  const queue = new PultSendQueue({ pauseMs: 0 });
+  const controller = new AbortController();
+  const calls = [];
+  let release;
+  const busy = queue.push(() => new Promise((resolve) => {
+    release = resolve;
+  }));
+  const owned = queue.push(async () => {
+    calls.push('обход');
+  }, { signal: controller.signal });
+  const foreign = queue.push(async () => {
+    calls.push('ответ человеку');
+  });
+  const cancelled = assert.rejects(owned, { name: 'AbortError' });
+
+  controller.abort();
+  await cancelled;
+  release();
+  await Promise.all([busy, foreign]);
+  assert.deepEqual(calls, ['ответ человеку']);
 });

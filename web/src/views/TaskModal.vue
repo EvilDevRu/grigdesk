@@ -2253,6 +2253,12 @@ async function loadDetail(force = false) {
   } finally {
     if (request === detailRequest) {
       loading.value = false;
+
+      // Источник собственной задачи подтверждается только ответом details.
+      // Первый параллельный loadTriage ещё закрыт loading и не прочитает оценку.
+      if (ownTask.value) {
+        void loadTriage();
+      }
     }
   }
 }

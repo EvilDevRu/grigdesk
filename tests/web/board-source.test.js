@@ -479,3 +479,38 @@ test('SOURCE-SHAPE: намеренная форма board совпадает с 
     baseline.stores['web/src/stores/board.ts'].state,
   );
 });
+
+for (const broken of [
+  { drivers: null },
+  { drivers: [{ id: 'fixture', dataRevision: -1 }] },
+  { enabledIds: ['missing'] },
+  { default: 'missing' },
+]) {
+  const label = `SOURCE-METADATA: повреждённый каталог ${JSON.stringify(broken)}`;
+
+  test(label, async (t) => {
+    setActivePinia(createPinia());
+
+    const calls = [];
+
+    t.mock.method(api, 'get', async (path) => {
+      calls.push(path);
+
+      return {
+        externalId: 'fixture',
+        revision: 1,
+        enabledIds: ['fixture'],
+        default: 'fixture',
+        drivers: [{ id: 'fixture', dataRevision: 1 }],
+        ...broken,
+      };
+    });
+
+    const board = useBoardStore();
+
+    await board.load(true);
+    assert.ok(board.error);
+    assert.equal(board.data, null);
+    assert.equal(calls.every((path) => path === '/api/trackers'), true);
+  });
+}

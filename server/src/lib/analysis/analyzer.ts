@@ -25,7 +25,6 @@ import {
 import { resolveLegacyModel, resolveModelRef } from '../chat/modelRef.ts';
 import { stripDiscussionSection } from '../telegram/discussion.ts';
 import { questionKey } from '../../../../shared/pipeline/analysisContracts.ts';
-import { LEGACY_VALUES } from '../../../../shared/runtime/legacyBrand.ts';
 import type {
   Analysis,
   AnalysisArbiterAnswerInput,
@@ -192,8 +191,7 @@ function clarificationEntries(markdown: unknown): AnalysisClarificationEntry[] {
     try {
       const parsed = JSON.parse(Buffer.from(String(match[1] || ''), 'base64url').toString('utf8'));
 
-      // Ответы арбитра до второго этапа переименования записаны прежним именем.
-      const actors: readonly unknown[] = ['human', 'grigdesk-arbiter', LEGACY_VALUES.arbiterActor];
+      const actors: readonly unknown[] = ['human', 'grigdesk-arbiter'];
 
       if (!parsed?.questionId || !actors.includes(parsed.actor)) {
         continue;

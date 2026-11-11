@@ -24,7 +24,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { LEGACY_VALUES } from '../../../shared/runtime/legacyBrand.ts';
 import type { ModelRegistry } from './chat/modelRef.ts';
 import type { ExecutorRunInput, ExecutorRunResult } from './executors/index.ts';
 
@@ -190,8 +189,7 @@ export async function readArbitrationContext({ controlDir, task, attempt }: {
       loop = true;
     }
     if (event.kind === 'human-rewind') {
-      // Возвраты арбитра до второго этапа переименования записаны прежним actor.
-      if (event.actor === ARBITER_ACTOR || event.actor === LEGACY_VALUES.arbiterActor) {
+      if (event.actor === ARBITER_ACTOR) {
         arbitrations += 1;
       }
       series = [];

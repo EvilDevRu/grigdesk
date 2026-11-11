@@ -26,6 +26,23 @@ test('A01: runtime parser закрывает authority/CDP/протоколы н
       ref: 'e1',
       text: 'x'.repeat(10001),
     },
+    {
+      action: 'resize',
+      tabId: 'tab',
+      width: 390,
+      height: 10000,
+    },
+    {
+      action: 'resize',
+      tabId: 'tab',
+      width: 390.5,
+      height: 844,
+    },
+    {
+      action: 'resize',
+      tabId: 'tab',
+      width: 390,
+    },
     { action: 'Runtime.evaluate', expression: '1' },
   ]) {
     assert.throws(() => parseBrowserAction(input));
@@ -38,9 +55,17 @@ test('A01: runtime parser закрывает authority/CDP/протоколы н
     ref: 'e1',
     text: '"; alert(1); //',
   };
+  const resize = {
+    action: 'resize',
+    tabId: 'tab',
+    width: 390,
+    height: 844,
+  };
 
   assert.deepEqual(parseBrowserAction(fill), fill);
+  assert.deepEqual(parseBrowserAction(resize), resize);
   assert.deepEqual(browserActions('plan'), ['list', 'snapshot', 'screenshot', 'console']);
+  assert.ok(browserActions('default').includes('resize'));
   assert.equal(BROWSER_DESCRIPTOR.name, 'grigdesk_browser');
   assert.equal(BROWSER_DESCRIPTOR.inputSchema.additionalProperties, false);
 });

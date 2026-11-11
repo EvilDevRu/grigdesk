@@ -1,4 +1,4 @@
-import { chmod, copyFile, lstat, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { dataHome, dataPath } from '../../shared/runtime/dataHome.ts';
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const execute = promisify(execFile);
@@ -191,20 +190,6 @@ async function syncDirectory(directory: string) {
  * Ключ подписи всегда находится вне репозитория, в том числе при явном переопределении пути.
  */
 async function release() {
-  const oldSigning = path.join(homedir(), '.config', LEGACY.configDir, 'android-signing');
-  const oldExists = await lstat(oldSigning).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-
-    throw error;
-  });
-
-  if (oldExists) {
-    throw new Error('Сначала перенесите прежний ключ подписи: ' +
-      `mv ~/.config/${LEGACY.configDir} ~/.config/grigdesk`);
-  }
-
   const relative = path.relative(root, path.resolve(signing));
 
   if (

@@ -22,6 +22,7 @@ const required = [
   'server/runtime/helpers/helpers.json', 'server/runtime/helpers/fixture.mjs',
   'server/node_modules/fastify/package.json', ...options.native,
   'engine/bin/factory', 'engine/lib/core.sh',
+  'tools/skills/grigdesk-connect-project/SKILL.md',
   'schemas/analytics/lifecycle-event.schema.json',
   'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
   'deploy/require-vpn.sh', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',
@@ -54,7 +55,7 @@ async function put(root, name) {
   await writeFile(file, 'fixture');
 }
 
-test('SB19: пропавшие helper, license, npm, native и schemas запрещают payload', async (t) => {
+test('SB19: пропавшие helper, license, npm, native, schemas и навык запрещают payload', async (t) => {
   for (const name of required) {
     const root = await fixture(t);
 
@@ -63,9 +64,10 @@ test('SB19: пропавшие helper, license, npm, native и schemas запр�
   }
 });
 
-test('SB19: внешний ELF, UI, свой TS, секрет и наружная ссылка запрещены', async (t) => {
+test('SB19: внешний ELF, UI, свой TS, посторонний tools, секрет и наружная ссылка запрещены', async (t) => {
   for (const name of ['bin/deepseek', 'bin/b24', 'bin/grigdesk-relay', 'web/dist/index.html',
-    'deepseek/runtime/node', 'server/grigdesk-server', 'server/src/leak.ts', '.env']) {
+    'deepseek/runtime/node', 'server/grigdesk-server', 'server/src/leak.ts',
+    'tools/maintenance.mts', '.env']) {
     const root = await fixture(t);
 
     await put(root, name);
@@ -136,15 +138,12 @@ test('SB19: приватные npm берутся строго по production l
   await assert.rejects(copyProductionDependencies({ sourceRoot, stageRoot }), /lock/);
 });
 
-test('SB19: shared допускает только явную compatibility обёртку legacyBrand', async (t) => {
+test('SB19: shared-исходники в payload запрещены', async (t) => {
   const root = await fixture(t);
-  const wrapper = 'shared/runtime/legacyBrand.ts';
 
-  await put(root, wrapper);
+  await put(root, 'shared/runtime/legacyBrand.ts');
 
-  const files = await auditPayload(root, { ...options, wrappers: [wrapper] }).catch(() => []);
-
-  assert.ok(files.some((file) => file.path === wrapper), 'разрешённая compatibility обёртка сохраняется');
-  await put(root, 'shared/runtime/extra.ts');
-  await assert.rejects(auditPayload(root, { ...options, wrappers: [wrapper] }), /исходник/);
+  await assert.rejects(auditPayload(root,
+    { ...options, wrappers: ['shared/runtime/legacyBrand.ts'] }),
+  /Запрещён корень состава payload|Лишний собственный исходник/u);
 });

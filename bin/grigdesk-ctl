@@ -245,15 +245,43 @@ developer_command() {
   }
 
   # Упаковка берёт уже собранный web/dist, поэтому вызывающая цепочка готовит веб первой.
-  # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
-  build_window() {
-    observed_step window.package npm --prefix "$DIR/desktop" run dist || return $?
+  # Установка вынесена отдельно: в параллельном all она обязана идти после установки
+  # сервера, потому что install окна проверяет метаданные bin/grigdesk-server.
+  window_package() {
+    observed_step window.package npm --prefix "$DIR/desktop" run dist
+  }
 
+  # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
+  window_install() {
     if [[ "$build_target" == all ]]; then
-      observed_step window.install "$DIR/deploy/desktop.sh" install --keep-runtime || return $?
+      observed_step window.install "$DIR/deploy/desktop.sh" install --keep-runtime
     else
-      observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+      observed_step window.install "$DIR/deploy/desktop.sh" install
     fi
+  }
+
+  # Отдельная цель окна остаётся последовательной: веб, упаковка, установка.
+  build_window() {
+    window_package || return $?
+    window_install
+  }
+
+  # Задачи Б24 (tasks) собираются своим ELF из tracker/: закреплённый Node и атомарная
+  # публикация прямо в bin/tracker самим сборщиком. Зависимости ставятся только при
+  # отсутствии — как у deepseek, повторный запуск живое дерево не трогает.
+  build_tracker() {
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/tracker-binary"
+
+    if [ ! -d "$DIR/tracker/node_modules" ]; then
+      observed_step tracker.deps npm --prefix "$DIR/tracker" install --no-audit --no-fund \
+        || return $?
+    else
+      build_event start tracker.deps
+      build_event end tracker.deps 0
+    fi
+
+    observed_step tracker.build npm --prefix "$DIR/tracker" run build -- \
+      --out-dir "$DIR/bin" --cache-dir "$cache/cache" || return $?
   }
 
   # Android использует штатный сборщик полного клиента со встроенным общим интерфейсом.
@@ -445,16 +473,61 @@ developer_command() {
         return 0
       fi
 
-      if [[ "$build_target" == all || "$build_target" == server ]]; then
+      if [[ "$build_target" == all ]]; then
+        # Общие зависимости готовятся до параллельных цепочек: первый запуск ставит
+        # node_modules последовательно, дальше сборки не спорят за деревья npm.
+        build_step web observed_step web.dependencies ensure_deps || return $?
+
+        # Три цепочки собираются параллельно: сервер, окно (веб и упаковка AppImage)
+        # и задачи Б24. Их каталоги и выходы не пересекаются. Итоговый код — первой
+        # отказавшей цепочки в порядке сервер → окно → tasks.
+        track_server() { build_step server build_server; }
+        track_desktop() {
+          build_step web observed_step web.build build_web || return $?
+          build_step window window_package
+        }
+        track_tasks() { build_step tasks build_tracker; }
+
+        track_server & server_job=$!
+        track_desktop & desktop_job=$!
+        track_tasks & tasks_job=$!
+
+        parallel_code=0
+        wait "$server_job" || parallel_code=$?
+        wait "$desktop_job" || {
+          desktop_code=$?
+
+          if [[ "$parallel_code" == 0 ]]; then
+            parallel_code=$desktop_code
+          fi
+        }
+        wait "$tasks_job" || {
+          tasks_code=$?
+
+          if [[ "$parallel_code" == 0 ]]; then
+            parallel_code=$tasks_code
+          fi
+        }
+
+        if [[ "$parallel_code" != 0 ]]; then
+          return "$parallel_code"
+        fi
+
+        # Установка окна идёт строго после установки сервера: install окна проверяет
+        # метаданные bin/grigdesk-server по текущей VERSION (декодер runtime-env).
+        build_step window window_install || return $?
+      fi
+
+      if [[ "$build_target" == server ]]; then
         build_step server build_server
       fi
 
-      if [[ "$build_target" == all || "$build_target" == web || "$build_target" == window ]]; then
+      if [[ "$build_target" == web || "$build_target" == window ]]; then
         build_step web observed_step web.dependencies ensure_deps
         build_step web observed_step web.build build_web
       fi
 
-      if [[ "$build_target" == all || "$build_target" == window ]]; then
+      if [[ "$build_target" == window ]]; then
         build_step window build_window
       fi
 
@@ -484,7 +557,7 @@ developer_command() {
       fi
 
       case "$build_target" in
-        all) echo 'Поставлены сервер, веб и окно.' ;;
+        all) echo 'Поставлены сервер, веб, окно и tasks.' ;;
         server) echo "Поставлен сервер: $DIR/bin/grigdesk-server" ;;
         web) echo "Собран веб: $DIR/web/dist" ;;
         window) echo "Поставлено окно: $DIR/bin/grigdesk-app; веб собран." ;;

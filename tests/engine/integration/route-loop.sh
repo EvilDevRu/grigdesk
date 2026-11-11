@@ -434,4 +434,33 @@ assert_eq 1 "$(json_field "$state" loop stage)" "уточнение id само 
 findings=$(attempt_stage_state_findings_v2 "$task" "$LOOP_ATTEMPT")
 assert_eq 0 "$(json_field "$findings" open length)" "замечания закрыты только решением ведущего"
 
+task=9188
+: >"$CALLS"
+PROFILE_LOOP_MAX_ROUNDS=1
+LOOP_ATTEMPT=$(begin_loop "$task")
+assert_rc 0 "$?" 'pending loop: attempt'
+printf '%s\n'   'REVIEW|failed|build|x=Первое задание|'   'BUILD|done|||'   'REVIEW|failed|build|x=Остался дефект|' >"$SCRIPT"
+route_v2_project_latest_reset() {
+  local state
+  state=$(attempt_stage_state_read_v2 "$1" "$2") || return
+  if [[ "$(json_field "$state" stop)" == loop-ceiling &&
+        ! -f "$TEST_ROOT/ceiling-projection-failed" ]]; then
+    touch "$TEST_ROOT/ceiling-projection-failed"
+    return 74
+  fi
+  return 0
+}
+route_v2_dispatch_until_pause "$task" "$LOOP_ATTEMPT" 10 >/dev/null
+assert_rc 74 "$?" 'pending loop: отказ после ceiling append'
+old=$(attempt_stage_state_read_v2 "$task" "$LOOP_ATTEMPT")
+assert_eq loop-ceiling "$(json_field "$old" stop)" 'pending loop: stop уже durable'
+count=$(wc -l <"$CALLS")
+route_v2_dispatch_next "$task" "$LOOP_ATTEMPT" >/dev/null
+assert_rc 0 "$?" 'pending loop: exact ceiling replay завершён'
+new=$(attempt_stage_state_read_v2 "$task" "$LOOP_ATTEMPT")
+assert_eq "$(json_field "$old" eventSequence)" "$(json_field "$new" eventSequence)"   'pending loop: второго события нет'
+assert_eq "$count" "$(wc -l <"$CALLS")" 'pending loop: второй модели нет'
+unset -f route_v2_project_latest_reset
+unset PROFILE_LOOP_MAX_ROUNDS
+
 finish_tests

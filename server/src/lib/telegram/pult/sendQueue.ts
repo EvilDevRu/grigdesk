@@ -15,6 +15,7 @@ interface QueueItem {
   sequence: number;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  detach: () => void;
 }
 
 const PRIORITY = Object.freeze({
@@ -46,8 +47,9 @@ export class PultSendQueue {
    * Поставить Bot API операцию в общую очередь. Приоритет меняет только ещё не
    * начатые элементы; текущий HTTP-вызов не прерывается и сохраняет at-most-once.
    */
-  push<Result>(operation: () => Promise<Result>, { priority = 'normal' }: {
+  push<Result>(operation: () => Promise<Result>, { priority = 'normal', signal }: {
     priority?: string;
+    signal?: AbortSignal;
   } = {}): Promise<Result> {
     if (typeof operation !== 'function') {
       throw new TypeError('PultSendQueue.push: operation должна быть функцией.');
@@ -57,13 +59,32 @@ export class PultSendQueue {
     }
 
     const result = new Promise<Result>((resolve, reject) => {
-      this.pending.push({
+      if (signal?.aborted) {
+        reject(signal.reason);
+
+        return;
+      }
+
+      const cancel = () => {
+        const index = this.pending.indexOf(item);
+
+        if (index >= 0) {
+          this.pending.splice(index, 1);
+          item.detach();
+          reject(signal?.reason);
+        }
+      };
+      const item: QueueItem = {
         operation: operation as () => Promise<unknown>,
         priority: (PRIORITY as Record<string, number>)[priority] as number,
         sequence: this.sequence,
         resolve: resolve as (value: unknown) => void,
         reject,
-      });
+        detach: () => signal?.removeEventListener('abort', cancel),
+      };
+
+      this.pending.push(item);
+      signal?.addEventListener('abort', cancel, { once: true });
       this.sequence += 1;
     });
 
@@ -98,6 +119,9 @@ export class PultSendQueue {
       }
 
       const item = this.pending.splice(selected, 1)[0] as QueueItem;
+
+      item.detach();
+
       let value: unknown;
       let error: unknown;
       let failed = false;
@@ -108,6 +132,12 @@ export class PultSendQueue {
         failed = true;
       }
 
+      if (failed) {
+        item.reject(error);
+      } else {
+        item.resolve(value);
+      }
+
       if (this.pauseMs > 0) {
         await new Promise((resolve) => {
           const timer = setTimeout(resolve, this.pauseMs);
@@ -115,9 +145,6 @@ export class PultSendQueue {
           (timer as { unref?: () => void }).unref?.();
         });
       }
-
-      if (failed) item.reject(error);
-      else item.resolve(value);
     }
     this.running = false;
   }

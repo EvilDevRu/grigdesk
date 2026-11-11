@@ -3,6 +3,7 @@ import { isRecord } from '../lib/objects.ts';
 export interface DesktopExitSnapshot {
   chats: { chatKey: string; title: string }[];
   pipelines: { task: string; title: string }[];
+  update?: { version: string } | null;
 }
 
 export type DesktopExitCommandType = 'inspect' | 'prompt' | 'decision' | 'stopping'
@@ -48,6 +49,28 @@ export function decodeDesktopExitSnapshot(value: unknown): DesktopExitSnapshot |
     }
 
     pipelines.push({ task: pipeline.task, title: pipeline.title });
+  }
+
+  /**
+   * Готовое обновление приходит необязательной строкой версии: её наличие включает
+   * в модале предупреждение о применении и перезапуске приложения при выходе.
+   */
+  let update: DesktopExitSnapshot['update'];
+
+  if (value.update !== undefined) {
+    if (!isRecord(value.update) || typeof value.update.version !== 'string' || !value.update.version) {
+      return null;
+    }
+
+    update = { version: value.update.version };
+  }
+
+  if (update) {
+    return {
+      chats,
+      pipelines,
+      update,
+    };
   }
 
   return { chats, pipelines };
