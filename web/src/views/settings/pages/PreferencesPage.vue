@@ -87,12 +87,11 @@ import {
   UiSelect,
   UiLoadingState,
 } from '../../../ui.ts';
-import { api, failureText } from '../../../shared/apiClient.ts';
-import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
-import { createPreferencesAdapter } from '../../../features/settings/resources/preferences.ts';
+import { failureText } from '../../../shared/apiClient.ts';
+import { getSettingsFields } from '../../../features/settings/catalog.ts';
+import { loadPreferences } from '../../../features/settings/loadPreferences.ts';
 import type { JsonValue } from '../../../features/settings/contracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { useChatStore } from '../../../stores/chat.ts';
 import { useProvidersStore } from '../../../stores/providers.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
@@ -186,16 +185,7 @@ async function load(): Promise<void> {
 
   try {
     try {
-      settings.registerResource(createPreferencesAdapter(api, (values) => {
-        if (typeof values.chatAutoCompactWindow === 'number') {
-          useChatStore().compactWindow = values.chatAutoCompactWindow;
-        }
-
-        if (typeof values.showAllModels === 'boolean') {
-          providers.showAllModels = values.showAllModels;
-        }
-      }, uiLocale), SETTINGS_FIELDS.filter((field) => field.resourceId === 'prefs'));
-      await settings.loadResource('prefs');
+      await loadPreferences();
     } catch (cause) {
       error.value = failureText(cause);
     }

@@ -61,6 +61,8 @@ declare module 'fastify' {
     // Перечитать лимиты исполнителей, если снимок устарел, и разослать их событием
     // `providers-usage`. Для фоновых потребителей, которым снимок нужен и без окон.
     refreshProvidersUsage?(): Promise<void>;
+    // Синхронно применяет сохранённую политику квот до HTTP ACK общих настроек.
+    syncProvidersUsagePolicy?(enabled: boolean, revision: number): void;
     // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
     providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
     // Обслуживание внешнего CLI сохраняет паузу аккаунта и отвергает старые callbacks.

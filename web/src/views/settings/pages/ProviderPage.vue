@@ -4,6 +4,7 @@
     :data-provider-page="selected?.id"
     :data-ready="ready"
   >
+    <ProviderQuotaPreferences :active="active" class="settings-provider-general" />
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <aside class="settings-provider-sidebar" :aria-label="t('settings.providerSelection')">
       <div class="settings-provider-picker">
@@ -426,6 +427,7 @@ import { providerCliActions } from '../../../features/providers/providerCliActio
 import { providerAvailability } from '../../../features/providers/providerLocale.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import type { FieldAddress } from '../../../features/settings/contracts.ts';
+import ProviderQuotaPreferences from '../ProviderQuotaPreferences.vue';
 import SettingsField from '../SettingsField.vue';
 import AccessProfilePanel from '../../../shared/AccessProfilePanel.vue';
 import SettingsNativeEditor from './SettingsNativeEditor.vue';
@@ -833,6 +835,10 @@ watch(showNative, async (open) => {
 </script>
 
 <style scoped>
+.settings-provider-general {
+  grid-column: 1 / -1;
+}
+
 .settings-provider {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);

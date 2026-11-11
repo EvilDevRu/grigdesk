@@ -1943,5 +1943,7 @@
   "accessProfilesChanged": "The profile or step changed in another window. Refresh its state and try signing in again.",
   "accessProfilesBusy": "The executor is busy. Wait for its work to finish before signing in again.",
   "accessProfilesSaveFailed": "The profile could not be saved. Check the storage and try signing in again.",
-  "accessProfilesFailed": "Sign-in could not be completed. Start a new attempt."
+  "accessProfilesFailed": "Sign-in could not be completed. Start a new attempt.",
+  "providerUsageAutoRefresh": "Refresh quotas automatically",
+  "providerUsageAutoRefreshHint": "For all executors on this server. When disabled, quotas are checked only with the ↻ button."
 }

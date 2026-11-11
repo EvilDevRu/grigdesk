@@ -369,6 +369,7 @@ export async function profileFixture(t, options = {}) {
     }
 
     await app.register(providersModule, {
+      prefs: { read: () => ({ providerUsageAutoRefresh: true }) },
       config,
       env,
       getProviderAdapters: async () => adapters,

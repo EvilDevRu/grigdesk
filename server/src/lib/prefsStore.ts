@@ -13,6 +13,10 @@ const DEFAULTS = {
   // Показывать в выборе модели ВСЕ, что помнит CLI (включая Sonnet 3.7, Opus 4.0…),
   // а не только две свежие версии каждого семейства.
   showAllModels: false,
+  // Автоматические измерения квот требуют явного включения владельцем.
+  // Кнопка ручной проверки остаётся доступной независимо от этого выбора.
+  providerUsageAutoRefresh: false,
+  providerUsagePolicyRevision: 0,
   // Держать процесс исполнителя живым между ходами чата. Разовый запуск умирал вместе
   // с ответом, унося фоновые команды и субагентов, поэтому дефолт — включено. Тумблер
   // оставлен для отката: живая сессия держит память и свои MCP-серверы, а исполнители
@@ -168,6 +172,10 @@ export class PrefsStore {
     return {
       ...DEFAULTS,
       ...loaded,
+      providerUsageAutoRefresh: loaded.providerUsageAutoRefresh === true,
+      providerUsagePolicyRevision: Number.isSafeInteger(loaded.providerUsagePolicyRevision)
+        && Number(loaded.providerUsagePolicyRevision) >= 0
+        ? Number(loaded.providerUsagePolicyRevision) : 0,
       // Общий store мержит верхний уровень. Speech доклеиваем отдельно, иначе старый
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
@@ -225,6 +233,15 @@ export class PrefsStore {
         else next[k] = patch[k];
       }
     }
+
+    const priorRevision = Number.isSafeInteger(stored.providerUsagePolicyRevision)
+      && Number(stored.providerUsagePolicyRevision) >= 0
+      ? Number(stored.providerUsagePolicyRevision) : 0;
+    const policyChanged = (stored.providerUsageAutoRefresh === true)
+      !== (next.providerUsageAutoRefresh === true);
+
+    next.providerUsagePolicyRevision = priorRevision + (policyChanged ? 1 : 0);
+
     // Публичный read() намеренно скрывает внутреннюю speech revision. Обычная правка
     // соседней настройки не должна её стирать и делать consent вкладки stale без причины.
     const storedSpeech = stored.speech as { _revision?: unknown } | undefined;

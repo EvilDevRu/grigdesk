@@ -28,6 +28,7 @@ import {
   normalizeProviderUsage,
   unsupportedProviderUsage,
 } from '../../lib/providerUsage.ts';
+import { createProviderUsagePoller, type UsagePollContext } from '../../lib/providerUsagePoller.ts';
 import { createProviderStatusProbe, VENDOR_FAULT_USAGE_STATES } from '../../lib/providerStatus.ts';
 import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/providerUsageSeen.ts';
 import type { ProviderUsage, ProviderUsagePatch, UsageBar } from '../../lib/providerUsage.ts';
@@ -75,6 +76,10 @@ export interface ProvidersModuleOptions {
 interface ProviderRoute {
   Params: { id: string };
   Querystring: { refresh?: string };
+}
+
+interface ProviderUsageRefreshRoute {
+  Body: { providerId?: unknown } | null;
 }
 
 interface ProviderActionRoute {
@@ -579,6 +584,10 @@ async function providersModule(
 
     return (patch: ProviderUsagePatch): boolean => {
       try {
+        if (!usagePoller.isEnabled() || usageAbort.signal.aborted) {
+          return false;
+        }
+
         if ((usageGenerations.get(providerId) ?? 0) !== generation) {
           return false;
         }
@@ -598,9 +607,7 @@ async function providersModule(
         liveUsage.set(providerId, accepted.state);
 
         if (previous && usageProviderIds.every((id) => usagePrevious.has(id))) {
-          fastify.sse?.broadcast?.('providers-usage', {
-            usage: projectUsageMap(Object.fromEntries(usagePrevious)),
-          });
+          publishUsage();
         }
 
         return true;
@@ -653,157 +660,194 @@ async function providersModule(
     return until ? { ...usage, retryAt: until } : usage;
   }
 
-  const usageCache = createUsageReadCache<Record<string, ProviderUsage>>(async (previousUsage, context) => {
-    // Тот же источник адаптеров, что и у реестра (`adaptersOf`): иначе стенд подменял
-    // исполнителей, а лимиты всё равно собирались у настоящих.
-    const executors = await adaptersOf();
+  /**
+   * Измеряет один аккаунт и фиксирует результат только в его действующем поколении.
+   * Все ожидания заканчиваются до записи backoff, истории вёдер и видимого снимка.
+   */
+  async function pollProviderUsage(id: string, context: UsagePollContext): Promise<void> {
+    const ex = (await adaptersOf()).get(id);
 
-    if (usageAbort.signal.aborted || !context.isCurrent()) {
-      return {};
+    if (!ex || usageAbort.signal.aborted || !context.isCurrent()) {
+      return;
     }
-
-    usageProviderIds = [...executors.keys()];
 
     const checkedAt = Date.now();
-    const completedPolls: Array<{
-      id: string;
-      startSeq: number;
-      generation: number;
-    }> = [];
+    const generation = usageGenerations.get(id) ?? 0;
+    const previous = usagePrevious.get(id);
+    const held = usageBackoff.get(id);
+    const isCurrent = () => !usageAbort.signal.aborted && context.isCurrent()
+      && (usageGenerations.get(id) ?? 0) === generation;
+    const installed = ex.kind === 'api' || ex.usageRequiresRuntime === false
+      ? true : await installedOf(ex, isCurrent);
 
-    // Аккаунты независимы: медленная проверка одного исполнителя не должна
-    // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
-    const entries = await Promise.all([...executors.values()].map(async (ex) => {
-      const generation = usageGenerations.get(ex.id) ?? 0;
-      const held = usageBackoff.get(ex.id);
-      const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
-      const isCurrent = () => !usageAbort.signal.aborted && context.isCurrent()
-        && (usageGenerations.get(ex.id) ?? 0) === generation;
-      const installed = ex.kind === 'api' || ex.usageRequiresRuntime === false
-        ? true : await installedOf(ex, isCurrent);
-
-      if (!isCurrent()) {
-        return [ex.id, previous ?? unsupportedProviderUsage(String(ex.name), checkedAt)] as const;
+    if (!isCurrent()) {
+      return;
+    }
+    if (installed === false) {
+      if (!removedRuntimes.has(id) || !previous) {
+        retainRuntimeUsage(ex, true);
       }
 
-      if (installed === false) {
-        const retained = removedRuntimes.has(ex.id) && previous
-          ? previous : retainRuntimeUsage(ex, true);
+      return;
+    }
+    if (installed === true) {
+      removedRuntimes.delete(id);
+    }
+    if ((held && held.until > checkedAt || removedRuntimes.has(id)) && previous) {
+      return;
+    }
 
-        return [ex.id, retained] as const;
-      }
+    let current: ProviderUsage;
+    const startSeq = liveUsage.get(id)?.seq ?? 0;
 
-      if (installed === true) {
-        removedRuntimes.delete(ex.id);
-      }
+    if (typeof ex.usage !== 'function') {
+      current = unsupportedProviderUsage(String(ex.name), checkedAt);
+    } else {
+      try {
+        const pending = Promise.resolve(ex.usage(config as never, deps as never));
 
-      // Идёт пауза после «стучитесь реже»: отдаём прошлый снимок как есть. Он уже несёт
-      // и слова вендора, и последние полосы — новых мы честно не знаем, а сходить за
-      // ними значит повторить ровно то, о чём нас попросили не делать.
-      if ((held && held.until > checkedAt || removedRuntimes.has(ex.id)) && previous) {
-        return [ex.id, previous] as const;
-      }
+        usageRequests.add(pending);
 
-      let current: ProviderUsage;
-      let startSeq = 0;
+        let response: unknown;
 
-      if (typeof ex.usage !== 'function') {
-        current = unsupportedProviderUsage(String(ex.name), checkedAt);
-      } else {
         try {
-          startSeq = liveUsage.get(ex.id)?.seq ?? 0;
-
-          const pending = Promise.resolve(ex.usage(config as never, deps as never));
-
-          usageRequests.add(pending);
-
-          let response: unknown;
-
-          try {
-            response = await pending;
-          } finally {
-            usageRequests.delete(pending);
-          }
-
-          current = normalizeProviderUsage(response, {
-            providerName: String(ex.name),
-            checkedAt,
-          });
-
-          if (ex.usagePresentation?.freshness && isRecord(response)
-            && typeof response.usageSchema === 'string' && response.usageSchema.length <= 128) {
-            current.usageSchema = response.usageSchema;
-          }
-        } catch {
-          if (isCurrent()) {
-            fastify.log.warn({ provider: ex.id }, 'usage исполнителя не получен');
-          }
-
-          current = normalizeProviderUsage({
-            state: 'unavailable',
-            message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
-          }, { providerName: String(ex.name), checkedAt });
+          response = await pending;
+        } finally {
+          usageRequests.delete(pending);
         }
-      }
-      if (!isCurrent()) {
-        return [ex.id, current] as const;
-      }
 
-      if (current.state === 'ok') {
-        completedPolls.push({
-          id: ex.id,
-          startSeq,
-          generation,
-        });
-      }
+        current = normalizeProviderUsage(response, { providerName: String(ex.name), checkedAt });
 
-      rememberUsageBackoff(ex.id, current, checkedAt);
-      // `current` здесь есть всегда, поэтому слияние возвращает запись, а не прошлый снимок.
-      const merged = withPauseUntil(ex.id, mergeProviderUsage(
-        previous,
-        markFreshBuckets(ex.id, current),
-      ) as ProviderUsage);
-
-      if (ex.usagePresentation?.freshness) {
-        const succeeded = current.state === 'ok' && !current.stale
-          && (current.bars.length > 0 || current.resources.length > 0);
-
-        merged.lastSuccessfulAt = succeeded ? current.dataCheckedAt : previous?.lastSuccessfulAt ?? null;
-        merged.runtimeGeneration = `${usageBootId}:${generation}`;
-        merged.pollIntervalMs = usageTickMs;
-        merged.usageSchema = current.usageSchema ?? previous?.usageSchema ?? '1';
-      }
-
-      if (!VENDOR_FAULT_USAGE_STATES.has(merged.state) || !ex.statusPage) {
-        usagePrevious.set(ex.id, merged);
-
-        return [ex.id, merged] as const;
-      }
-
-      const vendorStatus = await statusProbe.read(ex.statusPage);
-      const result = vendorStatus ? { ...merged, vendorStatus } : merged;
-
-      if (context.isCurrent() && (usageGenerations.get(ex.id) ?? 0) === generation) {
-        usagePrevious.set(ex.id, result);
-      }
-
-      return [ex.id, result] as const;
-    }));
-
-    // Пока соседний адаптер отвечает, GET читает прежний общий кэш с его оверлеем.
-    // Снимать события можно лишь вместе с готовым результатом всего опроса.
-    if (!usageAbort.signal.aborted && context.isCurrent()) {
-      for (const poll of completedPolls) {
-        const live = liveUsage.get(poll.id);
-
-        if (live && (usageGenerations.get(poll.id) ?? 0) === poll.generation) {
-          liveUsage.set(poll.id, settlePoll(live, poll.startSeq));
+        if (ex.usagePresentation?.freshness && isRecord(response)
+          && typeof response.usageSchema === 'string' && response.usageSchema.length <= 128) {
+          current.usageSchema = response.usageSchema;
         }
+      } catch {
+        if (isCurrent()) {
+          fastify.log.warn({ provider: id }, 'usage исполнителя не получен');
+        }
+
+        current = normalizeProviderUsage({
+          state: 'unavailable',
+          message: `Не удалось получить лимиты ${ex.name}. Повторите проверку.`,
+        }, { providerName: String(ex.name), checkedAt });
       }
     }
 
-    return Object.fromEntries(entries);
-  }, { maxAgeMs: usageTickMs });
+    if (!isCurrent()) {
+      return;
+    }
+
+    const provisional = mergeProviderUsage(previous, current) as ProviderUsage;
+    const vendorStatus = VENDOR_FAULT_USAGE_STATES.has(provisional.state) && ex.statusPage
+      ? await statusProbe.read(ex.statusPage) : null;
+
+    if (!isCurrent()) {
+      return;
+    }
+
+    const latestPrevious = usagePrevious.get(id);
+
+    rememberUsageBackoff(id, current, checkedAt);
+
+    const merged = withPauseUntil(id, mergeProviderUsage(latestPrevious,
+      markFreshBuckets(id, current)) as ProviderUsage);
+
+    if (ex.usagePresentation?.freshness) {
+      const succeeded = current.state === 'ok' && !current.stale
+        && (current.bars.length > 0 || current.resources.length > 0);
+
+      merged.lastSuccessfulAt = succeeded
+        ? current.dataCheckedAt : latestPrevious?.lastSuccessfulAt ?? null;
+      merged.runtimeGeneration = `${usageBootId}:${generation}`;
+      merged.pollIntervalMs = usageTickMs;
+      merged.usageSchema = current.usageSchema ?? latestPrevious?.usageSchema ?? '1';
+    }
+
+    const result = vendorStatus ? { ...merged, vendorStatus } : merged;
+
+    usagePrevious.set(id, result);
+
+    const live = liveUsage.get(id);
+
+    if (current.state === 'ok' && live) {
+      liveUsage.set(id, settlePoll(live, startSeq));
+    }
+  }
+
+  const initialUsagePrefs = prefs?.read();
+  let usagePolicyRevision = Number(initialUsagePrefs?.providerUsagePolicyRevision ?? 0);
+  const usagePoller = createProviderUsagePoller(
+    pollProviderUsage,
+    initialUsagePrefs?.providerUsageAutoRefresh === true,
+  );
+
+  /**
+   * Полная карта содержит все уже известные снимки, не подделывая неизмеренные квоты.
+   * Одинаковая проекция используется HTTP, ручным ответом и существующим SSE-потоком.
+   */
+  function usageSnapshot() {
+    return {
+      usage: projectUsageMap(Object.fromEntries(usagePrevious)),
+      autoRefresh: usagePoller.isEnabled(),
+      autoRefreshRevision: usagePolicyRevision,
+    };
+  }
+
+  /**
+   * Политика и снимки доставляются одним событием всем подключённым окнам.
+   * После остановки никакое завершение старого чтения больше не публикуется.
+   */
+  function publishUsage(): void {
+    if (!usageAbort.signal.aborted) {
+      fastify.sse?.broadcast?.('providers-usage', usageSnapshot());
+    }
+  }
+
+  /**
+   * Выключение сохраняет видимые проценты без продвижения даты измерения.
+   * Включение планирует сбор отдельно: сохранённая настройка не зависит от сети.
+   */
+  function syncProvidersUsagePolicy(enabled: boolean, revision: number): void {
+    usagePolicyRevision = revision;
+
+    if (enabled === usagePoller.isEnabled()) {
+      return;
+    }
+    if (!enabled) {
+      const frozen = usageSnapshot().usage;
+
+      for (const [id, entry] of Object.entries(frozen)) {
+        usagePrevious.set(id, entry);
+      }
+
+      liveUsage.clear();
+    }
+
+    usagePoller.setEnabled(enabled);
+    publishUsage();
+
+    if (enabled) {
+      void refreshUsageIfStale().catch((err: unknown) => {
+        fastify.log.warn({ err }, 'не удалось возобновить автоматическое чтение квот');
+      });
+    }
+  }
+
+  fastify.decorate('syncProvidersUsagePolicy', syncProvidersUsagePolicy);
+
+  /**
+   * Обычное чтение при выключении обслуживается только сохранённым снимком.
+   * Разрешённый автоопрос делит работу по аккаунтам, сохраняя полный HTTP-контракт.
+   */
+  async function readUsage(minAgeMs: number): Promise<void> {
+    if (!usagePoller.isEnabled() || usageAbort.signal.aborted) {
+      return;
+    }
+
+    usageProviderIds = [...(await adaptersOf()).keys()];
+    await Promise.all(usageProviderIds.map((id) => usagePoller.poll(id, 'automatic', minAgeMs)));
+  }
 
   /**
    * Смена файлов CLI не меняет аккаунтный Retry-After и не запускает внеочередной poll.
@@ -821,39 +865,13 @@ async function providersModule(
 
     retainRuntimeUsage(adapter, options.removed === true);
 
-    if (usageProviderIds.every((providerId) => usagePrevious.has(providerId))) {
-      usageCache.replace(Object.fromEntries(usagePrevious));
-      fastify.sse?.broadcast?.('providers-usage', {
-        usage: projectUsageMap(Object.fromEntries(usagePrevious)),
-      });
-    } else {
-      usageCache.clear();
-    }
+    usagePoller.invalidate(id, true);
+    publishUsage();
 
     return true;
   }
 
   fastify.decorate('invalidateProviderRuntime', invalidateProviderRuntime);
-
-  /**
-   * Проверяет актуальность непосредственно перед выходом HTTP/SSE.
-   * Старый refresh разделяет чтение нового поколения, а не публикует прежний счёт.
-   */
-  async function readUsage<Result>(
-    refresh: boolean,
-    consume: (usage: Record<string, ProviderUsage>) => Result,
-  ): Promise<Result> {
-    for (;;) {
-      const version = usageCache.version();
-      const usage = await (refresh ? usageCache.refresh() : usageCache.read());
-
-      if (version === usageCache.version()) {
-        return consume(projectUsageMap(usage));
-      }
-
-      refresh = false;
-    }
-  }
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   // providerId → что показала последняя фоновая проверка новой версии CLI.
@@ -915,51 +933,48 @@ async function providersModule(
   // Ручная проверка «прямо сейчас» (кнопка в настройках).
   fastify.post('/api/providers/check-updates', async () => ({ updates: await checkUpdates() }));
 
-  // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
-  fastify.get('/api/providers/usage', (_, reply) => readUsage(false, (usage) => reply.send({ usage })));
+  fastify.get<{ Querystring: { cached?: string } }>('/api/providers/usage', async (request) => {
+    if (request.query.cached !== '1') {
+      await readUsage(usageTickMs);
+    }
 
-  // Принудительная проверка по кнопке во всплывашке. Обходит TTL кэша, но не паузу после
-  // отказа вендора: её соблюдает само чтение и вернёт прошлый снимок. Свежий снимок
-  // отдаётся как есть — он уже в кэше, и read() к вендору не пойдёт. Итог рассылается
-  // всем окнам: проверку попросило одно, а полосы общие.
-  fastify.post('/api/providers/usage/refresh', (_, reply) => readUsage(
-    usageCache.ageMs() >= USAGE_FORCE_MIN_AGE_MS,
-    (usage) => {
-      if (!usageAbort.signal.aborted) {
-        fastify.sse?.broadcast?.('providers-usage', { usage });
-      }
+    return usageSnapshot();
+  });
 
-      return reply.send({ usage });
-    },
-  ));
+  fastify.post<ProviderUsageRefreshRoute>('/api/providers/usage/refresh', async (request, reply) => {
+    const id = request.body?.providerId;
 
-  // ── Фоновая свежесть лимитов ──
-  // Раньше лимиты читались только по запросу окна: первое наведение после минуты тишины
-  // запускало живой поход к вендору, и всплывашка секунды показывала прошлый снимок.
-  // Тик держит серверный кэш тёплым и рассылает снимок по SSE, поэтому окно читает
-  // готовое, а полосы идут за временем и без наведения.
-  //
-  // Цена фона — походы к вендору идут, пока открыт GrigDesk, а не пока водят мышью, поэтому
-  // шаг здесь свой (USAGE_CACHE_MS) и заметно длиннее реестра: минутный круглосуточно
-  // ловил отказ по частоте у живого аккаунта.
+    if (typeof id !== 'string' || !id || id.length > 128 || id.trim() !== id) {
+      return reply.code(400).send({
+        error: 'provider_required',
+        message: 'Выберите исполнителя для проверки квоты. Обновите окно приложения.',
+      });
+    }
+
+    const adapters = await adaptersOf();
+
+    if (!adapters.has(id)) {
+      return reply.code(404).send({ error: 'unknown_provider' });
+    }
+
+    usageProviderIds = [...adapters.keys()];
+    await usagePoller.poll(id, 'manual', USAGE_FORCE_MIN_AGE_MS);
+    publishUsage();
+
+    return usageSnapshot();
+  });
 
   /**
-   * Перечитать лимиты, если снимок устарел, и разослать его. Снимок моложе половины
-   * периода не перечитывается — его только что принёс запрос окна, второй поход подряд
-   * лишний. Наружу отдаётся декоратором `refreshProvidersUsage`: фоновый потребитель
-   * (прогноз лимитов) зовёт его своим редким таймером, когда окон нет, — снимок уходит
-   * тем же событием, и второго пути к вендору не появляется.
+   * Общий фоновый вход сохраняет период и запрет автоматического режима.
+   * Прогноз использует этот же вход и не получает отдельного разрешения на измерение.
    */
   async function refreshUsageIfStale(): Promise<void> {
-    if (usageAbort.signal.aborted || usageCache.ageMs() < usageTickMs / 2) {
+    if (!usagePoller.isEnabled() || usageAbort.signal.aborted) {
       return;
     }
 
-    await readUsage(true, (usage) => {
-      if (!usageAbort.signal.aborted) {
-        fastify.sse?.broadcast?.('providers-usage', { usage });
-      }
-    });
+    await readUsage(usageTickMs / 2);
+    publishUsage();
   }
 
   fastify.decorate('refreshProvidersUsage', refreshUsageIfStale);
@@ -988,6 +1003,7 @@ async function providersModule(
    */
   async function stopUsage(): Promise<void> {
     clearInterval(usageTimer);
+    usagePoller.stop();
     usageAbort.abort();
     await Promise.allSettled([...usageRequests]);
   }
@@ -1056,7 +1072,7 @@ async function providersModule(
     }
     if (r?.ok) {
       liveUsage.delete(ex.id);
-      usageCache.clear();
+      usagePoller.invalidate(ex.id);
     } else {
       fastify.log.warn({
         provider: ex.id,
@@ -1119,7 +1135,7 @@ async function providersModule(
     resetUsage: (id) => {
       usageGenerations.set(id, (usageGenerations.get(id) ?? 0) + 1);
       liveUsage.delete(id);
-      usageCache.clear();
+      usagePoller.invalidate(id);
       usageBackoff.delete(id);
       usagePrevious.delete(id);
     },
@@ -1145,7 +1161,7 @@ async function providersModule(
     registryCache.clear();
     usageGenerations.set(id, (usageGenerations.get(id) ?? 0) + 1);
     liveUsage.delete(id);
-    usageCache.clear();
+    usagePoller.invalidate(id);
     usageBackoff.delete(id);
     usagePrevious.delete(id);
     fastify.sse?.broadcast?.('providers-update', { credentials: id });

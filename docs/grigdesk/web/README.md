@@ -338,7 +338,8 @@
 - [Кнопка остановки и пояснение отказа: очередь ходов и ввод в активный ход](chat-stop-and-deny-comment.md)
 - [settings-search.md](settings-search.md) — поиск метаданных, дерево и показ поля настроек.
 
-- [settings-preferences.md](settings-preferences.md) — черновики prefs, клавиш, экрана и диагностики.
+- [settings-preferences.md](settings-preferences.md) — черновики prefs, общий switch квот на agents.providers,
+  binding ревизий между окнами, клавиши, экран и диагностика.
 
 - [settings-speech.md](settings-speech.md) — речь, гонки снимков и UI-опрос заданий в общем модале.
 - [Единая страница речи: простые настройки, расширенное и прежние адреса](speech-settings-page.md)

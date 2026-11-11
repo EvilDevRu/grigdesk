@@ -114,3 +114,34 @@ test('общий prefs API скрывает nativeSettings в GET и успеш�
 
   assert.equal(prefs.read().providerSettings.future.nativeSettings.sentinel, 'private-native-value');
 });
+
+test('P2: prefs отклоняет не boolean автообновления без частичной записи', async (t) => {
+  const { prefs } = await withPrefs(t);
+  const app = await settingsApp({ prefs });
+
+  t.after(() => app.close());
+  prefs.write({ showAllModels: true });
+
+  const before = prefs.readStored();
+
+  for (const value of ['false', 1, null, [], {}]) {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/settings/prefs',
+      payload: { providerUsageAutoRefresh: value, showAllModels: false },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, 'bad_preference');
+    assert.deepEqual(prefs.readStored(), before);
+  }
+
+  const protectedReply = await app.inject({
+    method: 'POST',
+    url: '/api/settings/prefs',
+    payload: { providerUsagePolicyRevision: 99 },
+  });
+
+  assert.equal(protectedReply.statusCode, 400);
+  assert.deepEqual(prefs.readStored(), before);
+});

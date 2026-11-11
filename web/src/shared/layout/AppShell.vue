@@ -278,10 +278,10 @@
                     v-tooltip="usagePauseOf(p)
                       ? t('core.theVendorRequestedAPauseNextCheck', { value1: usagePauseOf(p) })
                       : t('core.checkLimitsNow')"
-                    :disabled="!!usagePauseOf(p)"
-                    :loading="prov.usageRefreshing"
+                    :disabled="!!usagePauseOf(p) || prov.usageRefreshing && prov.usageRefreshingId !== p.id"
+                    :loading="prov.usageRefreshing && prov.usageRefreshingId === p.id"
                     :loading-label="t('core.checking')"
-                    @click="prov.refreshUsage()"
+                    @click="prov.refreshUsage(p.id)"
                   >
                     <UiRefreshIcon />
                   </UiIconButton>
@@ -332,6 +332,10 @@
                     >
                       {{ usageOf(p)!.action!.label }}
                     </UiButton>
+                  </span>
+                  <ProviderUsageTransportNotice :provider-id="p.id" />
+                  <span v-if="prov.usageAutoRefresh === false" class="pu-reset">
+                    {{ t('core.usageAutoRefreshOff') }}
                   </span>
                   <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
                   <span v-if="p.usagePresentation?.freshness" class="pu-reset"
@@ -553,6 +557,7 @@ import NavigationCount from './NavigationCount.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
 import ProviderIcon from '../ProviderIcon.vue';
+import ProviderUsageTransportNotice from '../../features/providers/ProviderUsageTransportNotice.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
 import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
@@ -681,6 +686,7 @@ const usageNow = ref(Date.now());
 const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale, {
   now: usageNow.value,
   deliveryStale: prov.usageTransport.deliveryStale,
+  manualOnly: prov.usageAutoRefresh === false,
 });
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
@@ -1184,7 +1190,9 @@ const { connected } = useSse((name, data) => {
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
   if (name === 'providers-usage') {
-    prov.applyUsage(isRecord(data) ? data.usage : undefined);
+    prov.applyUsage(isRecord(data) ? data.usage : undefined,
+      isRecord(data) ? data.autoRefresh : undefined,
+      isRecord(data) ? data.autoRefreshRevision : undefined);
   }
   if (name === 'grigdesk-update') {
     grigDeskUpdate.load({ quiet: true });

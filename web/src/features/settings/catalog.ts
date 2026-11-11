@@ -31,6 +31,14 @@ export interface StaticSettingsField extends SettingsFieldMetadata {
 
 const PREFERENCE_DEFINITIONS = [
   [
+    'agents.providers',
+    'providerUsageAutoRefresh',
+    'switch',
+    translator.t('ru', 'settings.providerUsageAutoRefresh'),
+    translator.t('ru', 'settings.providerUsageAutoRefreshHint'),
+  ],
+
+  [
     'automation.chats',
     'chatLiveSessions',
     'switch',
@@ -883,6 +891,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.arbiterEffort",
     "description": "settings.availableLevelsComeFromTheSelectedModel",
     "scope": "settings.allDevices"
+  },
+  'prefs:providerUsageAutoRefresh': {
+    label: 'settings.providerUsageAutoRefresh',
+    description: 'settings.providerUsageAutoRefreshHint',
+    scope: 'settings.allDevices',
   },
   "prefs:showAllModels": {
     "label": "settings.showAllModels",

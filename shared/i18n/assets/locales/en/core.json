@@ -1632,5 +1632,7 @@
   "routeUpdateQr": "Update route using QR or text",
   "routeUpdateTitle": "Change address",
   "trackerDefaultBoard": "Default board",
-  "trackerSourceUnavailable": "unavailable"
+  "trackerSourceUnavailable": "unavailable",
+  "usageNotChecked": "Quota has not been checked yet. Click ↻.",
+  "usageAutoRefreshOff": "Automatic refresh is off"
 }

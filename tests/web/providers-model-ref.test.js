@@ -406,14 +406,19 @@ test('ошибка проверки после commit не превращает 
 test('reconnect перечитывает реестр и usage, поздний ответ прежнего соединения игнорируется', async (t) => {
   const { store, gets } = credentialFixture(t);
 
+  store.usage.tripo.dataCheckedAt = 1000;
+
+  const before = JSON.parse(JSON.stringify(store.usage));
+
   store.noteUsageConnection(true);
 
   const pending = store.loadUsage(true);
 
   store.noteUsageConnection(false);
   store.noteUsageConnection(true);
-
-  assert.equal(store.usage.tripo, undefined);
+  assert.deepEqual(store.usage, before);
+  assert.equal(store.usage.tripo.dataCheckedAt, 1000);
+  assert.equal(store.usageTransport.deliveryStale, true);
   assert.deepEqual(gets.map((item) => item.url), [
     '/api/providers/usage', '/api/providers', '/api/providers/usage',
   ]);
@@ -422,7 +427,6 @@ test('reconnect перечитывает реестр и usage, поздний �
   await new Promise((resolve) => setImmediate(resolve));
   gets[0].resolve({ usage: { tripo: { resources: [{ summary: 'A' }] } } });
   await pending;
-
   assert.equal(store.providers[0].available, false);
   assert.deepEqual(store.usage.tripo.resources, []);
 });

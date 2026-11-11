@@ -248,16 +248,21 @@ export function providerStatusHint(provider: ProviderView = {}, usage: UsageEntr
 // даже пока данные грузятся или CLI не предоставляет API потребления.
 export function providerUsageView(entry: UsageEntry | null | undefined, provider: ProviderView = {},
   locale: LocaleSource = 'ru',
-  context: { now?: number; deliveryStale?: boolean } = {},
+  context: {
+    now?: number;
+    deliveryStale?: boolean;
+    manualOnly?: boolean;
+  } = {},
 ) {
   const t = localeTranslator(locale);
 
   if (!entry || typeof entry !== 'object') {
     return {
-      state: 'loading',
+      state: context.manualOnly ? 'unavailable' : 'loading',
       bars: [],
       resources: [],
-      message: t("core.limitDataHasNotBeenReceivedYet"),
+      message: context.manualOnly ? t('core.usageNotChecked')
+        : t('core.limitDataHasNotBeenReceivedYet'),
       tone: 'muted',
       action: null,
       measuredAt: null,

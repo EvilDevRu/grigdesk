@@ -44,6 +44,7 @@ type SettingsRequest = FastifyRequest<{
 }>;
 
 const PROTECTED_PREFS = new Map([
+  ['providerUsagePolicyRevision', '/api/settings/prefs (server managed)'],
   ['browserAgentMode', '/api/browser/mode'],
   ['speech', '/api/settings/speech'],
   // Реестры проектов принадлежат разделу «Проекты»: здесь они пишутся только своим API,
@@ -186,8 +187,24 @@ async function settingsModule(
       }
     }
 
+    if ('providerUsageAutoRefresh' in body && typeof body.providerUsageAutoRefresh !== 'boolean') {
+      return reply.code(400).send({
+        error: 'bad_preference',
+        message: 'Автообновление квот должно быть включено или выключено.',
+      });
+    }
+
     try {
-      return publicPrefsView(prefs.write(body));
+      const next = prefs.write(body);
+
+      if ('providerUsageAutoRefresh' in body) {
+        fastify.syncProvidersUsagePolicy?.(
+          next.providerUsageAutoRefresh === true,
+          Number(next.providerUsagePolicyRevision),
+        );
+      }
+
+      return publicPrefsView(next);
     } catch (err) {
       // Файл настроек не читается — запись отклонена целиком, и человеку нужен не
       // «внутренний сбой», а понятная причина: иначе порча выглядит как сбой GrigDesk.

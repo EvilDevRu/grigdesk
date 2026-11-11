@@ -131,3 +131,23 @@ test('LO-06: запись удаляет старые режимы доступ�
     assert.equal(stored.speech._revision, 'synthetic-revision');
   }
 });
+
+test('P1: автообновление квот по умолчанию выключено и сохраняется', async (t) => {
+  const { prefs, prefsPath } = await withPrefs(t);
+
+  assert.equal(prefs.read().providerUsageAutoRefresh, false);
+  prefs.write({ showAllModels: true });
+  assert.equal(prefs.read().providerUsageAutoRefresh, false);
+  prefs.write({ providerUsageAutoRefresh: true });
+
+  const restored = new PrefsStore({ prefsPath });
+
+  assert.equal(restored.read().providerUsageAutoRefresh, true);
+  assert.equal(restored.read().providerUsagePolicyRevision, 1);
+  restored.write({ providerUsageAutoRefresh: true });
+  assert.equal(restored.read().providerUsagePolicyRevision, 1);
+  restored.write({ providerUsageAutoRefresh: false });
+  assert.equal(prefs.read().providerUsageAutoRefresh, false);
+  assert.equal(prefs.read().providerUsagePolicyRevision, 2);
+  assert.equal(prefs.read().showAllModels, true);
+});

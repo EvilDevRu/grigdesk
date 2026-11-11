@@ -1652,5 +1652,7 @@
   "routeUpdateQr": "Обновить маршрут по QR или строке",
   "routeUpdateTitle": "Изменить адрес",
   "trackerDefaultBoard": "Доска по умолчанию",
-  "trackerSourceUnavailable": "недоступен"
+  "trackerSourceUnavailable": "недоступен",
+  "usageNotChecked": "Квота ещё не проверялась. Нажмите ↻.",
+  "usageAutoRefreshOff": "Автообновление выключено"
 }
