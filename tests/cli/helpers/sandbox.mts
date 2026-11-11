@@ -161,7 +161,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
     'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts',
     'shared/runtime/dataHome.ts', 'shared/runtime/grigDeskReadiness.ts', 'shared/desktop/desktopRuntime.ts',
     'shared/runtime/runtimeSettings.ts', 'shared/runtime/legacyBrand.ts', 'shared/desktop/windowKeyPath.ts',
-    'shared/node/bundleLayout.ts',
+    'shared/node',
     'shared/i18n', 'shared/package.json', 'VERSION']) {
     cpSync(path.join(repo, name), path.join(root, name), { recursive: true });
   }
@@ -204,6 +204,7 @@ exit 7
   Object.assign(env, {
     HOME: home,
     GRIGDESK_HOME: path.join(home, '.grigdesk'),
+    GRIGDESK_ARTIFACTS_DIR: path.join(home, '.grigdesk/artifacts'),
     XDG_CONFIG_HOME: path.join(home, 'config'),
     XDG_DATA_HOME: path.join(home, 'data'),
     PATH: `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,

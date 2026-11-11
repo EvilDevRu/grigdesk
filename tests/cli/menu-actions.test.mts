@@ -10,7 +10,7 @@ import {
 } from './helpers/menuFixture.mts';
 
 const groups = ['Открыть окно', 'Состояние', 'Сервер', 'Посредник', 'Устройства',
-  'Сборка', 'Разработка', 'Выход'];
+  'Сборка', 'Разработка', 'Уборка артефактов', 'Выход'];
 
 test('MA-NAV: порядок, описания, стрелки, Enter и Esc между уровнями', async (t) => {
   const box = await sourceMenu(t);
@@ -37,11 +37,11 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   await session.wait(/сервер, окно, посредник, связи/iu, 4000, statusStart);
   assert.doesNotMatch(session.output().slice(statusStart), /запустить.*GrigDesk/iu);
   session.write(up + down.repeat(5) + '\r');
-  await session.wait(/Переносимый комплект/u);
+  await session.wait(/Android APK/u);
 
   const build = session.output().slice(first.length);
   const buildTitles = [/Всё/u, /Только сервер/u, /Только веб/u, /Окно/u, /DeepSeek/u,
-    /Переносимый комплект/u];
+    /Android APK/u];
 
   for (const title of buildTitles) {
     assert.match(build, title);
@@ -49,10 +49,10 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
 
   assert.match(build, /сервер.*веб.*окно/iu);
 
-  const bundleStart = session.output().length;
+  const apkStart = session.output().length;
 
   session.write(down.repeat(5));
-  await session.wait(/release\/.*архив/iu, 4000, bundleStart);
+  await session.wait(/собрать приложение со встроенным вебом/iu, 4000, apkStart);
 
   const before = session.output().length;
 

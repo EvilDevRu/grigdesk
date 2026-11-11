@@ -14,6 +14,7 @@ import type { Settings } from '../shared/runtime/runtimeSettings.ts';
 import { HELP_TEXT, parseArgs } from './args.ts';
 import type { CliArgs } from './args.ts';
 import { insideUnit, insideWindowScope } from './cgroup.ts';
+import { artifactsCleanupCommand } from './artifactsCleanup.ts';
 import { readLinks, readRelay, relayCommand } from './relay.ts';
 import { readServer, serverCommand, UNIT } from './server.ts';
 import { collectStatus, printable, renderText, toJson } from './status.ts';
@@ -98,6 +99,10 @@ export async function runCli(argv: readonly string[], output: CliOutput = plainO
       output.write(HELP_TEXT);
 
       return 0;
+    }
+
+    if (args.kind === 'artifacts-cleanup') {
+      return await artifactsCleanupCommand(args, output);
     }
 
     const root = await realPath(runtimeInstallationRoot());
