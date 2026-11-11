@@ -4,6 +4,10 @@
 // ПОДКЛЮЧЕНИЕ НОВОГО ИИ — МОДУЛЬНОЕ: один файл в server/src/lib/executors/ (контракт там),
 // этот модуль ничего не знает про конкретных вендоров.
 import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
+import { AccessProfileService } from '../../lib/accessProfiles/service.ts';
+import { accessProfileAdapter } from '../../lib/accessProfiles/adapter.ts';
+import type { AccessConfig, AccessOptions } from '../../lib/accessProfiles/types.ts';
+import { registerAccessProfiles } from './accessProfiles.ts';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +16,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getProviderAdapters, isChatExecutor, supportsScopedWorkspace } from '../../lib/executors/index.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 import type { ExecutorAdapter } from '../../lib/executors/index.ts';
-import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
+import { getModelsRegistry, invalidateModelsRegistry } from '../../lib/modelsRegistry.ts';
 import { parseInTurnCapability } from '../../../../shared/chat/chatInTurnContracts.ts';
 import { isOutdated, parseVersion } from '../../lib/executors/_npmLatest.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/providerSettings.ts';
@@ -53,6 +57,7 @@ type ProvidersConfig = {
 };
 
 export interface ProvidersModuleOptions {
+  accessProfiles?: AccessOptions;
   config: ProvidersConfig;
   claudeAuth?: unknown;
   prefs?: PrefsStore;
@@ -160,7 +165,15 @@ async function providersModule(
   const usageRequests = new Set<Promise<unknown>>();
   const deps = { claudeAuth, signal: usageAbort.signal };
   const serviceEnv = opts.env || process.env;
-  const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
+  const rawAdaptersOf = opts.getProviderAdapters || getProviderAdapters;
+  const accessProfiles = new AccessProfileService(config as AccessConfig, serviceEnv,
+    rawAdaptersOf, opts.accessProfiles);
+  const adaptersOf = async () => new Map([...(await rawAdaptersOf()).entries()].map(([id, adapter]) =>
+    [id, accessProfileAdapter(adapter, { service: accessProfiles })]));
+
+  registerAccessProfiles(fastify, accessProfiles);
+  fastify.addHook('onClose', () => accessProfiles.close());
+
   const modelsOf = opts.getModelsRegistry || getModelsRegistry;
   const installationChecks = new Map<string, {
     at: number;
@@ -312,6 +325,13 @@ async function providersModule(
 
       providers.push({
         id: ex.id,
+        ...(ex.accessProfiles ? {
+          accessProfiles: await accessProfiles.list(ex.id).then((list) => ({
+            supported: true,
+            methods: list.methods,
+            activeProfile: list.profiles.find((item) => item.id === list.activeProfileId) ?? null,
+          })),
+        } : {}),
         name: ex.name,
         vendor: ex.vendor,
         type,
@@ -659,7 +679,8 @@ async function providersModule(
       const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
       const isCurrent = () => !usageAbort.signal.aborted && context.isCurrent()
         && (usageGenerations.get(ex.id) ?? 0) === generation;
-      const installed = ex.kind === 'api' ? true : await installedOf(ex, isCurrent);
+      const installed = ex.kind === 'api' || ex.usageRequiresRuntime === false
+        ? true : await installedOf(ex, isCurrent);
 
       if (!isCurrent()) {
         return [ex.id, previous ?? unsupportedProviderUsage(String(ex.name), checkedAt)] as const;
@@ -1104,6 +1125,18 @@ async function providersModule(
     },
     refreshModels: () => modelsOf(config, { refresh: true }),
   });
+
+  accessProfiles.changed = (id) => {
+    invalidateModelsRegistry(config.modelsPath);
+    registryCache.clear();
+    usageGenerations.set(id, (usageGenerations.get(id) ?? 0) + 1);
+    liveUsage.delete(id);
+    usageCache.clear();
+    usageBackoff.delete(id);
+    usagePrevious.delete(id);
+    fastify.sse?.broadcast?.('providers-update', { credentials: id });
+    fastify.sse?.broadcast?.('access-profiles', { provider: id });
+  };
 
   const installationService = new ProviderInstallService({
     ...opts.providerInstall,

@@ -1,6 +1,6 @@
 // Каталоги содержат только имена исходного кода, без параметров событий и данных окна.
 export const WEB_SSE_SIGNALS = [
-  'hello', 'plugin-event', 'state-change', 'providers-update', 'provider-install',
+  'hello', 'plugin-event', 'state-change', 'providers-update', 'access-profiles', 'provider-install',
   'provider-install-v2', 'providers-usage', 'grigdesk-update', 'chat-permission', 'chat-question',
   'chat-permission-done', 'ssh-permission', 'ssh-sessions', 'ssh-audit', 'db-permission',
   'db-sessions', 'db-queries', 'db-audit', 'chat-step', 'chat-progress', 'chat-done', 'chat-orphan',

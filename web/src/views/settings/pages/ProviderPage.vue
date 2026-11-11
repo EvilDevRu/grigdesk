@@ -89,7 +89,9 @@
             {{ item.label }}
           </UiTab>
         </UiTabs>
-        <p v-if="!ready">{{ t('settings.loading') }}</p>
+        <AccessProfilePanel v-if="tab === 'access' && selected.accessProfiles?.supported"
+          :provider-id="selected.id" />
+        <p v-else-if="!ready">{{ t('settings.loading') }}</p>
         <template v-else-if="tab === 'access'">
           <SettingsScope>{{ t('settings.keysAndAccessModeChangeAfterApply') }}</SettingsScope>
           <div v-for="field in visibleCredentials" :key="field.env">
@@ -425,6 +427,7 @@ import { providerAvailability } from '../../../features/providers/providerLocale
 import { api, failureText } from '../../../shared/apiClient.ts';
 import type { FieldAddress } from '../../../features/settings/contracts.ts';
 import SettingsField from '../SettingsField.vue';
+import AccessProfilePanel from '../../../shared/AccessProfilePanel.vue';
 import SettingsNativeEditor from './SettingsNativeEditor.vue';
 
 const props = defineProps<{ active: boolean }>();

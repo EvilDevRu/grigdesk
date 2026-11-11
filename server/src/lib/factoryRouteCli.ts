@@ -12,6 +12,8 @@
 // 3. `systemd-run` без `--scope` возвращает 0 сразу после регистрации юнита, поэтому
 //    код возврата движка до GrigDesk НЕ доходит. Исход читаем из состояния: жив ли юнит
 //    и появился ли ORCH_PID; текст отказа — из журнала запуска.
+import { randomUUID } from 'node:crypto';
+import { preparePipelineAccess } from './accessProfiles/pipeline.ts';
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -30,6 +32,7 @@ import {
   buildFactoryExternalCliDescriptor, factoryExternalCliDescriptorPath,
 } from './providerInstall/factoryExternalCli.ts';
 import { nodeExecutable } from './runtimePaths.ts';
+import { accessService, type AccessProfileService } from './accessProfiles/service.ts';
 
 /**
  * На длинной попытке goto записал решение, но прежних 30 секунд не хватило на выход.
@@ -76,6 +79,7 @@ const ROUTE_HOST_NAMES = [
 
 // Пути и бинари, без которых команду движку не собрать.
 export interface RouteConfig {
+  accessProfiles?: AccessProfileService;
   dataHome?: string;
   routesDir: string;
   stateDir: string;
@@ -423,10 +427,11 @@ export function routeLaunchEnv(
  */
 export function routeSecrets(
   source: Record<string, string | undefined> = process.env,
+  names: readonly string[] = ROUTE_SECRET_NAMES,
 ): Record<string, string> {
   const secrets: Record<string, string> = {};
 
-  for (const name of ROUTE_SECRET_NAMES) {
+  for (const name of names) {
     const value = source[name];
 
     if (!value) {
@@ -816,8 +821,8 @@ export async function confirmRouteResume({
  * Пишет секреты движка в файл `EnvironmentFile` юнита с правами 0600.
  *
  * Через `--setenv=NAME=VALUE` значение попало бы в argv systemd-run и в `ps`, а форму
- * `--setenv=NAME` без значения systemd 249 не поддерживает. Файл один на все запуски:
- * содержимое у него всегда одно и то же, юнит читает его на старте. Запись атомарна
+ * `--setenv=NAME` без значения systemd 249 не поддерживает. Профильный запуск получает
+ * собственный каталог файла, поэтому другой dispatch не заменяет его доступ. Запись атомарна
  * (эксклюзивный временный файл и rename), а без единого ключа прежний файл удаляется:
  * старый секрет не переживает запуск, которому он уже не положен.
  */
@@ -837,7 +842,7 @@ async function writeRouteSecretsFile(
 
   const temp = path.join(stateDir, `.route-secrets.${process.pid}.${Date.now()}.tmp`);
 
-  await fs.mkdir(stateDir, { recursive: true });
+  await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 
   try {
     await fs.writeFile(temp, `${lines.join('\n')}\n`, { mode: 0o600, flag: 'wx' });
@@ -859,10 +864,11 @@ async function writeRouteSecretsFile(
 function detachedRouteEnv(
   env: Record<string, string>,
   secrets: Record<string, string>,
+  accessKeys: readonly string[] = [],
 ): Record<string, string | undefined> {
   const inherited: Record<string, string | undefined> = { ...process.env };
 
-  for (const name of [...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]) {
+  for (const name of [...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES, ...accessKeys]) {
     delete inherited[name];
   }
 
@@ -877,7 +883,8 @@ function detachedRouteEnv(
  * Стадия получает закрытый descriptor выбранных внешних копий, а не PATH оркестратора.
  * Отказ построения не отменяет маршрут: раннер честно упадёт на своём probe.
  */
-async function prepareRouteExternalCliDescriptor(config: RouteConfig): Promise<string> {
+async function prepareRouteExternalCliDescriptor(config: RouteConfig,
+  profileEnvironments?: Record<string, NodeJS.ProcessEnv>, descriptorOverride?: string): Promise<string> {
   const dataHome = config.dataHome;
 
   if (!dataHome || !path.isAbsolute(dataHome)) {
@@ -888,9 +895,9 @@ async function prepareRouteExternalCliDescriptor(config: RouteConfig): Promise<s
     const adapters = await getProviderAdapters();
     const home = process.env.HOME && path.isAbsolute(process.env.HOME)
       ? process.env.HOME : os.homedir();
-    const descriptorPath = factoryExternalCliDescriptorPath(dataHome);
+    const descriptorPath = descriptorOverride ?? factoryExternalCliDescriptorPath(dataHome);
 
-    await buildFactoryExternalCliDescriptor({
+    const descriptor = await buildFactoryExternalCliDescriptor({
       adapters,
       config: runtimeConfig,
       env: process.env,
@@ -898,18 +905,36 @@ async function prepareRouteExternalCliDescriptor(config: RouteConfig): Promise<s
       scratch: path.join(dataHome, 'artifacts', 'provider-install-probes', 'factory'),
       leaseDirectory: path.join(dataHome, 'provider-cli-leases'),
       descriptorPath,
+      profileEnvironments,
     });
 
+    for (const provider of Object.keys(profileEnvironments ?? {})) {
+      if (adapters.get(provider)?.externalCli && !descriptor.providers[provider]) {
+        throw new Error('Не удалось подготовить выбранную копию CLI для профиля конвейера.');
+      }
+    }
+
     return descriptorPath;
-  } catch {
+  } catch (error) {
+    if (profileEnvironments) {
+      throw error;
+    }
+
     return '';
   }
 }
 
-export async function spawnRouteEngine(config: RouteConfig, { task, args, extraEnv = {} }: {
+/**
+ * Доступы маршрута закрепляются до первой границы запуска и переживают паузу.
+ * Обе ветви запуска получают одни секреты без публикации ключей в argv.
+ */
+export async function spawnRouteEngine(config: RouteConfig, {
+  task, args, extraEnv = {}, accessProviderIds,
+}: {
   task: string | number;
   args: string[];
   extraEnv?: Record<string, string>;
+  accessProviderIds?: string[];
 }): Promise<{
   ok: boolean;
   unit: string | null;
@@ -924,11 +949,28 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   // текущего запуска, иначе старый preflight замаскирует новый несвязанный отказ.
   const logOffset = await logLength(logFile);
   let secrets: Record<string, string>;
+  const service = config.accessProfiles ?? accessService({ stateDir: config.stateDir });
+  let accessEnv: NodeJS.ProcessEnv = {};
+  let rollback = async () => {};
+  let environments: Record<string, NodeJS.ProcessEnv> | undefined;
+  const accessKeys = service ? [...new Set([...(await service.adaptersOf()).values()]
+    .flatMap((adapter) => adapter.accessProfiles?.envKeys ?? []))] : [];
 
-  // Повреждённый ключ — отказ до любой записи и до регистрации юнита.
+  // Секреты проверяются до записи descriptor и до регистрации юнита.
   try {
-    secrets = routeSecrets();
+    if (service) {
+      const access = await preparePipelineAccess(service, config, String(task), args, accessProviderIds);
+
+      accessEnv = access.env;
+      environments = access.environments;
+      accessKeys.push(...access.keys);
+      rollback = access.rollback;
+    }
+
+    secrets = routeSecrets(service ? accessEnv : process.env, [...ROUTE_SECRET_NAMES, ...accessKeys]);
   } catch (error) {
+    await rollback();
+
     return {
       ok: false,
       unit: null,
@@ -945,6 +987,8 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   } catch (error) {
     const failure = runtimeLaunchFailure(error);
 
+    await rollback();
+
     return {
       ok: false,
       unit: null,
@@ -958,7 +1002,24 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   config = prepared.config;
   args = prepared.args;
 
-  const externalCliDescriptor = await prepareRouteExternalCliDescriptor(config);
+  const launchDirectory = service
+    ? path.join(config.stateDir, 'access-launches', String(task), randomUUID()) : config.stateDir;
+  let externalCliDescriptor;
+
+  try {
+    externalCliDescriptor = await prepareRouteExternalCliDescriptor(config, environments,
+      service ? path.join(launchDirectory, 'external-cli.json') : undefined);
+  } catch {
+    await rollback();
+
+    return {
+      ok: false,
+      unit: null,
+      logFile,
+      logOffset,
+      message: 'Не удалось подготовить окружение выбранного CLI. Повторите после проверки установки.',
+    };
+  }
 
   if (externalCliDescriptor) {
     config = { ...config, externalCliDescriptor };
@@ -967,6 +1028,11 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   await fs.mkdir(config.stateDir, { recursive: true });
 
   const env = routeLaunchEnv(config, extraEnv);
+
+  for (const key of accessKeys) {
+    delete env[key];
+  }
+
   const haveSystemd = await new Promise<boolean>((res) => {
     execFile('systemd-run', ['--version'], (err) => res(!err));
   });
@@ -977,7 +1043,7 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
     const child = spawn(prepared.command, args, {
       detached: true,
       stdio: ['ignore', out.fd, out.fd],
-      env: detachedRouteEnv(env, secrets),
+      env: detachedRouteEnv(env, secrets, accessKeys),
     });
     child.unref();
     const exited = await new Promise<number | null>((res) => {
@@ -1002,7 +1068,7 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   }
 
   const unit = routeUnitName(task);
-  const secretsFile = await writeRouteSecretsFile(config.stateDir, secrets);
+  const secretsFile = await writeRouteSecretsFile(launchDirectory, secrets);
   const argv = [
     ...factoryUnitArgs(task),
     // Без этого отказ движка не оставит следа: у сервиса stdout уходит в журнал

@@ -90,6 +90,10 @@ test('HELP-S2: ссылки наружу, пропавшая цель, необ�
 test('HELP-S3: фактический корпус полный, обезличенный и помещается в runtime лимит', async () => {
   const root = path.resolve(import.meta.dirname, '../..');
   const version = (await readFile(path.join(root, 'VERSION'), 'utf8')).trim();
+  const catalog: Array<{
+    id: string;
+    file: string;
+  }> = JSON.parse(await readFile(path.join(root, 'docs/grigdesk/guide/catalog.json'), 'utf8'));
   const corpus = await compileHelpSources(root, {
     version, commit: 'source'
   });
@@ -102,7 +106,10 @@ test('HELP-S3: фактический корпус полный, обезлич�
     assert.equal(article.markdown.split('\n')[0], `# ${article.title}`);
   }
 
-  assert.equal(corpus.articles.length, 28);
+  assert.deepEqual(
+    corpus.articles.map(({ id, file }) => ({ id, file })),
+    catalog.map(({ id, file }) => ({ id, file }))
+  );
   assert.equal(corpus.articles.some((entry) => entry.id === 'studio3d'), false);
   assert.ok(corpus.articles.some((entry) => entry.id === 'getting-started'));
   assert.ok(corpus.articles.some((entry) => entry.id === 'troubleshooting'));

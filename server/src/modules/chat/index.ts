@@ -1,4 +1,5 @@
 import { ChatCatalogPaging } from '../../lib/chat/catalogPaging.ts';
+import { reserveExecutorAccess } from '../../lib/accessProfiles/adapter.ts';
 import {
   decodeWindowBase, historyWindow, historyPrefixHash, historyWindowCursor,
 } from '../../lib/chat/historyWindow.ts';
@@ -1096,6 +1097,27 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
       fastify.log.info({ chatKey }, 'чат: непрошеный ход агента доставлен');
     }),
+  });
+
+  const accessParticipant = {
+    busy: (provider: string) => liveSessions.stats().some((session) =>
+      session.executor === provider && (session.busy || session.sleeping)),
+    /**
+     * Свободный процесс закрывается до подтверждения переключения доступа.
+     * Занятые, фоновые и спящие сессии остаются под защитой admission.
+     */
+    async closeIdle(provider: string) {
+      for (const session of liveSessions.stats()) {
+        if (session.executor === provider && !session.busy && !session.sleeping) {
+          await liveSessions.close(session.chatKey, 'смена профиля доступа');
+        }
+      }
+    },
+  };
+
+  fastify.accessProfiles?.participants.add(accessParticipant);
+  fastify.addHook('onClose', async () => {
+    fastify.accessProfiles?.participants.delete(accessParticipant);
   });
   /** Ждать конца всех идущих ходов, но не дольше бюджета. */
   function settleRuns(ms: number): Promise<void> {
@@ -3262,7 +3284,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Target уже разрешён строго по сохранённому modelRef до взятия locks. Никакого
     // fallback к Claude здесь больше нет.
     const info = { provider: target.provider, model: target.modelInfo };
-    const executor = await executorResolver(target.provider);
+    let executor = await executorResolver(target.provider);
+    let accessReservation;
+
+    try {
+      accessReservation = await reserveExecutorAccess(executor, config);
+      executor = accessReservation.adapter;
+    } catch (error) {
+      const failure = error as Error & { statusCode?: number; code?: string };
+
+      return channel.refuse(failure.statusCode ?? 503, {
+        error: failure.code ?? 'access_unavailable',
+        message: failure.message,
+      });
+    }
+
+    try {
 
     // Папка артефактов — рабочая папка агентов вне дерева кода: ход получает её на запись,
     // если адаптер объявил несколько корней. Однокорневые (их граница записи — рабочая папка)
@@ -4548,6 +4585,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           }
         }
       }
+    }
+    } finally {
+      await accessReservation.release();
     }
   }
 

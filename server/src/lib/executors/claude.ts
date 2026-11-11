@@ -1,5 +1,7 @@
 // Исполнитель Claude (Anthropic, Claude Code CLI).
 import { readClaudeFastModels } from './_claudeSpeed.ts';
+import { claudeAccess } from '../accessProfiles/drivers/cli.ts';
+import { accessEnvironment, accessIsCurrent } from '../accessProfiles/runtime.ts';
 import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { setTimeout as wait } from 'node:timers/promises';
 
@@ -319,7 +321,10 @@ const UNTRUSTED_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_LIMIT_MINOR = 2000;
 
 function defaultCredentialsPath() {
-  return path.join(os.homedir(), '.claude', '.credentials.json');
+  const env = accessEnvironment();
+
+  return path.join(env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? os.homedir(), '.claude'),
+    '.credentials.json');
 }
 
 async function readCliCredentials(credentialsPath: string): Promise<ClaudeCredentials | null> {
@@ -700,6 +705,14 @@ export async function fetchClaudeUsage({
     oauthTokenUrl,
   };
   const auth = await resolveClaudeCliToken(tokenOpts);
+
+  if (!await accessIsCurrent()) {
+    return {
+      hasToken: true,
+      status: 0,
+      error: 'access_changed',
+    };
+  }
   if (!auth.token) {
     if (!auth.hasCredentials) return { hasToken: false };
     return {
@@ -1470,7 +1483,7 @@ function claudeCommandDesc(text: unknown) {
  * /api/providers не знает cwd конкретного чата (план §6).
  */
 async function scanClaudeUserCommands() {
-  const dir = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'commands');
+  const dir = path.join(claudeConfigDir(), 'commands');
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -1645,11 +1658,15 @@ async function readJsonQuiet(file: string): Promise<Record<string, unknown> | nu
 }
 
 function claudeConfigDir() {
-  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const env = accessEnvironment();
+
+  return env.CLAUDE_CONFIG_DIR || path.join(env.HOME ?? os.homedir(), '.claude');
 }
 
 export default {
   id: 'claude',
+  accessProfiles: claudeAccess,
+  usageRequiresRuntime: false,
   chatSpeed: {
     modes: ['standard', 'fast'] as const,
     /**
@@ -1834,12 +1851,24 @@ export default {
   },
 
   /**
-   * Авторизация — через ClaudeAuthStore GrigDesk (apikey/env/cli/none).
+   * Активный профиль использует собственный ключ либо credential home.
+   * Вызовы без профильного снимка сохраняют прежний ClaudeAuthStore контракт.
    */
-  auth(config: ClaudeConfig, { claudeAuth }: {
+  async auth(config: ClaudeConfig, { claudeAuth }: {
     claudeAuth?: { publicView: () => { mode?: string } };
   } = {}) {
-    const mode = claudeAuth?.publicView().mode || 'none';
+    const env = accessEnvironment();
+    let selected = '';
+
+    if (env !== process.env) {
+      if (env.ANTHROPIC_API_KEY) {
+        selected = 'env';
+      } else {
+        selected = await fs.access(defaultCredentialsPath()).then(() => 'cli', () => 'none');
+      }
+    }
+
+    const mode = selected || claudeAuth?.publicView().mode || 'none';
     const labels: Record<string, string> = {
       apikey: 'API-ключ GrigDesk',
       env: 'ANTHROPIC_API_KEY окружения',
@@ -1937,6 +1966,16 @@ export default {
    * (~/.claude/.credentials.json); пользователь явно попросил эту статистику.
    */
   async usage(config: ClaudeConfig) {
+    const env = accessEnvironment();
+
+    if (env !== process.env && env.ANTHROPIC_API_KEY) {
+      return {
+        state: 'unsupported',
+        bars: [],
+        message: 'Лимиты подписки CLI недоступны для API-профиля.',
+      };
+    }
+
     return classifyClaudeUsageResponse(await fetchClaudeUsage({
       claudeBin: config.claudeBin,
       oauthClientId: config.claudeOauthClientId,
@@ -1966,12 +2005,14 @@ export default {
    */
   async discoverModels(config: ClaudeConfig) {
     let headers: Record<string, string> | null = null;
-    if (process.env.ANTHROPIC_API_KEY) {
-      headers = { 'x-api-key': process.env.ANTHROPIC_API_KEY };
+    const env = accessEnvironment();
+
+    if (env.ANTHROPIC_API_KEY) {
+      headers = { 'x-api-key': env.ANTHROPIC_API_KEY };
     } else if (config.discoverWithCliToken) {
       try {
         const creds = JSON.parse(
-          await fs.readFile(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8'),
+          await fs.readFile(defaultCredentialsPath(), 'utf8'),
         ) as ClaudeCredentials | null;
         const tok = creds?.claudeAiOauth?.accessToken;
         if (tok) headers = { Authorization: `Bearer ${tok}`, 'anthropic-beta': 'oauth-2025-04-20' };
