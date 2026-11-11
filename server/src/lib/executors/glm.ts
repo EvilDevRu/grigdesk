@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { glmAccess } from '../accessProfiles/drivers/api.ts';
 import path from 'node:path';
 
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
@@ -128,6 +129,15 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       } as const,
     } : {}),
     id: 'glm',
+    usageRequiresRuntime: false,
+    accessProfiles: {
+      ...glmAccess,
+      scopeConfig: (config: import('../accessProfiles/types.ts').AccessConfig, scope: string) => ({
+        ...config,
+        glmRuntimeHome: path.join(String(config.glmRuntimeHome), 'access', scope),
+      }),
+      bind: (env: NodeJS.ProcessEnv) => createGlmAdapter({ ...deps, env }),
+    },
     prepareRuntime: prepareGlmRuntime,
     name: 'GLM (Z.ai)',
     commands: () => readHarnessSkillCommands(),

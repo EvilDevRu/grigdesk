@@ -5,6 +5,8 @@
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
 import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
+import { codexAccess } from '../accessProfiles/drivers/cli.ts';
+import { accessEnvironment } from '../accessProfiles/runtime.ts';
 import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
@@ -925,8 +927,12 @@ export function codexAppServerRequest(bin: string, { method, params }: {
 } = {}): Promise<CodexRpcResponse> {
   return new Promise((resolve) => {
     let child: ChildProcess;
+
     try {
-      child = spawnProcess(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnProcess(bin, ['app-server'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: accessEnvironment(),
+      });
     } catch (error) {
       resolve({ error: { message: (error as Error)?.message || 'Codex app-server не запустился' } });
       return;
@@ -3256,6 +3262,7 @@ export default {
         supervised_db: Object.freeze(['list', 'schema']) }) }) : undefined;
   },
   id: 'codex',
+  accessProfiles: codexAccess,
   chatSpeed: {
     modes: ['standard', 'fast', 'ultrafast'] as const,
     /**
@@ -3410,11 +3417,15 @@ export default {
   },
 
   /**
-   * Авторизация — файл ~/.codex/auth.json (создаётся `codex login`).
+   * Проверка прежнего подключения использует home выбранного профиля.
+   * Наличие файла не считается доказательством завершения нового CLI login.
    */
   async auth() {
     try {
-      await fs.access(path.join(os.homedir(), '.codex', 'auth.json'));
+      const env = accessEnvironment();
+      const home = env.CODEX_HOME ?? path.join(env.HOME ?? os.homedir(), '.codex');
+
+      await fs.access(path.join(home, 'auth.json'));
       return { mode: 'cli', label: 'CLI хоста (codex login)', available: true };
     } catch {
       return { mode: 'none', label: 'не авторизован (codex login)', available: false };

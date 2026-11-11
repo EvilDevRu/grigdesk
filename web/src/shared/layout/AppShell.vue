@@ -300,6 +300,7 @@
                 </span>
               </template>
               <template #default="{ close }">
+                <AccessProfileMenu v-if="p.accessProfiles?.supported" :provider-id="p.id" />
                 <span class="ptip">
                   <!-- В сводке остаются ошибки установки; успешный результат и готовность
                        терминала доступны в общем окне установки и настройках. -->
@@ -484,6 +485,7 @@ import ComputerResourcesDialog from './ComputerResourcesDialog.vue';
 import { resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import ProviderInstallDialog from '../ProviderInstallDialog.vue';
+import AccessProfileMenu from '../AccessProfileMenu.vue';
 import { useProviderInstallStore, providerInstallVisibleWarnings } from '../../stores/providerInstall.ts';
 import { providerCliActions } from '../../features/providers/providerCliActions.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';

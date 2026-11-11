@@ -43,6 +43,13 @@ export function registerProviderCredentials(
       return reply.code(404).send({ error: 'unknown_provider' });
     }
 
+    if (adapter.accessProfiles) {
+      return reply.code(409).send({
+        error: 'profile_access_required',
+        message: 'Откройте мастер профилей доступа исполнителя.',
+      });
+    }
+
     const declarations = await declaredCredentials(adapter, config);
 
     if (!declarations.length) {

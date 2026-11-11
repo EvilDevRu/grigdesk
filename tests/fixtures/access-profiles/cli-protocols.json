@@ -1,0 +1,40 @@
+{
+  "codex": {
+    "version": "0.166.0",
+    "source": "codex app-server generate-json-schema --out <temporary-directory>",
+    "schemas": {
+      "v1/InitializeResponse.json": "62ad689c2cb6379913c1d72749cfd8de5089d35760214123518eb92eef11acc9",
+      "v2/LoginAccountParams.json": "48fb9bea54d7e0890052653ac06737efb3200ba2261515b2c4014027f36bea3d",
+      "v2/LoginAccountResponse.json": "72e6d77f49bc5809c3af50f183e2a0862dd8f7836816d4796ff69bb13eae0e89",
+      "v2/GetAccountResponse.json": "1d44d4274ea35e1f866c4b0e3db64678fab108914c276353bdc3b1b0de286459",
+      "v2/AccountLoginCompletedNotification.json": "d81e8821fd5a4a9ad118dfc3506ea156d32dcb18da388b336501bbc6a5ccb4a6"
+    },
+    "loginArgs": [
+      "app-server"
+    ],
+    "direction": "cli-to-site"
+  },
+  "claude": {
+    "version": "2.1.80",
+    "source": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.80.tgz",
+    "integrity": "sha512-YAgNNr3fzn3xaTNm+CYgebdEinU9D0HxGUT2C1N2Ej2HCvt5AjrSoU8vTgccxx4oPkj1R4gpuZWi1rTKvxNaPQ==",
+    "cliSha256": "0b146fe609bd591feb8e6ba689d146b56265076c9c23cee1a351cd2df74b4ec1",
+    "loginArgs": [
+      "/login"
+    ],
+    "direction": "site-to-cli",
+    "note": "TUI /login принимает ручной код. Отдельный auth login в этой версии не читает stdin-код: startOAuthFlow ждёт callback; его не используем как фиктивный manual flow."
+  },
+  "kimi": {
+    "version": "2.4.1",
+    "source": "@moonshot-ai/kimi-code/dist/main.mjs: runLoginFlow, registerLoginCommand, tokenToWire",
+    "cliSha256": "fd15d5c9b48892bb4f1d5fe82df9f790c8c19a44ca9a81054cc592b6fb9e2c90",
+    "loginArgs": [
+      "login",
+      "--region",
+      "global"
+    ],
+    "direction": "cli-to-site",
+    "note": "ACP authenticate вызывает только ensureAuthed; initialize объявляет terminal auth method. Протокол device-кодов доступен через login --region, не через ACP authenticate."
+  }
+}

@@ -11,6 +11,7 @@ import claude from '../../server/src/lib/executors/claude.ts';
 import {
   getModelsRegistry,
   mergeCatalogModel,
+  mergeCatalog,
   modelInfoFromRegistry,
   resolveEffortHints,
   resolveModelEfforts,
@@ -30,6 +31,40 @@ const registry = {
     },
   ],
 };
+
+test('первый scope доступа сохраняет алиасы актуальных моделей без каталога другого аккаунта', async () => {
+  const file = {
+    fixture: [
+      {
+        id: 'current-model',
+        modelRefAliases: ['previous-model'],
+        name: 'Старое имя',
+      },
+      { id: 'account-a-only-model', modelRefAliases: ['private-old-model'] },
+    ],
+    _meta: { fixture: {
+      catalogVersion: 'v',
+      catalogSchema: 12,
+      catalogCacheKey: 'old-key',
+    } },
+  };
+  const adapter = {
+    probe: async () => ({ version: 'v' }),
+    catalogAccessScope: () => 'profile-b/default/1',
+    catalogCacheKey: () => 'new-key',
+    catalog: async () => [{ id: 'current-model', name: 'Новое имя' }],
+  };
+
+  await mergeCatalog(file, 'fixture', adapter, {});
+
+  assert.deepEqual(file.fixture, [{
+    id: 'current-model',
+    name: 'Новое имя',
+    modelRefAliases: ['previous-model'],
+  }]);
+  assert.equal(JSON.stringify(file).includes('account-a-only-model'), false);
+  assert.equal(JSON.stringify(file).includes('private-old-model'), false);
+});
 
 test('справка усилия следует доступным ступеням и не придумывает смысл новой', () => {
   const model = {

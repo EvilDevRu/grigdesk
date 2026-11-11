@@ -67,6 +67,11 @@ export interface ProviderModelEntry {
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
+  accessProfiles?: {
+    supported: boolean;
+    methods: import('./accessProfileContracts.ts').AccessMethod[];
+    activeProfile: import('./accessProfileContracts.ts').AccessProfile | null;
+  };
   chatSpeed?: ChatSpeedCapability;
   defaultPermissionMode?: string;
   permissionModeSelectionPolicy?: 'preserve-explicit';

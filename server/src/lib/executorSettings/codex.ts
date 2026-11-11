@@ -1,6 +1,7 @@
 // Codex разделяет схему RPC, полный опубликованный config и каталог feature flags.
 // Авторитет установленного CLI определяется отдельно от актуальности внешней схемы.
 
+import { accessEnvironment } from '../accessProfiles/runtime.ts';
 import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 
 import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnapshot } from './types.ts';
@@ -124,7 +125,7 @@ export const codexNativeSettings = createNativeSettingsCapability<CodexSettingsC
   profile: () => ({
     transport: 'app-server',
     mode: 'default',
-    identity: ['app-server-config-v1', process.env.CODEX_HOME ?? null],
+    identity: ['app-server-config-v1', accessEnvironment().CODEX_HOME ?? null],
   }),
   discover: readCodexSettings,
 });

@@ -20,6 +20,8 @@
 
 ## Устройство
 
+- [Профили доступа: миграция CLI/API, допуск до выхода login, память и восстановление ключа](access-profiles.md)
+
 - [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
 - [Веб-инструменты GLM: разрешение поиска и чтения страниц, провайдеры и ревизия v4](glm-web-tools.md)
@@ -253,6 +255,7 @@
 - [Codex: недоверенный ход исключает декларации встроенных инструментов](codex-untrusted-namespaces.md)
 - [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
 - [Ключи доступа исполнителей задаются окном и живут в .env папки данных](executor-credentials.md)
+- [Правила профилей доступа: два режима GLM, подтверждение DeepSeek и приватное хранилище](access-profile-rules.md)
 - [Нативные настройки исполнителей: форма, API и области применения](executor-native-settings.md)
 - [Обнаружение нативных настроек: источники CLI, пробелы схем и общий контракт](executor-settings-discovery.md)
 - [Границы настроек: конкурирующие записи, публичные prefs и fingerprint запуска](executor-settings-storage-boundaries.md)
@@ -284,7 +287,7 @@
 
 ## Грабли
 
-- [Проверка авторизации Codex игнорирует CODEX_HOME и может скрыть доступный CLI](codex-auth-home.md)
+- [Codex: выбранный home, наличие auth-файла и отдельная проверка нового входа](codex-auth-home.md)
 - [Аудит токенов и остатков: пропущенные события Kimi и квот, округление, повторный учёт Claude и потеря итогового контекста DSH](usage-metrics-audit.md)
 - [Неудачный запуск Claude: необработанная ошибка stdin может завершить сервер](claude-startup-pipe-error.md)
 - [Claude: границы завершения реплик, исчезновение «Пишет…» и запись полного текста](claude-assistant-block-completion.md)

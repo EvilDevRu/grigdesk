@@ -1,5 +1,10 @@
 # Программная правка .env — только через общий писатель
 
+Профильный доступ исполнителей хранит новые секретные ревизии отдельно от `.env`;
+миграция оставляет исходные переменные без изменения. Это не второй writer `.env`:
+старый credentials POST для capability `accessProfiles` отвечает 409. Контракт —
+[приватное хранилище профилей](../chat/access-profile-rules.md).
+
 Файл `.env` в папке данных читают сервер, окно, CLI, systemd (`EnvironmentFile=`),
 `node --env-file` (`bin/grigdesk-ctl`, `deploy/restart.sh`) и человек. Код GrigDesk правит его одним модулем
 `server/src/lib/envFile.ts`. Окно «Ключи доступа» в карточках исполнителей

@@ -5,6 +5,7 @@
 // Режимный securityProfile для session bindings вычисляет chat-модуль
 // (kimiSecurityProfile), статичное поле ниже — каталожная подпись contained-профиля.
 import { execFile } from '../providerInstall/externalCliProcess.ts';
+import { kimiAccess } from '../accessProfiles/drivers/cli.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -287,6 +288,13 @@ async function nearestKimiProjectRoot(cwd?: string): Promise<string | null> {
 
 export default {
   id: 'kimi',
+  accessProfiles: {
+    ...kimiAccess,
+    runtimeConfig: (config: import('../accessProfiles/types.ts').AccessConfig, env: NodeJS.ProcessEnv) => ({
+      ...config,
+      kimiHome: env.KIMI_CODE_HOME,
+    }),
+  },
   effortHints: {
     low: 'Короткое рассуждение для простых задач; быстрее и экономнее.',
     high: 'Глубокое рассуждение для сложного кода, отладки и анализа.',

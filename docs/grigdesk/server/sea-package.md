@@ -7,6 +7,8 @@
 Копируются Python-программы, requirements, движок, запускалки,
 каталог helper-ов и ESM bridge. Исходные `server/src`, `server/scripts` и `shared`
 целиком в комплект не переносятся. Совместимые обёртки создаются отдельно.
+Управляемый вход Claude/Kimi использует `server/src/lib/accessProfiles/authPty.py`;
+он включён отдельным ресурсом в `resources.json` и `binary-resources.json`.
 
 `server/scripts/sea/dependencies.mts` раскрывает проверенный официальный архив
 Node вместе с npm, заголовками и лицензиями. Серверные зависимости устанавливаются

@@ -69,6 +69,8 @@ export type ModelsRegistry = Record<string, CatalogModel[]>;
 // проверки; building — идущая обычная сборка, к которой присоединяются вызовы;
 // queue — хвост очереди сборок этого файла, он никогда не отклоняется.
 interface RegistryCacheEntry {
+  generation: number;
+  refreshRequired: boolean;
   registry: ModelsRegistry | null;
   at: number;
   building: Promise<ModelsRegistry> | null;
@@ -77,6 +79,19 @@ interface RegistryCacheEntry {
 
 const registryCache = new Map<string, RegistryCacheEntry>();
 const CACHE_MS = 60_000;
+
+/**
+ * Смена доступа отзывает готовый каталог и публикацию уже идущей сборки.
+ * Очередь записи сохраняется: новая сборка не пересекается со старым models.json.
+ */
+export function invalidateModelsRegistry(modelsPath: string): void {
+  const entry = registryCacheEntry(modelsPath);
+
+  entry.generation += 1;
+  entry.registry = null;
+  entry.building = null;
+  entry.refreshRequired = true;
+}
 
 /**
  * Файл реестра: читаем; при отсутствии — сеем из исполнителей.
@@ -170,7 +185,7 @@ export async function mergeCatalog(
   } catch { version = ''; }
   const meta = (file._meta ||= {}) as Record<string, Record<string, unknown>>;
   const pm = (meta[prov] ||= {});
-  const list = (file[prov] ||= []) as CatalogModel[];
+  let list = (file[prov] ||= []) as CatalogModel[];
   // Версия бинаря не описывает env/policy, влияющие на каталог. Executor при необходимости
   // объявляет дополнительный стабильный fingerprint; ошибка hook-а заставляет повторить
   // каталог, но не фиксируется как успешное состояние.
@@ -181,6 +196,17 @@ export async function mergeCatalog(
     try {
       catalogCacheKey = String(await ex.catalogCacheKey?.(config));
     } catch { cacheKeyVerified = false; }
+  }
+
+  const accessScope = ex.catalogAccessScope ? await ex.catalogAccessScope(config) : undefined;
+  const accessChanged = accessScope !== undefined && pm.catalogAccessScope !== accessScope;
+  const aliasSources = list;
+
+  if (accessChanged) {
+    list = list.filter((model) => model.custom);
+    file[prov] = list;
+    delete pm.watermark;
+    pm.catalogAccessScope = accessScope;
   }
   // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
   // каталога (CATALOG_SCHEMA) — иначе у уже работающих экземпляров GrigDesk остался бы старый список.
@@ -193,7 +219,7 @@ export async function mergeCatalog(
   try { catalog = await ex.catalog(config) as CatalogModel[]; } catch { catalog = null; }
 
   if (!catalog?.length) {
-    let changed = false;
+    let changed = accessChanged;
 
     if (ex.chatSpeed) {
       for (const model of list) {
@@ -212,7 +238,8 @@ export async function mergeCatalog(
   // при непрочитанном context мы не имеем права угадывать их эквивалентность.
   const catalogCopy = catalog.map((model) => ({ ...model }));
   const catalogById = new Map(catalogCopy.map((model) => [model.id, model]));
-  for (const current of list) {
+
+  for (const current of aliasSources) {
     if (current?.custom || !Array.isArray(current?.modelRefAliases)) continue;
     const fresh = catalogById.get(current.id);
     if (!fresh) continue;
@@ -414,6 +441,8 @@ function registryCacheEntry(modelsPath: string): RegistryCacheEntry {
 
   if (!entry) {
     entry = {
+      generation: 0,
+      refreshRequired: false,
       registry: null,
       at: 0,
       building: null,
@@ -435,13 +464,22 @@ function enqueueRegistryBuild(
   config: { modelsPath: string },
   refresh: boolean,
 ): Promise<ModelsRegistry> {
-  const build = entry.queue.then(() => buildModelsRegistry(config, refresh));
+  const generation = entry.generation;
+  const isCurrent = () => entry.generation === generation;
+  const build = entry.queue.then(() => buildModelsRegistry(
+    config, refresh || entry.refreshRequired, isCurrent,
+  ));
 
   entry.queue = build.catch(() => undefined);
 
   return build.then((registry) => {
+    if (!isCurrent()) {
+      return sharedRegistryBuild(entry, config);
+    }
+
     entry.registry = registry;
     entry.at = Date.now();
+    entry.refreshRequired = false;
 
     return registry;
   });
@@ -482,8 +520,12 @@ function refreshInBackground(entry: RegistryCacheEntry, config: { modelsPath: st
     return;
   }
 
+  const generation = entry.generation;
+
   sharedRegistryBuild(entry, config).catch(() => {
-    entry.at = Date.now();
+    if (entry.generation === generation) {
+      entry.at = Date.now();
+    }
   });
 }
 
@@ -494,6 +536,7 @@ function refreshInBackground(entry: RegistryCacheEntry, config: { modelsPath: st
 async function buildModelsRegistry(
   config: { modelsPath: string },
   refresh: boolean,
+  isCurrent: () => boolean,
 ): Promise<ModelsRegistry> {
   const executors = await getExecutors();
   const file = await loadFile(config.modelsPath);
@@ -509,7 +552,10 @@ async function buildModelsRegistry(
   for (const ex of executors.values()) {
     if (await mergeDiscovered(file, ex.id, ex, config)) dirty = true;
   }
-  if (dirty) await fs.writeFile(config.modelsPath, JSON.stringify(file, null, 2));
+
+  if (dirty && isCurrent()) {
+    await fs.writeFile(config.modelsPath, JSON.stringify(file, null, 2));
+  }
 
   const registry: ModelsRegistry = {};
 
