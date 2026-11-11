@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deepSeekAccess } from '../accessProfiles/drivers/api.ts';
 import path from 'node:path';
 
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
@@ -10,7 +11,7 @@ import { normalizeDeepSeekPermissionMode } from '../deepseek/toolPermissionPolic
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import { selectedDeepSeekBinary } from '../deepseek/distribution.ts';
-import type { ExecutorDistributionProbe } from './index.ts';
+import type { ExecutorAdapter, ExecutorDistributionProbe } from './index.ts';
 import {
   deepSeekAuth,
   deepSeekCatalogCacheKey,
@@ -83,8 +84,33 @@ export function deepSeekSecurityProfile(
   return `${DEEPSEEK_PROFILE_REVISION}:${fingerprint}`;
 }
 
-export default {
+const deepSeekAdapter = {
   id: 'deepseek',
+  usageRequiresRuntime: false,
+  accessProfiles: {
+    ...deepSeekAccess,
+    scopeConfig: (config: import('../accessProfiles/types.ts').AccessConfig, scope: string) => ({
+      ...config,
+      deepseekRuntimeHome: path.join(String(config.deepseekRuntimeHome), 'access', scope),
+    }),
+    bind: (env: NodeJS.ProcessEnv, value: unknown, source: ExecutorAdapter): Partial<ExecutorAdapter> => {
+      const config = value as DeepSeekConfig;
+
+      return {
+      ...(source.auth === deepSeekAdapter.auth ? { auth: () => deepSeekAuth(env) } : {}),
+      ...(source.catalog === deepSeekAdapter.catalog ? {
+        catalog: () => env.DEEPSEEK_API_KEY
+          ? readDeepSeekCatalog({ config, env }).then((result) => result.models) : null,
+      } : {}),
+      ...(source.catalogCacheKey === deepSeekAdapter.catalogCacheKey ? {
+        catalogCacheKey: () => deepSeekCatalogCacheKey(config, env),
+      } : {}),
+      ...(source.usage === deepSeekAdapter.usage ? {
+        usage: () => deepSeekUsage({ config, env }),
+      } : {}),
+      };
+    },
+  },
   untrustedInput: Object.freeze({ text: true, images: false }),
   runUntrusted: runDeepSeekModelOnly,
   effortHints: {
@@ -293,3 +319,5 @@ export default {
     return result;
   },
 };
+
+export default deepSeekAdapter;

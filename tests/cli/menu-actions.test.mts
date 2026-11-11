@@ -10,7 +10,7 @@ import {
 } from './helpers/menuFixture.mts';
 
 const groups = ['Открыть окно', 'Состояние', 'Сервер', 'Посредник', 'Устройства',
-  'Сборка', 'Разработка', 'Выход'];
+  'Сборка', 'Разработка', 'Уборка артефактов', 'Выход'];
 
 test('MA-NAV: порядок, описания, стрелки, Enter и Esc между уровнями', async (t) => {
   const box = await sourceMenu(t);
@@ -53,7 +53,7 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   const apkStart = session.output().length;
 
   session.write(down.repeat(5));
-  await session.wait(/встроенным вебом/u, 4000, apkStart);
+  await session.wait(/собрать приложение со встроенным вебом/iu, 4000, apkStart);
 
   const before = session.output().length;
 

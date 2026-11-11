@@ -106,6 +106,14 @@ def main():
                         fcntl.ioctl(slave, termios.TIOCSWINSZ,
                                     struct.pack('HHHH', rows, command['resize'], 0, 0))
                         os.kill(child.pid, signal.SIGWINCH)
+                    if command.get('eof'):
+                        # В raw mode Ctrl+D является клавишей, а не EOF.
+                        # Канонический VEOF даёт настоящий конец stdin; CLI сам восстановит termios.
+                        values = termios.tcgetattr(slave)
+                        values[3] |= termios.ICANON
+                        values[6][termios.VEOF] = b'\x04'
+                        termios.tcsetattr(slave, termios.TCSANOW, values)
+                        os.write(master, b'\x04')
                     if 'signal' in command and child.poll() is None:
                         os.kill(child.pid, getattr(signal, command['signal']))
                     if command.get('close'):

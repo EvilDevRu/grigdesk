@@ -17,6 +17,8 @@
 
 ## Устройство
 
+- [Закрепление доступа цепочек исполнителей, identity попытки, паузы и рестарт](access-profile-pins.md)
+
 - [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
 - [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
 - [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)

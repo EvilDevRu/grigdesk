@@ -43,7 +43,8 @@ async function reusePayload(file: string, work: string): Promise<DeepSeekManifes
 
 /**
  * Под pinned Node собирается только собственный prefix, его lock сверяется с exact источником.
- * Cache generation публикуется builder после полной проверки и не использует production current.
+ * Возвращённый lock удерживается вызывающим до конца упаковки и чтения journal contract.
+ * При ошибке подготовки владелец освобождается здесь, готовое дерево не становится production current.
  */
 async function generation(work: string, options: BinaryBuildOptions) {
   const prepared = await readPreparedRuntimeDependencies(options.nodeCacheDir);
@@ -111,9 +112,12 @@ async function generation(work: string, options: BinaryBuildOptions) {
       artifact: verified.artifact,
       worker,
       nodeSha256: prepared.nodeSha256,
+      lock,
     };
-  } finally {
+  } catch (error) {
     await lock.release();
+
+    throw error;
   }
 }
 
@@ -154,44 +158,49 @@ export async function prepareBinaryPayload(
     base = await reusePayload(options.payload, work);
   } else {
     const built = await generation(work, options);
-    const raw = JSON.parse(await readFile(path.join(built.directory, 'runtime.json'), 'utf8'));
-    const payload = await packagePayload({
-      generationDirectory: built.directory,
-      workerNode: path.join(work, 'bin/node'),
-      nodeLicense: path.join(work, 'LICENSE'),
-      workerBootstrap: path.join(work, 'worker-bootstrap.mjs'),
-      workerVerify: path.join(work, 'worker-verify.mjs'),
-      worker: built.worker,
-      outputFile: path.join(work, 'payload.zip'),
-    });
 
-    base = {
-      format: 1,
-      upstreamVersion: built.artifact.source.version,
-      buildId: built.artifact.buildId,
-      runtimeVersion: built.artifact.runtimeVersion,
-      hostContract: built.artifact.hostContract,
-      journal: await journalContract(path.join(work, 'bin/node'), built.directory),
-      platform: 'linux',
-      arch: 'x64',
-      workerNode: {
-        version: built.worker.nodeVersion,
-        abi: built.worker.nativeAbi,
-        sha256: built.nodeSha256,
-      },
-      capabilities: built.artifact.capabilities,
-      glm: {
-        inputs: {
-          source: { commit: raw.source.commit },
-          inputIdentity: {
-            composition: raw.inputIdentity.composition,
-            dependencyLock: raw.inputIdentity.dependencyLock,
-          },
-          llmPiAi: raw.llmPiAi,
+    try {
+      const raw = JSON.parse(await readFile(path.join(built.directory, 'runtime.json'), 'utf8'));
+      const payload = await packagePayload({
+        generationDirectory: built.directory,
+        workerNode: path.join(work, 'bin/node'),
+        nodeLicense: path.join(work, 'LICENSE'),
+        workerBootstrap: path.join(work, 'worker-bootstrap.mjs'),
+        workerVerify: path.join(work, 'worker-verify.mjs'),
+        worker: built.worker,
+        outputFile: path.join(work, 'payload.zip'),
+      });
+
+      base = {
+        format: 1,
+        upstreamVersion: built.artifact.source.version,
+        buildId: built.artifact.buildId,
+        runtimeVersion: built.artifact.runtimeVersion,
+        hostContract: built.artifact.hostContract,
+        journal: await journalContract(path.join(work, 'bin/node'), built.directory),
+        platform: 'linux',
+        arch: 'x64',
+        workerNode: {
+          version: built.worker.nodeVersion,
+          abi: built.worker.nativeAbi,
+          sha256: built.nodeSha256,
         },
-      },
-      payload,
-    };
+        capabilities: built.artifact.capabilities,
+        glm: {
+          inputs: {
+            source: { commit: raw.source.commit },
+            inputIdentity: {
+              composition: raw.inputIdentity.composition,
+              dependencyLock: raw.inputIdentity.dependencyLock,
+            },
+            llmPiAi: raw.llmPiAi,
+          },
+        },
+        payload,
+      };
+    } finally {
+      await built.lock.release();
+    }
   }
 
   const raw = {

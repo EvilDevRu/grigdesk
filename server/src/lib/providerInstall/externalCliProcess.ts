@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { USER_CLI_PARENT_KEY } from '../../../../shared/node/userCliParentEnvironment.ts';
+import { applyAccessEnvironment } from '../accessProfiles/runtime.ts';
 import { helperCommand } from '../runtimePaths.ts';
 
 export interface ExternalCliProcessContext {
@@ -75,7 +76,7 @@ function launchEnvironment(context: ExternalCliProcessContext, supplied: unknown
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
 
-  return env;
+  return applyAccessEnvironment(env);
 }
 
 /**

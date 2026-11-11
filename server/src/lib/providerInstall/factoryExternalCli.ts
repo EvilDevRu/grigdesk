@@ -65,6 +65,7 @@ export async function buildFactoryExternalCliDescriptor(input: {
   scratch: string;
   leaseDirectory: string;
   descriptorPath: string;
+  profileEnvironments?: Record<string, NodeJS.ProcessEnv>;
 }): Promise<FactoryExternalCliDescriptor> {
   const providers: Record<string, FactoryExternalCliProvider> = {};
   const unavailable: Record<string, string> = {};
@@ -105,6 +106,20 @@ export async function buildFactoryExternalCliDescriptor(input: {
         const value = shell.env[key];
 
         if (typeof value === 'string' && value && !value.includes('\0')) {
+          env[key] = value;
+        }
+      }
+
+      const access = input.profileEnvironments?.[adapter.id];
+
+      if (access) {
+        for (const key of adapter.accessProfiles?.runtimeEnvKeys ?? []) {
+          const value = access[key] ?? '';
+
+          if (!/^[A-Z_][A-Z0-9_]*$/u.test(key) || /[\r\n\0]/u.test(value)) {
+            throw new Error('Неверное окружение профиля CLI');
+          }
+
           env[key] = value;
         }
       }

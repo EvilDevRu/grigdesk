@@ -1,3 +1,9 @@
+import {
+  DEFAULT_ARTIFACT_RETENTION_MS, DEFAULT_KEEP_GENERATIONS,
+  parseArtifactRetention, parseKeepGenerations,
+} from '../shared/node/artifactsCleanup.ts';
+import { cliTranslator } from './i18n.ts';
+
 /**
  * Новые ошибки аргументов имеют фиксированный ключ без значения из командной строки.
  * Перевод выполняет оболочка, а чистый parser не читает окружение или локаль.
@@ -6,9 +12,13 @@ export class CliArgumentError extends Error {}
 
 export type Action = 'setup' | 'restore' | 'start' | 'stop' | 'restart' | 'status' | 'logs'
   | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
+  | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
 
 export type CliArgs = {
-  kind: 'open' | 'status' | 'server' | 'relay' | 'device' | 'help' | 'version';
+  kind: 'open' | 'status' | 'server' | 'relay' | 'device' | 'artifacts-cleanup' | 'help' | 'version';
+  dryRun?: boolean;
+  olderThanMs?: number;
+  keepGenerations?: number;
   deviceAction?: 'add' | 'list' | 'revoke';
   deviceValue?: string;
   address?: string;
@@ -52,6 +62,8 @@ grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
 grigdesk-ctl device add <имя> [--address host:port] [--json]
 grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
+grigdesk-ctl artifacts-cleanup [--dry-run] [--older-than 7d] [--keep-generations 3] [--json]
+                                Срок: положительное целое с m (минуты), h (часы), d (сутки)
 grigdesk-ctl desktop … | tracker … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
 grigdesk-ctl build [all|server|web|window|deepseek|apk]
@@ -99,6 +111,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   if (command === 'device') {
     return parseDevice(argv.slice(1), args);
+  }
+
+  if (command === 'artifacts-cleanup') {
+    return parseCleanup(argv.slice(1), args);
   }
 
   if (!['open', 'status', 'server', 'relay'].includes(command)) {
@@ -196,6 +212,50 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new Error(`Неизвестный флаг: ${flag}. ${HELP_HINT}`);
     } else {
       throw new Error(`Неизвестная команда: лишний аргумент ${flag}. ${HELP_HINT}`);
+    }
+  }
+
+  return args;
+}
+
+/**
+ * Параметры уборки не разрешаются остальным командам и проверяются до файловых эффектов.
+ * Повторные значения отвергаются, а общие валидаторы совпадают с политикой test helper.
+ */
+function parseCleanup(argv: readonly string[], defaults: CliArgs): CliArgs {
+  const { t } = cliTranslator();
+  const seen = new Set<string>();
+  const args: CliArgs = {
+    ...defaults,
+    kind: 'artifacts-cleanup',
+    dryRun: false,
+    olderThanMs: DEFAULT_ARTIFACT_RETENTION_MS,
+    keepGenerations: DEFAULT_KEEP_GENERATIONS,
+  };
+
+  for (let index = 0; index < argv.length; index++) {
+    const flag = argv[index]!;
+
+    if (flag === '--json') {
+      args.json = true;
+    } else if (flag === '--dry-run') {
+      args.dryRun = true;
+    } else if (['--older-than', '--keep-generations'].includes(flag) && !seen.has(flag)) {
+      seen.add(flag);
+
+      try {
+        const value = argv[++index] ?? '';
+
+        if (flag === '--older-than') {
+          args.olderThanMs = parseArtifactRetention(value);
+        } else {
+          args.keepGenerations = parseKeepGenerations(value);
+        }
+      } catch {
+        throw new Error(t(flag === '--older-than' ? 'cleanup.invalidDuration' : 'cleanup.invalidKeep'));
+      }
+    } else {
+      throw new Error(t('cleanup.invalidArgument', { argument: flag }));
     }
   }
 

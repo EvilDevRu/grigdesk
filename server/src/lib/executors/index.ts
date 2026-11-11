@@ -171,6 +171,8 @@
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
 import type { ChatSpeed, ChatSpeedCapability } from '../../../../shared/chat/chatSpeed.ts';
 import path from 'node:path';
+import { accessProfileAdapter } from '../accessProfiles/adapter.ts';
+import type { AccessCapability } from '../accessProfiles/types.ts';
 
 import type { WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
 import type { WorkdirValidator } from '../chat/workdir.ts';
@@ -345,6 +347,8 @@ export interface PermissionModeContext {
 }
 
 export interface ExecutorAdapter {
+  catalogAccessScope?: (config: unknown) => string | Promise<string>;
+  accessProfiles?: AccessCapability;
   chatSpeed?: ChatSpeedCapability & {
     apply(settings: Record<string, unknown>, speed: ChatSpeed): Record<string, unknown>;
   };
@@ -356,6 +360,7 @@ export interface ExecutorAdapter {
   runtimeProfileFingerprint?: (preparedRuntime: PreparedExecutorRuntime) => string;
   externalCli?: (config: unknown, home: string) => ExternalCliDefinition | null;
   usagePresentation?: { freshness: boolean; spentLabel: boolean };
+  usageRequiresRuntime?: boolean;
   installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
@@ -502,7 +507,7 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
     const adapter = mod.default as ExecutorAdapter | undefined;
 
     if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {
-      map.set(adapter.id, externalCliAdapter(adapter));
+      map.set(adapter.id, accessProfileAdapter(externalCliAdapter(adapter)));
     }
   }
   loadedAdapters = new Map(

@@ -27,8 +27,9 @@ function commandTitle(argv: readonly string[], t: Translate): string {
   }
 
   const name = argv[0] ?? '';
-  const key = name === 'device' ? 'devices' : name;
-  const known = ['open', 'status', 'server', 'relay', 'devices', 'dev', 'deps', 'run'].includes(key);
+  const key = name === 'device' ? 'devices' : name === 'artifacts-cleanup' ? 'artifactsCleanup' : name;
+  const known = ['open', 'status', 'server', 'relay', 'devices', 'dev', 'deps', 'run',
+    'artifactsCleanup'].includes(key);
 
   if (!known) {
     return t('screens.command');

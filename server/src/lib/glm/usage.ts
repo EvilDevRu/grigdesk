@@ -98,7 +98,7 @@ async function fetchWithRetry(
  * Один вызов адреса кабинета Z.ai. Отказ ключа — auth_required, просьба реже — rate_limited,
  * конверт с кодом не 200 — unavailable со словом самого Z.ai.
  */
-async function callZai(
+export async function callZai(
   fetchImpl: typeof fetch,
   key: string,
   route: string,

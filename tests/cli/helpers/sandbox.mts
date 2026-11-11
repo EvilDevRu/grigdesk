@@ -201,6 +201,7 @@ exit 7
   Object.assign(env, {
     HOME: home,
     GRIGDESK_HOME: path.join(home, '.grigdesk'),
+    GRIGDESK_ARTIFACTS_DIR: path.join(home, '.grigdesk/artifacts'),
     XDG_CONFIG_HOME: path.join(home, 'config'),
     XDG_DATA_HOME: path.join(home, 'data'),
     PATH: `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,

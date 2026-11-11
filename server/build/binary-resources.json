@@ -67,6 +67,11 @@
       "kind": "file"
     },
     {
+      "source": "server/src/lib/accessProfiles/authPty.py",
+      "target": "server/src/lib/accessProfiles/authPty.py",
+      "kind": "file"
+    },
+    {
       "source": "server/src/lib/media/audio-probe.py",
       "target": "server/src/lib/media/audio-probe.py",
       "kind": "file"

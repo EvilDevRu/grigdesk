@@ -116,6 +116,7 @@ export function startPty(t: TestContext, options: PtyOptions) {
     write: (value: string) => send({ write: Buffer.from(value).toString('base64') }),
     resize: (columns: number) => send({ resize: columns }),
     signal: (name: string) => send({ signal: name }),
+    endInput: () => send({ eof: true }),
     /**
      * Ждёт наблюдаемую строку до срока, завершаясь сразу при раннем выходе CLI.
      * Ошибка называет недостающее поведение, а не таймаут внешнего сервиса.

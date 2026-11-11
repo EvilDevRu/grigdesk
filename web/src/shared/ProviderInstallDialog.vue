@@ -138,7 +138,7 @@
           v-if="loginCommand"
           variant="solid"
           tone="accent"
-          @click="openTerminal(loginCommand)"
+          @click="openLogin"
         >{{ t('settings.providerInstallationLogin') }}</UiButton>
       </footer>
     </div>
@@ -246,6 +246,23 @@ const loginCommand = computed(() => {
 
   return finished && needsLogin ? finished.loginCommand : '';
 });
+
+/**
+ * Вход поддерживаемого исполнителя проходит через серверный мастер.
+ * Установка и прежний способ адаптера без профилей сохраняют свой lifecycle.
+ */
+async function openLogin() {
+  if (provider.value?.accessProfiles?.supported) {
+    install.visible = false;
+    settings.requestOpen({ pageId: 'agents.providers', entityId: provider.value.id });
+    settings.selectPage('agents.providers', provider.value.id, 'access');
+
+    return;
+  }
+
+  await openTerminal(loginCommand.value);
+}
+
 const heading = computed(() => {
   const name = provider.value?.name;
   const operation = install.selectedRequest?.operation

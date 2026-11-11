@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 
+export const DIRECTORY_LOCK_SUFFIXES = ['.lock', '.install-lock', '.select-lock', '.cutover-lock'] as const;
+
 export interface DirectoryLockOwner {
   pid: number;
   starttime: string;
@@ -19,6 +21,12 @@ export interface DirectoryLockOptions {
   waitMs?: number;
   pollMs?: number;
   probe?: DirectoryLockProbe;
+  cleanupBarrier?: DirectoryLockReference;
+}
+
+export interface DirectoryLockReference {
+  path: string;
+  owner: DirectoryLockOwner;
 }
 
 export interface DirectoryLock {
@@ -106,6 +114,33 @@ function sameOwner(left: DirectoryLockOwner | null, right: DirectoryLockOwner): 
 }
 
 /**
+ * Проверка состояния ничего не создаёт и не освобождает даже доказанно мёртвый lock.
+ * Непонятная запись остаётся занятой, включая ссылку вместо каталога владельца.
+ */
+export async function directoryLockState(
+  directory: string,
+  probe: DirectoryLockProbe = actualProbe,
+): Promise<'absent' | 'alive' | 'dead' | 'unknown'> {
+  try {
+    await fs.lstat(directory);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown';
+  }
+
+  const owner = await readOwner(directory);
+
+  return owner ? processOwnerState(owner, probe) : 'unknown';
+}
+
+/**
+ * Исключение собственного lock требует совпадения PID, времени старта и token.
+ * Старая ссылка на handle не позволяет игнорировать заменённого владельца.
+ */
+export async function directoryLockOwnedBy(directory: string, owner: DirectoryLockOwner): Promise<boolean> {
+  return sameOwner(await readOwner(directory), owner);
+}
+
+/**
  * Reclaim внутри старого каталога сериализует уборщиков до его удаления.
  * Владелец перечитывается после захвата claim: свежий lock не удаляется по старому снимку.
  */
@@ -159,7 +194,7 @@ async function retireDead(directory: string, options: DirectoryLockOptions): Pro
  * Восстановление после SIGKILL требует PID и времени старта, а не возраста lock.
  * Уборка мёртвого владельца разрешает повторный захват даже без ожидания.
  */
-export async function acquireDirectoryLock(
+async function acquireRawDirectoryLock(
   directory: string,
   options: DirectoryLockOptions = {},
 ): Promise<DirectoryLock> {
@@ -222,6 +257,95 @@ export async function acquireDirectoryLock(
 
     if (await retireDead(directory, options)) {
       continue;
+    }
+
+    if (performance.now() >= deadline) {
+      throw Object.assign(new Error('Каталог занят другим процессом; повторите запуск'), {
+        code: 'directory_lock_busy',
+      });
+    }
+
+    await pause(options.pollMs ?? 50);
+  }
+}
+
+/**
+ * Барьер находится рядом с корнем, поэтому не попадает в удаляемое дерево.
+ * Одинаковое имя используют уборщик и все выдающие directory lock процессы.
+ */
+export function directoryCleanupLockPath(root: string): string {
+  return `${root}.cleanup.lock`;
+}
+
+/**
+ * Проверяются барьеры самого защищаемого дерева и каждого физического предка.
+ * Мёртвый барьер восстанавливается обычным reclaim, неизвестный остаётся закрытым.
+ */
+async function cleanupBarrierBusy(directory: string, options: DirectoryLockOptions): Promise<boolean> {
+  const suffix = DIRECTORY_LOCK_SUFFIXES.find((value) => directory.endsWith(value));
+  let ancestor = suffix ? directory.slice(0, -suffix.length) : directory;
+
+  for (;;) {
+    const barrier = directoryCleanupLockPath(ancestor);
+    const own = options.cleanupBarrier;
+
+    if (!(own?.path === barrier && await directoryLockOwnedBy(barrier, own.owner))) {
+      let state = await directoryLockState(barrier, options.probe);
+
+      if (state === 'dead') {
+        await retireDead(barrier, options);
+        state = await directoryLockState(barrier, options.probe);
+      }
+
+      if (state !== 'absent') {
+        return true;
+      }
+    }
+
+    const parent = path.dirname(ancestor);
+
+    if (parent === ancestor) {
+      return false;
+    }
+
+    ancestor = parent;
+  }
+}
+
+/**
+ * Новый владелец публикует lock между двумя проверками барьера уборки.
+ * Если уборщик успел закрыть дерево, предварительный lock снимается до передачи вызывающему.
+ */
+export async function acquireDirectoryLock(
+  directory: string,
+  options: DirectoryLockOptions = {},
+): Promise<DirectoryLock> {
+  const physical = path.join(await fs.realpath(path.dirname(directory)), path.basename(directory));
+  const deadline = performance.now() + (options.waitMs ?? 15000);
+
+  for (;;) {
+    if (!await cleanupBarrierBusy(physical, options)) {
+      let lock;
+
+      try {
+        lock = await acquireRawDirectoryLock(directory, { ...options, waitMs: 0 });
+
+        if (!await cleanupBarrierBusy(physical, options)) {
+          return lock;
+        }
+
+        await lock.release();
+        lock = undefined;
+      } catch (error) {
+        await lock?.release();
+
+        const code = (error as NodeJS.ErrnoException).code;
+
+        if (code !== 'directory_lock_busy'
+          && !(code === 'ENOENT' && await cleanupBarrierBusy(physical, options))) {
+          throw error;
+        }
+      }
     }
 
     if (performance.now() >= deadline) {

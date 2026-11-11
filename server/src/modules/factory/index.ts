@@ -1,3 +1,4 @@
+import { accessService } from '../../lib/accessProfiles/service.ts';
 import { randomUUID } from 'node:crypto';
 import {
   decodeStageRunnerApply, decodeStageRunnerIdentity, StageRunnerSettingsInputError,
@@ -1498,6 +1499,10 @@ async function factoryModule(
         launchConfirmations = 0;
       }
       if (launchConfirmations >= 4 && registry) {
+        await accessService({ stateDir: config.stateDir })?.sealPipeline(
+          id, dispatchId, String(registry.ATTEMPT_ID),
+        );
+
         if (pendingSource) {
           const proof = await factoryState.readTrustedTicketProof(id);
 
@@ -2528,6 +2533,10 @@ async function factoryModule(
           message: 'Исполнитель не входит в разрешённую резервную цепочку этапа.',
         });
       }
+
+      await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(target, id,
+        managed.trusted.attempt, graph.daemonAlive);
+
       return await runnerControl.switch({ task: id, stage, target });
     } catch (err) {
       if (err instanceof RunnerControlInputError) {
@@ -2587,6 +2596,10 @@ async function factoryModule(
             message: `исполнитель ${primary} не установлен`,
           });
         }
+
+        await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(primary, id,
+          managed.trusted.attempt, graph.daemonAlive);
+
         return await runnerControl.setStage({ task: id, stage, primary });
       }
       return await runnerControl.clearStage({ task: id, stage });

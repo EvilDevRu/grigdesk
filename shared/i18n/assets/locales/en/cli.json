@@ -288,5 +288,41 @@
     "publicRequired": "For an IPv6 SSH address, provide the public relay address explicitly via --public-host.",
     "routeConflict": "The relay route was changed by another owner. Check the connection state and repeat the restore.",
     "failedGeneric": "The installation did not finish. The server job shows the exact completed steps."
+  },
+  "artifactsCleanup": "Artifacts cleanup",
+  "artifactsCleanupDescription": "preview and explicitly delete old artifacts",
+  "cleanup": {
+    "root": "Directory: {path}",
+    "policy": "Age threshold: {days} days; keep generations: {keep}",
+    "entry": "{path}: {bytes} bytes — {status} {reason}",
+    "previewTotal": "Would delete: {bytes} bytes",
+    "freedTotal": "Deleted, freed: {bytes} bytes",
+    "errors": "Errors: {count}",
+    "interrupted": "Cleanup interrupted; remaining directories were not deleted.",
+    "question": "Delete old artifacts? Deletion is irreversible.",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "navigation": "↑↓ select · Enter confirm · Esc cancel · PgUp/PgDn scroll",
+    "invalidDuration": "Duration: a positive integer with m, h or d (for example 7d)",
+    "invalidKeep": "Generation count: a positive safe integer",
+    "invalidArgument": "Unknown or repeated cleanup argument: {argument}",
+    "status": {
+      "would-delete": "would delete",
+      "deleted": "deleted",
+      "skipped": "skipped",
+      "error": "error"
+    },
+    "reason": {
+      "young": "younger than threshold",
+      "locked": "busy: locked",
+      "lock-unknown": "unknown lock owner",
+      "protected-cache": "protected cache",
+      "keep-latest": "latest generations",
+      "current": "current directory",
+      "symlink": "symbolic link",
+      "not-directory": "not a directory",
+      "disappeared": "directory disappeared or replaced",
+      "io-error": "access or I/O error"
+    }
   }
 }
