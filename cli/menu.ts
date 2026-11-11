@@ -69,7 +69,14 @@ function menuItems(source: boolean): MenuItem[] {
     {
       label: 'relay',
       description: 'serviceDescription',
-      children: service('relay'),
+      children: [
+        ...['setup', 'restore'].map((action) => ({
+          label: 'remote.' + action,
+          description: 'remote.description',
+          argv: ['relay', action],
+        })),
+        ...service('relay'),
+      ],
     },
     {
       label: 'devices',

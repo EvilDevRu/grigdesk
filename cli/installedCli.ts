@@ -10,7 +10,9 @@ import { inspectInstalledServer, startInstalledServer, stopInstalledServer }
 import { installedServerUnit, INSTALLED_SERVER_UNIT } from '../shared/node/installedServer.ts';
 import { readInstalledUpdate } from '../shared/node/installedUpdateState.ts';
 import { runInstalledUpdateWorker } from '../shared/node/installedUpdateWorker.ts';
-import { HELP_TEXT, parseArgs } from './args.ts';
+import { serverSettings } from '../shared/node/installedServer.ts';
+import { relaySetup } from './relaySetup.ts';
+import { HELP_TEXT, parseArgs, CliArgumentError } from './args.ts';
 import { runUpdateCommand } from './updates.ts';
 import { cliTranslator } from './i18n.ts';
 import { TerminalSession, terminalText } from './terminal.ts';
@@ -27,7 +29,7 @@ async function runInstalledMenu(root: string): Promise<number> {
   const session = new TerminalSession();
   const { t } = cliTranslator();
   const items = ['check-updates', 'update', 'update-status', 'resume-update',
-    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'exit'];
+    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'relay-setup', 'relay-restore', 'exit'];
   let selected = 0;
   let status = await service.status();
   let closed = false;
@@ -81,7 +83,8 @@ async function runInstalledMenu(root: string): Promise<number> {
           session.suspend();
 
           try {
-            const command = action.startsWith('channel-')
+            const command = action.startsWith('relay-') ? ['relay', action.slice(6)]
+              : action.startsWith('channel-')
               ? ['server', 'update-channel', action.slice('channel-'.length)] : ['server', action];
             const code = await runInstalledCli(root, command);
 
@@ -129,7 +132,10 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
   try {
     args = parseArgs(argv);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : 'invalid_arguments'}\n`);
+    const message = error instanceof CliArgumentError ? t(error.message)
+      : error instanceof Error ? error.message : 'invalid_arguments';
+
+    process.stderr.write(message + '\n');
 
     return 2;
   }
@@ -146,6 +152,10 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
         || /^app-grigdesk-\d+\.scope$/u.test(part))) {
         throw new Error('release_command_inside_owner_use_force');
       }
+    }
+
+    if (args.kind === 'relay' && ['setup', 'restore'].includes(args.action ?? '')) {
+      return await relaySetup(args, await serverSettings(receipt));
     }
 
     if (args.kind === 'help') {

@@ -1607,6 +1607,11 @@
   "chatHistoryChanged": "The chat window has changed",
   "chatSelectionConflict": "Could not synchronize the chat settings. Try sending again.",
   "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
-  "trackerSourceUnavailable": "unavailable",
-  "trackerDefaultBoard": "Default board"
+  "routeUpdateConfirm": "Update route",
+  "routeUpdateDirect": "Change direct address",
+  "routeUpdateHint": "Updating the route preserves the key and trust of the selected machine.",
+  "routeUpdateQr": "Update route using QR or text",
+  "routeUpdateTitle": "Change address",
+  "trackerDefaultBoard": "Default board",
+  "trackerSourceUnavailable": "unavailable"
 }

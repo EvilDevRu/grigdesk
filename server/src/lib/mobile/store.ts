@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { deviceName, MobileInputError } from './errors.ts';
 import { privateRead, privateWrite, serialized } from './files.ts';
-import { createRelayCredentials } from './identity.ts';
+import { createRelayCredentials, readIdentity } from './identity.ts';
 
 export type DeviceScope = 'mobile-v1' | 'client';
 
@@ -254,7 +254,7 @@ export class RelayStore {
     name: unknown;
     host: string;
     port: number;
-  }): Promise<Relay> {
+  }, reservation?: { id: string; enabled: boolean }): Promise<Relay> {
     const name = deviceName(input.name);
     const host = typeof input.host === 'string' ? input.host.trim() : '';
 
@@ -272,8 +272,39 @@ export class RelayStore {
 
     return serialized(this.file, async () => {
       const relays = await this.list();
-      const id = `r${randomBytes(8).toString('hex')}`;
-      const credentials = await createRelayCredentials(this.directory, id);
+      const id = reservation?.id ?? `r${randomBytes(8).toString('hex')}`;
+
+      if (!/^r[a-f0-9]{8,32}$/.test(id)) {
+        throw new MobileInputError('bad_relay_id', 'Неверный идентификатор посредника.');
+      }
+
+      const folder = path.join(this.directory, 'relays', id);
+      const existing = relays.find((item) => item.id === id);
+      const identity = await readIdentity(
+        path.join(folder, 'relay-key.pem'), path.join(folder, 'relay-cert.pem'),
+      );
+
+      if (existing) {
+        if (!identity || identity.fp !== existing.fp) {
+          throw new MobileInputError('mobile_identity_error', 'Личность посредника повреждена.', 503);
+        }
+
+        return existing;
+      }
+
+      const receiptFile = path.join(folder, 'reservation.json');
+      const receipt = await privateRead(receiptFile) as Relay | null;
+
+      if (identity && (!receipt || receipt.id !== id || receipt.fp !== identity.fp)) {
+        throw new MobileInputError('mobile_identity_error', 'Нет квитанции личности посредника.', 503);
+      }
+
+      // Квитанция без файлов личности — расходящееся состояние после сбоя, не источник секрета.
+      if (!identity && receipt) {
+        throw new MobileInputError('mobile_identity_error', 'Файлы личности посредника отсутствуют.', 503);
+      }
+
+      const credentials = receipt ?? await createRelayCredentials(this.directory, id);
       const relay = {
         id,
         name,
@@ -282,10 +313,11 @@ export class RelayStore {
         fp: credentials.fp,
         brainToken: credentials.brainToken,
         deviceToken: credentials.deviceToken,
-        enabled: true,
-        createdAt: Date.now(),
+        enabled: reservation?.enabled ?? true,
+        createdAt: receipt?.createdAt ?? Date.now(),
       };
 
+      await privateWrite(receiptFile, JSON.stringify(relay));
       relays.push(relay);
       await privateWrite(
         this.file,
@@ -296,6 +328,28 @@ export class RelayStore {
       );
 
       return relay;
+    });
+  }
+
+  /**
+   * Меняет только маршрут после сетевого доказательства кандидата.
+   * Сравнение всей прежней записи защищает параллельное восстановление от потери данных.
+   */
+  compareRoute(before: Relay, after: Pick<Relay, 'host' | 'port' | 'enabled'>): Promise<Relay> {
+    return serialized(this.file, async () => {
+      const relays = await this.list();
+      const index = relays.findIndex((item) => item.id === before.id);
+
+      if (index < 0 || JSON.stringify(relays[index]) !== JSON.stringify(before)) {
+        throw new MobileInputError('route_conflict', 'Маршрут изменён другим заданием.', 409);
+      }
+
+      const updated = { ...before, ...after };
+
+      relays[index] = updated;
+      await privateWrite(this.file, JSON.stringify({ version: 1, relays }));
+
+      return updated;
     });
   }
 

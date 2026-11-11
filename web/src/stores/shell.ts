@@ -164,7 +164,11 @@ export const useShellStore = defineStore('shell', {
     addLocal() {
       return shellAction('POST', '/profiles', { local: true });
     },
-    editProfile(id: string, patch: { name?: string; address?: string }) {
+    editProfile(id: string, patch: {
+      name?: string;
+      address?: string;
+      routePairing?: string;
+    }) {
       return shellAction('PATCH', `/profiles/${encodeURIComponent(id)}`, patch);
     },
     removeProfile(id: string) {

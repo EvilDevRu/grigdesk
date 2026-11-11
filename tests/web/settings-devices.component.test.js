@@ -178,6 +178,7 @@ for (const action of ['rename', 'revoke']) {
       profiles: [],
       localAvailable: false,
       capabilities: [],
+      localAvailable: true,
     });
     h.auth.clientScope = 'scope-b';
     h.answers['GET /api/devices'] = () => ({

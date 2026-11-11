@@ -46,5 +46,6 @@
   "device_scope_forbidden": "Revoke the old pairing and connect the current app with a new QR.",
   "device_unknown": "Device not found. Get a new QR code and pair it again.",
   "appLockInvalid": "Invalid app lock fields.",
-  "appLockSaveFailure": "Could not save the app lock preference."
+  "appLockSaveFailure": "Could not save the app lock preference.",
+  "profileChanged": "The machine changed. Try updating again."
 }

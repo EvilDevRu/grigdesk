@@ -461,6 +461,27 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         move = current;
       } else if (path.startsWith("/__shell/profiles/") && head.method().equals("PATCH")) {
         JSONObject profile = store.get(path.substring("/__shell/profiles/".length()));
+
+        if (data.has("routePairing")) {
+          if (data.length() != 1 || !(data.opt("routePairing") instanceof String)) {
+            throw new IllegalArgumentException(
+              ShellLocale.text(locale, "native.invalidMachineFields", "Неверные поля машины."));
+          }
+
+          if (nativeActions != null) {
+            nativeActions.unlock();
+          }
+
+          pairing.updateRoutes(profile.getString("id"), data.getString("routePairing"));
+          state.changed();
+
+          if (profile.getString("id").equals(store.selected)) {
+            connect(store.selected, true);
+          }
+
+          return PipeResponse.json(200, new JSONObject().put("ok", true));
+        }
+
         String name = data.optString("name", profile.getString("name"));
         String address = data.optString("address", profile.getString("address"));
 
