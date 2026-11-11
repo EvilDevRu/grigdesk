@@ -4,6 +4,7 @@ import path from 'node:path';
 import { runtimeRoot } from '../server/src/lib/runtimePaths.ts';
 import { isPortableBundle } from '../shared/node/bundleLayout.ts';
 import { readCliContext } from './commands.ts';
+import { confirmArtifactsCleanup } from './artifactsCleanupMenu.ts';
 import { runBuildProgress } from './buildProgress.ts';
 import { cliTranslator } from './i18n.ts';
 import { sourceInstallation } from './interactive.ts';
@@ -97,6 +98,11 @@ function menuItems(source: boolean): MenuItem[] {
         })),
       },
     ] : [],
+    {
+      label: 'artifactsCleanup',
+      description: 'artifactsCleanupDescription',
+      argv: ['artifacts-cleanup'],
+    },
     { label: 'exit', description: 'exitDescription' },
   ];
 }
@@ -174,6 +180,7 @@ export async function runMenu(root: string): Promise<number> {
     items: menuItems(source),
     selected: 0,
   }];
+  let cleanupFailure = 0;
 
   return session.run(async () => {
     /**
@@ -211,7 +218,7 @@ export async function runMenu(root: string): Promise<number> {
         levels.pop();
 
         if (!levels.length) {
-          return 0;
+          return cleanupFailure;
         }
       } else if (key.name === 'down' || key.name === 'up') {
         const direction = key.name === 'down' ? 1 : -1;
@@ -227,9 +234,21 @@ export async function runMenu(root: string): Promise<number> {
             selected: 0,
           });
         } else if (item.label === 'exit') {
-          return 0;
+          return cleanupFailure;
         } else {
           const argv = [...item.argv ?? []];
+          const confirmation = item.label === 'artifactsCleanup'
+            ? await confirmArtifactsCleanup(session) : 'confirm';
+
+          if (typeof confirmation === 'number') {
+            return confirmation;
+          }
+
+          if (confirmation === 'cancel') {
+            render();
+
+            continue;
+          }
 
           if (item.prompt) {
             const value = await promptText(session, t(item.prompt));
@@ -247,8 +266,13 @@ export async function runMenu(root: string): Promise<number> {
             argv.push(value);
           }
 
-          const code = item.variant ? await runBuildProgress(root, item.variant, session)
+          const code = confirmation === 'error' ? 1
+            : item.variant ? await runBuildProgress(root, item.variant, session)
             : await runMenuAction(root, argv, session);
+
+          if (item.label === 'artifactsCleanup' && code !== 0) {
+            cleanupFailure = code;
+          }
 
           if (item.label === 'open' || ['dev', 'run'].includes(item.label) || item.variant && code !== 0) {
             return code;

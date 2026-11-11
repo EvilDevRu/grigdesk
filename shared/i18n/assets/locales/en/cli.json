@@ -38,7 +38,7 @@
   "devices": "Devices",
   "devicesDescription": "pair with QR, list, revoke",
   "build": "Build",
-  "buildDescription": "server, web, window, DeepSeek, APK, portable bundle",
+  "buildDescription": "server, web, window, DeepSeek and APK",
   "development": "Development",
   "developmentDescription": "dev mode, dependencies, run",
   "exit": "Exit",
@@ -146,16 +146,6 @@
       "smoke-coding-plan": "DeepSeek: live smoke (coding-plan)",
       "install": "DeepSeek: install",
       "prune": "DeepSeek: prune cache"
-    },
-    "bundle": {
-      "server": "Bundle: server",
-      "tracker": "Bundle: tracker",
-      "relay": "Bundle: relay",
-      "deepseek": "Bundle: DeepSeek",
-      "window": "Bundle: window",
-      "verify": "Bundle: verify",
-      "pack": "Bundle: pack",
-      "publish": "Bundle: publish"
     }
   },
   "screens": {
@@ -243,5 +233,41 @@
     "stage_manual_recovery_required": "Check the installation using the CLI",
     "menu_channel-release": "Channel: stable releases",
     "menu_channel-dev": "Channel: development builds"
+  },
+  "artifactsCleanup": "Artifacts cleanup",
+  "artifactsCleanupDescription": "preview and explicitly delete old artifacts",
+  "cleanup": {
+    "root": "Directory: {path}",
+    "policy": "Age threshold: {days} days; keep generations: {keep}",
+    "entry": "{path}: {bytes} bytes — {status} {reason}",
+    "previewTotal": "Would delete: {bytes} bytes",
+    "freedTotal": "Deleted, freed: {bytes} bytes",
+    "errors": "Errors: {count}",
+    "interrupted": "Cleanup interrupted; remaining directories were not deleted.",
+    "question": "Delete old artifacts? Deletion is irreversible.",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "navigation": "↑↓ select · Enter confirm · Esc cancel · PgUp/PgDn scroll",
+    "invalidDuration": "Duration: a positive integer with m, h or d (for example 7d)",
+    "invalidKeep": "Generation count: a positive safe integer",
+    "invalidArgument": "Unknown or repeated cleanup argument: {argument}",
+    "status": {
+      "would-delete": "would delete",
+      "deleted": "deleted",
+      "skipped": "skipped",
+      "error": "error"
+    },
+    "reason": {
+      "young": "younger than threshold",
+      "locked": "busy: locked",
+      "lock-unknown": "unknown lock owner",
+      "protected-cache": "protected cache",
+      "keep-latest": "latest generations",
+      "current": "current directory",
+      "symlink": "symbolic link",
+      "not-directory": "not a directory",
+      "disappeared": "directory disappeared or replaced",
+      "io-error": "access or I/O error"
+    }
   }
 }

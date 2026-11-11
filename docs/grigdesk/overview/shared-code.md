@@ -105,7 +105,9 @@
 | `node/installerArchiveTail.ts` | Потоковое размещение и чтение архивов за ELF установщика: подписанные размеры/SHA, O_NOFOLLOW и эксклюзивная копия |
 | `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
 | `node/readContainedText.ts` | Ограниченное чтение обычного текста внутри корня без вложенных симлинков; core API 2 и Showcase |
-| `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, своим release и [повтором захвата после reclaim](directory-lock-recovery.md), в том числе без ожидания |
+| `node/directoryLock.ts` | Mkdir-lock с PID/starttime, своим release, [повтором после reclaim](directory-lock-recovery.md) без ожидания и барьерами уборки |
+| `node/artifactsCleanup.ts` | Явная возрастная уборка и узкая retention тестов DeepSeek: общие defaults, preview, lock/cache-защиты и отчёт |
+| `node/artifactRemoval.ts` | Единый fd родителя для candidate lock/release, atomic quarantine и проверки inode удаляемого дерева |
 | `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |
 | `lib/contractDecoders.ts` | Проверка сетевого JSON с выводом типов и ошибкой вызывающей области |

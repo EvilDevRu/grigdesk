@@ -233,5 +233,41 @@
     "stage_manual_recovery_required": "Нужна проверка установки через CLI",
     "menu_channel-release": "Канал: стабильные выпуски release",
     "menu_channel-dev": "Канал: пробные выпуски dev"
+  },
+  "artifactsCleanup": "Уборка артефактов",
+  "artifactsCleanupDescription": "просмотр и явное удаление старых артефактов",
+  "cleanup": {
+    "root": "Папка: {path}",
+    "policy": "Порог: {days} сут.; хранить поколений: {keep}",
+    "entry": "{path}: {bytes} байт — {status} {reason}",
+    "previewTotal": "К удалению: {bytes} байт",
+    "freedTotal": "Удалено, освобождено: {bytes} байт",
+    "errors": "Ошибок: {count}",
+    "interrupted": "Уборка прервана; оставшиеся каталоги не удалены.",
+    "question": "Удалить старые артефакты? Удаление необратимо.",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "navigation": "↑↓ выбор · Enter подтвердить · Esc отмена · PgUp/PgDn просмотр",
+    "invalidDuration": "Срок: положительное целое с m, h или d (например 7d)",
+    "invalidKeep": "Число поколений: положительное безопасное целое",
+    "invalidArgument": "Неизвестный или повторный аргумент уборки: {argument}",
+    "status": {
+      "would-delete": "будет удалено",
+      "deleted": "удалено",
+      "skipped": "пропущено",
+      "error": "ошибка"
+    },
+    "reason": {
+      "young": "моложе порога",
+      "locked": "занят: блокировка",
+      "lock-unknown": "неизвестный владелец блокировки",
+      "protected-cache": "защищённый кэш",
+      "keep-latest": "последние поколения",
+      "current": "текущий каталог",
+      "symlink": "символическая ссылка",
+      "not-directory": "не каталог",
+      "disappeared": "каталог исчез или заменён",
+      "io-error": "ошибка доступа или ввода-вывода"
+    }
   }
 }

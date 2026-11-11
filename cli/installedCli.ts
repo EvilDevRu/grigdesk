@@ -11,6 +11,8 @@ import { installedServerUnit, INSTALLED_SERVER_UNIT } from '../shared/node/insta
 import { readInstalledUpdate } from '../shared/node/installedUpdateState.ts';
 import { runInstalledUpdateWorker } from '../shared/node/installedUpdateWorker.ts';
 import { HELP_TEXT, parseArgs } from './args.ts';
+import { artifactsCleanupCommand } from './artifactsCleanup.ts';
+import { runArtifactsCleanupMenu } from './artifactsCleanupMenu.ts';
 import { runUpdateCommand } from './updates.ts';
 import { cliTranslator } from './i18n.ts';
 import { TerminalSession, terminalText } from './terminal.ts';
@@ -27,11 +29,13 @@ async function runInstalledMenu(root: string): Promise<number> {
   const session = new TerminalSession();
   const { t } = cliTranslator();
   const items = ['check-updates', 'update', 'update-status', 'resume-update',
-    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'exit'];
+    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'artifactsCleanup', 'exit'];
   let selected = 0;
   let status = await service.status();
   let closed = false;
   let result = '';
+  let actionActive = false;
+  let cleanupFailure = 0;
 
   return session.run(async () => {
     /**
@@ -45,9 +49,13 @@ async function runInstalledMenu(root: string): Promise<number> {
         `GrigDesk ${status.installed.server ?? status.installed.desktop ?? '—'} · ${receipt.channel}`,
         t(`updates.${status.check.state}`)
           + (status.check.state === 'available' ? `: ${status.check.envelope?.payload.version ?? ''}` : ''),
-        ...items.map((item, index) => ({
-          spans: [{ text: t(`updates.menu_${item}`) }], selected: index === selected,
-        })),
+        ...items.flatMap((item, index) => [
+          ...item === 'artifactsCleanup' ? [t('menuGroups.developer')] : [],
+          {
+            spans: [{ text: t(item === 'artifactsCleanup' ? item : `updates.menu_${item}`) }],
+            selected: index === selected,
+          },
+        ]),
         terminalText(result, width),
       ], render, { theme: 'dark', width });
     };
@@ -56,7 +64,7 @@ async function runInstalledMenu(root: string): Promise<number> {
     void service.checkUpdates().then(async () => {
       status = await service.status();
 
-      if (!closed) {
+      if (!closed && !actionActive) {
         render();
       }
     }).catch(() => {});
@@ -66,7 +74,7 @@ async function runInstalledMenu(root: string): Promise<number> {
         const key = await session.nextKey();
 
         if (['escape', 'eof', 'interrupt', 'terminate'].includes(key.name)) {
-          return key.name === 'interrupt' ? 130 : 0;
+          return key.name === 'interrupt' ? 130 : key.name === 'terminate' ? 143 : cleanupFailure;
         }
 
         if (key.name === 'up' || key.name === 'down') {
@@ -75,7 +83,29 @@ async function runInstalledMenu(root: string): Promise<number> {
           const action = items[selected]!;
 
           if (action === 'exit') {
-            return 0;
+            return cleanupFailure;
+          }
+
+          if (action === 'artifactsCleanup') {
+            actionActive = true;
+
+            try {
+              const outcome = await runArtifactsCleanupMenu(session);
+
+              if (outcome?.exit) {
+                return outcome.code;
+              }
+
+              if (outcome?.code) {
+                cleanupFailure = outcome.code;
+              }
+            } finally {
+              actionActive = false;
+            }
+
+            render();
+
+            continue;
           }
 
           session.suspend();
@@ -135,6 +165,12 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
   }
 
   try {
+    if (args.kind === 'artifacts-cleanup') {
+      return await artifactsCleanupCommand(args, {
+        write: (text) => process.stdout.write(text),
+      });
+    }
+
     const receipt = await readInstallation(root);
     const guarded = args.kind === 'open' || args.kind === 'server'
       && (['stop', 'restart'].includes(args.action ?? '') || args.restart || args.rollback);

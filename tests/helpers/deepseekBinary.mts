@@ -7,6 +7,10 @@ import { promisify } from 'node:util';
 
 import { decodeDeepSeekRuntimeInfo, type DeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
 import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
+import {
+  cleanupArtifacts, DEFAULT_ARTIFACT_RETENTION_MS, DEFAULT_KEEP_GENERATIONS,
+  parseArtifactRetention, parseKeepGenerations,
+} from '../../shared/node/artifactsCleanup.ts';
 import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 import { glmCompatibilityHash } from '../../shared/node/glmCompatibility.ts';
 import { removePrivateTree } from '../../shared/node/files.ts';
@@ -129,11 +133,11 @@ export function deepSeekTestArtifactsRoot(): string {
   const directory = process.env.GRIGDESK_TEST_DEEPSEEK_ROOT
     ?? path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-binary');
 
-  if (!path.isAbsolute(directory)) {
+  if (!path.isAbsolute(directory) || path.resolve(directory) === path.parse(directory).root) {
     throw new Error('Test DeepSeek root должен быть абсолютным');
   }
 
-  return directory;
+  return path.resolve(directory);
 }
 
 /**
@@ -195,31 +199,109 @@ async function removeAbandonedSourceCopies(directory: string): Promise<void> {
 }
 
 /**
+ * Несуществующий cache разрешается через ближайшего существующего предка без создания папок.
+ * Так ссылка внутри test root на внешний cache не разрешает helper менять внешнее дерево.
+ */
+async function resolvedTestPath(directory: string): Promise<string> {
+  try {
+    return await fs.realpath(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || path.dirname(directory) === directory) {
+      throw error;
+    }
+
+    return path.join(await resolvedTestPath(path.dirname(directory)), path.basename(directory));
+  }
+}
+
+/**
  * Один настоящий candidate собирается под lock и использует общий прогретый test cache.
  * Явный override тоже проходит metadata и полный verify, без обхода integrity.
  */
 export async function ensureTestDeepSeekBinary(): Promise<TestDeepSeekBinary> {
+  const root = deepSeekTestArtifactsRoot();
+  const retention = process.env.GRIGDESK_TEST_DEEPSEEK_RETENTION;
+  const generations = process.env.GRIGDESK_TEST_DEEPSEEK_KEEP_GENERATIONS;
+  const olderThanMs = retention === undefined
+    ? DEFAULT_ARTIFACT_RETENTION_MS : parseArtifactRetention(retention);
+  const keepGenerations = generations === undefined
+    ? DEFAULT_KEEP_GENERATIONS : parseKeepGenerations(generations);
   const explicit = process.env.GRIGDESK_TEST_DEEPSEEK_BINARY;
+  let directory: string;
+  let cache: string;
+  let explicitBinary = '';
+  let explicitPayload = '';
 
   if (explicit) {
-    const root = deepSeekTestArtifactsRoot();
-    const binary = path.resolve(explicit);
+    explicitBinary = path.resolve(explicit);
+    directory = process.env.GRIGDESK_TEST_DEEPSEEK_CACHE_DIR
+      ?? path.join(root, 'explicit-cache', sha256(explicitBinary));
+    explicitPayload = process.env.GRIGDESK_TEST_DEEPSEEK_PAYLOAD ?? '';
+    cache = '';
 
-    const cacheDir = process.env.GRIGDESK_TEST_DEEPSEEK_CACHE_DIR
-      ?? path.join(root, 'explicit-cache', sha256(binary));
-    const payloadFile = process.env.GRIGDESK_TEST_DEEPSEEK_PAYLOAD ?? '';
-
-    if (!path.isAbsolute(cacheDir) || payloadFile && !path.isAbsolute(payloadFile)) {
+    if (!path.isAbsolute(directory) || explicitPayload && !path.isAbsolute(explicitPayload)) {
       throw new Error('Test cache и payload требуют абсолютные пути');
     }
-
-    return checked(binary, cacheDir, payloadFile);
+  } else {
+    ({ directory, cache } = await candidateRoot());
   }
 
-  const { directory, cache } = await candidateRoot();
-  const lock = await acquireDirectoryLock(`${directory}.lock`, { waitMs: 900000 });
+  const canonicalRoot = await resolvedTestPath(root);
+  const canonicalDirectory = await resolvedTestPath(directory);
+  const relative = path.relative(canonicalRoot, canonicalDirectory);
+  const internal = !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`);
+  const lockPath = `${internal ? canonicalDirectory : canonicalRoot}.lock`;
+  const protectedPaths = [canonicalDirectory];
+
+  if (cache) {
+    protectedPaths.push(path.resolve(cache), await resolvedTestPath(cache));
+  }
+
+  for (const file of [explicitBinary, explicitPayload].filter(Boolean)) {
+    protectedPaths.push(file, await resolvedTestPath(file));
+  }
+
+  await fs.mkdir(internal ? path.dirname(canonicalDirectory) : canonicalRoot, {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  const lock = await acquireDirectoryLock(lockPath, { waitMs: 900000 });
 
   try {
+    if (internal) {
+      await fs.mkdir(canonicalDirectory, { recursive: true, mode: 0o700 });
+      await fs.utimes(canonicalDirectory, new Date(), new Date());
+    }
+
+    const report = await cleanupArtifacts({
+      root: canonicalRoot,
+      scope: 'deepseek-tests',
+      olderThanMs,
+      keepGenerations,
+      heldLock: { path: lockPath, owner: lock.owner },
+      protectedPaths,
+    });
+    const deleted = report.entries.filter((entry) => entry.status === 'deleted');
+
+    if (deleted.length) {
+      process.stderr.write(`Уборка DeepSeek: удалено каталогов ${deleted.length}, `
+        + `байт ${report.freedBytes}\n`);
+    }
+
+    if (report.errorCount) {
+      const errors = report.entries.filter((entry) => entry.status === 'error')
+        .map((entry) => `${entry.path}: ${entry.reason}`).join('; ');
+
+      process.stderr.write(`Ошибка уборки DeepSeek: ${errors}\n`);
+
+      throw new Error(`Уборка DeepSeek отказала: ${errors}`);
+    }
+
+    if (explicit) {
+      return await checked(explicitBinary, directory, explicitPayload);
+    }
+
     await removeAbandonedSourceCopies(directory);
 
     const binary = path.join(directory, 'bin/deepseek');
