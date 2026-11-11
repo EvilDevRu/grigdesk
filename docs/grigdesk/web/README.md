@@ -329,7 +329,7 @@
 - [Таймер в state стора + $subscribe = бесконечный круг](store-timer-subscription-loop.md)
 - [Интерфейс внутри AppImage: неизменяемые версии, lazy-ресурсы и клавиши](packaged-ui.md)
 - [PWA снята: установка приложения и встроенная иконка уведомлений](pwa-installation-requirements.md)
-- [Знак GrigDesk: мастера G/GD, растры, генератор и встроенные копии](brand-mark.md)
+- [Знак GrigDesk: мастера G/GD, растры, генератор, обложка README и встроенные копии](brand-mark.md)
 - [Alt+Shift+клавиша не доходит до страницы: пару забирает переключатель раскладки](keyboard-layout-shortcut-conflict.md)
 - [Code/Shelf/Terminal нельзя монтировать отдельно в route и в правом доке](duplicate-tool-mounts.md)
 - [Escape закрывает только верхний слой](escape-top-layer.md)
