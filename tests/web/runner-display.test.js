@@ -189,3 +189,25 @@ test('attempt without usage telemetry shows nothing', () => {
   assert.equal(attemptCostTitle({ runner: 'kimi' }), '');
   assert.equal(attemptCostLabel({ tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 } }), '');
 });
+
+// К4: пустой effort фактического запуска не заимствует новое значение policy.
+test('empty-effort-does-not-borrow-future-policy', () => {
+  const runner = {
+    primary: 'codex',
+    actual: 'codex',
+    model: 'model-a',
+    models: { codex: { family: 'sol', effort: 'high' } },
+    attempts: [{
+      runner: 'codex',
+      model: 'model-a',
+      effort: ''
+    }],
+  };
+
+  assert.doesNotMatch(runnerEffortLabel(runner), /high/);
+  assert.doesNotMatch(runnerModelEffortLabel(runner), /effort high/);
+  assert.match(runnerModelEffortLabel(runner), /не задан|без effort|без усили/i);
+  assert.equal(runnerModelEffortLabel({
+    ...runner, attempts: [{ runner: 'codex', model: 'model-a' }],
+  }), 'model-a · effort high', 'legacy без EFFORT сохраняет прежний fallback');
+});

@@ -1521,6 +1521,15 @@
       "owner": "task-13",
       "fate": "development-only",
       "detail": "Сборочная подготовка существующего Markdown renderer своим Node; не исполняется из payload."
+    },
+    {
+      "file": "engine/lib/runner-model-options.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/factoryRunnerModels.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "compat-wrapper",
+      "detail": "Metadata раннеров через собранный helper закреплённой поставки."
     }
   ],
   "resources": [
@@ -2059,6 +2068,14 @@
       "owner": "task-13",
       "fate": "asset",
       "detail": "Самостоятельный reader и ресурсы справки: сборка, полные лицензии и собственное поколение сервера."
+    },
+    {
+      "path": "server/scripts/factoryRunnerModels.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "helper",
+      "detail": "Metadata helper Factory без модельных вызовов."
     }
   ]
 }

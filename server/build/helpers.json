@@ -232,6 +232,13 @@
       "entryKind": "script",
       "exports": [],
       "description": "Run-scoped статус Factory через настоящий stage-result/progress."
+    },
+    {
+      "id": "factory-runner-models",
+      "entry": "server/scripts/factoryRunnerModels.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Метаданные моделей и уровней раннеров Factory без модельного вызова."
     }
   ]
 }

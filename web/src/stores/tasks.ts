@@ -16,6 +16,8 @@ import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
 import type { TaskDetail } from '../shared/boardContracts.ts';
+import { decodeStageRunnerOptions } from '../../../shared/pipeline/stageRunnerSettings.ts';
+import type { StageRunnerApply, StageRunnerIdentity } from '../../../shared/pipeline/stageRunnerSettings.ts';
 
 const t = localeTranslator(uiLocalePort);
 
@@ -329,6 +331,31 @@ export const useTasksStore = defineStore('tasks', {
 
     async setStageRunner(id: TaskId, stage: string, primary: string) {
       return api.post(`/api/tasks/${id}/runner/override`, { stage, primary });
+    },
+
+    /**
+     * Ленивый каталог принадлежит exact узлу, а не общей телеметрии графа.
+     * Параметры передаются без изменения идентификаторов и без собственного SSE.
+     */
+    async getStageRunnerOptions(
+      task: TaskId, fields: Omit<StageRunnerIdentity, 'task'> & { provider?: string },
+    ) {
+      const { provider, ...identity } = fields;
+      const query = new URLSearchParams(identity);
+
+      if (provider !== undefined) {
+        query.set('provider', provider);
+      }
+
+      return decodeStageRunnerOptions(await api.get(`/api/tasks/${task}/runner/options?${query}`));
+    },
+
+    /**
+     * Черновик превращается в одну согласованную мутацию только по явному действию.
+     * Receipt подтверждает отдельно сохранение и результат возможного перезапуска.
+     */
+    async applyStageRunnerSettings(task: TaskId, payload: StageRunnerApply) {
+      return decodeStageRunnerOptions(await api.post(`/api/tasks/${task}/runner/settings`, payload));
     },
 
     async resume(id: TaskId) {

@@ -55,7 +55,8 @@
 - [ENGINE.md](engine/ENGINE.md) — архитектура движка, инварианты и проверки.
 - [KIMI.md](engine/KIMI.md) — Kimi runner, классификация отказов и contract-based совместимость CLI.
 - [GLM.md](engine/GLM.md) — GLM runner этапов поверх DSH ELF: допуск, каталог, fail-closed классификатор.
-- [ADDING-RUNNER.md](engine/ADDING-RUNNER.md) — подключение нового provider runner.
+- [ADDING-RUNNER.md](engine/ADDING-RUNNER.md) — подключение runner и metadata model_options.
+- [Модель и effort этапа](grigdesk/pipeline/node-model-and-effort.md) — scoped policy, exact CLI/API и restart.
 - [PROFILE-CONTRACT.md](engine/PROFILE-CONTRACT.md) — контракт проектного профиля.
 - [Профили конвейера](grigdesk/pipeline/project-profiles.md) — устройство и справочник
   параметров файлов, хуков, исполнителей, моделей и маршрутов.

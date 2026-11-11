@@ -27,6 +27,12 @@ Hook marker и authority CAS остаются отдельными провер�
 и чужой run-id сохраняют active record. Сама постановка deferred request не означает,
 что authority уже приняла результат.
 
+Helper `factory-runner-models` собирает metadata конвейерных моделей и индивидуальных
+уровней effort без model call и записи реестра чатов. Совместимый wrapper
+`server/scripts/factoryRunnerModels.mts` относителен перемещаемому комплекту; callback
+раннера использует Node закреплённого runtime. Контракт и состав проверки —
+[модель и effort этапа](../pipeline/node-model-and-effort.md).
+
 Status port получает `engine/lib/stage-progress.sh` и `stage-result.sh` через общий
 `runtimeRoot()`. Относительный `import.meta.url` серверного исходника не сохраняется
 в собранном helper: после переноса команды принадлежат `R/engine`.

@@ -240,3 +240,53 @@ test('SB08: compiled status MCP проводит настоящие границ
     assert.match(result, /признаны три границы этапа/);
     assert.doesNotMatch(result, /not ok/);
   });
+
+// К7: отдельный helper перемещается вместе с Node/engine и работает без server sources.
+test('stage-model-helper-relocated', { timeout: 20_000 }, async (t) => {
+  const catalog = await loadHelpers(MANIFEST, SOURCE);
+  const entry = catalog.helpers.find((helper) => helper.id === 'factory-runner-models');
+
+  assert.ok(entry, 'metadata helper должен обнаруживаться в поставке');
+
+  const { codexModelFixture } = await import('../helpers/factoryStageModelMetadata.mjs');
+  const fx = await codexModelFixture(t);
+  const root = path.join(fx.root, 'relocated runtime with spaces');
+  const helpers = path.join(root, 'server/runtime/helpers');
+
+  await fs.mkdir(helpers, { recursive: true });
+  await fs.mkdir(path.join(root, 'runtime/node/bin'), { recursive: true });
+  await fs.symlink(process.execPath, path.join(root, 'runtime/node/bin/node'));
+  await fs.cp(path.join(SOURCE, 'engine'), path.join(root, 'engine'), { recursive: true });
+  await fs.writeFile(path.join(helpers, 'helpers.json'), await fs.readFile(MANIFEST));
+  await buildHelper({
+    root: SOURCE,
+    manifest: catalog,
+    id: entry.id,
+    outDir: helpers,
+    workDir: path.join(fx.root, 'helper-build'),
+  });
+
+  const compatibility = JSON.parse(await fs.readFile(path.join(SOURCE, 'server/build/compatibility.json')));
+  const wrappers = compatibility.wrappers.filter((wrapper) => wrapper.helper === entry.id);
+
+  assert.equal(wrappers.length, 1);
+  await writeCompatibility(root, { ...compatibility, wrappers }, catalog);
+
+  const output = execFileSync('bash', ['-c', [
+    'source "$FACTORY_HOME/lib/runners/codex.sh"',
+    'runner_codex_model_options',
+  ].join('\n')], {
+    env: {
+      ...fx.env,
+      FACTORY_HOME: path.join(root, 'engine'),
+      NODE_BIN: path.join(root, 'runtime/node/bin/node')
+    },
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const models = JSON.parse(output).models;
+
+  assert.deepEqual(models.map((model) => model.id), fx.native.slice(0, 2).map((model) => model.id));
+  await assert.rejects(fs.stat(path.join(root, 'server/src')), { code: 'ENOENT' });
+  assert.equal((await fx.methods()).some((method) => /^(thread|turn)\//.test(method)), false);
+});

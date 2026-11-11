@@ -201,8 +201,6 @@ export interface NodeMetadata {
     reason?: string;
     chain: string[];
     attempts?: Array<import('./runnerDisplay.ts').RunnerAttempt & {
-      id?: string;
-      epoch?: number;
       result?: string;
     }>;
   };

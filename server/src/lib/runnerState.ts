@@ -343,7 +343,7 @@ export async function readRunnerAttempts(
         epoch: /^\d+$/.test(meta.EPOCH || '') ? Number(meta.EPOCH) : null,
         runner: PROVIDER_ID.test(meta.RUNNER || '') ? meta.RUNNER ?? null : null,
         model: runnerModelName(meta.RESOLVED_MODEL || meta.MODEL),
-        effort: meta.EFFORT || null,
+        effort: meta.EFFORT ?? null,
         reason: meta.ROUTE_REASON || null,
         result: meta.RESULT_CLASS || null,
         rc: /^-?\d+$/.test(meta.RC || '') ? Number(meta.RC) : null,
@@ -352,7 +352,7 @@ export async function readRunnerAttempts(
       });
     } catch { /* незавершённый запуск ещё мог не записать meta.env */ }
   }));
-  attempts.sort((a, b) => (a.epoch ?? Number.MAX_SAFE_INTEGER) - (b.epoch ?? Number.MAX_SAFE_INTEGER)
+  attempts.sort((a, b) => (a.epoch ?? -1) - (b.epoch ?? -1)
     || a.id.localeCompare(b.id));
 
   const recent = attempts.slice(-20);

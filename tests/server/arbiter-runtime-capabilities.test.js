@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { probeFactoryGotoCapability } from '../../server/src/lib/factoryRuntimeCapabilities.ts';
+import * as capabilities from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import { readExistingFactoryRuntimePin } from '../../server/src/lib/factoryRuntimePins.ts';
 
 test('probe запускает выбранный A с его окружением, а не текущий B; unknown не кэшируется', async (t) => {
@@ -117,3 +118,96 @@ test(("source и отрицательный ответ перепроверяю�
     assert.equal(calls, 3);
   }
 );
+
+// К6: capability нового редактора проверяется у A и кэшируется отдельно от goto.
+test('settings-pin-A-not-B', async (t) => {
+  assert.equal(typeof capabilities.probeFactoryStageRunnerSettingsCapability, 'function',
+    'нужен самостоятельный probe stage-runner-settings-v1');
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'stage-capability-A-'));
+  const selected = {
+    packageId: null,
+    runtimeRoot: root,
+    engineHome: root,
+    engineBin: `${root}/A with spaces`,
+    node: `${root}/own-node`,
+  };
+  const config = {
+    rootDir: '/B',
+    factoryHome: '/B/engine',
+    factoryBin: '/B/factory',
+    stateDir: `${root}/state`,
+    factoryControlDir: `${root}/control`,
+    profilesDir: `${root}/profiles`,
+    factoryConfigRoot: `${root}/config`,
+  };
+  let count = 0;
+  const deps = {
+    readPin: async () => selected,
+    exec: async (command, args, options) => {
+      count += 1;
+      assert.equal(command, selected.engineBin);
+      assert.equal(options.env.NODE_BIN, selected.node);
+      assert.deepEqual(args, ['capabilities', '--format', 'json']);
+
+      if (count === 1) {
+        throw Object.assign(new Error('fixture timeout'), { killed: true });
+      }
+
+      return { stdout: '{"schema":1,"features":["stage-runner-settings-v1"]}' };
+    },
+  };
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const unknown = await capabilities.probeFactoryStageRunnerSettingsCapability(config, {}, deps);
+
+  assert.equal(unknown.status, 'unknown');
+
+  const supported = await capabilities.probeFactoryStageRunnerSettingsCapability(config, {}, deps);
+
+  assert.equal(supported.status, 'supported');
+  assert.equal(count, 2, 'unknown допускает повтор, не кэшируется');
+});
+
+test('settings-old-runtime', async () => {
+  assert.equal(typeof capabilities.probeFactoryStageRunnerSettingsCapability, 'function');
+
+  const config = {
+    rootDir: '/A',
+    factoryHome: '/A/engine',
+    factoryBin: '/A/factory',
+    stateDir: '/state',
+    factoryControlDir: '/control',
+    profilesDir: '/profiles',
+    factoryConfigRoot: '/config',
+  };
+  let executed = 0;
+  const missing = await capabilities.probeFactoryStageRunnerSettingsCapability(config, {}, {
+    readPin: async () => null,
+    exec: async () => {
+      executed += 1;
+    },
+  });
+
+  assert.equal(missing.status, 'unavailable');
+  assert.equal(executed, 0, 'без authority нельзя пробовать B');
+
+  const selected = {
+    packageId: null,
+    runtimeRoot: '/A',
+    engineHome: '/A/engine',
+    engineBin: '/A/factory',
+    node: '/A/node',
+  };
+  const deps = {
+    readPin: async () => selected,
+    exec: async () => ({ stdout: '{"schema":1,"features":["goto-expected-stage-v1"]}' }),
+  };
+
+  assert.equal((await probeFactoryGotoCapability(config, {}, deps)).status, 'supported');
+
+  const unsupported = await capabilities.probeFactoryStageRunnerSettingsCapability(config, {}, deps);
+
+  assert.equal(unsupported.status, 'unsupported');
+});

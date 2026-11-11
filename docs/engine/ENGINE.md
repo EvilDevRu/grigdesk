@@ -18,7 +18,8 @@
 7. Offline tests не запускают GrigDesk и не выполняют model call.
 8. Опубликованный route v2 bundle проверяется engine независимо от server-а; изменение
    `current` не меняет уже закреплённую ревизию.
-9. Model/provider/effort отсутствуют в route schema и остаются только в `runners.env`.
+9. Model/provider/effort отсутствуют в route schema; профильная политика живёт в `runners.env`,
+    локальная настройка узла — в защищённом sidecar текущей attempt.
 10. Guard, locks, capabilities и состояние v2 лежат в `FACTORY_CONTROL_ROOT`, который
     не пересекается с provider-writable `STATE_DIR`.
 11. Delivery выводится из закреплённой топологии: нет канонического `ship` — нет delivery
@@ -1634,7 +1635,7 @@ Routing не имеет запасного provider-а вне canonical policy.
 Приоритет модели:
 
 ```text
-stage/provider policy → DEFAULT/provider policy → provider default family
+attempt/node selection → stage/provider policy → DEFAULT/provider policy → provider default family
 ```
 
 Поля:
@@ -1664,6 +1665,30 @@ Opaque DeepSeek model id берётся только из trusted catalog; pin �
 в [DEEPSEEK.md](DEEPSEEK.md).
 
 Exact id допустим, если он подтверждён каталогом/coverage. Молчаливого downgrade нет.
+
+Локальная настройка хранит целую selection в `runner-settings/<node>.json` trusted attempt.
+Модель и effort с null независимо читают действующую политику; резерв не получает пару
+основного. Изменение primary сохраняет прежний резерв при том же исполнителе; сброс primary
+возвращает task/profile policy для этого node, не удаляя legacy stage override у соседей.
+Источник явного локального primary передаётся диспетчеру как `task-stage`, включая
+повтор admission: именной выбор человека обходит сохранённый breaker только для основного.
+При null восстанавливается источник унаследованной цепочки; резерв сохраняет свой допуск.
+
+`factory TASK runner settings show|options|apply --profile PROFILE --attempt ATTEMPT
+--node NODE --stage STAGE` проверяет immutable pin, точный agent-node/runKey и CAS.
+Options принимает provider, apply — целый JSON payload. Callback `model_options` подтверждает
+per-model efforts; неподтверждённая пара не заменяется молча. Capability редактора —
+`stage-runner-settings-v1`; сервер обращается только к закреплённой поставке.
+
+Admission под pipeline/task lock сверяет тот же снимок настроек и создаёт run без окна
+между CAS и capability. Restart атомарно сохраняет future и immutable intent, публикует
+стабильный lifecycle draft, останавливает trusted session, затем однократно consumes intent.
+Новый запуск использует замороженную пару, fresh provider session и новую epoch; ошибка
+после accept сохраняет selection с отдельным receipt. Контракт —
+[настройки модели и effort](../grigdesk/pipeline/node-model-and-effort.md).
+Receipt получает итог всей restart-цепочки, включая отказ до launcher и успешный резерв.
+Запоздалый отказ interrupt не понижает consumed/started запрос. Read-only `show` читает
+сохранённый выбор и при недоступном coverage; строгий допуск остаётся в options/apply/launch.
 
 ## Ошибки и failover
 
@@ -1973,7 +1998,7 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check --host-preflight
 
 - `profile.sh` перечитывается перед этапом;
 - `runners.env` читается при каждом routing decision;
-- task override читается из pipeline;
+- legacy task override читается из pipeline; настройка attempt/node — из trusted sidecar;
 - server/web код требует обычного рестарта соответствующего процесса;
 - уже запущенная provider attempt не меняет модель посередине; switch создаёт новую attempt;
 - промпты и схема v2 требуют публикации И новой попытки: примороженный бандл не меняется

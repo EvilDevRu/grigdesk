@@ -1,4 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import {
+  decodeStageRunnerApply, decodeStageRunnerIdentity, StageRunnerSettingsInputError,
+} from '../../../../shared/pipeline/stageRunnerSettings.ts';
+import type { StageRunnerIdentity } from '../../../../shared/pipeline/stageRunnerSettings.ts';
+import { probeFactoryStageRunnerSettingsCapability } from '../../lib/factoryRuntimeCapabilities.ts';
+import { StageRunnerCommandError } from '../../lib/runnerControl.ts';
 import { FactoryTaskSources, factoryTicketHash } from '../../lib/factoryTaskSources.ts';
 import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
 import type { TrackerContext } from '../../lib/trackers/facade.ts';
@@ -327,6 +333,7 @@ async function factoryModule(
     stateDir: config.stateDir,
     configRoot: config.factoryConfigRoot,
     profilesDir: config.profilesDir,
+    routeConfig: config,
   });
   // Все start одной задачи проходят через один promise-tail.
   // Detached engine может не успеть опубликовать trusted identity до ответа HTTP, поэтому
@@ -2389,6 +2396,98 @@ async function factoryModule(
   function resumeRouteAttempt(id: string, params: Parameters<typeof launchRouteAttempt>[1]) {
     return conversationService.withReadStopped(id, () => launchRouteAttempt(id, params));
   }
+
+  /**
+   * Exact API сверяет доверенную попытку до metadata discovery и передаёт запись CLI.
+   * Факт текущего запуска возвращается отдельно от подтверждённой future selection.
+   */
+  async function stageSettingsAuthority(identity: StageRunnerIdentity, reply: FastifyReply) {
+    const managed = await managedRegistry(identity.task, reply);
+
+    if (!managed) {
+      return false;
+    }
+
+    if (managed.trusted.terminal || managed.trusted.attempt !== identity.attempt
+      || managed.trusted.profile !== identity.profile) {
+      reply.code(409).send({ error: 'identity_conflict', message: 'Попытка или профиль уже изменились.' });
+
+      return false;
+    }
+
+    const capability = await probeFactoryStageRunnerSettingsCapability(config, identity);
+
+    if (capability.status !== 'supported') {
+      reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
+
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Синтаксический отказ не запускает движок; конфликт CAS и каталога остаётся 409.
+   * Metadata discovery можно повторить, поэтому недоступность явно получает 503.
+   */
+  function stageSettingsError(error: unknown, reply: FastifyReply) {
+    const input = error instanceof StageRunnerSettingsInputError || error instanceof RunnerControlInputError;
+    const unavailable = error instanceof StageRunnerCommandError && error.code === 69;
+    const status = input ? 400 : unavailable ? 503 : 409;
+
+    return reply.code(status).send({ error: input ? 'settings_input' : 'settings_rejected',
+      message: errorMessage(error) });
+  }
+
+  fastify.get<{ Params: { id: string }; Querystring: Record<string, unknown> }>(
+    '/api/tasks/:id/runner/options', async (request, reply) => {
+      try {
+        const query = request.query;
+
+        const fieldsAllowed = ['profile', 'attempt', 'node', 'stage', 'provider'];
+
+        if (Object.keys(query).some((key) => !fieldsAllowed.includes(key))) {
+          throw new RunnerControlInputError('Лишние поля запроса каталога.');
+        }
+
+        const { provider, ...fields } = query;
+        const identity = decodeStageRunnerIdentity({ task: request.params.id, ...fields });
+
+        if (provider !== undefined
+          && (typeof provider !== 'string' || !/^[a-z][a-z0-9_-]*$/u.test(provider))) {
+          throw new RunnerControlInputError('Некорректный исполнитель.');
+        }
+
+        if (!await stageSettingsAuthority(identity, reply)) {
+          return reply;
+        }
+
+        return await runnerControl.settingsOptions({ identity, provider });
+      } catch (error) {
+        return stageSettingsError(error, reply);
+      }
+    },
+  );
+
+  fastify.post<{ Params: { id: string }; Body: unknown }>(
+    '/api/tasks/:id/runner/settings', async (request, reply) => {
+      try {
+        const payload = decodeStageRunnerApply(request.body);
+
+        if (payload.identity.task !== request.params.id) {
+          throw new RunnerControlInputError('Задача в URL и identity различаются.');
+        }
+
+        if (!await stageSettingsAuthority(payload.identity, reply)) {
+          return reply;
+        }
+
+        return await runnerControl.applySettings(payload);
+      } catch (error) {
+        return stageSettingsError(error, reply);
+      }
+    },
+  );
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
   // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает

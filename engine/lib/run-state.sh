@@ -429,32 +429,40 @@ _run_state_write() {
   mv -f -- "$tmp" "$file"
 }
 
+# Обычные вызывающие получают прежнюю блокировку и поведение запуска.
+# Admission настроек использует отдельный unlocked-примитив под уже занятым lock.
 run_state_begin() {
+  local task=$1 lock_fd rc
+  pipeline_lock_acquire "$task" lock_fd || return
+  run_state_begin_unlocked "$@"
+  rc=$?
+  pipeline_lock_release "$lock_fd"
+  return "$rc"
+}
+
+# Вызывающий уже держит pipeline lock: admission проверяет settings revision
+# и публикует новую capability в одной критической секции с сохранением future.
+run_state_begin_unlocked() {
   local task=$1 stage=$2 run_id=$3 epoch=$4 token=$5
   [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ && "$epoch" =~ ^[0-9]+$ ]] || return 2
   local lock_fd file token_hash rc current_epoch
-  pipeline_lock_acquire "$task" lock_fd || return
   file=$(run_state_active_file "$task" "$stage") || {
-    pipeline_lock_release "$lock_fd"
     return 2
   }
   if [[ -f "$file" ]]; then
     current_epoch=$(_run_state_get "$file" EPOCH)
     if [[ "$current_epoch" =~ ^[0-9]+$ ]] && (( epoch <= current_epoch )); then
-      pipeline_lock_release "$lock_fd"
       return 73
     fi
   fi
   token_hash=$(factory_token_hash "$token")
   _run_state_write "$file" "$run_id" "$epoch" "$token_hash" active || {
     rc=$?
-    pipeline_lock_release "$lock_fd"
     return "$rc"
   }
   pipeline_store_update_unlocked "$task" RUN_PROTOCOL 2 "$stage" running \
     "ACTIVE_RUN_${stage}" "$run_id" "ACTIVE_EPOCH_${stage}" "$epoch"
   rc=$?
-  pipeline_lock_release "$lock_fd"
   return "$rc"
 }
 

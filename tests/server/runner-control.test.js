@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { settingsServer } from '../helpers/stageRunnerSettingsServer.mjs';
+import { applyPayload, cliJson } from '../helpers/stageRunnerSettingsFixture.mjs';
+
 import {
   FactoryRunnerControl,
   RunnerControlInputError,
+  StageRunnerCommandError,
 } from '../../server/src/lib/runnerControl.ts';
 
 test('runner control invokes only the canonical factory switch command', async () => {
@@ -97,4 +101,109 @@ test('runner control rejects malformed set/clear input before spawning', async (
     RunnerControlInputError,
   );
   assert.equal(called, false);
+});
+
+// К6: exact settings не могут пользоваться прежней командой, выбирающей latest run.
+test('settings-argv-with-identity', async (t) => {
+  const fx = await settingsServer(t);
+  const identity = fx.identity;
+  const config = fx.config;
+  const control = new FactoryRunnerControl({
+    factoryBin: config.factoryBin,
+    stateDir: config.stateDir,
+    configRoot: config.factoryConfigRoot,
+    profilesDir: config.profilesDir,
+    routeConfig: config,
+  });
+
+  assert.equal(typeof control.settingsOptions, 'function', 'control должен иметь exact settings options');
+  await control.settingsOptions({ identity, provider: 'alpha' });
+
+  const calls = await fx.engineCalls();
+  const args = calls.find((entry) => entry.slice(0, 4).join(' ') === '81 runner settings options');
+
+  assert.ok(args, 'wrapper закреплённого A получил команду; текущий B не запускался');
+
+  for (const [flag, value] of [
+    ['--profile', identity.profile], ['--attempt', identity.attempt], ['--node', 'plan'], ['--stage', 'PLAN'],
+    ['--provider', 'alpha'], ['--control-dir', fx.env.FACTORY_CONTROL_ROOT],
+  ]) {
+    assert.equal(args[args.indexOf(flag) + 1], value);
+  }
+
+  const options = cliJson(fx.cli('options', ['--provider', 'alpha']));
+  const payload = applyPayload(options);
+
+  assert.equal(typeof control.applySettings, 'function');
+  await control.applySettings(payload);
+
+  const saved = await control.settingsOptions({ identity });
+
+  assert.deepEqual(saved.selection, payload.selection);
+
+  await assert.rejects(
+    control.settingsOptions({ identity, provider: 'alpha;false' }), RunnerControlInputError,
+  );
+
+  const appliedCalls = await fx.engineCalls();
+  const applyArgs = appliedCalls.find((entry) => entry.slice(0, 4).join(' ') === '81 runner settings apply');
+
+  assert.ok(applyArgs);
+  assert.deepEqual(JSON.parse(applyArgs[applyArgs.indexOf('--payload') + 1]), payload);
+
+  const showArgs = appliedCalls.find((entry) => entry.slice(0, 4).join(' ') === '81 runner settings show');
+
+  assert.ok(showArgs, 'bootstrap читает сохранённую selection через pinned show');
+  assert.equal(showArgs.includes('--provider'), false);
+});
+
+// Диагностика движка не обязана содержать локализованный текст таймаута.
+// После неопределённого исхода возвращается receipt уже принятой записи.
+test('settings recovers timeout receipt independently of stderr text', async (t) => {
+  const fx = await settingsServer(t);
+  const options = cliJson(fx.cli('options', ['--provider', 'alpha']));
+  const payload = applyPayload(options);
+  const accepted = {
+    ...options,
+    revision: options.revision + 1,
+    selection: payload.selection,
+    receipt: { requestId: payload.requestId, state: 'saved' },
+  };
+  const calls = [];
+  const control = new FactoryRunnerControl({
+    factoryBin: fx.config.factoryBin,
+    stateDir: fx.config.stateDir,
+    configRoot: fx.config.factoryConfigRoot,
+  });
+
+  control.settingsCommand = async (operation) => {
+    calls.push(operation);
+
+    if (operation === 'apply') {
+      throw new StageRunnerCommandError(1, 'fixture post-commit warning', true);
+    }
+
+    return operation === 'show' ? accepted : options;
+  };
+
+  assert.deepEqual(await control.applySettings(payload), accepted);
+  assert.deepEqual(calls, ['options', 'apply', 'show']);
+
+  calls.length = 0;
+  control.settingsCommand = async (operation) => {
+    calls.push(operation);
+
+    if (operation === 'apply') {
+      throw new StageRunnerCommandError(75, 'fixture: не уложился в доступную квоту');
+    }
+
+    return options;
+  };
+
+  await assert.rejects(control.applySettings(payload), (error) => {
+    assert.equal(error.timedOut, false);
+
+    return error instanceof StageRunnerCommandError;
+  });
+  assert.deepEqual(calls, ['options', 'apply'], 'обычный отказ не маскируется прежним receipt');
 });
