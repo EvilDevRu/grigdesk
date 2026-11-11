@@ -111,7 +111,8 @@ export class AccessProfileService {
   readonly participants = new Set<AccessParticipant>();
   readonly drivers = new Map<string, CliAttemptProcess>();
   readonly adaptersOf: () => Promise<Map<string, ExecutorAdapter>>;
-  changed: (provider: string) => void = () => {};
+  changed: (provider: string, options?: { metadataOnly: boolean }) => void = () => {};
+  activityChanged: (provider: string) => void = () => {};
 
   constructor(config: AccessConfig, env: NodeJS.ProcessEnv,
     adaptersOf: () => Promise<Map<string, ExecutorAdapter>>, options: AccessOptions = {}) {
@@ -258,10 +259,22 @@ export class AccessProfileService {
 
     return this.store.locked(provider, async () => {
       const manifest = await this.manifest(provider);
+      let switchAllowed = true;
+
+      try {
+        await this.assertSwitchable(provider);
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'access_busy') {
+          throw error;
+        }
+
+        switchAllowed = false;
+      }
 
       return {
         revision: manifest.revision,
         activeProfileId: manifest.activeProfileId,
+        switchAllowed,
         profiles: manifest.profiles.map(({ secretRef, evidence, memoryGeneration, ...profile }) => profile),
         methods: capability.methods,
       };
@@ -272,7 +285,7 @@ export class AccessProfileService {
    * Все живые reservations проверяются по PID и времени старта.
    * Неизвестный владелец блокирует переключение; возраст файла не является разрешением.
    */
-  async assertIdle(provider: string, ownAttempt?: string): Promise<void> {
+  async assertSwitchable(provider: string, ownAttempt?: string): Promise<void> {
     await this.assertNoLogin(provider, await this.manifest(provider), ownAttempt);
 
     const pipelines = path.join(this.store.directory(provider), 'pipelines');
@@ -312,6 +325,14 @@ export class AccessProfileService {
         throw accessError(409, 'access_busy', 'Исполнитель занят ходом, фоном или ожидающим заданием.');
       }
     }
+  }
+
+  /**
+   * Чтение допуска не закрывает свободные диалоги; смена доступа делает это перед commit.
+   * Проверка занятости повторяется под тем же mutex, что и сама активация.
+   */
+  async assertIdle(provider: string, ownAttempt?: string): Promise<void> {
+    await this.assertSwitchable(provider, ownAttempt);
 
     for (const participant of this.participants) {
       await participant.closeIdle(provider);
@@ -559,6 +580,7 @@ export class AccessProfileService {
           },
           profileId: profile.id,
         }));
+        this.activityChanged(provider);
       }
 
       return {
@@ -580,6 +602,8 @@ export class AccessProfileService {
         release: async () => {
           if (reservation) {
             await fs.rm(reservation, { force: true });
+            reservation = undefined;
+            this.activityChanged(provider);
           }
         },
       };
@@ -658,7 +682,7 @@ export class AccessProfileService {
       manifest.revision += 1;
       manifest.operations[operationId] = { state: 'completed', profileId: id };
       await this.store.write(provider, manifest, true);
-      this.changed(provider);
+      this.changed(provider, { metadataOnly: action !== 'activate' });
 
       const { secretRef, evidence, memoryGeneration, ...view } = profile;
 

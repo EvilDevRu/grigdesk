@@ -53,6 +53,7 @@ export interface AccessAttempt {
 export interface AccessProfileList {
   revision: number;
   activeProfileId: string | null;
+  switchAllowed: boolean;
   profiles: AccessProfile[];
   methods: AccessMethod[];
 }

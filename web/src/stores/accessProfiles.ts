@@ -53,6 +53,7 @@ function publicList(value: unknown): AccessProfileList {
   return {
     revision: value.revision,
     activeProfileId: typeof value.activeProfileId === 'string' ? value.activeProfileId : null,
+    switchAllowed: value.switchAllowed === true,
     profiles: value.profiles.map((item) => {
       if (!isRecord(item) || typeof item.id !== 'string' || typeof item.name !== 'string') {
         throw new Error('Некорректный профиль');
@@ -97,6 +98,32 @@ export const useAccessProfilesStore = defineStore('accessProfiles', {
   }),
 
   actions: {
+    /**
+     * Общий SSE обновляет допуск по границам ходов и изменениям конвейера.
+     * Поток токенов и лимиты не запускают лишние чтения приватного списка.
+     */
+    refreshOnEvent(provider: string, name: string) {
+      if (['hello', 'providers-update', 'access-profiles', 'state-change', 'chat-turn-start',
+        'chat-done', 'chat-orphan', 'chat-sessions', 'chat-store'].includes(name)) {
+        void this.load(provider);
+      }
+    },
+
+    /**
+     * Оба места выбора используют последний серверный допуск и одну CAS-операцию.
+     * Сервер повторно проверяет занятость, если диалог начался после чтения списка.
+     */
+    async activate(provider: string, id: string) {
+      const list = this.lists[provider];
+
+      if (!list?.switchAllowed || this.pending[provider] || this.errors[provider]
+        || id === list.activeProfileId) {
+        return;
+      }
+
+      await this.mutate(provider, `/${id}/activate`, { expectedRevision: list.revision });
+    },
+
     /**
      * До отправки окна запоминают только публичную identity мутации.
      * Секретные значения не сохраняются даже при транспортном отказе.

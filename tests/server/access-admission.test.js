@@ -7,6 +7,21 @@ import {
 } from '../helpers/accessProfiles.js';
 import { liveAdapter } from '../helpers/accessLiveAdapter.js';
 
+test('reservation публикует занятость и освобождение без сброса доступа', async (t) => {
+  const f = await profileFixture(t);
+
+  assert.equal((await profiles(f)).switchAllowed, true);
+
+  const reservation = await f.app.accessProfiles.select('synthetic-access');
+
+  t.after(() => reservation?.release());
+  assert.equal((await profiles(f)).switchAllowed, false);
+  await reservation.release();
+  assert.equal((await profiles(f)).switchAllowed, true);
+  assert.equal(f.events.filter((event) => event.name === 'access-profiles').length, 2);
+  assert.equal(f.events.some((event) => event.name === 'providers-update'), false);
+});
+
 test('AP03_launch_switch_race: два процесса допускают запуск и переключение в одном порядке', async (t) => {
   const f = await profileFixture(t);
 
@@ -59,6 +74,7 @@ test('AP04_busy_matrix: running, permission, background, sleep и service зап
       await saveChat(f);
       await runChat(f);
       await control.enter(state);
+      assert.equal((await profiles(f)).switchAllowed, false);
 
       const refusal = await activate(f, second, 'synthetic-access', {}, 409);
 
@@ -66,6 +82,7 @@ test('AP04_busy_matrix: running, permission, background, sleep и service зап
       assert.equal((await profiles(f)).activeProfileId, before.activeProfileId);
       assert.equal(control.handles[0].alive, true, 'занятый процесс не убивается ради switch');
       await control.leave();
+      assert.equal((await profiles(f)).switchAllowed, true);
       await activate(f, second);
     });
   }
@@ -80,6 +97,7 @@ test('AP04_busy_matrix: running, permission, background, sleep и service зап
 
     await worker('boot');
     assert.equal((await worker('service')).started, true);
+    assert.equal((await profiles(f)).switchAllowed, false);
     await activate(f, second, 'synthetic-access', {}, 409);
     await worker('finish');
     await activate(f, second);
@@ -100,6 +118,7 @@ test('AP05_idle_child: ACK переключения приходит после 
 
   const previous = control.handles[0];
 
+  assert.equal((await profiles(f)).switchAllowed, true);
   assert.equal(previous.alive, true);
   await activate(f, second);
   assert.equal(previous.alive, false, 'свободный CLI старого профиля завершён до ACK');

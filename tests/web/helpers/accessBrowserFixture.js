@@ -61,9 +61,9 @@ export async function accessBrowser(t, options = {}) {
     connections: 0,
     attempt: null,
   };
-  const broadcast = () => {
+  const broadcast = (event = 'providers-update') => {
     for (const stream of streams) {
-      stream.write(`event: providers-update\ndata: ${JSON.stringify({
+      stream.write(`event: ${event}\ndata: ${JSON.stringify({
         accessProfiles: 'fixture', revision: snapshot.revision,
       })}\n\n`);
     }
@@ -128,7 +128,8 @@ export async function accessBrowser(t, options = {}) {
           result = { error: 'auth_required' };
         } else if (request.method === 'GET' && url.pathname === ACCESS_ROOT) {
           status = control.listStatus;
-          result = status === 200 ? snapshot : { error: 'Временный отказ списка' };
+          result = status === 200 ? { ...snapshot, switchAllowed: !control.busy }
+            : { error: 'Временный отказ списка' };
         } else if (request.method === 'GET' && url.pathname.includes('/operations/')) {
           result = operations.get(url.pathname.split('/').at(-1));
         } else if (request.method === 'GET' && url.pathname.includes('/attempts')) {

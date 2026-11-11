@@ -1126,7 +1126,21 @@ async function providersModule(
     refreshModels: () => modelsOf(config, { refresh: true }),
   });
 
-  accessProfiles.changed = (id) => {
+  accessProfiles.activityChanged = (id) => {
+    fastify.sse?.broadcast?.('access-profiles', { provider: id });
+  };
+
+  accessProfiles.changed = (id, options) => {
+    if (options?.metadataOnly) {
+      // Имя и удаление неактивного профиля не меняют действующий доступ.
+      // Сохраняем карточки на время проб и не отзываем модели или статистику аккаунта.
+      registryCache.expire();
+      fastify.sse?.broadcast?.('providers-update', { metadata: id });
+      fastify.sse?.broadcast?.('access-profiles', { provider: id });
+
+      return;
+    }
+
     invalidateModelsRegistry(config.modelsPath);
     registryCache.clear();
     usageGenerations.set(id, (usageGenerations.get(id) ?? 0) + 1);

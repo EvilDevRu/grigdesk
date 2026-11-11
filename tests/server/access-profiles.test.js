@@ -9,6 +9,46 @@ import {
 } from '../helpers/accessProfiles.js';
 import { cliFixture } from '../helpers/accessCliFixture.js';
 
+test('переименование сохраняет карточки исполнителей во время медленной пробы', async (t) => {
+  const f = await profileFixture(t);
+  const before = await profiles(f);
+  const original = active(before);
+  const initial = await f.request('GET', '/api/providers?wait=1');
+  const gate = Promise.withResolvers();
+
+  t.after(() => gate.resolve());
+  f.adapters.get('synthetic-access').probe = async () => {
+    await gate.promise;
+
+    return { ok: true, version: 'test-1' };
+  };
+
+  await f.request('PATCH', `${base()}/${original.id}`, {
+    operationId: operationId(),
+    expectedRevision: original.revision,
+    name: 'Новое имя аккаунта',
+  });
+
+  const start = performance.now();
+  const current = await f.request('GET', '/api/providers');
+
+  assert.deepEqual(current.providers.map((item) => item.id), initial.providers.map((item) => item.id));
+  assert.ok(performance.now() - start < 1000, 'Карточки доступны до завершения пробы');
+
+  const renamed = active(await profiles(f));
+
+  assert.equal(renamed.name, 'Новое имя аккаунта');
+  assert.equal(renamed.id, original.id);
+  assert.equal(renamed.accessRevision, original.accessRevision);
+  assert.equal(renamed.accountGeneration, original.accountGeneration);
+  assert.equal(f.events.some((event) => event.payload?.credentials), false);
+  gate.resolve();
+
+  const updated = await f.request('GET', '/api/providers?wait=1');
+
+  assert.equal(updated.providers[0].accessProfiles.activeProfile.name, 'Новое имя аккаунта');
+});
+
 test('AP01_saved_profiles: имя, UUID, несколько сохранённых и только один активный', async (t) => {
   const f = await profileFixture(t);
   const before = await profiles(f);
