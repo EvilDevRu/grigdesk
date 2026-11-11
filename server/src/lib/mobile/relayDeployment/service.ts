@@ -17,6 +17,7 @@ import { DeploymentStateStore } from './stateStore.ts';
 import type { DeploymentRecord } from './stateStore.ts';
 import { preflight } from './preflight.ts';
 import { installRelay } from './installer.ts';
+import type { RelayInstallation } from './installer.ts';
 import { candidateAddress, verifyCandidate } from './candidate.ts';
 import type { CandidateOptions } from './candidate.ts';
 
@@ -148,13 +149,7 @@ export class RelayDeploymentService {
         return receipt.result;
       }
 
-      const busy = records.find(({ job }) => !terminal.includes(job.state)
-        && (job.relayId && job.relayId === input.relayId
-          || job.public.host === input.public.host && job.public.port === input.public.port));
-
-      if (busy) {
-        throw new MobileInputError('deployment_busy', `Продолжите задание ${busy.job.id}.`, 409);
-      }
+      this.assertAvailable(records, input);
 
       const job: DeploymentJob = {
         ...input,
@@ -209,8 +204,9 @@ export class RelayDeploymentService {
 
     const checked = await this.options.hostKeys.check(key);
 
-    return this.update(id, (current) => {
+    return this.update(id, (current, records) => {
       this.revision(current, input.revision);
+      this.assertAvailable(records, current, id);
       current.state = checked.status === 'trusted' ? 'awaiting_credentials' : 'awaiting_host_key';
       current.hostKey = {
         challengeId: checked.challengeId,
@@ -335,6 +331,7 @@ export class RelayDeploymentService {
     const generation = this.generation;
     let session: SshTransportSession | undefined;
     let authenticated = false;
+    let disconnected = false;
 
     try {
       session = await this.options.transport.connect({
@@ -345,17 +342,31 @@ export class RelayDeploymentService {
       });
       authenticated = true;
       this.sessions.add(session);
+
+      const connection = session;
+
+      connection.once('close', () => {
+        disconnected = true;
+
+        if (this.sessions.has(connection)) {
+          void this.previewDisconnected(job.id, generation);
+        }
+      });
       await preflight(session, job);
 
       const artifact = await resolveRelayArtifact(this.directory, this.options);
 
-      if (generation !== this.generation || this.stopped) {
+      if (generation !== this.generation || this.stopped || disconnected) {
         session.close();
         this.sessions.delete(session);
 
         // Worker ещё не зарегистрирован: staging удаляется вручную, release его не знает.
         if (artifact.staging) {
           void fs.rm(artifact.staging, { recursive: true, force: true }).catch(() => {});
+        }
+
+        if (disconnected) {
+          throw new Error('ssh_disconnected');
         }
 
         return;
@@ -376,6 +387,10 @@ export class RelayDeploymentService {
         expires: this.now() + 300_000,
       });
       await this.update(job.id, (current) => {
+        if (disconnected) {
+          throw new Error('ssh_disconnected');
+        }
+
         current.state = 'awaiting_confirmation';
         current.preview = {
           digest,
@@ -385,6 +400,7 @@ export class RelayDeploymentService {
         current.steps = [{ name: 'preflight', state: 'completed' }];
       });
     } catch (cause) {
+      this.release(job.id);
       session?.close();
 
       if (session) {
@@ -401,6 +417,25 @@ export class RelayDeploymentService {
       delete secret.privateKey;
       delete secret.passphrase;
     }
+  }
+
+  /**
+   * Закрытый SSH делает ожидающий preview непригодным: start не должен использовать мёртвую сессию.
+   * Во время preflight/install отказ фиксирует сам worker; штатный release уже удалил соединение.
+   */
+  private async previewDisconnected(id: string, generation: number): Promise<void> {
+    if (generation !== this.generation || this.stopped) {
+      return;
+    }
+
+    await this.update(id, (job) => {
+      if (job.state === 'awaiting_confirmation') {
+        job.state = 'interrupted';
+        job.error = { code: 'credentials_required' };
+        delete job.preview;
+        this.release(id);
+      }
+    }).catch(() => {});
   }
 
   /**
@@ -474,6 +509,8 @@ export class RelayDeploymentService {
   private async install(job: DeploymentJob): Promise<void> {
     const generation = this.generation;
     const worker = this.workers.get(job.id);
+    let installation: RelayInstallation | undefined;
+    let preserveBackup = false;
 
     if (!worker) {
       // Shutdown между start и install не оставляет осиротевшей записи relay.
@@ -503,7 +540,9 @@ export class RelayDeploymentService {
           enabled: relay.enabled,
         };
       });
-      await installRelay(worker.session, job, worker.artifact, await this.mobile.relayEnv(relay.id));
+      installation = await installRelay(
+        worker.session, job, worker.artifact, await this.mobile.relayEnv(relay.id),
+      );
 
       if (generation !== this.generation) {
         return;
@@ -515,9 +554,19 @@ export class RelayDeploymentService {
         current.steps.find((step) => step.name === 'install')!.state = 'completed';
         current.steps.push({ name: 'channel', state: 'running' });
       });
-      this.release(job.id);
-      await this.promote(job, relay, generation);
+
+      const promoted = await this.promote(job, relay, generation);
+
+      if (installation.replaced && !promoted) {
+        preserveBackup = !await this.rollbackInstallation(job.id, installation, generation);
+      }
     } catch (error) {
+      if (installation?.replaced) {
+        preserveBackup = !await this.rollbackInstallation(job.id, installation, generation);
+
+        return;
+      }
+
       if (error instanceof Error && error.message === 'waiting_vpn') {
         await this.fail(job.id, 'waiting_vpn', generation, 'waiting_vpn');
 
@@ -525,11 +574,54 @@ export class RelayDeploymentService {
       }
 
       const conflict = error instanceof MobileInputError && error.code === 'route_conflict';
+      const rollbackFailed = error instanceof Error && error.message === 'remote_rollback_failed';
 
-      await this.fail(job.id, conflict ? 'route_conflict' : 'installation_failed', generation,
-        conflict ? 'recovery_required' : 'failed');
+      await this.fail(job.id, rollbackFailed ? 'remote_rollback_failed'
+        : conflict ? 'route_conflict' : 'installation_failed', generation,
+      conflict || rollbackFailed ? 'recovery_required' : 'failed');
     } finally {
+      if (!preserveBackup) {
+        await installation?.dispose();
+      }
+
       this.release(job.id);
+    }
+  }
+
+  /**
+   * Сетевой отказ не оставляет прежний домашний маршрут указывать на уже заменённую службу.
+   * Потерянный SSH отделён от подтверждённого отката: автоматическое продолжение не обещается.
+   */
+  private async rollbackInstallation(
+    id: string,
+    installation: RelayInstallation,
+    generation: number,
+  ): Promise<boolean> {
+    if (generation !== this.generation || this.stopped) {
+      return false;
+    }
+
+    try {
+      await this.update(id, (job) => {
+        job.steps.push({ name: 'rollback', state: 'running' });
+      });
+      await installation.rollback();
+      await this.update(id, (job) => {
+        job.service = { state: installation.wasRunning ? 'running' : 'unknown' };
+        job.channel = { state: 'unverified' };
+        job.steps.find((step) => step.name === 'rollback')!.state = 'completed';
+      });
+      await this.fail(id, 'previous_installation_restored', generation, 'recovery_required');
+
+      return true;
+    } catch {
+      await this.update(id, (job) => {
+        job.service = { state: 'unknown' };
+        job.channel = { state: 'unverified' };
+      }).catch(() => {});
+      await this.fail(id, 'remote_rollback_failed', generation, 'recovery_required');
+
+      return false;
     }
   }
 
@@ -538,9 +630,8 @@ export class RelayDeploymentService {
    * CAS не перезаписывает более свежий маршрут другого владельца.
    */
   private async promote(job: DeploymentJob, relay: Awaited<ReturnType<MobileService['relay']>>,
-    generation: number): Promise<void> {
+    generation: number): Promise<boolean> {
     const address = await candidateAddress(job.candidateHost, this.runtime.vpnGate);
-    const publicAddress = await candidateAddress(job.public.host, this.runtime.vpnGate);
     const status = await this.mobile.status();
     const existing = relay.enabled && relay.host === job.candidateHost && relay.port === job.public.port
       && status.relays.find((item) => item.id === relay.id)?.link.state === 'online';
@@ -557,8 +648,20 @@ export class RelayDeploymentService {
       existing,
     });
 
+    let publicAddress: string | undefined;
+
+    try {
+      publicAddress = await candidateAddress(job.public.host, this.runtime.vpnGate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+
+      if (!['ENOTFOUND', 'ENODATA', 'EAI_AGAIN'].includes(code ?? '')) {
+        throw error;
+      }
+    }
+
     if (generation !== this.generation) {
-      return;
+      return false;
     }
 
     if (address !== publicAddress) {
@@ -567,7 +670,7 @@ export class RelayDeploymentService {
         current.error = { code: 'update_dns' };
       });
 
-      return;
+      return false;
     }
 
     await this.update(job.id, (current) => {
@@ -604,6 +707,8 @@ export class RelayDeploymentService {
         current.steps.find((step) => step.name === 'channel')!.state = 'completed';
         delete current.error;
       });
+
+      return true;
     } catch {
       await this.mobile.relays.compareRoute(after, relay);
       await this.runtime.sync();
@@ -617,7 +722,7 @@ export class RelayDeploymentService {
    * Квитанция сохраняет ответ retry независимо от последующих стадий.
    */
   async retry(id: string, input: { requestId: string; revision: number }): Promise<DeploymentJob> {
-    return this.receipted(id, 'retry', input, (record) => {
+    return this.receipted(id, 'retry', input, (record, records) => {
       this.revision(record.job, input.revision);
 
       const waiting = ['waiting_vpn', 'awaiting_dns'].includes(record.job.state);
@@ -626,11 +731,36 @@ export class RelayDeploymentService {
         throw new MobileInputError('deployment_state', 'Задание уже выполняется.', 409);
       }
 
+      this.assertAvailable(records, record.job, id);
       record.job.state = 'draft';
       delete record.job.error;
       delete record.job.hostKey;
       this.release(id);
     });
+  }
+
+  /**
+   * Отмена завершает только ожидание ввода или подтверждения до удалённых изменений.
+   * Принятый worker не прерывается этим действием; потерянный ответ воспроизводится из квитанции.
+   */
+  async cancel(id: string, input: { requestId: string; revision: number }): Promise<DeploymentJob> {
+    const job = await this.receipted(id, 'cancel', input, (record) => {
+      this.revision(record.job, input.revision);
+
+      if (!['draft', 'awaiting_host_key', 'awaiting_credentials', 'awaiting_confirmation']
+        .includes(record.job.state)) {
+        throw new MobileInputError('deployment_state', 'Выполняющееся задание нельзя отменить.', 409);
+      }
+
+      record.job.state = 'interrupted';
+      record.job.error = { code: 'deployment_cancelled' };
+      delete record.job.preview;
+      this.release(id);
+    });
+
+    this.runtime.changed();
+
+    return job;
   }
 
   /**
@@ -672,7 +802,7 @@ export class RelayDeploymentService {
    * Несовпавшие параметры того же requestId отклоняются до любого эффекта.
    */
   private receipted(id: string, action: string, input: { requestId: string },
-    mutate: (record: DeploymentRecord) => void): Promise<DeploymentJob> {
+    mutate: (record: DeploymentRecord, records: DeploymentRecord[]) => void): Promise<DeploymentJob> {
     if (typeof input.requestId !== 'string' || !/^[\w-]{1,128}$/.test(input.requestId)) {
       throw new MobileInputError('bad_request_id', 'Нужен идентификатор запроса.');
     }
@@ -691,7 +821,7 @@ export class RelayDeploymentService {
         return receipt.result;
       }
 
-      mutate(record);
+      mutate(record, records);
       record.job.revision += 1;
       record.receipts[key] = {
         input: fingerprint,
@@ -701,6 +831,21 @@ export class RelayDeploymentService {
 
       return record.job;
     });
+  }
+
+  /**
+   * Проверяет единственного владельца relay и endpoint внутри транзакции журнала.
+   * Повтор старого задания проходит тот же admission, что создание нового, исключая только себя.
+   */
+  private assertAvailable(records: DeploymentRecord[], target: Pick<DeploymentJob, 'relayId' | 'public'>,
+    excludingId?: string): void {
+    const busy = records.find(({ job }) => job.id !== excludingId && !terminal.includes(job.state)
+      && (job.relayId && job.relayId === target.relayId
+        || job.public.host === target.public.host && job.public.port === target.public.port));
+
+    if (busy) {
+      throw new MobileInputError('deployment_busy', `Продолжите задание ${busy.job.id}.`, 409);
+    }
   }
 
   private record(records: DeploymentRecord[], id: string): DeploymentRecord {
@@ -729,12 +874,12 @@ export class RelayDeploymentService {
    */
   private async update(
     id: string,
-    action: (job: DeploymentJob) => void | Promise<void>,
+    action: (job: DeploymentJob, records: DeploymentRecord[]) => void | Promise<void>,
   ): Promise<DeploymentJob> {
     const job = await this.store.mutate(async (records) => {
       const record = this.record(records, id);
 
-      await action(record.job);
+      await action(record.job, records);
       record.job.revision += 1;
 
       return record.job;
@@ -770,14 +915,18 @@ export class RelayDeploymentService {
     }).catch(() => {});
   }
 
+  /**
+   * Освобождает только ресурсы текущего worker, отмечая штатное закрытие до события close.
+   * Проверенный архив удаляется вместе с попыткой и не переживает закрытую SSH-сессию.
+   */
   private release(id: string): void {
     const worker = this.workers.get(id);
 
     if (worker) {
       clearTimeout(worker.timer);
-      worker.session.close();
       this.sessions.delete(worker.session);
       this.workers.delete(id);
+      worker.session.close();
 
       // Проверенный архив больше не нужен: staging не должен переживать попытку установки.
       if (worker.artifact.staging) {

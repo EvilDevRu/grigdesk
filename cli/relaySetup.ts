@@ -118,10 +118,13 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
       }
 
       const listed = await request<{ jobs: DeploymentJob[] }>('/api/mobile/deployments');
-      let job = listed.jobs.map(unwrap).find((item) => !['ready', 'failed'].includes(item.state));
+      const jobs = listed.jobs.map(unwrap);
 
       terminal.output.write(label('home') + ': ' + terminalText(status.server.name ?? settings.origin, 100)
         + '\n');
+
+      let job = await chooseDeployment(terminal, jobs
+        .filter((item) => item.mode === args.action && item.state !== 'ready'), label);
 
       if (!job) {
         let relay = status.relays[0];
@@ -142,6 +145,7 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
           if (!relay) {
             throw new InputExit(2);
           }
+
         } else {
           name = await input(terminal, label('name'));
         }
@@ -154,6 +158,31 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
           throw new Error(label('publicRequired'));
         }
 
+        const publicRoute = {
+          host: args.publicHost ?? (name === undefined ? relay!.host : host),
+          port: args.publicPort ?? (name === undefined ? relay!.port : 443),
+        };
+        const waiting = jobs.filter((item) =>
+          ['draft', 'awaiting_host_key', 'awaiting_credentials', 'awaiting_confirmation'].includes(item.state)
+          && (name === undefined && item.relayId === relay!.id
+            || item.public?.host === publicRoute.host && item.public?.port === publicRoute.port));
+
+        for (const previous of waiting) {
+          terminal.output.write(terminalText(previous.name ?? previous.public?.host ?? previous.id, 80)
+            + ' · ' + terminalText(previous.ssh?.host ?? '', 80) + '\n');
+
+          const accepted = await input(terminal, label('cancelWaiting'));
+
+          if (!/^(да|yes|y)$/iu.test(accepted)) {
+            throw new InputExit(2);
+          }
+
+          await request(`/api/mobile/deployments/${encodeURIComponent(previous.id)}/cancel`, {
+            revision: previous.revision,
+            requestId: randomUUID(),
+          });
+        }
+
         const value = await request<DeploymentJob | { job: DeploymentJob }>('/api/mobile/deployments', {
           requestId: randomUUID(),
           expectedServerFp: status.server.fp,
@@ -164,8 +193,7 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
             user,
             port: args.sshPort ?? 22,
           },
-          public: { host: args.publicHost ?? (name === undefined ? relay!.host : host),
-            port: args.publicPort ?? (name === undefined ? relay!.port : 443) },
+          public: publicRoute,
           candidateHost: args.candidateHost ?? host,
         });
 
@@ -184,11 +212,18 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
           if (job.state !== 'draft') {
             const code = job.error?.code;
 
-            terminal.output.write(label(code === 'ssh_auth_failed' ? 'authFailed'
-              : code === 'unsupported_platform' ? 'platformFailed'
-                : code === 'relay_port_busy' ? 'portBusy'
-                  : code === 'waiting_vpn' ? 'waiting_vpn'
-                    : code === 'route_conflict' ? 'routeConflict' : 'failedGeneric') + '\n');
+            const failures: Record<string, string> = {
+              ssh_auth_failed: 'authFailed',
+              unsupported_platform: 'platformFailed',
+              relay_port_busy: 'portBusy',
+              waiting_vpn: 'waiting_vpn',
+              route_conflict: 'routeConflict',
+              previous_installation_restored: 'rolledBack',
+              remote_rollback_failed: 'rollbackFailed',
+              deployment_cancelled: 'cancelled',
+            };
+
+            terminal.output.write(label(failures[code ?? ''] ?? 'failedGeneric') + '\n');
             await input(terminal, label('retry'));
             await action('retry', { requestId: randomUUID() });
           }
@@ -319,4 +354,34 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
       return 1;
     }
   });
+}
+
+/**
+ * Продолжение выбирается явно среди заданий нужного сценария, а не по порядку журнала.
+ * Нулевой пункт позволяет указать новый VPS, сохранив прежнюю прерванную попытку и её личность.
+ */
+async function chooseDeployment(
+  terminal: TerminalSession,
+  jobs: DeploymentJob[],
+  label: (key: string) => string,
+): Promise<DeploymentJob | undefined> {
+  if (!jobs.length) {
+    return undefined;
+  }
+
+  terminal.output.write(label('jobs') + '\n' + jobs.map((job, index) =>
+    `${index + 1}. ${terminalText(job.name ?? job.public?.host ?? job.id, 80)}`
+      + ` · ${terminalText(job.ssh?.host ?? '', 80)}`).join('\n') + '\n0. ' + label('newJob') + '\n');
+
+  const choice = Number(await input(terminal, label('chooseJob')) || 1);
+
+  if (choice === 0) {
+    return undefined;
+  }
+
+  if (!Number.isSafeInteger(choice) || !jobs[choice - 1]) {
+    throw new InputExit(2);
+  }
+
+  return jobs[choice - 1];
 }

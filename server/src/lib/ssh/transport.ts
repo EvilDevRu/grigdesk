@@ -103,17 +103,20 @@ export function createSshTransport(options: SshTransportOptions = {}): SshTransp
         }
         : {}),
     };
+
     await new Promise<void>((resolve, reject) => {
       const onReady = () => {
-        client.off('error', onError);
         resolve();
       };
       const onError = (error: unknown) => {
         client.off('ready', onReady);
+        // ssh2 продолжает выдавать error после ready; соединение закрывается без
+        // необработанного события, даже пока потребитель ещё не получил session.
+        client.destroy?.();
         reject(error);
       };
       client.once('ready', onReady);
-      client.once('error', onError);
+      client.on('error', onError);
       client.connect(connectOptions);
     });
     const emitter = client as EventEmitter;

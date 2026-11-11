@@ -51,6 +51,7 @@ export async function channelFixture(t, options = {}) {
   const hostKeys = await createHostKeyStore({ file: path.join(directory, 'known-hosts.json') });
   const port = options.port ?? await freePort();
   const services = new Map();
+  const generations = new Map();
   const errors = [];
   const route = options.publicRoute ? publicRelayRoute(t) : null;
   const vpnChecks = [];
@@ -89,6 +90,13 @@ export async function channelFixture(t, options = {}) {
       const state = JSON.parse(await readFile(path.join(ssh.root, 'var/lib/os-state.json'), 'utf8'));
 
       for (const [unit, status] of Object.entries(state.units)) {
+        const generation = state.generations?.[unit] ?? 0;
+
+        if (services.has(unit) && (!status.active || generations.get(unit) !== generation)) {
+          await services.get(unit).close();
+          services.delete(unit);
+        }
+
         if (!status.active || services.has(unit)) {
           continue;
         }
@@ -123,6 +131,7 @@ export async function channelFixture(t, options = {}) {
         await relay.listen(options.listenHost ?? '127.0.0.1', servicePort);
 
         services.set(unit, relay);
+        generations.set(unit, generation);
       }
     } catch (error) {
       if (error.code !== 'ENOENT') {

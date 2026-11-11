@@ -66,7 +66,7 @@ export async function deploymentRoutes(app: FastifyInstance, mobile: MobileServi
     },
   );
 
-  for (const action of ['probe', 'host-key', 'start', 'retry', 'check'] as const) {
+  for (const action of ['probe', 'host-key', 'start', 'retry', 'check', 'cancel'] as const) {
     app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
       `/api/mobile/deployments/:id/${action}`, async (request, reply) => {
         const body = request.body;

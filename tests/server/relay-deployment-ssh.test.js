@@ -11,6 +11,40 @@ import { executedOsCommands, relayDeploymentSsh } from './helpers/relayDeploymen
 import { createHostKeyStore } from '../../server/src/lib/ssh/hostKeys.ts';
 import { temporary } from '../relay/helpers.js';
 import { readDeployment, waitDeployment } from './helpers/relayDeployment.js';
+import { relayRelease } from './helpers/relayDeploymentRelease.js';
+
+test('RD-SSH-04: error после ready закрывает preview без необработанного исключения', async (t) => {
+  const ssh = await relayDeploymentSsh(t);
+  const release = relayRelease();
+  let connected;
+  const f = await deploymentFixture(t, {
+    transport: {
+      probe: ssh.transport.probe,
+      connect: async (input) => {
+        connected = await ssh.transport.connect(input);
+
+        return connected;
+      },
+    },
+    deployment: { release: release.release },
+  });
+  const preview = await prepareDeployment(f, setupInput(f, {
+    ssh: {
+      host: '127.0.0.1',
+      port: ssh.port,
+      user: 'root',
+    },
+  }), { password: ssh.password });
+
+  assert.equal(preview.state, 'awaiting_confirmation');
+  assert.doesNotThrow(() => connected.client.emit('error', new Error('RD_RESET_SENTINEL')));
+
+  const interrupted = await waitDeployment(f, preview.id, ['interrupted']);
+
+  assert.equal(interrupted.preview, undefined);
+  assert.equal(interrupted.error.code, 'credentials_required');
+  assert.equal(JSON.stringify(interrupted).includes('RD_RESET_SENTINEL'), false);
+});
 
 for (const encrypted of [false, true]) {
   test(`RD-SSH-01: настоящий SSH принимает ${encrypted ? 'зашифрованный' : 'обычный'} ключ`, async (t) => {

@@ -14,9 +14,15 @@
       <UiButton :disabled="!serverFp || jobs.loading" @click="begin()">
         {{ t('settings.remoteSetup') }}
       </UiButton>
-      <UiButton v-if="jobs.jobs.length" @click="resume">
-        {{ t('settings.remoteResume') }}
-      </UiButton>
+      <article v-for="job in jobs.jobs" :key="job.id" class="remote-access__relay"
+               :data-deployment-id="job.id">
+        <strong>{{ jobLabel(job) }}</strong>
+        <span>{{ job.ssh?.host ?? job.public?.host }}</span>
+        <UiButton @click="resume(job)">{{ t('settings.remoteResume') }}</UiButton>
+        <UiButton v-if="canCancel(job)" :disabled="busy" @click="cancelWaiting(job)">
+          {{ t('settings.remoteCancelWait') }}
+        </UiButton>
+      </article>
       <article v-for="relay in relays" :key="relay.id" class="remote-access__relay">
         <strong>{{ relay.name }}</strong>
         <span>{{ relayOnline(relay) }}</span>
@@ -105,6 +111,9 @@
           <p v-if="['installing', 'preflight', 'verifying'].includes(current.state)" role="status">
             {{ t('settings.remoteWorking') }}
           </p>
+          <UiButton v-if="canCancel(current)" :disabled="busy" @click="cancelWaiting(current)">
+            {{ t('settings.remoteCancelWait') }}
+          </UiButton>
         </template>
         <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
       </div>
@@ -165,12 +174,25 @@ const deleting = ref(false);
 let generation = 0;
 let ownerGeneration = 0;
 let loadGeneration = 0;
+let createRequest: { fingerprint: string; requestId: string } | null = null;
 
 const failureMessage = computed(() => {
   const code = current.value?.error?.code;
 
   if (code === 'port_busy' || code === 'relay_port_busy') {
     return t('settings.remotePortBusy');
+  }
+
+  if (code === 'previous_installation_restored') {
+    return t('settings.remotePreviousRestored');
+  }
+
+  if (code === 'remote_rollback_failed') {
+    return t('settings.remoteRollbackFailed');
+  }
+
+  if (code === 'deployment_cancelled') {
+    return t('settings.remoteCancelled');
   }
 
   return code === 'ssh_auth_failed' ? t('settings.remoteAuthFailed')
@@ -202,7 +224,8 @@ function previewChange(change: string): string {
  */
 function stepLabel(name: string): string {
   return name === 'preflight' ? t('settings.remoteStepPreflight')
-    : name === 'install' ? t('settings.remoteStepInstall') : t('settings.remoteStepChannel');
+    : name === 'install' ? t('settings.remoteStepInstall')
+      : name === 'rollback' ? t('settings.remoteStepRollback') : t('settings.remoteStepChannel');
 }
 
 /**
@@ -282,9 +305,62 @@ function begin(relay?: RelaySummary): void {
   opened.value = true;
 }
 
-function resume(): void {
-  current.value = jobs.jobs.at(-1) ?? null;
+/**
+ * Подпись связывает каждое задание с именем подключения и выбранным SSH-сервером.
+ * Более поздняя попытка не скрывает незавершённое задание другого подключения.
+ */
+function jobLabel(job: DeploymentJob): string {
+  return job.name ?? relays.value.find((relay) => relay.id === job.relayId)?.name
+    ?? job.public?.host ?? t('settings.remoteAccess');
+}
+
+/**
+ * Открывается именно выбранный снимок, а не последнее задание всего домашнего сервера.
+ * Форма предыдущего открытия и её секреты не переходят к другой попытке.
+ */
+function resume(job: DeploymentJob): void {
+  close(false);
+  current.value = job;
+  restoreRelay.value = job.mode === 'restore'
+    ? relays.value.find((relay) => relay.id === job.relayId) ?? null : null;
   opened.value = true;
+}
+
+/**
+ * Отменять разрешено только ожидание до принятой установки текущей попытки.
+ * Начатая установка остаётся у серверного worker независимо от жизни формы.
+ */
+function canCancel(job: DeploymentJob): boolean {
+  return ['draft', 'awaiting_host_key', 'awaiting_credentials', 'awaiting_confirmation']
+    .includes(job.state);
+}
+
+/**
+ * Подтверждённая отмена освобождает подключение для другого VPS, не удаляя его личность.
+ * После диалога повторно проверяются владелец и стадия: принятый install отменять нельзя.
+ */
+async function cancelWaiting(job: DeploymentJob): Promise<void> {
+  const epoch = generation;
+
+  if (busy.value || !canCancel(job)
+    || !await confirmDialog(messageRef('settings.remoteCancelHint'))) {
+    return;
+  }
+
+  const latest = jobs.jobs.find((item) => item.id === job.id);
+
+  if (generation !== epoch || !latest || !canCancel(latest)) {
+    return;
+  }
+
+  await submit(() => api.post(`/api/mobile/deployments/${latest.id}/cancel`, {
+    revision: latest.revision,
+    requestId: crypto.randomUUID(),
+  }, { retry: false }));
+
+  if (generation === epoch) {
+    await load();
+  }
 }
 
 /**
@@ -311,6 +387,11 @@ async function submit(work: () => Promise<unknown>): Promise<void> {
     }
   } catch {
     if (generation === epoch) {
+      await jobs.load();
+    }
+
+    if (generation === epoch) {
+      current.value = jobs.jobs.find((job) => job.id === current.value?.id) ?? current.value;
       error.value = t('settings.remoteFailure');
     }
   } finally {
@@ -345,8 +426,7 @@ async function create(): Promise<void> {
   }
 
   await submit(async () => {
-    const created = deploymentJob(await api.post('/api/mobile/deployments', {
-      requestId: crypto.randomUUID(),
+    const parameters = {
       expectedServerFp: serverFp.value,
       mode: restoreRelay.value ? 'restore' : 'setup',
       ...(restoreRelay.value ? { relayId: restoreRelay.value.id } : { name: name.value }),
@@ -357,10 +437,48 @@ async function create(): Promise<void> {
       },
       public: { host: publicHost.value || host.value, port: portValue(publicPort.value, 443) },
       candidateHost: candidateHost.value || host.value,
-    }, { retry: false }));
+    };
+    const fingerprint = JSON.stringify(parameters);
+
+    if (createRequest?.fingerprint !== fingerprint) {
+      createRequest = { fingerprint, requestId: crypto.randomUUID() };
+    }
+
+    const requestId = createRequest.requestId;
+    let created: DeploymentJob;
+
+    try {
+      created = deploymentJob(await api.post('/api/mobile/deployments', {
+        ...parameters,
+        requestId,
+      }, { retry: false }));
+    } catch (cause) {
+      if (generation !== epoch) {
+        throw cause;
+      }
+
+      await jobs.load();
+
+      const accepted = jobs.jobs.find((job) => job.requestId === requestId);
+
+      if (generation !== epoch || !accepted) {
+        throw cause;
+      }
+
+      return accepted;
+    }
 
     if (generation !== epoch) {
       return created;
+    }
+
+    const latest = jobs.jobs.find((job) => job.id === created.id);
+
+    current.value = latest && latest.revision > created.revision ? latest : created;
+    jobs.accept(current.value);
+
+    if (current.value.state !== 'draft') {
+      return current.value;
     }
 
     return api.post(`/api/mobile/deployments/${created.id}/probe`, { revision: created.revision },
@@ -497,6 +615,7 @@ watch(owner, () => {
   jobs.reset();
   relays.value = [];
   current.value = null;
+  createRequest = null;
   serverFp.value = '';
   void load();
 }, { immediate: true, flush: 'sync' });
@@ -509,6 +628,7 @@ onBeforeUnmount(() => {
   ownerGeneration += 1;
   close(false);
   jobs.reset();
+  createRequest = null;
 });
 </script>
 

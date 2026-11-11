@@ -1,7 +1,7 @@
 import { shellQuote } from '../../../../../shared/lib/shellQuote.ts';
 import type { DeploymentJob } from '../../../../../shared/mobile/relayDeploymentContracts.ts';
 import type { SshTransportSession } from '../../ssh/transport.ts';
-import { command } from './sshClient.ts';
+import { command, RemoteCommandError } from './sshClient.ts';
 
 /**
  * Читает платформу и полномочия до передачи файлов или создания системных объектов.
@@ -45,7 +45,15 @@ done`);
   const root = values.root === 'yes';
 
   if (job.relayId) {
-    await command(session, `${root ? '' : 'sudo -n '}sh -c ${shellQuote(ownership(job))}`);
+    try {
+      await command(session, `${root ? '' : 'sudo -n '}sh -c ${shellQuote(ownership(job))}`);
+    } catch (error) {
+      if (error instanceof RemoteCommandError && error.exitCode === 73) {
+        throw new Error('relay_port_busy');
+      }
+
+      throw error;
+    }
   } else if (values.busy) {
     throw new Error('relay_port_busy');
   }
@@ -57,7 +65,7 @@ done`);
  * Присваивать чужие каталоги, пользователя и unit запрещено даже при свободном порте.
  * Совпавшая собственная установка опознаётся по server pin и устойчивому relay id.
  */
-export function ownership(job: DeploymentJob): string {
+export function ownership(job: DeploymentJob, checkPort = true): string {
   const id = job.relayId!;
 
   return `set -eu
@@ -78,6 +86,29 @@ else
   test ! -e "$unit"
   if getent passwd grigdesk-relay-${id} >/dev/null; then exit 1; fi
   if getent group grigdesk-relay-${id} >/dev/null; then exit 1; fi
-  test -z "$(ss -H -ltn 'sport = :${job.public.port}')"
+fi
+${checkPort ? portOwnership(job) : ''}`;
+}
+
+/**
+ * Занятый порт допустим только для процессов cgroup выбранной собственной службы.
+ * Отдельный worker ретранслятора проверяется вместе с supervisor, а не только по MainPID.
+ */
+function portOwnership(job: DeploymentJob): string {
+  return `listeners=$(ss -H -ltnp 'sport = :${job.public.port}')
+if [ -n "$listeners" ]; then
+  group=$(systemctl show --property=ControlGroup --value grigdesk-relay-${job.relayId}.service)
+  test -n "$group" && test "$group" != / || exit 73
+  # Готовый relay содержит supervisor и worker; PID владельца сокета может отличаться от MainPID.
+  # Каждый слушающий процесс обязан принадлежать cgroup именно нашей службы.
+  while IFS= read -r listener; do
+    pids=$(printf '%s\\n' "$listener" | grep -o 'pid=[0-9]*' | cut -d= -f2)
+    test -n "$pids" || exit 73
+    for pid in $pids; do
+      cut -d: -f3- "/proc/$pid/cgroup" | grep -Fqx -- "$group" || exit 73
+    done
+  done <<LISTENERS
+$listeners
+LISTENERS
 fi`;
 }

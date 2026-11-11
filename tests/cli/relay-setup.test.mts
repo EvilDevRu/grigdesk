@@ -203,6 +203,8 @@ test('RD-CTL-02: закрытый после 202 ctl и повтор читаю�
 
   await h.box.waitFor(() => h.calls.filter((call) => call.url === '/api/mobile/deployments'
     && call.method === 'GET').length > before);
+  await second.wait(/Выберите задание/iu);
+  second.write('\r');
   assert.equal(h.calls.filter((call) => call.url === '/api/mobile/deployments'
     && call.method === 'POST').length, 1);
   assert.equal(h.calls.filter((call) => call.url.endsWith('/credentials')).length, 1);
@@ -211,3 +213,180 @@ test('RD-CTL-02: закрытый после 202 ctl и повтор читаю�
   await second.done;
   assert.doesNotMatch(second.output(), /RD_DETACHED_PASSWORD_SENTINEL/u);
 });
+
+test('RD-CTL-04: чужой setup не мешает restore выбрать подключение и новый SSH', async (t) => {
+  const h = await relayCliFixture(t, false, { jobs: [{
+    id: 'old-setup-job',
+    revision: 5,
+    mode: 'setup',
+    state: 'interrupted',
+    steps: [],
+    ssh: {
+      host: 'old-vps.example.invalid',
+      port: 22,
+      user: 'root',
+    },
+  }] });
+  const terminal = h.launch('restore');
+
+  await terminal.wait(/Выберите подключение/iu);
+  terminal.write('\r');
+  await terminal.wait(/SSH.*адрес/iu);
+  terminal.write('new-vps.example.invalid\r');
+  await terminal.wait(/Пользователь SSH/iu);
+  terminal.write('root\r');
+  await terminal.wait(/SHA256:fixture-server/u);
+  terminal.write('\x03');
+  await terminal.done;
+
+  const created = h.calls.find((call) => call.method === 'POST'
+    && call.url === '/api/mobile/deployments');
+
+  assert.ok(created);
+
+  const input = JSON.parse(created.body);
+
+  assert.equal(input.mode, 'restore');
+  assert.equal(input.relayId, 'r12345678');
+  assert.equal(input.ssh.host, 'new-vps.example.invalid');
+  assert.equal(h.calls.some((call) => call.url.includes('old-setup-job/')), false);
+});
+
+test('RD-CTL-04: прерванный restore позволяет выбрать новый VPS вместо прежнего SSH', async (t) => {
+  const h = await relayCliFixture(t, false, { jobs: [{
+    id: 'old-restore-job',
+    revision: 5,
+    mode: 'restore',
+    relayId: 'r12345678',
+    state: 'interrupted',
+    steps: [],
+    public: { host: 'relay.example.invalid', port: 443 },
+    ssh: {
+      host: 'old-vps.example.invalid',
+      port: 22,
+      user: 'root',
+    },
+  }] });
+  const terminal = h.launch('restore');
+
+  await terminal.wait(/Выберите задание/iu);
+  terminal.write('0\r');
+  await terminal.wait(/Выберите подключение/iu);
+  terminal.write('\r');
+  await terminal.wait(/SSH.*адрес/iu);
+  terminal.write('new-vps.example.invalid\r');
+  await terminal.wait(/Пользователь SSH/iu);
+  terminal.write('root\r');
+  await terminal.wait(/SHA256:fixture-server/u);
+  terminal.write('\x03');
+  await terminal.done;
+
+  assert.equal(h.calls.some((call) => call.url.includes('old-restore-job/')), false);
+  assert.equal(h.calls.filter((call) => call.method === 'POST'
+    && call.url === '/api/mobile/deployments').length, 1);
+});
+
+for (const accepted of [true, false]) {
+  test(`RD-CTL-05: новый VPS завершает старое ожидание только с подтверждением=${accepted}`, async (t) => {
+    const h = await relayCliFixture(t, false, { jobs: [{
+      id: 'waiting-restore-job',
+      revision: 3,
+      mode: 'restore',
+      relayId: 'r12345678',
+      state: 'awaiting_credentials',
+      steps: [],
+      public: { host: 'relay.example.invalid', port: 443 },
+      ssh: {
+        host: 'old-vps.example.invalid',
+        port: 22,
+        user: 'root',
+      },
+    }] });
+    const terminal = h.launch('restore');
+
+    await terminal.wait(/Выберите задание/iu);
+    terminal.write('0\r');
+    await terminal.wait(/Выберите подключение/iu);
+    terminal.write('\r');
+    await terminal.wait(/SSH.*адрес/iu);
+    terminal.write('new-vps.example.invalid\r');
+    await terminal.wait(/Пользователь SSH/iu);
+    terminal.write('root\r');
+    await terminal.wait(/Завершить ожидание/iu);
+    assert.equal(h.calls.some((call) => call.url.endsWith('/cancel')), false);
+    terminal.write(accepted ? 'да\r' : 'нет\r');
+
+    if (accepted) {
+      await terminal.wait(/SHA256:fixture-server/u);
+      terminal.write('\x03');
+    }
+
+    const result = await terminal.done;
+    const cancelled = h.calls.filter((call) => call.url.endsWith('/cancel'));
+
+    assert.equal(cancelled.length, accepted ? 1 : 0);
+    assert.equal(result.code, accepted ? 130 : 2);
+    assert.equal(h.calls.some((call) => call.url.endsWith('/start')), false);
+
+    if (accepted) {
+      assert.ok(cancelled[0]);
+      assert.equal(cancelled[0].url, '/api/mobile/deployments/waiting-restore-job/cancel');
+      assert.equal(JSON.parse(cancelled[0].body).revision, 3);
+    }
+  });
+}
+
+for (const accepted of [true, false]) {
+  test(`RD-CTL-06: setup на новом VPS освобождает прежний DNS только с согласием=${accepted}`, async (t) => {
+    const h = await relayCliFixture(t, false, { jobs: [{
+      id: 'waiting-setup-job',
+      revision: 3,
+      mode: 'setup',
+      state: 'awaiting_credentials',
+      steps: [],
+      public: { host: 'relay.example.invalid', port: 443 },
+      ssh: {
+        host: 'old-vps.example.invalid',
+        port: 22,
+        user: 'root',
+      },
+    }] });
+    const terminal = h.launch('setup', { args: ['--public-host', 'relay.example.invalid'] });
+
+    await terminal.wait(/Выберите задание/iu);
+    terminal.write('0\r');
+    await terminal.wait(/Имя подключения/iu);
+    terminal.write('Новая попытка\r');
+    await terminal.wait(/SSH.*адрес/iu);
+    terminal.write('new-vps.example.invalid\r');
+    await terminal.wait(/Пользователь SSH/iu);
+    terminal.write('root\r');
+    await terminal.wait(/Завершить ожидание/iu);
+    assert.equal(h.calls.some((call) => call.url.endsWith('/cancel')), false);
+    terminal.write(accepted ? 'да\r' : 'нет\r');
+
+    if (accepted) {
+      await terminal.wait(/SHA256:fixture-server/u);
+      terminal.write('\x03');
+    }
+
+    const result = await terminal.done;
+    const cancelled = h.calls.filter((call) => call.url.endsWith('/cancel'));
+    const created = h.calls.filter((call) => call.method === 'POST'
+      && call.url === '/api/mobile/deployments');
+
+    assert.equal(cancelled.length, accepted ? 1 : 0);
+    assert.equal(created.length, accepted ? 1 : 0);
+    assert.equal(result.code, accepted ? 130 : 2);
+
+    if (accepted) {
+      assert.ok(cancelled[0]);
+      assert.ok(created[0]);
+      assert.equal(cancelled[0].url, '/api/mobile/deployments/waiting-setup-job/cancel');
+      assert.equal(JSON.parse(cancelled[0].body).revision, 3);
+      assert.equal(JSON.parse(created[0].body).public.host, 'relay.example.invalid');
+      assert.equal(JSON.parse(created[0].body).ssh.host, 'new-vps.example.invalid');
+      assert.ok(h.calls.indexOf(cancelled[0]) < h.calls.indexOf(created[0]));
+    }
+  });
+}

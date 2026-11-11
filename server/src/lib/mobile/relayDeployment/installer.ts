@@ -9,6 +9,13 @@ import type { RelayArtifact } from './artifact.ts';
 import { ownership, preflight } from './preflight.ts';
 import { command, upload } from './sshClient.ts';
 
+export interface RelayInstallation {
+  replaced: boolean;
+  wasRunning: boolean;
+  rollback: () => Promise<void>;
+  dispose: () => Promise<void>;
+}
+
 /**
  * Формирует службу без прав root и с единственной capability для привилегированного порта.
  * systemd читает защищённый EnvironmentFile до перехода к отдельному пользователю.
@@ -53,7 +60,7 @@ export async function installRelay(
   job: DeploymentJob,
   artifact: RelayArtifact,
   env: string,
-): Promise<void> {
+): Promise<RelayInstallation> {
   if (await sha256File(artifact.file) !== artifact.digest) {
     throw new Error('relay_artifact_corrupt');
   }
@@ -61,6 +68,10 @@ export async function installRelay(
   const root = await preflight(session, job);
   const staging = `/tmp/grigdesk-relay-${randomUUID()}`;
   const quoted = shellQuote(staging);
+  const privileged = (script: string) => `${root ? '' : 'sudo -n '}sh -c ${shellQuote(script)}`;
+  const dispose = async () => {
+    await command(session, privileged(`rm -rf -- ${quoted}`)).catch(() => {});
+  };
 
   await command(session, `umask 077; mkdir ${quoted}`);
 
@@ -72,9 +83,30 @@ export async function installRelay(
 chmod 755 ${quoted}/binary
 printf '%s  %s\\n' '${artifact.digest}' ${quoted}/binary | sha256sum -c - >/dev/null
 ${quoted}/binary --version >/dev/null`);
-    await command(session, `${root ? '' : 'sudo -n '}sh -c ${shellQuote(installScript(job, staging))}`);
-  } finally {
-    await command(session, `rm -rf -- ${quoted}`).catch(() => {});
+
+    const result = await command(session, privileged(installScript(job, staging)));
+
+    return {
+      replaced: result.includes('previous=yes'),
+      wasRunning: result.includes('active=yes'),
+      rollback: async () => {
+        await command(session, privileged(rollbackScript(job, staging)));
+      },
+      dispose,
+    };
+  } catch (error) {
+    const retained = await command(session, privileged(`set -eu
+if [ -f ${quoted}/old-binary ] && [ ! -f ${quoted}/rollback-completed ]; then
+  printf kept
+else
+  rm -rf -- ${quoted}
+fi`)).then((result) => result === 'kept', () => true);
+
+    if (retained) {
+      throw new Error('remote_rollback_failed');
+    }
+
+    throw error;
   }
 }
 
@@ -104,6 +136,12 @@ if [ -f "$state/owner" ] && [ -f "$base/grigdesk-relay" ] && [ -f "$conf/relay.e
   cp -p "$unit" "$stage/old-unit"
   if systemctl is-active ${unitName} >/dev/null; then active=yes; fi
   if systemctl is-enabled ${unitName} >/dev/null; then enabled=yes; fi
+  if [ "$active" = yes ] && [ "$enabled" = yes ] \
+    && cmp -s "$stage/binary" "$base/grigdesk-relay" \
+    && cmp -s "$stage/relay.env" "$conf/relay.env" && cmp -s "$stage/unit" "$unit"; then
+    printf '%s\\n' unchanged
+    exit 0
+  fi
 else
   mkdir -p "$base" "$conf" "$state"
   chmod 755 "$base"
@@ -112,15 +150,13 @@ else
   chmod 600 "$state/owner"
 fi
 printf '%s\\n' installing > "$state/phase"
+printf '%s\\n' "$active" > "$stage/active"
+printf '%s\\n' "$enabled" > "$stage/enabled"
 rollback() {
   trap - EXIT HUP INT TERM
+  rm -f "$base/grigdesk-relay.next" "$conf/relay.env.next" "$unit.next"
   if [ "$old" = yes ]; then
-    cp -p "$stage/old-binary" "$base/grigdesk-relay"
-    cp -p "$stage/old-env" "$conf/relay.env"
-    cp -p "$stage/old-unit" "$unit"
-    systemctl daemon-reload || true
-    if [ "$enabled" = yes ]; then systemctl enable ${unitName} || true; fi
-    if [ "$active" = yes ]; then systemctl start ${unitName} || true; fi
+${restorePrevious(job)}
   else
     systemctl stop ${unitName} || true
     systemctl disable ${unitName} || true
@@ -133,7 +169,8 @@ rollback() {
     groupdel grigdesk-relay-${id} 2>/dev/null || true
     rmdir "$base" "$conf" "$state" 2>/dev/null || true
   fi
-  printf '%s\\n' recovery_required > "$state/phase"
+  if [ -d "$state" ]; then printf '%s\\n' recovery_required > "$state/phase"; fi
+  printf '%s\\n' restored > "$stage/rollback-completed"
   exit 1
 }
 trap rollback EXIT HUP INT TERM
@@ -148,8 +185,57 @@ mv "$conf/relay.env.next" "$conf/relay.env"
 mv "$unit.next" "$unit"
 systemctl daemon-reload
 systemctl enable ${unitName}
-systemctl start ${unitName}
+if [ "$active" = yes ]; then
+  systemctl restart ${unitName}
+else
+  systemctl start ${unitName}
+fi
 systemctl is-active ${unitName} >/dev/null
 printf '%s\\n' installed > "$state/phase"
-trap - EXIT HUP INT TERM`;
+trap - EXIT HUP INT TERM
+printf 'previous=%s\\nactive=%s\\n' "$old" "$active"`;
+}
+
+/**
+ * Возвращает прежние файлы атомарной заменой и восстанавливает активность и автозапуск.
+ * Тот же фрагмент применяется при отказе shell и после неудачного сетевого доказательства.
+ */
+function restorePrevious(job: DeploymentJob): string {
+  const unitName = `grigdesk-relay-${job.relayId}.service`;
+
+  return `systemctl stop ${unitName}
+cp -p "$stage/old-binary" "$base/grigdesk-relay.rollback"
+cp -p "$stage/old-env" "$conf/relay.env.rollback"
+cp -p "$stage/old-unit" "$unit.rollback"
+mv "$base/grigdesk-relay.rollback" "$base/grigdesk-relay"
+mv "$conf/relay.env.rollback" "$conf/relay.env"
+mv "$unit.rollback" "$unit"
+restored=yes
+systemctl daemon-reload || restored=no
+if [ "$enabled" = yes ]; then
+  systemctl enable ${unitName} || restored=no
+else
+  systemctl disable ${unitName} || restored=no
+fi
+if [ "$active" = yes ]; then systemctl start ${unitName} || restored=no; fi
+test "$restored" = yes`;
+}
+
+/**
+ * Откат после сетевого отказа допускается лишь для всё ещё установленного нами поколения.
+ * Изменённые кем-то другим файлы не затираются; потерянный SSH даёт явный recovery_required.
+ */
+function rollbackScript(job: DeploymentJob, staging: string): string {
+  return `set -eu
+exec 9>/run/grigdesk-relay-${job.public.port}.lock
+flock -n 9
+${ownership(job, false)}
+stage=${shellQuote(staging)}
+cmp -s "$stage/binary" "$base/grigdesk-relay"
+cmp -s "$stage/relay.env" "$conf/relay.env"
+cmp -s "$stage/unit" "$unit"
+active=$(cat "$stage/active")
+enabled=$(cat "$stage/enabled")
+${restorePrevious(job)}
+printf '%s\\n' restored > "$state/phase"`;
 }

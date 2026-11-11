@@ -53,6 +53,7 @@ export async function relayDeploymentSsh(t, options = {}) {
   const commands = [];
   const authentications = [];
   const writes = [];
+  const openingTimers = new Set();
   const platform = {
     id: 'ubuntu',
     arch: 'x86_64',
@@ -78,7 +79,7 @@ export async function relayDeploymentSsh(t, options = {}) {
   await fs.writeFile(path.join(root, 'stubs/os.cjs'), osAdapter);
 
   for (const command of ['id', 'getent', 'useradd', 'groupadd', 'userdel', 'groupdel',
-    'systemctl', 'ss', 'uname',
+    'systemctl', 'ss', 'uname', 'cut',
     'getconf', 'ldd', 'ldconfig', 'sudo', 'chown', 'mv', 'install',
     'apt', 'apt-get', 'npm', 'docker', 'ufw', 'iptables']) {
     await fs.writeFile(path.join(root, 'stubs', command),
@@ -120,12 +121,22 @@ export async function relayDeploymentSsh(t, options = {}) {
       const session = accept();
 
       session.on('exec', (acceptExec, _reject, info) => {
-        const channel = acceptExec();
+        const execute = () => {
+          const channel = acceptExec();
 
-        commands.push(info.command);
-        run(info.command, channel);
+          commands.push(info.command);
+          run(info.command, channel);
+        };
+
+        // Самопроверка фикстуры всегда проходит; задержка относится только к исследуемой команде.
+        if (info.command === 'printf fixture-ok') {
+          execute();
+        } else {
+          openLater(client, 'exec', execute);
+        }
       });
-      session.on('sftp', (acceptSftp) => serveSftp(acceptSftp(), root, writes, options));
+      session.on('sftp', (acceptSftp) => openLater(client, 'sftp', () =>
+        serveSftp(acceptSftp(), root, writes, options)));
     }));
   });
   await new Promise((resolve, reject) => {
@@ -133,6 +144,10 @@ export async function relayDeploymentSsh(t, options = {}) {
     listener.listen(0, '127.0.0.1', resolve);
   });
   t.after(async () => {
+    for (const timer of openingTimers) {
+      clearTimeout(timer);
+    }
+
     for (const client of clients) {
       client.end();
     }
@@ -178,6 +193,34 @@ export async function relayDeploymentSsh(t, options = {}) {
     password,
     hostVerifier: (fp) => fp === probed.fingerprint
   };
+
+  /**
+   * SSH может принять login, но не подтвердить exec/subsystem; это не разрыв TCP.
+   * Позднее подтверждение не вызывается после закрытия клиента и не запускает команды сиротой.
+   */
+  function openLater(client, kind, accept) {
+    if (options[`${kind}Open`] === 'missing') {
+      return;
+    }
+
+    const delay = options[`${kind}DelayMs`] ?? 0;
+
+    if (!delay) {
+      accept();
+
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      openingTimers.delete(timer);
+
+      if (clients.has(client)) {
+        accept();
+      }
+    }, delay);
+
+    openingTimers.add(timer);
+  }
 
   const control = new Client();
 
@@ -406,7 +449,15 @@ else if (command === 'ldd') console.log(platform.missingLibrary
   ? platform.missingLibrary + ' => not found' : 'ldd (GNU libc) ' + platform.glibc);
 else if (command === 'ldconfig') console.log(platform.missingLibrary ? '' :
   'libdl.so.2 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libpthread.so.0 libc.so.6 ld-linux-x86-64.so.2');
-else if (command === 'ss') console.log(platform.portBusy ? 'LISTEN 0 128 0.0.0.0:443' : '');
+else if (command === 'ss') console.log(platform.portBusy
+  ? 'LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:(("relay",pid=777,fd=10))' : '');
+else if (command === 'cut') {
+  if (args.at(-1) === '/proc/777/cgroup') console.log(platform.listenerGroup || '/foreign');
+  else {
+    const child = require('node:child_process').spawnSync('/usr/bin/cut', args, { stdio: 'inherit' });
+    process.exit(child.status || 0);
+  }
+}
 else if (command === 'id') {
   if (args.includes('-u') && args.length === 1) console.log(platform.root ? '0' : '1000');
   else if (state.users.includes(args.at(-1))) console.log('uid=991 gid=991');
@@ -435,15 +486,24 @@ else if (command === 'id') {
 } else if (command === 'systemctl') {
   if (!platform.systemd) fail();
   const unit = args.find(arg => arg.endsWith('.service')) || 'default';
+  if (platform.failStop && args.includes('stop')) fail();
   if (platform.failCommand && args.includes(platform.failCommand)) fail();
   if (args.includes('--version')) { console.log('systemd 249'); process.exit(0); }
   if (unit === 'default') process.exit(0);
+  if (args.includes('show')) {
+    console.log(state.units[unit]?.active ? '/system.slice/' + unit : '');
+    process.exit(0);
+  }
   state.units[unit] ||= { active: false, enabled: false };
   if (args.includes('is-active')) { console.log(state.units[unit].active ? 'active' : 'inactive');
     process.exit(state.units[unit].active ? 0 : 3); }
   if (args.includes('is-enabled')) { console.log(state.units[unit].enabled ? 'enabled' : 'disabled');
     process.exit(state.units[unit].enabled ? 0 : 1); }
-  if (args.includes('start') || args.includes('restart')) state.units[unit].active = true;
+  if (args.includes('restart') || args.includes('start') && !state.units[unit].active) {
+    state.generations ||= {};
+    state.generations[unit] = (state.generations[unit] || 0) + 1;
+    state.units[unit].active = true;
+  }
   if (args.includes('stop')) state.units[unit].active = false;
   if (args.includes('enable')) state.units[unit].enabled = true;
   if (args.includes('disable')) state.units[unit].enabled = false;

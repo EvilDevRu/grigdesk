@@ -307,3 +307,129 @@ test('RD-INSTALL-01: непривилегированный порт не пол
   assert.match(unit, /^CapabilityBoundingSet=\s*$/mu);
   assert.doesNotMatch(unit, /CAP_NET_BIND_SERVICE/u);
 });
+
+for (const owned of [true, false]) {
+  test(`RD-INSTALL-05: маркер не подменяет владельца порта; своя cgroup=${owned}`, async (t) => {
+    const { f, ssh, job } = await preview(t);
+
+    await startDeployment(f, job);
+
+    const ready = await waitDeployment(f, job.id, ['ready'], 15000);
+    const unit = `grigdesk-relay-${ready.relayId}.service`;
+
+    await ssh.setPlatform({
+      portBusy: true,
+      listenerGroup: owned ? `/system.slice/${unit}` : '/system.slice/foreign.service',
+    });
+
+    const next = await prepareDeployment(f, setupInput(f, {
+      requestId: 'owned-installation-port-check',
+      mode: 'restore',
+      name: undefined,
+      relayId: ready.relayId,
+      ssh: {
+        host: '127.0.0.1',
+        port: ssh.port,
+        user: 'root',
+      },
+      public: { host: '127.0.0.1', port: owned ? 443 : 5443 },
+    }), { password: ssh.password });
+
+    assert.equal(next.state, owned ? 'awaiting_confirmation' : 'failed');
+
+    if (!owned) {
+      assert.equal(next.error.code, 'relay_port_busy');
+    }
+  });
+}
+
+test('RD-INSTALL-06: новый порт применяется работающему relay; одинаковый повтор не перезапускает', {
+  timeout: 45000,
+}, async (t) => {
+  const f = await channelFixture(t);
+  const ssh = {
+    host: '127.0.0.1',
+    port: f.ssh.port,
+    user: 'root',
+  };
+  const first = await prepareDeployment(f, setupInput(f, {
+    ssh,
+    public: { host: '127.0.0.1', port: f.port },
+  }), { password: f.ssh.password });
+
+  await startDeployment(f, first);
+
+  const ready = await waitDeployment(f, first.id, ['ready'], 15000);
+  const port = await freePort();
+  const input = setupInput(f, {
+    requestId: 'change-existing-port',
+    mode: 'restore',
+    name: undefined,
+    relayId: ready.relayId,
+    ssh,
+    public: { host: '127.0.0.1', port },
+  });
+  const second = await prepareDeployment(f, input, { password: f.ssh.password });
+
+  await startDeployment(f, second);
+  await waitDeployment(f, second.id, ['ready'], 15000);
+  assert.equal((await f.mobile.relay(ready.relayId)).port, port);
+
+  const stateFile = path.join(f.ssh.root, 'var/lib/os-state.json');
+  const before = JSON.parse(await readFile(stateFile, 'utf8')).generations;
+  const repeated = await prepareDeployment(f, {
+    ...input,
+    requestId: 'repeat-identical-install',
+  }, { password: f.ssh.password });
+
+  await startDeployment(f, repeated);
+  await waitDeployment(f, repeated.id, ['ready'], 15000);
+  assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')).generations, before);
+});
+
+test('RD-INSTALL-07: сбой первого mv не оставляет каталоги без owner для следующего retry', {
+  timeout: 45000,
+}, async (t) => {
+  const { f, ssh, job } = await preview(t);
+
+  await ssh.setPlatform({ failCommand: 'mv' });
+  await startDeployment(f, job);
+
+  const failed = await waitDeployment(f, job.id, ['failed', 'recovery_required'], 15000);
+
+  await ssh.setPlatform({ failCommand: null });
+
+  const retry = await deploymentRequest(f, 'POST', `/${job.id}/retry`, {
+    requestId: 'retry-first-mv-failure',
+    revision: failed.revision,
+  });
+
+  assert.equal(retry.statusCode, 202, retry.body);
+
+  const probe = await deploymentRequest(f, 'POST', `/${job.id}/probe`, {
+    revision: retry.json().revision,
+  });
+
+  assert.equal(probe.statusCode, 200, probe.body);
+
+  const awaiting = await waitDeployment(f, job.id, ['awaiting_credentials']);
+  const credentials = await deploymentRequest(f, 'POST', `/${job.id}/credentials`,
+    Buffer.from(JSON.stringify({
+      revision: awaiting.revision,
+      attemptId: 'credentials-after-mv-failure',
+      password: ssh.password,
+    })), { 'content-type': 'application/octet-stream' });
+
+  assert.equal(credentials.statusCode, 202, credentials.body);
+
+  const previewAfterFailure = await waitDeployment(f, job.id, ['awaiting_confirmation', 'failed'], 15000);
+
+  assert.equal(previewAfterFailure.state, 'awaiting_confirmation');
+  assert.equal(previewAfterFailure.relayId, failed.relayId);
+  await startDeployment(f, previewAfterFailure, 'start-after-mv-failure');
+
+  const ready = await waitDeployment(f, job.id, ['ready'], 15000);
+
+  assert.equal(ready.relayId, failed.relayId);
+  assert.equal((await f.mobile.relays.list()).length, 1);
+});

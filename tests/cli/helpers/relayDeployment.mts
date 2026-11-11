@@ -13,7 +13,10 @@ import { startPty } from './pty.mts';
  * CLI получает короткую cookie через настоящий HTTP и только свой window-key файл.
  * Серверные DTO здесь синтетические: SSH и установка проверяются отдельными integration tests.
  */
-export async function relayCliFixture(t: TestContext, installed = false, options = { holdInstall: false }) {
+export async function relayCliFixture(t: TestContext, installed = false, options: {
+  holdInstall?: boolean;
+  jobs?: Record<string, unknown>[];
+} = {}) {
   const box = await sourceMenu(t);
   const calls: {
     method: string;
@@ -113,15 +116,19 @@ export async function relayCliFixture(t: TestContext, installed = false, options
 
     if (url === '/api/mobile/deployments' && request.method === 'GET') {
       response.end(JSON.stringify({
-        jobs: calls.some((call) => call.method === 'POST'
-          && call.url === url) ? [job] : []
+        jobs: [...(options.jobs ?? []), ...(calls.some((call) => call.method === 'POST'
+          && call.url === url) ? [job] : [])],
       }));
 
       return;
     }
 
     if (url === '/api/mobile/deployments' && request.method === 'POST') {
-      Object.assign(job, JSON.parse(body), { id: job.id, revision: 1 });
+      Object.assign(job, JSON.parse(body), {
+        id: job.id,
+        revision: 1,
+        state: 'draft',
+      });
       response.statusCode = 202;
     } else if (url.endsWith('/probe')) {
       Object.assign(job, {
