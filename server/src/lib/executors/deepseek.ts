@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { deepSeekAccess } from '../accessProfiles/drivers/api.ts';
+import { accessEnvironment } from '../accessProfiles/runtime.ts';
 import path from 'node:path';
 
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
@@ -219,10 +220,15 @@ const deepSeekAdapter = {
   probe(config: DeepSeekConfig) {
     return probeDeepSeekRuntime(config);
   },
-  auth() { return deepSeekAuth(process.env); },
+  auth() {
+    return deepSeekAuth(accessEnvironment());
+  },
   // Лимитов подписки у DeepSeek нет — есть предоплаченный счёт. Вместо «CLI не отдаёт
-  // лимиты» всплывашка получает остаток по валютам и темп его расхода.
-  usage(config: DeepSeekConfig) { return deepSeekUsage({ config, env: process.env }); },
+  // лимиты» всплывашка получает остаток по валютам и темп его расхода. Окружение
+  // берётся из access-снимка, поэтому профильный ключ виден без отдельного bind.
+  usage(config: DeepSeekConfig) {
+    return deepSeekUsage({ config, env: accessEnvironment() });
+  },
 
   mcpStatus(config: DeepSeekConfig) {
     return readDeepSeekMcpStatus(config);
@@ -319,5 +325,22 @@ const deepSeekAdapter = {
     return result;
   },
 };
+
+// Состояние счёта по умолчанию читает изолированный процесс: он не наследует
+// подмены fetch этого процесса. Тестам профилей доступа нужен фиксированный
+// HTTP-получатель, поэтому фабрика подменяет только транспорт usage, оставляя
+// остальные поля адаптера общими.
+export function createDeepSeekAdapter(deps: { usageFetch?: typeof fetch } = {}) {
+  return {
+    ...deepSeekAdapter,
+    ...(deps.usageFetch ? {
+      usage: (config: DeepSeekConfig) => deepSeekUsage({
+        config,
+        env: accessEnvironment(),
+        fetchImpl: deps.usageFetch,
+      }),
+    } : {}),
+  };
+}
 
 export default deepSeekAdapter;

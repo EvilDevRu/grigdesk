@@ -12,7 +12,6 @@ export class CliArgumentError extends Error {}
 
 export type Action = 'setup' | 'restore' | 'start' | 'stop' | 'restart' | 'status' | 'logs'
   | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
-  | 'check-updates' | 'update' | 'update-status' | 'resume-update' | 'update-channel';
 
 export type CliArgs = {
   kind: 'open' | 'status' | 'server' | 'relay' | 'device' | 'artifacts-cleanup' | 'help' | 'version';

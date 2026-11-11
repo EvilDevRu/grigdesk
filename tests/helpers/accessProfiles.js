@@ -10,7 +10,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
-import deepseek from '../../server/src/lib/executors/deepseek.ts';
+import deepseek, { createDeepSeekAdapter } from '../../server/src/lib/executors/deepseek.ts';
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import providersModule from '../../server/src/modules/providers/index.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
@@ -675,7 +675,7 @@ export async function serverWorker(t, fixture) {
  * GLM получает тот же env, из которого тест ожидает режим и выбранный ключ.
  */
 export function apiAdapters(env, vendor) {
-  return [deepseek, createGlmAdapter({
+  return [createDeepSeekAdapter({ usageFetch: vendor.fetchImpl }), createGlmAdapter({
     env,
     admission: [],
     usageFetch: vendor.fetchImpl
