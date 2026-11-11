@@ -288,6 +288,29 @@
   margin-top: 8px;
 }
 
+/* Ошибка в ленте разделяет заголовок, исходную причину и помощь по вертикали.
+   Длинные пути и строки диагностики переносятся без обрезки и сохраняют переводы строк. */
+.ui-inline-message[data-context='chat-turn-error'] {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.ui-inline-message[data-context='chat-turn-error'] .ui-inline-message__detail {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.ui-inline-message[data-context='chat-turn-error'] .chat-error-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ui-inline-message[data-context='chat-turn-error'] .ui-inline-message__actions {
+  margin-top: 10px;
+}
+
 /* Отказ загрузки истории остаётся под шапкой, а действие читается рядом с причиной.
    Узкая колонка переносит кнопку под текст без уменьшения области нажатия. */
 .ui-inline-message[data-context='chat-message-load'] {

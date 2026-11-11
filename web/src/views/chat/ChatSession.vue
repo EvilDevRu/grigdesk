@@ -466,8 +466,14 @@
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
               <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''" :chat-id="sid"
                             @click="onMarkdownClick" />
+              <UiInlineMessage v-else-if="m.role === 'error'" tone="danger"
+                               :heading="t('core.error')" data-context="chat-turn-error">
+                <span class="chat-error-reason">{{ m.text }}</span>
+                <template #actions>
+                  <HelpArticleLink variant="ghost" data-role="chat-error-help" />
+                </template>
+              </UiInlineMessage>
               <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span>
-              <HelpArticleLink v-if="m.role === 'error'" data-role="chat-error-help" />
 <span
                 v-if="m.role === 'user' && (validMessageTime(m.sentAt) || deliveryMark(m)?.kind === 'pending')"
                 class="m-meta">
@@ -3160,15 +3166,17 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   cursor: zoom-in; }
 /* md-текст не pre-wrap (маркдаун сам управляет блоками) */
 .msg.assistant .text.md { white-space: normal; }
-/* Ошибка — компактная плашка по содержимому, а не баннер во всю ширину */
 /* Обрыв связи — предупреждение, а не провал: цвет «внимание», не «ошибка». */
 .msg.offline { align-self: flex-start; max-width: 80%; }
 .msg.offline .text { background: color-mix(in srgb, var(--warn) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); color: var(--muted); }
-.msg.error { align-self: flex-start; max-width: 80%; }
-.msg.error .text { background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
-  color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
-.msg.error .text::before { content: '⚠ '; }
+/* Карточка растёт по содержимому, а длинная причина ограничена шириной ленты.
+   Оформление и перенос текста принадлежат общему feedback.css. */
+.msg.error {
+  align-self: flex-start;
+  min-width: 0;
+  max-width: min(100%, 680px);
+}
 
 /* Служебная плашка самого GrigDesk (сжали контекст, сбросили память агента) — это не
    реплика: её не говорил ни агент, ни человек. Поэтому по центру, без пузыря и подписи. */
