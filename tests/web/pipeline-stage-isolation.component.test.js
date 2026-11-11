@@ -89,8 +89,9 @@ async function mountPipelines(t, { running = false } = {}) {
           return pendingOptions.get(task).promise;
         }
 
-        const provider = new URL(url, 'http://fixture').searchParams.get('provider') || 'claude';
         const confirmed = confirmedByTask.get(task);
+        const provider = new URL(url, 'http://fixture').searchParams.get('provider')
+          || confirmed.selection.parametersFor;
 
         return provider === confirmed.selection.parametersFor ? confirmed : stageSettingsOptions({
           ...tasks.find((entry) => entry.task === task),
@@ -195,6 +196,7 @@ async function mountPipelines(t, { running = false } = {}) {
     alerts,
     optionsRequests,
     pendingOptions,
+    confirmedByTask,
     /**
      * Закрывает прежнее окно и открывает узел публичным событием нужного графа.
      * Все ожидающие ответы при этом продолжают принадлежать прежним запросам.
@@ -468,4 +470,60 @@ test('dirty-draft-survives-refresh', async (t) => {
   assert.equal(settingsFields(fx.wrapper)[0].element.value, 'opus-other');
   assert.equal(settingsFields(fx.wrapper)[1].element.value, 'low');
   assert.equal(fx.posts.some((post) => post.url.endsWith('/runner/settings')), false);
+});
+
+test('new-live-run-refreshes-cas-without-replacing-draft', async (t) => {
+  const fx = await mountPipelines(t, { running: true });
+  const legacy = {
+    id: 'legacy-without-epoch',
+    epoch: null,
+    runner: 'claude',
+  };
+
+  fx.graphs[0].nodeMeta.browser.runner.attempts = [
+    {
+      id: 'run-current',
+      epoch: 1,
+      runner: 'claude',
+    },
+    legacy,
+  ];
+  await fx.wrapper.vm.load();
+  await fx.open(0);
+  await fx.wrapper.get('#stage-executors-tab').trigger('click');
+  await settingsFields(fx.wrapper)[1].setValue('high');
+
+  const current = fx.confirmedByTask.get(42);
+  const nextRun = { id: 'run-after-restart', epoch: 2 };
+
+  fx.confirmedByTask.set(42, {
+    ...current,
+    actual: { ...current.actual, run: nextRun },
+  });
+  fx.graphs[0].nodeMeta.browser.runner.attempts = [
+    {
+      ...nextRun,
+      runner: 'claude',
+      model: 'opus',
+      effort: 'max',
+    },
+    legacy,
+  ];
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+  assert.equal(settingsFields(fx.wrapper)[1].element.value, 'high');
+
+  const requests = fx.optionsRequests.length;
+
+  fx.graphs[0].nodeMeta.browser.tokens = 100;
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+  assert.equal(fx.optionsRequests.length, requests, 'обновление токенов не перечитывает каталог');
+  await settingsButton(fx.wrapper, /Сохранить для следующего запуска/).trigger('click');
+  await fx.flushPromises();
+
+  const request = fx.posts.find((post) => post.url.endsWith('/runner/settings'));
+
+  assert.deepEqual(request?.body.expectedRun, nextRun);
+  assert.equal(request?.body.selection.effort, 'high');
 });

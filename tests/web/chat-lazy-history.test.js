@@ -378,6 +378,7 @@ test('HEAD-UNREAD: окончательный ответ уведомляет о
   assert.equal(chatNotifications().length, 0);
   await writeChat(world, {
     ...original,
+    unread: true,
     messages: [...original.messages,
     {
       role: 'assistant',
@@ -878,3 +879,101 @@ for (const failure of ['detail', 'put']) {
     assert.equal(copy.messages.filter((message) => message.pid === 'saved-only01').length, 1);
   });
 }
+
+test('RESYNC-LITE: сверка после обрыва шлёт только показанные и открытые id', async (t) => {
+  const shown = [sampleChat('resync-shown-a'), sampleChat('resync-shown-b')];
+  const world = await serverWorld(t, shown);
+  const view = await world.open();
+
+  // Шапка чата, давно покинувшего показ (вытеснен страницей или переездом группы),
+  // остаётся в известных версиях — но не должна гонять сверку после каждого обрыва.
+  const { head } = (await world.app.inject('/api/chat/store/head/resync-shown-b')).json();
+
+  await view.chat._applyChatHead({ ...head, id: 'resync-retired', title: 'Покинул показ' });
+
+  const page = view.chat.pageFor('', false);
+
+  page.ids = page.ids.filter((id) => id !== 'resync-retired');
+  page.overlayIds = page.overlayIds.filter((id) => id !== 'resync-retired');
+
+  const known = await new Promise((resolve) => {
+    const api = view.api;
+
+    assert.ok(api, 'тестовый мир держит сеть вкладки');
+
+    const original = api.post.bind(api);
+
+    api.post = async (url, body) => {
+      if (url === '/api/chat/store/changes') {
+        resolve({ ...(body?.known || {}) });
+      }
+
+      return original(url, body);
+    };
+
+    void view.chat._resyncStore();
+  });
+
+  assert.equal(known['resync-retired'], undefined,
+    'версия вне показа не участвует в сверке после обрыва');
+  assert.notEqual(known[shown[0].id], undefined, 'показанная строка по-прежнему сверяется');
+});
+
+test('HEAD-EVENT: шапка в событии chat-store применяется без чтения с сервера', async (t) => {
+  const original = sampleChat('head-event');
+  const world = await serverWorld(t, [original]);
+  const { chat, sse, calls } = await world.open();
+
+  const { head: renamed } = (await world.app.inject(`/api/chat/store/head/${original.id}`)).json();
+
+  const before = calls.length;
+
+  sse('chat-store', {
+    id: original.id,
+    origin: 'foreign-window',
+    head: { ...renamed, title: 'Имя из события', revision: (renamed.revision || 0) + 1 },
+  });
+  await new Promise(setImmediate);
+
+  assert.equal(chat._find(original.id).title, 'Имя из события');
+
+  const reads = calls.slice(before).filter((call) => call.method === 'GET');
+
+  assert.equal(reads.length, 0, 'шапка события не порождает чтений с сервера');
+});
+
+test('HEAD-EVENT-BURST: пачка событий одного чата склеивается, последнее состояние побеждает', async (t) => {
+  const original = sampleChat('head-event-burst');
+  const world = await serverWorld(t, [original]);
+  const { chat, sse, calls } = await world.open();
+
+  const { head } = (await world.app.inject(`/api/chat/store/head/${original.id}`)).json();
+  const before = calls.length;
+
+  sse('chat-store', {
+    id: original.id,
+    origin: 'foreign-window',
+    head: { ...head, title: 'Первое', revision: (head.revision || 0) + 1 },
+  });
+  sse('chat-store', {
+    id: original.id,
+    origin: 'foreign-window',
+    head: { ...head, title: 'Второе', revision: (head.revision || 0) + 2 },
+  });
+  sse('chat-store', {
+    id: original.id,
+    origin: 'foreign-window',
+    head: { ...head, title: 'Третье', revision: (head.revision || 0) + 3 },
+  });
+  await new Promise(setImmediate);
+
+  assert.equal(chat._find(original.id).title, 'Первое', 'первое событие применяется сразу');
+
+  await new Promise((resolve) => setTimeout(resolve, 450));
+
+  assert.equal(chat._find(original.id).title, 'Третье', 'повторы склеились в последнюю шапку');
+
+  const reads = calls.slice(before).filter((call) => call.method === 'GET');
+
+  assert.equal(reads.length, 0, 'склейка не порождает чтений с сервера');
+});

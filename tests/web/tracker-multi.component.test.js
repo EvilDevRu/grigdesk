@@ -56,13 +56,26 @@ test('MD-SETTINGS-UI: включения A/B независимы, default вы�
   assert.equal(card.wrapper.get('[data-role="tracker-editor-enabled"]').text(), 'Включён');
   assert.equal(card.wrapper.get('[data-role="tracker-editor-in-use"]').text(), 'По умолчанию');
 
-  const defaultControl = card.wrapper.find('select[aria-label="Доска по умолчанию"]');
+  assert.equal(card.wrapper.get('[data-role="tracker-make-default"]').element.disabled, true,
+    'Текущий черновой дефолт уже выбран');
+  await card.wrapper.get('[data-driver="fixture-a"]').trigger('click');
+  await card.wrapper.get('[data-role="tracker-board-enabled"]').setValue(false);
 
-  assert.ok(defaultControl.exists(), 'Доска по умолчанию выбирается отдельным control');
-  await defaultControl.setValue('fixture-a');
+  const makeDefault = card.wrapper.get('[data-role="tracker-make-default"]');
+
+  assert.equal(makeDefault.text(), 'По умолчанию');
+  assert.equal(makeDefault.element.disabled, false, 'Выключенный доступный драйвер можно назначить основным');
+  await makeDefault.trigger('click');
+  assert.equal(card.wrapper.get('[data-role="tracker-board-enabled"]').element.checked, true,
+    'Назначение основной доски включает её');
+  assert.equal(makeDefault.element.disabled, true);
+  assert.equal(makeDefault.attributes('aria-pressed'), 'true');
+  assert.equal(card.state.catalog.default, 'fixture-b', 'До сохранения действует прежняя основная доска');
+  assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
+  await card.wrapper.get('[data-driver="fixture-b"]').trigger('click');
   assert.equal(card.wrapper.get('[data-driver="fixture-b"] [data-role="tracker-in-use"]').text(),
     'По умолчанию', 'Несохранённый дефолт не перемещает чип');
-  await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
   await card.flushPromises();
 
   const write = card.apiCalls.find((call) => call.method === 'POST' && call.url === '/api/trackers/settings');

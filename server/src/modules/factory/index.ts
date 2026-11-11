@@ -2294,6 +2294,81 @@ async function factoryModule(
     }
   });
 
+  // Ручная перепривязка рантайма остановленной попытки. Автоматическое снятие
+  // закрепления получает только несовместимость поставки (маркер движка), поэтому
+  // попытка, чей закреплённый движок исправен, но отстал от сервера, застревает
+  // на старом helper-е навсегда: явное решение человека завершает этот класс отказов.
+  fastify.post<FactoryRoute>('/api/tasks/:id/runtime-rebind', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+
+    if (!id) {
+      return reply.code(400).send({ error: 'bad_input' });
+    }
+
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    const { registry, trusted } = managed;
+
+    if (trusted.terminal) {
+      return reply.code(409).send({
+        error: 'attempt_terminal',
+        message: `попытка закрыта (${trusted.terminal})`,
+      });
+    }
+
+    // Снятие пина живого прогона убирает защиту reservation у работающего движка:
+    // действие осмысленно и безопасно только у остановленного прогона.
+    if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+      return reply.code(409).send({
+        error: 'run_in_progress',
+        message: 'Прогон выполняется: перепривязка доступна только остановленному прогону.',
+      });
+    }
+
+    let outcome: { unpinned: boolean; packageId: string | null };
+
+    try {
+      outcome = await unpinFactoryRuntimeAttempt({
+        controlRoot: config.factoryControlDir,
+        stateRoot: config.stateDir,
+        profileRoot: config.profilesDir,
+        cacheDir: config.runtime?.cacheDir
+          ?? dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime'),
+        task: id,
+        attempt: trusted.attempt,
+        profile: trusted.profile,
+      });
+    } catch (error) {
+      fastify.log.warn(
+        { task: id, err: (error as Error).message },
+        'runtime-rebind: закрепление не снято',
+      );
+
+      return reply.code(409).send({
+        error: 'rebind_failed',
+        message: 'Закрепление не снято: попытка расходится с trusted ledger или pin повреждён.',
+      });
+    }
+
+    fastify.log.warn(
+      { task: id, packageId: outcome.packageId },
+      'runtime-rebind: закрепление снято, следующий запуск закрепит текущую поставку',
+    );
+
+    return {
+      ok: true,
+      unpinned: outcome.unpinned,
+      packageId: outcome.packageId,
+      note: outcome.unpinned
+        ? 'Закрепление снято: следующий запуск попытки закрепит текущую поставку сервера.'
+        : 'Закрепления не было — привязывать нечего.',
+    };
+  });
+
   // Читающий разбор и явное применение имеют одного владельца admission.
   // Старый адрес /arbitrate подтверждает запуск диалога, не двигая курсор.
   const conversationStore = opts.arbiterConversations || new ArbiterConversationStore(
@@ -2378,7 +2453,8 @@ async function factoryModule(
         const { provider, ...fields } = query;
         const identity = decodeStageRunnerIdentity({ task: request.params.id, ...fields });
 
-        if (typeof provider !== 'string' || !/^[a-z][a-z0-9_-]*$/u.test(provider)) {
+        if (provider !== undefined
+          && (typeof provider !== 'string' || !/^[a-z][a-z0-9_-]*$/u.test(provider))) {
           throw new RunnerControlInputError('Некорректный исполнитель.');
         }
 

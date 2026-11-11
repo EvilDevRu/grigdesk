@@ -2,9 +2,7 @@
 import { constants, promises as fs } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { config } from '../../config.ts';
-import { LEGACY } from '../../../../shared/runtime/legacyBrand.ts';
 
 export const CHAT_IMAGE_MAX_BYTES = 10_000_000;
 
@@ -36,8 +34,7 @@ export async function readChatImage(
   try {
     const workRoots = [cwd, ...extraDirs].map((root) => path.resolve(root));
     const workCanonical = await Promise.all(workRoots.map((root) => fileSystem.realpath(root)));
-    const aliases = await legacyArtifactRoots(path.resolve(cwd, requested), fileSystem);
-    const executorRoots = [...await existingRoots(imageRoots, fileSystem), ...aliases];
+    const executorRoots = await existingRoots(imageRoots, fileSystem);
     const requestedRoots = [...workRoots, ...executorRoots.map(([root]) => root)];
     const canonicalRoots = [...workCanonical, ...executorRoots.map(([, canonical]) => canonical)];
     const file = path.resolve(cwd, requested);
@@ -109,36 +106,6 @@ export async function readChatImage(
     }
 
     return { status: 500, error: 'image_read_failed' };
-  }
-}
-
-/**
- * Исторический путь допускается только через ссылку на текущую папку данных.
- * Проверяются лишь запрошенные старые artifacts; проверка канонического пути и fd остаётся общей.
- */
-async function legacyArtifactRoots(
-  requested: string, fileSystem: ChatImageFileSystem,
-): Promise<Array<[string, string]>> {
-  const oldHome = path.join(os.homedir(), LEGACY.dataHomeDir);
-  const root = path.join(oldHome, 'artifacts');
-
-  if (!isWithinChatImageRoot(requested, root)) {
-    return [];
-  }
-
-  try {
-    if (!(await fs.lstat(oldHome)).isSymbolicLink()) {
-      return [];
-    }
-
-    const [old, current] = await Promise.all([
-      fileSystem.realpath(oldHome),
-      fileSystem.realpath(config.dataHome),
-    ]);
-
-    return old === current ? [[root, path.join(current, 'artifacts')]] : [];
-  } catch {
-    return [];
   }
 }
 

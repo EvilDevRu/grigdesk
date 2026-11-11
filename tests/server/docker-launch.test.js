@@ -34,7 +34,6 @@ async function fixture(t, { stubNpm = false } = {}) {
     await mkdir(path.join(directory, relative), { recursive: true });
   }
   for (const file of ['shared/runtime/dataHome.ts', 'shared/package.json',
-    'shared/runtime/legacyBrand.ts',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts', ...SOURCE_RUNTIME_FILES]) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await copyFile(path.join(root, file), path.join(directory, file));

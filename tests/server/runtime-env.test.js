@@ -7,7 +7,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { isNodeVersionSupported } from '../../server/src/lib/nodeVersion.ts';
-import { LEGACY, LEGACY_DATA_PATHS } from '../../shared/runtime/legacyBrand.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const helper = path.join(root, 'deploy', 'lib', 'runtime-env.sh');
@@ -30,68 +29,9 @@ grigdesk_add_cli_paths
 printf '%s\n' "$PATH"
 `;
 
-test('GE-07: запускалки отвергают старые ключи корней с кодом 78', (t) => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-old-env-'));
 
-  t.after(() => rmSync(home, { recursive: true, force: true }));
 
-  for (const suffix of ['HOME', 'ENV_FILE']) {
-    for (const command of ['grigdesk_load_runtime_env', 'grigdesk_require_migrated']) {
-      const result = spawnSync('bash', ['-c', 'source "$1"; "$2" "$3" source',
-        '_', helper, command, home], {
-        env: {
-          PATH: process.env.PATH,
-          HOME: home,
-          [`${LEGACY.envPrefix}${suffix}`]: '/forbidden',
-        },
-        encoding: 'utf8',
-      });
 
-      assert.equal(result.status, 78, result.stderr);
-      assert.match(result.stderr, new RegExp(`GRIGDESK_${suffix}`));
-      assert.equal(existsSync(path.join(home, '.grigdesk')), false);
-    }
-  }
-});
-
-test('GB-07: bash сохраняет отказы матрицы папки данных', (t) => {
-  for (const layout of ['old', 'both', 'internal']) {
-    const directory = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-home-matrix-'));
-    const home = path.join(directory, 'home');
-    const code = path.join(directory, 'code');
-
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
-    mkdirSync(home);
-    mkdirSync(code);
-
-    if (layout !== 'internal') {
-      mkdirSync(path.join(home, LEGACY.dataHomeDir));
-    }
-
-    if (layout !== 'old') {
-      mkdirSync(path.join(home, '.grigdesk'));
-    }
-
-    if (layout === 'internal') {
-      const file = path.join(home, '.grigdesk', LEGACY_DATA_PATHS[1][0]);
-
-      mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, '{}');
-    }
-
-    const result = spawnSync('bash', ['-c', 'source "$1"; grigdesk_require_migrated "$2" source',
-      '_', helper, code], {
-      env: {
-        PATH: process.env.PATH,
-        HOME: home,
-      },
-      encoding: 'utf8',
-    });
-
-    assert.equal(result.status, 78, `${layout}: ${result.stderr}`);
-    assert.match(result.stderr, /mv -T|две папки данных|brandMove.mts --apply/);
-  }
-});
 
 test('общий preflight соблюдает Node compatibility встроенного DeepSeek', () => {
   const versionProbe = String.raw`
@@ -299,4 +239,23 @@ test('RE-DH-5 остановка ждёт PID и завершает только
       assert.ok(Date.now() - before >= 900);
     }
   }
+});
+
+test('GE-NEW: старые ключи корней не вызывают отказ запускалки', (t) => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-new-env-'));
+
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+
+  const result = spawnSync('bash', ['-c', probe, '_', helper, home], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: home,
+      COCKPIT_HOME: '/forbidden'
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '8140');
+  assert.equal(result.stderr, '');
 });

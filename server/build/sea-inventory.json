@@ -98,7 +98,7 @@
       "count": 1,
       "owner": "task-12",
       "fate": "compat-wrapper",
-      "detail": "Shell на прежнем пути находит helper data-home и модуль legacyBrand комплекта."
+      "detail": "Проверка раскладки данных GrigDesk"
     },
     {
       "file": "deploy/lib/runtime-env.sh",
@@ -108,15 +108,6 @@
       "owner": "task-17",
       "fate": "development-only",
       "detail": "Явная команда SEA и проверка готового R; source app.ts только в прежней ветке."
-    },
-    {
-      "file": "deploy/lib/runtime-env.sh",
-      "construct": "shell-ref",
-      "target": "shared/runtime/legacyBrand.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "Shell на прежнем пути находит helper data-home и модуль legacyBrand комплекта."
     },
     {
       "file": "deploy/restart.sh",
@@ -788,7 +779,7 @@
       "file": "server/src/binary/workerBootstrap.ts",
       "construct": "exec-path",
       "target": "",
-      "count": 1,
+      "count": 3,
       "owner": "task-19",
       "fate": "package",
       "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
@@ -1523,15 +1514,6 @@
       "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
     },
     {
-      "file": "deploy/lib/runtime-env.sh",
-      "construct": "shell-ref",
-      "target": "server/runtime/helpers/legacy-brand.mjs",
-      "count": 1,
-      "owner": "task-16",
-      "fate": "helper",
-      "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
-    },
-    {
       "file": "server/scripts/help/buildHelpSite.mts",
       "construct": "exec-path",
       "target": "",
@@ -1774,14 +1756,6 @@
       "owner": "task-17",
       "fate": "compat-wrapper",
       "detail": "Единая команда выбирает бинарник комплекта или исходный сервер."
-    },
-    {
-      "path": "shared/runtime/legacyBrand.ts",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "Shell читает префиксы через обёртку комплекта."
     },
     {
       "path": "server/scripts/dataHomeCheck.mts",

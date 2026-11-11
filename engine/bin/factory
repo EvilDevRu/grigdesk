@@ -2790,16 +2790,9 @@ v2_bootstrap_pause() {
 v2_lifecycle_begin_human_for_stop() {
   local attempt=$1 stop=$2 reason evidence
   runtime_lifecycle_enabled_v2 || return 0
-  case "$stop" in
-    # Потолок кругов цикла — тот же исчерпанный бюджет автоматических возвратов:
-    # закрытый словарь аналитики не расширяется ради синонима.
-    rewind-limit|loop-ceiling) reason=rewind_limit ;;
-    no-progress) reason=no_progress ;;
-    human) reason=manual_resume_required ;;
-    *) reason=operator_requested ;;
-  esac
+  reason=$(runtime_lifecycle_stop_reason_v2 "$stop") || return
   evidence=$(v2_lifecycle_latest_stage_hash "$attempt") || return
-  runtime_lifecycle_human_begin_v2 "$reason" "$evidence" >/dev/null
+  runtime_lifecycle_human_begin_once_v2 "$reason" "$evidence" >/dev/null
 }
 
 v2_on_signal() {
@@ -3003,6 +2996,17 @@ v2_main() {
       return 0
     fi
     bootstrap_decision_hash=$(jq -r '.decision.recordHash // empty' <<<"$bootstrap_journal") || return 78
+    # Сбой после event rename нельзя отдать первому strict read в runner preflight.
+    # Уже удерживаем orchestrator lock; helper берёт task-state lock и чинит лишь exact pointer.
+    if [[ -e "$ROUTE_V2_ATTEMPT_DIR/pending-transition.json" ||
+          -L "$ROUTE_V2_ATTEMPT_DIR/pending-transition.json" ]]; then
+      _route_v2_pending_origin_check "$TASK" "$EXPECTED_ATTEMPT" || return
+      attempt_stage_state_reconcile_pending_v2 "$TASK" "$EXPECTED_ATTEMPT" || {
+        rc=$?
+        v2_log "resume: сохранённый переход не прошёл проверку восстановления (код $rc)"
+        return "$rc"
+      }
+    fi
   fi
 
   # Решение человека на воротах в режиме --commit-only не запускает ни одного
@@ -3146,6 +3150,30 @@ v2_main() {
       # Остановка по потолку кругов без поднятого потолка: отказ до сессии lifecycle,
       # закрытия вмешательства человека и снятия STALLED_HUMAN — журнал, реестр и
       # lifecycle продолжают согласованно говорить «ждёт человека». Подсказка — в журнале.
+      # После accepted stop дописываем только проекции до read-only hold.
+      # Режим 2 не запускает модель, commit или снимок ещё не установленных workspace roots.
+      _route_v2_pending_wait_probe "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 0 )); then
+        v2_lifecycle_begin_session "$attempt" resume "$ROUTE" "$route_hash" || return
+        _route_v2_pending_drive "$TASK" "$attempt" 2 >/dev/null
+        rc=$?
+        if (( rc != 0 && rc != 21 )); then return "$rc"; fi
+        cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
+        stop=$(json_value stop <<<"$cursor") || return 78
+        stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
+        set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop" || return
+        v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
+        _route_v2_pending_ack_stop "$TASK" "$attempt" || return
+        v2_log "recovery: проекция остановки восстановлена без повторного узла"
+        v2_log "${stop_node^^}: маршрут остановлен: $stop"
+      elif (( rc != 3 )); then
+        return "$rc"
+      fi
+      route_v2_recovered_stop_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then return 0; fi
+      (( rc == 0 )) || return "$rc"
       route_v2_loop_ceiling_held "$TASK" "$attempt"
       rc=$?
       if (( rc == 11 )); then
@@ -3163,12 +3191,13 @@ v2_main() {
         return "$rc"
       fi
     fi
-    v2_lifecycle_begin_session \
-      "$attempt" resume "$ROUTE" "$route_hash" || {
+    if [[ "$V2_LIFECYCLE_SESSION_OPEN" != 1 ]]; then
+      v2_lifecycle_begin_session "$attempt" resume "$ROUTE" "$route_hash" || {
         rc=$?
         v2_log "lifecycle resume не открыт (код $rc)"
         return "$rc"
       }
+    fi
     v2_lifecycle_resolve_human \
       "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" \
       "$bootstrap_decision_hash" || {
@@ -3387,6 +3416,11 @@ v2_main() {
       v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || {
         rc=$?
         v2_log "маршрут остановлен: $stop; lifecycle вмешательства человека не открыт (код $rc)"
+        return "$rc"
+      }
+      _route_v2_pending_ack_stop "$TASK" "$attempt" || {
+        rc=$?
+        v2_log "stop projection сохранена, но pending ack не завершён (код $rc)"
         return "$rc"
       }
       if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then

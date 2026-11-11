@@ -7,6 +7,7 @@ import { applyPayload, cliJson } from '../helpers/stageRunnerSettingsFixture.mjs
 import {
   FactoryRunnerControl,
   RunnerControlInputError,
+  StageRunnerCommandError,
 } from '../../server/src/lib/runnerControl.ts';
 
 test('runner control invokes only the canonical factory switch command', async () => {
@@ -136,9 +137,73 @@ test('settings-argv-with-identity', async (t) => {
   assert.equal(typeof control.applySettings, 'function');
   await control.applySettings(payload);
 
+  const saved = await control.settingsOptions({ identity });
+
+  assert.deepEqual(saved.selection, payload.selection);
+
+  await assert.rejects(
+    control.settingsOptions({ identity, provider: 'alpha;false' }), RunnerControlInputError,
+  );
+
   const appliedCalls = await fx.engineCalls();
   const applyArgs = appliedCalls.find((entry) => entry.slice(0, 4).join(' ') === '81 runner settings apply');
 
   assert.ok(applyArgs);
   assert.deepEqual(JSON.parse(applyArgs[applyArgs.indexOf('--payload') + 1]), payload);
+
+  const showArgs = appliedCalls.find((entry) => entry.slice(0, 4).join(' ') === '81 runner settings show');
+
+  assert.ok(showArgs, 'bootstrap читает сохранённую selection через pinned show');
+  assert.equal(showArgs.includes('--provider'), false);
+});
+
+// Диагностика движка не обязана содержать локализованный текст таймаута.
+// После неопределённого исхода возвращается receipt уже принятой записи.
+test('settings recovers timeout receipt independently of stderr text', async (t) => {
+  const fx = await settingsServer(t);
+  const options = cliJson(fx.cli('options', ['--provider', 'alpha']));
+  const payload = applyPayload(options);
+  const accepted = {
+    ...options,
+    revision: options.revision + 1,
+    selection: payload.selection,
+    receipt: { requestId: payload.requestId, state: 'saved' },
+  };
+  const calls = [];
+  const control = new FactoryRunnerControl({
+    factoryBin: fx.config.factoryBin,
+    stateDir: fx.config.stateDir,
+    configRoot: fx.config.factoryConfigRoot,
+  });
+
+  control.settingsCommand = async (operation) => {
+    calls.push(operation);
+
+    if (operation === 'apply') {
+      throw new StageRunnerCommandError(1, 'fixture post-commit warning', true);
+    }
+
+    return operation === 'show' ? accepted : options;
+  };
+
+  assert.deepEqual(await control.applySettings(payload), accepted);
+  assert.deepEqual(calls, ['options', 'apply', 'show']);
+
+  calls.length = 0;
+  control.settingsCommand = async (operation) => {
+    calls.push(operation);
+
+    if (operation === 'apply') {
+      throw new StageRunnerCommandError(75, 'fixture: не уложился в доступную квоту');
+    }
+
+    return options;
+  };
+
+  await assert.rejects(control.applySettings(payload), (error) => {
+    assert.equal(error.timedOut, false);
+
+    return error instanceof StageRunnerCommandError;
+  });
+  assert.deepEqual(calls, ['options', 'apply'], 'обычный отказ не маскируется прежним receipt');
 });

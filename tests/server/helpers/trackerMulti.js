@@ -69,8 +69,17 @@ export default function createDriver(host) {
     listTasks: async () => [task],
     getDashboard: async () => {
       record('getDashboard', []);
-      if (control().dashboardError) throw new Error(control().dashboardError);
-      return { tasks: [task], toReview: [], created: [], widgets: [] };
+
+      if (control().dashboardError) {
+        throw new Error(control().dashboardError);
+      }
+
+      return {
+        tasks: [{ ...task, ...(control().task ?? {}) }],
+        toReview: [],
+        created: [],
+        widgets: [],
+      };
     },
     taskDetail: async (id) => { record('taskDetail', [id]); return task; },
     taskPageData: async (id) => { record('taskPageData', [id]); return { comments: [] }; },

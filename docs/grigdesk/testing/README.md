@@ -8,6 +8,7 @@
 
 ## Грабли
 
+- [JVM смены маршрута: стандартное окружение, честный skip и обязательный Java-прогон](relay-route-jvm-launcher.md)
 - [Happy-dom: отключённый CSS посылает преждевременный error](happy-dom-disabled-css-transport.md) — проверяемый HTTP receipt перед load/error.
 - [Happy DOM: условие после :root применяется без проверки атрибута](happy-dom-root-selector.md)
 - [Navigator.locks Node и удержанный ответ фикстуры окна](node-navigator-locks.md)

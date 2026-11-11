@@ -4,6 +4,7 @@ import {
   formatDeepSeekMoney,
 } from '../deepseek/balance.ts';
 import { usagePercentOrNull } from '../providerUsage.ts';
+import { isolatedFetch } from '../isolatedFetch.ts';
 import { parseGlmAccessMode, selectGlmServiceKey } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 import { glmPricingStatus, watchGlmPricing } from './pricingWatch.ts';
@@ -380,7 +381,7 @@ async function codingPlanUsage(
 export async function glmUsage({
   env,
   runtimeHome,
-  fetchImpl = fetch,
+  fetchImpl = isolatedFetch,
   now = Date.now,
 }: GlmUsageOptions): Promise<Record<string, unknown>> {
   const mode: GlmAccessMode | null = parseGlmAccessMode(env.GRIGDESK_GLM_API_MODE);

@@ -131,6 +131,7 @@ export class TerminalSession {
   private raw = false;
   private paused = true;
   private active = false;
+  private attached = false;
   private onResize: (() => void) | undefined;
   private previousFrame: TerminalFrame | undefined;
 
@@ -191,6 +192,7 @@ export class TerminalSession {
     this.paused = this.input.readableFlowing !== true;
     emitKeypressEvents(this.input);
     this.input.on('keypress', this.keypress);
+    this.attached = true;
     this.input.on('end', this.end);
     this.output.on('resize', this.resize);
     process.on('SIGINT', this.interrupt);
@@ -202,6 +204,7 @@ export class TerminalSession {
       return await action();
     } finally {
       this.active = false;
+      this.attached = false;
       this.input.setRawMode?.(this.raw);
       this.input.removeListener('keypress', this.keypress);
       this.input.removeListener('end', this.end);
@@ -221,10 +224,18 @@ export class TerminalSession {
 
   /**
    * Внешняя команда получает обычный ввод и видимый курсор.
+   * Слушатель клавиш снимается: вложенный мастер не должен делить нажатия с меню.
    * После её вывода сохранённые позиции строк больше не считаются достоверными.
    */
   suspend(): void {
     this.previousFrame = undefined;
+    const pending = this.reader;
+
+    this.reader = undefined;
+    pending?.({ name: '', text: '' });
+    this.queue.length = 0;
+    this.input.removeListener('keypress', this.keypress);
+    this.attached = false;
     this.input.setRawMode?.(this.raw);
     this.input.pause();
 
@@ -235,10 +246,18 @@ export class TerminalSession {
 
   /**
    * Возобновление возвращает только ввод меню после завершения обычной команды.
+   * Очередь нажатий внешней команды отбрасывается: реплей клавиш недопустим.
    * Скрытие курсора не применяется к терминалам без управления позиционированием.
    */
   resume(): void {
     if (this.active) {
+      // Слушатель добавляется один раз: повторный add дублировал бы каждое нажатие.
+      if (!this.attached) {
+        this.queue.length = 0;
+        this.input.addListener('keypress', this.keypress);
+        this.attached = true;
+      }
+
       this.input.setRawMode?.(true);
       this.input.resume();
 
@@ -246,6 +265,17 @@ export class TerminalSession {
         this.output.write('\x1b[?25l');
       }
     }
+  }
+
+  /**
+   * Освобождает подвешенного читателя без потери будущего SIGINT.
+   * Пустое имя не выполняет никаких веток и только закрывает осиротевший промис.
+   */
+  cancelReader(): void {
+    const pending = this.reader;
+
+    this.reader = undefined;
+    pending?.({ name: '', text: '' });
   }
 
   nextKey(): Promise<TerminalKey> {

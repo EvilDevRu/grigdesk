@@ -492,13 +492,16 @@ test('отказ head после named409 не отправляет full и со
   assert.equal(requests[1].url.endsWith('/step-reuse'), true);
 });
 
-test('head в chat-store обновляет dirty-каталог без detail и сброса refs', async () => {
+test('head в chat-store сверяет dirty полную ленту без сброса черновика и refs', async () => {
   const { chat, session, requests, reads } = await setup();
 
   session.draft = 'Несохранённый черновик';
   reads.length = 0;
+  // Full-протокол читает detail для объединения чужих финалов. Одной шапки
+  // достаточно скрытому historyWindow, но эта фикстура проверяет полную ленту.
+  assert.equal(session.historyWindow, undefined);
   await chat._pullChat(session.id, false, protocolHead({ ...baseChat(), revision: 9 }));
-  assert.deepEqual(reads, []);
+  assert.deepEqual(reads, [`/api/chat/store/chat/${session.id}`]);
   assert.equal(session.revision, 1);
   assert.equal(session.draft, 'Несохранённый черновик');
   await chat._writeChat(session.id);

@@ -30,6 +30,7 @@
         <p>{{ t('settings.automaticLoginUsingThisComputerSLocal') }}</p>
       </div>
     </SettingsSection>
+    <RemoteAccessPanel :key="owner" />
     <DevicesPanel :key="`${owner}:${devicesGeneration}`" phone />
   </section>
 </template>
@@ -46,6 +47,7 @@ import { phoneRelayReady, usePhoneAccessStore, type PhoneAccessStatus } from '..
 import PhoneConnectButton from '../../shared/layout/PhoneConnectButton.vue';
 import DevicesPanel from './DevicesPanel.vue';
 import MobileAccess from './MobileAccess.vue';
+import RemoteAccessPanel from './RemoteAccessPanel.vue';
 import SettingsFacts from './SettingsFacts.vue';
 import SettingsSection from './SettingsSection.vue';
 

@@ -415,8 +415,10 @@ def main():
         print(json.dumps(preview))
         return
     if operation == "receipt":
-        request, state, reason = args
+        request, state, reason, *expected_states = args
         if record and record.get("receipt", {}).get("requestId") == request:
+            if expected_states and record["receipt"]["state"] not in expected_states:
+                return
             record["receipt"].update(state=state, reason=reason)
             if state == "failed" and record.get("pending"):
                 record["pending"]["state"] = "failed"

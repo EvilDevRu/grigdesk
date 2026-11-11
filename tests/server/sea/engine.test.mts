@@ -11,7 +11,7 @@ import { helperFixture, runFile, SOURCE_ROOT } from './helperFixture.mts';
 
 test('SEA-ENGINE-01: CLI, data-home и оба моста движка исполняются без server/src TS', async (t) => {
   const fixture = await helperFixture(t, [
-    'grigdesk-cli', 'data-home-check', 'legacy-brand', 'engine-runtime-usage', 'engine-codex-failure',
+    'grigdesk-cli', 'data-home-check', 'engine-runtime-usage', 'engine-codex-failure',
   ]);
   const wrapperFile = path.join(SOURCE_ROOT, 'server/build/compatibility.json');
   const wrappers = JSON.parse(await readFile(wrapperFile, 'utf8'));

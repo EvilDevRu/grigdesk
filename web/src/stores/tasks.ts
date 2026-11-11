@@ -162,16 +162,20 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
-     * Таймер адресуется полному источнику независимо от дефолта.
-     * Повтор после отказа остаётся явным действием пользователя.
+     * Подтверждённая пауза адресована источнику и не считается случайным пропуском CRM.
+     * Ошибка POST и поздний ответ прежнего владельца не меняют состояние удержания.
      */
     async timer(id: TaskId, action: string, source?: TaskSourceId) {
       const target = await this.target(id, source);
+      const board = useBoardStore();
+      const epoch = board.sourceEpoch;
+      const timerSource = source ?? board.data?.source;
 
       await api.post(
         `${target.prefix}/task/${id}/timer/${action}`, undefined, target.options,
       );
-      await useBoardStore().load(true);
+      board.confirmTimerAction(id, action, timerSource, epoch);
+      await board.load(true);
     },
 
     /**
@@ -334,9 +338,14 @@ export const useTasksStore = defineStore('tasks', {
      * Параметры передаются без изменения идентификаторов и без собственного SSE.
      */
     async getStageRunnerOptions(
-      task: TaskId, fields: Omit<StageRunnerIdentity, 'task'> & { provider: string },
+      task: TaskId, fields: Omit<StageRunnerIdentity, 'task'> & { provider?: string },
     ) {
-      const query = new URLSearchParams(fields);
+      const { provider, ...identity } = fields;
+      const query = new URLSearchParams(identity);
+
+      if (provider !== undefined) {
+        query.set('provider', provider);
+      }
 
       return decodeStageRunnerOptions(await api.get(`/api/tasks/${task}/runner/options?${query}`));
     },

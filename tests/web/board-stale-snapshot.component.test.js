@@ -57,3 +57,22 @@ test('STALE-02: ошибка первого чтения не выдаёт от�
   await flushPromises();
   assert.deepEqual(refreshes, [true]);
 });
+
+test('STALE-03: ошибка ветки мультиисточника показывает пометку устаревания', async (t) => {
+  const { wrapper, stores, flushPromises } = await mountBoardView(t, {
+    prefix: 'board-stale-branch',
+    tasks: [{
+      id: 42,
+      title: 'Задача ветки',
+      timerElapsed: 0
+    }],
+  });
+
+  stores.board().data = { ...stores.board().data, multiSource: true };
+  stores.board().branches = {
+    'fixture-a': { snapshot: stores.board().data, error: 'CRM недоступна' },
+  };
+
+  await flushPromises();
+  assert.match(wrapper.get('[data-role="board-snapshot-status"]').text(), /Не удалось обновить/u);
+});

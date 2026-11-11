@@ -9,7 +9,6 @@ import {
   normalizeRecentWorkdirs,
   sameChatWorkdir,
 } from '../../shared/chat/chatWorkdir.ts';
-import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 import { resolveChatWorkdir, validateWorkdirPath } from '../../server/src/lib/chat/workdir.ts';
 
 /**
@@ -206,10 +205,6 @@ test('несколько repo keys одного realpath сохраняются 
   assert.deepEqual(result.copies.map((entry) => entry.key), ['a', 'alias', 'b']);
 });
 
-test('старое значение рабочей папки читается как grigdesk', () => {
-  const legacy = { kind: LEGACY_VALUES.workdirKind };
-
-  assert.deepEqual(normalizeChatWorkdir(legacy), { kind: 'grigdesk' });
-  assert.ok(sameChatWorkdir(legacy, { kind: 'grigdesk' }));
-  assert.deepEqual(normalizeRecentWorkdirs([legacy]), [{ kind: 'grigdesk' }]);
+test('старое значение рабочей папки больше не читается как grigdesk', () => {
+  assert.equal(normalizeChatWorkdir({ kind: 'cockpit' }), null);
 });

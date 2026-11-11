@@ -150,7 +150,8 @@ async function mountPipeline(t, {
           return optionsHandler(url, confirmed);
         }
 
-        const provider = new URL(url, 'http://fixture').searchParams.get('provider') || 'claude';
+        const provider = new URL(url, 'http://fixture').searchParams.get('provider')
+          || confirmed.selection.parametersFor;
 
         return provider === confirmed.selection.parametersFor
           ? confirmed
@@ -659,6 +660,42 @@ test('same-provider-effort-restart', async (t) => {
   assert.deepEqual(fx.applyCalls[0][1].expectedRun, { id: 'run-current', epoch: 1 });
 });
 
+test('restart-refreshes-run-before-next-apply', async (t) => {
+  const initial = stageSettingsOptions({ running: true });
+  const nextRun = { id: 'run-restarted', epoch: 2 };
+  let current = structuredClone(initial);
+  const fx = await mountPipeline(t, {
+    ...makeFixture({ status: 'run', actual: 'claude' }),
+    optionsHandler: () => current,
+    applyHandler: (payload) => {
+      const accepted = {
+        ...structuredClone(current),
+        selection: { ...payload.selection },
+        revision: current.revision + 1,
+        receipt: { requestId: payload.requestId, state: 'pending' },
+      };
+
+      current = {
+        ...structuredClone(accepted),
+        actual: { ...initial.actual, run: nextRun },
+      };
+
+      return accepted;
+    },
+  });
+
+  await fx.openPlanStage('run');
+  await settingsFields(fx.wrapper)[1].setValue('high');
+  await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
+  await fx.flushPromises();
+  await settingsFields(fx.wrapper)[1].setValue('max');
+  await settingsButton(fx.wrapper, /Сохранить для следующего запуска/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 2);
+  assert.deepEqual(fx.applyCalls[1][1].expectedRun, nextRun);
+  assert.equal(fx.applyCalls[1][1].selection.effort, 'max');
+});
+
 // К3: каждое поле возвращается к наследованию без сброса второго.
 test('independent-inheritance-and-remount', async (t) => {
   const settings = stageSettingsOptions();
@@ -748,8 +785,119 @@ test('options-loading-empty-error-retry', async (t) => {
     assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Каталог временно недоступен/);
     await settingsButton(fx.wrapper, /Повторить|Обновить/).trigger('click');
     await fx.flushPromises();
-    assert.equal(count, 2);
+    assert.equal(count, 3, 'после bootstrap каталог выбранного исполнителя проверяется отдельно');
     assert.equal(settingsFields(fx.wrapper)[0].element.disabled, false);
     assert.equal(fx.wrapper.find('.smodal').exists(), true);
   });
+});
+
+test('provider-catalog-failure-clears-previous-models', async (t) => {
+  let unavailable = true;
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    optionsHandler: (url, confirmed) => {
+      const provider = new URL(url, 'http://fixture').searchParams.get('provider')
+        || confirmed.selection.parametersFor;
+
+      if (provider === 'codex' && unavailable) {
+        throw new Error('Каталог Codex недоступен');
+      }
+
+      return stageSettingsOptions({ provider });
+    },
+  });
+
+  await fx.openPlanStage('wait');
+  assert.ok(settingsFields(fx.wrapper)[0].findAll('option')
+    .some((item) => item.element.value === 'opus-other'));
+  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.flushPromises();
+
+  const fields = fx.wrapper.findAll('.executor-row')[1].findAll('.executor-fields select');
+
+  assert.equal(fields[0].element.disabled, true);
+  assert.equal(fields[0].findAll('option').some((item) => item.element.value === 'opus-other'), false);
+  assert.equal(settingsButton(fx.wrapper, /^Применить$/).element.disabled, true);
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Каталог Codex недоступен/);
+
+  unavailable = false;
+  await settingsButton(fx.wrapper, /Повторить|Обновить/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fields[0].element.disabled, false);
+  assert.ok(fields[0].findAll('option').some((item) => item.element.value === 'sol-other'));
+  assert.deepEqual(fx.applyCalls, []);
+});
+
+test('saved-provider-bootstrap-does-not-depend-on-base-catalog', async (t) => {
+  const saved = stageSettingsOptions({ provider: 'codex' });
+
+  saved.selection = {
+    primary: 'codex',
+    parametersFor: 'codex',
+    model: 'sol-other',
+    effort: 'low',
+  };
+  saved.effective.model = 'sol-other';
+  saved.effective.effort = 'low';
+
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    settings: saved,
+    optionsHandler: (url) => {
+      const provider = new URL(url, 'http://fixture').searchParams.get('provider');
+
+      if (provider === 'claude') {
+        throw new Error('Каталог базового исполнителя недоступен');
+      }
+
+      return structuredClone(saved);
+    },
+  });
+
+  await fx.openPlanStage('wait');
+  assert.equal(fx.optionCalls.some((url) => /provider=claude/.test(url)), false);
+  assert.equal(fx.optionCalls.some((url) => /provider=codex/.test(url)), true);
+  assert.equal(settingsFields(fx.wrapper)[0].element.value, 'sol-other');
+  assert.equal(settingsFields(fx.wrapper)[1].element.value, 'low');
+  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  await fx.flushPromises();
+  assert.deepEqual(fx.applyCalls[0][1].selection, saved.selection);
+});
+
+test('unavailable-saved-catalog-keeps-visible-confirmed-parameters', async (t) => {
+  const saved = stageSettingsOptions({ provider: 'codex' });
+
+  saved.selection = {
+    primary: 'codex',
+    parametersFor: 'codex',
+    model: 'sol-other',
+    effort: 'low',
+  };
+  saved.effective.model = 'sol-other';
+  saved.effective.effort = 'low';
+
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    settings: saved,
+    optionsHandler: (url) => {
+      if (new URL(url, 'http://fixture').searchParams.has('provider')) {
+        throw new Error('Каталог сохранённого исполнителя недоступен');
+      }
+
+      return { ...structuredClone(saved), models: [] };
+    },
+  });
+
+  await fx.openPlanStage('wait');
+
+  const fields = settingsFields(fx.wrapper);
+
+  assert.equal(fields[0].element.value, 'sol-other');
+  assert.equal(fields[1].element.value, 'low');
+  assert.equal(fields[0].element.disabled, true);
+  assert.equal(settingsButton(fx.wrapper, /^Применить$/).element.disabled, true);
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Следующий запуск: sol-other · effort low/);
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(),
+    /Каталог сохранённого исполнителя недоступен/);
+  assert.deepEqual(fx.applyCalls, []);
 });

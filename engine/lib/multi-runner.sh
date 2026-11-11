@@ -518,14 +518,6 @@ tests — дефект/неполнота теста; environment —
       unset FACTORY_PROVIDER_REQUESTED_SCOPE
     fi
   fi
-  if [[ -n "${MULTI_RESTART_REQUEST:-}" && -z "$MULTI_MANUAL_TARGET" ]]; then
-    if [[ "$rc" == 0 ]]; then
-      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" started ''
-    else
-      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" failed \
-        'launch: новый процесс завершился с ошибкой'
-    fi
-  fi
   if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" && "$rc" != 0 ]]; then
     DISPATCH_INVOKE_RESULT=invalid_config
     DISPATCH_INVOKE_DETAIL="браузерный транспорт: $BROWSER_TRANSPORT_ERROR"
@@ -677,7 +669,7 @@ _multi_require_coverage() {
 
 # Цепочка узла разрешается до coverage тем же порядком task/profile overrides.
 # Ни один кандидат не получает model call без допуска, включая ручной switch.
-multi_runner_run() {
+_multi_runner_run() {
   local task=$1 prompt=$2 stage=$3 timeout_s=$4
   local config route primary failover rc manual_count=0 switched=0
   MULTI_TASK=$task
@@ -688,6 +680,7 @@ multi_runner_run() {
   route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
   primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
   failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+  MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$route")
   _stage_settings_load "$task" "$stage" || return 78
   _stage_settings_route
   MULTI_COVERAGE_REQUIRED=0
@@ -700,7 +693,6 @@ multi_runner_run() {
   fi
   runner_registry_reset
   runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 78
-  MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$route")
   MULTI_PRIMARY=$primary
   MULTI_FAILOVER=$failover
   set_st "$task" "RUNNER_REQUESTED_${stage}" "$primary" \
@@ -730,16 +722,18 @@ multi_runner_run() {
   # (`task`) или на этап (`task-stage`). Такой заход предохранитель не отменяет —
   # см. комментарий в lib/dispatcher.sh.
   local human_choice=""
-  case "$MULTI_ROUTE_SOURCE" in
-    task-stage|task) human_choice=$primary ;;
-  esac
   while (( manual_count < 2 )); do
+    human_choice=""
+    if [[ "$switched" == 1 || "$MULTI_ROUTE_SOURCE" == task-stage || "$MULTI_ROUTE_SOURCE" == task ]]; then
+      human_choice=$primary
+    fi
     dispatcher_run_chain "$task" "$stage" "$primary" "$failover" "$(date +%s)" \
       _multi_resolve _multi_invoke "$human_choice"
     rc=$?
     if [[ "$MULTI_SETTINGS_RETRY" == 1 ]]; then
       admission_retries=$((admission_retries + 1))
       if (( admission_retries >= 3 )); then
+        MULTI_RESTART_FAILURE_REASON='admission: настройки изменились перед новым запуском'
         _multi_catalog_cleanup
         return 75
       fi
@@ -747,6 +741,7 @@ multi_runner_run() {
       route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
       primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
       failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+      MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$route")
       _stage_settings_route
       MULTI_PRIMARY=$primary
       MULTI_FAILOVER=$failover
@@ -755,7 +750,6 @@ multi_runner_run() {
     if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
       primary=$MULTI_MANUAL_TARGET
       # Кнопка переключения нажата прямо во время хода — это тот же явный выбор.
-      human_choice=$primary
       failover=""
       MULTI_PRIMARY=$primary
       MULTI_FAILOVER=$failover
@@ -774,6 +768,7 @@ multi_runner_run() {
       MULTI_DISPATCH_SOURCE_OVERRIDE=manual-switch
       if [[ "$MULTI_COVERAGE_REQUIRED" == 1 ]] &&
          ! _multi_require_coverage "$task" "$stage" "$config" "$primary" "$failover"; then
+        MULTI_RESTART_FAILURE_REASON='coverage: новый запуск не получил допуск исполнителей'
         set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
         _multi_catalog_cleanup
         return 79
@@ -816,4 +811,24 @@ multi_runner_run() {
   set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" manual_switch_conflict
   _multi_catalog_cleanup
   return 79
+}
+
+# Receipt завершает итог всей цепочки, поэтому отказ до launcher тоже виден человеку.
+# Успешный разрешённый резерв не наследует отказ предыдущего кандидата restart.
+multi_runner_run() {
+  local rc reason
+  MULTI_RESTART_REQUEST=""
+  MULTI_RESTART_FAILURE_REASON=""
+  _multi_runner_run "$@"
+  rc=$?
+  if [[ -n "$MULTI_RESTART_REQUEST" ]]; then
+    if (( rc == 0 )); then
+      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" started ''
+    else
+      reason=${MULTI_RESTART_FAILURE_REASON:-${DISPATCH_RESULT_DETAIL:-}}
+      [[ -n "$reason" ]] || reason="launch: отказ нового запуска (${DISPATCH_RESULT_KIND:-unknown}, код $rc)"
+      _stage_settings_receipt "$MULTI_SETTINGS_IDENTITY" "$MULTI_RESTART_REQUEST" failed "$reason"
+    fi
+  fi
+  return "$rc"
 }

@@ -177,6 +177,123 @@ test('restart-replay', async (t) => {
   assert.equal((await fx.captures()).length, 2);
 });
 
+test('restart-preflight-failure-finishes-receipt', async (t) => {
+  const fx = await liveFixture(t, null, async (fixture) => {
+    const file = path.join(fixture.env.FACTORY_RUNNERS_DIR, 'alpha.sh');
+    const runner = await readFile(file, 'utf8');
+
+    await writeFile(file, runner
+      .replace("trap 'exit 143' TERM", "trap 'touch \"$TEST_ROOT/after-stop\"; exit 143' TERM")
+      .replace('[[ "${SETTINGS_METADATA_UNAVAILABLE:-0}" != 1 ]] || return 4',
+        '[[ "${SETTINGS_METADATA_UNAVAILABLE:-0}" != 1 && ! -e "$TEST_ROOT/after-stop" ]] || return 4'));
+  });
+
+  cliJson(applyCli(fx, applyPayload(fx.options, selection(), 'restart', 'metadata-after-stop')));
+
+  const finished = await fx.active.finished;
+  const current = cliJson(fx.cli('show'));
+
+  assert.notEqual(finished.status, 0);
+  assert.equal((await fx.captures()).length, 1, 'resolver отказал до нового launcher');
+  assert.deepEqual(current.selection, selection());
+  assert.equal(current.actual, null);
+  assert.equal(current.receipt.state, 'failed');
+  assert.match(current.receipt.reason, /launch|metadata|invalid_config/u);
+});
+
+test('restart-reserve-success-finishes-receipt', async (t) => {
+  const fx = await liveFixture(t, null, async (fixture) => {
+    const file = path.join(fixture.env.FACTORY_RUNNERS_DIR, 'alpha.sh');
+    const runner = await readFile(file, 'utf8');
+
+    await writeFile(file, runner
+      .replace("trap 'exit 143' TERM", "trap 'touch \"$TEST_ROOT/after-stop\"; exit 143' TERM")
+      .replace('case "${FAKE_ALPHA_RESULT:-limited}" in', [
+        '[[ ! -e "$TEST_ROOT/after-stop" ]] || return 42',
+        'case "${FAKE_ALPHA_RESULT:-limited}" in',
+      ].join('\n'))
+      .replace('limited:42)', 'limited:42|wait:42)'));
+  });
+
+  cliJson(applyCli(fx, applyPayload(fx.options, selection(), 'restart', 'restart-with-reserve')));
+
+  const finished = await fx.active.finished;
+  const current = cliJson(fx.cli('show'));
+  const captures = await fx.captures();
+
+  assert.equal(finished.status, 0, finished.output);
+  assert.deepEqual(captures.map((capture) => capture.provider), ['alpha', 'alpha', 'beta']);
+  assert.equal(captures.at(-1).model, 'beta-model');
+  assert.equal(captures.at(-1).effort, 'high');
+  assert.equal(current.receipt.state, 'started');
+  assert.equal(current.receipt.reason, '');
+});
+
+test('restart-source-finishes-before-interrupt', async (t) => {
+  const fx = await liveFixture(t, null, async (fixture) => {
+    const file = path.join(fixture.env.FACTORY_RUNNERS_DIR, 'alpha.sh');
+    const runner = await readFile(file, 'utf8');
+
+    fixture.env.SETTINGS_RECORD = fixture.record;
+    await writeFile(file, runner.replace('while true; do sleep 1; done', [
+      'while true; do',
+      '  if [[ -f "$SETTINGS_RECORD" ]] &&',
+      '     jq -e \\',
+      '       \'.pending.eventPublished == true and .pending.source.id == env.FACTORY_RUN_ID\' \\',
+      '       "$SETTINGS_RECORD" >/dev/null 2>&1; then',
+      '    return 0',
+      '  fi',
+      '  sleep 0.02',
+      'done',
+    ].join('\n')));
+  });
+  const bashEnv = path.join(fx.root, 'interrupt-barrier.sh');
+
+  // Перестановка только управляющего вызова: новый capture появляется за штатным
+  // launch barrier, поэтому interrupt наверняка увидит уже следующую trusted identity.
+  await writeFile(bashEnv, [
+    'set -T',
+    'trap \'case "$BASH_COMMAND" in runtime_interrupt_trusted_active*)',
+    '  for stop_wait in {1..400}; do',
+    '    [[ "$(wc -l <"$TEST_ROOT/argv.tsv")" -lt 2 ]] || break',
+    '    sleep 0.02',
+    '  done',
+    ';; esac\' DEBUG',
+  ].join('\n'));
+  fx.env.BASH_ENV = bashEnv;
+
+  const result = applyCli(fx, applyPayload(fx.options, selection(), 'restart', 'source-finished'));
+
+  delete fx.env.BASH_ENV;
+  cliJson(result);
+
+  const current = cliJson(fx.cli('show'));
+  const captures = await fx.captures();
+
+  assert.equal(captures.length, 2);
+  assert.notEqual(current.actual.run.id, fx.first.id);
+  assert.equal(current.actual.model, 'alpha-strong');
+  assert.equal(current.actual.effort, 'max');
+  assert.equal(current.receipt.state, 'consumed');
+  assert.equal(current.receipt.reason, '');
+});
+
+test('show-saved-selection-without-coverage', async (t) => {
+  const fx = await settingsFixture(t);
+
+  await fx.seed(selection());
+  await writeFile(fx.config, `${await readFile(fx.config, 'utf8')}RUNNERS_COVERAGE=required\n`);
+
+  const bytes = await readFile(fx.record);
+  const current = cliJson(fx.cli('show'));
+
+  assert.deepEqual(current.selection, selection());
+  assert.equal(fx.cli('options', ['--provider', 'alpha']).status, 75);
+  assert.equal(applyCli(fx, applyPayload(current, selection(), 'next', 'coverage-required')).status, 75);
+  assert.deepEqual(await readFile(fx.record), bytes);
+  assert.deepEqual(await fx.captures(), []);
+});
+
 /**
  * Подменяет только системную файловую операцию Python в процессе fixture CLI.
  * Продуктовый storage остаётся настоящим, а место отказа фиксируется отдельным trace.

@@ -1,6 +1,7 @@
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { normalizeProviderUsage } from '../providerUsage.ts';
+import { isolatedFetch } from '../isolatedFetch.ts';
 import type { ProviderUsage } from '../providerUsage.ts';
 
 const REGIONS = {
@@ -219,7 +220,7 @@ export async function readTripoBalance(options: TripoAccountDeps = {}): Promise<
   const env = options.env ?? process.env;
   const access = tripoAccess(env);
   const deps = {
-    fetchImpl: options.fetchImpl ?? fetch,
+    fetchImpl: options.fetchImpl ?? isolatedFetch,
     now: options.now ?? Date.now,
     setTimer: options.setTimer ?? setTimeout,
     clearTimer: options.clearTimer ?? clearTimeout,

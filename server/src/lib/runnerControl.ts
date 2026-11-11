@@ -21,9 +21,12 @@ export class RunnerControlCommandError extends Error {}
 export class StageRunnerCommandError extends Error {
   readonly code: number;
 
-  constructor(code: number, message: string) {
+  readonly timedOut: boolean;
+
+  constructor(code: number, message: string, timedOut = false) {
     super(message);
     this.code = code;
+    this.timedOut = timedOut;
   }
 }
 
@@ -118,19 +121,23 @@ export class FactoryRunnerControl {
     const result = await runRouteEngine(this.routeConfig, args);
 
     if (!result.ok) {
-      throw new StageRunnerCommandError(result.code, result.stderr || result.message);
+      throw new StageRunnerCommandError(result.code, result.stderr || result.message, result.timedOut);
     }
 
     return decodeStageRunnerOptions(JSON.parse(result.stdout));
   }
 
   /**
-   * Каталог читается лениво для выбранного исполнителя и точного узла.
-   * Provider не нормализуется удалением недопустимых символов.
+   * Без provider читается сохранённый выбор точного узла, независимо от graph primary.
+   * Явный provider открывает его каталог без нормализации недопустимых символов.
    */
   async settingsOptions({ identity, provider }: {
-    identity: StageRunnerIdentity; provider: string;
+    identity: StageRunnerIdentity; provider?: string;
   }): Promise<StageRunnerOptions> {
+    if (provider === undefined) {
+      return this.settingsCommand('show', identity);
+    }
+
     if (!PROVIDER_RE.test(provider)) {
       throw new RunnerControlInputError('Некорректный исполнитель.');
     }
@@ -172,7 +179,7 @@ export class FactoryRunnerControl {
     try {
       return await this.settingsCommand('apply', payload.identity, ['--payload', JSON.stringify(payload)]);
     } catch (error) {
-      if (error instanceof StageRunnerCommandError && /не уложился/u.test(error.message)) {
+      if (error instanceof StageRunnerCommandError && error.timedOut) {
         const current = await this.settingsCommand('show', payload.identity);
 
         if (current.receipt?.requestId === payload.requestId) {

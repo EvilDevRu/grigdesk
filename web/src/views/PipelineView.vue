@@ -836,6 +836,24 @@
               >
                 {{ translate('core.stageRestartAction') }}
               </UiButton>
+              <!-- Перепривязка рантайма: этап отразил отказ среды из-за устаревшего
+                   инструмента закреплённой поставки. Снятие закрепления включает
+                   свежий инструмент на следующем запуске этой же попытки. -->
+              <UiButton
+                class="btn rebind"
+                variant="outline"
+                block
+                :loading="rebindBusy"
+                :disabled="Boolean(stageBusy)"
+                loading-label="Снимаю закрепление"
+                @click="rebindRuntime"
+              >
+                Перепривязать рантайм
+              </UiButton>
+              <p class="gate-hint">
+                Попытка закреплена за поставкой сервера. Снятие закрепления
+                включает обновлённый инструмент этапа на следующем запуске.
+              </p>
             </div>
           </aside>
 
@@ -932,7 +950,7 @@
                   <p v-if="runnerSettings && !runnerSettings.models.length">
                     {{ translate('core.stageSettingsEmpty') }}
                   </p>
-                  <p v-if="runnerSettings">
+                  <p v-if="runnerConfirmed">
                     {{ translate('core.stageSettingsFuture', {
                       model: runnerConfirmedModel,
                       effort: runnerConfirmed?.effective.effort || ''
@@ -1169,6 +1187,7 @@ import type {
   NodeMetadata, NodeVerdict, ArbiterCard, PipelineActivity, PipelineReply,
 } from '../shared/pipelineContracts.ts';
 import type { BoardTask } from '../shared/boardContracts.ts';
+import { boardAllRoleTasks } from '../shared/boardTimerTasks.ts';
 
 type TaskId = string | number;
 type BulkAction = 'resume' | 'stop';
@@ -1304,9 +1323,19 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
   return task?.source === 'grigdesk' ? task.title || null : trackerTitle(taskNum) || task?.title || null;
 }
 
-const boardTasksById = computed(() => new Map(
-  (board.data?.tasks || []).map((task) => [Number(task.id), task]),
-));
+const boardTasksById = computed(() => {
+  const map = new Map<number, BoardTask>();
+
+  for (const task of boardAllRoleTasks(board.data)) {
+    const id = Number(task.id);
+
+    if (!map.has(id)) {
+      map.set(id, task);
+    }
+  }
+
+  return map;
+});
 
 function boardTask(t: PipelineViewTask) {
   return boardTasksById.value.get(Number(t.task));
@@ -1317,7 +1346,7 @@ function boardTask(t: PipelineViewTask) {
  * Статус существует только для явного булева значения из снимка доски.
  */
 function trackerTimerState(t: PipelineViewTask) {
-  if (!boardSupportsTimer(board.data)) {
+  if (!board.data?.multiSource && !boardSupportsTimer(board.data)) {
     return null;
   }
 
@@ -1341,7 +1370,8 @@ function trackerTimerState(t: PipelineViewTask) {
 function trackerTimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
 
-  if (!boardSupportsTimer(board.data) || !task || typeof task.timerRunning !== 'boolean') {
+  if ((!board.data?.multiSource && !boardSupportsTimer(board.data))
+    || !task || typeof task.timerRunning !== 'boolean') {
     return '';
   }
 
@@ -1356,11 +1386,11 @@ const outsideTimers = computed(() => {
 
   const d = board.data;
 
-  if (!d || !boardSupportsTimer(d)) {
+  if (!d || (!d.multiSource && !boardSupportsTimer(d))) {
     return [];
   }
 
-  return (d.tasks || []).filter((t) => (
+  return boardAllRoleTasks(d).filter((t) => (
     t.timerRunning && !factoryIds.value.has(Number(t.id))
   ));
 });
@@ -1877,6 +1907,9 @@ const stageFindingsReady = ref(false);
 const gateRejecting = ref(false);
 const gateNoteEl = ref<InstanceType<typeof UiTextarea> | null>(null);
 const rewindComment = ref('');
+// Перепривязка рантайма остановленной попытки: отдельное busy, чтобы действие
+// не смешивалось с возвратом курсора и не блокировалось им в обратную сторону.
+const rebindBusy = ref(false);
 // Ответы на вопросы узла: id находки → текст. Отдельно от свободного поля, потому что
 // каждый ответ обязан приехать агенту привязанным к ЕГО вопросу, а не сплошняком.
 const rewindAnswers = ref<Record<string, string>>({});
@@ -2435,6 +2468,45 @@ async function forceStatus(status: string) {
     finishStageAction(opened);
   }
 }
+/**
+ * Снимает закрепление рантайма у остановленной попытки. Следующий запуск попытки
+ * закрепит текущую поставку сервера — так доезжают обновления инструмента этапа
+ * (например, новые действия браузера) без перезапуска задачи с нуля.
+ */
+async function rebindRuntime() {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value || rebindBusy.value) {
+    return;
+  }
+
+  if (!await confirmDialog(
+    'Снять закрепление рантайма этой попытки? '
+      + 'Следующий запуск продолжит попытку на текущей поставке сервера.',
+    { okText: 'Перепривязать' },
+  )) {
+    return;
+  }
+
+  rebindBusy.value = true;
+
+  try {
+    const res = decodePipelineReply(await api.post(
+      `/api/tasks/${opened.task}/runtime-rebind`,
+      {},
+    ));
+
+    alertDialog(res.note || 'Готово.');
+    await load();
+  }
+  catch (e) {
+    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+  }
+  finally {
+    rebindBusy.value = false;
+  }
+}
+
 // Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
 // а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
 // приезжает обычным путём — load() → watch(stageLive) → stage.meta.
@@ -2535,6 +2607,13 @@ const runnerSettingsLoading = ref(false);
 const runnerSettingsError = ref('');
 let runnerSettingsSequence = 0;
 let runnerApplyRequest: StageRunnerApply | null = null;
+const runnerRunObservation = computed(() => {
+  const live = stageLive.value;
+  const attempts = live?.meta.runner?.attempts;
+  const run = attempts?.findLast((attempt) => typeof attempt.epoch === 'number') ?? attempts?.at(-1);
+
+  return JSON.stringify([live?.status, live?.daemonAlive, live?.meta.runner?.actual, run?.id, run?.epoch]);
+});
 const runnerPending = computed(() => stagePending.value?.runner || null);
 const stageRunnerActive = computed(() => (
   runnerDraft.value?.parametersFor || stage.value?.meta.runner?.primary || ''
@@ -2561,14 +2640,16 @@ const runnerSettingsDisabled = computed(() => Boolean(stageBusy.value || runnerS
 async function loadRunnerSettings(keepDraft = false) {
   const opened = stage.value;
   const sequence = ++runnerSettingsSequence;
-  const provider = runnerDraft.value?.parametersFor || opened?.meta.runner?.primary;
+  const provider = runnerDraft.value?.parametersFor;
+  const observation = runnerRunObservation.value;
 
-  if (!opened || opened.readOnly || !provider || !opened.attempt || opened.isGate) {
+  if (!opened || opened.readOnly || !opened.meta.runner || !opened.attempt || opened.isGate) {
     return;
   }
 
   runnerSettingsLoading.value = true;
   runnerSettingsError.value = '';
+  runnerSettings.value = null;
 
   try {
     const result = decodeStageRunnerOptions(await taskStore.getStageRunnerOptions(opened.task, {
@@ -2576,7 +2657,7 @@ async function loadRunnerSettings(keepDraft = false) {
       attempt: String(opened.attempt),
       node: opened.id,
       stage: opened.runnerKey,
-      provider,
+      ...(provider === undefined ? {} : { provider }),
     }));
 
     if (stage.value !== opened || sequence !== runnerSettingsSequence) {
@@ -2595,7 +2676,7 @@ async function loadRunnerSettings(keepDraft = false) {
       runnerDraft.value = { ...result.selection };
       runnerConfirmed.value = result;
 
-      if (result.selection.parametersFor !== provider) {
+      if (provider === undefined || result.selection.parametersFor !== provider) {
         void loadRunnerSettings(true);
       }
     } else if (result.selection.parametersFor === provider) {
@@ -2608,6 +2689,10 @@ async function loadRunnerSettings(keepDraft = false) {
   } finally {
     if (stage.value === opened && sequence === runnerSettingsSequence) {
       runnerSettingsLoading.value = false;
+
+      if (observation !== runnerRunObservation.value) {
+        void loadRunnerSettings(true);
+      }
     }
   }
 }
@@ -2621,6 +2706,14 @@ watch(() => stage.value, () => {
   runnerSettingsLoading.value = false;
   runnerApplyRequest = null;
   void loadRunnerSettings();
+});
+
+// Смена запуска перечитывает trusted actual через options, сохраняя набранную пару.
+// Токены и прочая telemetry не меняют ключ наблюдения и не вызывают discovery.
+watch(runnerRunObservation, () => {
+  if (runnerDraft.value && !stageBusy.value) {
+    void loadRunnerSettings(true);
+  }
 });
 
 function setRunnerParameter(field: 'model' | 'effort', value: string | null) {
@@ -2722,6 +2815,10 @@ async function applyRunnerSettings(mode: 'next' | 'restart') {
     }
 
     await load();
+
+    if (stage.value === opened) {
+      await loadRunnerSettings(true);
+    }
   } catch (error) {
     if (stage.value === opened) {
       const message = errorMessage(error, '');

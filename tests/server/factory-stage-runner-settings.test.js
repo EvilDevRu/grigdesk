@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import { applyPayload, selection, waitFor } from '../helpers/stageRunnerSettingsFixture.mjs';
@@ -140,4 +141,36 @@ test('settings-api-requires-auth', async (t) => {
 
   httpJson(await fx.app.inject({ url: '/api/tasks' }), 401);
   assert.deepEqual(await fx.engineCalls(), before);
+});
+
+test('bootstrap-reads-saved-provider-without-base-metadata', async (t) => {
+  const fx = await settingsServer(t);
+  const selected = {
+    primary: 'gamma',
+    parametersFor: 'gamma',
+    model: '["route","model"]',
+    effort: 'off',
+  };
+  const options = httpJson(await fx.get('gamma'));
+
+  httpJson(await fx.post(applyPayload(options, selected)));
+
+  const runner = path.join(fx.env.FACTORY_RUNNERS_DIR, 'alpha.sh');
+
+  await writeFile(runner, `${await readFile(runner, 'utf8')}\nrunner_alpha_model_options() { return 4; }\n`);
+
+  const { task, ...identity } = fx.identity;
+  const query = new URLSearchParams(identity);
+  const response = httpJson(await fx.app.inject({
+    url: `/api/tasks/${task}/runner/options?${query}`,
+    headers: { cookie: 'grigdesk_sid=fixture' },
+  }));
+
+  assert.deepEqual(response.selection, selected);
+  assert.equal(response.effective.model, selected.model);
+  assert.equal(response.models[0].id, selected.model);
+  httpJson(await fx.app.inject({
+    url: `/api/tasks/${task}/runner/options?${query}&provider=`,
+    headers: { cookie: 'grigdesk_sid=fixture' },
+  }), 400);
 });

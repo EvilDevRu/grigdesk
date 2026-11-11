@@ -31,6 +31,8 @@ interface AttemptTokens extends Record<string, unknown> {
 
 // Один запуск этапа.
 export interface RunnerAttempt {
+  id?: string;
+  epoch?: number;
   runner?: string;
   model?: unknown;
   effort?: unknown;

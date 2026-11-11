@@ -16,7 +16,6 @@ import {
 import type { LockDeps, LockOwner } from '../../server/src/lib/dataHomeBoot.ts';
 import { referencesOf } from '../../tools/entrypointGraph.mts';
 import { freePort, isolatedEnv } from './helpers/pluginBootFixture.js';
-import { LEGACY, LEGACY_DATA_PATHS } from '../../shared/runtime/legacyBrand.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -69,34 +68,11 @@ function lockDeps(extra: Partial<LockDeps> = {}): LockDeps {
   };
 }
 
-test('GB-01: старая папка требует шага владельца без создания новой', (t) => {
-  const f = fixture(t);
 
-  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
-  assert.throws(() => prepareDataHome(f, { ...lockDeps(), owner: owner() }), (error: Error) => {
-    assert.ok(error.message.includes(`mv -T ~/${LEGACY.dataHomeDir} ~/.grigdesk`));
 
-    return true;
-  });
-  assert.equal(fs.existsSync(path.join(f.home, '.grigdesk')), false);
-});
 
-test('GB-02: ссылка старого имени на новую папку допустима', (t) => {
-  const f = fixture(t);
-  const data = path.join(f.home, '.grigdesk');
 
-  fs.mkdirSync(data);
-  fs.symlinkSync('.grigdesk', path.join(f.home, LEGACY.dataHomeDir));
-  assert.equal(checkDataHome(f, fs), fs.realpathSync(data));
-});
 
-test('GB-03: две настоящие папки запрещены', (t) => {
-  const f = fixture(t);
-
-  fs.mkdirSync(path.join(f.home, '.grigdesk'));
-  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
-  assert.throws(() => checkDataHome(f, fs), /две папки данных/);
-});
 
 test('GB-04: новая установка создаёт новую папку данных', (t) => {
   const f = fixture(t);
@@ -106,30 +82,9 @@ test('GB-04: новая установка создаёт новую папку 
   assert.equal(fs.existsSync(result.home), true);
 });
 
-test('GB-05: явная независимая папка не зависит от старой папки HOME', (t) => {
-  const f = fixture(t);
-  const explicit = path.join(f.root, 'explicit');
 
-  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
-  f.env.GRIGDESK_HOME = explicit;
-  assert.equal(checkDataHome(f, fs), explicit);
-});
 
-test('GB-06: неперенесённые внутренние пути блокируют любую выбранную папку', (t) => {
-  for (const explicit of [false, true]) {
-    for (const [oldPath] of LEGACY_DATA_PATHS) {
-      const f = fixture(t);
-      const data = explicit ? path.join(f.root, 'explicit') : path.join(f.home, '.grigdesk');
 
-      if (explicit) {
-        f.env.GRIGDESK_HOME = data;
-      }
-
-      write(path.join(data, oldPath), 'fixture');
-      assert.throws(() => checkDataHome(f, fs), /node tools\/brandMove.mts --apply/);
-    }
-  }
-});
 
 test('GB-08: старая раскладка в коде требует ручного переноса', (t) => {
   const f = fixture(t);
@@ -463,4 +418,12 @@ test('DB-12 срок ожидания блокировки читается из
   assert.equal(result.status, 78, result.stderr);
   assert.match(result.stderr, /уже пользуется сервер/);
   assert.ok(Date.now() - started < 8000, 'Файл задаёт немедленный отказ, без ожидания 15 секунд');
+});
+
+test('GB-NEW: старая папка Кокпита не мешает новой установке', (t) => {
+  const f = fixture(t);
+
+  fs.mkdirSync(path.join(f.home, '.cockpit'), { recursive: true });
+
+  assert.doesNotThrow(() => checkDataHome(f, fs));
 });

@@ -7,12 +7,9 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 import { writeCompatibility } from '../../server/scripts/sea/compatibility.mts';
-import { buildHelper, loadHelpers } from '../../server/scripts/sea/helpers.mts';
 
 const run = promisify(execFile);
-const SOURCE = path.resolve(import.meta.dirname, '../..');
 
 /**
  * Временный корень проверки обёрток не содержит серверных исходников.
@@ -39,7 +36,7 @@ test('SEA-COMPAT-01: обёртки сохраняют exports, argv и код �
     schema: 1,
     wrappers: [
       {
-        path: 'shared/runtime/legacyBrand.ts',
+        path: 'engine/lib/probe-library.mjs',
         helper: 'library',
         kind: 'library',
       },
@@ -57,7 +54,7 @@ test('SEA-COMPAT-01: обёртки сохраняют exports, argv и код �
 
   await writeCompatibility(root, manifest, helpers);
 
-  const library = await import(pathToFileURL(path.join(root, 'shared/runtime/legacyBrand.ts')).href);
+  const library = await import(pathToFileURL(path.join(root, 'engine/lib/probe-library.mjs')).href);
 
   assert.equal(library.value, 'сохранён');
 
@@ -96,30 +93,4 @@ test('SEA-COMPAT-02: неизвестный helper и выход за R отве
       helpers: [{ id: 'known', entryKind: 'script' }],
     }), /обёртк|helper|путь/i);
   }
-});
-
-test('SEA-COMPAT-03: библиотечный helper действительно экспортирует прежние имена', async (t) => {
-  const root = await scratch(t);
-  const file = path.join(root, 'helpers.json');
-
-  await writeFile(file, JSON.stringify({ schema: 1, helpers: [{
-    id: 'legacy-brand',
-    entry: 'shared/runtime/legacyBrand.ts',
-    entryKind: 'library',
-    exports: ['LEGACY', 'legacyRootProblem'],
-    description: 'Библиотечная совместимость shell.',
-  }] }));
-
-  const manifest = await loadHelpers(file, SOURCE);
-  const built = await buildHelper({
-    root: SOURCE,
-    id: 'legacy-brand',
-    manifest,
-    outDir: path.join(root, 'out'),
-    workDir: path.join(root, 'build'),
-  });
-  const library = await import(pathToFileURL(built.file).href);
-
-  assert.equal(library.LEGACY.envPrefix, LEGACY.envPrefix);
-  assert.equal(library.legacyRootProblem({ GRIGDESK_HOME: '/tmp/test' }), null);
 });

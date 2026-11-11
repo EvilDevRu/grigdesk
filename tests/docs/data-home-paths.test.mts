@@ -27,8 +27,6 @@ const forbidden = [
 const exceptions: Array<[string, string, string]> = [
   ['server/src/lib/kimi/sandbox.ts', 'const legacyState =', 'Защита настоящей старой раскладки.'],
   ['server/src/lib/kimi/sandbox.ts', 'const legacyEnv =', 'Защита настоящей старой раскладки.'],
-  ['tools/brandMovePlan.ts', 'server/.state', 'Перенос и возврат прежнего состояния.'],
-  ['tools/brandMovePlan.ts', "context.codeRoot, '.env'", 'Перенос и возврат прежних настроек.'],
   ['server/src/lib/dataHomeBoot.ts', 'server/.state', 'Сторож прежней раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', "codeRoot, '.env'", 'Сторож прежнего файла настроек.'],
   ['cli/commands.ts', 'server/.state', 'Переходное чтение до ручного переноса.'],

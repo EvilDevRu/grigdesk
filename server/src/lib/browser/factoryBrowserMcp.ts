@@ -134,7 +134,7 @@ function response(value: unknown, action: string): FactoryBrowserMcpResult {
   }
 
   const allowed = ['ok', 'error', 'tabId', 'url', 'pageEpoch', 'text', 'elements',
-    'console', 'truncated', 'tabs'];
+    'console', 'truncated', 'tabs', 'width', 'height'];
   const clean: Record<string, unknown> = { untrusted: true };
 
   for (const key of allowed) {

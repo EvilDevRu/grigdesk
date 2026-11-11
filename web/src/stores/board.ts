@@ -10,9 +10,12 @@ import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 import { defineStore } from 'pinia';
+import { toRaw } from 'vue';
 import { api } from '../shared/apiClient.ts';
 import { measureChatPerformance } from '../shared/chatPerformance.ts';
 import { boardActivity, boardTaskIds } from '../shared/boardActivity.ts';
+import { boardAllRoleTasks } from '../shared/boardTimerTasks.ts';
+import { stabilizeTimerRoles } from '../shared/timerStability.ts';
 import { useTaskSeenStore } from './taskSeen.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -78,6 +81,32 @@ function boardCatalog(raw: Record<string, unknown>): BoardCatalog {
 }
 
 const mirrors = new WeakMap<object, () => void>();
+const timerHolds = new WeakMap<object, Set<string>>();
+const confirmedTimerStops = new WeakMap<object, Map<string, Set<string>>>();
+
+/**
+ * Подтверждение паузы живёт до первого отрицательного снимка своего источника.
+ * Поздний ответ с true его не расходует, поэтому очередь принудительного refresh безопасна.
+ */
+function timerStops(store: object, snapshot: BoardDashboard): Set<string> {
+  return confirmedTimerStops.get(store)?.get(snapshot.source ?? '') ?? new Set<string>();
+}
+
+/**
+ * Принятый отрицательный ответ завершает исключение из сглаживания.
+ * Исчезнувшая строка тоже подтверждает отсутствие таймера; другие источники не участвуют.
+ */
+function settleTimerStops(stops: Set<string>, snapshot: BoardDashboard): void {
+  const runningIds = new Set(boardAllRoleTasks(snapshot)
+    .filter((task) => task.timerRunning === true).map((task) => String(task.id)));
+
+  for (const id of stops) {
+    if (!runningIds.has(id)) {
+      stops.delete(id);
+    }
+  }
+}
+
 const reads = new WeakMap<object, AbortController>();
 const loadingJobs = new WeakMap<object, Promise<number | undefined>>();
 const forcedJobs = new WeakMap<object, Promise<number | undefined>>();
@@ -118,6 +147,7 @@ export const useBoardStore = defineStore('board', {
     data: null as BoardDashboard | null,
     branches: {} as Record<string, {
       snapshot: BoardDashboard;
+      lastOkAt?: number;
       dataRevision?: number;
       error?: string;
     }>,
@@ -126,6 +156,12 @@ export const useBoardStore = defineStore('board', {
     loading: false,
     error: null as string | null,
     loadedAt: 0,
+    failedSnapshotAt: 0,
+    lastRefreshAttemptAt: 0,
+    failedBranchTimes: {} as Record<string, {
+      lastOkAt: number;
+      dataRevision?: number;
+    }>,
     readAt: 0,
     sourceKey: '',
     sourceEpoch: 0,
@@ -158,6 +194,28 @@ export const useBoardStore = defineStore('board', {
         unseenCount: external.unseenCount + internal.unseenCount,
         unseenTaskIds: [...external.unseenTaskIds, ...internal.unseenTaskIds]
       };
+    },
+    // Общий отказ каталога важен и при сохранённом multi-снимке.
+    // Ошибка отдельной ветки не требует ошибки всего стора.
+    refreshProblem: (s): string => {
+      const branch = Object.values(s.branches).find((value) => !!value.error);
+
+      return s.error || branch?.error || '';
+    },
+    // Живые ветки не сбрасывают срок отказавшей; общий отказ использует последнюю
+    // успешную загрузку либо обезличенную метку, сохранённую перед очисткой источника.
+    staleSinceMs: (s): number => {
+      const stamps = Object.values(s.branches)
+        .filter((branch) => !!branch.error)
+        .map((branch) => branch.lastOkAt ?? 0)
+        .filter((stamp) => stamp > 0);
+      const general = s.failedSnapshotAt || s.loadedAt;
+
+      if (s.error && general > 0) {
+        stamps.push(general);
+      }
+
+      return stamps.length ? Math.min(...stamps) : 0;
     },
   },
   actions: {
@@ -287,16 +345,30 @@ export const useBoardStore = defineStore('board', {
         }
 
         const accepted = measureChatPerformance('board.apply', () => {
-          const dashboard = decodeBoardDashboard(raw);
+          const decoded = decodeBoardDashboard(raw);
 
           if (controller.signal.aborted || readAt <= this.readAt) {
             return false;
           }
 
-          this.data = dashboard;
+          const previous = this.data?.multiSource ? null : this.data;
+          const hold = previous ? (timerHolds.get(toRaw(previous)) ?? new Set<string>())
+            : new Set<string>();
+          const stops = timerStops(this, decoded);
+          const stabilized = stabilizeTimerRoles(previous, decoded, hold, stops);
+
+          settleTimerStops(stops, decoded);
+
+          const published = { ...decoded, ...stabilized.roles };
+
+          timerHolds.delete(toRaw(previous ?? decoded));
+          timerHolds.set(toRaw(published), stabilized.held);
+          this.data = published;
           this.loadedAt = Date.now();
           this.readAt = readAt;
           this.error = null;
+          this.failedSnapshotAt = 0;
+          this.failedBranchTimes = {};
 
           return true;
         });
@@ -311,6 +383,16 @@ export const useBoardStore = defineStore('board', {
       } catch (error) {
         if (!controller.signal.aborted && epoch === this.sourceEpoch
           && !this.sourceSuspended && readAt >= this.readAt) {
+          const failedSnapshotAt = this.staleSinceMs || this.failedSnapshotAt || this.loadedAt;
+          const failedBranchTimes = { ...this.failedBranchTimes };
+
+          for (const [id, branch] of Object.entries(this.branches)) {
+            failedBranchTimes[id] = {
+              lastOkAt: branch.lastOkAt ?? 0,
+              dataRevision: branch.dataRevision,
+            };
+          }
+
           try {
             const confirmed = await readBoardSource(controller.signal);
 
@@ -329,12 +411,16 @@ export const useBoardStore = defineStore('board', {
             }
 
             this.clearSource();
+            this.failedSnapshotAt = failedSnapshotAt;
+            this.failedBranchTimes = failedBranchTimes;
           }
 
           this.error = errorMessage(error, 'Доска недоступна');
+          this.lastRefreshAttemptAt = Date.now();
         }
       } finally {
         if (reads.get(this) === controller) {
+          this.lastRefreshAttemptAt = Date.now();
           reads.delete(this);
           this.loading = false;
         }
@@ -365,6 +451,39 @@ export const useBoardStore = defineStore('board', {
         return;
       }
 
+      for (const [id, timing] of Object.entries(this.failedBranchTimes)) {
+        const descriptor = catalog.drivers.find((entry) => entry.id === id);
+
+        if (!(catalog.enabledIds ?? []).includes(id) || !descriptor
+          || descriptor.dataRevision !== timing.dataRevision) {
+          continue;
+        }
+
+        this.branches[id] = {
+          snapshot: {},
+          ...timing,
+          error: this.error || localeTranslator(uiLocalePort)('core.boardTrackerUnavailable'),
+        };
+      }
+
+      this.failedBranchTimes = {};
+
+      if (this.error) {
+        for (const id of catalog.enabledIds ?? []) {
+          const branch = this.branches[id];
+
+          if (branch) {
+            branch.error ||= this.error;
+          }
+        }
+      }
+
+      if (!(catalog.enabledIds ?? []).length) {
+        this.loadedAt = Date.now();
+        this.error = null;
+        this.failedSnapshotAt = 0;
+      }
+
       this.mergeBranches(catalog);
 
       await Promise.all((catalog.enabledIds ?? []).map(async (id) => {
@@ -390,7 +509,25 @@ export const useBoardStore = defineStore('board', {
             return;
           }
 
-          this.branches[id] = { snapshot, dataRevision: descriptor?.dataRevision };
+          const previous = this.branches[id]?.snapshot;
+          const hold = timerHolds.get(toRaw(previous ?? snapshot)) ?? new Set<string>();
+          const stops = timerStops(this, snapshot);
+          const stabilized = stabilizeTimerRoles(previous, snapshot, hold, stops);
+
+          settleTimerStops(stops, snapshot);
+
+          const published = { ...snapshot, ...stabilized.roles };
+
+          timerHolds.delete(toRaw(previous ?? snapshot));
+          timerHolds.set(toRaw(published), stabilized.held);
+          this.branches[id] = {
+            snapshot: published,
+            dataRevision: descriptor?.dataRevision,
+            lastOkAt: Date.now()
+          };
+          this.loadedAt = Date.now();
+          this.error = null;
+          this.failedSnapshotAt = 0;
           this.mergeBranches(catalog);
 
           if (snapshot.source) {
@@ -405,12 +542,21 @@ export const useBoardStore = defineStore('board', {
             }
           }
         } catch (error) {
-          if (!controller.signal.aborted && token === (this.branchEpochs[id] ?? 0)) {
+          if (!controller.signal.aborted && epoch === this.sourceEpoch
+            && token === (this.branchEpochs[id] ?? 0) && !this.suspendedIds.includes(id)) {
             const branch = this.branches[id];
 
-            if (branch) {
-              branch.error = errorMessage(error, 'Доска недоступна');
-            }
+            this.branches[id] = {
+              ...(branch ?? {
+                snapshot: {},
+                dataRevision: descriptor?.dataRevision,
+                lastOkAt: 0,
+              }),
+              error: errorMessage(error, 'Доска недоступна'),
+            };
+            this.error = null;
+            this.failedSnapshotAt = 0;
+            this.mergeBranches(catalog);
           }
         }
       }));
@@ -442,8 +588,6 @@ export const useBoardStore = defineStore('board', {
 
       this.data = data;
       this.readAt = Math.max(Date.now(), this.readAt + 1);
-      this.loadedAt = Date.now();
-      this.error = null;
     },
     /**
      * Удаляет только данные затронутого подключения перед сменой реквизитов.
@@ -452,8 +596,11 @@ export const useBoardStore = defineStore('board', {
     dropDriver(id: string) {
       const source = this.branches[id]?.snapshot.source;
 
+      confirmedTimerStops.get(this)?.delete(source ?? '');
+
       this.branchEpochs[id] = (this.branchEpochs[id] ?? 0) + 1;
       delete this.branches[id];
+      delete this.failedBranchTimes[id];
 
       if (source) {
         useTaskFavoritesStore().forSource(source).clear();
@@ -472,10 +619,14 @@ export const useBoardStore = defineStore('board', {
       reads.delete(this);
       loadingJobs.delete(this);
       forcedJobs.delete(this);
+      confirmedTimerStops.delete(this);
       this.branches = {};
       this.suspendedIds = [];
       this.data = null;
       this.loadedAt = 0;
+      this.failedSnapshotAt = 0;
+      this.lastRefreshAttemptAt = 0;
+      this.failedBranchTimes = {};
       this.readAt = 0;
       this.sourceKey = '';
       this.sourceSuspended = suspended;
@@ -526,6 +677,36 @@ export const useBoardStore = defineStore('board', {
       return this.load(true);
     },
     /**
+     * Только успешная мутация этого владельца может отключить сглаживание конкретной задачи.
+     * Смена поколения или отсутствие нужного источника не затрагивает новый снимок.
+     */
+    confirmTimerAction(id: string | number, action: string, source: string | undefined, epoch: number) {
+      if (epoch !== this.sourceEpoch || !this.data) {
+        return;
+      }
+
+      const snapshots = this.data.multiSource
+        ? Object.values(this.branches).map((branch) => branch.snapshot) : [this.data];
+
+      if (!snapshots.some((snapshot) => snapshot.source === source)) {
+        return;
+      }
+
+      const map = confirmedTimerStops.get(this) ?? new Map<string, Set<string>>();
+      const key = source ?? '';
+      const stops = map.get(key) ?? new Set<string>();
+
+      if (action === 'pause') {
+        stops.add(String(id));
+      } else if (action === 'start') {
+        stops.delete(String(id));
+      }
+
+      map.set(key, stops);
+      confirmedTimerStops.set(this, map);
+    },
+
+    /**
      * Окно карточки регистрирует запрос снимка у главного окна; null возвращает обычное чтение.
      * Функция хранится в WeakMap, а не в сериализуемом состоянии Pinia.
      */
@@ -554,6 +735,9 @@ export const useBoardStore = defineStore('board', {
       this.readAt = readAt;
       this.loadedAt = Date.now();
       this.error = null;
+      this.failedSnapshotAt = 0;
+      this.failedBranchTimes = {};
+      this.lastRefreshAttemptAt = Date.now();
     },
     /**
      * Первая загрузка объявляет прежние задачи базовым списком владельца.

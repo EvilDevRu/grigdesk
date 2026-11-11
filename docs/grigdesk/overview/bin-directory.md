@@ -36,7 +36,8 @@
 - `deploy/lib/` — общие bash-функции: `runtime-env.sh` (Node, PATH и порт для `bin/grigdesk-ctl`
   и скриптов), `desktop-app.sh` (пути окна) и куски установщика `install-choices.sh`,
   `media-runtime.sh`, `cli-link.sh`, `tracker-cli.sh` (зависимости сборки, сборка и ссылка `tracker`), `deepseek-cli.sh` (явная установка отдельного DeepSeek ELF);
-- `tracker/` — TypeScript-исходник команды `tracker` и её сборщик (`npm --prefix tracker run build`);
+- `tracker/` — TypeScript-исходник команды `tracker` и её сборщик (`npm --prefix tracker run build`;
+  цель «Всё» команды `grigdesk-ctl build` собирает его параллельно с сервером и окном прямо в `bin/tracker`);
 - `tools/` — инструменты разработчика: `release` и `release-check` (выпуск GrigDesk), `mobile`
   (сборка APK), `relay` (сборка посредника), `upgrade-publish-contract` (переход старых установок).
 

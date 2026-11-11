@@ -52,6 +52,7 @@ _stage_settings_load() {
 
 # Локальный primary принадлежит одному node; null возвращает актуальную базовую цепочку.
 # Принятый restart сохраняет собственный snapshot даже при новой настройке future.
+# Источник цепочки сохраняет именной обход предохранителя при явном выборе primary.
 _stage_settings_route() {
   if [[ -n "${MULTI_FROZEN_RESTART:-}" ]]; then
     primary=$(jq -r .effective.primary <<<"$MULTI_FROZEN_RESTART")
@@ -64,12 +65,14 @@ _stage_settings_route() {
   if [[ -n "$selected" ]]; then
     primary=$selected
     failover=$(jq -r '(.failover // []) | join(",")' <<<"$MULTI_SETTINGS")
+    MULTI_ROUTE_SOURCE=task-stage
   else
     local inherited_route
     inherited_route=$(routing_resolve "$(multi_runner_config_file)" \
       "$(pipeline_store_file "$MULTI_TASK")" "$MULTI_STAGE" 1) || return
     primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$inherited_route")
     failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$inherited_route")
+    MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$inherited_route")
   fi
 }
 
@@ -142,7 +145,8 @@ _stage_settings_preview() {
     DISPATCH_RESOLVED_EFFORT=$(_multi_model_value "$config" "$MULTI_STAGE" "$provider" EFFORT)
     [[ -n "$DISPATCH_RESOLVED_EFFORT" ]] || DISPATCH_RESOLVED_EFFORT=high
   fi
-  if [[ "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
+  if [[ "${STAGE_SETTINGS_ALLOW_UNAVAILABLE:-0}" != 1 &&
+        "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
     if [[ "$provider" == "$primary" ]]; then
       candidate_failover=$failover
     fi
@@ -263,7 +267,8 @@ stage_runner_settings_cli() {
       _stage_settings_receipt "$identity" "$request" published '' || return
       if ! runtime_interrupt_trusted_active "$task" "$stage" "$run" "$epoch" \
         "${FACTORY_SWITCH_GRACE_SECONDS:-5}"; then
-        _stage_settings_receipt "$identity" "$request" failed 'stop: не удалось остановить точный запуск'
+        _stage_settings_receipt "$identity" "$request" failed \
+          'stop: не удалось остановить точный запуск' pending
       fi
     fi
     rm -f -- "$event_file"
@@ -275,8 +280,10 @@ stage_runner_settings_cli() {
 
 # Результат после accept меняется под тем же порядком locks, что и исходная selection.
 # RequestId запрещает позднему завершению перезаписать receipt нового действия человека.
+# Ожидаемое состояние защищает уже consumed restart от запоздалого отказа остановки.
 _stage_settings_receipt() {
   local identity=$1 request=$2 state=$3 reason=$4 task lock_fd task_fd rc
+  local expected_state=${5:-}
   task=$(jq -r .task <<<"$identity")
   pipeline_lock_acquire "$task" lock_fd || return
   _attempt_state_lock "$task" task_fd || {
@@ -286,7 +293,9 @@ _stage_settings_receipt() {
   if [[ "$state" == published ]]; then
     _stage_settings_tool published "$identity" "$request"
   else
-    _stage_settings_tool receipt "$identity" "$request" "$state" "$reason"
+    local -a receipt_args=("$request" "$state" "$reason")
+    [[ -z "$expected_state" ]] || receipt_args+=("$expected_state")
+    _stage_settings_tool receipt "$identity" "${receipt_args[@]}"
   fi
   rc=$?
   _attempt_state_unlock "$task_fd"

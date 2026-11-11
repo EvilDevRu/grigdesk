@@ -1307,3 +1307,57 @@ test('BR-N-reconnect-transfer: переданная вкладка не восс
 
   assert.deepEqual(result, { ok: false, error: 'access_revoked' });
 });
+
+test('BR-N-resize: эмуляция размеров применяется и снимается при отзыве доступа', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  await assert.rejects(() => f.execute({
+    action: 'resize',
+    tabId: tab.tabId,
+    width: 390,
+    height: 10000
+  }, tab.grantEpoch), /browser_action_invalid/u);
+
+  type ResizeResult = {
+    ok: boolean;
+    width: number;
+    height: number
+  };
+
+  const result = await f.execute({
+    action: 'resize',
+    tabId: tab.tabId,
+    width: 390,
+    height: 844
+  }, tab.grantEpoch) as ResizeResult;
+
+  assert.equal(result.ok, true);
+  assert.equal(result.width, 390);
+  assert.equal(result.height, 844);
+
+  const overrides = f.calls.filter((call) => call.method === 'Emulation.setDeviceMetricsOverride');
+
+  assert.deepEqual(overrides.at(-1)?.params, {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 0,
+    mobile: false
+  });
+
+  /**
+   * Refs переизмеряются resolve-ом, поэтому наблюдение не инвалидируется:
+   * после resize snapshot остаётся действительным, с новой эпохой страницы.
+   */
+  const observed = await f.execute({
+    action: 'snapshot',
+    tabId: tab.tabId
+  }, tab.grantEpoch) as { ok: boolean; pageEpoch: number };
+
+  assert.equal(observed.ok, true);
+  assert.equal(observed.pageEpoch, tab.pageEpoch + 1);
+
+  await f.api.invoke({ operation: 'revoke', tabId: tab.tabId });
+
+  assert.equal(f.calls.some((call) => call.method === 'Emulation.clearDeviceMetricsOverride'), true);
+});

@@ -13,6 +13,8 @@ const seconds: Record<string, number> = {
   'web.build': 45,
   'window.package': 180,
   'window.install': 10,
+  'tracker.deps': 120,
+  'tracker.build': 90,
   'apk.build': 180,
   'deepseek.deps': 120,
   'deepseek.prepare': 60,
@@ -76,9 +78,16 @@ export function buildStepIds(variant: string): string[] {
       'deepseek.smoke-coding-plan', 'deepseek.install', 'deepseek.prune'];
   }
 
+  // all собирает сервер, окно и tasks параллельными цепочками, поэтому стадии задач
+  // идут после упаковки окна; установка окна — строго последней, после сервера.
+  if (variant === 'all') {
+    return ['server.node', 'server.build', 'server.install', 'web.dependencies', 'web.build',
+      'window.package', 'tracker.deps', 'tracker.build', 'window.install'];
+  }
+
   return [
-    ...['all', 'server'].includes(variant) ? ['server.node', 'server.build', 'server.install'] : [],
-    ...['all', 'web', 'window'].includes(variant) ? ['web.dependencies', 'web.build'] : [],
-    ...['all', 'window'].includes(variant) ? ['window.package', 'window.install'] : [],
+    ...variant === 'server' ? ['server.node', 'server.build', 'server.install'] : [],
+    ...['web', 'window'].includes(variant) ? ['web.dependencies', 'web.build'] : [],
+    ...variant === 'window' ? ['window.package', 'window.install'] : [],
   ];
 }

@@ -1,6 +1,5 @@
 <template>
-  <TrackerInstallDialog v-if="!connectionOpen" :open="open" :start-install="startInstall"
-                        :start-update="startUpdate"
+  <TrackerInstallDialog v-if="!connectionOpen" :open="open" :request="installRequest"
                         @update:open="emit('update:open', $event)" @configure="configureDriver" />
   <UiDialog v-else :open="open" :title="t('core.trackerDriversTitle')" :busy="busy" :dismissible="!busy"
             data-role="tracker-settings" data-ui-workspace
@@ -18,9 +17,55 @@
       </div>
     </template>
 
-    <div class="tracker-settings">
+    <div class="tracker-settings" :aria-busy="loading || busy">
       <UiLoadingState v-if="loading">
-        <UiSkeletonLayout layout="form" :header="false" :rows="3" />
+        <div class="tracker-settings__workspace" aria-hidden="true" data-loading-region="tracker-settings">
+          <div class="tracker-settings__sidebar">
+            <div class="tracker-settings__picker">
+              <div class="tracker-settings__loading-field">
+                <UiSkeleton width="120px" height="18px" />
+                <UiSkeleton shape="block" height="var(--control-height)" />
+              </div>
+            </div>
+            <div class="tracker-settings__catalog">
+              <h3><UiSkeleton width="65%" height="18px" /></h3>
+              <div v-for="index in externalDrivers.length || 3" :key="index"
+                   class="tracker-settings__loading-driver">
+                <UiSkeleton width="72%" height="18px" />
+                <UiSkeleton width="30%" height="14px" />
+              </div>
+            </div>
+            <div class="tracker-settings__catalog-actions">
+              <UiSkeleton shape="block" height="var(--control-height)" width="min(100%, 180px)" />
+              <UiSkeleton shape="block" height="var(--control-height)" width="min(100%, 140px)" />
+            </div>
+          </div>
+          <div class="tracker-settings__editor">
+            <div class="tracker-settings__driver-heading">
+              <UiSkeleton width="45%" height="24px" />
+              <UiSkeleton width="80px" height="18px" />
+            </div>
+            <UiSkeleton width="60%" height="18px" />
+            <UiFormActions align="start">
+              <UiSkeleton shape="block" width="100px" height="var(--control-height)" />
+              <UiSkeleton shape="block" width="140px" height="var(--control-height)" />
+            </UiFormActions>
+            <div class="tracker-settings__section">
+              <h4><UiSkeleton width="min(100%, 200px)" height="21px" /></h4>
+              <UiFormActions align="start">
+                <UiSkeleton shape="block" width="140px" height="var(--control-height)" />
+                <UiSkeleton width="90px" height="var(--control-height)" />
+              </UiFormActions>
+              <div class="tracker-settings__fields">
+                <div v-for="index in 3" :key="index" class="tracker-settings__loading-field">
+                  <UiSkeleton width="35%" height="18px" />
+                  <UiSkeleton shape="block" height="var(--control-height)" />
+                </div>
+              </div>
+              <UiSkeleton shape="block" width="min(100%, 190px)" height="var(--control-height)" />
+            </div>
+          </div>
+        </div>
       </UiLoadingState>
       <div v-else class="tracker-settings__workspace">
         <aside class="tracker-settings__sidebar" :aria-label="t('core.trackerInstalled')">
@@ -94,28 +139,38 @@
               <UiInlineMessage v-else-if="selected.reason" tone="warning">{{ selected.reason }}</UiInlineMessage>
             </template>
             <UiFormActions align="start">
-              <UiButton tone="accent"
-                        :disabled="packageActionsDisabled || !packageInfo?.updateAvailable || packageInfo.localChanges"
+              <UiButton :disabled="packageActionsDisabled || !packageInfo?.updateAvailable || packageInfo.localChanges"
                         @click="openUpdate()">{{ t('core.trackerUpdate') }}</UiButton>
-              <UiButton variant="link" :disabled="busy || checking" @click="openManager()">
-                {{ t('core.trackerMoreActions') }}
+              <UiButton v-if="packageInfo && !packageInfo.localChanges"
+                        :disabled="packageActionsDisabled" @click="openPackageAction('version')">
+                {{ t('core.trackerOtherVersion') }}
               </UiButton>
+              <UiButton v-if="packageInfo?.rollbackAvailable && !packageInfo.localChanges"
+                        :disabled="packageActionsDisabled" @click="openPackageAction('rollback')">
+                {{ t('core.trackerRollback') }}
+              </UiButton>
+              <UiButton v-if="packageInfo?.localChanges"
+                        :disabled="packageActionsDisabled" @click="openPackageAction('restore')">
+                {{ t('core.trackerRestorePackage') }}
+              </UiButton>
+              <UiButton tone="danger" variant="solid" :disabled="packageActionsDisabled"
+                        @click="removeSelected()">{{ t('core.trackerRemove') }}</UiButton>
             </UiFormActions>
 
             <section class="tracker-settings__section" :aria-label="t('core.trackerConnectionSettings')">
               <h4>{{ t('core.trackerConnectionSettings') }}</h4>
-              <UiCheckbox :model-value="enabledIds.includes(editorId)" data-role="tracker-board-enabled"
-                          :disabled="busy || (!driverAvailable && !enabledIds.includes(editorId))"
-                          @update:model-value="setEnabled(Boolean($event))">
-                {{ t('core.trackerUseOnBoard') }}
-              </UiCheckbox>
-              <UiField :label="t('core.trackerDefaultBoard')">
-                <UiSelect v-model="externalId" :aria-label="t('core.trackerDefaultBoard')" :disabled="busy">
-                  <option v-for="id in enabledIds" :key="id" :value="id">
-                    {{ externalDrivers.find((driver) => driver.id === id)?.name ?? id }}
-                  </option>
-                </UiSelect>
-              </UiField>
+              <UiFormActions align="start">
+                <UiButton :pressed="externalId === editorId" data-role="tracker-make-default"
+                          :disabled="busy || !driverAvailable || externalId === editorId"
+                          @click="makeDefault()">
+                  {{ t('core.trackerInUse') }}
+                </UiButton>
+                <UiCheckbox :model-value="enabledIds.includes(editorId)" data-role="tracker-board-enabled"
+                            :disabled="busy || (!driverAvailable && !enabledIds.includes(editorId))"
+                            @update:model-value="setEnabled(Boolean($event))">
+                  {{ t('core.trackerUseOnBoard') }}
+                </UiCheckbox>
+              </UiFormActions>
               <UiInlineMessage v-if="externalId !== (trackers.catalog?.externalId ?? '')">
                 {{ externalId ? t('core.trackerSwitchConnection', { name: activeDriverName })
                   : t('core.trackerDisconnectConnection') }}
@@ -144,11 +199,14 @@
               </div>
               <UiFormActions align="start">
                 <UiButton :loading="testing" :disabled="busy || !driverAvailable || invalidTokenInput"
-                          data-role="tracker-test-connection" @click="checkConnection()">
+                          data-role="tracker-test-connection" aria-describedby="tracker-connection-hint"
+                          @click="checkConnection()">
                   {{ t('core.trackerTestConnection') }}
                 </UiButton>
+                <span id="tracker-connection-hint" class="tracker-settings__note tracker-settings__connection-hint">
+                  {{ t('core.trackerTestConnectionHint') }}
+                </span>
               </UiFormActions>
-              <p class="tracker-settings__note">{{ t('core.trackerTestConnectionHint') }}</p>
               <UiInlineMessage v-if="connectionResult" :tone="connectionResult.ok ? 'success' : 'danger'"
                                role="status" data-role="tracker-connection-result">
                 {{ connectionResult.ok ? t('core.trackerConnectionSuccess', { name: selected.name })
@@ -158,6 +216,16 @@
             </section>
           </template>
           <p v-else class="tracker-settings__note">{{ t('core.trackerEmpty') }}</p>
+          <UiInlineMessage v-if="removalNeedsRefresh" tone="warning" role="status">
+            {{ installer.unknownOutcome ? t('core.trackerCheckingOutcome') : t('core.trackerRefreshFailed') }}
+            {{ installer.refreshError || installer.error }}
+            <UiButton variant="link" :loading="recoveringRemoval" :disabled="busy" @click="recoverRemoval()">
+              {{ t('core.trackerRefresh') }}
+            </UiButton>
+          </UiInlineMessage>
+          <UiButton v-if="operationPending" :disabled="busy" @click="openOperation({ kind: 'resume' })">
+            {{ t('core.trackerCheckingOutcome') }}
+          </UiButton>
           <UiInlineMessage v-if="updatesError" tone="warning">
             {{ updatesError }}
             <UiButton variant="link" :disabled="updatesLoading || checking" @click="loadPackageInfo()">
@@ -177,8 +245,12 @@
         <UiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">
           {{ t('core.close') }}
         </UiButton>
-        <UiButton variant="solid" tone="accent" :loading="saving"
-                  :disabled="busy || loading || invalidTokenInput" @click="save">
+        <UiButton :loading="saving === 'apply'"
+                  :disabled="busy || loading || invalidTokenInput || removalNeedsRefresh" @click="save(false)">
+          {{ t('core.trackerApply') }}
+        </UiButton>
+        <UiButton variant="solid" tone="accent" :loading="saving === 'save'"
+                  :disabled="busy || loading || invalidTokenInput || removalNeedsRefresh" @click="save(true)">
           {{ t('core.trackerSave') }}
         </UiButton>
       </UiFormActions>
@@ -196,10 +268,11 @@ import {
 } from '../../../../shared/trackers/settingsValidation.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
+import type { DriverInstallRequest } from '../../stores/driverInstall.ts';
 import { api, ApiError, failureText } from '../../shared/apiClient.ts';
 import {
   t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeletonLayout,
+  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeleton,
 } from '../../ui.ts';
 import TrackerInstallDialog from './TrackerInstallDialog.vue';
 import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
@@ -227,11 +300,12 @@ const tokenFailure = ref<{
   field: string;
   message: string;
 } | null>(null);
-const saving = ref(false);
+const saving = ref<'apply' | 'save' | null>(null);
 const saved = ref(false);
 const connectionOpen = ref(true);
-const startInstall = ref(false);
-const startUpdate = ref<string>();
+const installRequest = ref<DriverInstallRequest>({ kind: 'install' });
+const removalNeedsRefresh = ref(!!installer.pendingRemoval);
+const recoveringRemoval = ref(false);
 const drafts = new Map<string, Record<string, string | boolean | number>>();
 let settingsReady: Promise<void> | null = null;
 
@@ -246,9 +320,12 @@ const packageInfo = computed(() => installer.installed[editorId.value]);
 const driverAvailable = computed(() => ['active', 'available'].includes(selected.value?.status ?? ''));
 const activeDriverName = computed(() => externalDrivers.value
   .find((driver) => driver.id === externalId.value)?.name ?? externalId.value);
-const busy = computed(() => saving.value || testing.value);
-const packageActionsDisabled = computed(() => loading.value || saving.value || updatesLoading.value
-  || checking.value || testing.value || installer.blocked);
+const busy = computed(() => saving.value !== null || testing.value
+  || installer.removing || recoveringRemoval.value);
+const packageActionsDisabled = computed(() => loading.value || busy.value || updatesLoading.value
+  || checking.value || installer.blocked || removalNeedsRefresh.value);
+const operationPending = computed(() => !installer.pendingRemoval && (installer.active
+  || installer.unknownOutcome || !!installer.pendingRollback || !!installer.recoveryError));
 const tokenInputErrors = computed(() => Object.fromEntries(
   visibleTrackerTokenKeys(selected.value?.schema ?? {}, values.value)
     .filter((key) => !isTrackerTokenInput(String(values.value[key] ?? '')))
@@ -258,12 +335,12 @@ const invalidTokenInput = computed(() => Object.keys(tokenInputErrors.value).len
 
 /**
  * Настройка использует ту же модальную оболочку вместо диалога поверх установщика.
- * Выбор из результата не сохраняется на сервере до явного нажатия «Сохранить».
+ * Выбор из результата не сохраняется на сервере до явного применения или сохранения.
  */
 async function configureDriver(id?: string) {
   await settingsReady;
 
-  if (id !== undefined) {
+  if (id !== undefined && externalDrivers.value.some((driver) => driver.id === id)) {
     editorId.value = id;
   }
 
@@ -275,21 +352,27 @@ async function configureDriver(id?: string) {
  * Установщик сам восстановит активную операцию до открытия нового маршрута.
  */
 function openInstaller() {
-  startInstall.value = true;
-  startUpdate.value = undefined;
-  installer.screen = 'manage';
-  connectionOpen.value = false;
+  openOperation({ kind: 'install' });
 }
 
 /**
- * Дополнительные операции открываются без сохранения подключения.
- * Смена содержимого оставляет черновики драйверов в памяти каталога.
+ * Мастер получает конкретное действие вместо промежуточного списка пакетов.
+ * Черновики остаются в настройках, незавершённая серверная операция сохраняет приоритет.
  */
-function openManager() {
-  startInstall.value = false;
-  startUpdate.value = undefined;
-  installer.screen = 'manage';
+function openOperation(request: DriverInstallRequest) {
+  installRequest.value = request;
+
+  if (!installer.blocked) {
+    installer.screen = 'idle';
+  }
+
   connectionOpen.value = false;
+}
+
+function openPackageAction(kind: 'version' | 'restore' | 'rollback') {
+  if (!packageActionsDisabled.value && packageInfo.value) {
+    openOperation({ kind, id: editorId.value });
+  }
 }
 
 /**
@@ -301,10 +384,7 @@ function openUpdate() {
     return;
   }
 
-  startInstall.value = false;
-  startUpdate.value = editorId.value;
-  installer.screen = 'manage';
-  connectionOpen.value = false;
+  openOperation({ kind: 'update', id: editorId.value });
 }
 
 /**
@@ -345,6 +425,57 @@ async function checkUpdates() {
   }
 }
 
+/**
+ * Кнопка удаляет выбранный редактором пакет через общее подтверждение без сохранения черновиков.
+ * Неизвестный исход и отказ перечитывания проверяются в форме без повторного удаления.
+ */
+async function removeSelected() {
+  const driver = selected.value;
+
+  if (!driver || packageActionsDisabled.value) {
+    return;
+  }
+
+  error.value = '';
+  saved.value = false;
+
+  const removed = await installer.confirmRemove(driver.id, driver.name);
+
+  if (installer.unknownOutcome || (removed && installer.refreshError)) {
+    removalNeedsRefresh.value = true;
+  } else if (removed === false) {
+    error.value = installer.error;
+  } else if (removed) {
+    revision.value = trackers.catalog?.revision ?? revision.value;
+    updatesError.value = installer.refreshError;
+  }
+}
+
+/**
+ * Повтор проверяет каталог после удаления, не отправляя мутацию заново.
+ * Пока состояние неизвестно, сохранение не может вернуть удалённый драйвер в черновой набор.
+ */
+async function recoverRemoval() {
+  if (busy.value) {
+    return;
+  }
+
+  recoveringRemoval.value = true;
+
+  try {
+    if (installer.pendingRemoval || installer.unknownOutcome) {
+      await installer.current();
+    } else {
+      await installer.refreshAfterMutation();
+    }
+
+    removalNeedsRefresh.value = installer.unknownOutcome || !!installer.refreshError || !!installer.error;
+    revision.value = trackers.catalog?.revision ?? revision.value;
+  } finally {
+    recoveringRemoval.value = false;
+  }
+}
+
 watch([externalId, editorId, values], () => {
   saved.value = false;
   connectionResult.value = null;
@@ -362,6 +493,19 @@ function setEnabled(enabled: boolean) {
   if (!enabledIds.value.includes(externalId.value)) {
     externalId.value = enabledIds.value[0] ?? '';
   }
+}
+
+/**
+ * Выбранный редактором драйвер становится основной доской и включается при необходимости.
+ * Назначение меняет только черновик, сохранённые чипы обновятся после записи настроек.
+ */
+function makeDefault() {
+  if (busy.value || loading.value || !driverAvailable.value) {
+    return;
+  }
+
+  setEnabled(true);
+  externalId.value = editorId.value;
 }
 
 function fieldError(key: string): string | undefined {
@@ -486,8 +630,16 @@ watch(editorId, (id, previous) => {
 });
 
 watch(() => trackers.catalog, (catalog) => {
-  if (catalog?.drivers.some((driver) => driver.id === externalId.value && driver.deleted)) {
-    externalId.value = catalog.externalId ?? '';
+  const deletedIds = catalog?.drivers.filter((driver) => driver.deleted).map((driver) => driver.id) ?? [];
+
+  if (catalog && deletedIds.some((id) => enabledIds.value.includes(id)
+    || id === externalId.value || id === editorId.value)) {
+    enabledIds.value = enabledIds.value.filter((id) => !deletedIds.includes(id));
+
+    if (deletedIds.includes(externalId.value)) {
+      externalId.value = catalog.default ?? catalog.externalId ?? '';
+    }
+
     revision.value = catalog.revision;
   }
 
@@ -526,14 +678,14 @@ async function load() {
 
 /**
  * Сервер сравнивает ревизию перед сохранением выбора и реквизитов.
- * Неуспешная запись сохраняет введённые значения для исправления и повторной проверки.
+ * Применение обновляет базу черновика; сохранение дополнительно закрывает окно только после успеха.
  */
-async function save() {
-  if (busy.value || loading.value || invalidTokenInput.value) {
+async function save(closeAfterSave: boolean) {
+  if (busy.value || loading.value || invalidTokenInput.value || removalNeedsRefresh.value) {
     return;
   }
 
-  saving.value = true;
+  saving.value = closeAfterSave ? 'save' : 'apply';
   saved.value = false;
   error.value = '';
 
@@ -565,12 +717,21 @@ async function save() {
     }) as { revision: number };
 
     revision.value = result.revision;
+
+    for (const [id, changed] of Object.entries(settings)) {
+      savedValues.value[id] = { ...savedValues.value[id], ...changed };
+    }
+
     saved.value = true;
+
+    if (closeAfterSave) {
+      emit('update:open', false);
+    }
   } catch (cause) {
     error.value = failureText(cause);
     await showTokenFailure(cause);
   } finally {
-    saving.value = false;
+    saving.value = null;
   }
 }
 
@@ -633,6 +794,18 @@ onMounted(() => {
   display: none;
 }
 
+.tracker-settings__loading-driver,
+.tracker-settings__loading-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tracker-settings__loading-driver {
+  gap: 4px;
+  padding: 11px;
+}
+
 .tracker-settings__catalog h3 {
   margin: 0 0 4px;
   color: var(--ink-mid);
@@ -672,6 +845,10 @@ onMounted(() => {
 
 .tracker-settings__actions {
   width: 100%;
+}
+
+.tracker-settings__connection-hint {
+  flex: 1 1 240px;
 }
 
 @container tracker-settings (max-width: 680px) {

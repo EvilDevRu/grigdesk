@@ -352,7 +352,7 @@ export async function readRunnerAttempts(
       });
     } catch { /* незавершённый запуск ещё мог не записать meta.env */ }
   }));
-  attempts.sort((a, b) => (a.epoch ?? Number.MAX_SAFE_INTEGER) - (b.epoch ?? Number.MAX_SAFE_INTEGER)
+  attempts.sort((a, b) => (a.epoch ?? -1) - (b.epoch ?? -1)
     || a.id.localeCompare(b.id));
 
   const recent = attempts.slice(-20);

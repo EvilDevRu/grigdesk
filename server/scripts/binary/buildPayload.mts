@@ -42,10 +42,6 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     'VERSION', 'runtime', 'server', 'engine', 'schemas', 'deploy', 'licenses', 'tools',
   ]);
 
-  if (options.wrappers?.includes('shared/runtime/legacyBrand.ts')) {
-    allowed.add('shared');
-  }
-
   for (const name of await readdir(root)) {
     if (!allowed.has(name)) {
       throw new Error(`Запрещён корень состава payload: ${name}`);

@@ -33,8 +33,6 @@ async function fixture(t, name = 'R') {
   await mkdir(home);
   await mkdir(stubs);
   await cp(path.join(SOURCE, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
-  await cp(path.join(SOURCE, 'shared/runtime/legacyBrand.ts'),
-    path.join(root, 'shared/runtime/legacyBrand.ts'));
   await writeFile(path.join(root, 'server/scripts/dataHomeCheck.mts'), 'process.exitCode = 0;\n');
   await writeFile(path.join(root, 'release.json'), '{"schema":1}\n');
   await writeFile(path.join(root, 'bin/b24'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });

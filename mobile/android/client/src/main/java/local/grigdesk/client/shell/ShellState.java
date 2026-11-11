@@ -132,7 +132,7 @@ public final class ShellState {
     result.put("serverApi", connection == null ? JSONObject.NULL : connection.get("serverApi"));
     result.put("appApi", new JSONObject().put("major", major).put("minor", minor));
     result.put("localAvailable", false);
-    result.put("capabilities", new JSONArray(new String[] { "scan", "save", "unlock" }));
+    result.put("capabilities", new JSONArray(new String[] { "scan", "save", "unlock", "routeUpdate" }));
 
     if (appLock != null) {
       result.put("appLock", appLock.get());

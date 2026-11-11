@@ -13,6 +13,8 @@ declare module 'ssh2' {
     port?: number;
     username?: string;
     password?: string;
+    privateKey?: Buffer | string;
+    passphrase?: string;
     readyTimeout?: number;
     hostHash?: string;
     hostVerifier?: (key: Buffer | string) => boolean;
@@ -41,6 +43,12 @@ declare module 'ssh2' {
     ) => void;
     createReadStream: (path: string) => Readable;
     createWriteStream: (path: string) => Writable;
+    writeFile: (
+      path: string,
+      data: Buffer,
+      options: { mode: number; flag: string },
+      callback: (error?: Error | null) => void,
+    ) => void;
     end?: () => void;
   }
 

@@ -140,3 +140,36 @@ test('DP-02 ошибка close сохраняет код перезапуска 
     assert.deepEqual(exits, [code || 1]);
   }
 });
+
+test('deadline называет внутренний close-шаг и не даёт поздний успешный drain proof', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const events = [];
+  const proofs = [];
+  const exits = [];
+  let release;
+  const coordinator = createShutdownCoordinator({
+    timeoutMs: 50,
+    exit: (code) => exits.push(code),
+    log: {
+      info: (fields) => events.push(fields),
+      error: (fields) => events.push(fields),
+    },
+    close: () => coordinator.closeStep('telegram-watch', () => new Promise((resolve) => {
+      release = resolve;
+    })),
+  });
+
+  coordinator.afterDrain((success) => proofs.push(success));
+
+  const stopping = coordinator.begin('синтетика', 75);
+
+  t.mock.timers.tick(50);
+  release();
+  await stopping;
+  assert.deepEqual(exits, [75]);
+  assert.deepEqual(proofs, []);
+  assert.equal(events.find((event) => event.event === 'shutdown.deadline').step, 'telegram-watch');
+  assert.ok(events.some((event) => event.event === 'shutdown.step.start'));
+  assert.ok(events.some((event) => event.event === 'shutdown.step.end'));
+});

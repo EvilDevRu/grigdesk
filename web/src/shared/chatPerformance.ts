@@ -69,7 +69,7 @@ export function createChatPerformanceRecorder(options: {
         const end = options.now();
         const ms = Math.max(0, end - started);
         const sample: Sample = {
-          tag: 'AGENT-DBG',
+          tag: 'chat-perf',
           operation,
           view,
           ms,
@@ -125,7 +125,7 @@ export function createChatPerformanceRecorder(options: {
     const specific = overlap.filter((sample) => !['sse.dispatch', 'vue.flush'].includes(sample.operation));
     const operation = (specific.length ? specific : overlap).sort((a, b) => b.ms - a.ms)[0];
     const sample: WebLogData['perf.block'] = {
-      tag: 'AGENT-DBG',
+      tag: 'chat-perf',
       kind,
       view: options.view(),
       ms,
@@ -344,7 +344,7 @@ export function installChatPerformance(options: {
     observe('longtask');
     observe('long-animation-frame');
     log.record('perf.ready', {
-      tag: 'AGENT-DBG',
+      tag: 'chat-perf',
       longTasks: supported.includes('longtask'),
       longFrames: supported.includes('long-animation-frame'),
     });

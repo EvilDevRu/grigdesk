@@ -59,17 +59,6 @@
       "description": "Единая команда GrigDesk из готового комплекта."
     },
     {
-      "id": "legacy-brand",
-      "entry": "shared/runtime/legacyBrand.ts",
-      "entryKind": "library",
-      "exports": [
-        "LEGACY",
-        "legacyRootProblem",
-        "legacyEnvWarnings"
-      ],
-      "description": "Библиотечные exports прежнего shell-контракта имён."
-    },
-    {
       "id": "routes-publish-kit",
       "entry": "server/src/modules/routes/publishKit.ts",
       "entryKind": "library",

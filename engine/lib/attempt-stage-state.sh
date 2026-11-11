@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Доверенный курсор выполнения для попытки с закреплённым маршрутом v2.
+# Узкое восстановление pointer после exact host receipt:
+#   attempt_stage_state_reconcile_pending_v2 TASK ATTEMPT
 #
 # Публичный API:
 #   attempt_stage_state_init_v2 TASK ATTEMPT_ID ROUTE_ID
@@ -1999,7 +2001,10 @@ elif OP == "routing-transitions":
         }
         sys.stdout.buffer.write(canonical_bytes(projection))
 
-elif OP == "validate-ledger":
+elif OP in {"validate-ledger", "recover-pending-runtime"}:
+    pending_name = None
+    if OP == "recover-pending-runtime":
+        pending_name, *ARGS = ARGS
     # Пара цикла — необязательный хвост аргументов: у маршрута без `loop` её нет, и
     # проверка побайтно прежняя.
     directory, task, attempt, profile, catalog, route, route_hash, entry, *loop_args = ARGS
@@ -2282,12 +2287,53 @@ elif OP == "validate-ledger":
         route_hash,
         entry,
     )
-    if (
+    mismatch = (
         runtime["sequence"] != event_names[-1][0]
         or runtime["headEventHash"] != previous_hash
         or runtime["cursor"] != cursor
-    ):
-        fail()
+    )
+    if mismatch:
+        if pending_name is None or len(event_names) < 2:
+            fail()
+        # Полная цепочка уже проверена выше, включая семантику последнего event.
+        # Допускается ровно один подтверждённый хвост, а не произвольная починка 78.
+        prefix_sequence, prefix_hash, prefix_name = event_names[-2]
+        prefix_event = regular_json(os.path.join(directory, prefix_name))
+        if (runtime["sequence"] != prefix_sequence
+                or runtime["headEventHash"] != prefix_hash
+                or runtime["cursor"] != prefix_event["after"]):
+            fail()
+        sys.path.insert(0, os.path.join(os.environ["FACTORY_HOME"], "lib"))
+        from pathlib import Path
+        from pending_transition import BIND, classify, load
+        try:
+            pending = load(Path(pending_name))
+        except (OSError, ValueError, KeyError, TypeError):
+            fail()
+        base = pending["base"]
+        bindings = {
+            "taskId": task, "attemptId": attempt, "profile": profile,
+            "catalogHash": catalog, "routeId": route, "routeHash": route_hash,
+        }
+        if (any(base[k] != bindings[k] for k in BIND)
+                or base["eventSequence"] != runtime["sequence"]
+                or base["headEventHash"] != runtime["headEventHash"]
+                or runtime["cursor"]["state"] != "ready"
+                or base["currentNode"] != runtime["cursor"]["currentNode"]):
+            fail()
+        candidate = dict(runtime, sequence=event_names[-1][0],
+                         headEventHash=previous_hash, cursor=cursor)
+        projected = dict(bindings, eventSequence=candidate["sequence"],
+                         headEventHash=previous_hash, **cursor)
+        latest_name = os.path.join(directory, event_names[-1][2])
+        latest_raw = open(latest_name, "rb").read()
+        try:
+            status = classify(pending, projected, previous_event, latest_raw, Path('/dev/null'))
+        except (OSError, ValueError, KeyError, TypeError):
+            fail()
+        if status != 'committed':
+            fail()
+        runtime = validate_runtime(candidate, task, attempt, profile, catalog, route, route_hash, entry)
     dump(runtime)
 
 else:
@@ -2778,6 +2824,54 @@ attempt_stage_state_pause_v2() {
   [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
   if (( rc == 0 )); then
     _attempt_stage_state_validate_locked "$task" "$attempt"
+    rc=$?
+  fi
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
+# Достраивает только runtime-проекцию одного exact события после durable host intent.
+# Не переписывает историю; общий read остаётся fail-closed без этого узкого API.
+attempt_stage_state_reconcile_pending_v2() {
+  local task attempt lock_fd receipt payload rc
+  local -a loop_args=()
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc != 0 )); then
+    _attempt_state_unlock "$lock_fd"
+    return "$rc"
+  fi
+  _attempt_stage_state_validate_internal_locked "$task" "$attempt" >/dev/null
+  rc=$?
+  if (( rc == 0 )); then
+    _attempt_state_unlock "$lock_fd"
+    return 0
+  fi
+  if (( rc != 78 )); then
+    _attempt_state_unlock "$lock_fd"
+    return "$rc"
+  fi
+  receipt="$ASTAGE_ATTEMPT_DIR/pending-transition.json"
+  payload=$(mktemp "$ASTAGE_ATTEMPT_DIR/.pending-runtime.XXXXXX") || {
+    _attempt_state_unlock "$lock_fd"
+    return 74
+  }
+  [[ -z "$ASTAGE_LOOP_LEAD" ]] || loop_args=("$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER")
+  PYTHONDONTWRITEBYTECODE=1 _attempt_stage_state_json recover-pending-runtime     "$receipt" "$ASTAGE_RESULTS_DIR" "$task" "$attempt" "$ASTAGE_PROFILE"     "$ASTAGE_CATALOG_HASH" "$ASTAGE_ROUTE" "$ASTAGE_ROUTE_HASH" "$ASTAGE_ENTRY"     "${loop_args[@]}" >"$payload"
+  rc=$?
+  if (( rc == 0 )); then
+    chmod 400 "$payload" || rc=74
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_publish_runtime_locked "$payload"
+    rc=$?
+  fi
+  rm -f -- "$payload"
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >/dev/null
     rc=$?
   fi
   _attempt_state_unlock "$lock_fd"

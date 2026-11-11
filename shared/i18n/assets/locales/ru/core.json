@@ -1367,6 +1367,7 @@
   "trackerResetOrder": "Вернуть порядок трекера и показать все задачи",
   "chatContextLabel": "Контекст",
   "boardSnapshotStale": "Не удалось обновить доску. Показаны последние полученные данные.",
+  "boardTimersStale": "Данные не обновлялись {minutes} мин — учёт может быть неточным.",
   "boardSnapshotUpdated": "Обновлено: {time}",
   "boardSourceChanged": "Источник доски изменился. Обновите данные.",
   "grigdeskB24Disconnected": "Б24 не подключён",
@@ -1444,6 +1445,7 @@
   "trackerResultStep": "Результат",
   "trackerPrepareStep": "Подготовка",
   "trackerBackToList": "К трекерам",
+  "trackerBackToSettings": "К настройкам",
   "trackerCancelReview": "Отменить проверку",
   "trackerTechnicalDetails": "Технические сведения",
   "trackerPackageId": "Идентификатор пакета",
@@ -1642,7 +1644,13 @@
   "chatHistoryOlderFailed": "Не загрузились старые сообщения",
   "chatHistoryBaseFailed": "Не обновилась база истории",
   "chatHistoryChanged": "Окно чата уже изменилось",
+  "chatSelectionConflict": "Не удалось согласовать настройки чата. Повторите отправку.",
   "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна",
-  "trackerSourceUnavailable": "недоступен",
-  "trackerDefaultBoard": "Доска по умолчанию"
+  "routeUpdateConfirm": "Обновить маршрут",
+  "routeUpdateDirect": "Изменить прямой адрес",
+  "routeUpdateHint": "Обновление маршрута сохраняет ключ и доверие к выбранной машине.",
+  "routeUpdateQr": "Обновить маршрут по QR или строке",
+  "routeUpdateTitle": "Изменить адрес",
+  "trackerDefaultBoard": "Доска по умолчанию",
+  "trackerSourceUnavailable": "недоступен"
 }

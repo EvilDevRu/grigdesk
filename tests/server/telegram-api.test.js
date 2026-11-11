@@ -2,7 +2,11 @@
 // в channel adapter. Сеть здесь полностью подменена: фиксируем только контракт,
 // лимит байтов и то, что секрет не добирается до ошибок.
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import http from 'node:http';
 import test from 'node:test';
+
+import { isolatedFetchWithLimits } from '../../server/src/lib/isolatedFetch.ts';
 
 import {
   callBotApi,
@@ -12,6 +16,23 @@ import {
 import * as telegramApi from '../../server/src/lib/telegram/api.ts';
 
 const TOKEN = '8123456789:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6';
+
+/**
+ * Синтетическая сеть использует только loopback; настоящий Telegram недоступен тесту.
+ * Подмена URL сохраняет production isolatedFetch и его завершение сетевого процесса.
+ */
+async function localNetwork(t, handler, limits) {
+  const server = http.createServer(handler);
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  return (_url, init) => isolatedFetchWithLimits(`http://127.0.0.1:${server.address().port}`, init, limits);
+}
 
 test('sendChatAction отправляет typing одним неидемпотентным вызовом Bot API', async () => {
   const calls = [];
@@ -187,4 +208,106 @@ test('transport и Telegram errors не раскрывают токен', async 
       return true;
     },
   );
+});
+
+test('deadline охватывает чтение JSON и закрывает сетевой процесс', async (t) => {
+  let closed;
+  const disconnected = new Promise((resolve) => {
+    closed = resolve;
+  });
+  const fetchImpl = await localNetwork(t, (request, response) => {
+    request.socket.once('close', closed);
+    response.writeHead(200);
+    response.write('{"ok":true,"result":');
+  });
+
+  await assert.rejects(callBotApi(TOKEN, 'getMe', {}, { fetchImpl, timeoutMs: 250 }),
+    (error) => error.kind === 'transport' && error.code === 'ABORT_ERR');
+  await disconnected;
+});
+
+test('скачивание больше 2 МиБ сохраняет предел файлов и deadline тела', async (t) => {
+  const bytes = Buffer.alloc(3 * 1024 * 1024, 7);
+  const fetchImpl = await localNetwork(t, (_request, response) => response.end(bytes), {
+    maxBytes: 20 * 1024 * 1024,
+    timeoutMs: 60_000,
+  });
+
+  assert.deepEqual(await downloadFile(TOKEN, 'synthetic.bin', { fetchImpl }), bytes);
+});
+
+test('отмена скачивания ждёт закрытия TCP после уже полученных заголовков', async (t) => {
+  const controller = new AbortController();
+  let closed;
+  const disconnected = new Promise((resolve) => {
+    closed = resolve;
+  });
+  const fetchImpl = await localNetwork(t, (request, response) => {
+    request.socket.once('close', closed);
+    response.writeHead(200);
+    response.write('синтетические байты');
+    controller.abort();
+  }, { maxBytes: 20 * 1024 * 1024, timeoutMs: 60_000 });
+
+  await assert.rejects(downloadFile(TOKEN, 'synthetic.bin', {
+    fetchImpl,
+    signal: controller.signal,
+  }), (error) => error.kind === 'transport' && error.code === 'ABORT_ERR');
+  await disconnected;
+});
+
+test('long poll дольше 15 секунд сохраняет собственный срок Telegram', { timeout: 22_000 }, async (t) => {
+  const fetchImpl = await localNetwork(t, (_request, response) => {
+    setTimeout(() => response.end('{"ok":true,"result":[]}'), 15_100);
+  }, { timeoutMs: 35_000 });
+
+  assert.deepEqual(await callBotApi(TOKEN, 'getUpdates', { timeout: 25 }, { fetchImpl }), []);
+});
+
+test('отмена не повторяет идемпотентный запрос и прерывает паузу повторов', async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const result = getFile(TOKEN, 'synthetic', {
+    signal: controller.signal,
+    retries: 2,
+    fetchImpl: async () => {
+      attempts += 1;
+      controller.abort();
+
+      throw new Error('синтетический обрыв');
+    },
+  });
+
+  await assert.rejects(result);
+  assert.equal(attempts, 1);
+});
+
+test('причина внешней отмены не раскрывает токен до запроса и в паузе повторов', async () => {
+  const controller = new AbortController();
+
+  controller.abort(new Error(`secret ${TOKEN}`));
+  await assert.rejects(getFile(TOKEN, 'synthetic', { signal: controller.signal }), (error) => {
+    assert.equal(error.code, 'ABORT_ERR');
+    assert.equal(error.kind, 'transport');
+    assert.equal(error.message.includes(TOKEN), false);
+
+    return true;
+  });
+
+  const retryController = new AbortController();
+  let attempts = 0;
+  const pending = getFile(TOKEN, 'synthetic', {
+    retries: 2,
+    signal: retryController.signal,
+    fetchImpl: async () => {
+      attempts += 1;
+
+      throw new Error('синтетический отказ');
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  retryController.abort(new Error(`secret ${TOKEN}`));
+  await assert.rejects(pending, (error) => error.code === 'ABORT_ERR' && !error.message.includes(TOKEN));
+  assert.equal(attempts, 1);
 });

@@ -852,8 +852,6 @@ import type { ProviderModelEntry } from '../../../../shared/chat/providersContra
 import { useDictationController } from '../../features/speech/provider.ts';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
 import { startChatPerformance } from '../../shared/chatPerformance.ts';
-// AGENT-DBG: временно, до установления причины потери фокуса при наборе.
-import { installChatComposerFocusDebug } from '../../shared/chatComposerFocusDebug.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.ts';
@@ -1914,16 +1912,6 @@ function scrollDown() {
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
 const taEl = ref<InstanceType<typeof UiTextarea> | null>(null);
-// AGENT-DBG-START
-let stopFocusDebug: (() => void) | undefined;
-
-onMounted(() => {
-  if (taEl.value?.el) {
-    stopFocusDebug = installChatComposerFocusDebug(taEl.value.el);
-  }
-});
-onUnmounted(() => stopFocusDebug?.());
-// AGENT-DBG-END
 
 const composerH = ref<number | null>(storedComposerHeight());
 const keyboardLayoutVisible = ref(false);

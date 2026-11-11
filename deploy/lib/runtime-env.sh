@@ -34,7 +34,15 @@ try:
         for key, expected in [("format", 1), ("hostContract", 1), ("packagingVersion", 2)]:
             if type(value.get(key)) is not int or value[key] != expected:
                 raise ValueError()
-        if value.get("version") != "0.1.0" or value.get("runtime") != {
+        # Как parseProductVersion: номер продукта не меняет совместимость hostContract.
+        # Bootstrap без Node сохраняет тот же формат stable/dev и предел safe integer.
+        version = value.get("version")
+        number = r"(0|[1-9][0-9]*)"
+        match = re.fullmatch(number + r"\." + number + r"\." + number + r"(?:-dev\." + number + r")?",
+                             version) if isinstance(version, str) else None
+        if not match or any(int(part) > 9007199254740991 for part in match.groups() if part is not None):
+            raise ValueError()
+        if value.get("runtime") != {
             "node": "24.21.0", "abi": "137", "platform": "linux", "arch": "x64"
         }:
             raise ValueError()
@@ -374,13 +382,8 @@ grigdesk_load_runtime_env() {
   local env_file
   env_file=$(grigdesk_env_file) || return 1
   local output
-  local brand_module="${BASH_SOURCE[0]%/*}/../../shared/runtime/legacyBrand.ts"
 
   grigdesk_require_node "${2:-}" || return 1
-
-  if [[ -n "$_grigdesk_binary_root" ]]; then
-    brand_module="$_grigdesk_binary_root/server/runtime/helpers/legacy-brand.mjs"
-  fi
 
   GRIGDESK_NODE_ENV_ARGS=()
   [[ -f "$env_file" ]] && GRIGDESK_NODE_ENV_ARGS=(--env-file "$env_file")
@@ -388,29 +391,27 @@ grigdesk_load_runtime_env() {
   if output=$(grigdesk_node --input-type=module -e '
     import fs from "node:fs";
     import { parseEnv } from "node:util";
-    import { pathToFileURL } from "node:url";
-    const { legacyRootProblem } = await import(pathToFileURL(process.argv[2]).href);
-    const inheritedProblem = legacyRootProblem(process.env);
-    if (inheritedProblem) {
-      console.error(inheritedProblem);
-      process.exit(78);
-    }
+
     const file = process.argv[1];
     const values = fs.existsSync(file) ? parseEnv(fs.readFileSync(file, "utf8")) : {};
-    const fileProblem = legacyRootProblem(values, true);
-    if (fileProblem) {
-      console.error(fileProblem);
-      process.exit(78);
+
+    for (const reserved of ["GRIGDESK_HOME", "GRIGDESK_ENV_FILE"]) {
+      if (Object.hasOwn(values, reserved)) {
+        console.error(`Ключ ${reserved} запрещён в файле настроек.`);
+        process.exit(78);
+      }
     }
     for (const [key, value] of Object.entries(values)) {
       if (!Object.hasOwn(process.env, key)) {
         process.env[key] = value;
       }
     }
+
     const port = Number(process.env.GRIGDESK_PORT) || 8140;
+
     process.stdout.write(`${port}\n${process.env.GRIGDESK_CLI_TOKEN_PATH || ""}\n` +
       `${process.env.GRIGDESK_LOG || ""}\n`);
-  ' -- "$env_file" "$brand_module"); then
+  ' -- "$env_file"); then
     :
   else
     local code=$?

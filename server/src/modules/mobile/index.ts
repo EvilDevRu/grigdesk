@@ -3,6 +3,7 @@ import qrcode from 'qrcode-generator';
 
 import { MobileInputError } from '../../lib/mobile/errors.ts';
 import type { MobileService } from '../../lib/mobile/service.ts';
+import { deploymentRoutes } from './deployments.ts';
 
 /**
  * Административные ручки наследуют общий auth guard основного API.
@@ -27,6 +28,8 @@ export default async function mobileModule(
       message: 'Мобильный доступ недоступен.',
     });
   });
+  await app.register(async (scope) => deploymentRoutes(scope, service));
+
   app.get('/api/mobile/status', () => service.status());
   app.post<{ Body: Parameters<MobileService['addRelay']>[0] }>(
     '/api/mobile/relays',

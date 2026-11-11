@@ -43,6 +43,21 @@ test('PAGE-LIST: сервер отдаёт 40, 40, 15 карточек вмес�
   assert.equal(new Set(ids).size, 95);
 });
 
+test('PAGE-MANY-CLIENTS: 32 читателя одного списка не вытесняют курсоры друг друга', async (t) => {
+  const fixture = await listFixture(t, catalog());
+  const readers = await Promise.all(Array.from({ length: 32 }, () => (
+    jsonRequest(fixture.app, 'GET', list)
+  )));
+
+  for (const first of readers) {
+    const next = await jsonRequest(fixture.app, 'GET',
+      `${list}&cursor=${encodeURIComponent(first.page.nextCursor)}`);
+
+    assert.deepEqual([...first.sessions, ...next.sessions].map((head) => head.id),
+      catalog().slice(0, 80).map((chat) => chat.id));
+  }
+});
+
 test('PAGE-DELTA: knownOnly не приносит соседние 94 карточки', async (t) => {
   const fixture = await listFixture(t, catalog());
   const head = (await jsonRequest(fixture.app, 'GET', '/api/chat/store/head/page-0')).head;

@@ -950,4 +950,284 @@ assert_file_missing "$FACTORY_HOME/bin/factory-canary" \
 assert_file_missing "$FACTORY_HOME/bin/factory-canary-host.mjs" \
   "obsolete host wrapper is removed"
 
+# Читает только через штатный валидатор из отдельного shell-процесса.
+pending_public_lifecycle() {
+  local item_task=$1 item_attempt=$2 item_state=$3 item_control=$4
+  FACTORY_CONTROL_ROOT="$item_control" FACTORY_ROUTE_STATE_DIR="$item_state" \
+    STATE_DIR="$item_state" bash --noprofile --norc -c '
+      source "$FACTORY_HOME/lib/attempt-lifecycle-state.sh" || exit $?
+      attempt_lifecycle_read_v2 "$1" "$2"
+    ' _ "$item_task" "$item_attempt"
+}
+
+# Expected задаётся по реальному source visit/стадийному hash, не из нового human record.
+pending_assert_human() {
+  python3 - "$@" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+file_name, visit, source_session, stage_hash, mode, finished_count = sys.argv[1:]
+rows = [json.loads(line) for line in Path(file_name).read_text().splitlines()]
+starts = [row for row in rows if row['kind'] == 'node_visit_started' and row['nodeVisitId'] == visit]
+assert len(starts) == 1
+assert starts[0]['orchestratorSessionId'] == source_session
+humans = [row for row in rows if row['kind'] == 'human_intervention_started']
+assert len(humans) == 1
+human = humans[0]
+assert human['nodeVisitId'] == visit
+assert human['nodeId'] == 'verify' and human['runKey'] == 'VERIFY'
+assert human['details']['evidenceSha256'] == stage_hash
+assert human['details']['reasonCode'] == 'manual_resume_required'
+assert sum(row['kind'] == 'node_visit_finished' for row in rows) == int(finished_count)
+assert not any(row['kind'] == 'human_intervention_resolved' for row in rows)
+if mode == 'existing':
+    assert human['orchestratorSessionId'] == source_session
+else:
+    assert human['orchestratorSessionId'] != source_session
+PYCODE
+}
+
+# Проверяет реальные артефакты целиком, включая прежний fail-closed перед recovery.
+pending_assert_stall() {
+  local item_task=$1 item_state=$2 label=$3 consumer_log rc
+  consumer_log="$TEST_ROOT/stall-consumer-$label.log"
+  PENDING_RECOVERY_STAGES_PATH="$item_state/logs/t${item_task}.stages.log" \
+  PENDING_RECOVERY_PIPELINE_PATH="$item_state/t${item_task}.pipeline" \
+  PENDING_RECOVERY_MACHINE_PATH="$TEST_ROOT/pending-command-machine.json" \
+  PATH="$(dirname "$NODE_BIN"):$PATH" \
+  NODE_TEST_MAX_RSS_MB=4096 bash "$FACTORY_TESTS_HOME/../run-node-tests-safe.sh" \
+    --test-concurrency=2 --test "$FACTORY_TESTS_HOME/../server/stall-human-stop.test.js" \
+    >"$consumer_log" 2>&1
+  rc=$?
+  if (( rc != 0 )); then test_note "$(cat "$consumer_log")"; fi
+  assert_rc 0 "$rc" "$label: actual log → карточка VERIFY/human/готово и graph key"
+}
+
+gap_routes="$TEST_ROOT/pending-launcher-routes"
+"$NODE_BIN" --input-type=module - "$FACTORY_HOME/.." "$gap_routes" \
+  "$TEST_ROOT/pending-command-machine.json" <<'JS'
+import fs from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+const [root, baseDir, machinePath] = process.argv.slice(2);
+const { RoutesStore } = await import(pathToFileURL(`${root}/server/src/modules/routes/store.ts`));
+const fixtures = await import(pathToFileURL(`${root}/tests/engine/fixtures/routes-catalog-definitions.mjs`));
+const definition = structuredClone(fixtures.ROUTE_DEFINITIONS.command);
+definition.route.bootstrap = 'skip';
+definition.route.entry = 'verify';
+const verify = definition.route.nodes.find(node => node.id === 'verify');
+verify.on.done = { stop: 'human' };
+verify.on.skipped = { next: 'retro' };
+await fs.writeFile(machinePath, JSON.stringify(definition.route));
+const store = new RoutesStore({ baseDir });
+const published = await store.publishRoute(fixtures.PROFILE_ID, 'command', definition);
+const bootstrap = structuredClone(fixtures.bootstrap);
+bootstrap.nodes[0].on.done.escalate.routes = ['command'];
+bootstrap.escalation[0].allowedRoutes = ['command'];
+await store.publishCatalog(fixtures.PROFILE_ID, {
+  catalog: {
+    schema: 2, profile: fixtures.PROFILE_ID,
+    routes: { command: published.routeHash }, bootstrap: { file: 'bootstrap/scout.json' },
+  },
+  bootstrap, prompts: fixtures.bootstrapPrompts,
+}, { expectedCatalogHash: null });
+JS
+assert_rc 0 "$?" 'public gap: настоящий bundle опубликован в temporary store'
+cp "$profile_dir/profile.sh" "$TEST_ROOT/profile-before-pending-test.sh"
+cat >>"$profile_dir/profile.sh" <<'PROFILE'
+profile_route_command() {
+  [[ "$2" == command && "$3" == verify && "$5" == fixture-verify ]] || return 64
+  if [[ "${FIXTURE_RUNTIME_FAULT:-0}" == 1 ]]; then
+    # Hook выполняется в host после загрузки runtime, fault только у следующего commit.
+    _attempt_stage_state_publish_runtime_locked() { return 74; }
+  fi
+  printf '%s\n' '{"schema":1,"outcome":"done","comment":"готово","failureOwner":null,"findings":[]}'
+}
+PROFILE
+public_gap_task=9018
+public_gap_ticket="$TEST_ROOT/pending-ticket.json"
+sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$public_gap_task\"/"   "$ticket" >"$public_gap_ticket"
+public_gap_state="$TEST_ROOT/pending-public-state"
+public_gap_control="$TEST_ROOT/pending-public-control"
+before_invocations=$(wc -l <"$TEST_ROOT/invocations")
+public_gap_start=$(FACTORY_FORBID_LIVE=0 FIXTURE_RUNTIME_FAULT=1 FAKE_ALPHA_RESULT=done   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners"   "$tool" "$public_gap_task" start --profile "$profile_id" --route command     --ticket-json "$public_gap_ticket" --routes-dir "$gap_routes"     --state-dir "$public_gap_state" --control-dir "$public_gap_control" 2>&1)
+assert_rc 74 "$?" 'public gap: исходный start остановился именно после event publication'
+public_gap_attempt=$(awk -F= '$1=="ATTEMPT_ID"{print $2}'   "$public_gap_state/t${public_gap_task}.pipeline")
+public_gap_dir="$public_gap_control/protocol-v2/tasks/t${public_gap_task}/attempts/$public_gap_attempt"
+assert_file_exists "$public_gap_dir/pending-transition.json" 'public gap: durable receipt существует'
+old_events=$(find "$public_gap_dir/stage-results" -name 'event.*.json' | wc -l)
+origin_visit=$(jq -r .origin.nodeVisitId "$public_gap_dir/pending-transition.json")
+origin_session=$(jq -r .origin.orchestratorSessionId "$public_gap_dir/pending-transition.json")
+pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+  "$public_gap_state" "$public_gap_control" >"$TEST_ROOT/public-gap-before.ndjson"
+source_finished=$(python3 - "$TEST_ROOT/public-gap-before.ndjson" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+print(sum(json.loads(line)['kind'] == 'node_visit_finished'
+          for line in Path(sys.argv[1]).read_text().splitlines()))
+PYCODE
+)
+cp "$public_gap_dir/pending-transition.json" "$TEST_ROOT/public-pending-original.json"
+for bad in task origin; do
+  before_bad_runtime=$(sha256sum "$public_gap_dir/stage-results/runtime.json" | cut -d' ' -f1)
+  before_bad_lifecycle=$(pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+    "$public_gap_state" "$public_gap_control" | sha256sum)
+  chmod 600 "$public_gap_dir/pending-transition.json"
+  python3 - "$public_gap_dir/pending-transition.json" "$bad" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+value = json.loads(path.read_text())
+if sys.argv[2] == 'task':
+    value['base']['taskId'] = '8'
+else:
+    value['origin']['nodeVisitId'] = 'nv_' + '9' * 32
+path.write_text(json.dumps(value))
+path.chmod(0o400)
+PYCODE
+  FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$public_gap_task" resume --profile "$profile_id" --attempt "$public_gap_attempt" \
+      --routes-dir "$gap_routes" --state-dir "$public_gap_state" \
+      --control-dir "$public_gap_control" >/dev/null 2>&1
+  assert_rc 78 "$?" "public gap: wrong $bad отклонён до восстановительных эффектов"
+  assert_eq "$before_bad_runtime" \
+    "$(sha256sum "$public_gap_dir/stage-results/runtime.json" | cut -d' ' -f1)" \
+    "public gap: wrong $bad не меняет pointer"
+  assert_eq "$before_bad_lifecycle" \
+    "$(pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+      "$public_gap_state" "$public_gap_control" | sha256sum)" "public gap: wrong $bad не пишет lifecycle"
+  assert_eq "$before_invocations" "$(wc -l <"$TEST_ROOT/invocations")" 'public gap: негатив без модели'
+  assert_eq "$old_events" "$(find "$public_gap_dir/stage-results" -name 'event.*.json' | wc -l)" \
+    'public gap: негатив не меняет stage ledger'
+  chmod 600 "$public_gap_dir/pending-transition.json"
+  cat "$TEST_ROOT/public-pending-original.json" >"$public_gap_dir/pending-transition.json"
+  chmod 400 "$public_gap_dir/pending-transition.json"
+done
+public_gap_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners"   "$tool" "$public_gap_task" resume --profile "$profile_id" --attempt "$public_gap_attempt"     --routes-dir "$gap_routes" --state-dir "$public_gap_state"     --control-dir "$public_gap_control" 2>&1)
+public_gap_rc=$?
+if (( public_gap_rc != 0 )); then test_note "$public_gap_resume"; fi
+assert_rc 0 "$public_gap_rc" 'public gap: штатный factory resume достиг восстановления'
+assert_eq "$old_events"   "$(find "$public_gap_dir/stage-results" -name 'event.*.json' | wc -l)"   'public gap: accepted command не создал повторное stage event'
+assert_eq "$before_invocations" "$(wc -l <"$TEST_ROOT/invocations")"   'public gap: preflight и resume не запустили ни одной модели'
+assert_file_missing "$public_gap_dir/pending-transition.json" 'public gap: replay receipt погашен'
+public_gap_cursor=$(FACTORY_CONTROL_ROOT="$public_gap_control"   FACTORY_ROUTE_STATE_DIR="$public_gap_state" STATE_DIR="$public_gap_state"   bash --noprofile --norc -c '
+    source "$FACTORY_HOME/lib/attempt-stage-state.sh"
+    attempt_stage_state_read_v2 "$1" "$2"
+  ' _ "$public_gap_task" "$public_gap_attempt")
+assert_rc 0 "$?" 'public gap: восстановленная цепочка проходит общий строгий read'
+assert_eq human "$(jq -r .stop <<<"$public_gap_cursor")" 'public gap: сохранён точный stop'
+assert_eq verify "$(jq -r .lastCommit.node <<<"$public_gap_cursor")" 'public gap: последнее решение command'
+pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+  "$public_gap_state" "$public_gap_control" >"$TEST_ROOT/public-gap-after.ndjson"
+pending_assert_human "$TEST_ROOT/public-gap-after.ndjson" "$origin_visit" "$origin_session" \
+  "$(jq -r .headEventHash <<<"$public_gap_cursor")" new "$source_finished"
+assert_rc 0 "$?" 'public gap: один correct human record, source visit, новая writer session'
+pending_assert_stall "$public_gap_task" "$public_gap_state" gap-first
+before_repeat=$(pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+  "$public_gap_state" "$public_gap_control" | sha256sum)
+FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$public_gap_task" resume --profile "$profile_id" --attempt "$public_gap_attempt" \
+    --routes-dir "$gap_routes" --state-dir "$public_gap_state" \
+    --control-dir "$public_gap_control" >/dev/null
+assert_rc 0 "$?" 'public gap: повтор восстановленного stop удержан штатно'
+assert_eq "$before_repeat" "$(pending_public_lifecycle "$public_gap_task" "$public_gap_attempt" \
+  "$public_gap_state" "$public_gap_control" | sha256sum)" 'public gap: повтор не открывает session/human'
+assert_eq "$before_invocations" "$(wc -l <"$TEST_ROOT/invocations")" 'public gap: повтор без модели'
+pending_assert_stall "$public_gap_task" "$public_gap_state" gap-repeat
+# Явная штатная очистка собственной fake shared lease, чтобы fixture не оставляла владельца.
+FACTORY_FORBID_LIVE=0 FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners"   "$tool" "$public_gap_task" abandon --profile "$profile_id" --attempt "$public_gap_attempt"     --reason 'offline pending fixture complete' --routes-dir "$gap_routes"     --state-dir "$public_gap_state" --control-dir "$public_gap_control" >/dev/null
+assert_rc 0 "$?" 'public gap: собственная fake lease освобождена'
+cp "$TEST_ROOT/profile-before-pending-test.sh" "$profile_dir/profile.sh"
+
+cp "$profile_dir/profile.sh" "$TEST_ROOT/profile-before-human-fault.sh"
+cat >>"$profile_dir/profile.sh" <<'PROFILE'
+profile_route_command() {
+  [[ "$2" == command && "$3" == verify && "$5" == fixture-verify ]] || return 64
+  if [[ -n "${FIXTURE_HUMAN_FAULT:-}" ]]; then
+    eval "$(declare -f runtime_lifecycle_human_begin_v2 | \
+      sed '1s/runtime_lifecycle_human_begin_v2/_human_begin_without_fixture_fault/')"
+    runtime_lifecycle_human_begin_v2() {
+      if [[ "$FIXTURE_HUMAN_FAULT" == before ]]; then return 74; fi
+      _human_begin_without_fixture_fault "$@" || return
+      return 74
+    }
+  fi
+  printf '%s\n' '{"schema":1,"outcome":"done","comment":"готово","failureOwner":null,"findings":[]}'
+}
+PROFILE
+human_task=9030
+for failure in before after; do
+  human_task=$((human_task + 1))
+  human_state="$TEST_ROOT/pending-human-$failure-state"
+  human_control="$TEST_ROOT/pending-human-$failure-control"
+  human_ticket="$TEST_ROOT/pending-human-$failure-ticket.json"
+  sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$human_task\"/" "$ticket" >"$human_ticket"
+  model_count=$(wc -l <"$TEST_ROOT/invocations")
+  human_start=$(FACTORY_FORBID_LIVE=0 FIXTURE_HUMAN_FAULT="$failure" FAKE_ALPHA_RESULT=done \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$human_task" start --profile "$profile_id" --route command \
+      --ticket-json "$human_ticket" --routes-dir "$gap_routes" \
+      --state-dir "$human_state" --control-dir "$human_control" 2>&1)
+  assert_rc 74 "$?" "human $failure: fault находится в human projection"
+  human_attempt=$(awk -F= '$1=="ATTEMPT_ID"{print $2}' "$human_state/t${human_task}.pipeline")
+  human_dir="$human_control/protocol-v2/tasks/t${human_task}/attempts/$human_attempt"
+  assert_file_exists "$human_dir/pending-transition.json" "human $failure: receipt пережил отказ"
+  source_visit=$(jq -r .origin.nodeVisitId "$human_dir/pending-transition.json")
+  source_session=$(jq -r .origin.orchestratorSessionId "$human_dir/pending-transition.json")
+  accepted_hash=$(jq -r .runtime.headEventHash "$human_dir/stage-results/runtime.json")
+  accepted_events=$(find "$human_dir/stage-results" -name 'event.*.json' | wc -l)
+  pending_public_lifecycle "$human_task" "$human_attempt" "$human_state" "$human_control" \
+    >"$TEST_ROOT/human-$failure-before.ndjson"
+  if [[ "$failure" == after ]]; then mode=existing; else mode=new; fi
+  human_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$human_task" resume --profile "$profile_id" --attempt "$human_attempt" \
+      --routes-dir "$gap_routes" --state-dir "$human_state" --control-dir "$human_control" 2>&1)
+  resume_rc=$?
+  if (( resume_rc != 0 )); then test_note "$human_resume"; fi
+  assert_rc 0 "$resume_rc" "human $failure: отдельный public resume завершил проекцию"
+  assert_file_missing "$human_dir/pending-transition.json" "human $failure: ack после успеха"
+  assert_eq "$accepted_events" "$(find "$human_dir/stage-results" -name 'event.*.json' | wc -l)" \
+    "human $failure: stage event не дублируется"
+  assert_eq "$model_count" "$(wc -l <"$TEST_ROOT/invocations")" "human $failure: нет модели"
+  pending_public_lifecycle "$human_task" "$human_attempt" "$human_state" "$human_control" \
+    >"$TEST_ROOT/human-$failure-after.ndjson"
+  pending_assert_human "$TEST_ROOT/human-$failure-after.ndjson" "$source_visit" \
+    "$source_session" "$accepted_hash" "$mode" 1
+  assert_rc 0 "$?" "human $failure: один human, exact source, один visit finish"
+  pending_assert_stall "$human_task" "$human_state" "human-$failure-first"
+  if [[ "$failure" == after ]]; then
+    python3 - "$TEST_ROOT/human-after-before.ndjson" "$TEST_ROOT/human-after-after.ndjson" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+before, after = [[json.loads(line) for line in Path(name).read_text().splitlines()] for name in sys.argv[1:]]
+original = [row for row in before if row['kind'] == 'human_intervention_started']
+replayed = [row for row in after if row['kind'] == 'human_intervention_started']
+assert original == replayed and len(original) == 1
+PYCODE
+    assert_rc 0 "$?" 'human after: original human event не переписан'
+  fi
+  stable_lifecycle=$(pending_public_lifecycle "$human_task" "$human_attempt" \
+    "$human_state" "$human_control" | sha256sum)
+  FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$human_task" resume --profile "$profile_id" --attempt "$human_attempt" \
+      --routes-dir "$gap_routes" --state-dir "$human_state" --control-dir "$human_control" >/dev/null
+  assert_rc 0 "$?" "human $failure: повтор удержан без lifecycle error"
+  assert_eq "$stable_lifecycle" "$(pending_public_lifecycle "$human_task" "$human_attempt" \
+    "$human_state" "$human_control" | sha256sum)" "human $failure: нет новой session/resolve/human"
+  assert_eq "$model_count" "$(wc -l <"$TEST_ROOT/invocations")" "human $failure: повтор без модели"
+  pending_assert_stall "$human_task" "$human_state" "human-$failure-repeat"
+  FACTORY_FORBID_LIVE=0 FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$human_task" abandon --profile "$profile_id" --attempt "$human_attempt" \
+      --reason 'offline human projection fixture complete' --routes-dir "$gap_routes" \
+      --state-dir "$human_state" --control-dir "$human_control" >/dev/null
+  assert_rc 0 "$?" "human $failure: fake lease освобождена"
+done
+cp "$TEST_ROOT/profile-before-human-fault.sh" "$profile_dir/profile.sh"
+
 finish_tests

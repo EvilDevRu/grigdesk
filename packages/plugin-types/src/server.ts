@@ -94,6 +94,8 @@ export interface PluginDocuments {
 }
 
 export interface PluginCore extends Partial<PluginRuntimeServices> {
+  /** Небольшой HTTP(S)-ответ: отдельный процесс, 15 секунд, до 2 МиБ; тело запроса — строка. */
+  fetch: typeof fetch;
   getProviders(type: unknown): Promise<PluginProvider[]>;
   emit(event: string, data?: unknown): void;
   withPathLock<Result>(key: string, task: () => Promise<Result>): Promise<Result>;

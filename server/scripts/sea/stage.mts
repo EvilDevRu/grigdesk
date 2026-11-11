@@ -23,7 +23,7 @@ export interface AuditOptions {
 
 const FORBIDDEN = new Set(['.env', '.git', '.state', '.cache', '__pycache__']);
 const DATA_DIRECTORIES = new Set(['chats', 'profiles']);
-const WRAPPERS = ['shared/runtime/legacyBrand.ts', 'server/scripts/dataHomeCheck.mts'];
+const WRAPPERS = ['server/scripts/dataHomeCheck.mts'];
 
 /**
  * Права поставки не зависят от umask и групп машины сборки.

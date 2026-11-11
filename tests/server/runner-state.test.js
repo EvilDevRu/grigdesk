@@ -425,3 +425,28 @@ test('explicit-empty-effort-is-not-missing', async (t) => {
   assert.equal(attempts.find((attempt) => attempt.id === 'empty').effort, '');
   assert.equal(attempts.find((attempt) => attempt.id === 'legacy').effort, null);
 });
+
+test('legacy-history-does-not-displace-new-epochs-from-recent-attempts', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'stage-legacy-history-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  for (let index = 0; index < 22; index += 1) {
+    const run = path.join(root, 'logs/runs/t81/PLAN', `legacy-${index}`);
+
+    await mkdir(run, { recursive: true });
+    await writeFile(path.join(run, 'meta.env'), 'RUNNER=codex\nMODEL=legacy-model\n');
+  }
+
+  const current = path.join(root, 'logs/runs/t81/PLAN/current-run');
+
+  await mkdir(current, { recursive: true });
+  await writeFile(path.join(current, 'meta.env'), 'RUNNER=codex\nMODEL=current-model\nEPOCH=2\n');
+
+  const attempts = await readRunnerAttempts(root, '81', 'PLAN');
+
+  assert.equal(attempts.length, 20);
+  assert.equal(attempts.at(-1).id, 'current-run');
+  assert.equal(attempts.at(-1).epoch, 2);
+  assert.ok(attempts.some((attempt) => attempt.epoch === null), 'legacy история остаётся доступной');
+});

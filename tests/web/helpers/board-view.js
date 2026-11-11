@@ -197,10 +197,15 @@ export async function mountBoardView(t, {
           created,
           ...snapshot,
         },
+        branches: {},
         error: boardError,
         readAt: 1_800_000_000_000,
         loading: pending,
       }),
+      getters: {
+        refreshProblem: (s) => s.error
+          || Object.values(s.branches ?? {}).find((branch) => branch.error)?.error || '',
+      },
       actions: {
         async load(force) {
           calls.boardLoad.push(force);

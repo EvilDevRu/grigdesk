@@ -350,12 +350,12 @@ export const actionButton = (wrapper, pattern) => wrapper.findAll('button').find
 });
 
 /**
- * Управление пакетами открывается отдельным переходом из формы доски.
- * Сохранённая операция восстанавливается только после этого явного действия.
+ * Действия пакета находятся прямо в параметрах выбранного драйвера.
+ * Открытие настроек не восстанавливает старую операцию и не обращается к Git.
  */
-export async function openTrackerManager(card) {
+export async function openTrackerDriverSettings(card) {
   await openTrackerSettings(card);
-  await actionButton(card.wrapper, /^Другие действия$/u).trigger('click');
+  await card.wrapper.get('[data-driver="grigdesk-b24-discript"]').trigger('click');
   await card.flushPromises();
 }
 
@@ -397,6 +397,10 @@ export async function chooseExternal(card, id) {
  * Последующие действия обращаются к тому же диалогу, даже при смене шага.
  */
 export async function openTrackerInstaller(card) {
+  if (card.wrapper.find('[data-role="tracker-install"]').exists()) {
+    return liveTrackerDialog(card);
+  }
+
   const button = actionButton(card.wrapper, /^\s*(?:Добавить трекер|Add tracker|Установить|Install)\s*$/u);
 
   await button.trigger('click');
@@ -412,7 +416,7 @@ export async function openTrackerInstaller(card) {
 export function liveTrackerDialog(card) {
   return new Proxy({}, {
     get(_target, key) {
-      const dialog = card.wrapper.find('[data-role="tracker-install"]');
+      const dialog = card.wrapper.find('[data-role="tracker-install"], [data-role="tracker-settings"]');
       const value = dialog[key];
 
       return typeof value === 'function' ? value.bind(dialog) : value;

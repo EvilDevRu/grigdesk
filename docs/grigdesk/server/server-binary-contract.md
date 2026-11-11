@@ -17,6 +17,9 @@ alias --check-startup подразумевает JSON. Передача preparat
 Продуктовая версия manifest берётся из GRIGDESK_RELEASE_VERSION либо корневого `VERSION`, входит в packageId
 и проверяется также в защищённой identity payload. Format и hostContract при изменении
 продуктовой версии сохраняются; префиксы, ведущие нули и суффиксы кроме нумерованного dev запрещены.
+Shell-bootstrap в `deploy/lib/runtime-env.sh` проверяет тот же формат и предел safe integer,
+не закрепляя конкретный выпуск; совместимость определяют поля бинарного протокола.
+[Причина прежнего отказа установки окна](runtime-env-version-sync.md).
 
 В registered-раскладке физический ELF остаётся в generations/version/server/bin, но
 runtimeInstallationRoot берётся из защищённого receipt до загрузки config. Ресурсы R и

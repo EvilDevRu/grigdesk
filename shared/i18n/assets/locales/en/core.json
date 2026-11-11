@@ -1347,6 +1347,7 @@
   "trackerResetOrder": "Restore tracker order and show all tasks",
   "chatContextLabel": "Context",
   "boardSnapshotStale": "Could not refresh the board. Showing the last received data.",
+  "boardTimersStale": "Data has not been refreshed for {minutes} min — timers may be stale.",
   "boardSnapshotUpdated": "Updated: {time}",
   "boardSourceChanged": "The board source changed. Refresh the data.",
   "grigdeskB24Disconnected": "B24 is not connected",
@@ -1424,6 +1425,7 @@
   "trackerResultStep": "Result",
   "trackerPrepareStep": "Preparation",
   "trackerBackToList": "Back to trackers",
+  "trackerBackToSettings": "Back to settings",
   "trackerCancelReview": "Cancel preparation",
   "trackerTechnicalDetails": "Technical details",
   "trackerPackageId": "Package identifier",
@@ -1622,7 +1624,13 @@
   "chatHistoryOlderFailed": "Could not load older messages",
   "chatHistoryBaseFailed": "Could not refresh the history base",
   "chatHistoryChanged": "The chat window has changed",
+  "chatSelectionConflict": "Could not synchronize the chat settings. Try sending again.",
   "chatHistoryWindowAckMissing": "The server did not confirm the history window base",
-  "trackerSourceUnavailable": "unavailable",
-  "trackerDefaultBoard": "Default board"
+  "routeUpdateConfirm": "Update route",
+  "routeUpdateDirect": "Change direct address",
+  "routeUpdateHint": "Updating the route preserves the key and trust of the selected machine.",
+  "routeUpdateQr": "Update route using QR or text",
+  "routeUpdateTitle": "Change address",
+  "trackerDefaultBoard": "Default board",
+  "trackerSourceUnavailable": "unavailable"
 }

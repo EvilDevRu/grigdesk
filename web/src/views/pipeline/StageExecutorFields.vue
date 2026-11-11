@@ -5,6 +5,7 @@
       <UiSelect :id="`${fieldId}-model`" :model-value="selectedModel" :disabled="!editable"
                 :aria-describedby="descriptionId" @update:model-value="updateModel">
         <option :value="inheritValue">{{ t('core.stageInheritModel', { value: inheritedModel }) }}</option>
+        <option v-if="unlistedModel" :value="draft!.model" disabled>{{ draft!.model }}</option>
         <option v-for="item in options?.models || []" :key="item.id" :value="item.id">
           {{ item.label || item.id }}
         </option>
@@ -17,6 +18,9 @@
       <UiSelect :id="`${fieldId}-effort`" :model-value="selectedEffort" :disabled="!editable"
                 :aria-describedby="descriptionId" @update:model-value="updateEffort">
         <option :value="inheritValue">{{ t('core.stageInheritEffort', { value: inheritedEffort }) }}</option>
+        <option v-if="unlistedEffort" :value="draft!.effort" disabled>
+          {{ draft!.effort || t('core.stageNoEffort') }}
+        </option>
         <option v-for="level in efforts" :key="level" :value="level">
           {{ level || t('core.stageNoEffort') }}
         </option>
@@ -58,12 +62,16 @@ const inheritedEffort = computed(() => (
 ));
 const selectedModel = computed(() => props.draft?.model ?? inheritValue);
 const selectedEffort = computed(() => props.draft?.effort ?? inheritValue);
+const unlistedModel = computed(() => props.draft?.model !== null && props.draft?.model !== undefined
+  && !props.options?.models.some((item) => item.id === props.draft?.model));
 const efforts = computed(() => {
   const selected = props.draft?.model ?? inheritedModel.value;
 
   return props.options?.models.find((item) => item.id === selected || item.aliases?.includes(selected || ''))
     ?.efforts || [];
 });
+const unlistedEffort = computed(() => props.draft?.effort !== null && props.draft?.effort !== undefined
+  && !efforts.value.includes(props.draft.effort));
 
 function updateModel(value: string | number | null) {
   emit('model', value === inheritValue ? null : String(value ?? ''));

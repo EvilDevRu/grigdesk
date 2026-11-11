@@ -147,6 +147,45 @@ test('reserve-keeps-own-policy', async (t) => {
   }
 });
 
+test('local-primary-keeps-human-breaker-bypass', async (t) => {
+  const variants = [
+    {
+      primary: 'alpha',
+      result: 'done',
+      expected: ['alpha'],
+    },
+    {
+      primary: 'alpha',
+      result: 'limited',
+      expected: ['alpha', 'beta'],
+    },
+    {
+      primary: null,
+      result: 'done',
+      expected: ['beta'],
+    },
+  ];
+
+  for (const variant of variants) {
+    await t.test(`${variant.primary ?? 'policy'} / ${variant.result}`, async (sub) => {
+      const fx = await settingsFixture(sub);
+      const options = cliJson(fx.cli('options', ['--provider', 'alpha']));
+      const selected = selection('alpha-model', 'high', variant.primary);
+
+      cliJson(applyCli(fx, applyPayload(options, selected)));
+
+      const result = fx.shell([
+        'fingerprint=$(printf "alpha|default" | sha256sum | cut -c1-24)',
+        'breaker_record alpha "$fingerprint" provider "" "" "$(date +%s)" "" fixture',
+        'run_agent 81 fixture PLAN',
+      ].join('\n'), { FAKE_ALPHA_RESULT: variant.result });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual((await fx.captures()).map((capture) => capture.provider), variant.expected);
+    });
+  }
+});
+
 test('invalid-on-launch', async (t) => {
   const fx = await settingsFixture(t);
 
