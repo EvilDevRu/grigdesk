@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { errorMessage } from '../../../shared/lib/errors.ts';
 import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs, prepareFactoryRouteLaunch } from './factoryLaunch.ts';
@@ -44,6 +45,11 @@ export const ROUTE_DECISION_TIMEOUT_MS = 180_000;
 // и в detached-ветке — окружением процесса, никогда аргументом systemd-run. Ключ Coding
 // Plan передаётся с 29.10.2026 (решение владельца): этап GLM допущен и в подписке.
 const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY'] as const;
+
+const CLI_PREPARATION_REASONS: Record<string, string> = {
+  cli_missing: 'выбранная копия не найдена',
+  cli_broken: 'выбранная копия повреждена или не исполняется',
+};
 
 // Служебный ключ маршрута GLM этапам не передаётся ни в одной ветке: wrapper этапа
 // выводит его сам из ключа активного режима (buildGlmChildEnv), этапу нужен только исходный.
@@ -881,7 +887,8 @@ function detachedRouteEnv(
 
 /**
  * Стадия получает закрытый descriptor выбранных внешних копий, а не PATH оркестратора.
- * Отказ построения не отменяет маршрут: раннер честно упадёт на своём probe.
+ * Профильный запуск требует копии всех закреплённых CLI до регистрации движка.
+ * Без профильных окружений сохраняется прежняя проверка на probe самого раннера.
  */
 async function prepareRouteExternalCliDescriptor(config: RouteConfig,
   profileEnvironments?: Record<string, NodeJS.ProcessEnv>, descriptorOverride?: string): Promise<string> {
@@ -909,15 +916,29 @@ async function prepareRouteExternalCliDescriptor(config: RouteConfig,
     });
 
     for (const provider of Object.keys(profileEnvironments ?? {})) {
-      if (adapters.get(provider)?.externalCli && !descriptor.providers[provider]) {
-        throw new Error('Не удалось подготовить выбранную копию CLI для профиля конвейера.');
+      const adapter = adapters.get(provider);
+
+      if (adapter?.externalCli && !descriptor.providers[provider]) {
+        const bin = descriptor.unavailableBins?.[provider] || provider;
+        const reason = descriptor.unavailable[provider] || 'environment_unavailable';
+        const description = CLI_PREPARATION_REASONS[reason] || 'окружение недоступно';
+
+        throw new Error(
+          `${adapter.name || provider} (${provider}): не удалось подготовить выбранную копию CLI «${bin}»`
+          + ` для профиля конвейера: ${description} (${reason}).`,
+        );
       }
     }
 
     return descriptorPath;
   } catch (error) {
     if (profileEnvironments) {
-      throw error;
+      const providers = Object.keys(profileEnvironments).join(', ');
+
+      throw new Error(
+        `Не удалось подготовить окружение CLI (${providers}): `
+        + errorMessage(error, 'причина недоступна'),
+      );
     }
 
     return '';
@@ -943,6 +964,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   exited?: number | null;
   message?: string;
   failure?: RouteFailure | null;
+  failedBeforeSpawn?: true;
 }> {
   const logFile = path.join(config.stateDir, `t${task}.launch.log`);
   // launch.log переиспользуется задачей. Typed-ошибку разрешено брать только из
@@ -1009,7 +1031,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   try {
     externalCliDescriptor = await prepareRouteExternalCliDescriptor(config, environments,
       service ? path.join(launchDirectory, 'external-cli.json') : undefined);
-  } catch {
+  } catch (error) {
     await rollback();
 
     return {
@@ -1017,7 +1039,8 @@ export async function spawnRouteEngine(config: RouteConfig, {
       unit: null,
       logFile,
       logOffset,
-      message: 'Не удалось подготовить окружение выбранного CLI. Повторите после проверки установки.',
+      failedBeforeSpawn: true,
+      message: errorMessage(error, 'Не удалось подготовить окружение выбранного CLI.'),
     };
   }
 

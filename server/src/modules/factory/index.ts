@@ -114,6 +114,7 @@ interface PreparedLaunch {
 interface RouteReply {
   status: number | null;
   body: Record<string, unknown>;
+  launchNotStarted?: boolean;
 }
 
 // Сверка после срока сравнивает два доверенных снимка той же exact попытки.
@@ -1368,7 +1369,41 @@ async function factoryModule(
   }
 
   /**
-   * Старт после общего preflight: только здесь начинаются git/slot/ticket/engine side effects.
+   * Повтор после отказа подготовки требует отсутствия всех артефактов запуска.
+   * Только ENOENT доказывает отсутствие: ошибки чтения и любые остатки сохраняют pending.
+   */
+  async function launchArtifactsAbsent(id: string): Promise<boolean> {
+    try {
+      await factoryState.readRegistry(id);
+
+      return false;
+    } catch (error) {
+      if (!registryIsMissing(error)) {
+        return false;
+      }
+    }
+
+    for (const artifact of [
+      path.join(config.factoryControlDir, 'protocol-v2', 'tasks', `t${id}`),
+      path.join(config.stateDir, 'slots', `t${id}.json`),
+    ]) {
+      try {
+        await fs.lstat(artifact);
+
+        return false;
+      } catch (error) {
+        if (!registryIsMissing(error)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Старт после общего preflight начинает git/slot/ticket/engine side effects.
+   * Отказ подготовки до spawn допускает повтор только после сверки оставшихся артефактов.
    */
   async function startRoutePipeline(
     id: string,
@@ -1450,16 +1485,28 @@ async function factoryModule(
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
       throw err;
     }
+
     if (!launch.ok) {
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
+
+      if (launch.failedBeforeSpawn) {
+        fastify.log.error({ task: id, reason: launch.message }, 'Отказ подготовки CLI конвейера');
+      }
+
+      const launchNotStarted = launch.failedBeforeSpawn === true
+        && (slot.source === 'none' || slot.source === 'new')
+        && await launchArtifactsAbsent(id);
+
       if (launch.failure?.error === 'catalog_changed') {
         return {
           status: 409,
           body: { error: 'catalog_changed', message: launch.failure.message },
         };
       }
+
       return {
         status: 500,
+        launchNotStarted,
         body: {
           outcome: 'invalid',
           ...(launch.failure ? {
@@ -1810,11 +1857,14 @@ async function factoryModule(
     // отказа на диске остаётся только `t<id>.launch.log` с причиной). Без этой ветки
     // маркер висел до перезапуска сервера, и задача запиралась ответом `run_exists`
     // из-за чужого CLI: `inspectLaunchState` видит `absent` и marker снять не может.
-    // Соседний `runner_preflight_failed` сюда НЕ входит намеренно — он означает, что
-    // сломалась сама проверка, и такого же доказательства за ним нет.
+    // Отказ подготовки допускает повтор по отдельному proof: launcher не дошёл до
+    // spawn, rollback завершён, реестр/control/резервация отсутствуют. Сам по себе
+    // invalid или runner_preflight_failed этого не доказывает: после передачи движку
+    // и при ошибке чтения артефактов pending сохраняется.
     const provenPreSideEffect = (result.status === 409 && result.body?.outcome === 'no_slot')
       || (result.status === 409 && result.body?.error === 'catalog_changed')
-      || (result.status === 500 && result.body?.error === 'runner_preflight_unavailable');
+      || (result.status === 500 && result.body?.error === 'runner_preflight_unavailable')
+      || result.launchNotStarted === true;
     if (provenVisible || provenPreSideEffect) taskLaunchPending.delete(key);
     return result;
   }

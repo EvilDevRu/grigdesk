@@ -113,7 +113,7 @@
 
 ## Грабли
 
-- [Изолированный стенд пуст: приёмка редактора упирается в отсутствие данных](stand-empty-editor-acceptance.md)
+- [Тестовый стенд: посев, точные write roots проверяющего и освобождение shared-аренды](stand-empty-editor-acceptance.md)
 - [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)
@@ -146,6 +146,8 @@
 - [Запуск фабрики — ТОЛЬКО в отдельный systemd-scope (иначе рестарт GrigDesk убивает прогоны)](factory-systemd-scope.md)
 - [Каталог маршрутов сверяется внутри движка, а не в HTTP-preflight](route-catalog-pinning.md)
 - [Контракт запуска — по состоянию, не по stdout](launch-state-contract.md)
+- [Повтор после отказа подготовки CLI](cli-preparation-retry.md) — proof до spawn,
+  отсутствие артефактов, исполнитель и выбранная копия в причине отказа.
 - [Лёгкий маршрут сужал задачу молча: пустые критерии + «уже есть в коде»](light-route-scope-loss.md)
 - [Маршрут встал «код 78» на узле, который отработал = вердикт command-узла не по контракту](command-node-verdict-contract.md)
 - [Модалка этапа переживает сам этап — статус в ней обязан идти за графом](stage-dialog-live-status.md)

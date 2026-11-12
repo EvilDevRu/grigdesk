@@ -379,10 +379,10 @@ test('отказ runner preflight не запирает задачу: следу
   assert.equal(retried.json().outcome, 'launched');
 });
 
-test('runner_preflight_failed marker остаётся fail-closed', async (t) => {
-  // Соседний маркер означает, что сломалась САМА проверка. Доказательства «попытки
-  // не было» за ним нет, поэтому marker снимать нельзя — иначе ослабление одного
-  // случая тихо распространится на другой.
+test('runner_preflight_failed сам по себе не освобождает pending', async () => {
+  // Сломанная проверка не доказывает отсутствие попытки. Её код сам по себе
+  // не разрешает повтор: для отказа подготовки нужен отдельный proof до spawn
+  // с отсутствием реестра, attempt и резервации после rollback.
   const source = await readFile(
     new URL('../../server/src/modules/factory/index.ts', import.meta.url),
     'utf8',
