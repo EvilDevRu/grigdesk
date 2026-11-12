@@ -337,6 +337,7 @@
 - [Возможности устройства в локальном окне без PWA](pwa-secure-context.md)
 - [Tooltip/popover живут в <body>: scoped-селектор consumer-а до surface не дотянется](teleported-overlay-styles.md)
 - [Кнопка остановки и пояснение отказа: очередь ходов и ввод в активный ход](chat-stop-and-deny-comment.md)
+- [Ворота VPN: общий черновик, «Применить» и «ОК»](../server/vpn-route-check.md)
 - [settings-search.md](settings-search.md) — поиск метаданных, дерево и показ поля настроек.
 
 - [settings-preferences.md](settings-preferences.md) — черновики prefs, общий switch квот на agents.providers,
