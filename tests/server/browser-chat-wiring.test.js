@@ -11,7 +11,7 @@ import { BROWSER_USAGE_GUIDANCE } from '../../shared/browser/browserTool.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
-const PROVIDERS = ['claude', 'codex', 'kimi', 'deepseek', 'glm'];
+const PROVIDERS = ['claude', 'codex', 'kimi', 'deepseek', 'glm', 'qwen'];
 const PROMPT_RULE = 'Для браузерной проверки используй grigdesk_browser; отдельный браузер не запускай.';
 
 /**
@@ -363,7 +363,7 @@ test('BR-C09: удалённый чат и chatModule onClose удаляют own
 });
 
 for (const provider of PROVIDERS) {
-  test(`HELP-T3 ${provider}: read-only ход читает справку через общий registry`, async (t) => {
+  test(`HELP-T3 ${provider}: действия в GrigDesk получают справку и правила работы`, async (t) => {
     const calls = [];
     const help = {
       bundle: async () => {
@@ -382,13 +382,18 @@ for (const provider of PROVIDERS) {
     const f = await fixture(t, provider, help);
     const record = await f.chat('44');
 
-    await f.turn(record, 'plan');
+    await f.turn(record, 'plan', { message: 'Посмотри состояние конвейера в GrigDesk' });
 
     const run = f.runs.at(-1);
     const descriptor = run.workTools.descriptors.find((entry) => entry.name === 'grigdesk_help');
 
     assert.ok(descriptor);
+    assert.match(descriptor.description, /Для вопросов и действий в GrigDesk/u);
     assert.match(run.message, /\[Справка GrigDesk\]/u);
+    assert.match(run.message, /штатными инструментами и CLI/u);
+    assert.match(run.message, /bin\/grigdesk-ctl tracker/u);
+    assert.match(run.message, /Не запускай Vite, сборку или второй GrigDesk/u);
+    assert.match(run.message, /Dev-стенд нужен для проверки изменений интерфейса/u);
     assert.deepEqual(await run.workTools.invoke('grigdesk_help', {
       action: 'read', id: 'chats'
     }), {
