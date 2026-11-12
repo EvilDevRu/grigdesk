@@ -23,6 +23,7 @@ test('build: исходники с установленным ELF сохраня
 
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual((await box.calls()).map((call) => call.args), [
+    ['install', '--no-audit', '--no-fund'],
     ['run', '--silent', 'deepseek:prepare'],
     ['run', 'build'],
   ]);
@@ -130,6 +131,24 @@ test('build: неизвестная цель и лишний аргумент д
     assert.equal(result.code, 2, `${JSON.stringify(tail)}: ${result.stderr}`);
     assert.match(result.stderr, /build \[all\|server\|web\|window\|deepseek\|apk\]/);
     assert.deepEqual(await box.calls(), []);
+  }
+});
+
+test('build: отказ подготовки зависимостей останавливает server и all до сборки', async (t) => {
+  for (const target of ['server', 'all']) {
+    const box = await fixture(t);
+
+    await box.fail('npm', 'install', 28);
+
+    const result = await box.run(['build', target]);
+
+    assert.equal(result.code, 28, result.stderr);
+    assert.deepEqual(await box.calls(), [{
+      command: 'npm',
+      cwd: path.join(box.root, 'server'),
+      args: ['install', '--no-audit', '--no-fund'],
+    }]);
+    assert.doesNotMatch(result.stdout, /Поставлен|Поставлены/u);
   }
 });
 

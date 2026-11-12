@@ -18,14 +18,16 @@ grigdesk-ctl build apk
 ```
 
 Без цели выбирается `all` — «Всё (server, desktop, tasks)». Сначала общей фазой готовятся
-зависимости (`ensure_deps`: `node_modules` сервера и веба при отсутствии, проба DeepSeek),
+зависимости (`ensure_deps`: сверка серверных пакетов через `npm install`, веб при отсутствии
+`node_modules`, проба DeepSeek),
 затем три цепочки собираются **параллельно**: сервер (`prepare-runtime`, `build:binary`,
 `install:binary`), окно (`npm run build` в web и `npm --prefix desktop run dist`) и задачи
 Б24 (`npm --prefix tracker run build`). Установка окна идёт строго после всех цепочек:
 `deploy/desktop.sh install` проверяет метаданные и совместимость `bin/grigdesk-server`
 ([декодер runtime-env](runtime-env-version-sync.md)), поэтому не может конкурировать
 с `install:binary`. Отдельные цели остаются последовательными: `server` вызывает
-`build:binary` и `install:binary`; `web` сохраняет подготовку зависимостей и
+`npm install --no-audit --no-fund` в сервере, затем `build:binary` и `install:binary`;
+`web` сохраняет подготовку зависимостей и
 `npm run build` в web; `window` сначала готовит и собирает веб, затем выполняет
 `npm --prefix desktop run dist` и `deploy/desktop.sh install`.
 `apk` — отдельная цель [сборки Android-приложения](ctl-build-apk.md) через `tools/mobile build`.
@@ -70,6 +72,12 @@ buildId (новая и предыдущая — для идущих ходов) 
 `--help` и `-h` в любом месте печатают общую справку без сборки и установки.
 
 ## Сервер и кэш
+
+Существующий `server/node_modules` не отменяет подготовку: после изменения lock в нём
+могут отсутствовать новые пакеты. `npm install --no-audit --no-fund` согласует дерево
+с зависимостями перед офлайн-копированием production npm. В `all` это происходит один
+раз до параллельных цепочек; отдельный `server` выполняет ту же подготовку без веба.
+Отказ npm останавливает сборку до подготовки Node, упаковки и установки ELF.
 
 Сборка использует `${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-binary/out`,
 кэш — соседний `cache`. `server/scripts/ctlBuild.mts` подготавливает архив Node штатным

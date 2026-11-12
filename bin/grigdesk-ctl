@@ -185,14 +185,18 @@ developer_command() {
     }
   }
 
+  # npm сверяет существующее дерево с lock: наличие node_modules не гарантирует полноту.
+  # После обновления исходников новые серверные пакеты нужны до офлайн-подготовки ELF.
+  ensure_server_deps() (
+    echo "→ npm i (server)"
+    cd "$DIR/server" || return $?
+    npm install --no-audit --no-fund
+  )
+
   # Зависимости подготавливаются только для явного запуска разработчика.
   # Отказ встроенного исполнителя сохраняет прежнее предупреждение и не мешает серверу.
   ensure_deps() {
-    [ -d "$DIR/server/node_modules" ] || (
-      echo "→ npm i (server)"
-      cd "$DIR/server"
-      npm install --no-audit --no-fund
-    ) || return $?
+    ensure_server_deps || return $?
     [ -d "$DIR/web/node_modules" ] || (
       echo "→ npm i (web)"
       cd "$DIR/web"
@@ -519,6 +523,7 @@ developer_command() {
       fi
 
       if [[ "$build_target" == server ]]; then
+        build_step server ensure_server_deps || return $?
         build_step server build_server
       fi
 

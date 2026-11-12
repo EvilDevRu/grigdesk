@@ -222,6 +222,10 @@ export function expectedAllPhases(box) {
     deps: [{
       command: 'npm',
       cwd: path.join(box.root, 'server'),
+      args: ['install', '--no-audit', '--no-fund'],
+    }, {
+      command: 'npm',
+      cwd: path.join(box.root, 'server'),
       args: ['run', '--silent', 'deepseek:prepare'],
     }],
     tracks: [
@@ -322,6 +326,11 @@ export function expectedBuildCalls(box, target) {
   const server = [
     {
       command: 'npm',
+      cwd: path.join(box.root, 'server'),
+      args: ['install', '--no-audit', '--no-fund'],
+    },
+    {
+      command: 'npm',
       cwd: '/',
       args: ['--prefix', path.join(box.root, 'server'), 'run', 'build:binary', '--',
         '--out-dir', path.join(cache, 'out'), '--cache-dir', path.join(cache, 'cache')],
@@ -337,6 +346,11 @@ export function expectedBuildCalls(box, target) {
     },
   ];
   const web = [
+    {
+      command: 'npm',
+      cwd: path.join(box.root, 'server'),
+      args: ['install', '--no-audit', '--no-fund'],
+    },
     {
       command: 'npm',
       cwd: path.join(box.root, 'server'),
