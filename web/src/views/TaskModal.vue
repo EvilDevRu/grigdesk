@@ -17,12 +17,11 @@
       <div class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
         <UiPaneHeader class="task-toolbar" inset="content" data-ui-task-header>
           <template #title>
-            <span class="meyebrow">{{ ownTask ? t('core.grigdeskTaskLabel')
-              : t('core.grigdeskGenericTask') }}</span>
+            <span class="meyebrow">{{ t('core.taskFormGenericTask') }}</span>
           </template>
           <template #meta>
             <span class="mid mono">#{{ taskId }}</span>
-            <TaskSourceChip v-if="taskSource || ownTask" :source="ownTask ? 'grigdesk' : taskSource" />
+            <TaskSourceChip v-if="taskSource" :source="taskSource" />
           </template>
           <template #actions>
             <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
@@ -568,8 +567,7 @@
                 </div>
               </section>
               <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
-                {{ ownTask ? t('core.grigdeskEmptyDescription')
-                  : 'Постановка пока не загружена или в задаче нет описания.' }}
+                Постановка пока не загружена или в задаче нет описания.
               </div>
             </template>
           </div>
@@ -1304,7 +1302,6 @@
 import TaskSourceChip from '../shared/TaskSourceChip.vue';
 import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import { trackerCapabilities } from '../shared/trackerCapabilities.ts';
-import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
 import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import TaskLoading from './TaskLoading.vue';
 
@@ -1407,39 +1404,34 @@ const trackerCaps = computed(() => {
 });
 const board = useBoardStore();
 const trackerFavorites = useTaskFavoritesStore();
-const favorites = computed(() => trackerFavorites.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerFavorites.own : trackerFavorites));
+const favorites = computed(() => trackerFavorites.forSource?.(taskSource.value)
+  ?? trackerFavorites);
 const trackerShelf = useTaskShelfStore();
-const shelf = computed(() => trackerShelf.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerShelf.own : trackerShelf));
+const shelf = computed(() => trackerShelf.forSource?.(taskSource.value)
+  ?? trackerShelf);
 const plugins = usePluginsStore();
 const trackerSeen = useTaskSeenStore();
-const seen = computed(() => trackerSeen.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerSeen.own : trackerSeen));
+const seen = computed(() => trackerSeen.forSource?.(taskSource.value)
+  ?? trackerSeen);
 const { taskId } = storeToRefs(ui);
 const taskSource = computed(() => ui.taskSource);
 
 const detail = ref<TaskDetail | null>(null);
-const ownTask = computed(() => detail.value?.source === 'grigdesk');
 const currentTaskKey = computed(() => taskReferenceKey({
   id: taskId.value!,
-  source: ownTask.value ? 'grigdesk' : taskSource.value || board.data?.source,
+  source: taskSource.value || board.data?.source,
+  unavailable: ui.taskUnavailable,
 }));
 
-// Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
-// Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
-const isB24Task = computed(() => {
-  return detail.value !== null ? !ownTask.value
-    : taskSource.value ? taskSource.value !== 'grigdesk'
-      : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value));
-});
+// Историческая ссылка закрывает все внешние эффекты до загрузки карточки.
+// Длина обычного номера не определяет его источник.
+const isB24Task = computed(() => !!taskId.value && !ui.taskUnavailable);
 let detailRequest = 0;
 const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
-const canUsePersonal = computed(() => isB24Task.value
-  || (ownTask.value && grigdeskPersonalStateVersion.value === 1));
+const canUsePersonal = computed(() => isB24Task.value);
 const canAnalyzeTask = computed(() => (!taskSource.value || taskSource.value === board.data?.source)
-  && isB24Task.value || (ownTask.value && !loading.value));
+  && isB24Task.value);
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
 const commentText = ref('');
@@ -1451,7 +1443,7 @@ let ticker: ReturnType<typeof setInterval> | null = null;
 const boardTask = computed(() => {
   const d = board.data;
 
-  if (!d || !taskId.value || ownTask.value) {
+  if (!d || !taskId.value || ui.taskUnavailable) {
     return null;
   }
 
@@ -1483,9 +1475,7 @@ const awaitingReview = computed(() => detail.value?.status === 4
 const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
-const taskProject = computed(() => ownTask.value
-  ? detail.value?.projectTitle || ''
-  : detail.value?.group_name || boardTask.value?.group || '');
+const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
 const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
 
 const taskStatus = computed(() => detail.value?.statusText || detail.value?.status_label || '');
@@ -1896,9 +1886,7 @@ function htmlToText(s: string | null | undefined) {
     .replace(/\n{3,}/g, '\n\n').trim();
 }
 
-const cleanDesc = computed(() => ownTask.value
-  ? detail.value?.description || ''
-  : htmlToText(detail.value?.description));
+const cleanDesc = computed(() => htmlToText(detail.value?.description));
 
 // Описание — текстом, но URL в нём должны жить: экранируем и оборачиваем ссылки.
 function linkify(s: string) {
@@ -2192,7 +2180,7 @@ let personalTarget = '';
 
 /**
  * Личные эффекты выполняются только для подтверждённой карточки и поддерживаемого пространства.
- * Позднее подтверждение capability включает own-метки без повторного открытия карточки.
+ * Пара источника и номера не позволяет ответу прежней карточки отметить новую задачу.
  */
 function loadPersonalState() {
   if (!taskId.value || !detail.value || !canUsePersonal.value) {
@@ -2212,8 +2200,6 @@ function loadPersonalState() {
   void seen.value.markSeen([taskId.value]);
 }
 
-watch(grigdeskPersonalStateVersion, loadPersonalState);
-
 let detailAbort: AbortController | null = null;
 let commentsAbort: AbortController | null = null;
 
@@ -2222,7 +2208,7 @@ let commentsAbort: AbortController | null = null;
  * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
  */
 async function loadDetail(force = false) {
-  if (!taskId.value) {
+  if (!taskId.value || ui.taskUnavailable) {
     return;
   }
 
@@ -2253,12 +2239,6 @@ async function loadDetail(force = false) {
   } finally {
     if (request === detailRequest) {
       loading.value = false;
-
-      // Источник собственной задачи подтверждается только ответом details.
-      // Первый параллельный loadTriage ещё закрыт loading и не прочитает оценку.
-      if (ownTask.value) {
-        void loadTriage();
-      }
     }
   }
 }
@@ -2503,7 +2483,14 @@ async function loadTriage() {
   }
 
   try {
-    triage.value = await readAnalysisDetail(taskId.value!);
+    const reference = currentTaskKey.value;
+    const response = await readAnalysisDetail(taskId.value!);
+
+    if (currentTaskKey.value !== reference) {
+      return;
+    }
+
+    triage.value = response;
     syncClarifyDrafts();
   } catch { /* блок триажа не ломает модалку */ }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
@@ -2520,7 +2507,7 @@ const analyzeNow = () => act('analyze', async () => {
     return;
   }
 
-  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
+  await analyzeTask(taskId.value!, { source: taskSource.value });
   await loadTriage();
 });
 
@@ -2579,14 +2566,26 @@ const clarifySaved = ref('');
  * При отказе сохраняется прежний пустой fallback истории уточнений.
  */
 async function loadClarifications() {
+  if (!taskId.value || ui.taskUnavailable) {
+    return;
+  }
+
+  const reference = currentTaskKey.value;
+
   try {
     const response = await analysisApi.clarifications(taskId.value!);
+
+    if (currentTaskKey.value !== reference) {
+      return;
+    }
 
     clarifySaved.value = response.text || '';
     clarifyEntries.value = response.entries || [];
   } catch {
-    clarifySaved.value = '';
-    clarifyEntries.value = [];
+    if (currentTaskKey.value === reference) {
+      clarifySaved.value = '';
+      clarifyEntries.value = [];
+    }
   }
 }
 
@@ -2632,7 +2631,7 @@ const sendClarify = () => act('clarify', async () => {
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
+  await analyzeTask(taskId.value!, { source: taskSource.value });
   await loadTriage();
 });
 
@@ -2789,7 +2788,7 @@ async function loadConveyor() {
   conveyorGraph.value = null;
   sandbox.value = null;
 
-  if (!taskId.value) {
+  if (!taskId.value || ui.taskUnavailable) {
     return;
   }
 
@@ -3035,13 +3034,13 @@ async function refreshLaunchOptions() {
   const requestId = ++launchOptionsRequest;
   const id = taskId.value;
   const reference = currentTaskKey.value;
-  const profile = launchForm.value?.profile || (ownTask.value ? detail.value?.projectId : undefined);
+  const profile = launchForm.value?.profile;
 
   launchOptionsBusy.value = true;
   launchOptionsFailed.value = true;
 
   try {
-    let opts = await tasks.launchOptions(id, ownTask.value ? profile : undefined);
+    let opts = await tasks.launchOptions(id);
 
     if (requestId !== launchOptionsRequest) {
       return;
@@ -3218,7 +3217,7 @@ async function openLaunch() {
   launchOptionsBusy.value = true;
 
   try {
-    opts = await tasks.launchOptions(taskId.value!, ownTask.value ? detail.value?.projectId : undefined);
+    opts = await tasks.launchOptions(taskId.value!);
   } catch (e) {
     if (requestId === launchOptionsRequest) {
       err.value = `Не удалось узнать параметры запуска: ${failureText(e)}`;
@@ -3434,7 +3433,7 @@ async function doLaunch(payload: unknown) {
 
   try {
     const r = await tasks.launch(taskId.value!, { ...objectOrEmpty(payload),
-      ...(taskSource.value ? { source: taskSource.value } : ownTask.value ? { source: 'grigdesk' } : {}),
+      ...(taskSource.value ? { source: taskSource.value } : {}),
     });
 
     launchForm.value = null;
@@ -3547,7 +3546,7 @@ function onTaskDialogOpenChange(open: boolean) {
 }
 
 // Открытие/закрытие модалки по taskId.
-watch(() => [taskId.value, taskSource.value], ([id]) => {
+watch(() => [taskId.value, taskSource.value, ui.taskUnavailable], ([id]) => {
   checklistEditing.value = null;
   checklistAdding.value = null;
   checklistCreating.value = false;
@@ -3569,7 +3568,23 @@ watch(() => [taskId.value, taskSource.value], ([id]) => {
   cancelTaskEdit();
   editMessage.value = null;
 
+  if (id && ui.taskUnavailable) {
+    if (triageTimer) {
+      clearInterval(triageTimer);
+      triageTimer = null;
+    }
+
+    triage.value = null;
+    conveyor.value = null;
+    conveyorGraph.value = null;
+    sandbox.value = null;
+    err.value = t('core.taskNotFound');
+
+    return;
+  }
+
   if (id) {
+    err.value = null;
     void trackers.load();
     detail.value = null;
     launchMsg.value = null;

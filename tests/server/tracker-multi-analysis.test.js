@@ -3,12 +3,13 @@ import test from 'node:test';
 
 import analysisModule from '../../server/src/modules/analysis/index.ts';
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
-import { ownTask, seedTasks } from './helpers/grigdesk-tasks.js';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { selectTracker, trackerCalls } from './helpers/trackerFixture.js';
 import { multiFixture } from './helpers/trackerMulti.js';
 import { inboxConsumerFixture, REVISION } from './helpers/trackerInbox.js';
 
-test('MD-ANALYSIS-GUARD: чужой source получает 409 до enqueue, own/default проходят', async (t) => {
+test('MD-ANALYSIS-GUARD: чужой source получает 409, default проходит', async (t) => {
   const calls = [];
   const fixture = await multiFixture(t, {
     register: async ({ app, runtime, config }) => {
@@ -40,18 +41,7 @@ test('MD-ANALYSIS-GUARD: чужой source получает 409 до enqueue, ow
   assert.match(rejected.json().message, /умолчанию|источник|доск/iu);
   assert.equal((await fixture.request('POST', '/api/tasks/42/analyze', { taskSource: sourceB }))
     .statusCode, 200);
-  await seedTasks(fixture.config, [ownTask()]);
-  assert.equal((await fixture.request('POST', '/api/tasks/100000000001/analyze', {
-    taskSource: 'grigdesk',
-  })).statusCode, 200);
 
-  const before = [...calls];
-  const absentOwn = await fixture.request('POST', '/api/tasks/100000000099/analyze', {
-    taskSource: 'grigdesk',
-  });
-
-  assert.equal(absentOwn.statusCode, 404, absentOwn.body);
-  assert.deepEqual(calls, before);
 });
 
 test('MD-DEFAULT-CONSUMERS: analyzer и Inbox при последовательных включениях идут в B', async (t) => {
@@ -71,4 +61,47 @@ test('MD-DEFAULT-CONSUMERS: analyzer и Inbox при последователь�
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
   assert.equal((await trackerCalls(fixture.config, 'fixture-b'))
     .filter((call) => call.method === 'createTask').length, 1);
+});
+
+test('OWN-REMOVED-ENQUEUE: explicit grigdesk отвергнут до очереди, default остаётся доступен', async (t) => {
+  const calls = [];
+  const fixture = await multiFixture(t, {
+    register: async ({ app, runtime, config }) => {
+      await app.register(analysisModule, {
+        tracker: runtime.tracker,
+        analyzer: {
+          config,
+          enqueue: async (id) => {
+            calls.push(id);
+
+            return { ok: true };
+          },
+        },
+      });
+    },
+  });
+  const id = '100000000001';
+
+  await writeFile(path.join(fixture.root, 'tasks.json'), JSON.stringify({
+    schemaVersion: 1,
+    revision: 1,
+    nextId: '100000000010',
+    tasks: [{
+      id,
+      source: 'grigdesk',
+      title: 'Архив',
+      description: 'История',
+      projectId: 'beta',
+      projectTitle: 'Бета',
+      sourceUrl: 'http://client.test/#/board',
+      createdAt: '2026-10-24T00:00:00.000Z',
+    }],
+  }));
+
+  const legacy = await fixture.request('POST', `/api/tasks/${id}/analyze`, { taskSource: 'grigdesk' });
+
+  assert.ok([400, 404, 409].includes(legacy.statusCode), legacy.body);
+  assert.deepEqual(calls, []);
+  assert.equal((await fixture.request('POST', '/api/tasks/42/analyze', {})).statusCode, 200);
+  assert.deepEqual(calls, ['42']);
 });

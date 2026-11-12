@@ -6,7 +6,7 @@ export const WEB_SSE_SIGNALS = [
   'db-sessions', 'db-queries', 'db-audit', 'chat-step', 'chat-progress', 'chat-done', 'chat-orphan',
   'chat-turn-start', 'chat-run-metadata', 'chat-in-turn', 'chat-assistant-message', 'chat-sessions',
   'chat-session', 'chat-store', 'chat-store-meta', 'speech-settings', 'diagnostic-logging',
-  'inbox-changed', 'telegram-status', 'mobile-changed', 'task-shelf-changed', 'grigdesk-tasks-changed',
+  'inbox-changed', 'telegram-status', 'mobile-changed', 'task-shelf-changed',
   'arbiter-live', 'arbiter-conversation', 'sandboxes-changed', 'sandbox-progress', 'projects-changed',
   'routes-draft-changed', 'routes-catalog-changed', 'showcase-changed',
   'showcase-progress', 'showcase-build-progress', 'showcase-voice', 'usage-forecast',

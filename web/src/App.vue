@@ -62,7 +62,6 @@
 import PerformanceBoundary from './shared/performanceBoundary.ts';
 import { useDocumentPreviewStore } from './stores/documentPreview.ts';
 import { useDiffStore } from './stores/diff.ts';
-import { useGrigdeskTasksStore } from './stores/grigdeskTasks.ts';
 import { useTasksStore } from './stores/tasks.ts';
 import { useUiStore } from './stores/ui.ts';
 import WorkspaceLoading from './shared/layout/WorkspaceLoading.vue';
@@ -227,16 +226,13 @@ function startWindowSync() {
       { flush: 'post' },
     ),
     reload: () => Promise.allSettled([...favorites.external.map((branch) => branch.load(true)),
-      ...seen.external.map((branch) => branch.load(true)), favorites.load(true), seen.load(true),
-      favorites.own.load(true), seen.own.load(true)]),
+      ...seen.external.map((branch) => branch.load(true)), favorites.load(true), seen.load(true)]),
   });
   const stopSync = startTaskWindowSync({
     channel: new BroadcastChannel('grigdesk-task-data-v1'),
     stores: [
       { store: favorites, actions: ['setFavorite'] },
       { store: seen, actions: ['markSeen'] },
-      { store: useTaskFavoritesStore().own, actions: ['setFavorite'] },
-      { store: useTaskSeenStore().own, actions: ['markSeen'] },
     ],
     invalidate: () => refresh.request(),
   });
@@ -357,7 +353,6 @@ function startPolling() {
   // Отметки просмотра нужны всему приложению, а не только доске: без них чип «Доска»
   // в навигации не знает, какие задачи новые, на какой бы странице человек ни стоял.
   useTaskSeenStore().load(true);
-  void useGrigdeskTasksStore().load();
   startWindowSync();
 
   if (surfaceDocument) {
@@ -427,7 +422,6 @@ watch([() => shell.profile?.id, () => auth.clientScope], () => {
   useTaskFavoritesStore().clear();
   useTaskSeenStore().clear();
   useTaskShelfStore().clear();
-  useGrigdeskTasksStore().clear();
   useTasksStore().invalidate();
   useUiStore().close();
 }, { flush: 'sync' });
@@ -456,7 +450,6 @@ watch(() => auth.authenticated, (on, was) => {
     dismissAllAlerts();
 
     if (!shell.present) {
-      useGrigdeskTasksStore().clear();
       useTaskFavoritesStore().clear();
       useTaskShelfStore().clear();
       clearAlertHistory();

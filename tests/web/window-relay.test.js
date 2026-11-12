@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { startShellRelay, startBoardRelay } from '../../web/src/shared/windowRelay.ts';
+import { startShellRelay, startBoardRelay, startShelfRelay } from '../../web/src/shared/windowRelay.ts';
 
 /**
  * Подменный канал хранит отправленное и даёт тесту доставить сообщение.
@@ -207,4 +207,47 @@ test('WR-03: доской делится тот, кто её прочитал; �
   assert.equal(mirrorLoaded, null);
   assert.equal(source.closed, true);
   assert.equal(mirror.closed, true);
+});
+
+test('OWN-REMOVED-RELAY: own acknowledge игнорируется, внешние и bare исполняются один раз', async (t) => {
+  const channel = fakeChannel();
+  const calls = [];
+  const stop = startShelfRelay({
+    role: 'source',
+    channel,
+    acknowledge: (...args) => calls.push(args),
+  });
+
+  t.after(stop);
+
+  for (const fields of [
+    { source: 'grigdesk' },
+    { source: 'tracker', taskSource: 'grigdesk' },
+    { source: 'tracker', taskSource: 'unknown' },
+  ]) {
+    channel.onmessage({ data: {
+      version: 1,
+      type: 'shelf-acknowledge',
+      taskId: '100000000001',
+      ...fields,
+    } });
+    await new Promise(setImmediate);
+    assert.deepEqual(calls, [], JSON.stringify(fields));
+  }
+
+  const external = `fixture-a@${'a'.repeat(64)}`;
+
+  for (const fields of [{}, { source: 'tracker', taskSource: external }]) {
+    channel.onmessage({ data: {
+      version: 1,
+      type: 'shelf-acknowledge',
+      taskId: '42',
+      ...fields,
+    } });
+    await new Promise(setImmediate);
+  }
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], '42');
+  assert.deepEqual(calls[1], ['42', 'tracker', external]);
 });

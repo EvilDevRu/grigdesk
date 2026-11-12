@@ -254,7 +254,7 @@ test('арбитр не берётся за вопрос, переформули
   });
 });
 
-test('LOCAL-ARBITER-01: factual использует beta, продуктовый выбор остаётся человеку', async (t) => {
+test('EXTERNAL-ARBITER-01: профиль beta сохраняет границу factual/выбора', async (t) => {
   const reply = JSON.stringify({ answers: [
     {
       questionId: 'q-code',
@@ -272,13 +272,10 @@ test('LOCAL-ARBITER-01: factual использует beta, продуктовы�
     },
   ] });
   const fx = await fixture(t, { reply });
-  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
-  const task = ownTask();
+  const task = { id: '100000000001' };
   const config = fx.analyzer.config;
 
-  config.grigdeskTasksPath = path.join(config.factoryHome, 'tasks.json');
-  config.factoryProfile = 'alpha';
-  await seedTasks(config, [task]);
+  config.factoryProfile = 'beta';
 
   for (const name of ['alpha', 'beta']) {
     const directory = path.join(config.profilesDir, name);

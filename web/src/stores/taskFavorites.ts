@@ -60,8 +60,7 @@ interface FavoritesBranch extends Pick<StoreGeneric, '$onAction'> {
 const createTaskFavoritesStore = (
   storeId: string, source: TaskPersonalSource, taskSource?: string,
 ) => {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
-    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
+  const prefix = taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
   const url = `/api/${prefix}/task-favorites`;
 
   return defineStore(storeId, {
@@ -80,7 +79,6 @@ const createTaskFavoritesStore = (
   }),
   getters: {
     external: (state): FavoritesBranch[] => state.sources.map((id) => externalBranches.get(id)!()),
-    own: (): FavoritesBranch => useGrigdeskTaskFavoritesStore(),
     count: (state) => state.taskIds.length,
     isFavorite: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     isPending: (state) => (id: unknown) => !!state.pending[taskKey(id)],
@@ -88,12 +86,9 @@ const createTaskFavoritesStore = (
   actions: {
     /**
      * Полный источник выбирает независимую ветку личного состояния.
-     * Собственные задачи и прежний default сохраняют свои публичные обращения.
+     * Прежний числовой вход сохраняет обращения к доске по умолчанию.
      */
     forSource(target?: string): FavoritesBranch {
-      if (target === 'grigdesk') {
-        return useGrigdeskTaskFavoritesStore();
-      }
       if (!target || !target.includes('@')) {
         return this;
       }
@@ -118,9 +113,6 @@ const createTaskFavoritesStore = (
     applySnapshot(value: unknown, requestSeq: number | null = null) {
       const snapshot = normalizedSnapshot(value);
 
-      if (source === 'grigdesk' && snapshot.scope !== 'grigdesk') {
-        throw new Error('Некорректный источник личных меток GrigDesk');
-      }
 
       const seq = requestSeq ?? ++this._requestSeq;
 
@@ -145,9 +137,6 @@ const createTaskFavoritesStore = (
      * Смена эпохи отменяет применение ответа и его служебных флагов.
      */
     async load(force = false, options: TaskSourceOptions = {}): Promise<boolean> {
-      if (options.source === 'grigdesk' && source !== 'grigdesk') {
-        return useGrigdeskTaskFavoritesStore().load(force);
-      }
 
       if (this.loading) {
         return false;
@@ -191,9 +180,6 @@ const createTaskFavoritesStore = (
      * Блокировка принадлежит задаче и снимается только в своей эпохе.
      */
     async setFavorite(id: unknown, favorite: boolean, options: TaskSourceOptions = {}): Promise<boolean> {
-      if (options.source === 'grigdesk' && source !== 'grigdesk') {
-        return useGrigdeskTaskFavoritesStore().setFavorite(id, favorite);
-      }
 
       const key = taskKey(id);
 
@@ -243,9 +229,6 @@ const createTaskFavoritesStore = (
     },
 
     toggle(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> {
-      if (options.source === 'grigdesk' && source !== 'grigdesk') {
-        return useGrigdeskTaskFavoritesStore().toggle(id);
-      }
 
       return this.setFavorite(id, !this.isFavorite(id));
     },
@@ -257,10 +240,6 @@ const createTaskFavoritesStore = (
     clear(options: TaskSourceOptions = {}): void {
       if (!taskSource && source === 'tracker') {
         this.external.forEach((branch) => branch.clear());
-      }
-
-      if (!taskSource && source === 'tracker' && options.source !== 'tracker') {
-        useGrigdeskTaskFavoritesStore().clear();
       }
 
       this._epoch += 1;
@@ -281,4 +260,3 @@ const createTaskFavoritesStore = (
 const externalBranches = new Map<string, ReturnType<typeof createTaskFavoritesStore>>();
 
 export const useTaskFavoritesStore = createTaskFavoritesStore('taskFavorites', 'tracker');
-export const useGrigdeskTaskFavoritesStore = createTaskFavoritesStore('grigdeskTaskFavorites', 'grigdesk');

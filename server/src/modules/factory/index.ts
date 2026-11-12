@@ -11,7 +11,6 @@ import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
 import type { TrackerContext } from '../../lib/trackers/facade.ts';
 import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
-import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
 import { registerArbiterConversationRuntime } from './arbiterConversationRuntime.ts';
@@ -218,7 +217,6 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
   GrigDeskConfig, 'ticketsDir' | 'modelsPath' | 'factoryProfile' | 'sandboxDownCmd'
 > & {
   factoryStandsDir?: string;
-  grigdeskTasksPath?: string;
   factoryTaskSourcesPath?: string;
   arbiterConversationsDir?: string;
 };
@@ -615,10 +613,6 @@ async function factoryModule(
   // Список всех задач с картой статусов этапов.
   fastify.get<FactoryRoute>('/api/tasks', async (request) => {
     const tasks = await factoryState.listTasks();
-    // Названия берём из одного снимка: полный файл не перечитывается для каждой строки.
-    // Карта живёт только в этом запросе, поэтому следующий увидит новые задачи и правки.
-    const ownTasks = tasks.length ? (await new GrigdeskTaskStore({ config }).list()).tasks : [];
-    const ownById = new Map(ownTasks.map((task) => [task.id, task]));
     const extended = request.query.sources === '1';
     let sourceRecords: Awaited<ReturnType<FactoryTaskSources['read']>>['entries'] = {};
 
@@ -631,8 +625,7 @@ async function factoryModule(
     }
 
     const titledTasks = await Promise.all(tasks.map(async (task) => {
-      const own = ownById.get(String(task.task));
-      let source: TaskSourceId | undefined = own?.source;
+      let source: TaskSourceId | undefined;
 
       if (extended && sourceRecords[String(task.task)]) {
         try {
@@ -645,7 +638,7 @@ async function factoryModule(
 
       return {
         ...task,
-        title: own?.title || await storedTicketTitle(task.task),
+        title: await storedTicketTitle(task.task),
         ...(source ? { source } : {}),
         // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
         // Без этого признака человек берётся за неё руками параллельно с арбитром.
@@ -860,11 +853,10 @@ async function factoryModule(
   // из трекера. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
-  async function ticketSections(id: string, { profile = null, title = '', description = '', own = false }: {
+  async function ticketSections(id: string, { profile = null, title = '', description = '' }: {
     profile?: string | null;
     title?: string;
     description?: string;
-    own?: boolean;
   } = {}) {
     const sections: Array<{ title: string; text: string }> = [];
     const clarify = await analyzer.readClarifications(id);
@@ -896,7 +888,7 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (tracker && !own && tracker.capabilities?.()?.comments !== false) {
+    if (tracker && tracker.capabilities?.()?.comments !== false) {
       try {
         const page = await tracker.taskPageData(id);
         const comments = (page.comments || []) as Array<{
@@ -1157,8 +1149,7 @@ async function factoryModule(
     dynamicSections?: boolean;
   } = {}): Promise<PreflightResult> {
     const sourceContext = tracker?.captureContext?.();
-    const ownSourceTask = await readGrigdeskTask(config, id);
-    let launchSource: TaskSourceId | undefined = ownSourceTask ? 'grigdesk' : undefined;
+    let launchSource: TaskSourceId | undefined;
 
     if (reuseTicket && sourceIndex) {
       const records = await sourceIndex.read();
@@ -1167,15 +1158,15 @@ async function factoryModule(
         launchSource = FactoryTaskSources.verified(records.entries[id],
           await factoryState.readTrustedTicketProof(id));
       } catch {
-        launchSource = ownSourceTask ? 'grigdesk' : undefined;
+        launchSource = undefined;
       }
-    } else if (!ownSourceTask && tracker?.accountIdentity && sourceContext?.trackerId) {
+    } else if (tracker?.accountIdentity && sourceContext?.trackerId) {
       const identity = await tracker.accountIdentity();
 
       launchSource = `${sourceContext.trackerId}@${trackerAccountScope(identity)}`;
     }
 
-    if (sourceContext && !ownSourceTask && !reuseTicket) {
+    if (sourceContext && !reuseTicket) {
       tracker?.assertContext?.(sourceContext);
     }
     if (source !== undefined && (!isTaskSourceId(source) || source !== launchSource)) {
@@ -1322,22 +1313,20 @@ async function factoryModule(
       }
     } else {
       try {
-        const own = await readGrigdeskTask(config, id);
-        const ticketTitle = own?.title ?? title;
-        const ticketDescription = own?.description ?? description;
+        const ticketTitle = title;
+        const ticketDescription = description;
 
         built = buildTicket({
           task: id,
           title: ticketTitle,
           description: ticketDescription,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
-          sourceUrl: own?.sourceUrl || sourceUrl || (await taskSourceUrl(id)),
+          sourceUrl: sourceUrl || (await taskSourceUrl(id)),
           sections: dynamicSections
             ? await ticketSections(id, {
               profile,
               title: ticketTitle,
               description: ticketDescription,
-              own: Boolean(own),
             })
             : [],
         });
@@ -1362,7 +1351,7 @@ async function factoryModule(
         launchInputs,
         ticket: built,
         source: launchSource,
-        sourceContext: !ownSourceTask && !reuseTicket ? sourceContext : undefined,
+        sourceContext: !reuseTicket ? sourceContext : undefined,
       },
     };
   }

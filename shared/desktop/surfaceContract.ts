@@ -8,7 +8,8 @@ export type SurfaceKind = 'task' | 'tool';
 export type SurfaceTarget = {
   kind: 'task';
   id: string;
-  source?: TaskSourceId
+  source?: TaskSourceId;
+  unavailable?: 'legacy-own';
 } | {
   kind: 'tool';
   id: string
@@ -28,9 +29,11 @@ export function parseSurfaceTarget(value: unknown): SurfaceTarget | null {
     return { kind: 'tool', id: item.id };
   }
 
-  if (!item || Object.keys(item).some((key) => !['kind', 'id', 'source'].includes(key))
+  if (!item || Object.keys(item).some((key) => !['kind', 'id', 'source', 'unavailable'].includes(key))
     || item.kind !== 'task'
     || typeof item.id !== 'string' || !/^[1-9][0-9]{0,14}$/.test(item.id)
+    || (item.unavailable !== undefined && (item.unavailable !== 'legacy-own'
+      || item.source !== undefined || !/^[1-9]\d{11}$/.test(item.id)))
     || (item.source !== undefined && (!isTaskSourceId(item.source)
       || !parseTaskReference(`${item.source}:${item.id}`)))) {
     return null;
@@ -39,7 +42,8 @@ export function parseSurfaceTarget(value: unknown): SurfaceTarget | null {
   return {
     kind: 'task',
     id: item.id,
-    ...(isTaskSourceId(item.source) ? { source: item.source } : {})
+    ...(isTaskSourceId(item.source) ? { source: item.source } : {}),
+    ...(item.unavailable === 'legacy-own' ? { unavailable: 'legacy-own' as const } : {})
   };
 }
 /**
@@ -52,8 +56,8 @@ export function surfaceUrl(origin: string, target: SurfaceTarget, instance?: str
   url.searchParams.set('surface', target.kind);
   url.searchParams.set('id', target.id);
 
-  if (target.kind === 'task' && target.source) {
-    url.searchParams.set('source', target.source);
+  if (target.kind === 'task' && (target.source || target.unavailable)) {
+    url.searchParams.set('source', target.unavailable ? 'grigdesk' : target.source!);
   }
 
   if (target.kind === 'tool' && isToolInstance(instance)) {
@@ -83,7 +87,8 @@ export function surfaceTargetFromUrl(value: string, origin: string): SurfaceDocu
     const target = parseSurfaceTarget({
       kind: url.searchParams.get('surface'),
       id: url.searchParams.get('id'),
-      ...(url.searchParams.has('source') ? { source: url.searchParams.get('source') } : {}),
+      ...(url.searchParams.get('source') === 'grigdesk' ? { unavailable: 'legacy-own' }
+        : url.searchParams.has('source') ? { source: url.searchParams.get('source') } : {}),
     });
 
     if (target?.kind === 'tool') {

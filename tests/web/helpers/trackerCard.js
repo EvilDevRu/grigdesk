@@ -56,6 +56,7 @@ export async function mountTrackerCard(t, {
   catalog = null,
   taskSource,
   boardSource,
+  openReference,
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/board');
   const prefix = `__trackerCard${nonce += 1}`;
@@ -164,6 +165,21 @@ export async function mountTrackerCard(t, {
         };
       }
 
+      if (openReference && (url === '/api/tracker/task/42' || url === `/api/tracker/task/${id}`)) {
+        return {
+          id: url.endsWith('/42') ? 42 : Number(id),
+          title: 'Следующая внешняя задача',
+          description: 'Текст',
+          status: 3,
+        };
+      }
+
+      if (url === `/api/grigdesk-tasks/${id}` && detail.source !== 'grigdesk') {
+        throw new migrationHarness.ApiError('Архивная задача отсутствует', 404, {
+          error: 'grigdesk_task_not_found',
+        });
+      }
+
       if (url === `/api/tracker/task/${id}` || url === `/api/grigdesk-tasks/${id}`
         || (catalog && url === `/api/tracker/${trackerId}/task/${id}`)) {
         if (detailMode === 'held') {
@@ -270,14 +286,28 @@ export async function mountTrackerCard(t, {
     ApiError: migrationHarness.ApiError,
     UiStore: useUiStore,
     BoardStore: useBoardStore,
-    AnalysisStore: () => ({ detail: async () => ({}) }),
+    AnalysisStore: () => ({ detail: async () => {
+      if (openReference) {
+        calls.push({ method: 'ANALYSIS' });
+      }
+
+      return {};
+    } }),
     FavoritesStore: () => ({
       loaded: true,
       isFavorite: () => false,
       isPending: () => false,
-      load: async () => {},
+      load: async () => {
+        if (openReference) {
+          calls.push({ method: 'PERSONAL', operation: 'favorites' });
+        }
+      },
     }),
-    SeenStore: () => ({ markSeen: async () => {} }),
+    SeenStore: () => ({ markSeen: async () => {
+      if (openReference) {
+        calls.push({ method: 'PERSONAL', operation: 'seen' });
+      }
+    } }),
     Subscribe: (listener) => {
       listeners.add(listener);
 
@@ -319,8 +349,16 @@ export async function mountTrackerCard(t, {
       entries: [],
       isOnShelf: () => false,
       isPending: () => false,
-      async load() {},
-      async acknowledge() {},
+      async load() {
+        if (openReference) {
+          calls.push({ method: 'PERSONAL', operation: 'shelf-load' });
+        }
+      },
+      async acknowledge() {
+        if (openReference) {
+          calls.push({ method: 'PERSONAL', operation: 'shelf-acknowledge' });
+        }
+      },
     };
 
     shelf.own = shelf;
@@ -344,6 +382,40 @@ export async function mountTrackerCard(t, {
   globalThis[`${prefix}TasksStore`] = tasks.useTasksStore;
 
   const pinia = createPinia();
+  let ui = useUiStore(pinia);
+
+  if (openReference) {
+    const module = await compileModule(webFile('src/stores/ui.ts'), { stubs: {
+      './shell.ts': 'export const useShellStore = () => ({ capabilities: [] });',
+      '../shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',
+      '../shared/shellClient.ts': `export const shellAction = async () => {
+        globalThis.${prefix}Api.post('shell-action', {});
+      };`,
+      '../ui': 'export const showToast = () => {};',
+    } });
+
+    globalThis[`${prefix}UiStore`] = module.useUiStore;
+    ui = module.useUiStore(pinia);
+
+    const { reactive } = await import('../../../web/node_modules/vue/index.mjs');
+    const links = await compileModule(webFile('src/shared/alertDeepLinks.ts'));
+    const route = reactive({ path: '/board', query: { openTask: openReference } });
+    const stop = links.installAlertDeepLinks({
+      route,
+      router: {
+        push() {},
+        replace(location) {
+          route.query = location.query;
+        },
+      },
+      chat: { revealChat: async () => true },
+      ui,
+    });
+
+    t.after(stop);
+    await flushPromises();
+  }
+
   const component = await compileTaskModal(prefix);
   const wrapper = mount(component, {
     props: { presentation },
@@ -375,7 +447,7 @@ export async function mountTrackerCard(t, {
     metadata,
     task,
     board: useBoardStore(pinia),
-    ui: useUiStore(pinia),
+    ui,
     tasks: tasks.useTasksStore(pinia),
   };
 }
