@@ -1,41 +1,41 @@
-# Правила для контрибьютеров
+# Contributing guidelines
 
-Правила действуют для людей и ИИ-агентов, работающих с этим репозиторием.
-Перед изменениями прочитай [общие инструкции проекта](CLAUDE.md).
+These guidelines apply to people and AI agents working in this repository.
+Before making changes, read the [general project instructions](CLAUDE.md).
 
-## Сообщения коммитов
+## Commit messages
 
-- Заголовок и, если нужно, тело сообщения пишутся на английском языке.
-- Один коммит решает одну задачу; заголовок кратко описывает конкретное изменение.
-- Заголовок — до 72 символов, без точки в конце. Используй повелительную форму:
-  `add`, `fix`, `remove`, а не `added`, `fixes`, `removed`.
-- Обычно достаточно заголовка. Тело добавляй только для объяснения причины или
-  неочевидных последствий, отделяя его пустой строкой.
-- Не используй общие сообщения вроде `update`, `fix stuff` или `misc changes`.
+- Write the subject and, if needed, the body in English.
+- Each commit addresses one task; the subject briefly describes the specific change.
+- Keep the subject at 72 characters or fewer, with no trailing period. Use the imperative:
+  `add`, `fix`, `remove`, rather than `added`, `fixes`, `removed`.
+- A subject is usually enough. Add a body only to explain the reason or
+  non-obvious consequences, separated from the subject by a blank line.
+- Avoid vague messages such as `update`, `fix stuff`, or `misc changes`.
 
-По умолчанию используем стиль Conventional Commits:
+Use Conventional Commits by default:
 
 ```text
 type(scope): short summary
 ```
 
-`scope` необязателен; он обозначает затронутую область, например `chat`, `web`, `server`.
-Тип выбирается по цели изменения:
+`scope` is optional; it identifies the affected area, such as `chat`, `web`, or `server`.
+Choose the type based on the purpose of the change:
 
-| Тип | Когда использовать |
+| Type | When to use it |
 | --- | --- |
-| `feat` | Новая возможность |
-| `fix` | Исправление ошибки |
-| `refactor` | Изменение структуры кода с сохранением поведения |
-| `perf` | Улучшение производительности |
-| `docs` | Изменение документации |
-| `test` | Изменение тестов |
-| `build` | Сборка или зависимости |
-| `ci` | Автоматические проверки и публикация |
-| `chore` | Прочие служебные изменения |
-| `revert` | Отмена предыдущего коммита |
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `refactor` | A code structure change that preserves behavior |
+| `perf` | A performance improvement |
+| `docs` | Documentation changes |
+| `test` | Test changes |
+| `build` | Build or dependency changes |
+| `ci` | Automated checks and publishing |
+| `chore` | Other maintenance changes |
+| `revert` | Reverting a previous commit |
 
-Примеры:
+Examples:
 
 ```text
 feat(chat): add message search
@@ -43,39 +43,39 @@ fix(web): preserve scroll position
 docs: define commit message rules
 ```
 
-Для несовместимого изменения ставь `!` перед двоеточием, например
-`feat(api)!: remove legacy chat endpoint`, и опиши последствия в теле сообщения.
+For a breaking change, place `!` before the colon, for example
+`feat(api)!: remove legacy chat endpoint`, and describe the consequences in the message body.
 
-Если пользователь или явно вызванный навык требует другой формат, например
-`Task <TASK> - <summary>`, соблюдай его. Английский язык, краткость и запрет трейлера
-соавторства остаются обязательными. Автоматические сообщения merge и revert допустимы
-на английском языке; вручную написанное описание следует этим правилам.
+If the user or an explicitly invoked skill requires a different format, such as
+`Task <TASK> - <summary>`, follow it. English, brevity, and the prohibition on
+co-authorship trailers remain mandatory. Automatically generated merge and revert messages
+are allowed in English; manually written descriptions must follow these guidelines.
 
 ## Pull requests
 
-- Заголовок и всё описание PR пишутся на английском языке, включая заголовки разделов
-  и автоматически добавленные подписи конвейера.
-- Заголовок следует тому же стилю `type(scope): short summary`, что и сообщение коммита:
-  конкретное изменение, повелительная форма, до 72 символов, без точки в конце.
-  Явно запрошенный пользователем или навыком формат имеет приоритет.
-- Начинай описание с проблемы и итогового поведения. Описывай окончательный состав
-  изменений для ревьюера, который не читал переписку; историю обсуждения не переноси.
-- В `Summary` кратко объясни, что изменилось и зачем. В `Validation` укажи фактически
-  выполненные проверки и их результаты; непроведённые проверки явно отметь.
-- Раздел `Notes` добавляй при необходимости: ограничения, несовместимость, порядок
-  поставки или ручные действия. Объём описания должен соответствовать сложности PR.
-- При изменении состава PR обновляй заголовок и описание по итоговой реализации.
+- Write the title and the entire PR description in English, including section headings
+  and automatically added pipeline signatures.
+- The title follows the same `type(scope): short summary` style as a commit message:
+  a specific change, imperative wording, at most 72 characters, and no trailing period.
+  A format explicitly requested by the user or a skill takes precedence.
+- Start the description with the problem and the resulting behavior. Describe the final
+  changes for a reviewer who has not read the conversation; leave out the discussion history.
+- In `Summary`, briefly explain what changed and why. In `Validation`, list the checks
+  actually performed and their results; explicitly note any checks that were not run.
+- Add `Notes` when needed for limitations, breaking changes, rollout order, or manual steps.
+  The length of the description should match the complexity of the PR.
+- When the scope of the PR changes, update its title and description to reflect the final implementation.
 
-[Шаблон GitHub](.github/pull_request_template.md) задаёт разделы нового PR.
-Подсказки замени конкретным описанием; необязательный `Notes` удали, если он не нужен.
+The [GitHub template](.github/pull_request_template.md) defines the sections of a new PR.
+Replace the prompts with a specific description; remove the optional `Notes` section if it is not needed.
 
-Пример заголовка:
+Example title:
 
 ```text
 fix(web): preserve scroll position when loading older messages
 ```
 
-Пример описания:
+Example description:
 
 ```markdown
 ## Summary
@@ -89,13 +89,13 @@ visible message and scroll offset while the older messages are inserted.
 - Manually verified that loading older messages keeps the visible message in place.
 ```
 
-Пример показывает оформление; в реальном PR перечисляй только выполненные проверки.
+This example illustrates the format; in an actual PR, list only the checks that were performed.
 
-## Соавторство
+## Co-authorship
 
-Коммиты создаются **без трейлера `Co-Authored-By:`** независимо от регистра написания.
-Это относится и к автоматически добавленным строкам от редактора или ИИ-агента.
-Перед созданием или изменением коммита проверь всё сообщение и удали такой трейлер.
+Create commits **without a `Co-Authored-By:` trailer**, regardless of capitalization.
+This also applies to lines automatically added by an editor or AI agent.
+Before creating or amending a commit, review the entire message and remove any such trailer.
 
-Для агента эти правила не заменяют прямую просьбу человека сделать коммит, push или PR;
-ограничения заданы в [общих инструкциях проекта](CLAUDE.md).
+For agents, these guidelines do not replace an explicit human request to commit, push, or create a PR;
+the restrictions are defined in the [general project instructions](CLAUDE.md).
