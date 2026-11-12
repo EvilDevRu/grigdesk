@@ -84,12 +84,17 @@ test('AP22_settings_topbar: верхнее меню показывает имя 
   }).waitFor();
   assert.equal(f.snapshot.activeProfileId, 'profile-b');
 
-  await f.page.getByRole('button', { name: 'Управление подключениями', exact: true }).click();
-  await f.page.locator('[data-profile-id="profile-b"]').waitFor();
+  assert.equal(await f.page.getByRole('button', {
+    name: 'Управление подключениями',
+    exact: true,
+  }).count(), 0);
+  await f.page.locator('[data-context="topbar-popover-settings"]').click();
+  await f.page.locator('[data-provider-page="fixture"][data-ready="true"]').waitFor();
 
   const accessTab = f.page.getByRole('tab', { name: 'Доступ', exact: true });
 
-  assert.equal(await accessTab.getAttribute('aria-selected'), 'true');
+  await accessTab.click();
+  await f.page.locator('[data-profile-id="profile-b"]').waitFor();
 });
 
 test('ряд подключений появляется только при нескольких учётках и обновляется через SSE', async (t) => {

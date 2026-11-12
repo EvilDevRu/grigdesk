@@ -98,7 +98,7 @@
 - [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)
-- [Ворота VPN проверяют маршрут, а не конкретный клиент](vpn-route-check.md)
+- [Ворота VPN: маршрут, общий черновик и сохранение через «Применить»](vpn-route-check.md)
 - [Вход в GrigDesk: один пользователь, сессионная cookie, гард на ВЕСЬ /api](session-authentication.md)
 - [Владельцы порта и сокета браузера: служба, ручной запуск, приложение и зависшая остановка](server-port-ownership.md)
 - [Браузерный удалённый доступ снят; приложение использует отдельный туннель](remote-access-options.md)

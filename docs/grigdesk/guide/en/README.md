@@ -1,6 +1,6 @@
 # GrigDesk User Guide
 
-The compact connection list, shared account switcher below the limits and sign-in recovery are described in [Executor access profiles](access-profiles.md).
+The connection list, switcher below the limits, settings access from the header and access recovery are described in [Executor access profiles](access-profiles.md).
 
 This guide covers the released GrigDesk, from installation to tasks and recovery. The version appears below the contents; when connected remotely, the guide belongs to the selected server.
 
@@ -37,14 +37,14 @@ External plugins keep their own instructions in their packages. Unknown articles
 - [Agent conversations: multiple applications, background write reconciliation and history recovery](chats.md)
 - [Incoming, Telegram and GitHub: queue, conversations and actions](incoming.md)
 - [Browser: site icons, agent locks, access and automatic tab closure](browser.md)
-- [GrigDesk settings: shared quota collection switch, targeted refresh and saved snapshots](settings.md)
+- [GrigDesk settings: applying VPN parameters, quotas, snapshots and updating an older client](settings.md)
 - [Machines, wizard jobs, VPS replacement, cancelling waits and restoring the previous service](connections.md)
 - [Dictation and meetings](speech.md)
 - [Troubleshooting: chat errors, stopping the server and Telegram, build and window installation failures](troubleshooting.md)
 - [Glossary](glossary.md)
 - [Projects and repositories: project profile and built-in grigdesk-connect-project in the chat menu](projects.md)
 - [Tasks and triage: drivers, applying without closing, saving and closing, main board and estimates](tasks.md)
-- [Starting pipelines, managing attempts and looping in an isolated environment](pipelines.md) — local model/effort selection, restoring selections after catalog failure and settings after stage restart.
+- [Starting pipelines, managing attempts and looping in an isolated environment](pipelines.md) — local model/effort selection saved after closing the dialog, compact fields and settings after stage restart. It also covers a separate access request during publication and retrying only SHIP.
 - [Human decisions, failure reasons, unavailable diagnostics and stopping the arbiter](gates.md)
 - [Route editor](routes.md)
 - [Chat working directory](chat-workdir.md)

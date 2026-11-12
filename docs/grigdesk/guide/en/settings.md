@@ -38,9 +38,13 @@ When off, last values and their old check times remain visible. Opening a popove
 
 After enabling and applying, stale quotas are checked immediately and background collection runs. Forecasts receive points only from new measurements. After a server restart in manual mode, the snapshot is empty until the first check. This setting changes neither actual limits nor chat operation.
 
+If ↻ stops refreshing quotas after a server update and the error asks you to choose an executor and update the application window, install the current application build on this device. An older interface sends the request without the selected executor. Restarting only the server does not update the application's interface. Then check the selected machine, enable automatic refresh if needed and press Apply.
+
 ## Configure the VPN gate
 
 On System → Startup, enable the VPN gate to check the tunnel before server startup, optionally specifying an interface and probe address. The gate is off by default, so startup performs no check. When enabled, it blocks startup until the route to the probe address uses the tunnel.
+
+Press Apply to save the parameters, or OK to save and close Settings. Cancel discards unapplied changes.
 
 Changes apply after restarting the server: the section shows current running values and warns when saved configuration differs. Restart is above in the same section.
 

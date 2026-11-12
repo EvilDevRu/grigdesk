@@ -51,7 +51,7 @@
 
 ## Устройство
 
-- [Профили доступа: компактные строки, общий переключатель учёток под лимитами, «…» и допуск переключения](access-profiles.md)
+- [Профили доступа: переключатель под лимитами, «…», допуск и единственный вход в настройки в заголовке](access-profiles.md)
 
 Внешние панели проходят [единый ToolHost и проверку готовности пакета](persistent-tool-host.md#внешний-маршрут).
 Документация и тесты продукта Studio3D находятся в его пакете, с оглавлением `docs/README.md`.
@@ -337,6 +337,7 @@
 - [Возможности устройства в локальном окне без PWA](pwa-secure-context.md)
 - [Tooltip/popover живут в <body>: scoped-селектор consumer-а до surface не дотянется](teleported-overlay-styles.md)
 - [Кнопка остановки и пояснение отказа: очередь ходов и ввод в активный ход](chat-stop-and-deny-comment.md)
+- [Ворота VPN: общий черновик, «Применить» и «ОК»](../server/vpn-route-check.md)
 - [settings-search.md](settings-search.md) — поиск метаданных, дерево и показ поля настроек.
 
 - [settings-preferences.md](settings-preferences.md) — черновики prefs, общий switch квот на agents.providers,

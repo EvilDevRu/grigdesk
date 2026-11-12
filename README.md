@@ -129,7 +129,7 @@ Make the workspace your own with extra tools and panels. Open **Settings → Plu
 
 ## Documentation
 
-The [user guide](docs/grigdesk/guide/en/README.md) covers setup, everyday work, and recovery. It is also built into the app: open **Help** or press **F1**.
+Open **Help** or press **F1** in the app to read the user guide included with your server version. The [source guide](docs/grigdesk/guide/en/README.md) covers setup, everyday work, and recovery.
 
 | Get started | Build and review |
 | :--- | :--- |
