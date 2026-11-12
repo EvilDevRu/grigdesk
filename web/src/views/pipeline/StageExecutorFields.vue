@@ -1,7 +1,8 @@
 <template>
   <div class="executor-fields">
     <div class="executor-field">
-      <label :for="`${fieldId}-model`">{{ t('core.stageModel') }}</label>
+      <label :for="`${fieldId}-model`" v-tooltip="t(props.draft?.model != null
+        ? 'core.stageSourceLocal' : 'core.stageSourceProfile')">{{ t('core.stageModel') }}</label>
       <UiSelect :id="`${fieldId}-model`" :model-value="selectedModel" :disabled="!editable"
                 :aria-describedby="descriptionId" @update:model-value="updateModel">
         <option :value="inheritValue">{{ t('core.stageInheritModel', { value: inheritedModel }) }}</option>
@@ -10,11 +11,10 @@
           {{ item.label || item.id }}
         </option>
       </UiSelect>
-      <small>{{ t(props.draft?.model !== null && props.draft?.model !== undefined
-        ? 'core.stageSourceLocal' : 'core.stageSourceProfile') }}</small>
     </div>
     <div class="executor-field">
-      <label :for="`${fieldId}-effort`">{{ t('core.stageEffort') }}</label>
+      <label :for="`${fieldId}-effort`" v-tooltip="t(props.draft?.effort != null
+        ? 'core.stageSourceLocal' : 'core.stageSourceProfile')">{{ t('core.stageEffort') }}</label>
       <UiSelect :id="`${fieldId}-effort`" :model-value="selectedEffort" :disabled="!editable"
                 :aria-describedby="descriptionId" @update:model-value="updateEffort">
         <option :value="inheritValue">{{ t('core.stageInheritEffort', { value: inheritedEffort }) }}</option>
@@ -25,8 +25,6 @@
           {{ level || t('core.stageNoEffort') }}
         </option>
       </UiSelect>
-      <small>{{ t(props.draft?.effort !== null && props.draft?.effort !== undefined
-        ? 'core.stageSourceLocal' : 'core.stageSourceProfile') }}</small>
     </div>
   </div>
 </template>
@@ -34,7 +32,7 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue';
 
-import { UiSelect, t } from '../../ui.ts';
+import { UiSelect, t, vTooltip } from '../../ui.ts';
 import { runnerEffortLabel, runnerModelLabel, type RunnerState } from '../../shared/runnerDisplay.ts';
 import type {
   StageRunnerOptions, StageRunnerSelection,

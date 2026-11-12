@@ -290,14 +290,16 @@ async function mountPipeline(t, {
   };
 }
 
-test('selection-is-draft', async (t) => {
+test('selection-saves-immediately', async (t) => {
   const fx = await mountPipeline(t, makeFixture());
 
   await fx.openPlanStage('wait');
   await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
   await fx.flushPromises();
   assert.deepEqual(fx.runnerCalls, [], 'выбор исполнителя не вызывает legacy override');
-  assert.deepEqual(fx.applyCalls, [], 'черновик не сохраняется до явного действия');
+  assert.equal(fx.applyCalls.length, 1, 'клик по исполнителю сразу сохраняет выбор');
+  assert.equal(fx.applyCalls[0][1].selection.primary, 'codex');
+  assert.equal(fx.wrapper.get('#stage-executors-panel').text().includes('Применить'), false);
 
   const fields = settingsFields(fx.wrapper);
 
@@ -305,7 +307,9 @@ test('selection-is-draft', async (t) => {
   assert.equal(fields[0].element.disabled, false);
   await fields[0].setValue('sol-other');
   await fields[1].setValue('low');
-  assert.deepEqual(fx.applyCalls, []);
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.at(-1)[1].selection.model, 'sol-other');
+  assert.equal(fx.applyCalls.at(-1)[1].selection.effort, 'low');
 });
 
 test('apply-one-tuple-keeps-dialog', async (t) => {
@@ -320,10 +324,9 @@ test('apply-one-tuple-keeps-dialog', async (t) => {
   assert.equal(fields[0].element.disabled, false);
   await fields[0].setValue('sol-other');
   await fields[1].setValue('low');
-  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
   await fx.flushPromises();
-  assert.equal(fx.applyCalls.length, 1);
-  assert.deepEqual(fx.applyCalls[0][1].selection, {
+  assert.equal(fx.applyCalls.length, 2);
+  assert.deepEqual(fx.applyCalls.at(-1)[1].selection, {
     primary: 'codex',
     parametersFor: 'codex',
     model: 'sol-other',
@@ -339,6 +342,65 @@ test('apply-one-tuple-keeps-dialog', async (t) => {
   assert.equal(fx.applyCalls[0][1].mode, 'next');
   assert.equal(fx.wrapper.find('.smodal').exists(), true);
   assert.deepEqual(fx.runnerCalls, []);
+});
+
+test('late-provider-catalog-does-not-save-new-selection-twice', async (t) => {
+  const pending = Promise.withResolvers();
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    runners: ['claude', 'codex', 'kimi'],
+    optionsHandler: (url, confirmed) => {
+      const provider = new URL(url, 'http://fixture').searchParams.get('provider');
+
+      return provider === 'codex' ? pending.promise
+        : provider === 'kimi' ? stageSettingsOptions({ provider }) : confirmed;
+    },
+  });
+
+  await fx.openPlanStage('wait');
+
+  const picks = fx.wrapper.findAll('.executor-row .ui-selectable-row__primary');
+
+  await picks[1].trigger('click');
+  await picks[2].trigger('click');
+  await fx.flushPromises();
+  pending.resolve(stageSettingsOptions({ provider: 'codex' }));
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 1);
+  assert.equal(fx.applyCalls[0][1].selection.primary, 'kimi');
+});
+
+test('auto-save-failure-keeps-selection-and-retries', async (t) => {
+  let calls = 0;
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    applyHandler: (payload) => {
+      calls += 1;
+
+      if (calls === 1) {
+        throw new Error('Сохранение временно недоступно');
+      }
+
+      return {
+        ...stageSettingsOptions(),
+        selection: { ...payload.selection },
+        revision: 1,
+        receipt: { requestId: payload.requestId, state: 'saved' },
+      };
+    },
+  });
+
+  await fx.openPlanStage('wait');
+  await settingsFields(fx.wrapper)[1].setValue('high');
+  await fx.flushPromises();
+  assert.equal(settingsFields(fx.wrapper)[1].element.value, 'high');
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Сохранение временно недоступно/);
+  await settingsButton(fx.wrapper, /Повторить сохранение/).trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 2);
+  assert.equal(fx.applyCalls[1][1].requestId, fx.applyCalls[0][1].requestId);
+  assert.equal(fx.applyCalls[1][1].selection.effort, 'high');
+  assert.equal(fx.wrapper.get('#stage-executors-panel').text().includes('Повторить сохранение'), false);
 });
 
 test('карточка текущего исполнителя запроса не шлёт', async (t) => {
@@ -504,14 +566,12 @@ test('ручной запуск без Bitrix показывает заголо�
   assert.equal(wrapper.text().includes('загрузка названия'), false);
 });
 
-test('reset-executor-is-draft', async (t) => {
+test('reset-executor-saves-immediately', async (t) => {
   const fx = await mountPipeline(t, makeFixture({ source: 'task-stage' }));
 
   await fx.openPlanStage('idle');
   await fx.wrapper.get('.runner-reset').trigger('click');
   assert.deepEqual(fx.runnerCalls, []);
-  assert.deepEqual(fx.applyCalls, []);
-  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
   await fx.flushPromises();
   assert.equal(fx.applyCalls[0][1].selection.primary, null);
 });
@@ -547,7 +607,6 @@ test('active-next-preserves-fact', async (t) => {
   assert.equal(fields[0].element.disabled, false);
   await fields[0].setValue('opus-other');
   await fields[1].setValue('low');
-  await settingsButton(fx.wrapper, /Сохранить для следующего запуска/).trigger('click');
   await fx.flushPromises();
   assert.equal(fx.applyCalls.length, 1);
   assert.equal(fx.applyCalls[0][1].mode, 'next');
@@ -577,7 +636,7 @@ test('остановленный run: черновик сохраняется д
 
   await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
   assert.deepEqual(runnerCalls, []);
-  assert.ok(settingsButton(wrapper, /^Применить$/).exists());
+  assert.equal(wrapper.get('#stage-executors-panel').text().includes('Применить'), false);
 });
 
 test('readOnly: блока выбора исполнителя нет', async (t) => {
@@ -640,18 +699,20 @@ test('same-provider-effort-restart', async (t) => {
 
   assert.equal(fields[1].element.disabled, false);
   await fields[1].setValue('high');
+  await fx.flushPromises();
   await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
   await fx.flushPromises();
   assert.equal(confirmations.length, 1);
   assert.match(JSON.stringify(confirmations[0]), /останов|заверш|прерв/i);
-  assert.deepEqual(fx.applyCalls, []);
+  assert.equal(fx.applyCalls.length, 1, 'effort сохранён без остановки процесса');
+  assert.equal(fx.applyCalls[0][1].mode, 'next');
 
   globalThis.__pipelineRunnerConfirmDialog = async () => true;
   await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
   await fx.flushPromises();
-  assert.equal(fx.applyCalls.length, 1);
-  assert.equal(fx.applyCalls[0][1].mode, 'restart');
-  assert.deepEqual(fx.applyCalls[0][1].selection, {
+  assert.equal(fx.applyCalls.length, 2);
+  assert.equal(fx.applyCalls[1][1].mode, 'restart');
+  assert.deepEqual(fx.applyCalls[1][1].selection, {
     primary: null,
     parametersFor: 'claude',
     model: null,
@@ -686,14 +747,14 @@ test('restart-refreshes-run-before-next-apply', async (t) => {
 
   await fx.openPlanStage('run');
   await settingsFields(fx.wrapper)[1].setValue('high');
+  await fx.flushPromises();
   await settingsButton(fx.wrapper, /Перезапустить с этими параметрами/).trigger('click');
   await fx.flushPromises();
   await settingsFields(fx.wrapper)[1].setValue('max');
-  await settingsButton(fx.wrapper, /Сохранить для следующего запуска/).trigger('click');
   await fx.flushPromises();
-  assert.equal(fx.applyCalls.length, 2);
-  assert.deepEqual(fx.applyCalls[1][1].expectedRun, nextRun);
-  assert.equal(fx.applyCalls[1][1].selection.effort, 'max');
+  assert.equal(fx.applyCalls.length, 3);
+  assert.deepEqual(fx.applyCalls[2][1].expectedRun, nextRun);
+  assert.equal(fx.applyCalls[2][1].selection.effort, 'max');
 });
 
 // К3: каждое поле возвращается к наследованию без сброса второго.
@@ -719,7 +780,6 @@ test('independent-inheritance-and-remount', async (t) => {
 
   assert.ok(inheritModel, 'у модели есть независимое наследование');
   await fields[0].setValue(inheritModel.element.value);
-  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
   await fx.flushPromises();
   assert.equal(fx.applyCalls.at(-1)[1].selection.model, null);
   assert.equal(fx.applyCalls.at(-1)[1].selection.effort, 'high');
@@ -728,7 +788,6 @@ test('independent-inheritance-and-remount', async (t) => {
 
   assert.ok(inheritEffort, 'у effort есть независимое наследование');
   await fields[1].setValue(inheritEffort.element.value);
-  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
   await fx.flushPromises();
   assert.equal(fx.applyCalls.at(-1)[1].selection.effort, null);
 
@@ -817,7 +876,7 @@ test('provider-catalog-failure-clears-previous-models', async (t) => {
 
   assert.equal(fields[0].element.disabled, true);
   assert.equal(fields[0].findAll('option').some((item) => item.element.value === 'opus-other'), false);
-  assert.equal(settingsButton(fx.wrapper, /^Применить$/).element.disabled, true);
+  assert.deepEqual(fx.applyCalls, []);
   assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Каталог Codex недоступен/);
 
   unavailable = false;
@@ -825,7 +884,8 @@ test('provider-catalog-failure-clears-previous-models', async (t) => {
   await fx.flushPromises();
   assert.equal(fields[0].element.disabled, false);
   assert.ok(fields[0].findAll('option').some((item) => item.element.value === 'sol-other'));
-  assert.deepEqual(fx.applyCalls, []);
+  assert.equal(fx.applyCalls.length, 1, 'успешный повтор завершает выбор исполнителя');
+  assert.equal(fx.applyCalls[0][1].selection.primary, 'codex');
 });
 
 test('saved-provider-bootstrap-does-not-depend-on-base-catalog', async (t) => {
@@ -859,9 +919,10 @@ test('saved-provider-bootstrap-does-not-depend-on-base-catalog', async (t) => {
   assert.equal(fx.optionCalls.some((url) => /provider=codex/.test(url)), true);
   assert.equal(settingsFields(fx.wrapper)[0].element.value, 'sol-other');
   assert.equal(settingsFields(fx.wrapper)[1].element.value, 'low');
-  await settingsButton(fx.wrapper, /^Применить$/).trigger('click');
+  assert.deepEqual(fx.applyCalls, [], 'открытие сохранённого выбора не создаёт запись');
+  await settingsFields(fx.wrapper)[1].setValue('high');
   await fx.flushPromises();
-  assert.deepEqual(fx.applyCalls[0][1].selection, saved.selection);
+  assert.deepEqual(fx.applyCalls[0][1].selection, { ...saved.selection, effort: 'high' });
 });
 
 test('unavailable-saved-catalog-keeps-visible-confirmed-parameters', async (t) => {
@@ -895,8 +956,9 @@ test('unavailable-saved-catalog-keeps-visible-confirmed-parameters', async (t) =
   assert.equal(fields[0].element.value, 'sol-other');
   assert.equal(fields[1].element.value, 'low');
   assert.equal(fields[0].element.disabled, true);
-  assert.equal(settingsButton(fx.wrapper, /^Применить$/).element.disabled, true);
-  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Следующий запуск: sol-other · effort low/);
+  assert.deepEqual(fx.applyCalls, []);
+  assert.equal(fx.wrapper.find('#stage-executors-panel .stage-section-heading').exists(), false);
+  assert.equal(fx.wrapper.get('#stage-executors-panel').text().includes('Следующий запуск:'), false);
   assert.match(fx.wrapper.get('#stage-executors-panel').text(),
     /Каталог сохранённого исполнителя недоступен/);
   assert.deepEqual(fx.applyCalls, []);

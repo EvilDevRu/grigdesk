@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 import { applyPayload, selection, waitFor } from '../helpers/stageRunnerSettingsFixture.mjs';
 import { httpJson, settingsServer } from '../helpers/stageRunnerSettingsServer.mjs';
 
@@ -36,6 +37,39 @@ test('options-and-apply-exact-identity', async (t) => {
   }
 
   assert.deepEqual(JSON.parse(apply[apply.indexOf('--payload') + 1]), payload);
+});
+
+test('graph-shows-saved-settings-before-first-run', async (t) => {
+  const fx = await settingsServer(t);
+  const options = httpJson(await fx.get('gamma'));
+  const selected = {
+    primary: 'gamma',
+    parametersFor: 'gamma',
+    model: '["route","model"]',
+    effort: 'off',
+  };
+
+  httpJson(await fx.post(applyPayload(options, selected)));
+
+  const adapter = new FactoryStateAdapter({
+    stateDir: fx.config.stateDir,
+    profilesDir: fx.config.profilesDir,
+    routesDir: fx.config.routesDir,
+    controlDir: fx.config.factoryControlDir,
+  });
+  const graph = await adapter.getTaskGraph('81');
+  const runner = graph.nodeMeta.plan.runner;
+
+  console.error('AGENT-DBG Граф после сохранения', {
+    saved: selected,
+    primary: runner.primary,
+    model: runner.models.gamma,
+  });
+  assert.equal(runner.primary, 'gamma');
+  assert.equal(runner.models.gamma.exact, 'model');
+  assert.equal(runner.models.gamma.effort, 'off');
+  assert.equal(runner.actual, null);
+  assert.equal(graph.nodeMeta.ship.runner.primary, 'alpha', 'соседний узел сохраняет политику');
 });
 
 test('active-next-and-same-provider-restart', async (t) => {

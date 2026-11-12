@@ -392,9 +392,8 @@
                   </span>
                 </span>
               </template>
-              <template v-if="p.accessProfiles?.supported" #footer="{ close }">
-                <AccessProfileMenu :provider-id="p.id"
-                  @manage="close('action'); toProviderAccess(p.id)" />
+              <template v-if="p.accessProfiles?.supported" #footer>
+                <AccessProfileMenu :provider-id="p.id" />
               </template>
             </UiTopbarPanel>
           </span>
@@ -670,16 +669,6 @@ const { openTerminal } = useToolLauncher();
 
 function toProviders() {
   openSettings({ pageId: 'agents.providers' });
-}
-
-/**
- * Быстрый выбор подключения ведёт прямо к доступам своего исполнителя.
- * Сначала открывается общая сессия настроек, затем выбирается её вкладка.
- */
-function toProviderAccess(id: string) {
-  if (openSettings({ pageId: 'agents.providers', entityId: id })) {
-    settings.selectPage('agents.providers', id, 'access');
-  }
 }
 
 const usageNow = ref(Date.now());

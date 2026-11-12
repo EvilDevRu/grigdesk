@@ -325,6 +325,22 @@ SETTINGS_FIELDS.push({
   scope: translator.t('ru', 'settings.applicationComputer'),
 });
 
+const VPN_GATE_FIELDS = [
+  ['requireVpn', 'switch', 'settings.vpnGateRequire', 'settings.vpnGateRequireHint'],
+  ['iface', 'text', 'settings.vpnGateIface', 'settings.vpnGateIfaceHint'],
+  ['probe', 'text', 'settings.vpnGateProbe', 'settings.vpnGateProbeHint'],
+] as const;
+
+SETTINGS_FIELDS.push(...VPN_GATE_FIELDS.map(([key, control, label, description]) => ({
+  address: { pageId: 'system.startup', fieldPath: ['vpnGate', key] },
+  resourceId: 'vpnGate',
+  key,
+  control,
+  label: translator.t('ru', label),
+  description: translator.t('ru', description),
+  scope: translator.t('ru', 'settings.selectedServerComputer'),
+})));
+
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
 export const DEFAULT_SETTINGS_PAGE = 'interface.behavior';
 
@@ -991,6 +1007,21 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.usePreviousText",
     "description": "settings.forDictationVideoTranscriptionUsesItsOwn",
     "scope": "settings.allDevices"
+  },
+  "vpnGate:requireVpn": {
+    "label": "settings.vpnGateRequire",
+    "description": "settings.vpnGateRequireHint",
+    "scope": "settings.selectedServerComputer"
+  },
+  "vpnGate:iface": {
+    "label": "settings.vpnGateIface",
+    "description": "settings.vpnGateIfaceHint",
+    "scope": "settings.selectedServerComputer"
+  },
+  "vpnGate:probe": {
+    "label": "settings.vpnGateProbe",
+    "description": "settings.vpnGateProbeHint",
+    "scope": "settings.selectedServerComputer"
   },
   "autostart:enabled": {
     "label": "settings.startWhenTheMachineTurnsOn",

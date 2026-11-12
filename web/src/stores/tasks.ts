@@ -359,7 +359,7 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
-     * Черновик превращается в одну согласованную мутацию только по явному действию.
+     * Выбор человека сохраняется одной согласованной мутацией всей связки.
      * Receipt подтверждает отдельно сохранение и результат возможного перезапуска.
      */
     async applyStageRunnerSettings(task: TaskId, payload: StageRunnerApply) {
