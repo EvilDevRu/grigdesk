@@ -118,43 +118,26 @@ A `.deb` package is also available in [releases](https://github.com/EvilDevRu/gr
 
 </details>
 
-[Installation guide](docs/grigdesk/guide/installation.md) ·
-[First launch](docs/grigdesk/guide/getting-started.md)
+[Installation guide](docs/grigdesk/guide/en/installation.md) ·
+[First launch](docs/grigdesk/guide/en/getting-started.md)
 
 ## Plugins
 
 Make the workspace your own with extra tools and panels. Open **Settings → Plugins** to browse the catalog, or install a specific release from Git.
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/readme/studio3d.png" width="40" height="40" alt="">
-      <h3>Studio3D</h3>
-      <p>Generate, import, organize, preview, and export 3D models.</p>
-      <a href="https://github.com/EvilDevRu/grigdesk-studio3d">Explore Studio3D →</a>
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/readme/codex-reset.png" width="40" height="40" alt="">
-      <h3>Codex Reset</h3>
-      <p>Public Codex quota reset data and forecasts from codexreset.org, in your usage panel.</p>
-      <a href="https://github.com/EvilDevRu/grigdesk-codex-reset">Explore Codex Reset →</a>
-    </td>
-  </tr>
-</table>
-
-[Install a plugin](docs/grigdesk/guide/plugins.md) · [Build your own](docs/grigdesk/plugins/author-contract.md) · [Example plugin](packages/plugin-types/example/README.md)
+[Install a plugin](docs/grigdesk/guide/en/plugins.md) · [Build your own](docs/grigdesk/plugins/author-contract.md) · [Example plugin](packages/plugin-types/example/README.md)
 
 ## Documentation
 
-The [user guide](docs/grigdesk/guide/README.md) covers setup, everyday work, and recovery. It is also built into the app: open **Help** or press **F1**.
+The [user guide](docs/grigdesk/guide/en/README.md) covers setup, everyday work, and recovery. It is also built into the app: open **Help** or press **F1**.
 
 | Get started | Build and review |
 | :--- | :--- |
-| [Installation](docs/grigdesk/guide/installation.md) — set up GrigDesk | [Agent chats](docs/grigdesk/guide/chats.md) — choose models and work with agents |
-| [Projects](docs/grigdesk/guide/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/pipelines.md) — move a task through its stages |
-| [Tasks](docs/grigdesk/guide/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/gates.md) — inspect results and decide |
+| [Installation](docs/grigdesk/guide/en/installation.md) — set up GrigDesk | [Agent chats](docs/grigdesk/guide/en/chats.md) — choose models and work with agents |
+| [Projects](docs/grigdesk/guide/en/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/en/pipelines.md) — move a task through its stages |
+| [Tasks](docs/grigdesk/guide/en/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/en/gates.md) — inspect results and decide |
 
-Detailed guides are currently in Russian. For help, see [troubleshooting](docs/grigdesk/guide/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
+The complete guide is available in English and [Русский](docs/grigdesk/guide/README.md). Built-in articles follow the device language immediately and both languages are included offline in each release. Older Russian-only servers show Russian with an explanation. For help, see [troubleshooting](docs/grigdesk/guide/en/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
 
 ## Contributing
 

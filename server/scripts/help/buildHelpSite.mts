@@ -35,8 +35,22 @@ export async function buildHelpSite(input: {
   sourceRoot: string;
   output: string;
   bundle: HelpBundle;
+  englishBundle: HelpBundle;
 }): Promise<string[]> {
   const bundle = verifyHelpBundle(input.bundle);
+  const english = verifyHelpBundle(input.englishBundle);
+  const entries = (corpus: HelpBundle) => corpus.articles.map(({ id, file, routes }) => ({
+    id,
+    file,
+    routes
+  }));
+
+  if (bundle.locale !== 'ru' || english.locale !== 'en'
+    || bundle.version !== english.version || bundle.commit !== english.commit
+    || JSON.stringify(entries(bundle)) !== JSON.stringify(entries(english))) {
+    throw new Error('help_release_mismatch');
+  }
+
   const webRoot = path.join(input.sourceRoot, 'web');
   const modules = new Set<string>();
 
@@ -75,7 +89,8 @@ export async function buildHelpSite(input: {
   await mkdir(input.output, {
     recursive: true
   });
-  await writeFile(path.join(input.output, 'help.json'), JSON.stringify(bundle));
+  await writeFile(path.join(input.output, 'help.json'), JSON.stringify(input.bundle));
+  await writeFile(path.join(input.output, 'help.en.json'), JSON.stringify(input.englishBundle));
 
   const rendererFile = path.join(webRoot, '.generated/markdown/mermaid-renderer.meta.json');
   const renderer = JSON.parse(await readFile(rendererFile, 'utf8')) as {
@@ -106,7 +121,21 @@ export const latestHtml = '<!doctype html><html lang="ru"><meta charset="utf-8">
   + '<meta name="viewport" content="width=device-width,initial-scale=1">'
   + '<title>GrigDesk Help</title><p id="message">GrigDesk Help</p><script src="./latest.js"></script></html>';
 export const latestScript = `(() => {
-  const english = navigator.language.toLowerCase().startsWith('en');
+  const valid = (value) => ['system', 'ru', 'en'].includes(value);
+  const query = new URLSearchParams(location.search);
+  let preference = query.get('locale');
+
+  if (!valid(preference)) {
+    try {
+      preference = localStorage.getItem('grigdesk-help-language');
+    } catch {
+      // Без storage остаются URL и системный выбор.
+    }
+  }
+
+  const english = preference === 'en' || (preference !== 'ru'
+    && !navigator.language.toLowerCase().startsWith('ru'));
+
   const target = document.getElementById('message');
   target.textContent = english ? 'Opening the current guide…' : 'Открываем актуальное руководство…';
   const channel = location.pathname.endsWith('latest-dev.html') ? 'dev' : 'release';
@@ -122,7 +151,7 @@ export const latestScript = `(() => {
         || (channel === 'release' && !stable.test(version))) {
         throw new Error('version');
       }
-      location.replace('./' + version + '/index.html' + location.hash);
+      location.replace('./' + version + '/index.html' + location.search + location.hash);
     }).catch(() => {
       target.textContent = english ? 'Could not open the current guide. Try again later.'
         : 'Не удалось открыть актуальное руководство. Повторите позже.';

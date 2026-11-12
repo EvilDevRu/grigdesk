@@ -37,8 +37,15 @@ export async function readBuildInputs(sourceRoot: string): Promise<Record<string
     }
   }
 
-  for (const directory of ['docs/grigdesk/guide', 'shared/help', 'web/help', 'server/scripts/help']) {
+  const helpDirectories = ['docs/grigdesk/guide', 'docs/grigdesk/guide/en',
+    'shared/help', 'web/help', 'server/scripts/help'];
+
+  for (const directory of helpDirectories) {
     for (const entry of await readdir(path.join(sourceRoot, directory), { withFileTypes: true })) {
+      if (directory === 'docs/grigdesk/guide' && entry.name === 'en' && entry.isDirectory()) {
+        continue;
+      }
+
       if (!entry.isFile()) {
         throw new Error(`Недопустимый вход справки: ${directory}/${entry.name}`);
       }

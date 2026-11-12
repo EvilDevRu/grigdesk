@@ -23,7 +23,7 @@
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth` | `/api/auth*` | учётная запись, сессии и CLI token |
 | `terminal` | `/api/terminal` (WebSocket: `in`, `resize`) | stdlib Python helper: `pty.fork()`, `TIOCSWINSZ`/`SIGWINCH`, cleanup process group |
-| `help` | `GET /api/help` под общим auth guard | текущий guide в source или server/help/help.json своего поколения; [контракт](packaged-help.md) |
+| `help` | `GET /api/help?locale=ru\|en` (без параметра ru) под общим auth guard | текущий guide в source или server/help/{help.json,help.en.json} своего поколения; [контракт](packaged-help.md) |
 | `health` | `/api/health` | — |
 
 Fastify-плагины: `auth` (весь `/api`, WebSocket и `/shots` закрыты сессией;

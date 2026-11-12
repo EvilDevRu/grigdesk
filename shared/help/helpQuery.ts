@@ -25,6 +25,14 @@ function summary(article: HelpArticle) {
  */
 export function queryHelp(bundle: HelpBundle, raw: unknown) {
   const input = parseHelpInput(raw);
+
+  if (input.locale && input.locale !== bundle.locale) {
+    return {
+      ok: false,
+      error: 'help_locale_unavailable'
+    };
+  }
+
   const identity = {
     version: bundle.version,
     commit: bundle.commit,
