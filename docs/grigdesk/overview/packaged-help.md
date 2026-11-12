@@ -26,7 +26,7 @@ commit, locale=ru, articles и SHA256 канонического содержи�
 release/
   GrigDesk
   README.md
-  bin/{grigdesk-server,deepseek,b24,grigdesk-relay,grigdesk-ctl,bundle.json,lib/runtime-env.sh}
+  bin/{grigdesk-server,deepseek,tracker,grigdesk-relay,grigdesk-ctl,bundle.json,lib/runtime-env.sh}
 D/runtimes/server/packages/<packageId>/
   server/help/help.json
   server/help/site/{index.html,help.json,latest.html,latest.js,assets/,licenses/}

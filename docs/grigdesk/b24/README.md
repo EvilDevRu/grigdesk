@@ -6,6 +6,15 @@
 
 Читай перед правкой: `server/src/lib/trackers`, `server/src/modules/tracker`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `tracker/` (команда `tracker`).
 
+## Действия агента с задачами
+
+Для чтения и создания внешних задач используй `tracker`, в том числе для Discript.
+Пользовательский порядок входит в релизную [справку F1](../guide/tasks.md#создать-задачу-через-агента-или-tracker)
+и доступен агенту через `grigdesk_help`, статья `tasks`.
+Если команда недоступна по имени, из корня исходников вызывай `bin/grigdesk-ctl tracker`.
+При указанном человеком трекере задавай `--board <id>`; текущий default может быть другим.
+Порядок выбора цели, проверка возможности создания и JSON — в [инструкции CLI](agent-and-operator-cli.md).
+
 ## Устройство
 
 - [Задача №2: удаление встроенной доски, резерв own и сохранение default](own-board-retirement.md)
@@ -39,14 +48,14 @@
 - [Размещение карточки: отдельные окна desktop, диалог браузера и пассивная полка](task-card-placement.md)
 - [Оформление карточки: единая навигация, описание и разбор, сохранение черновиков](../web/task-detail-design.md)
 - [Авторизация и слои](authentication-layers.md)
-- [Граница B24](integration-boundary.md)
+- [Граница трекера: серверная сессия и команда tracker](integration-boundary.md)
 - [Личное состояние задач B24 живёт на сервере, а не в браузере](server-owned-task-state.md)
 - [Личное состояние задач: избранное, полка и просмотренное](personal-task-state.md)
 - [Полка не является фильтром доски и не связана с избранным](task-shelf-independence.md)
 - [Протокол портала](portal-protocol.md)
 - [Статусы и приоритет обработки](statuses-and-priority.md)
 - [Действия завершённой задачи в карточке](completed-task-actions.md)
-- [CLI для агента и оператора](agent-and-operator-cli.md)
+- [CLI агента: создание без браузера, явная доска, проверка возможности и ошибки](agent-and-operator-cli.md)
 - [Команда tracker: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
 - [HTTP API GrigDesk](http-api-grigdesk.md)
 

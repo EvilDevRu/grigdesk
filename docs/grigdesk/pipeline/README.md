@@ -63,7 +63,8 @@
 - [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)
 - [Бинарный DeepSeek в Factory: descriptor, package coverage, cache и prepared handle](deepseek-binary-factory.md)
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
-- [Авто-шип фабрики](automatic-shipping.md)
+- [Авто-шип фабрики](automatic-shipping.md) — порядок задаёт профиль; адресный tracker,
+  штатное разрешение Git и переиспользование опубликованных результатов при повторе.
 - [Маршруты (modules/routes)](route-management.md)
 - [Палитра](graph-palette.md)
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
