@@ -1,4 +1,3 @@
-import { readGrigdeskTask } from '../grigdeskTasks/store.ts';
 // Триаж задач: очередь + одиночный headless-запуск выбранной модели (read-only разведка
 // кода, без стенда). Агент сам пишет результат в каталог анализа (t<ID>.analysis.json +
 // t<ID>.md), раннер валидирует и обогащает (SHA репозиториев, стоимость, время).
@@ -42,7 +41,6 @@ import type {
 // то, что от них зовёт, и не выводит их формы из подсказок редактора.
 export interface AnalyzerConfig extends Record<string, unknown> {
   analysisDir: string;
-  grigdeskTasksPath?: string;
   factoryHome?: string;
   profilesDir?: string;
   factoryProfile?: string;
@@ -606,19 +604,10 @@ export class Analyzer {
   }
 
   /**
-   * Собственная задача оценивается по выбранному проекту без общего кеша профиля.
+   * Оценка внешней задачи использует профиль машины и общий кеш профиля.
    * Старые задачи и вызовы без номера сохраняют прежний выбор глобального профиля.
    */
   async profile(id?: string | number) {
-    const own = id == null ? null : await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return {
-        name: own.projectId,
-        ...await loadTriageProfile(this.config, own.projectId, { strict: true }),
-      };
-    }
-
     if (!this._profile) {
       const name = this.config.factoryProfile
         || (await this.factoryState.primaryProfile().catch(() => '')) || '';
@@ -1086,20 +1075,10 @@ export class Analyzer {
   }
 
   /**
-   * Собственная запись отдаёт исходный текст без HTML-очистки и обращения к порталу.
+   * Постановка читается у внешнего трекера и нормализуется в обычный текст.
    * Для Б24 сохраняются прежние детали и несистемные комментарии с best effort чтением.
    */
   async _fetchTicket(id: string | number): Promise<any> {
-    const own = await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return {
-        title: own.title,
-        description: own.description,
-        comments: [],
-      };
-    }
-
     const detail = await this.tracker.taskDetail(id);
     let comments = [];
 
@@ -1161,12 +1140,6 @@ export class Analyzer {
    * что сейчас бежит на конвейере.
    */
   async _taskProject(id: string | number): Promise<any> {
-    const own = await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return own.projectId;
-    }
-
     try {
       const { registry } = await this.factoryState.readRegistry(id);
       return String(registry?.PROFILE || '').trim() || null;

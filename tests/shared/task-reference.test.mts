@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  formatTaskReference, parseTaskReference, taskReferenceKey,
+  formatTaskReference, isTaskSourceId, parseTaskReference, taskReferenceKey,
 } from '../../shared/tasks/taskReference.ts';
 
 const external = `grigdesk-b24@${'a'.repeat(64)}` as const;
@@ -25,4 +25,16 @@ test('неизвестный источник и недопустимый own-н
 
   assert.notEqual(taskReferenceKey({ id: '42', source: external }),
     taskReferenceKey({ id: '42', source: `grigdesk-b24@${'b'.repeat(64)}` }));
+});
+
+test('OWN-REMOVED-REF: legacy отличается от bare и не становится активным source', () => {
+  const legacy = parseTaskReference('grigdesk:100000000000');
+  const bare = parseTaskReference('100000000000');
+
+  assert.deepEqual(legacy, { id: '100000000000', unavailable: 'legacy-own' });
+  assert.deepEqual(bare, { id: '100000000000' });
+  assert.notEqual(taskReferenceKey(legacy!), taskReferenceKey(bare!));
+  assert.equal(formatTaskReference(legacy!), 'grigdesk:100000000000');
+  assert.equal(isTaskSourceId('grigdesk'), false);
+  assert.equal(isTaskSourceId(external), true);
 });

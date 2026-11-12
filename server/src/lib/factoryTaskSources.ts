@@ -15,9 +15,11 @@ export interface FactorySourceRecord {
   attempt?: string;
 }
 
+type StoredSourceRecord = Omit<FactorySourceRecord, 'source'> & { source: TaskSourceId | 'grigdesk' };
+
 interface SourceDocument {
   schemaVersion: 1;
-  entries: Record<string, FactorySourceRecord>;
+  entries: Record<string, StoredSourceRecord>;
 }
 
 /**
@@ -59,7 +61,8 @@ export class FactoryTaskSources {
     if (value?.schemaVersion !== 1 || !value.entries || typeof value.entries !== 'object'
       || Array.isArray(value.entries) || Object.entries(value.entries).some(([id, entry]) => (
         !entry || entry.taskId !== id || !/^[1-9]\d{0,19}$/.test(id)
-        || !isTaskSourceId(entry.source) || !/^[a-f0-9]{64}$/.test(entry.ticketHash)
+        || (!isTaskSourceId(entry.source) && entry.source !== 'grigdesk')
+        || !/^[a-f0-9]{64}$/.test(entry.ticketHash)
         || !/^[a-f0-9-]{36}$/.test(entry.dispatchId)
         || (entry.attempt !== undefined && !/^a_[a-f0-9]{32}$/.test(entry.attempt))
       ))) {
@@ -74,6 +77,10 @@ export class FactoryTaskSources {
    * Pending сохраняется до spawn; подтверждение требует той же dispatch identity.
    */
   async put(record: FactorySourceRecord): Promise<void> {
+    if (!isTaskSourceId(record.source)) {
+      throw new Error('Источник запуска должен принадлежать внешнему трекеру');
+    }
+
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
 
     const lock = await acquireDirectoryLock(`${this.filePath}.lock`);
@@ -95,12 +102,12 @@ export class FactoryTaskSources {
    * Pending разрешается после рестарта только по immutable ticket и dispatch попытки.
    * Равный номер или отпечаток другого запуска не доказывает принадлежность источнику.
    */
-  static verified(record: FactorySourceRecord | undefined, proof: {
+  static verified(record: StoredSourceRecord | undefined, proof: {
     attempt: string;
     queueDispatchId?: string | null;
     ticketHash: string;
   } | null): TaskSourceId | undefined {
-    return record && proof && record.dispatchId === proof.queueDispatchId
+    return record && isTaskSourceId(record.source) && proof && record.dispatchId === proof.queueDispatchId
       && record.ticketHash === proof.ticketHash && (!record.attempt || record.attempt === proof.attempt)
       ? record.source : undefined;
   }

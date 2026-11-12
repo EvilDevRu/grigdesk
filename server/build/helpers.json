@@ -19,9 +19,7 @@
       "id": "external-cli-lease",
       "entry": "server/scripts/externalCliLease.mts",
       "entryKind": "main",
-      "exports": [
-        "main"
-      ],
+      "exports": ["main"],
       "description": "Внешний CLI удерживает reader установки до выхода процесса и потомков."
     },
     {
@@ -140,7 +138,9 @@
       "id": "code-branch-worker",
       "entry": "server/src/lib/codeBranchWorker.mts",
       "entryKind": "main",
-      "exports": ["main"],
+      "exports": [
+        "main"
+      ],
       "description": "Переключение основной ветки и запуск стенда по явным командам проекта."
     },
     {
@@ -239,6 +239,16 @@
       "entryKind": "script",
       "exports": [],
       "description": "Метаданные моделей и уровней раннеров Factory без модельного вызова."
+    },
+    {
+      "id": "qwen-runner",
+      "entry": "server/scripts/qwenRunner.mts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runQwenFactory"
+      ],
+      "description": "Host-wrapper внешнего Qwen CLI и metadata раннера без модельного вызова."
     }
   ]
 }

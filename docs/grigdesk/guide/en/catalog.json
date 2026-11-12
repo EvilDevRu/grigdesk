@@ -381,5 +381,18 @@
       "DeepSeek",
       "key"
     ]
+  },
+  {
+    "file": "qwen.md",
+    "id": "qwen",
+    "title": "Connect Qwen Code",
+    "section": "Conversations",
+    "keywords": [
+      "qwen",
+      "executor",
+      "API",
+      "modelProviders",
+      "models"
+    ]
   }
 ]

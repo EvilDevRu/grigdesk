@@ -15,5 +15,6 @@
   | Claude | `command-hook` | нативный deny для прямой формы и server-owned PreToolUse |
   | Codex | `command-hook` | process hook, подтверждённый через `hooks/list` до thread |
   | DeepSeek | `command-hook` | server-owned PreToolUse hook в штатном DSH (DeepSeek CLI) |
+  | Qwen | `command-hook` | server-owned final guard ACP до исполнения, включая yolo |
   | Kimi contained | `network-sandbox` | egress разрешён только API Kimi |
   | Kimi host | `fail-closed` | при включённом запрете весь ход отклоняется до spawn |

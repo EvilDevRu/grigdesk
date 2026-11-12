@@ -236,10 +236,15 @@ export function startShelfRelay(options: ShelfRelayOptions): () => void {
       return;
     }
 
+    if ((data.source !== undefined && data.source !== 'tracker')
+      || (data.taskSource !== undefined && !isTaskSourceId(data.taskSource))) {
+      return;
+    }
+
     const target = parseSurfaceTarget({ kind: 'task', id: data.taskId });
 
     if (target) {
-      const source = data.source === 'grigdesk' ? 'grigdesk' : 'tracker';
+      const source = 'tracker' as const;
 
       void Promise.resolve().then(() => options.acknowledge(target.id, source,
         isTaskSourceId(data.taskSource) ? data.taskSource : undefined)).catch(() => undefined);

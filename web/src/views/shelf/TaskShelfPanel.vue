@@ -187,8 +187,8 @@
                     v-tooltip="'Отметить событие просмотренным'"
                     role="embedded"
                     tone="success"
-                    :loading="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
-                    :disabled="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    :loading="shelfState(row).isPending?.(row.taskId)"
+                    :disabled="shelfState(row).isPending?.(row.taskId)"
                     @click.stop="shelf.acknowledge(row.taskId, { source: row.personalSource, taskSource: row.taskSource })"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -206,8 +206,8 @@
                     v-tooltip="'Убрать с полки'"
                     role="embedded"
                     tone="neutral"
-                    :loading="row.state !== 'lit' && (row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
-                    :disabled="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    :loading="row.state !== 'lit' && shelfState(row).isPending?.(row.taskId)"
+                    :disabled="shelfState(row).isPending?.(row.taskId)"
                     @click.stop="shelf.remove(row.taskId, { source: row.personalSource, taskSource: row.taskSource })"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -274,6 +274,7 @@ const PROGRESS_TONES: Record<string, UiActionTone> = {
 };
 
 const shelf = useTaskShelfStore();
+const shelfState = (row: ShelfRow) => row.taskSource ? shelf.forSource(row.taskSource) : shelf;
 const ui = useUiStore();
 const panel = ref<HTMLElement | null>(null);
 const searchInput = ref<InstanceType<typeof UiSearchInput> | null>(null);

@@ -1223,6 +1223,18 @@
         "chinaKeyConfigured": "Key configured · China",
         "chinaKeyMissing": "Key not configured · China"
       }
+    },
+    "qwen": {
+      "auth": {
+        "configured": "API key configured.",
+        "missing": "Configure an API key."
+      },
+      "credentials": {
+        "DASHSCOPE_API_KEY": {
+          "label": "API key",
+          "hint": "API key for the model service."
+        }
+      }
     }
   },
   "invalidPluginCatalog": "The server returned an invalid plugin catalog.",
@@ -1398,6 +1410,10 @@
       "containedSsh": "Contained mode blocks SSH through the network sandbox regardless of the switch.",
       "containedMcp": "Contained mode isolates user and project MCP servers.",
       "savedMcp": "Showing mcp.json configuration; Kimi checks availability in a new session."
+    },
+    "qwen": {
+      "guard": "Checked before each tool executes.",
+      "mcp": "MCP is provided by the server for each turn."
     }
   },
   "kimiDirectSshExtraConfirmation": "If contained mode later changes to host mode, the permission remains disabled.",

@@ -1,5 +1,5 @@
-import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
-import type { PersonalScopeOptions, OwnTaskReader, PersonalIdentitySource } from './taskPersonalScope.ts';
+import { personalWriteGuard, resolvePersonalScope } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions, PersonalIdentitySource } from './taskPersonalScope.ts';
 import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой полки: scope всегда выводится из текущей портальной сессии,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
@@ -45,16 +45,12 @@ export class TaskShelfService {
 
   tracker: TaskShelfIdentitySource;
 
-  readonly ownTasks?: OwnTaskReader;
-
-  constructor({ store, tracker, ownTasks }: {
+  constructor({ store, tracker }: {
     store: TaskShelfStore;
     tracker: TaskShelfIdentitySource;
-    ownTasks?: OwnTaskReader
   }) {
     this.store = store;
     this.tracker = tracker;
-    this.ownTasks = ownTasks;
   }
 
   /**
@@ -87,31 +83,23 @@ export class TaskShelfService {
   }
 
   /**
-   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
-   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   * Локальная мутация закрепляет учётную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции внешней доски.
    */
   async put(taskId: unknown, value: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
     const beforeWrite = personalWriteGuard(this.tracker, options);
     const scope = await this._scope({}, options);
 
-    if (options.source === 'grigdesk') {
-      await validateOwnPersonalTasks([taskId], this.ownTasks, true);
-    }
-
     return withScope(scope, await this.store.put(scope, taskId, value, beforeWrite));
   }
 
   /**
-   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
-   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   * Локальная мутация закрепляет учётную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции внешней доски.
    */
   async remove(taskId: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
     const beforeWrite = personalWriteGuard(this.tracker, options);
     const scope = await this._scope({}, options);
-
-    if (options.source === 'grigdesk') {
-      await validateOwnPersonalTasks([taskId], this.ownTasks, false);
-    }
 
     return withScope(scope, await this.store.remove(scope, taskId, beforeWrite));
   }

@@ -15,7 +15,7 @@ import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 
-test('MD-LEGACY: прежние DTO, default, own, auth и SSE alias сохраняются', async (t) => {
+test('MD-LEGACY: прежние DTO, default, auth и SSE alias сохраняются', async (t) => {
   const fixture = await multiFixture(t);
 
   for (const id of ['fixture-a', 'fixture-b']) {
@@ -27,7 +27,6 @@ test('MD-LEGACY: прежние DTO, default, own, auth и SSE alias сохра�
     const dashboard = await fixture.request('GET', '/api/tracker/dashboard');
     const detail = await fixture.request('GET', '/api/tracker/task/42');
     const created = await fixture.request('POST', '/api/tracker/tasks', { title: 'Прежний клиент' });
-    const own = await fixture.request('GET', '/api/grigdesk-tasks');
     const event = fixture.events.filter((item) => item.name === 'trackers-changed').at(-1);
 
     assert.equal(catalog.statusCode, 200);
@@ -40,12 +39,11 @@ test('MD-LEGACY: прежние DTO, default, own, auth и SSE alias сохра�
     assert.equal(detail.json().title, id);
     assert.equal(created.statusCode, 200, created.body);
     assert.equal(created.json().id, 43);
-    assert.equal(own.statusCode, 200, own.body);
     assert.equal(event.payload.externalId, id);
     assert.equal(event.payload.revision, catalog.json().revision);
   }
 
-  for (const url of ['/api/trackers', '/api/tracker/dashboard', '/api/grigdesk-tasks']) {
+  for (const url of ['/api/trackers', '/api/tracker/dashboard']) {
     assert.equal((await fixture.app.inject(url)).statusCode, 401, url);
   }
 });

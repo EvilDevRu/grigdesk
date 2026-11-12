@@ -221,7 +221,7 @@ test('HELP-S-L2: реальный EN полон, замкнут, обезлич�
   const russian = await compileHelpSources(root, identity);
 
   assert.equal(english.locale, 'en');
-  assert.equal(english.articles.length, 29);
+  assert.equal(english.articles.length, russian.articles.length);
   assert.deepEqual(english.articles.map(({ id, file, routes }: typeof russian.articles[number]) =>
     ({
       id,

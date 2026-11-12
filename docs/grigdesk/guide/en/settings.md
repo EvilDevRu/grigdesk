@@ -61,3 +61,5 @@ The server saves access keys; manual environment changes may require a restart. 
 ## Related articles
 
 [Executors](chats.md) · [Connections](connections.md) · [Speech](speech.md) · [Plugins](plugins.md)
+
+Connecting Qwen Code and configuring its model catalog are covered in a [separate article](qwen.md).

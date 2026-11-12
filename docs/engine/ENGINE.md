@@ -51,6 +51,7 @@
 | `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
 | `lib/runners/gigacode.sh.disabled` | [Временно отключённый GigaCode](GIGACODE.md); исходники сохранены, в реестре его нет |
 | `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
+| `lib/runners/qwen.sh` | внешний npm CLI, живой каталог и host-wrapper ([qwen.md](qwen.md)) |
 | `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
 | `lib/coverage.sh`, `lib/profile-preflight.sh` | readiness/capability artifacts |
 | `lib/pipeline-store.sh` | locked/atomic pipeline storage |

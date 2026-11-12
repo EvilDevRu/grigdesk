@@ -1,6 +1,6 @@
 <template>
-  <UiDialog :open="open" :title="t('core.grigdeskNewTask')" :busy="saving"
-            :description="t('core.grigdeskNewTaskIntro')" :dismissible="!saving"
+  <UiDialog :open="open" :title="t('core.taskFormNewTask')" :busy="saving"
+            :description="t('core.taskFormNewTaskIntro')" :dismissible="!saving"
             data-role="new-grigdesk-task" data-ui-workspace initial-focus="#grigdesk-task-title"
             @update:open="emit('update:open', $event)">
     <template #title>
@@ -12,7 +12,7 @@
             <path d="M9 3h6v3H9zM9 11h6M9 15h3" />
           </svg>
         </span>
-        <span class="new-task-title">{{ t('core.grigdeskNewTask') }}</span>
+        <span class="new-task-title">{{ t('core.taskFormNewTask') }}</span>
         <UiIconButton :label="t('core.close')" :disabled="saving" @click="emit('update:open', false)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                stroke-linecap="round" aria-hidden="true">
@@ -24,32 +24,37 @@
 
     <form id="grigdesk-new-task" class="new-task-form" @submit.prevent="save">
       <UiField id="grigdesk-task-board" :label="t('core.newTaskBoard')" required>
-        <UiSelect v-model="boardId" :disabled="saving || loadingBoards">
-          <option value="own">GrigDesk</option>
+        <UiSelect v-model="boardId" :aria-label="t('core.newTaskBoard')"
+                  :disabled="saving || loadingBoards">
+          <template #value="{ option }">{{ option?.label || t('core.newTaskChooseBoard') }}</template>
           <option v-for="driver in externalBoards" :key="driver.id" :value="driver.id"
                   :disabled="driver.status !== 'active' || !driver.configured">
             {{ driver.name }}
           </option>
         </UiSelect>
       </UiField>
+      <UiInlineMessage v-if="!loadingBoards && !trackers.error && !externalBoards.length">
+        {{ t(hasConnections ? 'core.newTaskUnavailable' : 'core.trackerSetupBanner') }}
+        <UiButton variant="text" @click="openSettings">{{ t('core.trackerSetupAction') }}</UiButton>
+      </UiInlineMessage>
       <UiInlineMessage v-if="trackers.error" tone="warning">{{ trackers.error }}</UiInlineMessage>
-      <UiField id="grigdesk-task-title" :label="t('core.grigdeskTaskTitle')" required>
-        <UiInput v-model="title" :placeholder="t('core.grigdeskTaskTitlePlaceholder')"
+      <UiField id="grigdesk-task-title" :label="t('core.taskTitle')" required>
+        <UiInput v-model="title" :placeholder="t('core.taskTitlePlaceholder')"
                  :maxlength="500" :disabled="saving" />
       </UiField>
-      <UiField v-if="needsProject" id="grigdesk-task-project" :label="t('core.grigdeskTaskProject')" required>
+      <UiField v-if="needsProject" id="grigdesk-task-project" :label="t('core.taskProject')" required>
         <UiSelect v-model="projectId" :disabled="saving || loadingProjects">
-          <option value="">{{ t('core.grigdeskChooseProject') }}</option>
+          <option value="">{{ t('core.taskFormChooseProject') }}</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">
             {{ project.title }}
           </option>
         </UiSelect>
       </UiField>
       <UiInlineMessage v-if="needsProject && !loadingProjects && !projects.length">
-        {{ t(boardId === 'own' ? 'core.grigdeskNoProjects' : 'core.newTaskNoProjects') }}
+        {{ t('core.newTaskNoProjects') }}
       </UiInlineMessage>
-      <UiField :label="t('core.grigdeskTaskOptionalDescription')">
-        <UiTextarea v-model="description" :placeholder="t('core.grigdeskTaskDescriptionPlaceholder')"
+      <UiField :label="t('core.taskOptionalDescription')">
+        <UiTextarea v-model="description" :placeholder="t('core.taskDescriptionPlaceholder')"
                     :maxlength="100000" :rows="5" :disabled="saving" />
       </UiField>
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
@@ -57,13 +62,13 @@
 
     <template #footer>
       <div class="new-task-footer">
-        <p class="new-task-note">{{ t('core.grigdeskTaskCreationHint') }}</p>
+        <p class="new-task-note">{{ t('core.taskCreationHint') }}</p>
         <UiFormActions>
           <UiButton variant="ghost" :disabled="saving" @click="emit('update:open', false)">
-            {{ t('core.grigdeskCancel') }}
+            {{ t('core.taskFormCancel') }}
           </UiButton>
           <UiButton type="submit" form="grigdesk-new-task" variant="solid" tone="accent"
-                    :loading="saving" :disabled="saving || loadingBoards || loadingProjects"
+                    :loading="saving" :disabled="saving || loadingBoards || loadingProjects || !target"
                     @click.prevent="save">
             <template #leading>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -71,7 +76,7 @@
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </template>
-            {{ t('core.grigdeskCreate') }}
+            {{ t('core.taskFormCreate') }}
           </UiButton>
         </UiFormActions>
       </div>
@@ -82,7 +87,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 
-import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
 import { useBoardStore } from '../../stores/board.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { api, failureText } from '../../shared/apiClient.ts';
@@ -101,14 +105,19 @@ defineProps<{ open: boolean }>();
 const emit = defineEmits<{
   'update:open': [open: boolean];
   created: [task: TaskReference];
+  connect: [];
 }>();
 
-const store = useGrigdeskTasksStore();
+const openSettings = () => {
+  emit('update:open', false);
+  emit('connect');
+};
+
 const trackers = useTrackersStore();
 const board = useBoardStore();
 const title = ref('');
 const description = ref('');
-const boardId = ref('own');
+const boardId = ref('');
 const projectId = ref('');
 const loadingBoards = ref(true);
 const loadingProjects = ref(true);
@@ -117,16 +126,18 @@ const error = ref('');
 const externalProjects = ref<Array<{ id: string; title: string }>>([]);
 const target = ref<TrackerTarget | null>(null);
 
+const hasConnections = computed(() => !!(trackers.catalog?.enabledIds?.length
+  ?? trackers.catalog?.externalId));
 const externalBoards = computed(() => {
   const catalog = trackers.catalog;
   const enabledIds = catalog?.enabledIds ?? (catalog?.externalId ? [catalog.externalId] : []);
 
-  return catalog?.drivers.filter((driver) => driver.id !== 'own'
-    && enabledIds.includes(driver.id) && driver.capabilities.create) ?? [];
+  return catalog?.drivers.filter((driver) => enabledIds.includes(driver.id) && driver.capabilities.create
+    && driver.status === 'active' && driver.configured) ?? [];
 });
 const selectedBoard = computed(() => externalBoards.value.find((driver) => driver.id === boardId.value));
-const needsProject = computed(() => boardId.value === 'own' || !!selectedBoard.value?.capabilities.projects);
-const projects = computed(() => boardId.value === 'own' ? store.projects : externalProjects.value);
+const needsProject = computed(() => !!selectedBoard.value?.capabilities.projects);
+const projects = computed(() => externalProjects.value);
 
 /**
  * Справочник и поколение захватываются для выбранной доски до создания.
@@ -143,33 +154,33 @@ watch(boardId, async (id, _previous, onCleanup) => {
   loadingProjects.value = true;
 
   try {
-    if (id === 'own') {
-      await store.loadProjects();
-    } else {
-      const prefix = `/api/tracker/${encodeURIComponent(id)}`;
-      const context = await api.get(`${prefix}/context`, { signal: controller.signal });
-
-      if (!isRecord(context) || !isTaskSourceId(context.source)
-        || !context.source.startsWith(`${id}@`) || !Number.isSafeInteger(context.generation)) {
-        throw new Error(t('core.taskSourceMismatch'));
-      }
-
-      const captured = {
-        prefix,
-        source: context.source,
-        options: { headers: { 'x-grigdesk-tracker-generation': String(context.generation) } },
-      };
-      const response = needsProject.value
-        ? await api.get(`${prefix}/groups`, { ...captured.options, signal: controller.signal }) : null;
-
-      if (controller.signal.aborted) {
-        return;
-      }
-
-      externalProjects.value = response ? decodeBoardNamedItems(response, 'groups')
-        .map((project) => ({ id: String(project.id), title: project.name })) : [];
-      target.value = captured;
+    if (!id) {
+      return;
     }
+
+    const prefix = `/api/tracker/${encodeURIComponent(id)}`;
+    const context = await api.get(`${prefix}/context`, { signal: controller.signal });
+
+    if (!isRecord(context) || !isTaskSourceId(context.source)
+      || !context.source.startsWith(`${id}@`) || !Number.isSafeInteger(context.generation)) {
+      throw new Error(t('core.taskSourceMismatch'));
+    }
+
+    const captured = {
+      prefix,
+      source: context.source,
+      options: { headers: { 'x-grigdesk-tracker-generation': String(context.generation) } },
+    };
+    const response = needsProject.value
+      ? await api.get(`${prefix}/groups`, { ...captured.options, signal: controller.signal }) : null;
+
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    externalProjects.value = response ? decodeBoardNamedItems(response, 'groups')
+      .map((project) => ({ id: String(project.id), title: project.name })) : [];
+    target.value = captured;
   } catch (failure) {
     if (!controller.signal.aborted) {
       error.value = failureText(failure);
@@ -220,7 +231,7 @@ async function save() {
 
   if (!title.value.trim() || (needsProject.value
     && !projects.value.some((project) => project.id === projectId.value))) {
-    error.value = t(needsProject.value ? 'core.grigdeskRequiredFields' : 'core.newTaskRequiredTitle');
+    error.value = t(needsProject.value ? 'core.taskFormRequiredFields' : 'core.newTaskRequiredTitle');
 
     return;
   }
@@ -229,20 +240,7 @@ async function save() {
   error.value = '';
 
   try {
-    let task: TaskReference;
-
-    if (boardId.value === 'own') {
-      const created = await store.create({
-        title: title.value.trim(),
-        description: description.value,
-        projectId: projectId.value,
-        clientOrigin: location.origin,
-      });
-
-      task = { id: created.id, source: 'grigdesk' };
-    } else {
-      task = await createExternalTask();
-    }
+    const task = await createExternalTask();
 
     emit('update:open', false);
     emit('created', task);
@@ -261,7 +259,7 @@ onMounted(async () => {
     const selected = externalBoards.value.find((driver) => driver.id === defaultId
       && driver.status === 'active' && driver.configured);
 
-    boardId.value = selected?.id ?? 'own';
+    boardId.value = selected?.id ?? '';
   } catch (failure) {
     error.value = failureText(failure);
   } finally {

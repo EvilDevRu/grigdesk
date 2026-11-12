@@ -160,7 +160,7 @@ test('SW-SOURCE: одинаковые номера разных источник
     {
       kind: 'task',
       id,
-      source: 'grigdesk',
+      unavailable: 'legacy-own',
     },
     {
       kind: 'task',
@@ -175,7 +175,10 @@ test('SW-SOURCE: одинаковые номера разных источник
   ];
   const gate = Promise.withResolvers();
 
-  t.after(() => f.controller.closeAll());
+  t.after(() => {
+    gate.resolve();
+    f.controller.closeAll();
+  });
   f.holdNext(gate.promise);
 
   const first = f.controller.open(origin, targets[0]);
@@ -184,7 +187,10 @@ test('SW-SOURCE: одинаковые номера разных источник
   assert.equal(repeated, first);
 
   for (const target of targets.slice(1)) {
-    assert.equal(await f.controller.open(origin, target), true);
+    const opening = f.controller.open(origin, target);
+
+    assert.notEqual(opening, first, 'Разные источники не разделяют pending-окно');
+    assert.equal(await opening, true);
   }
 
   assert.deepEqual(f.made.map((window) => window.target), targets);

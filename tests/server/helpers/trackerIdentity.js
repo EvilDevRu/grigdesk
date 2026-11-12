@@ -1,50 +1,55 @@
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import assert from 'node:assert/strict';
 
 import { copyCustomPackage } from './trackerPackage.js';
 import { trackerFixture } from './trackerFixture.js';
 
 /**
- * Identity вычисляет настоящий клиент драйвера, сетевой ответ задаётся на границе raw.
- * Смена credentials идёт через runtime с тем же registry и host, что у HTTP-приложения.
+ * Identity и кеш определяет настоящий пакет через host.fetch.
+ * Транспорт разрешает только discovery; реквизиты меняются штатным runtime.
  */
 export async function identityFixture(t, onDiscovery) {
+  let measuring = false;
   const fixture = await trackerFixture(t, {
     setup: copyCustomPackage,
+    fetch: async (url) => {
+      assert.equal(String(url), 'https://portal.example.test/api/v1/auth/token');
+
+      if (measuring) {
+        onDiscovery();
+      }
+
+      return new Response(JSON.stringify({ data: { user: { id: 77 } } }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    },
   });
 
   if (!fixture) {
     return null;
   }
 
-  // Registry импортирует временную копию пакета, подменяется prototype именно этой копии.
-  // Клиент остаётся настоящим: кеш discoverUserId и смена session проверяются без стабов identity.
-  const copiedClient = await import(pathToFileURL(
-    path.join(fixture.config.driversDir, 'grigdesk-b24-discript/src/client.ts'),
-  ).href);
-
-  // Прежний identity-double отдавал URL с завершающим слешем, нормализация URL здесь не проверяется.
-  // Сохраняем этот входной атрибут сессии, не подменяя discoverUserId и его настоящий кеш.
-  t.mock.method(copiedClient.B24Client.prototype, 'ensureAuth', async function () {
-    this.baseUrl = 'https://portal.example.test/';
-  });
-  t.mock.method(copiedClient.B24Client.prototype, 'raw', async () => {
-    onDiscovery();
-
-    return { text: async () => 'USER_ID=77;' };
-  });
   await fixture.runtime.writeSettings('grigdesk-b24-discript', {
     'grigdesk-b24-discript': {
       baseUrl: 'https://portal.example.test/',
-      login: 'user',
-      password: 'secret',
+      accessToken: 'fixture-token',
     },
   });
 
+  measuring = true;
+
+  // Подготовленный API-пакет принимает boolean fresh вместо объекта read-options.
+  // Registry оставляет реальный lease и credentials, не принуждая discovery на каждом чтении.
   return {
-    adapter: fixture.tracker,
-    changeCredentials: () => fixture.runtime.writeSettings('grigdesk-b24-discript', {
-      'grigdesk-b24-discript': { password: 'changed-secret' },
-    }),
+    adapter: {
+      accountIdentity: () => fixture.runtime.registry.call('grigdesk-b24-discript',
+        (tracker) => tracker.accountIdentity()),
+    },
+    async changeCredentials() {
+      measuring = false;
+      await fixture.runtime.writeSettings('grigdesk-b24-discript', {
+        'grigdesk-b24-discript': { accessToken: 'changed-token' },
+      });
+      measuring = true;
+    },
   };
 }

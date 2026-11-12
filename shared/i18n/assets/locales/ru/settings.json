@@ -1223,6 +1223,18 @@
         "chinaKeyConfigured": "Ключ задан · Китай",
         "chinaKeyMissing": "Ключ не задан · Китай"
       }
+    },
+    "qwen": {
+      "auth": {
+        "configured": "Ключ API настроен.",
+        "missing": "Настройте API-ключ."
+      },
+      "credentials": {
+        "DASHSCOPE_API_KEY": {
+          "label": "Ключ API",
+          "hint": "Ключ API сервиса модели."
+        }
+      }
     }
   },
   "invalidPluginCatalog": "Сервер вернул некорректный каталог плагинов.",
@@ -1398,6 +1410,10 @@
       "containedSsh": "Contained-режим закрывает SSH сетевой песочницей независимо от тумблера.",
       "containedMcp": "Contained-режим изолирует пользовательские и проектные MCP-серверы.",
       "savedMcp": "Показана конфигурация mcp.json; живость Kimi проверяет в новой сессии."
+    },
+    "qwen": {
+      "guard": "Проверка перед исполнением инструмента.",
+      "mcp": "MCP выдаётся сервером для каждого хода."
     }
   },
   "kimiDirectSshExtraConfirmation": "При будущей смене contained на host разрешение останется снятым.",

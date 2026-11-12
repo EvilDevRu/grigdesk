@@ -25,7 +25,7 @@ export async function resolveTrackerTarget(
   if (!source) {
     return { prefix: '/api/tracker', options: trackerMutationOptions() };
   }
-  if (!isTaskSourceId(source) || source === 'grigdesk') {
+  if (!isTaskSourceId(source)) {
     throw new Error(t('core.taskSourceUnsupported'));
   }
 

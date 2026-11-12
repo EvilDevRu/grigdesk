@@ -500,8 +500,16 @@ async function localAnalysis(t) {
     factoryProfile: 'alpha',
     grigdeskTasksPath: path.join(root, 'tasks.json'),
   });
-  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
-  const tasks = [ownTask('100000000001', 'beta'), ownTask('100000000002', 'gamma')];
+  const tasks = ['100000000001', '100000000002'].map((id, index) => ({
+    id,
+    source: 'grigdesk',
+    title: 'Архивное название',
+    description: 'Архивное описание',
+    projectId: index ? 'gamma' : 'beta',
+    projectTitle: index ? 'Проект gamma' : 'Проект beta',
+    sourceUrl: `http://client.test/#/board?openTask=${id}`,
+    createdAt: '2026-10-24T00:00:00.000Z',
+  }));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -520,7 +528,12 @@ async function localAnalysis(t) {
     ].join('\n'));
   }
 
-  await seedTasks(config, tasks);
+  await writeFile(path.join(root, 'tasks.json'), JSON.stringify({
+    schemaVersion: 1,
+    revision: tasks.length,
+    nextId: '100000000010',
+    tasks,
+  }));
 
   const calls = [];
   const portals = [];
@@ -572,25 +585,26 @@ async function localAnalysis(t) {
   };
 }
 
-test('LOCAL-TRIAGE-01: полный анализ читает свой текст и профиль beta без Б24', async (t) => {
+test('OWN-REMOVED-TRIAGE: архив не выбирает профиль, allowlist и постановку', async (t) => {
   const fx = await localAnalysis(t);
   const result = await fx.analyzer.analyze(fx.tasks[0].id);
 
   assert.equal(result.ok, true);
-  assert.deepEqual(fx.profiles, ['beta']);
-  assert.deepEqual(fx.portals, []);
+  assert.deepEqual(fx.profiles, ['alpha']);
+  assert.ok(fx.portals.includes('detail'));
+  assert.ok(fx.portals.includes('comments'));
 
   const prompt = String(fx.calls[0].message || fx.calls[0].prompt);
 
-  assert.ok(prompt.includes(fx.tasks[0].title));
-  assert.ok(prompt.includes(fx.tasks[0].description));
-  assert.match(prompt, /Контекст beta/);
-  assert.match(prompt, /code-beta/);
-  assert.doesNotMatch(prompt, /code-alpha|code-gamma/);
-  assert.doesNotMatch(prompt, /Чужой текст|Чужой комментарий портала/);
+  assert.match(prompt, /Чужая задача портала/);
+  assert.match(prompt, /Чужой текст/);
+  assert.match(prompt, /Чужой комментарий портала/);
+  assert.match(prompt, /Контекст alpha/);
+  assert.match(prompt, /code-alpha/);
+  assert.doesNotMatch(prompt, /code-beta|code-gamma|Архивное название|Архивное описание/);
 });
 
-test('LOCAL-TRIAGE-02: beta → gamma → beta не смешивает профиль и сохраняет ответ', async (t) => {
+test('OWN-REMOVED-TRIAGE: повтор внешнего анализа сохраняет ответ и профиль default', async (t) => {
   const fx = await localAnalysis(t);
   const id = fx.tasks[0].id;
 
@@ -608,8 +622,9 @@ test('LOCAL-TRIAGE-02: beta → gamma → beta не смешивает проф�
   await fx.analyzer.appendClarificationBatch(id, [{ questionId: 'q-mode', optionIds: ['manual'] }]);
   await fx.analyzer.analyze(id);
 
-  assert.deepEqual(fx.profiles, ['beta', 'gamma', 'beta']);
+  assert.deepEqual(fx.profiles, ['alpha', 'alpha', 'alpha']);
   assert.equal(fx.calls.length, 3);
   assert.match(String(fx.calls[2].message || fx.calls[2].prompt), /Ручной/);
-  assert.deepEqual(fx.portals, []);
+  assert.ok(fx.portals.includes('detail'));
+  assert.ok(fx.portals.includes('comments'));
 });

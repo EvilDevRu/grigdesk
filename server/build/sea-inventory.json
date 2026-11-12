@@ -1530,6 +1530,33 @@
       "owner": "deepseek-plan",
       "fate": "compat-wrapper",
       "detail": "Metadata раннеров через собранный helper закреплённой поставки."
+    },
+    {
+      "file": "engine/lib/runners/qwen.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/qwenRunner.mts",
+      "count": 2,
+      "owner": "task-1",
+      "fate": "compat-wrapper",
+      "detail": "Qwen host-wrapper: исходный и упакованный helper используют один runtime и ACP launcher."
+    },
+    {
+      "file": "server/scripts/qwenRunner.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "helper",
+      "detail": "Qwen host-wrapper: исходный и упакованный helper используют один runtime и ACP launcher."
+    },
+    {
+      "file": "server/src/lib/qwen/sandbox.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "helper",
+      "detail": "Qwen host-wrapper: исходный и упакованный helper используют один runtime и ACP launcher."
     }
   ],
   "resources": [

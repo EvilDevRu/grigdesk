@@ -1,5 +1,8 @@
 import claude from './executors/claude.ts';
 import codex from './executors/codex.ts';
+import qwen from './executors/qwen.ts';
+import { externalCliAdapter } from './providerInstall/externalCliAdapter.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
 import { config } from '../config.ts';
 import { GLM_FACTORY_MODELS } from './glm/factoryCatalog.ts';
 import { resolveDeepSeekRuntimeAsync } from './deepseek/runtimeProcess.ts';
@@ -62,6 +65,22 @@ export async function collectFactoryRunnerModels(
         aliases: Array.isArray(model.aliases) ? model.aliases.map(String) : [],
       }];
     });
+  } else if (provider === 'qwen') {
+    const adapter = externalCliAdapter(qwen);
+    const entries = await adapter.catalog!({
+      ...config,
+      rootDir: process.env.GRIGDESK_QWEN_CONFIG_ROOT || process.cwd(),
+      qwenBin: cli || process.env.GRIGDESK_QWEN_BIN || config.qwenBin,
+    });
+
+    const available = Array.isArray(entries) ? entries.filter(isRecord) : [];
+
+    models = available.filter((entry) => ids.includes(String(entry.id))).map((entry) => ({
+      id: String(entry.id),
+      label: String(entry.name || entry.id),
+      efforts: [''],
+      aliases: [],
+    }));
   } else if (provider === 'kimi') {
     models = ids.map((id) => ({
       id,

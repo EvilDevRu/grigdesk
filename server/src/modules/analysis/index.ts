@@ -2,7 +2,6 @@
 // Очередь и раннер — в lib/analysis/analyzer.ts; здесь только HTTP-обвязка.
 import type { TrackerFacade } from '../../lib/trackers/facade.ts';
 import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
-import { readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -46,11 +45,7 @@ async function analysisModule(
 
     const body = objectOrEmpty(request.body);
 
-    if (body.taskSource === 'grigdesk') {
-      if (!await readGrigdeskTask(analyzer.config, id)) {
-        return reply.code(404).send({ error: 'grigdesk_task_not_found' });
-      }
-    } else if (body.taskSource !== undefined) {
+    if (body.taskSource !== undefined) {
       try {
         const tracker = opts.tracker!;
         const context = tracker.captureContext();

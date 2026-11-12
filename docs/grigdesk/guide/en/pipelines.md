@@ -39,6 +39,17 @@ In a looping route, the lead assigns work to an executor and independently check
 
 ## Limitations and recovery
 
+An isolated test environment does not contain the main GrigDesk's projects and profiles.
+If the form says there are no projects with an available pipeline, first prepare a separate
+test project with a profile and published route. Retrying a stage without preparation
+produces the same refusal. After preparation, return to verification using Go here with an explanation.
+
+If CLI preparation fails before an attempt is created, the message names the executor,
+selected installation and cause. Fix that installation or its executor settings and retry
+the same task; GrigDesk does not need restarting. Retrying is available when it is confirmed
+that the engine has not received the launch and no run artifacts exist. If the launch has
+already reached the engine, wait for attempt confirmation and use Continue normally.
+
 After a write failure, Continue may restore an already verified result without rerunning the agent. If the result handed a decision to a person, open the indicated node: the question and comment remain, and another Continue does not answer for you. Use Go here with an explanation to rerun a stage.
 
 If the route checks environment readiness, it may perform limited repair of its own services and retry acceptance. If repair is exhausted, read the cause and actions taken; pressing retry does not itself create a new budget. Old attempts keep their route until an explicit run change.
@@ -48,5 +59,7 @@ Executor access is pinned before launch. Pausing or restarting the server does n
 A saved graph without a live process does not prove execution. In a loop, the lead hands tasks to the executor and brings results to acceptance; reaching the loop ceiling or making no progress requires a decision. The task environment may be available only while stopped.
 
 ## Related articles
+
+Connecting the new external executor and its verification scope are covered in [Qwen Code](qwen.md).
 
 [Tasks](tasks.md) · [Gates](gates.md) · [Routes](routes.md) · [Environments](sandboxes.md) · [Data and backups](data-and-backups.md)

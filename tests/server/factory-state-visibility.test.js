@@ -13,6 +13,7 @@ import path from 'node:path';
 import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 import { buildTicket, writeTicketFile } from '../../server/src/lib/factoryTicket.ts';
 import factoryModule from '../../server/src/modules/factory/index.ts';
+import { FactoryTaskSources, factoryTicketHash } from '../../server/src/lib/factoryTaskSources.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -511,37 +512,56 @@ test('STATE-10: recovery endpoint is gone and nothing resumes automatically', as
   assert.equal(await missing(fx.callsLog), true);
 });
 
-test('LOCAL-LIST-01: собственный title/source из записи, ручной тикет остаётся прежним', async (t) => {
+test('LOCAL-LIST-01: внешний title/source из тикета и proof, ручной тикет остаётся прежним', async (t) => {
   const fx = await fixture(t);
-  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
-  const task = ownTask();
+  const source = `fixture-a@${'a'.repeat(64)}`;
+  const ticket = buildTicket({
+    task: '8',
+    title: 'Внешняя постановка',
+    sourceUrl: 'https://external.test/tasks/8',
+  });
 
-  fx.config.grigdeskTasksPath = path.join(fx.config.stateDir, 'own.json');
-  await seedTasks(fx.config, [task]);
-  await writeFile(
-    path.join(fx.config.stateDir, `t${task.id}.pipeline`),
-    await readFile(path.join(fx.config.stateDir, 't7.pipeline'), 'utf8'),
-  );
+  await writeTicketFile({
+    dir: fx.config.ticketsDir,
+    task: '8',
+    ticket,
+  });
   await writeTicketFile({
     dir: fx.config.ticketsDir,
     task: '7',
     ticket: buildTicket({
       task: '7',
       title: 'Ручная задача',
-      sourceUrl: 'http://client.test/tasks/7'
+      sourceUrl: 'http://client.test/tasks/7',
     }),
   });
 
+  fx.config.factoryTaskSourcesPath = path.join(fx.config.stateDir, 'sources.json');
+
+  const record = {
+    taskId: '8',
+    source,
+    dispatchId: 'd5f1c2b3-1234-4567-890a-123456789abc',
+    ticketHash: factoryTicketHash(ticket),
+  };
+
+  await new FactoryTaskSources(fx.config.factoryTaskSourcesPath).put(record);
+  t.mock.method(fx.adapter, 'readTrustedTicketProof', async () => ({
+    attempt: ATTEMPT,
+    queueDispatchId: record.dispatchId,
+    ticketHash: record.ticketHash,
+  }));
+
   const app = await server(t, fx);
-  const response = await app.inject({ url: '/api/tasks' });
+  const response = await app.inject({ url: '/api/tasks?sources=1' });
 
   assert.equal(response.statusCode, 200, response.body);
 
-  const own = response.json().tasks.find((entry) => entry.task === task.id);
+  const external = response.json().tasks.find((entry) => entry.task === '8');
   const manual = response.json().tasks.find((entry) => entry.task === '7');
 
-  assert.equal(own.title, task.title);
-  assert.equal(own.source, 'grigdesk');
+  assert.equal(external.title, ticket.title);
+  assert.equal(external.source, source);
   assert.equal(manual.title, 'Ручная задача');
   assert.equal(manual.source, undefined);
 });

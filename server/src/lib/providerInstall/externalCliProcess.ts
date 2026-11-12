@@ -21,6 +21,14 @@ export interface ExternalCliProcessContext {
 const contexts = new AsyncLocalStorage<ExternalCliProcessContext>();
 const leaseJobs = new AsyncLocalStorage<string>();
 
+// Контейнерный launcher удерживает тот же выбор CLI, даже когда запускается bwrap.
+// Копия контекста не позволяет адаптеру заменить окружение соседнего вызова.
+export function currentExternalCliProcess(): ExternalCliProcessContext | undefined {
+  const context = contexts.getStore();
+
+  return context ? { ...context, env: { ...context.env } } : undefined;
+}
+
 /**
  * Открытие живой сессии чата помечает spawns своего вызова разговором.
  * Метка попадает в lease-запись хелпера и позволяет окну установки показать,

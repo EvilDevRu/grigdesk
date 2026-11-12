@@ -91,16 +91,12 @@ test('справка усилия следует доступным ступен
 test('справка описывает делегирование только у ultra Codex и ultracode Claude', async () => {
   const executors = await getExecutors();
 
-  for (const executor of executors.values()) {
-    assert.ok(Object.keys(executor.effortHints || {}).length, executor.id);
-  }
-
   assert.match(executors.get('codex').effortHints.ultra, /делегированием/);
   assert.equal(executors.get('claude').effortHints.ultracode,
     'Глубина xhigh; запрашивает делегирование задач при доступном workflow. Расход может вырасти.');
 
   for (const executor of executors.values()) {
-    for (const [level, hint] of Object.entries(executor.effortHints)) {
+    for (const [level, hint] of Object.entries(executor.effortHints || {})) {
       if (executor.id === 'codex' && level === 'ultra') {
         continue;
       }

@@ -43,12 +43,13 @@ External plugins keep their own instructions in their packages. Unknown articles
 - [Troubleshooting: chat errors, stopping the server and Telegram, build and window installation failures](troubleshooting.md)
 - [Glossary](glossary.md)
 - [Projects and repositories: project profile and built-in grigdesk-connect-project in the chat menu](projects.md)
-- [Tasks and triage: drivers, applying without closing, saving and closing, main board and estimates](tasks.md)
-- [Starting pipelines, managing attempts and looping in an isolated environment](pipelines.md) — local model/effort selection saved after closing the dialog, compact fields and settings after stage restart. It also covers a separate access request during publication and retrying only SHIP.
+- [Tasks and triage: external boards, creation, connections and historical links](tasks.md)
+- [Starting pipelines, managing attempts and looping in an isolated environment](pipelines.md) — local model/effort selection saved after closing the dialog, compact fields, preparing an empty test environment, retrying after a CLI repair, keeping selections when the catalog fails, and settings after stage restart. It also covers a separate access request during publication and retrying only SHIP.
 - [Human decisions, failure reasons, unavailable diagnostics and stopping the arbiter](gates.md)
 - [Route editor](routes.md)
 - [Chat working directory](chat-workdir.md)
 - [Conversation memory and context](chat-context.md)
+- [Connect Qwen Code: installation checks, external CLI, keys, catalog and permissions](qwen.md)
 - [DeepSeek and GLM: mode profiles, signing in again, web search and quota](deepseek.md)
 - [Usage forecast: manual measurements and permitted background collection](usage-forecast.md)
 - [Plugins: installation, database driver updates, notifications and shared sessions](plugins.md)

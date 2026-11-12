@@ -48,7 +48,11 @@ function showOpeningFailure() {
 }
 
 export const useUiStore = defineStore('ui', {
-  state: () => ({ taskId: null as string | null, taskSource: undefined as TaskSourceId | undefined }),
+  state: () => ({
+    taskId: null as string | null,
+    taskSource: undefined as TaskSourceId | undefined,
+    taskUnavailable: undefined as 'legacy-own' | undefined,
+  }),
 
   actions: {
     /**
@@ -78,15 +82,18 @@ export const useUiStore = defineStore('ui', {
       const target = parseSurfaceTarget({
         kind: 'task',
         id: String(id),
-        ...(source ? { source } : {})
+        ...(source ? { source } : {}),
+        ...(reference.unavailable ? { unavailable: reference.unavailable } : {})
       });
       const supported = useShellStore().capabilities.includes('windows')
-        && (!source || useShellStore().capabilities.includes('taskSources'));
+        && (!source || useShellStore().capabilities.includes('taskSources'))
+        && (!reference.unavailable || useShellStore().capabilities.includes('taskSources'));
 
       if (!target || !supported) {
         if (!surface) {
           this.taskId = String(id);
           this.taskSource = reference.source;
+          this.taskUnavailable = reference.unavailable;
         } else {
           showOpeningFailure();
         }
@@ -122,18 +129,29 @@ export const useUiStore = defineStore('ui', {
 
       this.taskId = result === 'window' ? null : String(id);
       this.taskSource = result === 'window' ? undefined : reference.source;
+      this.taskUnavailable = result === 'window' ? undefined : reference.unavailable;
     },
 
-    openTaskInline(id: string | number, source?: TaskSourceId) {
+    /**
+     * Доставка из главного окна сохраняет полную цель без повторного выбора размещения.
+     * Исторический marker не позволяет открыть внешнюю задачу с тем же номером.
+     */
+    openTaskInline(id: string | number, source?: TaskSourceId, unavailable?: 'legacy-own') {
       nextGeneration(this);
       this.taskId = String(id);
       this.taskSource = source;
+      this.taskUnavailable = unavailable;
     },
 
+    /**
+     * Закрытие отменяет применение поздних ответов и очищает всю цель карточки.
+     * Следующее открытие не наследует исторический признак отсутствия задачи.
+     */
     close() {
       nextGeneration(this);
       this.taskId = null;
       this.taskSource = undefined;
+      this.taskUnavailable = undefined;
     },
   },
 });

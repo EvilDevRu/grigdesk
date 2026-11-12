@@ -102,13 +102,19 @@ async function runCli() {
     },
   });
   const lines = createInterface({ input: process.stdin });
+
   for await (const line of lines) {
     if (!line.trim()) {
       continue;
     }
+
     let response;
+    let requestId = null;
+
     try {
       const message = JSON.parse(line);
+
+      requestId = message?.id ?? null;
       // JSON-RPC notification подтверждать нельзя: лишний ответ с null/пустым id
       // ломает строгие MCP-клиенты после initialize.
       if (!Object.hasOwn(message, 'id')) {
@@ -118,7 +124,7 @@ async function runCli() {
     } catch (error) {
       response = {
         jsonrpc: '2.0',
-        id: null,
+        id: requestId,
         error: { code: -32603, message: String(error?.message || error) },
       };
     }
