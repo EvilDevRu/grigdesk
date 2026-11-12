@@ -15,7 +15,7 @@ interface ExecutorTypeMetadata {
   hint: string;
 }
 
-const BUILTIN_PROVIDERS = new Set(['claude', 'codex', 'deepseek', 'glm', 'kimi', 'tripo']);
+const BUILTIN_PROVIDERS = new Set(['claude', 'codex', 'deepseek', 'glm', 'kimi', 'tripo', 'qwen']);
 
 /**
  * Собственный вопрос поля удерживает ключ до ответа человека в общем диалоге.
