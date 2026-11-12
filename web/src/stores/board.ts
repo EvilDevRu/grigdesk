@@ -1,6 +1,5 @@
 import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
 import { useTrackersStore } from './trackers.ts';
-import { useGrigdeskTasksStore } from './grigdeskTasks.ts';
 import { useTaskFavoritesStore } from './taskFavorites.ts';
 // Кеш доски B24. При переходе в раздел данные показываются мгновенно из кеша,
 // обновление идёт в фоне + периодический поллинг (не тормозит навигацию).
@@ -186,14 +185,8 @@ export const useBoardStore = defineStore('board', {
         unseenCount: activities.reduce((total, activity) => total + activity.unseenCount, 0),
         unseenTaskIds: activities.flatMap((activity) => activity.unseenTaskIds),
       };
-      const own = useGrigdeskTasksStore();
-      const internal = boardActivity({ tasks: own.tasks }, seen.own.taskIds, { ready: seen.own.ready });
 
-      return {
-        ...external,
-        unseenCount: external.unseenCount + internal.unseenCount,
-        unseenTaskIds: [...external.unseenTaskIds, ...internal.unseenTaskIds]
-      };
+      return external;
     },
     // Общий отказ каталога важен и при сохранённом multi-снимке.
     // Ошибка отдельной ветки не требует ошибки всего стора.

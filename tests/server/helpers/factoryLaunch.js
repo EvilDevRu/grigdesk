@@ -160,13 +160,11 @@ exit 0
     factoryControlDir: path.join(root, 'control'),
     routesDir: path.join(root, 'routes'),
     ticketsDir: path.join(root, 'tickets'),
-    grigdeskTasksPath: path.join(root, 'tasks.json'),
     stateDir,
     profilesDir,
     factoryProfile: 'demo',
     ...(sourceFixture ? {
       analysisDir: sourceFixture.config.analysisDir,
-      grigdeskTasksPath: sourceFixture.config.grigdeskTasksPath,
       factoryTaskSourcesPath: sourceFixture.config.factoryTaskSourcesPath
         || path.join(stateDir, 'factory-task-sources.json'),
     } : {}),

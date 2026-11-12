@@ -92,7 +92,11 @@ async function sessionAlive(record: LeaseRecord): Promise<boolean> {
         return true;
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      // Посторонний процесс может исчезнуть между readdir и чтением stat.
+      // ENOENT и ESRCH доказывают его выход; другие ошибки сохраняют запрет снятия reader.
+      const code = (error as NodeJS.ErrnoException).code;
+
+      if (code !== 'ENOENT' && code !== 'ESRCH') {
         return true;
       }
     }

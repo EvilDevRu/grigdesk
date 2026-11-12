@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import { trackerCalls } from './helpers/trackerFixture.js';
 import { driverContext, generationHeader, multiFixture, saveMulti } from './helpers/trackerMulti.js';
@@ -200,4 +201,39 @@ test('MD-ID: адресный PROJ-123 не превращается в числ
   }
 
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
+});
+
+test('OWN-REMOVE-BARRIER-DEFAULT: создание не меняет сохранённый выбор B', async (t) => {
+  const fixture = await multiFixture(t);
+  const file = fixture.config.trackerSettingsPath;
+  const before = await readFile(file, 'utf8');
+
+  for (const url of ['/api/tracker/fixture-a/tasks', '/api/tracker/tasks']) {
+    const response = await fixture.request('POST', url, { title: 'Внешняя задача' });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(await readFile(file, 'utf8'), before);
+    assert.equal(fixture.runtime.selection.read().default, 'fixture-b');
+  }
+
+  for (const id of ['fixture-a', 'fixture-b']) {
+    const effects = (await trackerCalls(fixture.config, id)).filter((call) => call.method === 'createTask');
+
+    assert.equal(effects.length, 1, id);
+    assert.deepEqual(effects[0].args, [{ title: 'Внешняя задача' }]);
+  }
+
+  await saveMulti(fixture, ['fixture-b'], 'fixture-b');
+
+  const disabledBytes = await readFile(file, 'utf8');
+
+  for (const [id, status] of [['fixture-a', 409], ['unknown-driver', 404]]) {
+    const response = await fixture.request('POST', `/api/tracker/${id}/tasks`, { title: 'Отказ' });
+
+    assert.equal(response.statusCode, status, response.body);
+    assert.equal(await readFile(file, 'utf8'), disabledBytes);
+  }
+
+  assert.equal((await trackerCalls(fixture.config, 'fixture-b'))
+    .filter((call) => call.method === 'createTask').length, 1);
 });

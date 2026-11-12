@@ -156,12 +156,13 @@ async function graphIdentity(input: NpmStrategyInput, cache: string, graph: NpmG
 }
 
 /**
- * node-gyp не соблюдает npm offline: заголовки выбранного Node готовятся отдельно до preview.
+ * Любой проверенный binding.gyp может вызвать node-gyp, который не соблюдает npm offline.
+ * Заголовки выбранного Node готовятся до preview, в том числе для fallback после prebuild.
  * Отсутствие локальных заголовков закрывает эту strategy вместо скрытой загрузки во время start.
  */
 async function prepareHeaders(input: NpmStrategyInput, directory: string,
   graph: NpmGraphPackage[]): Promise<string | null> {
-  if (!graph.some((entry) => entry.name === 'node-pty' && entry.bindingGyp)) {
+  if (!graph.some((entry) => entry.bindingGyp)) {
     return null;
   }
 

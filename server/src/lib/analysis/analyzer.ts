@@ -3,7 +3,6 @@ import { resolveTaskTarget } from '../trackers/taskTarget.ts';
 import type { TaskTargetOptions } from '../trackers/taskTarget.ts';
 import { isTaskSourceId, taskReferenceKey } from '../../../../shared/tasks/taskReference.ts';
 import { FactoryTaskSources } from '../factoryTaskSources.ts';
-import { readGrigdeskTask } from '../grigdeskTasks/store.ts';
 // Триаж задач: очередь + одиночный headless-запуск выбранной модели (read-only разведка
 // кода, без стенда). Агент сам пишет результат в каталог анализа (t<ID>.analysis.json +
 // t<ID>.md), раннер валидирует и обогащает (SHA репозиториев, стоимость, время).
@@ -47,7 +46,6 @@ import type {
 // то, что от них зовёт, и не выводит их формы из подсказок редактора.
 export interface AnalyzerConfig extends Record<string, unknown> {
   analysisDir: string;
-  grigdeskTasksPath?: string;
   factoryHome?: string;
   profilesDir?: string;
   factoryProfile?: string;
@@ -467,7 +465,7 @@ export class Analyzer {
       const dir = path.join(root, entry.name);
       const metadata = await this._readJson(path.join(dir, 'source.json'));
 
-      if (isTaskSourceId(metadata?.source) && metadata.source !== 'grigdesk'
+      if (isTaskSourceId(metadata?.source)
         && createHash('sha256').update(metadata.source).digest('hex') === entry.name) {
         result.push({ dir, source: metadata.source });
       }
@@ -478,7 +476,7 @@ export class Analyzer {
 
   _paths(id: string | number, options: TaskTargetOptions = {}) {
     const source = options.source;
-    const dir = source && source !== 'grigdesk'
+    const dir = source
       ? path.join(this.dir, 'by-source', createHash('sha256').update(source).digest('hex'))
       : this.dir;
 
@@ -525,7 +523,7 @@ export class Analyzer {
   ): Promise<string> {
     const file = this._paths(id, options)[field];
 
-    if (options.legacyFallback && options.source && options.source !== 'grigdesk'
+    if (options.legacyFallback && options.source
       && !await fs.stat(file).catch(() => null)) {
       return this._paths(id)[field];
     }
@@ -745,7 +743,7 @@ export class Analyzer {
 
     await fs.mkdir(path.dirname(p), { recursive: true });
 
-    if (options.source && options.source !== 'grigdesk') {
+    if (options.source) {
       const metadata = path.join(path.dirname(p), 'source.json');
       const temporary = path.join(path.dirname(p), `source.${randomUUID()}.json.tmp`);
 
@@ -771,19 +769,10 @@ export class Analyzer {
   }
 
   /**
-   * Собственная задача оценивается по выбранному проекту без общего кеша профиля.
+   * Оценка внешней задачи использует профиль машины и общий кеш профиля.
    * Старые задачи и вызовы без номера сохраняют прежний выбор глобального профиля.
    */
-  async profile(id?: string | number, _options: TaskTargetOptions = {}) {
-    const own = id == null ? null : await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return {
-        name: own.projectId,
-        ...await loadTriageProfile(this.config, own.projectId, { strict: true }),
-      };
-    }
-
+  async profile(_id?: string | number, _options: TaskTargetOptions = {}) {
     if (!this._profile) {
       const name = this.config.factoryProfile
         || (await this.factoryState.primaryProfile().catch(() => '')) || '';
@@ -809,7 +798,7 @@ export class Analyzer {
   }
 
   /**
-   * Расширенная сводка сохраняет пары, а старый вход проецирует только own/default.
+   * Расширенная сводка сохраняет пары, а старый вход проецирует только дефолтную доску.
    * Безымянные файлы остаются отдельными строками до явной новой оценки.
    */
   async list({ sources = false }: { sources?: boolean } = {}): Promise<AnalysisRow[]> {
@@ -1387,21 +1376,11 @@ export class Analyzer {
   }
 
   /**
-   * Собственная запись отдаёт исходный текст без HTML-очистки и обращения к порталу.
+   * Постановка читается у внешнего трекера и нормализуется в обычный текст.
    * Для Б24 сохраняются прежние детали и несистемные комментарии с best effort чтением.
    */
   async _fetchTicket(id: string | number, options: TaskTargetOptions = {}): Promise<any> {
     const target = await resolveTaskTarget(this.config, this.tracker, id, options);
-    const own = await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return {
-        title: own.title,
-        description: own.description,
-        comments: [],
-      };
-    }
-
     const detail = objectOrEmpty(await target.tracker!.taskDetail(id));
     let comments = [];
 
@@ -1466,14 +1445,8 @@ export class Analyzer {
    * что сейчас бежит на конвейере.
    */
   async _taskProject(id: string | number, options: TaskTargetOptions = {}): Promise<any> {
-    const own = await readGrigdeskTask(this.config, id);
-
-    if (own) {
-      return own.projectId;
-    }
-
     try {
-      if (options.source && options.source !== 'grigdesk' && !options.legacyFallback) {
+      if (options.source && !options.legacyFallback) {
         const index = new FactoryTaskSources(String(this.config.factoryTaskSourcesPath || ''));
         const record = (await index.read()).entries[String(id)];
         const proof = await this.factoryState.readTrustedTicketProof(id);

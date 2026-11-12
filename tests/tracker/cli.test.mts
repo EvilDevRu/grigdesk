@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -581,35 +581,46 @@ test('SOURCE-CLI-HTTP: options и один launch доходят до A, stdout 
     .some((call: { method: string }) => call.method === 'taskPageData'), false);
 });
 
-test('SOURCE-CLI-HTTP: own без досок сохраняет приоритет оценки и запуска', async (t) => {
-  const { ownTask, seedTasks } = await import('../server/helpers/grigdesk-tasks.js');
-  const { completed, eventually } = await import('../server/helpers/analysisSource.js');
+test('SOURCE-CLI-HTTP: без досок архив own не используется для оценки и запуска', async (t) => {
+  const { eventually } = await import('../server/helpers/analysisSource.js');
   const fx = await pipelineCliFixture(t);
-  const task = ownTask('100000000001', 'demo');
+  const id = '100000000001';
+  const archive = path.join(fx.config.stateDir, 'tasks.json');
+  const bytes = JSON.stringify({
+    schemaVersion: 1,
+    revision: 1,
+    nextId: '100000000002',
+    tasks: [{
+      id,
+      source: 'grigdesk',
+      title: 'Архивная задача',
+      projectId: 'demo',
+    }],
+  });
 
-  await mkdir(path.join(fx.config.profilesDir, 'demo'), { recursive: true });
-  await writeFile(path.join(fx.config.profilesDir, 'demo', 'profile.sh'),
-    "PROFILE_CTX='Собственный проект demo'\n");
-  await seedTasks(fx.config, [task]);
+  await writeFile(archive, bytes);
   await fx.runtime.writeSettings({ drivers: [], default: null }, {});
 
-  const result = await fx.run(['analyze', task.id]);
+  const result = await fx.run(['analyze', id]);
 
   assert.equal(result.code, 0, result.stderr.toString());
   await eventually(() => fx.analyzer._jobs.size, (size) => size === 0);
-  assert.equal((await completed(fx, 'grigdesk', task.id)).status?.state, 'done');
-  assert.match(fx.prompts[0], /Собственная постановка/);
+  assert.equal((await fx.analyzer.get(id)).status?.state, 'failed');
+  assert.equal(fx.prompts.length, 0);
 
-  const launched = await fx.run(['launch', task.id], JSON.stringify({
+  const launched = await fx.run(['launch', id], JSON.stringify({
     profile: 'demo',
     route: 'feature',
     title: 'Тело клиента',
-    description: 'Собственная запись сильнее тела',
+    description: 'Архивный источник недоступен',
     acceptanceCriteria: [],
+    source: 'grigdesk',
   }));
 
-  assert.equal(launched.code, 0, launched.stderr.toString());
-  assert.equal(JSON.parse(launched.stdout.toString()).outcome, 'launched');
+  assert.equal(launched.code, 22, launched.stderr.toString());
+  assert.equal(launched.stdout.length, 0);
+  assert.match(launched.stderr.toString(), /HTTP 404: Собственная задача не найдена/u);
+  assert.equal(await readFile(archive, 'utf8'), bytes);
 
   for (const id of ['fixture-a', 'fixture-b']) {
     assert.equal((await trackerCalls(fx.config, id))

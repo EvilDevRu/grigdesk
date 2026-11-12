@@ -5,7 +5,6 @@ import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 
 import { createTrackerRuntime } from '../../server/src/lib/trackers/runtime.ts';
-import { TASK_INPUT, seedTasks } from './helpers/grigdesk-tasks.js';
 import { IDS, controlDriver, multiFixture, saveMulti } from './helpers/trackerMulti.js';
 import { trackerCalls } from './helpers/trackerFixture.js';
 
@@ -61,7 +60,6 @@ for (const action of ['disable', 'remove']) {
       assert.equal(finished, false, 'Снятие подключения должно ждать физический вызов');
       await assert.rejects(fixture.runtime.registry.call('fixture-a', async () => 'новый'));
       assert.equal((await fixture.request('GET', '/api/tracker/fixture-b/task/42')).statusCode, 200);
-      assert.equal((await fixture.request('GET', '/api/grigdesk-tasks')).statusCode, 200);
     } finally {
       release.resolve();
       await accepted;
@@ -135,40 +133,6 @@ test('MD-HEALTH: исключение isConfigured одного пакета н�
 
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().drivers.find((entry) => entry.id === 'fixture-b').status, 'unavailable');
-  assert.ok(response.json().drivers.some((entry) => entry.id === 'own'));
-});
-
-test('MD-NUMBER: занятый номер B проверяется при default A, unknown сохраняет 503', async (t) => {
-  const fixture = await multiFixture(t);
-  const response = await saveMulti(fixture, IDS.slice(0, 2), 'fixture-a');
-
-  assert.equal(response.statusCode, 200, response.body);
-  await seedTasks(fixture.config, [], '100000000000');
-  await controlDriver(fixture, 'fixture-b', { probe: 'exists' });
-
-  // Первый кандидат занят в B, следующий свободен: контроль переключается по номеру.
-  // Драйвер читает файл на каждом вызове, поэтому правило задаётся в самом пакете.
-  const file = path.join(fixture.config.driversDir, 'fixture-b/control.json');
-
-  await writeFile(file, JSON.stringify({ probeById: { '100000000000': 'exists' } }));
-
-  const created = await fixture.request('POST', '/api/grigdesk-tasks', TASK_INPUT);
-
-  assert.equal(created.statusCode, 201, created.body);
-  assert.equal(created.json().task.id, '100000000001');
-  await controlDriver(fixture, 'fixture-b', { probe: 'unknown', probeById: {} });
-
-  const refused = await fixture.request('POST', '/api/grigdesk-tasks', TASK_INPUT);
-
-  assert.equal(refused.statusCode, 503, refused.body);
-  assert.equal(refused.json().error, 'task_number_unverified');
-  assert.equal(JSON.parse(await readFile(fixture.config.grigdeskTasksPath, 'utf8')).tasks.length, 1);
-
-  const probes = (await trackerCalls(fixture.config, 'fixture-b'))
-    .filter((call) => call.method === 'probeTaskNumber').length;
-
-  assert.equal((await saveMulti(fixture, ['fixture-a'], 'fixture-a')).statusCode, 200);
-  assert.equal((await fixture.request('POST', '/api/grigdesk-tasks', TASK_INPUT)).statusCode, 201);
-  assert.equal((await trackerCalls(fixture.config, 'fixture-b'))
-    .filter((call) => call.method === 'probeTaskNumber').length, probes);
+  assert.ok(response.json().drivers.some((entry) => entry.id === 'fixture-a'));
+  assert.equal(response.json().drivers.some((entry) => entry.id === 'own'), false);
 });

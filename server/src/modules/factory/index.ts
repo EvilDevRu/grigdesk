@@ -13,7 +13,6 @@ import { TrackerError } from '../../lib/trackers/contract.ts';
 import type { TrackerFacade, TrackerContext } from '../../lib/trackers/facade.ts';
 import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
-import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
 import { registerArbiterConversationRuntime } from './arbiterConversationRuntime.ts';
@@ -117,6 +116,7 @@ interface PreparedLaunch {
 interface RouteReply {
   status: number | null;
   body: Record<string, unknown>;
+  launchNotStarted?: boolean;
 }
 
 // Сверка после срока сравнивает два доверенных снимка той же exact попытки.
@@ -227,7 +227,6 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
   GrigDeskConfig, 'ticketsDir' | 'modelsPath' | 'factoryProfile' | 'sandboxDownCmd'
 > & {
   factoryStandsDir?: string;
-  grigdeskTasksPath?: string;
   factoryTaskSourcesPath?: string;
   arbiterConversationsDir?: string;
 };
@@ -627,10 +626,6 @@ async function factoryModule(
   // Список всех задач с картой статусов этапов.
   fastify.get<FactoryRoute>('/api/tasks', async (request) => {
     const tasks = await factoryState.listTasks();
-    // Названия берём из одного снимка: полный файл не перечитывается для каждой строки.
-    // Карта живёт только в этом запросе, поэтому следующий увидит новые задачи и правки.
-    const ownTasks = tasks.length ? (await new GrigdeskTaskStore({ config }).list()).tasks : [];
-    const ownById = new Map(ownTasks.map((task) => [task.id, task]));
     const extended = request.query.sources === '1';
     let sourceRecords: Awaited<ReturnType<FactoryTaskSources['read']>>['entries'] = {};
 
@@ -643,8 +638,7 @@ async function factoryModule(
     }
 
     const titledTasks = await Promise.all(tasks.map(async (task) => {
-      const own = ownById.get(String(task.task));
-      let source: TaskSourceId | undefined = own?.source;
+      let source: TaskSourceId | undefined;
 
       if (extended && sourceRecords[String(task.task)]) {
         try {
@@ -657,7 +651,7 @@ async function factoryModule(
 
       return {
         ...task,
-        title: own?.title || await storedTicketTitle(task.task),
+        title: await storedTicketTitle(task.task),
         ...(source ? { source } : {}),
         // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
         // Без этого признака человек берётся за неё руками параллельно с арбитром.
@@ -873,14 +867,13 @@ async function factoryModule(
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
   async function ticketSections(id: string, {
-    profile = null, title = '', description = '', own = false, sourceTracker = tracker, source,
+    profile = null, title = '', description = '', sourceTracker = tracker, source,
   }: {
     sourceTracker?: TrackerPort | null;
     source?: TaskSourceId;
     profile?: string | null;
     title?: string;
     description?: string;
-    own?: boolean;
   } = {}) {
     const sections: Array<{ title: string; text: string }> = [];
     const clarify = await analyzer.readClarifications(id, { source });
@@ -913,7 +906,7 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (sourceTracker && !own && sourceTracker.capabilities?.()?.comments !== false) {
+    if (sourceTracker && sourceTracker.capabilities?.()?.comments !== false) {
       try {
         const page = await sourceTracker.taskPageData(id) as { comments?: unknown };
         const comments = (page.comments || []) as Array<{
@@ -1176,7 +1169,6 @@ async function factoryModule(
   }: LaunchOptions = {}, { dynamicSections = true }: {
     dynamicSections?: boolean;
   } = {}): Promise<PreflightResult> {
-    const ownSourceTask = await readGrigdeskTask(config, id);
     const requestedSource = taskSource(source);
     let launchSource: TaskSourceId | undefined;
     let sourceContext: TrackerContext | undefined;
@@ -1193,8 +1185,6 @@ async function factoryModule(
           // Неизвестное происхождение старого тикета не подтверждается текущей доской.
         }
       }
-
-      launchSource ||= ownSourceTask ? 'grigdesk' : undefined;
 
       if (requestedSource !== undefined && requestedSource !== launchSource) {
         return { ok: false, result: { status: 409, body: { error: 'task_source_mismatch' } } };
@@ -1349,22 +1339,20 @@ async function factoryModule(
       }
     } else {
       try {
-        const own = await readGrigdeskTask(config, id);
-        const ticketTitle = own?.title ?? title;
-        const ticketDescription = own?.description ?? description;
+        const ticketTitle = title;
+        const ticketDescription = description;
 
         built = buildTicket({
           task: id,
           title: ticketTitle,
           description: ticketDescription,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
-          sourceUrl: own?.sourceUrl || sourceUrl || (await taskSourceUrl(id, sourceTracker)),
+          sourceUrl: sourceUrl || (await taskSourceUrl(id, sourceTracker)),
           sections: dynamicSections
             ? await ticketSections(id, {
               profile,
               title: ticketTitle,
               description: ticketDescription,
-              own: Boolean(own),
               sourceTracker,
               source: source === undefined ? undefined : launchSource,
             })
@@ -1391,14 +1379,48 @@ async function factoryModule(
         launchInputs,
         ticket: built,
         source: launchSource,
-        sourceContext: !ownSourceTask && !reuseTicket ? sourceContext : undefined,
+        sourceContext: !reuseTicket ? sourceContext : undefined,
         sourceTracker,
       },
     };
   }
 
   /**
-   * Старт после общего preflight: только здесь начинаются git/slot/ticket/engine side effects.
+   * Повтор после отказа подготовки требует отсутствия всех артефактов запуска.
+   * Только ENOENT доказывает отсутствие: ошибки чтения и любые остатки сохраняют pending.
+   */
+  async function launchArtifactsAbsent(id: string): Promise<boolean> {
+    try {
+      await factoryState.readRegistry(id);
+
+      return false;
+    } catch (error) {
+      if (!registryIsMissing(error)) {
+        return false;
+      }
+    }
+
+    for (const artifact of [
+      path.join(config.factoryControlDir, 'protocol-v2', 'tasks', `t${id}`),
+      path.join(config.stateDir, 'slots', `t${id}.json`),
+    ]) {
+      try {
+        await fs.lstat(artifact);
+
+        return false;
+      } catch (error) {
+        if (!registryIsMissing(error)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Старт после общего preflight начинает git/slot/ticket/engine side effects.
+   * Отказ подготовки до spawn допускает повтор только после сверки оставшихся артефактов.
    */
   async function startRoutePipeline(
     id: string,
@@ -1480,16 +1502,28 @@ async function factoryModule(
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
       throw err;
     }
+
     if (!launch.ok) {
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
+
+      if (launch.failedBeforeSpawn) {
+        fastify.log.error({ task: id, reason: launch.message }, 'Отказ подготовки CLI конвейера');
+      }
+
+      const launchNotStarted = launch.failedBeforeSpawn === true
+        && (slot.source === 'none' || slot.source === 'new')
+        && await launchArtifactsAbsent(id);
+
       if (launch.failure?.error === 'catalog_changed') {
         return {
           status: 409,
           body: { error: 'catalog_changed', message: launch.failure.message },
         };
       }
+
       return {
         status: 500,
+        launchNotStarted,
         body: {
           outcome: 'invalid',
           ...(launch.failure ? {
@@ -1786,9 +1820,6 @@ async function factoryModule(
           // Номер существующего прогона сам по себе не доказывает источник.
         }
 
-        if (await readGrigdeskTask(config, id)) {
-          verified = 'grigdesk';
-        }
         if (!verified || verified !== requestedSource) {
           return {
             status: 409,
@@ -1864,11 +1895,14 @@ async function factoryModule(
     // отказа на диске остаётся только `t<id>.launch.log` с причиной). Без этой ветки
     // маркер висел до перезапуска сервера, и задача запиралась ответом `run_exists`
     // из-за чужого CLI: `inspectLaunchState` видит `absent` и marker снять не может.
-    // Соседний `runner_preflight_failed` сюда НЕ входит намеренно — он означает, что
-    // сломалась сама проверка, и такого же доказательства за ним нет.
+    // Отказ подготовки допускает повтор по отдельному proof: launcher не дошёл до
+    // spawn, rollback завершён, реестр/control/резервация отсутствуют. Сам по себе
+    // invalid или runner_preflight_failed этого не доказывает: после передачи движку
+    // и при ошибке чтения артефактов pending сохраняется.
     const provenPreSideEffect = (result.status === 409 && result.body?.outcome === 'no_slot')
       || (result.status === 409 && result.body?.error === 'catalog_changed')
-      || (result.status === 500 && result.body?.error === 'runner_preflight_unavailable');
+      || (result.status === 500 && result.body?.error === 'runner_preflight_unavailable')
+      || result.launchNotStarted === true;
     if (provenVisible || provenPreSideEffect) taskLaunchPending.delete(key);
     return result;
   }

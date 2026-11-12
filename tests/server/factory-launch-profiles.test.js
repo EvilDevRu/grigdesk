@@ -111,7 +111,6 @@ exit 99
       factoryProfile: '',
       ...(sourceFixture ? {
         analysisDir: sourceFixture.config.analysisDir,
-        grigdeskTasksPath: sourceFixture.config.grigdeskTasksPath,
       } : {}),
     },
     prefs: { read: () => ({}) },

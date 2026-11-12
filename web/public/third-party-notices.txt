@@ -1,8 +1,10 @@
-Lobe Icons — Tripo and Z.ai marks
+Lobe Icons — Tripo, Z.ai and Qwen marks
 Source: https://github.com/lobehub/lobe-icons
 Revision: c385b2b8d1f9e19aa86e628d4e23c91ee1111a47
 Tripo source: packages/static-svg/icons/tripo.svg
 Tripo color source: packages/static-svg/icons/tripo-color.svg
+Qwen source: packages/static-svg/icons/qwen.svg
+Qwen revision: ea434b96e75813517b377825e01c0df61dee8836
 
 MIT License
 

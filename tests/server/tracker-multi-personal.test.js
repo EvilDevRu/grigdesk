@@ -12,7 +12,7 @@ const PERSONAL = [
 ];
 
 for (const [suffix, method, tail, payload, field] of PERSONAL) {
-  test(`MD-PERSONAL: ${suffix} A42 не меняет B42 и own, scope задаёт сервер`, async (t) => {
+  test(`MD-PERSONAL: ${suffix} A42 не меняет B42, scope задаёт сервер`, async (t) => {
     const fixture = await multiFixture(t, { personal: true });
 
     if (suffix === 'task-shelf') {
@@ -24,13 +24,10 @@ for (const [suffix, method, tail, payload, field] of PERSONAL) {
 
     const a = await fixture.request('GET', `/api/tracker/fixture-a/${suffix}`);
     const b = await fixture.request('GET', `/api/tracker/fixture-b/${suffix}`);
-    const own = await fixture.request('GET', `/api/grigdesk-tasks/${suffix}`);
 
     assert.equal(a.statusCode, 200, a.body);
     assert.equal(b.statusCode, 200, b.body);
-    assert.equal(own.statusCode, 200, own.body);
     assert.notEqual(a.json().scope, b.json().scope);
-    assert.notEqual(a.json().scope, own.json().scope);
 
     const write = await fixture.request(method, `/api/tracker/fixture-a/${suffix}${tail}?scope=evil`, {
       ...payload,
@@ -41,7 +38,6 @@ for (const [suffix, method, tail, payload, field] of PERSONAL) {
     assert.equal(write.json().scope, a.json().scope);
     assert.equal(write.json()[field].length, 1);
     assert.deepEqual((await fixture.request('GET', `/api/tracker/fixture-b/${suffix}`)).json(), b.json());
-    assert.deepEqual((await fixture.request('GET', `/api/grigdesk-tasks/${suffix}`)).json(), own.json());
   });
 }
 

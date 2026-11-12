@@ -39,6 +39,7 @@ export function freePort() {
 export function isolatedEnv(root, port, mobilePort = port + 1) {
   return {
     PATH: '/usr/bin:/bin',
+    SHELL: '/bin/bash',
     HOME: path.join(root, 'home'),
     GRIGDESK_HOME: root,
     NODE_ENV: 'production',

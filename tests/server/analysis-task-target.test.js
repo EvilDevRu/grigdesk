@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import test from 'node:test';
+import path from 'node:path';
 
 import { FactoryTaskSources, factoryTicketHash } from '../../server/src/lib/factoryTaskSources.ts';
-import { ownTask, seedTasks } from './helpers/grigdesk-tasks.js';
 import { selectTracker, trackerCalls } from './helpers/trackerFixture.js';
 import { controlDriver, generationHeader, saveMulti } from './helpers/trackerMulti.js';
 import { analysisSourceFixture, completed } from './helpers/analysisSource.js';
@@ -61,12 +61,10 @@ test('SOURCE-PROJECT-01: профиль registry доступен только �
     readRegistry: async () => ({ registry: { PROFILE: 'beta' } }),
     readTrustedTicketProof: async () => proof,
   };
-  await seedTasks(fx.config, [ownTask()]);
 
   assert.equal(await fx.analyzer._taskProject('42', { source: fx.a.source }), null,
     'Чужая verified B42 не доказывает проект A42');
   assert.equal(await fx.analyzer._taskProject('42', { source: fx.b.source }), 'beta');
-  assert.equal(await fx.analyzer._taskProject('100000000001', { source: 'grigdesk' }), 'beta');
 
   proof.ticketHash = 'f'.repeat(64);
   assert.equal(await fx.analyzer._taskProject('42', { source: fx.b.source }), null);
@@ -116,7 +114,7 @@ test('SOURCE-REFUSALS-01: формат, владелец и адресное п�
   }
 });
 
-test('SOURCE-REFUSALS-01: alias, source-less default и собственная задача сохраняют контракт', async (t) => {
+test('SOURCE-REFUSALS-01: alias и source-less default сохраняют контракт, own недоступен', async (t) => {
   await t.test('alias адресует включённую A', async (st) => {
     const fx = await analysisSourceFixture(st);
     const response = await fx.request('POST', '/api/tasks/42/analyze', { taskSource: fx.a.source });
@@ -130,17 +128,16 @@ test('SOURCE-REFUSALS-01: alias, source-less default и собственная �
     assert.equal((await fx.request('POST', '/api/tasks/42/analyze', {})).statusCode, 200);
     assert.equal((await completed(fx, fx.b.source)).analysis?.summary, 'Оценка B');
   });
-  await t.test('own-first и явный own missing', async (st) => {
+  await t.test('исторический own недоступен без обращения к драйверам', async (st) => {
     const fx = await analysisSourceFixture(st, { held: true });
 
-    await seedTasks(fx.config, [ownTask()]);
-    assert.equal((await fx.request('POST', '/api/tasks/100000000001/analyze', {})).statusCode, 200);
     assert.equal((await fx.request('POST', '/api/tasks/100000000099/analyze', {
       source: 'grigdesk',
     })).statusCode, 404);
     assert.equal((await fx.request('POST', '/api/tasks/100000000001/analyze', {
-      source: fx.a.source,
-    })).statusCode, 409);
+      taskSource: 'grigdesk',
+    })).statusCode, 404);
+    assert.equal(fx.analyzer._jobs.size, 0);
     assert.deepEqual(await taskCalls(fx, 'fixture-a'), []);
     assert.deepEqual(await taskCalls(fx, 'fixture-b'), []);
   });
@@ -206,24 +203,26 @@ test('SOURCE-WORKER-01: отказ детали без fallback, comments best e
   }
 });
 
-test('SOURCE-REFUSALS-01: повреждённое own-хранилище не разрешает portal fallback', async (t) => {
+test('SOURCE-REFUSALS-01: повреждённый архив own не влияет на внешнюю оценку', async (t) => {
   const fx = await analysisSourceFixture(t);
+  const archive = path.join(fx.config.stateDir, 'tasks.json');
+  const bytes = '{повреждённый документ';
 
-  await writeFile(fx.config.grigdeskTasksPath, '{повреждённый документ');
+  await writeFile(archive, bytes);
 
   const response = await fx.request('POST', '/api/tasks/42/analyze', {});
 
-  if (response.statusCode === 200) {
-    const detail = await completed(fx, fx.b.source);
+  assert.equal(response.statusCode, 200, response.body);
 
-    assert.equal(detail.status.state, 'failed');
-  } else {
-    assert.ok(response.statusCode >= 400);
-  }
+  const detail = await completed(fx, fx.b.source);
 
-  assert.equal(fx.prompts.length, 0);
+  assert.equal(detail.status.state, 'done');
+  assert.equal(detail.analysis.summary, 'Оценка B');
+  assert.equal(await readFile(archive, 'utf8'), bytes);
+  assert.equal(fx.prompts.length, 1);
   assert.deepEqual(await taskCalls(fx, 'fixture-a'), []);
-  assert.deepEqual(await taskCalls(fx, 'fixture-b'), []);
+  assert.deepEqual((await taskCalls(fx, 'fixture-b')).map((call) => call.method),
+    ['taskDetail', 'taskPageData']);
 });
 
 test('SOURCE-REFUSALS-01: legacy порт без forDriver не подменяет явную доску default', async (t) => {

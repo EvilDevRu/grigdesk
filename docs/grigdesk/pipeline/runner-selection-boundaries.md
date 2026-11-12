@@ -11,7 +11,7 @@
 `index`, `policy`, `catalog` и проверяет формат id. Проверки ключа, CLI и допуска
 runtime здесь нет: «установлен» означает наличие модуля раннера.
 
-В дереве движка есть `claude.sh`, `codex.sh`, `deepseek.sh`, `kimi.sh`, `glm.sh`.
+В дереве движка есть `claude.sh`, `codex.sh`, `deepseek.sh`, `kimi.sh`, `glm.sh`, `qwen.sh`.
 Endpoint назначения проверяет каталог раннеров; отдельная регистрация карточки
 исполнителя в чате сама по себе не создаёт поддержку конвейера.
 
@@ -54,6 +54,12 @@ Transient-юнит получает `DEEPSEEK_API_KEY` и `ZAI_API_KEY` толь
 не попадают. Проверка systemd-run исполняет команду с окружением, собранным с нуля.
 
 ## Проверки
+
+Qwen использует внешний npm CLI и собственный host-wrapper. Каталог берётся из
+`modelProviders` с подтверждением native ids, без pinned-списка моделей; неизвестные
+efforts не подменяются ступенями. Карточка чата и наличие shell-модуля ещё не доказывают
+готовность узла: status, never и файловые границы проверяются отдельным запуском.
+Контракт и оставшиеся границы проверки — [Qwen Code](../../engine/qwen.md).
 
 - `tests/server/runners-catalog.test.js` — обнаружение модулей, включая DeepSeek.
 - `tests/server/factory-runner-override.test.js` — назначение DeepSeek, границы

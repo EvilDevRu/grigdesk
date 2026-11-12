@@ -13,13 +13,15 @@
 //    код возврата движка до GrigDesk НЕ доходит. Исход читаем из состояния: жив ли юнит
 //    и появился ли ORCH_PID; текст отказа — из журнала запуска.
 import { randomUUID } from 'node:crypto';
-import { preparePipelineAccess } from './accessProfiles/pipeline.ts';
+import { declaredCredentials } from './executorCredentials.ts';
+import { preparePipelineAccess, routeProviders } from './accessProfiles/pipeline.ts';
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { errorMessage } from '../../../shared/lib/errors.ts';
 import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs, prepareFactoryRouteLaunch } from './factoryLaunch.ts';
@@ -45,9 +47,18 @@ export const ROUTE_DECISION_TIMEOUT_MS = 180_000;
 // Plan передаётся с 29.10.2026 (решение владельца): этап GLM допущен и в подписке.
 const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY'] as const;
 
+const CLI_PREPARATION_REASONS: Record<string, string> = {
+  cli_missing: 'выбранная копия не найдена',
+  cli_broken: 'выбранная копия повреждена или не исполняется',
+};
+
 // Служебный ключ маршрута GLM этапам не передаётся ни в одной ветке: wrapper этапа
 // выводит его сам из ключа активного режима (buildGlmChildEnv), этапу нужен только исходный.
 const ROUTE_WITHHELD_NAMES = [GLM_ROUTE_KEY_ENV];
+
+// Необъявленное имя доступа тоже не становится публичным параметром маршрута.
+// Разрешённые ключи возвращаются отдельно из проверенного источника секретов.
+const ROUTE_PRIVATE_ENV_NAME = /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD)(?:_|$)/u;
 
 // Имена, которыми владеет хост. Значение из extraEnv их не подменяет, даже если сам
 // хост переменную не задал (необязательные пути не открываются вызывающему).
@@ -58,6 +69,11 @@ const ROUTE_HOST_NAMES = [
   'PATH',
   'HOME',
   'GRIGDESK_HOME',
+  'GRIGDESK_QWEN_BIN',
+  'GRIGDESK_QWEN_HOME',
+  'GRIGDESK_QWEN_CONFIG_ROOT',
+  'QWEN_CODE_SYSTEM_SETTINGS_PATH',
+  'QWEN_CODE_SYSTEM_DEFAULTS_PATH',
   'GRIGDESK_PROVIDER_PREFS_PATH',
   'GRIGDESK_GLM_API_MODE',
   'GRIGDESK_DEEPSEEK_NODE_BIN',
@@ -90,6 +106,8 @@ export interface RouteConfig {
   factoryHome: string;
   profilesDir: string;
   factoryConfigRoot: string;
+  qwenBin?: string;
+  qwenHome?: string;
   deepseekBin?: string;
   deepseekBinOverride?: string;
   deepseekRuntimeMode?: 'binary';
@@ -388,7 +406,8 @@ export function routeLaunchEnv(
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
   const prefsPath = config.prefsPath;
   const blocked = new Set<string>([...ROUTE_HOST_NAMES, ...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]);
-  const safeExtra = Object.fromEntries(Object.entries(extra).filter(([name]) => !blocked.has(name)));
+  const safeExtra = Object.fromEntries(Object.entries(extra)
+    .filter(([name]) => !blocked.has(name) && !ROUTE_PRIVATE_ENV_NAME.test(name)));
 
   return {
     ...safeExtra,
@@ -407,6 +426,11 @@ export function routeLaunchEnv(
     ...(config.deepseekRuntimeHome
       ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),
+    GRIGDESK_QWEN_BIN: config.qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen',
+    GRIGDESK_QWEN_HOME: config.qwenHome || process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || '',
+    GRIGDESK_QWEN_CONFIG_ROOT: root,
+    QWEN_CODE_SYSTEM_SETTINGS_PATH: process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH || '',
+    QWEN_CODE_SYSTEM_DEFAULTS_PATH: process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || '',
     HOME: process.env.HOME || '',
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
@@ -872,6 +896,12 @@ function detachedRouteEnv(
     delete inherited[name];
   }
 
+  for (const name of Object.keys(inherited)) {
+    if (ROUTE_PRIVATE_ENV_NAME.test(name)) {
+      delete inherited[name];
+    }
+  }
+
   return {
     ...inherited,
     ...env,
@@ -881,7 +911,8 @@ function detachedRouteEnv(
 
 /**
  * Стадия получает закрытый descriptor выбранных внешних копий, а не PATH оркестратора.
- * Отказ построения не отменяет маршрут: раннер честно упадёт на своём probe.
+ * Профильный запуск требует копии всех закреплённых CLI до регистрации движка.
+ * Без профильных окружений сохраняется прежняя проверка на probe самого раннера.
  */
 async function prepareRouteExternalCliDescriptor(config: RouteConfig,
   profileEnvironments?: Record<string, NodeJS.ProcessEnv>, descriptorOverride?: string): Promise<string> {
@@ -909,15 +940,29 @@ async function prepareRouteExternalCliDescriptor(config: RouteConfig,
     });
 
     for (const provider of Object.keys(profileEnvironments ?? {})) {
-      if (adapters.get(provider)?.externalCli && !descriptor.providers[provider]) {
-        throw new Error('Не удалось подготовить выбранную копию CLI для профиля конвейера.');
+      const adapter = adapters.get(provider);
+
+      if (adapter?.externalCli && !descriptor.providers[provider]) {
+        const bin = descriptor.unavailableBins?.[provider] || provider;
+        const reason = descriptor.unavailable[provider] || 'environment_unavailable';
+        const description = CLI_PREPARATION_REASONS[reason] || 'окружение недоступно';
+
+        throw new Error(
+          `${adapter.name || provider} (${provider}): не удалось подготовить выбранную копию CLI «${bin}»`
+          + ` для профиля конвейера: ${description} (${reason}).`,
+        );
       }
     }
 
     return descriptorPath;
   } catch (error) {
     if (profileEnvironments) {
-      throw error;
+      const providers = Object.keys(profileEnvironments).join(', ');
+
+      throw new Error(
+        `Не удалось подготовить окружение CLI (${providers}): `
+        + errorMessage(error, 'причина недоступна'),
+      );
     }
 
     return '';
@@ -943,6 +988,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   exited?: number | null;
   message?: string;
   failure?: RouteFailure | null;
+  failedBeforeSpawn?: true;
 }> {
   const logFile = path.join(config.stateDir, `t${task}.launch.log`);
   // launch.log переиспользуется задачей. Typed-ошибку разрешено брать только из
@@ -958,16 +1004,51 @@ export async function spawnRouteEngine(config: RouteConfig, {
 
   // Секреты проверяются до записи descriptor и до регистрации юнита.
   try {
+    let participants = accessProviderIds;
+    const allowedSecrets: string[] = [...ROUTE_SECRET_NAMES];
+
     if (service) {
       const access = await preparePipelineAccess(service, config, String(task), args, accessProviderIds);
 
+      participants = access.providers;
       accessEnv = access.env;
+      allowedSecrets.push(...access.keys);
       environments = access.environments;
       accessKeys.push(...access.keys);
       rollback = access.rollback;
     }
 
-    secrets = routeSecrets(service ? accessEnv : process.env, [...ROUTE_SECRET_NAMES, ...accessKeys]);
+    // Старые вызовы без access service могут не иметь графа до запуска движка.
+    // В таком случае новые динамические ключи не выдаются, прежний запуск сохраняется.
+    participants ??= await routeProviders(config, String(task), args).catch(() => []);
+
+    const adapters = service ? await service.adaptersOf() : await getProviderAdapters();
+
+    // Все декларации очищаются из наследования; доставку получают только участники.
+    // Это сохраняет приватность ключа чужой карточки и исключает hostile extraEnv.
+    for (const adapter of adapters.values()) {
+      if (adapter.accessProfiles) {
+        continue;
+      }
+
+      const fields = await declaredCredentials(adapter, config);
+
+      for (const field of fields) {
+        if (field.kind !== 'secret' || ROUTE_HOST_NAMES.includes(field.env)
+          || ROUTE_WITHHELD_NAMES.includes(field.env)
+          || /^(?:NODE_|LD_|DYLD_|FACTORY_|GRIGDESK_)/.test(field.env)) {
+          continue;
+        }
+
+        accessKeys.push(field.env);
+
+        if (participants.includes(adapter.id)) {
+          allowedSecrets.push(field.env);
+        }
+      }
+    }
+
+    secrets = routeSecrets(service ? accessEnv : process.env, [...new Set(allowedSecrets)]);
   } catch (error) {
     await rollback();
 
@@ -1009,7 +1090,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   try {
     externalCliDescriptor = await prepareRouteExternalCliDescriptor(config, environments,
       service ? path.join(launchDirectory, 'external-cli.json') : undefined);
-  } catch {
+  } catch (error) {
     await rollback();
 
     return {
@@ -1017,7 +1098,8 @@ export async function spawnRouteEngine(config: RouteConfig, {
       unit: null,
       logFile,
       logOffset,
-      message: 'Не удалось подготовить окружение выбранного CLI. Повторите после проверки установки.',
+      failedBeforeSpawn: true,
+      message: errorMessage(error, 'Не удалось подготовить окружение выбранного CLI.'),
     };
   }
 

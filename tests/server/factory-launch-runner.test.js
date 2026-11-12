@@ -6,7 +6,6 @@ import test from 'node:test';
 import { access, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { ownTask, seedTasks } from './helpers/grigdesk-tasks.js';
 import { ATTEMPT, factoryLaunchFixture as fixture } from './helpers/factoryLaunch.js';
 
 
@@ -163,10 +162,10 @@ test('отказ runner preflight не запирает задачу: следу
   assert.equal(retried.json().outcome, 'launched');
 });
 
-test('runner_preflight_failed marker остаётся fail-closed', async (t) => {
-  // Соседний маркер означает, что сломалась САМА проверка. Доказательства «попытки
-  // не было» за ним нет, поэтому marker снимать нельзя — иначе ослабление одного
-  // случая тихо распространится на другой.
+test('runner_preflight_failed сам по себе не освобождает pending', async () => {
+  // Сломанная проверка не доказывает отсутствие попытки. Её код сам по себе
+  // не разрешает повтор: для отказа подготовки нужен отдельный proof до spawn
+  // с отсутствием реестра, attempt и резервации после rollback.
   const source = await readFile(
     new URL('../../server/src/modules/factory/index.ts', import.meta.url),
     'utf8',
@@ -221,10 +220,11 @@ test('B24-SOURCE-01: запуск сохраняет портальную ссы
   assert.doesNotMatch(ticket.description, /Служебный комментарий/);
 });
 
-test('LOCAL-LAUNCH-01: собственная постановка сильнее body, без обращений к Б24', async (t) => {
+test('OWN-REMOVED-TICKET: архив own не перекрывает внешний текст, URL и комментарии', async (t) => {
   const portalCalls = [];
   const { app, config } = await fixture(t, {
     tracker: {
+      sourceUrl: (id) => `https://portal.test/task/${id}`,
       async accountIdentity() {
         portalCalls.push('identity');
 
@@ -233,38 +233,56 @@ test('LOCAL-LAUNCH-01: собственная постановка сильне�
       async taskPageData() {
         portalCalls.push('comments');
 
-        return { comments: [{ text: 'Чужой комментарий портала', author: 'Портал' }] };
+        return { comments: [{ text: 'Внешний комментарий', author: 'Портал' }] };
       },
     },
     clarifications: 'Ответ человека на вопрос',
     openQuestions: { questions: ['Открытый вопрос'], unknowns: ['Проверить контракт'] },
   });
-  const task = ownTask();
+  const id = '100000000001';
+  const archive = path.join(path.dirname(config.stateDir), 'tasks.json');
+  const bytes = JSON.stringify({
+    schemaVersion: 1,
+    revision: 1,
+    nextId: '100000000010',
+    tasks: [{
+      id,
+      source: 'grigdesk',
+      title: 'Архивное название',
+      description: 'Архивный текст',
+      projectId: 'beta',
+      projectTitle: 'Проект beta',
+      sourceUrl: 'http://client.test/#/board?openTask=100000000001',
+      createdAt: '2026-10-24T00:00:00.000Z',
+    }],
+  });
 
-  await seedTasks(config, [task]);
+  await writeFile(archive, bytes);
 
+  const { sourceUrl, ...payload } = LAUNCH_PAYLOAD;
   const response = await app.inject({
     method: 'POST',
-    url: `/api/tasks/${task.id}/launch`,
+    url: `/api/tasks/${id}/launch`,
     payload: {
-      ...LAUNCH_PAYLOAD,
-      title: 'Поддельное название',
-      description: 'Поддельный текст'
+      ...payload,
+      title: 'Внешнее название',
+      description: 'Внешняя постановка',
     },
   });
 
   assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().outcome, 'launched');
 
-  const ticket = JSON.parse(await readFile(path.join(config.ticketsDir, `t${task.id}.ticket.json`), 'utf8'));
+  const ticket = JSON.parse(await readFile(path.join(config.ticketsDir, `t${id}.ticket.json`), 'utf8'));
 
-  assert.equal(ticket.title, task.title);
-  assert.equal(ticket.sourceUrl, task.sourceUrl);
-  assert.ok(ticket.description.includes(task.description));
+  assert.equal(ticket.title, 'Внешнее название');
+  assert.equal(ticket.sourceUrl, `https://portal.test/task/${id}`);
+  assert.match(ticket.description, /Внешняя постановка/);
+  assert.match(ticket.description, /Внешний комментарий/);
   assert.match(ticket.description, /Ответ человека на вопрос/);
   assert.match(ticket.description, /Открытый вопрос/);
-  assert.doesNotMatch(ticket.description, /Поддельный|Чужой комментарий портала/);
-  assert.deepEqual(portalCalls, []);
+  assert.doesNotMatch(ticket.description, /Архивное название|Архивный текст/);
+  assert.ok(portalCalls.includes('comments'));
+  assert.equal(await readFile(archive, 'utf8'), bytes);
 });
 
 /**

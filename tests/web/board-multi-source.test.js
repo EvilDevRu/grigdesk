@@ -18,7 +18,7 @@ test('MD-MERGE: A42+B42 приходят в единую ленту с разн�
 });
 
 for (const failure of ['error', 'disabled']) {
-  test(`MD-FAILURE: ${failure} A сохраняет last-good, B и own доступны`, async (t) => {
+  test(`MD-FAILURE: ${failure} A сохраняет last-good, B доступен`, async (t) => {
     const fixture = await webMultiFixture(t);
 
     await fixture.board.load(true);
@@ -32,7 +32,6 @@ for (const failure of ['error', 'disabled']) {
 
     await fixture.board.load(true);
     assert.deepEqual(rowRefs(fixture.board), [[fixture.sourceA, '42'], [fixture.sourceB, '42']]);
-    assert.equal((await fixture.request('GET', '/api/grigdesk-tasks')).statusCode, 200);
     assert.equal((await fixture.request('GET', '/api/tracker/fixture-b/task/42')).statusCode, 200);
 
     const catalog = (await fixture.request('GET', '/api/trackers')).json();
@@ -49,7 +48,7 @@ for (const failure of ['error', 'disabled']) {
   });
 }
 
-test('MD-FAILURE: холодный отказ A не придумывает строки, B и own продолжают работать', async (t) => {
+test('MD-FAILURE: холодный отказ A не придумывает строки, B продолжает работать', async (t) => {
   const fixture = await webMultiFixture(t);
 
   await controlDriver(fixture, 'fixture-a', { dashboardError: 'Холодный отказ A' });
@@ -62,7 +61,6 @@ test('MD-FAILURE: холодный отказ A не придумывает ст
   assert.equal(descriptor.status, 'unavailable');
   assert.equal(typeof descriptor.reason, 'string');
   assert.ok(descriptor.reason.trim().length > 0);
-  assert.equal((await fixture.request('GET', '/api/grigdesk-tasks/100000000001')).statusCode, 200);
 });
 
 test('MD-INDEPENDENT-READ: удержанный dashboard A не задерживает публикацию B', async (t) => {

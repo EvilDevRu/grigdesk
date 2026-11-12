@@ -40,6 +40,11 @@
       "path": "server/scripts/factoryRunnerModels.mts",
       "helper": "factory-runner-models",
       "kind": "script"
+    },
+    {
+      "path": "server/scripts/qwenRunner.mts",
+      "helper": "qwen-runner",
+      "kind": "script"
     }
   ]
 }

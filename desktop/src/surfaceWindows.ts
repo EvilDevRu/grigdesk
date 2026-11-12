@@ -47,7 +47,8 @@ function schedule(callback: () => void, milliseconds: number): () => void {
  * Явный источник различает одинаковые номера, прежняя цель сохраняет свой ключ.
  */
 function surfaceWindowKey(origin: string, target: SurfaceTarget): string {
-  const source = target.kind === 'task' && target.source ? `:${target.source}` : '';
+  const source = target.kind === 'task' && (target.source || target.unavailable)
+    ? `:${target.unavailable || target.source}` : '';
 
   return `${origin} ${target.kind}:${target.id}${source}`;
 }
