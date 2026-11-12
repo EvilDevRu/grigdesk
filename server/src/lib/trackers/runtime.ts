@@ -4,10 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 
 import type { TrackerCredentialsStore } from './credentialsStore.ts';
 import { createDriverInstallService } from '../driverInstall/service.ts';
-import { createGrigdeskTasksService } from '../grigdeskTasks/service.ts';
-import type { GrigdeskTasksServiceOptions } from '../grigdeskTasks/service.ts';
 import { TrackerFacade } from './facade.ts';
-import { createOwnTracker } from './own.ts';
 import { TrackerRegistry } from './registry.ts';
 import { createSerialQueue } from './serialQueue.ts';
 import { TrackerSettingsStore } from './settingsStore.ts';
@@ -15,8 +12,8 @@ import type { TrackerHost, TrackerReadTrace } from './contract.ts';
 import { TrackerError } from './contract.ts';
 import { installError } from '../packageInstall/errors.ts';
 
-export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions, 'tracker'> {
-  config: GrigdeskTasksServiceOptions['config'] & {
+export interface TrackerRuntimeOptions {
+  config: {
     driversDir: string;
     driverInstallsPath: string;
     trackerSettingsPath: string;
@@ -32,7 +29,7 @@ export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions,
 
 /**
  * Приложение и HTTP-фикстуры собирают один и тот же runtime.
- * Recovery установщика предшествует scan/import, own использует единственный ядровой сервис.
+ * Recovery установщика предшествует сканированию и импорту внешних пакетов.
  */
 export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
   const { config, credsStore } = options;
@@ -75,14 +72,6 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   const recovery = await installs.recover();
 
-  // Обёртка own регистрируется до выбора внешнего подключения и создания его фасада.
-  // Методы вызываются только после сборки runtime и обращаются к единственному own-сервису.
-  registry.register(createOwnTracker({
-    get: (id) => own.get(id),
-    list: () => own.list(),
-    create: (input) => own.create(input),
-    listProjects: () => own.listProjects(),
-  }), 'GrigDesk');
   installs.bindRuntime({
     isLoaded: (id) => registry.isLoaded(id),
     prepareReplace: async (id, signal) => {
@@ -118,9 +107,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   if (recovery.blockedIds === '*') {
     for (const entry of registry.descriptors()) {
-      if (entry.id !== 'own') {
-        registry.unavailable(entry.id, 'Требуется восстановление установки');
-      }
+      registry.unavailable(entry.id, 'Требуется восстановление установки');
     }
   } else {
     for (const id of recovery.blockedIds) {
@@ -143,23 +130,15 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     selection,
     onChanged: options.onChanged,
   });
-  const own = createGrigdeskTasksService({
-    ...options,
-    tracker: {
-      isConfigured: () => tracker.hasSelection(),
-      probeTaskNumber: (id) => tracker.probeTaskNumber(id),
-    },
-  });
-
   /**
-   * Все включённые внешние драйверы получают независимый допуск рядом с own.
+   * Все включённые внешние драйверы получают независимый допуск.
    * Недоступный выбор сохраняется, чтобы действие не сменило аккаунт незаметно.
    */
   async function activateSelection() {
     const { drivers } = selection.read();
 
     for (const id of registry.activeIds) {
-      if (id !== 'own' && !drivers.includes(id)) {
+      if (!drivers.includes(id)) {
         registry.deactivate(id);
       }
     }
@@ -229,7 +208,6 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     selection,
     credsStore,
     tracker,
-    own,
     installs,
     activateSelection,
     testConnection,

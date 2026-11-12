@@ -119,3 +119,38 @@ test('отпечаток тикета сохраняется после сери
   assert.notEqual(factoryTicketHash({ acceptanceCriteria: ['a', 'b'] }),
     factoryTicketHash({ acceptanceCriteria: ['b', 'a'] }));
 });
+
+test('OWN-REMOVED-INDEX: mixed индекс хранит историю, но подтверждает только внешний source', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'factory-mixed-'));
+
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  const target = path.join(directory, 'sources.json');
+  const legacy = {
+    ...record,
+    taskId: '100000000001',
+    source: 'grigdesk',
+  };
+  const document = { schemaVersion: 1, entries: { '42': record, [legacy.taskId]: legacy } };
+  const bytes = JSON.stringify(document);
+
+  await fs.writeFile(target, bytes);
+
+  const store = new FactoryTaskSources(target);
+  const read = await store.read();
+  const proof = {
+    attempt: `a_${'1'.repeat(32)}`,
+    queueDispatchId: record.dispatchId,
+    ticketHash: record.ticketHash,
+  };
+
+  assert.equal(FactoryTaskSources.verified(read.entries['42'], proof), source);
+  assert.equal(await fs.readFile(target, 'utf8'), bytes, 'Чтение не переписывает историю');
+  await store.put({ ...record, taskId: '43' });
+
+  const saved = await new FactoryTaskSources(target).read();
+
+  assert.deepEqual(saved.entries[legacy.taskId], legacy);
+  assert.equal(FactoryTaskSources.verified(saved.entries['43'], proof), source);
+  assert.equal(FactoryTaskSources.verified(saved.entries[legacy.taskId], proof), undefined);
+});

@@ -4,12 +4,10 @@ import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
-import { isRecord } from '../../../shared/lib/objects.ts';
-import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Кеш деталей B24 и действия через GrigDesk без открытия стороннего портала.
 // Подтверждённые мутации обновляют доску прежним порядком.
 import { defineStore } from 'pinia';
-import { api, ApiError } from '../shared/apiClient.ts';
+import { api } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.ts';
 import { useTrackersStore } from './trackers.ts';
 import {
@@ -42,8 +40,7 @@ export const useTasksStore = defineStore('tasks', {
     },
     /**
      * Детали используют прежний кеш на тридцать секунд с принудительным обновлением.
-     * Номера вне диапазона собственных задач читаются прежним запросом Б24.
-     * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
+     * Все номера читаются через внешний трекер; ответ проверяется до замены кеша.
      */
     async load(id: TaskId, force = false, signal?: AbortSignal, source?: TaskSourceId): Promise<TaskDetail> {
       const epoch = this.epoch;
@@ -55,46 +52,24 @@ export const useTasksStore = defineStore('tasks', {
       const legacySource = source && board.data?.source === source
         && !board.data?.multiSource && !catalog?.enabledIds;
 
-      if (cached?.target?.prefix === '/api/tracker' && source && source !== 'grigdesk'
+      if (cached?.target?.prefix === '/api/tracker' && source
         && !catalog?.enabledIds && board.data?.source !== source) {
         throw new Error(t('core.taskSourceMismatch'));
       }
 
-      const target = source === 'grigdesk' ? null : (!source || legacySource) ? {
+      const target = (!source || legacySource) ? {
         prefix: '/api/tracker',
         source,
         options: useTrackersStore().mutationOptions(),
       } : await resolveTrackerTarget(source, api, catalog ?? undefined);
 
-      if (source === 'grigdesk' && !/^[1-9]\d{11}$/.test(String(id))) {
-        throw new Error(t('core.taskSourceUnsupported'));
-      }
-
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
         return cached.data;
       }
 
-      let response: unknown;
-      let portal = source ? source !== 'grigdesk' : !/^[1-9]\d{11}$/u.test(String(id));
-
-      if (!portal) {
-        try {
-          response = await api.get(`/api/grigdesk-tasks/${id}`, { signal });
-        } catch (error) {
-          if (source === 'grigdesk' || !(error instanceof ApiError) || error.status !== 404
-            || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
-            throw error;
-          }
-
-          portal = true;
-        }
-      }
-
-      const data = portal
-        ? decodeTaskDetail(await api.get(`${target!.prefix}/task/${id}`, {
-          signal, ...target!.options,
-        }))
-        : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
+      const data = decodeTaskDetail(await api.get(`${target.prefix}/task/${id}`, {
+        signal, ...target.options,
+      }));
 
       signal?.throwIfAborted();
 

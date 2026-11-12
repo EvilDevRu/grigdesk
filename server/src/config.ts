@@ -226,7 +226,6 @@ export const config = {
   // может переписать. Движок делает себе доверенную копию сам.
   factoryTaskSourcesPath: process.env.GRIGDESK_FACTORY_TASK_SOURCES_PATH
     || path.join(dataStateDir, 'factory-task-sources.json'),
-  grigdeskTasksPath: process.env.GRIGDESK_TASKS_PATH || path.join(dataStateDir, 'grigdesk-tasks.json'),
 
   ticketsDir: process.env.GRIGDESK_TICKETS_DIR || path.join(dataStateDir, 'tickets'),
 

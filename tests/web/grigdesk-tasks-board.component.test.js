@@ -115,6 +115,7 @@ async function fixture(t, {
     rows,
     posts,
     reads,
+    catalog,
     finishLoading: initialRead.resolve,
     refuse: (value) => {
       refuse = value;
@@ -184,7 +185,7 @@ function multiBoardCatalog() {
 
   return {
     drivers,
-    activeIds: ['own', 'alpha-board', 'beta-board', 'readonly-board'],
+    activeIds: ['alpha-board', 'beta-board', 'readonly-board'],
     enabledIds: ['alpha-board', 'beta-board', 'readonly-board'],
     default: 'beta-board',
     externalId: 'beta-board',
@@ -205,7 +206,7 @@ function externalGet(url) {
   } : { groups: [{ id: alpha ? 91 : 92, name: alpha ? 'Внешний Альфа' : 'Внешний Бета' }] };
 }
 
-test('NEW-TASK: выбор содержит GrigDesk и обе доски, начальная цель — сохранённый дефолт', async (t) => {
+test('OWN-REMOVED-CREATE: только включённые внешние create-цели, начальный выбор default B', async (t) => {
   const fx = await fixture(t, {
     catalog: multiBoardCatalog(),
     externalGet,
@@ -217,7 +218,7 @@ test('NEW-TASK: выбор содержит GrigDesk и обе доски, на�
   const board = fx.wrapper.get('#grigdesk-task-board-native');
 
   assert.deepEqual(board.findAll('option').map((option) => option.element.value),
-    ['own', 'alpha-board', 'beta-board']);
+    ['alpha-board', 'beta-board']);
   assert.equal(board.element.value, 'beta-board');
   assert.deepEqual(fx.wrapper.get('#grigdesk-task-project-native').findAll('option')
     .map((option) => option.text()), ['Выберите проект', 'Внешний Бета']);
@@ -249,22 +250,11 @@ test('NEW-TASK: выбранная доска получает POST и её ис
     },
     options: { headers: { 'x-grigdesk-tracker-generation': '7' } },
   }]);
+  assert.equal(fx.catalog.default, 'beta-board');
+  assert.equal(fx.posts.some((entry) => entry.url.includes('/settings')), false);
   assert.deepEqual(fx.calls.openedReferences, [{ id: '42', source: `alpha-board@${'a'.repeat(64)}` }]);
   assert.equal(fx.rows.length, 0);
   assert.ok(fx.calls.boardLoad.includes(true));
-});
-
-test('NEW-TASK: возврат к GrigDesk использует внутренний проект и собственный API', async (t) => {
-  const fx = await fixture(t, { catalog: multiBoardCatalog(), externalGet });
-
-  await openForm(fx);
-  await fx.wrapper.get('#grigdesk-task-board-native').setValue('own');
-  await fx.flushPromises();
-  await fillForm(fx);
-  await submit(fx);
-  assert.equal(fx.posts[0].url, '/api/grigdesk-tasks?sources=1');
-  assert.equal(fx.posts[0].payload.projectId, 'beta');
-  assert.deepEqual(fx.calls.openedReferences, [{ id: LOCAL_TASK.id, source: 'grigdesk' }]);
 });
 
 test('NEW-TASK: поздний справочник прежней доски не заменяет проекты текущей', async (t) => {
@@ -333,297 +323,8 @@ test('NEW-TASK: доска без справочника проектов соз
   assert.equal(fx.reads.includes('/api/tracker/beta-board/groups'), false);
 });
 
-test('LOCAL-BOARD-01: без Б24 форма доступна, сохранённая задача видна и открывается', async (t) => {
-  const fx = await fixture(t);
-
-  assert.equal(fx.wrapper.find('.tracker-board .tracker-setup-banner').exists(), true);
-  await openForm(fx);
-  await fillForm(fx);
-  await submit(fx);
-  assert.equal(fx.posts.length, 1);
-  assert.equal(fx.posts[0].url, '/api/grigdesk-tasks?sources=1');
-  assert.deepEqual(fx.posts[0].payload, {
-    title: 'Своя задача',
-    description: LOCAL_TASK.description,
-    projectId: 'beta',
-    clientOrigin: fx.browser.location.origin,
-  });
-  assert.match(fx.wrapper.text(), /Своя задача/);
-  assert.match(fx.wrapper.text(), /Проект Бета/);
-  assert.equal(fx.wrapper.get('.col.primary').isVisible(), true);
-  assert.equal(fx.wrapper.find('.own-tasks').exists(), false);
-  assert.equal(fx.wrapper.find('.task-internal-flag').exists(), true);
-  assert.equal(fx.wrapper.find('[role="tablist"]').exists(), false);
-  assert.equal(fx.wrapper.find('li.trow').exists(), true);
-  assert.equal(fx.wrapper.find('[data-role="board-snapshot-status"]').exists(), false);
-  assert.deepEqual(fx.calls.opened, [LOCAL_TASK.id]);
-  assert.equal(fx.posts.some((entry) => entry.url.endsWith('/analyze')), false);
-});
-
-test('LOCAL-BOARD: баннер настройки виден вместе со списком внутренних задач', async (t) => {
-  const fx = await fixture(t);
-  const banner = fx.wrapper.get('.tracker-board .tracker-setup-banner');
-
-  assert.equal(banner.get('p').text(),
-    'Внешний трекер не подключён — задачи трекера не показываются.');
-  assert.equal(banner.get('button').text(), 'Настроить трекер');
-  assert.equal(banner.isVisible(), true);
-  assert.equal(fx.wrapper.get('.col.primary').isVisible(), true);
-  assert.equal(fx.wrapper.find('[role="tabpanel"]').exists(), false);
-  assert.equal(fx.wrapper.find('.col.primary .tracker-setup-banner').exists(), false);
-  await banner.get('button').trigger('click');
-  await fx.flushPromises();
-  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
-});
-
-test('LOCAL-BOARD: шестерёнка в шапке доступна при загрузке и без трекера', async (t) => {
-  const fx = await fixture(t, { pending: true });
-  const settings = fx.wrapper.get('.board-heading button[aria-label="Настройки трекеров"]');
-
-  assert.equal(settings.text(), '');
-  assert.equal(settings.find('svg').exists(), true);
-  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
-  await settings.trigger('click');
-  await fx.flushPromises();
-  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
-  fx.finishLoading();
-  await fx.flushPromises();
-  assert.equal(settings.isVisible(), true);
-  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), true);
-});
-
-test('LOCAL-BOARD: ошибка трекера оставляет внутренние задачи и создание на общей доске', async (t) => {
-  const fx = await fixture(t, { configured: true });
-
-  await openForm(fx);
-  assert.equal(fx.wrapper.get('#board-tracker-panel .col.primary').isVisible(), true);
-  assert.equal(fx.wrapper.find('.board-heading [role="tablist"]').exists(), false);
-  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
-  await fillForm(fx);
-  await submit(fx);
-  assert.equal(fx.wrapper.get('.col.primary').text().includes(LOCAL_TASK.title), true);
-  assert.equal(fx.wrapper.get('.tasks .task-internal-flag').text(), 'GrigDesk');
-  assert.equal(fx.wrapper.get('#board-tracker-panel').isVisible(), true);
-  assert.equal(fx.wrapper.get('.board-tracker-error').text().includes('Не удалось обновить'), true);
-  assert.equal(fx.wrapper.find('.board-tracker-error-details').exists(), false);
-  await fx.wrapper.get('.board-tracker-error .ui-disclosure-button').trigger('click');
-  await fx.flushPromises();
-  assert.equal(fx.wrapper.get('.board-tracker-error-details').text(), 'Ошибка B24 → Настройки');
-  await fx.wrapper.get('.board-heading button[aria-label="Настройки трекеров"]').trigger('click');
-  await fx.flushPromises();
-  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
-});
-
-test('LOCAL-BOARD: общий список стабилен по датам, флаг есть только у GrigDesk', async (t) => {
-  const newer = {
-    ...LOCAL_TASK,
-    id: '100000000002',
-    createdAt: '2026-10-25T00:00:00.000Z'
-  };
-  const sameDate = { ...newer, id: '100000000003' };
-  const fx = await fixture(t, {
-    configured: true,
-    initialTasks: [LOCAL_TASK, newer, sameDate],
-    boardError: null,
-    pipelineTasks: [{
-      task: newer.id,
-      source: 'grigdesk',
-      daemonAlive: true
-    }],
-  });
-  const rows = fx.wrapper.findAll('.col.primary .trow');
-
-  assert.equal(fx.wrapper.find('.own-tasks').exists(), false);
-  assert.equal(rows.length, 5);
-  assert.deepEqual(rows.slice(0, 3).map((row) => row.get('.task-id').text()),
-    [newer, sameDate, LOCAL_TASK].map((task) => `#${task.id}`));
-  assert.equal(rows.slice(0, 3).every((row) => row.get('.task-internal-flag').text() === 'GrigDesk'), true);
-  assert.equal(rows[3].find('.task-internal-flag').exists(), false);
-  assert.match(rows[0].text(), /Конвейер идёт/u);
-  await rows[0].get('[data-role="task-title"]').trigger('click');
-  assert.deepEqual(fx.calls.opened, [newer.id]);
-});
-
-test('LOCAL-BOARD-02: невалидный ввод и отказ сохраняют черновик, оценка не запускается', async (t) => {
-  const fx = await fixture(t);
-
-  await openForm(fx);
-  await fillForm(fx, '   ');
-  await submit(fx);
-  assert.equal(fx.posts.length, 0);
-  await fillForm(fx);
-  fx.refuse(true);
-  await submit(fx);
-  assert.equal(fx.rows.length, 0);
-  assert.equal(fx.wrapper.find('textarea').element.value, LOCAL_TASK.description);
-  fx.refuse(false);
-  await submit(fx);
-  assert.equal(fx.rows.length, 1);
-  assert.equal(fx.posts.some((entry) => entry.url.endsWith('/analyze')), false);
-});
-
-test('LOCAL-BOARD-02: без доступного проекта задача не сохраняется', async (t) => {
-  const fx = await fixture(t, { projects: [] });
-
-  await openForm(fx);
-  await submit(fx);
-  assert.equal(fx.posts.length, 0);
-  assert.equal(fx.rows.length, 0);
-});
-
-test('LOCAL-BOARD-03: событие и reconnect обновляют список, unmount снимает подписку', async (t) => {
-  const fx = await fixture(t);
-
-  assert.ok(fx.reads.includes('/api/grigdesk-tasks'), 'Доска читает собственный список при открытии');
-  fx.rows.push(LOCAL_TASK);
-
-  for (const listener of fx.listeners) {
-    listener('grigdesk-tasks-changed', { revision: 1 });
-  }
-
-  await fx.flushPromises();
-  assert.match(fx.wrapper.text(), /Своя задача/);
-
-  const before = fx.reads.filter((url) => url === '/api/grigdesk-tasks').length;
-
-  for (const listener of fx.listeners) {
-    listener('hello', {});
-  }
-
-  await fx.flushPromises();
-  assert.ok(fx.reads.filter((url) => url === '/api/grigdesk-tasks').length > before);
-  fx.wrapper.unmount();
-  assert.equal(fx.listeners.size, 0);
-});
-
-test('LOCAL-BOARD-03: старый GET не откатывает POST, событие в полёте дочитывается', async (t) => {
-  let release;
-  let reads = 0;
-  let active = 0;
-  let peak = 0;
-  const second = {
-    ...LOCAL_TASK,
-    id: '100000000002',
-    title: 'Задача другой вкладки'
-  };
-  const fx = await mountBoardView(t, {
-    prefix: 'local-board-order',
-    ownApi: {
-      /**
-       * Первое чтение удерживается до ответа POST и события другой вкладки.
-       * Активные чтения считаются для проверки сериализации и trailing-прохода.
-       */
-      async get(url) {
-        if (url === '/api/grigdesk-tasks/projects') {
-          return { projects: [{ id: 'beta', title: 'Проект Бета' }] };
-        }
-
-        if (url !== '/api/grigdesk-tasks') {
-          return { tasks: [] };
-        }
-
-        reads += 1;
-        active += 1;
-        peak = Math.max(peak, active);
-
-        if (reads === 1) {
-          return new Promise((resolve) => {
-            release = (value) => {
-              active -= 1;
-              resolve(value);
-            };
-          });
-        }
-
-        active -= 1;
-
-        return {
-          tasks: [second, LOCAL_TASK],
-          revision: 2,
-          trackerConfigured: false
-        };
-      },
-      async post() {
-        return { task: LOCAL_TASK, revision: 1 };
-      },
-    },
-  });
-
-  await openForm(fx);
-  await fillForm(fx);
-
-  for (const listener of fx.listeners) {
-    listener('grigdesk-tasks-changed', { revision: 2 });
-  }
-
-  await submit(fx);
-  release({
-    tasks: [],
-    revision: 0,
-    trackerConfigured: true
-  });
-  await fx.flushPromises();
-  assert.match(fx.wrapper.text(), /Своя задача/);
-  assert.match(fx.wrapper.text(), /Задача другой вкладки/);
-  assert.equal(fx.wrapper.find('.tracker-board .tracker-setup-banner').exists(), true);
-  assert.equal(peak, 1);
-  assert.equal(reads, 2);
-});
-
-test('BOARD-HIERARCHY: название первым, полный номер и проект в метаданных, одно открытие', async (t) => {
-  const task = {
-    ...LOCAL_TASK,
-    id: '100000000099',
-    title: 'Название без служебного префикса',
-  };
-  const fx = await fixture(t, {
-    configured: true,
-    initialTasks: [task],
-    pipelineTasks: [{
-      task: task.id,
-      source: 'grigdesk',
-      daemonAlive: true
-    }],
-    boardError: null,
-  });
-  const row = fx.wrapper.get('.col.primary .trow');
-
-  assert.equal(row.find('.ttext .task-name').exists(), true);
-  assert.equal(row.get('.ttext .task-name').text(), task.title);
-  assert.equal(row.get('.task-meta .mono').text(), `#${task.id}`);
-  assert.match(row.get('.task-meta').text(), /Проект Бета/u);
-  assert.match(row.get('.task-meta').text(), /Конвейер идёт/u);
-
-  const { browser, wrapper } = fx;
-  const source = await readFile(webFile('src/views/BoardView.vue'), 'utf8');
-  const layers = ['tokens', 'base', 'components/foundation', 'components/actions'];
-  const cssText = (await Promise.all(layers.map((name) =>
-    readFile(webFile(`src/styles/${name}.css`), 'utf8')))).join('\n')
-    + '\n' + source.match(/<style scoped>([\s\S]*?)<\/style>/u)[1];
-  const style = browser.document.createElement('style');
-
-  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
-  browser.document.documentElement.setAttribute('data-ui-touch', '');
-  style.textContent = cssText;
-  browser.document.head.append(style);
-  t.after(() => style.remove());
-
-  const css = (selector) => browser.getComputedStyle(wrapper.get(selector).element);
-  const titleColor = css('.ttext .task-name').color;
-
-  assert.notEqual(titleColor, '');
-  assert.equal(titleColor, css('.tasks .task-name').color);
-  assert.notEqual(titleColor, css('.task-meta').color);
-  assert.equal(css('.ttext .task-name').fontSize, '15px');
-  assert.equal(css('.task-meta').fontSize, '12px');
-  assert.equal(css('.ttext').minHeight, '44px');
-
-  await row.get('.ttext').trigger('click');
-  assert.deepEqual(fx.calls.opened, [task.id]);
-});
-
 test('PHONE-HEADER: реальная форма создания наследует общую шапку, desktop сохраняется', async (t) => {
-  const fx = await fixture(t);
+  const fx = await fixture(t, { catalog: multiBoardCatalog(), externalGet });
 
   fx.browser.happyDOM.setWindowSize({ width: 390, height: 844 });
   fx.browser.document.documentElement.setAttribute('data-ui-touch', '');
@@ -650,3 +351,49 @@ test('PHONE-HEADER: реальная форма создания наследу�
   style.textContent = cssText;
   assert.equal(fx.browser.getComputedStyle(title).fontSize, '13px');
 });
+
+for (const state of ['empty', 'readonly', 'offline']) {
+  test(`OWN-REMOVED-CREATE: ${state} не создаёт own и не подменяет цель`, async (t) => {
+    const catalog = multiBoardCatalog();
+
+    if (state === 'empty') {
+      catalog.drivers = [];
+      catalog.enabledIds = [];
+      catalog.activeIds = [];
+      catalog.default = null;
+      catalog.externalId = null;
+    } else if (state === 'readonly') {
+      for (const driver of catalog.drivers) {
+        driver.capabilities.create = false;
+      }
+    } else {
+      for (const driver of catalog.drivers) {
+        driver.status = 'unavailable';
+        driver.configured = false;
+      }
+    }
+
+    const fx = await fixture(t, { catalog, externalGet });
+
+    await openForm(fx);
+
+    const board = fx.wrapper.find('#grigdesk-task-board-native');
+    const options = board.exists() ? board.findAll('option') : [];
+
+    assert.equal(options.some((option) => option.element.value === 'own'), false);
+    assert.equal(options.some((option) => option.element.value
+      && !option.element.disabled && option.element.selected), false);
+
+    const save = fx.wrapper.findAll('button').find((button) => button.text().trim() === 'Создать');
+
+    assert.ok(save);
+    assert.equal(save.element.disabled, true);
+    await save.trigger('click');
+    await fx.flushPromises();
+    assert.deepEqual(fx.posts, []);
+
+    if (state === 'empty') {
+      assert.match(fx.wrapper.text(), /подключ|настро[йи]/iu);
+    }
+  });
+}

@@ -237,3 +237,69 @@ test('TW-CTX02: локальные Терминал/module не вытесняю
   assert.equal(f.context.capture({ path: '/chats' }).promptContext.details.tool.id, 'module-example');
   assert.equal(f.context.capture({ path: '/chats' }).promptContext.details.toolWindow, undefined);
 });
+
+test('OWN-REMOVED-RELAY: tool own remove/acknowledge не меняют default полку', async (t) => {
+  const product = await featureModule('src/shared/tools/toolWindowRelay.ts');
+  const channel = channelPair().main;
+  const calls = [];
+  const store = {
+    scope: null,
+    revision: 0,
+    entries: [],
+    allRows: [],
+    sourceIssues: [],
+    loaded: true,
+    error: null,
+    setViewAction: () => {},
+    remove: (...args) => calls.push(['remove', ...args]),
+    acknowledge: (...args) => calls.push(['acknowledge', ...args]),
+  };
+  const stop = product.startToolShelfRelay({
+    role: 'source',
+    channel,
+    store,
+    instance,
+  });
+
+  t.after(stop);
+
+  for (const action of ['remove', 'acknowledge']) {
+    for (const fields of [
+      { source: 'grigdesk' },
+      { source: 'tracker', taskSource: 'grigdesk' },
+      { source: 'tracker', taskSource: 'unknown' },
+    ]) {
+      channel.onmessage({ data: {
+        version: 1,
+        type: 'shelf-action',
+        instance,
+        taskId: '100000000001',
+        action,
+        ...fields,
+      } });
+      await tick();
+      assert.deepEqual(calls, [], `${action}: ${JSON.stringify(fields)}`);
+    }
+  }
+
+  const external = `fixture-a@${'a'.repeat(64)}`;
+
+  for (const action of ['remove', 'acknowledge']) {
+    for (const fields of [{}, { source: 'tracker', taskSource: external }]) {
+      channel.onmessage({ data: {
+        version: 1,
+        type: 'shelf-action',
+        instance,
+        taskId: '42',
+        action,
+        ...fields,
+      } });
+      await tick();
+    }
+  }
+
+  assert.equal(calls.length, 4);
+  assert.deepEqual(calls.map(([action]) => action), ['remove', 'remove', 'acknowledge', 'acknowledge']);
+  assert.equal(calls[1][2].taskSource, external);
+  assert.equal(calls[3][2].taskSource, external);
+});

@@ -2,7 +2,6 @@ import './startDataHome.ts';
 import { createHelpService } from './lib/help/service.ts';
 import helpModule from './modules/help/index.ts';
 import { nodeExecutable, runtimeKind } from './lib/runtimePaths.ts';
-import { GrigdeskTaskStore } from './lib/grigdeskTasks/store.ts';
 // Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -133,7 +132,6 @@ import staticPlugin from './plugins/static.ts';
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
 import trackerModule from './modules/tracker/index.ts';
-import grigdeskTasksModule from './modules/grigdesk-tasks/index.ts';
 import taskFavoritesModule from './modules/task-favorites/index.ts';
 import taskShelfModule from './modules/task-shelf/index.ts';
 import taskSeenModule from './modules/task-seen/index.ts';
@@ -783,8 +781,6 @@ async function build(desktopParent: DesktopParent | null) {
     config,
     traceRead: (event) => fastify.log.debug(event, 'Чтение трекера'),
     credsStore,
-    factoryState,
-    projectsService,
     grigDeskVersion: installOptions.grigDeskVersion,
     onChanged: async () => {
       await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
@@ -1050,23 +1046,19 @@ async function build(desktopParent: DesktopParent | null) {
   }));
 
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
-  const ownPersonalTasks = new GrigdeskTaskStore({ config });
   const taskFavorites = new TaskFavoritesService({
     store: taskFavoritesStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
   const taskShelf = new TaskShelfService({
     store: taskShelfStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
   const taskSeen = new TaskSeenService({
     store: taskSeenStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const analyzer = new Analyzer({
     config,
@@ -1364,13 +1356,6 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
-  await fastify.register(grigdeskTasksModule, {
-    service: trackerRuntime.own,
-    config,
-    tracker,
-    factoryState,
-    projectsService,
-  });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService, installs: dbEngineInstalls });
   await fastify.register(dockerModule, { service: dockerService });

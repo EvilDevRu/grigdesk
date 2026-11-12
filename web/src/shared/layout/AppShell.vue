@@ -472,7 +472,6 @@
 import { taskReferenceKey, isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import PluginIcon from '../PluginIcon.vue';
 
-import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
 import { selectTopbarTimerTasks } from '../boardTimerTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
@@ -1168,9 +1167,6 @@ const { connected } = useSse((name, data) => {
     void boardStore.load(true);
   }
 
-  if (name === 'grigdesk-tasks-changed' || name === 'hello') {
-    void useGrigdeskTasksStore().load();
-  }
 
   if (name === 'mobile-changed' && phoneAccess.open) {
     void phoneAccess.refresh().catch(() => {});

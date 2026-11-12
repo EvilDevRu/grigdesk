@@ -176,9 +176,9 @@ test('SL-02: настоящий UI store не применяет поздний 
 
   const remaining = state.replies.length;
 
-  await ui.openTask('100000000000', 'grigdesk');
+  await ui.openTask('grigdesk:100000000000');
   assert.equal(ui.taskId, '100000000000');
-  assert.equal(ui.taskSource, 'grigdesk');
+  assert.equal(ui.taskSource, undefined);
   assert.equal(state.replies.length, remaining);
 
   const closing = Promise.withResolvers();

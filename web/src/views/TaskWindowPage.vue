@@ -1,10 +1,10 @@
 <template>
   <main class="task-window-page"
-    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface" :aria-label="t('core.grigdeskTaskCard')">
+    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface" :aria-label="t('core.taskCard')">
     <TaskModal v-if="target && ready" presentation="document" />
     <template v-else>
       <header class="task-window-titlebar">
-        <span>GrigDesk · {{ t('core.grigdeskGenericTask') }}</span>
+        <span>GrigDesk · {{ t('core.taskFormGenericTask') }}</span>
         <UiIconButton label="Закрыть окно" @click="closeWindow">✕</UiIconButton>
       </header>
       <TaskLoading v-if="target" label="Подключаемся к GrigDesk…" area="window" />
@@ -56,15 +56,17 @@ onUnmounted(stopSpeech);
 // Первое получение владельца сессии очищает состояние App. Открываем карточку после
 // запуска синхронизации, чтобы начальная очистка не закрыла её native-документ.
 watch(() => props.target?.kind === 'task'
-  ? [props.target.id, props.target.source, props.ready] as const : null, (target) => {
-  const [id, source, ready] = target || [];
+  ? [props.target.id, props.target.source, props.ready, props.target.unavailable] as const
+  : null, (target) => {
+  const [id, source, ready, unavailable] = target || [];
 
   if (id) {
     document.title = 'Задача #' + id + ' — GrigDesk';
   }
 
-  if (ready && id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source)) {
-    ui.openTaskInline(id, source);
+  if (ready && id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source
+    || ui.taskUnavailable !== unavailable)) {
+    ui.openTaskInline(id, source, unavailable);
   }
 }, { immediate: true });
 // Закрытие карточки её действиями завершает только этот native-документ.

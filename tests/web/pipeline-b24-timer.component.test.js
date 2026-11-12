@@ -70,7 +70,7 @@ function timerSnapshot(card) {
  * границы, что и в приложении. Часы и единственный секундный interval управляются тестом.
  */
 async function mountScenario(t, {
-  own = false, boardTasksOverride = null, boardToReview = [], boardExtra = {},
+  external = false, boardTasksOverride = null, boardToReview = [], boardExtra = {},
 } = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
@@ -107,8 +107,11 @@ async function mountScenario(t, {
     factoryTask(303, 'Ручной тикет'),
   ];
 
-  if (own) {
-    tasks.push({ ...factoryTask('100000000001', 'Своя задача'), source: 'grigdesk' });
+  if (external) {
+    tasks.push({
+      ...factoryTask('100000000001', 'Внешняя задача'),
+      source: `fixture-a@${'a'.repeat(64)}`,
+    });
   }
 
   const graphs = new Map([
@@ -197,8 +200,8 @@ async function mountScenario(t, {
       async load(id) {
         loadedTasks.push(String(id));
       },
-      title() {
-        return null;
+      title(id) {
+        return external && String(id) === '100000000001' ? 'Внешняя задача' : null;
       },
     },
   });
@@ -402,17 +405,17 @@ test('карточки конвейера различают три состоя
   });
 });
 
-test('LOCAL-PIPELINE-01: собственное название открывает карточку без гидратации Б24', async (t) => {
-  const fx = await mountScenario(t, { own: true });
+test('EXTERNAL-PIPELINE-01: внешнее название открывает карточку с гидратацией трекера', async (t) => {
+  const fx = await mountScenario(t, { external: true });
   const card = cardByTask(fx.wrapper, '100000000001');
 
-  assert.ok(card, 'Собственная задача видна в смешанном списке');
-  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+  assert.ok(card, 'Внешняя задача видна в списке конвейера');
+  assert.equal(fx.loadedTasks.includes('100000000001'), true);
 
   const title = card.find('[data-role="pipeline-title"]');
 
-  assert.ok(title.exists(), 'Название собственной задачи доступно как действие');
-  assert.equal(title.text(), 'Своя задача');
+  assert.ok(title.exists(), 'Название внешней задачи доступно как действие');
+  assert.equal(title.text(), 'Внешняя задача');
   await title.trigger('click');
   assert.deepEqual(fx.openedTasks, ['100000000001']);
   assert.equal(cardByTask(fx.wrapper, 303).find('[data-role="pipeline-title"]').exists(), false);
@@ -423,7 +426,7 @@ test('LOCAL-PIPELINE-01: собственное название открыва�
   globalThis.__pipelineB24SseHandler('state-change', {});
   t.mock.timers.tick(1000);
   await fx.flushPromises();
-  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+  assert.equal(fx.loadedTasks.includes('100000000001'), true);
   assert.ok(fx.getCalls.filter((url) => url === '/api/tasks?sources=1').length >= 2);
 });
 
