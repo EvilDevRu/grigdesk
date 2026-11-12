@@ -13,7 +13,8 @@
 //    код возврата движка до GrigDesk НЕ доходит. Исход читаем из состояния: жив ли юнит
 //    и появился ли ORCH_PID; текст отказа — из журнала запуска.
 import { randomUUID } from 'node:crypto';
-import { preparePipelineAccess } from './accessProfiles/pipeline.ts';
+import { declaredCredentials } from './executorCredentials.ts';
+import { preparePipelineAccess, routeProviders } from './accessProfiles/pipeline.ts';
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -49,6 +50,10 @@ const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_K
 // выводит его сам из ключа активного режима (buildGlmChildEnv), этапу нужен только исходный.
 const ROUTE_WITHHELD_NAMES = [GLM_ROUTE_KEY_ENV];
 
+// Необъявленное имя доступа тоже не становится публичным параметром маршрута.
+// Разрешённые ключи возвращаются отдельно из проверенного источника секретов.
+const ROUTE_PRIVATE_ENV_NAME = /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD)(?:_|$)/u;
+
 // Имена, которыми владеет хост. Значение из extraEnv их не подменяет, даже если сам
 // хост переменную не задал (необязательные пути не открываются вызывающему).
 const ROUTE_HOST_NAMES = [
@@ -58,6 +63,11 @@ const ROUTE_HOST_NAMES = [
   'PATH',
   'HOME',
   'GRIGDESK_HOME',
+  'GRIGDESK_QWEN_BIN',
+  'GRIGDESK_QWEN_HOME',
+  'GRIGDESK_QWEN_CONFIG_ROOT',
+  'QWEN_CODE_SYSTEM_SETTINGS_PATH',
+  'QWEN_CODE_SYSTEM_DEFAULTS_PATH',
   'GRIGDESK_PROVIDER_PREFS_PATH',
   'GRIGDESK_GLM_API_MODE',
   'GRIGDESK_DEEPSEEK_NODE_BIN',
@@ -90,6 +100,8 @@ export interface RouteConfig {
   factoryHome: string;
   profilesDir: string;
   factoryConfigRoot: string;
+  qwenBin?: string;
+  qwenHome?: string;
   deepseekBin?: string;
   deepseekBinOverride?: string;
   deepseekRuntimeMode?: 'binary';
@@ -388,7 +400,8 @@ export function routeLaunchEnv(
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
   const prefsPath = config.prefsPath;
   const blocked = new Set<string>([...ROUTE_HOST_NAMES, ...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]);
-  const safeExtra = Object.fromEntries(Object.entries(extra).filter(([name]) => !blocked.has(name)));
+  const safeExtra = Object.fromEntries(Object.entries(extra)
+    .filter(([name]) => !blocked.has(name) && !ROUTE_PRIVATE_ENV_NAME.test(name)));
 
   return {
     ...safeExtra,
@@ -407,6 +420,11 @@ export function routeLaunchEnv(
     ...(config.deepseekRuntimeHome
       ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),
+    GRIGDESK_QWEN_BIN: config.qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen',
+    GRIGDESK_QWEN_HOME: config.qwenHome || process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || '',
+    GRIGDESK_QWEN_CONFIG_ROOT: root,
+    QWEN_CODE_SYSTEM_SETTINGS_PATH: process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH || '',
+    QWEN_CODE_SYSTEM_DEFAULTS_PATH: process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || '',
     HOME: process.env.HOME || '',
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
@@ -872,6 +890,12 @@ function detachedRouteEnv(
     delete inherited[name];
   }
 
+  for (const name of Object.keys(inherited)) {
+    if (ROUTE_PRIVATE_ENV_NAME.test(name)) {
+      delete inherited[name];
+    }
+  }
+
   return {
     ...inherited,
     ...env,
@@ -958,16 +982,51 @@ export async function spawnRouteEngine(config: RouteConfig, {
 
   // Секреты проверяются до записи descriptor и до регистрации юнита.
   try {
+    let participants = accessProviderIds;
+    const allowedSecrets: string[] = [...ROUTE_SECRET_NAMES];
+
     if (service) {
       const access = await preparePipelineAccess(service, config, String(task), args, accessProviderIds);
 
+      participants = access.providers;
       accessEnv = access.env;
+      allowedSecrets.push(...access.keys);
       environments = access.environments;
       accessKeys.push(...access.keys);
       rollback = access.rollback;
     }
 
-    secrets = routeSecrets(service ? accessEnv : process.env, [...ROUTE_SECRET_NAMES, ...accessKeys]);
+    // Старые вызовы без access service могут не иметь графа до запуска движка.
+    // В таком случае новые динамические ключи не выдаются, прежний запуск сохраняется.
+    participants ??= await routeProviders(config, String(task), args).catch(() => []);
+
+    const adapters = service ? await service.adaptersOf() : await getProviderAdapters();
+
+    // Все декларации очищаются из наследования; доставку получают только участники.
+    // Это сохраняет приватность ключа чужой карточки и исключает hostile extraEnv.
+    for (const adapter of adapters.values()) {
+      if (adapter.accessProfiles) {
+        continue;
+      }
+
+      const fields = await declaredCredentials(adapter, config);
+
+      for (const field of fields) {
+        if (field.kind !== 'secret' || ROUTE_HOST_NAMES.includes(field.env)
+          || ROUTE_WITHHELD_NAMES.includes(field.env)
+          || /^(?:NODE_|LD_|DYLD_|FACTORY_|GRIGDESK_)/.test(field.env)) {
+          continue;
+        }
+
+        accessKeys.push(field.env);
+
+        if (participants.includes(adapter.id)) {
+          allowedSecrets.push(field.env);
+        }
+      }
+    }
+
+    secrets = routeSecrets(service ? accessEnv : process.env, [...new Set(allowedSecrets)]);
   } catch (error) {
     await rollback();
 

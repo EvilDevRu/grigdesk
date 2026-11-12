@@ -382,5 +382,18 @@
       "DeepSeek",
       "ключ"
     ]
+  },
+  {
+    "file": "qwen.md",
+    "id": "qwen",
+    "title": "Подключить Qwen Code",
+    "section": "Разговоры",
+    "keywords": [
+      "qwen",
+      "исполнитель",
+      "API",
+      "modelProviders",
+      "модели"
+    ]
   }
 ]

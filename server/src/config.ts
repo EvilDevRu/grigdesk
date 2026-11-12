@@ -137,6 +137,9 @@ export const config = {
   // kimiLaunchMode: host — обычный хост-процесс с наследованием host config (как claude),
   // contained — server-owned contained ACP profile (bwrap + user systemd cgroup
   // + versioned HTTPS allowlist); host config/hooks/plugins/MCP runtime не наследует.
+  qwenBin: process.env.GRIGDESK_QWEN_BIN || 'qwen',
+  qwenHome: process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || path.join(home, '.qwen'),
+  qwenRuntimeHome: path.join(dataHome, 'qwen-runtime'),
   kimiLaunchMode,
   kimiBin: process.env.GRIGDESK_KIMI_BIN || 'kimi',
   kimiHome: process.env.GRIGDESK_KIMI_HOME

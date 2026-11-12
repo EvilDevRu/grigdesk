@@ -9,6 +9,7 @@ _runner_model_options() {
   catalog=$("runner_${provider}_catalog") || catalog=""
   case "$provider" in
     claude|codex) cli=$(factory_external_bin "$provider" "$provider") || return 4 ;;
+    qwen) cli=$(factory_external_bin qwen "${GRIGDESK_QWEN_BIN:-qwen}") || return 4 ;;
   esac
   factory_exec provider "$node" "$FACTORY_HOME/../server/scripts/factoryRunnerModels.mts" \
     "$provider" "$catalog" "$cli"
