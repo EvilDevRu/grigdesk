@@ -419,6 +419,16 @@
   "commandLine": "Command line",
   "developer": "Developer",
   "setupRequired": "Setup required",
+  "providerChatNotInstalled": "Not installed",
+  "providerChatInstallHint": "Install the provider on the Overview tab to start a conversation.",
+  "providerChatAccessHint": "Set up the connection on the Access tab, then click Recheck.",
+  "providerChatNoModels": "No models",
+  "providerChatNoModelsHint": "The model list is empty. Click Recheck. If no models appear, check the connection on the Access tab.",
+  "providerChatUnavailableHint": "The provider will appear in the chat model picker after setup succeeds and models are loaded.",
+  "providerChatConfigureAccess": "Configure access",
+  "providerAccessUnconfirmed": "Access changes could not be confirmed. Recheck the connection before entering them again.",
+  "providerAccessPending": "Save the connection",
+  "providerAccessPendingHint": "Click Apply to load models for the selected service. Until you save, Recheck uses the previous connection.",
   "installationIsAvailableConnectionToChatsIs": "Installation is available; connection to chats is not enabled yet.",
   "buildReady": "Build ready",
   "buildUnavailable": "Build unavailable",
@@ -743,7 +753,7 @@
   "parameterUnavailableReloadTheProviderRegistry": "Parameter unavailable; reload the provider registry",
   "fieldNoLongerAvailableRecheckTheRegistry": "Field no longer available; recheck the registry",
   "checkTheAccessFieldAndSelectedMode": "Check the access field and selected mode",
-  "keysSavedReloadTheProviderRegistry": "Keys saved; reload the provider registry",
+  "keysSavedReloadTheProviderRegistry": "Access saved. The provider list could not be refreshed. Click Recheck; you do not need to enter the key again.",
   "pipeline": "pipeline",
   "sandbox": "sandbox",
   "gate": "gate",
@@ -1227,9 +1237,47 @@
     "qwen": {
       "auth": {
         "configured": "API key configured.",
-        "missing": "Configure an API key."
+        "missing": "Configure an API key.",
+        "settingsFailed": "Qwen: model settings could not be read. Check the Qwen Code configuration.",
+        "incompatible": "Qwen Code is incompatible with GrigDesk. Update or reinstall Qwen Code on the Overview tab.",
+        "sandboxMissing": "Qwen: the required sandbox is unavailable. The Linux server needs bwrap installed.",
+        "catalogFailed": "Qwen Code could not load models. Click Recheck. If the error persists, update or reinstall Qwen Code on the Overview tab.",
+        "catalogEmpty": "Qwen Code returned no models. Check the service and key on the Access tab, then click Recheck."
       },
       "credentials": {
+        "GRIGDESK_QWEN_SERVICE": {
+          "label": "API service and region",
+          "hint": "Select the service that issued your key. The default is Alibaba Model Studio in Singapore.",
+          "options": {
+            "dashscope-intl": {
+              "label": "Alibaba Model Studio — Singapore (default)"
+            },
+            "dashscope-china": {
+              "label": "Alibaba Model Studio — China"
+            },
+            "dashscope-us": {
+              "label": "Alibaba Model Studio — US"
+            },
+            "qwencloud-intl": {
+              "label": "QwenCloud — Singapore"
+            },
+            "coding-intl": {
+              "label": "Alibaba Coding Plan — International",
+              "hint": "Alibaba Cloud subscription. For an Individual Plan on qwencloud.com, select QwenCloud Token Plan."
+            },
+            "coding-china": {
+              "label": "Alibaba Coding Plan — China",
+              "hint": "Alibaba Cloud subscription. For an Individual Plan on qwencloud.com, select QwenCloud Token Plan."
+            },
+            "qwencloud-token": {
+              "label": "QwenCloud Token Plan — Singapore",
+              "hint": "Individual Plan and Team Plan on qwencloud.com. Use the key from your QwenCloud account."
+            },
+            "openrouter": {
+              "label": "OpenRouter"
+            }
+          }
+        },
         "DASHSCOPE_API_KEY": {
           "label": "API key",
           "hint": "API key for the model service."
@@ -1413,7 +1461,8 @@
     },
     "qwen": {
       "guard": "Checked before each tool executes.",
-      "mcp": "MCP is provided by the server for each turn."
+      "mcp": "MCP is provided by the server for each turn.",
+      "quotaUnsupported": "Qwen quota retrieval is not yet supported in GrigDesk."
     }
   },
   "kimiDirectSshExtraConfirmation": "If contained mode later changes to host mode, the permission remains disabled.",

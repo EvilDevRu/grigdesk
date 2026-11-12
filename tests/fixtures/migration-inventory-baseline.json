@@ -807,6 +807,8 @@
       "tests/server/providers-settings-route.test.js",
       "tests/server/providers-update-schedule.test.js",
       "tests/server/providers-usage-tick.test.js",
+      "tests/server/qwen-native-tools.test.js",
+      "tests/server/qwen-tool-policy.test.js",
       "tests/server/relay-script.test.js",
       "tests/server/release-bundle-signing.test.js",
       "tests/server/release-channel.test.js",

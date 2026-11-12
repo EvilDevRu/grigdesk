@@ -673,7 +673,8 @@ export const useProvidersStore = defineStore('providers', {
     /**
      * Ключи доступа исполнителя (окно «Ключи доступа»): values — имя переменной → значение
      * или null для удаления. Сервер пишет их в корневой .env; каталог моделей он перечитывает
-     * в фоне и сообщает о нём событием providers-update, поэтому здесь refresh не нужен.
+     * в фоне и сообщает о нём событием providers-update. Несекретные choice из ACK
+     * возвращаются координатору, но не перезаписывают более новый снимок всего store.
      */
     async saveCredentials(providerId: string, values: Record<string, string | null>) {
       try {
@@ -693,7 +694,14 @@ export const useProvidersStore = defineStore('providers', {
 
         void this.invalidateCredentials(providerId);
 
-        return { ok: true };
+        const choices = Array.isArray(r.credentials) ? r.credentials.filter((field) => isRecord(field)
+          && field.kind === 'choice' && typeof field.env === 'string'
+          && (typeof field.value === 'string' || field.value === null)) : [];
+        const savedChoices: Record<string, string | null> = Object.fromEntries(
+          choices.map((field) => [field.env, field.value]),
+        );
+
+        return { ok: true, ...choices.length ? { savedChoices } : {} };
       } catch (e) {
         const result = classifyWriteError(e, uiLocale);
 

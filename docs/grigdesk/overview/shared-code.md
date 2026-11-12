@@ -73,7 +73,10 @@
 | Модуль | Назначение |
 |---|---|
 | `web/src/shared/providerModelSelect.ts` | Допуск доступного исполнителя и непрозрачные значения селекта; `ProviderModelSelect.vue` объединяет представление моделей чата, арбитра и плагинов |
-| `web/src/features/providers/providerLocale.ts:providerAvailability` | Общие доступность и подпись сервиса для мастера и настроек; отдельный чатовый допуск вызывает существующий селектор моделей |
+| `web/src/features/providers/providerLocale.ts:providerAvailability`, `providerChatReadiness` | Статус подключения и отдельная готовность чата по установке, доступу и моделям; настройки и подвал выбора модели используют общую проекцию |
+| `server/src/lib/qwen/modelMetadata.ts:qwenEffortOption` | Native-ступени выбранной модели, включая группы ACP и `default`; единый разбор для каталога и подтверждения усилия до prompt |
+| `server/src/lib/qwen/workspace.ts:resolveQwenWorkspace` | Общая для адаптера и runtime проверка физических рабочих корней Qwen, сортировка и удаление повторов, отказ корня внутри скрываемых `.env`/`.qwen` |
+| `server/src/lib/qwen/steps.ts:createQwenTextSteps` | Ограниченный буфер последовательных текстовых дельт, id смыслового блока и однократный flush при границе/выходе; общий `foldChatSteps` отображает legacy-дельты по capability адаптера |
 | `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts`, `browser/browserLimits.ts` | Безопасные defaults/URL, распознавание адресной строки и поиск, закрытые actions, provider-neutral tool schema и срок простоя агентских вкладок |
 | `plugins/providerUsageResources.ts` | Проверка JSON-ресурсов фонового плагина, безопасных ссылок и собственных переводов для всплывашки исполнителя |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |

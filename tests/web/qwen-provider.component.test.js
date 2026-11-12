@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { directSshSetting } from '../../server/src/lib/executors/_directSshPolicy.ts';
+import { qwenServiceCredential } from '../../server/src/lib/qwen/services.ts';
+import { providerUsageView } from '../../web/src/features/providers/providerUsage.ts';
 import { messages, translate } from '../../shared/i18n/catalogs.ts';
 import data from './fixtures/settings-modal/data.json' with { type: 'json' };
 import { i18nComponent } from './helpers/i18nComponent.js';
@@ -40,6 +42,12 @@ function qwenEntry() {
         label: 'CUSTOM_QWEN_ENDPOINT_KEY',
         set: false,
         inFile: false,
+      },
+      {
+        ...qwenServiceCredential(),
+        set: false,
+        inFile: false,
+        value: null,
       },
     ],
     models: [{ id: 'custom-model(openai)', name: 'Моя внешняя модель' }],
@@ -89,6 +97,7 @@ test('qwen-ru-en-metadata-and-credential-draft', async (t) => {
   assert.equal(input.element.value, '');
   assert.match(input.attributes('placeholder'), /6789/);
   await input.setValue('synthetic-private-draft');
+  await wrapper.get('select[aria-label="Сервис API и регион"]').setValue('qwencloud-intl');
   assert.equal(writes.length, 0);
   assert.equal(JSON.stringify(h.settings.$state).includes('synthetic-private-draft'), false);
   await h.module.localeAdapter.setUiLanguage('en');
@@ -101,18 +110,40 @@ test('qwen-ru-en-metadata-and-credential-draft', async (t) => {
   assert.doesNotMatch(english.authLabel, /[А-Яа-яЁё]/);
   assert.doesNotMatch(english.credentials[0].label, /[А-Яа-яЁё]/);
   assert.equal(english.credentials[1].label, 'CUSTOM_QWEN_ENDPOINT_KEY');
+  assert.equal(english.credentials[2].label, 'API service and region');
+  assert.doesNotMatch(english.credentials[2].hint, /[А-Яа-яЁё]/);
+  assert.ok(english.credentials[2].options.every((option) => !/[А-Яа-яЁё]/u.test(option.label)));
+
+  const planHint = english.credentials[2].options.find((option) => option.value === 'qwencloud-token').hint;
+
+  assert.match(planHint, /Individual Plan.*qwencloud.com/);
+  assert.doesNotMatch(planHint, /[А-Яа-яЁё]/u);
+  assert.equal(wrapper.get('select[aria-label="API service and region"]').element.value,
+    'qwencloud-intl', 'Смена языка сохраняет выбранный сервис');
   assert.equal(english.models[0].name, 'Моя внешняя модель');
   assert.equal(wrapper.get(`[aria-label="${english.credentials[0].label}"]`).element.value,
     'synthetic-private-draft', 'Смена языка сохраняет приватный draft');
   await h.settings.apply();
-  assert.equal(h.settings.snapshot.dirtyCount, 1);
+  assert.equal(h.settings.snapshot.dirtyCount, 2);
   assert.match(wrapper.text(), /fixture refusal/);
   rejectApply = false;
   await h.settings.apply();
-  assert.deepEqual(writes.at(-1), { values: { DASHSCOPE_API_KEY: 'synthetic-private-draft' } });
+  assert.deepEqual(writes.at(-1), { values: {
+    DASHSCOPE_API_KEY: 'synthetic-private-draft',
+    GRIGDESK_QWEN_SERVICE: 'qwencloud-intl',
+  } });
   await h.module.localeAdapter.setUiLanguage('ru');
   await h.flushPromises();
   assert.equal(entry.credentials[1].label, 'CUSTOM_QWEN_ENDPOINT_KEY');
   h.settings.dispose();
   assert.equal(h.settings.getValue('providerCredentials:qwen', 'DASHSCOPE_API_KEY'), undefined);
+});
+
+test('qwen-quota-message-describes-integration-support-in-both-languages', () => {
+  const message = messages.ru.settings.builtinProviderText.qwen.quotaUnsupported;
+  const view = providerUsageView({ state: 'unsupported', message }, { id: 'qwen' }, 'en');
+
+  assert.equal(view.message, messages.en.settings.builtinProviderText.qwen.quotaUnsupported);
+  assert.deepEqual(view.bars, []);
+  assert.doesNotMatch(view.message, /CLI/);
 });

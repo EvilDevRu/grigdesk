@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import qwen from '../src/lib/executors/qwen.ts';
 import { externalCliAdapter } from '../src/lib/providerInstall/externalCliAdapter.ts';
 import { createQwenFactoryStatus } from '../src/lib/qwen/factoryStatus.ts';
-import { readQwenSnapshot } from '../src/lib/qwen/settings.ts';
+import { resolveQwenSnapshot } from '../src/lib/qwen/discovery.ts';
 import { record } from '../src/lib/qwen/transport.ts';
 import {
   emitRunnerEvent,
@@ -45,7 +45,7 @@ async function metadata(argv: readonly string[], env: NodeJS.ProcessEnv): Promis
   const entries = Array.isArray(discovered) ? discovered.map(record) : [];
 
   if (!entries?.length) {
-    throw new Error(`${LABEL}: каталог моделей недоступен, настройте modelProviders`);
+    throw new Error(`${LABEL}: каталог моделей недоступен, проверьте доступ в карточке Qwen`);
   }
 
   if (mode === 'options') {
@@ -104,11 +104,11 @@ export async function runQwenFactory(argv = process.argv.slice(2), env = process
   }
 
   const config = { ...runnerConfig(args.bin, env), qwenRuntimeHome: args.runtimeHome };
-  const snapshot = readQwenSnapshot(config);
+  const snapshot = await resolveQwenSnapshot(config);
   const model = required('--model');
 
   if (!snapshot.models.some((entry) => entry.id === model)) {
-    throw new Error(`${LABEL}: модель отсутствует в modelProviders`);
+    throw new Error(`${LABEL}: модель отсутствует в каталоге Qwen`);
   }
 
   const prompt = await readRunnerPrompt(args.promptFile, LABEL);

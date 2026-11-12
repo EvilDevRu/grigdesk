@@ -1557,6 +1557,15 @@
       "owner": "task-1",
       "fate": "helper",
       "detail": "Qwen host-wrapper: исходный и упакованный helper используют один runtime и ACP launcher."
+    },
+    {
+      "file": "server/src/lib/qwen/settings.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "qwen-native-tools",
+      "fate": "helper",
+      "detail": "Проверка ffmpeg/ffprobe использует каталог текущего Node из PATH песочницы; исходный и упакованный Qwen helper выполняют её одинаково."
     }
   ],
   "resources": [

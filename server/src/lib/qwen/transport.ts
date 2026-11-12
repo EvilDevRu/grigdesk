@@ -17,11 +17,6 @@ export async function openQwenTransport(
   handlers: Parameters<typeof createAcpClient>[1] = {},
 ) {
   const sandbox = await startQwenSandbox(config, snapshot, options);
-  let stderr = '';
-
-  sandbox.child.stderr?.on('data', (part: Buffer) => {
-    stderr = (stderr + part.toString()).slice(-8192);
-  });
 
   const client = createAcpClient(sandbox.child, { requestTimeoutMs: 30000, ...handlers });
 
@@ -40,7 +35,7 @@ export async function openQwenTransport(
 
     return {
       client,
-      stderr: () => stderr,
+      stderr: sandbox.stderr,
       async close() {
         client.close();
         await sandbox.close();
@@ -50,7 +45,7 @@ export async function openQwenTransport(
     client.close();
     await sandbox.close();
 
-    const reason = `${String((error as Error).message)} ${stderr}`.trim();
+    const reason = `${String((error as Error).message)} ${sandbox.stderr()}`.trim();
 
     throw new Error(redactRunnerError(reason, snapshot.envKeys.map((key) => process.env[key])));
   }

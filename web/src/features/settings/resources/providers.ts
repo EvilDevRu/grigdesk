@@ -22,6 +22,7 @@ export interface ProviderWriteOutcome {
   status?: number;
   error?: string;
   serverValue?: JsonValue;
+  savedChoices?: Record<string, string | null>;
 }
 
 export interface ProviderStorePort {
@@ -374,8 +375,8 @@ function credentialConfirmed(
 }
 
 /**
- * Ключи отправляются одним запросом только из памяти сессии, без отдельного editor draft.
- * Реестр перечитывается до следующих ресурсов этого исполнителя, включая unknown readback.
+ * ACK выбора подтверждает запись независимо от холодного снимка фонового реестра.
+ * Секреты подтверждаются без возврата значений; отказ чтения не заставляет отправлять их повторно.
  */
 export function createProviderCredentialsAdapter(
   id: string,
@@ -392,7 +393,7 @@ export function createProviderCredentialsAdapter(
     chain: `provider:${id}`,
     order: 100,
     sortKey: [id, '0-credentials'],
-    body: 'patch',
+    body: 'per-field',
     supportsUnset: false,
     async read() {
       if (!store.loaded) {
@@ -452,25 +453,30 @@ export function createProviderCredentialsAdapter(
 
       const after = store.providers.find((entry) => entry.id === id)?.credentials ?? [];
       const fields: FieldResult[] = [...intents].map(([key, intent]) => {
+        const original = before.find((entry) => entry.env === key);
         const field = after.find((entry) => entry.env === key);
-        const confirmed = result.ok
-          || credentialConfirmed(before.find((entry) => entry.env === key), field, intent);
+        const confirmed = result.ok || credentialConfirmed(original, field, intent);
+        const savedValue = result.savedChoices?.[key];
+        const changed = field?.value !== original?.value;
+        const currentValue = typeof field?.value === 'string'
+          || savedValue !== undefined && field?.value === null && changed;
+        const serverValue = registry.ok && field?.kind === 'choice' && currentValue
+          && (savedValue === undefined || changed) ? field.value : savedValue;
+        const choice = original?.kind === 'choice';
 
         return {
           key,
-          status: confirmed ? 'success' : 'unknown',
-          ...confirmed && registry.ok && field?.kind === 'choice' && typeof field.value === 'string'
-            ? { serverValue: field.value } : {},
+          status: confirmed && (!choice || serverValue !== undefined) ? 'success' : 'unknown',
+          ...confirmed && serverValue !== undefined ? { serverValue } : {},
         };
       });
+      const unknown = fields.some((field) => field.status !== 'success');
 
       return {
-        status: fields.some((field) => field.status !== 'success') ? 'unknown'
-          : registry.ok ? 'success' : 'failed',
+        status: unknown ? 'unknown' : registry.ok ? 'success' : 'failed',
         fields,
-        ...registry.ok ? {} : {
-          message: registry.message || messageText("settings.keysSavedReloadTheProviderRegistry"),
-        },
+        ...unknown ? { message: messageText('settings.providerAccessUnconfirmed') }
+          : registry.ok ? {} : { message: messageText('settings.keysSavedReloadTheProviderRegistry') },
       };
     },
   };

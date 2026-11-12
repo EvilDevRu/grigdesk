@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { currentExternalCliProcess } from '../providerInstall/externalCliProcess.ts';
 import { acquireCliLease } from '../providerInstall/leases.ts';
+import { redactRunnerError } from '../factoryProviderRunner.ts';
 import { qwenConfig, type QwenSnapshot } from './settings.ts';
 
 export interface QwenMcpServer {
@@ -35,11 +36,12 @@ async function packageRoot(file: string): Promise<string> {
 }
 
 /**
- * Пустая файловая система даёт процессу одну writable папку и свой durable home.
+ * Пустая файловая система даёт процессу выбранные writable корни и свой durable home.
  * Ambient settings, hooks и .env проекта перекрываются server-owned снимком до запуска CLI.
  */
 export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnapshot, options: {
   cwd: string;
+  extraDirs?: readonly string[];
   home: string;
   authType: string;
   mode: string;
@@ -49,6 +51,7 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
   const config = qwenConfig(configValue);
   const context = currentExternalCliProcess();
   const bwrap = process.env.GRIGDESK_QWEN_BWRAP_BIN || '/usr/bin/bwrap';
+  const workspaceRoots = [options.cwd, ...options.extraDirs || []];
 
   if (process.platform !== 'linux') {
     throw new Error('Qwen: требуется Linux и песочница bwrap');
@@ -71,6 +74,8 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
     mode: 'reader',
   });
   let child: ChildProcess | undefined;
+  let closed: Promise<void> | undefined;
+  let stderr = '';
   const placeholders: Array<{
     file: string;
     ino: number;
@@ -112,36 +117,45 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
     await fs.mkdir(qwenHome, { recursive: true, mode: 0o700 });
     await fs.mkdir(empty);
     await fs.mkdir(temp);
-    await fs.writeFile(safeSettings, JSON.stringify(snapshot.settings), { mode: 0o400 });
+
+    const settings = {
+      ...snapshot.settings,
+      context: { includeDirectories: options.extraDirs || [] },
+    };
+
+    await fs.writeFile(safeSettings, JSON.stringify(settings), { mode: 0o400 });
     await fs.writeFile(path.join(privateDir, 'empty.json'), '{}', { mode: 0o400 });
-    await fs.writeFile(path.join(qwenHome, 'settings.json'), JSON.stringify(snapshot.settings), {
+    await fs.writeFile(path.join(qwenHome, 'settings.json'), JSON.stringify(settings), {
       mode: 0o600,
     });
 
-    for (const [name, directory] of [['.qwen', true], ['.env', false]] as const) {
-      const file = path.join(options.cwd, name);
+    for (const root of workspaceRoots) {
+      for (const [name, directory] of [['.qwen', true], ['.env', false]] as const) {
+        const file = path.join(root, name);
 
-      try {
-        if (directory) {
-          await fs.mkdir(file, { mode: 0o700 });
-        } else {
-          await fs.writeFile(file, '', { mode: 0o600, flag: 'wx' });
-        }
+        try {
+          if (directory) {
+            await fs.mkdir(file, { mode: 0o700 });
+          } else {
+            await fs.writeFile(file, '', { mode: 0o600, flag: 'wx' });
+          }
 
-        placeholders.push({
-          file,
-          directory,
-          ino: (await fs.lstat(file)).ino,
-        });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-          throw error;
+          placeholders.push({
+            file,
+            directory,
+            ino: (await fs.lstat(file)).ino,
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+            throw error;
+          }
         }
       }
     }
 
     const bin = await fs.realpath(context.executable);
     const node = await fs.realpath(process.execPath);
+    const cliRoot = await packageRoot(bin);
     const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-ipc',
       '--unshare-uts', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
     const mounted = new Set<string>();
@@ -162,23 +176,59 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
       mounted.add(target);
     };
 
+    // Системные alternatives и кэш загрузчика нужны зависимостям ffmpeg/ffprobe.
+    // Монтируются публичные системные данные, а не весь /etc с настройками хоста.
     for (const file of ['/usr', '/bin', '/lib', '/lib64', '/etc/ssl', '/etc/resolv.conf',
-      '/etc/hosts', '/etc/nsswitch.conf', '/etc/passwd', '/etc/group']) {
+      '/etc/hosts', '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
+      '/etc/alternatives', '/etc/ld.so.cache']) {
       await bind(file);
     }
 
     await bind(path.dirname(node));
-    await bind(await packageRoot(bin));
+    await bind(cliRoot);
 
     for (const root of options.readonlyRoots || []) {
       await bind(root);
     }
 
-    await bind(options.cwd, options.cwd, true);
+    for (const root of [...workspaceRoots].sort((left, right) => left.length - right.length)) {
+      await bind(root, root, true);
+    }
+
     await bind(options.home, options.home, true);
     await bind(privateDir);
-    await bind(empty, path.join(options.cwd, '.qwen'));
-    await bind(path.join(privateDir, 'empty.json'), path.join(options.cwd, '.env'));
+    // Bind mount следует за ссылкой назначения: её цель тоже должна существовать
+    // внутри пустой ФС. Подготавливаем пустую цель, не монтируя секретный исходный файл.
+    for (const root of workspaceRoots) {
+      for (const [name, source] of [
+        ['.qwen', empty],
+        ['.env', path.join(privateDir, 'empty.json')],
+      ] as const) {
+        const file = path.join(root, name);
+        const entry = await fs.lstat(file);
+
+        if (entry.isSymbolicLink()) {
+          const target = path.resolve(path.dirname(file), await fs.readlink(file));
+          const protectedRoots = [...workspaceRoots, options.home, privateDir, path.dirname(node),
+            cliRoot, '/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'];
+
+          if (target === path.parse(target).root
+            || protectedRoots.some((directory) => directory === target
+              || directory.startsWith(`${target}/`))) {
+            throw new Error(`Qwen: ссылка ${name} перекрывает рабочую папку или служебный каталог.`);
+          }
+
+          if (workspaceRoots.some((directory) => target.startsWith(`${directory}/`))
+            && !await fs.lstat(target).catch(() => null)) {
+            throw new Error(`Qwen: цель ссылки ${name} отсутствует внутри рабочей папки.`);
+          }
+
+          args.push('--ro-bind', source, target);
+        } else {
+          args.push('--ro-bind', source, file);
+        }
+      }
+    }
 
     // Сервер передаёт только явно выданные MCP. Скрипты и UDS доступны на чтение;
     // остальные папки данных и канал управления Factory в песочницу не попадают.
@@ -232,9 +282,14 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
     });
 
     const owned = child;
-    const closed = new Promise<void>((resolve) => {
+    const exited = new Promise<void>((resolve) => {
       owned.once('close', () => resolve());
       owned.once('error', () => resolve());
+    });
+
+    closed = exited;
+    owned.stderr?.on('data', (part: Buffer) => {
+      stderr = (stderr + part.toString()).slice(-8192);
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -247,6 +302,7 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
     return {
       child: owned,
       nonce,
+      stderr: () => stderr,
       /**
        * Завершается только собственная группа; reader снимается после reaping.
        * Уборка точек монтирования не затрагивает чужие файлы рабочей папки.
@@ -266,7 +322,7 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
           }
         }, 500);
 
-        await closed;
+        await exited;
         clearTimeout(timer);
         await lease.release();
         await cleanup();
@@ -274,9 +330,12 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
     };
   } catch (error) {
     child?.kill('SIGKILL');
+    await closed;
     await lease.release();
     await cleanup();
 
-    throw error;
+    const reason = stderr ? `Qwen: не удалось запустить песочницу. ${stderr.trim()}` : error;
+
+    throw new Error(redactRunnerError(reason, snapshot.envKeys.map((key) => process.env[key])));
   }
 }

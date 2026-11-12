@@ -52,7 +52,16 @@
     <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/glm-light.svg">
     <img src="docs/images/integrations/glm.svg" width="164" height="48" alt="Z.ai (GLM)">
   </picture>
+  <a href="docs/grigdesk/guide/qwen.md">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/qwen-light.svg">
+      <img src="docs/images/integrations/qwen.svg" width="164" height="48" alt="Qwen Code">
+    </picture>
+  </a>
 </p>
+
+Qwen Code supports chats and pipeline stages, with models discovered from your configured API service.
+[Set up Qwen Code](docs/grigdesk/guide/qwen.md).
 
 <p>
   <strong>Task boards</strong><br>

@@ -5,10 +5,11 @@ import type { ExecutorAdapter } from './index.ts';
 import { npmInstallCommand } from '../providerInstall/commands.ts';
 import { npmLatest } from './_npmLatest.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
-import { validateWorkdirPath } from '../chat/workdir.ts';
+import { resolveQwenWorkspace } from '../qwen/workspace.ts';
 import { qwenBin, readQwenSnapshot, qwenCredentials } from '../qwen/settings.ts';
-import { projectQwenModels, qwenCatalog } from '../qwen/catalog.ts';
+import { projectQwenModels, qwenCatalog, qwenCatalogError } from '../qwen/catalog.ts';
 import { runQwenTurn } from '../qwen/runtime.ts';
+import { qwenDiscoveryError } from '../qwen/discovery.ts';
 
 const execute = promisify(execFile);
 const binding = {
@@ -49,24 +50,48 @@ const adapter: ExecutorAdapter = {
     }
   },
   /**
-   * Наличие ключа — локальная готовность, а не обещание оплаченной квоты.
-   * Сеть и OAuth карточка не запускает; реальный отказ API возвращается ходом.
+   * Наличие ключа не отменяет известный отказ загрузки моделей этого доступа.
+   * Карточка читает последний результат каталога, не запуская сеть или OAuth повторно.
    */
   auth(config) {
     const fields = qwenCredentials(config);
-    const available = fields.some((field) => Boolean(process.env[field.env]));
+    const available = fields.some((field) => field.kind === 'secret' && Boolean(process.env[field.env]));
+    const error = available ? qwenDiscoveryError(config) || qwenCatalogError(config) : undefined;
 
     return {
       mode: 'api-key',
-      label: available ? 'Ключ API настроен.' : 'Настройте API-ключ.',
-      available,
+      label: error || (available ? 'Ключ API настроен.' : 'Настройте API-ключ.'),
+      available: available && !error,
     };
   },
   credentials: qwenCredentials,
   latestVersion: () => npmLatest('@qwen-code/qwen-code'),
+  usage: () => ({
+    state: 'unsupported',
+    message: 'Получение квот Qwen пока не поддерживается в GrigDesk.',
+  }),
   catalogLive: true,
+  legacyTextStepDeltas: true,
+  inTurnInput: {
+    protocol: 1,
+    text: true,
+    confirmation: 'forwarded',
+  },
   catalog: qwenCatalog,
-  catalogCacheKey: (config) => readQwenSnapshot(config).fingerprint,
+  catalogCacheKey: (config) => `${readQwenSnapshot(config).fingerprint}:native-model-options-v1`,
+  /**
+   * Смена автоматического сервиса или ключа снимает каталог прежнего доступа.
+   * Явный источник CLI сохраняет прежнее поведение при пустом или повреждённом JSON.
+   */
+  catalogAccessScope: (config) => {
+    try {
+      const source = readQwenSnapshot(config);
+
+      return source.automatic ? source.fingerprint : 'configured';
+    } catch {
+      return 'configured';
+    }
+  },
   /**
    * Начальный список использует только существующий локальный источник.
    * Повреждённый или пустой конфиг не заменяется выдуманными моделями.
@@ -79,17 +104,15 @@ const adapter: ExecutorAdapter = {
     }
   },
   workToolsTransport: 'mcp',
-  workdir: { switch: 'reseed', roots: 'single' },
+  workdir: { switch: 'reseed', roots: 'multi' },
   /**
-   * Дополнительная writable папка не обещается поверх одно-корневой песочницы.
-   * Основной путь проходит общую физическую проверку до любого запуска.
+   * Дополнительные корни становятся workspace CLI и writable mounts одной песочницы.
+   * Общая проверка путей применяется до смены памяти и повторяется при прямом запуске.
    */
   async validateWorkdir({ cwd, extraDirs }) {
-    await validateWorkdirPath(cwd);
+    const workspace = await resolveQwenWorkspace(cwd, extraDirs);
 
-    return extraDirs.length
-      ? { extraDirs: [], error: 'Qwen: поддерживается одна рабочая папка' }
-      : { extraDirs: [] };
+    return { extraDirs: workspace.extraDirs };
   },
   directSshPolicy: () => ({ enforcement: 'command-hook', note: 'Проверка перед исполнением инструмента.' }),
   settings: () => [directSshSetting()],

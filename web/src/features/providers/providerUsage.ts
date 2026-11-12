@@ -1,8 +1,11 @@
 import { intlLocale } from '../../../../shared/i18n/formats.ts';
-import { type LocaleSource, localeTranslator, translator } from '../../../../shared/i18n/catalogs.ts';
+import {
+  type LocaleSource, localeTranslator, resolveLocaleText, translator,
+} from '../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { localizeUsageAmount, localizeUsageResourceText } from './usageResourceText.ts';
 import { localizeProviderAction } from './providerLocale.ts';
+import { providerMetadataMessage } from '../settings/metadataLocale.ts';
 import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 import { localizeProviderPluginResource } from '../../../../shared/plugins/providerUsageResources.ts';
 
@@ -290,7 +293,8 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
       .map((bar) => localizeUsageBar(provider.id, bar, locale))),
     resources: (Array.isArray(entry.resources) ? entry.resources : [])
       .map((resource) => localizeUsageResource(provider.id!, resource, locale)),
-    message: entry.message || fallback,
+    message: resolveLocaleText(providerMetadataMessage(provider.id || '', entry.message || fallback, locale),
+      locale),
     tone,
     action: entry.action ? localizeProviderAction(provider.id!, entry.action, locale) : null,
   };

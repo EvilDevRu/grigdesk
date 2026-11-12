@@ -419,6 +419,16 @@
   "commandLine": "Командная строка",
   "developer": "Разработчик",
   "setupRequired": "Требуется настройка",
+  "providerChatNotInstalled": "Не установлен",
+  "providerChatInstallHint": "Установите исполнителя на вкладке «Обзор», чтобы начать разговор.",
+  "providerChatAccessHint": "Настройте подключение на вкладке «Доступ», затем нажмите «Перепроверить».",
+  "providerChatNoModels": "Нет моделей",
+  "providerChatNoModelsHint": "Список моделей пуст. Нажмите «Перепроверить». Если модели не появились, проверьте подключение на вкладке «Доступ».",
+  "providerChatUnavailableHint": "Исполнитель появится в выборе модели чата после успешной настройки и загрузки моделей.",
+  "providerChatConfigureAccess": "Настроить доступ",
+  "providerAccessUnconfirmed": "Не удалось подтвердить сохранение доступа. Перепроверьте подключение перед повторным вводом.",
+  "providerAccessPending": "Сохраните подключение",
+  "providerAccessPendingHint": "Нажмите «Применить», чтобы загрузить модели выбранного сервиса. До сохранения «Перепроверить» использует прежнее подключение.",
   "installationIsAvailableConnectionToChatsIs": "Установка доступна; подключение к чатам пока не включено.",
   "buildReady": "Сборка готова",
   "buildUnavailable": "Сборка недоступна",
@@ -743,7 +753,7 @@
   "parameterUnavailableReloadTheProviderRegistry": "Параметр недоступен; перечитайте реестр исполнителя",
   "fieldNoLongerAvailableRecheckTheRegistry": "Поле больше недоступно; перепроверьте реестр",
   "checkTheAccessFieldAndSelectedMode": "Проверьте поле доступа и выбранный режим",
-  "keysSavedReloadTheProviderRegistry": "Ключи сохранены; перечитайте реестр исполнителя",
+  "keysSavedReloadTheProviderRegistry": "Доступ сохранён. Не удалось обновить список исполнителей. Нажмите «Перепроверить»; повторно вводить ключ не нужно.",
   "pipeline": "конвейер",
   "sandbox": "песочница",
   "gate": "ворота",
@@ -1227,9 +1237,47 @@
     "qwen": {
       "auth": {
         "configured": "Ключ API настроен.",
-        "missing": "Настройте API-ключ."
+        "missing": "Настройте API-ключ.",
+        "settingsFailed": "Qwen: не удалось прочитать настройки моделей. Проверьте конфигурацию Qwen Code.",
+        "incompatible": "Qwen Code несовместим с GrigDesk. Обновите или переустановите Qwen Code в разделе «Обзор».",
+        "sandboxMissing": "Qwen: недоступна песочница для запуска. На сервере Linux требуется установленный bwrap.",
+        "catalogFailed": "Qwen Code не смог загрузить модели. Нажмите «Перепроверить». Если ошибка повторится, обновите или переустановите Qwen Code в разделе «Обзор».",
+        "catalogEmpty": "Qwen Code не вернул модели. Проверьте сервис и ключ на вкладке «Доступ», затем нажмите «Перепроверить»."
       },
       "credentials": {
+        "GRIGDESK_QWEN_SERVICE": {
+          "label": "Сервис API и регион",
+          "hint": "Выберите сервис, выдавший ключ. Без выбора используется Alibaba Model Studio в Сингапуре.",
+          "options": {
+            "dashscope-intl": {
+              "label": "Alibaba Model Studio — Сингапур (по умолчанию)"
+            },
+            "dashscope-china": {
+              "label": "Alibaba Model Studio — Китай"
+            },
+            "dashscope-us": {
+              "label": "Alibaba Model Studio — США"
+            },
+            "qwencloud-intl": {
+              "label": "QwenCloud — Сингапур"
+            },
+            "coding-intl": {
+              "label": "Alibaba Coding Plan — международный",
+              "hint": "Подписка Alibaba Cloud. Для Individual Plan на qwencloud.com выберите QwenCloud Token Plan."
+            },
+            "coding-china": {
+              "label": "Alibaba Coding Plan — Китай",
+              "hint": "Подписка Alibaba Cloud. Для Individual Plan на qwencloud.com выберите QwenCloud Token Plan."
+            },
+            "qwencloud-token": {
+              "label": "QwenCloud Token Plan — Сингапур",
+              "hint": "Individual Plan и Team Plan на qwencloud.com. Используйте ключ из кабинета QwenCloud."
+            },
+            "openrouter": {
+              "label": "OpenRouter"
+            }
+          }
+        },
         "DASHSCOPE_API_KEY": {
           "label": "Ключ API",
           "hint": "Ключ API сервиса модели."
@@ -1413,7 +1461,8 @@
     },
     "qwen": {
       "guard": "Проверка перед исполнением инструмента.",
-      "mcp": "MCP выдаётся сервером для каждого хода."
+      "mcp": "MCP выдаётся сервером для каждого хода.",
+      "quotaUnsupported": "Получение квот Qwen пока не поддерживается в GrigDesk."
     }
   },
   "kimiDirectSshExtraConfirmation": "При будущей смене contained на host разрешение останется снятым.",

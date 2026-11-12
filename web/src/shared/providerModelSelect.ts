@@ -1,7 +1,8 @@
 import type { ProviderEntry } from '../../../shared/chat/providersContracts.ts';
 
 export type ModelSelectProvider = Pick<ProviderEntry,
-  'id' | 'name' | 'color' | 'available' | 'chatEnabled' | 'models'>;
+  'id' | 'name' | 'color' | 'available' | 'chatEnabled' | 'models'
+  | 'installed' | 'type' | 'kind' | 'authLabel'>;
 export type ModelSelectValueFormat = 'id' | 'modelRef';
 
 /**

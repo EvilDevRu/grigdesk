@@ -87,6 +87,9 @@ test('qwen-runner-model-options-refresh', async (t) => {
 test('qwen-secrets-systemd-and-detached', async (t) => {
   for (const [systemd, service] of [[true, true], [false, true], [true, false], [false, false]]) {
     const fixture = await qwenRouteFixture(t, systemd, { service });
+
+    process.env.GRIGDESK_QWEN_SERVICE = 'qwencloud-intl';
+
     const result = await spawnRouteEngine(fixture.config, {
       task: 77,
       args: ['route', 'start', '77'],
@@ -96,6 +99,7 @@ test('qwen-secrets-systemd-and-detached', async (t) => {
         SECOND_QWEN_KEY: 'hostile-key',
         UNRELATED_QWEN_KEY: 'foreign-key-must-not-leak',
         GRIGDESK_QWEN_BIN: '/evil/qwen',
+        GRIGDESK_QWEN_SERVICE: 'openrouter',
       },
     });
 
@@ -112,6 +116,7 @@ test('qwen-secrets-systemd-and-detached', async (t) => {
     assert.equal(captured.env.UNRELATED_QWEN_KEY, undefined);
     assert.equal(captured.env.GRIGDESK_QWEN_BIN, fixture.bin);
     assert.equal(captured.env.GRIGDESK_QWEN_HOME, fixture.qwenHome);
+    assert.equal(captured.env.GRIGDESK_QWEN_SERVICE, 'qwencloud-intl');
 
     const output = await routePublicOutput(fixture, result);
 

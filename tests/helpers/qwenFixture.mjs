@@ -315,15 +315,32 @@ const notify = (update) => send({ method: 'session/update', params: { sessionId,
 const settingsPath = path.join(process.env.QWEN_HOME || process.env.GRIGDESK_QWEN_HOME, 'settings.json');
 const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
 const availableModels = Object.entries(settings.modelProviders || {}).flatMap(([authType, entries]) =>
-  entries.map((entry) => ({ modelId: entry.id + '(' + authType + ')', name: entry.name || entry.id })));
+  entries.map((entry) => ({ modelId: entry.id + '(' + authType + ')', name: entry.name || entry.id,
+    _meta: { contextLimit: options.metadata?.[entry.id + '(' + authType + ')']?.context } })));
 const models = { availableModels, currentModelId: availableModels[0]?.modelId };
-const modes = { currentModeId: 'default', availableModes: ['default', 'plan', 'yolo'].map((id) =>
+const modes = { currentModeId: 'default', availableModes: (options.modes ||
+  ['default', 'auto', 'plan', 'yolo']).map((id) =>
   ({ id, name: id })) };
 let sessionId = '11111111-2222-4333-8444-555555555555';
 let prompt = null;
 let reverse = null;
 let count = 0;
 let statusServer;
+let effort = '';
+// Metadata меняется вместе с выбранной моделью, как у настоящего ACP.
+// Общий список уровней намеренно не подставляется неизвестной модели.
+const configOptions = () => {
+  if (!options.metadata) {
+    return undefined;
+  }
+  const profile = options.metadata[models.currentModelId];
+  return [{ id: 'model', type: 'select', currentValue: models.currentModelId,
+    options: availableModels.map((model) => ({ value: model.modelId })) },
+    ...(profile?.efforts ? [{ id: 'reasoning_effort', type: 'select',
+      currentValue: effort || profile.defaultEffort || profile.efforts[0],
+      _meta: { 'qwenCode/reasoning': { defaultEffort: profile.defaultEffort } },
+      options: profile.efforts.map((value) => ({ value })) }] : [])];
+};
 const instance = randomUUID();
 log({ event: 'spawn', instance, argv: process.argv.slice(2), cwd: process.cwd() });
 const lines = readline.createInterface({ input: process.stdin });
@@ -341,18 +358,56 @@ lines.on('line', (line) => {
     reply(frame.id, { protocolVersion: 1, agentCapabilities: { loadSession: true },
       agentInfo: { name: 'qwen-code', version: '0.27.2' },
       _meta: options.noAck ? {} : { 'qwen-code/external-tool-guard-ready': 'required-v1' } });
+  } else if (frame.method === 'craft/midTurnSendNow') {
+    if (options.midTurnError) {
+      send({ id: frame.id, error: { code: -32601, message: 'synthetic unsupported send-now' } });
+      return;
+    }
+    reply(frame.id, {});
+    send({ id: 'foreign-mid-turn-drain', method: 'craft/drainMidTurnQueue', params: {
+      sessionId, promptId: 'foreign-prompt',
+    } });
+  } else if (frame.id === 'foreign-mid-turn-drain') {
+    log({ event: 'foreign-drain', result: frame.result });
+    send({ id: 'mid-turn-drain', method: 'craft/drainMidTurnQueue', params: {
+      sessionId, promptId: prompt.params._meta?.['qwen-code/invocation']?.promptId,
+    } });
+  } else if (frame.id === 'mid-turn-drain') {
+    log({ event: 'mid-turn-drain', result: frame.result });
+    finish();
   } else if (frame.method === 'session/new' || frame.method === 'session/load') {
     sessionId = frame.params.sessionId || sessionId;
     statusServer = frame.params.mcpServers?.find((server) => server.name === 'factory-status');
     if (frame.method === 'session/load') {
       notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'OLD_REPLAY' } });
     }
-    reply(frame.id, { sessionId, models, modes });
+    reply(frame.id, { sessionId, models, modes, configOptions: configOptions() });
+  } else if (frame.method === 'session/set_config_option') {
+    if (frame.params.configId === 'model') {
+      models.currentModelId = frame.params.value;
+      effort = '';
+    } else if (frame.params.configId === 'reasoning_effort' && !options.unconfirmedEffort) {
+      effort = frame.params.value === 'default' ? '' : frame.params.value;
+    }
+    reply(frame.id, { configOptions: configOptions() });
   } else if (frame.method === 'session/set_model' || frame.method === 'session/set_mode') {
+    if (frame.method === 'session/set_model' && options.modelUpdate) {
+      send({ method: 'qwen/notify/session/model-update', params: {
+        sessionId: options.foreignModelUpdate ? 'foreign-session' : sessionId,
+        currentModelId: options.modelUpdate,
+      } });
+    }
     reply(frame.id, {});
   } else if (frame.method === 'session/prompt') {
     prompt = frame;
     count += 1;
+    for (const file of options.readMasks || []) {
+      try {
+        log({ event: 'mask', file, text: readFileSync(file, 'utf8') });
+      } catch (error) {
+        log({ event: 'mask', file, code: error.code });
+      }
+    }
     if (options.bounds) {
       for (const file of options.bounds.allowed) {
         writeFileSync(file, 'allowed');
@@ -440,8 +495,16 @@ async function finish() {
   if (options.status) {
     await publishStatus();
   }
-  notify({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Думаю' } });
-  notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Новый ответ' } });
+  for (const update of options.stream || [
+    { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Думаю' } },
+    { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Новый ответ' } },
+  ]) {
+    notify(update);
+  }
+  if (options.streamError) {
+    send({ id: prompt.id, error: { code: -32001, message: 'synthetic stream failure' } });
+    return;
+  }
   reply(prompt.id, { stopReason: 'end_turn' });
 }
 async function publishStatus() {

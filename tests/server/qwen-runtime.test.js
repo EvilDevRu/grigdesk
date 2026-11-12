@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
 import { acquireCliLease, inspectCliLeases } from '../../server/src/lib/providerInstall/leases.ts';
 import { prepareExternalCliRuntime } from '../../server/src/lib/providerInstall/externalCliRuntime.ts';
+import { createQwenInTurn } from '../../server/src/lib/qwen/inTurn.ts';
 import {
   QWEN_KEY, qwenAdapter, qwenFixture, rejectedTurn, runInput, selectedModel, successful, until,
 } from '../helpers/qwenFixture.mjs';
@@ -16,6 +17,61 @@ import {
 async function absent(file) {
   await assert.rejects(access(file), { code: 'ENOENT' });
 }
+
+test('qwen-linked-env-and-project-settings-stay-masked', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const envTarget = path.join(fixture.root, 'private-env');
+  const settingsTarget = path.join(fixture.root, 'private-qwen');
+  const envLink = path.join(fixture.workspace, '.env');
+  const settingsLink = path.join(fixture.workspace, '.qwen');
+  const hiddenSettings = path.join(settingsLink, 'settings.json');
+
+  await writeFile(envTarget, 'PRIVATE_ENV_CANARY');
+  await mkdir(settingsTarget);
+  await writeFile(path.join(settingsTarget, 'settings.json'), '{"private":"PRIVATE_SETTINGS_CANARY"}');
+  await symlink(envTarget, envLink);
+  await symlink('../private-qwen', settingsLink);
+  await fixture.fake({ readMasks: [envLink, hiddenSettings] });
+
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)'));
+  const masks = (await fixture.records()).filter((entry) => entry.event === 'mask');
+
+  assert.equal(result.reply, 'Новый ответ');
+  assert.deepEqual(masks.map((entry) => [entry.file, entry.text, entry.code]), [
+    [envLink, '{}', undefined],
+    [hiddenSettings, undefined, 'ENOENT'],
+  ]);
+  assert.equal(await readFile(envTarget, 'utf8'), 'PRIVATE_ENV_CANARY');
+  assert.match(await readFile(path.join(settingsTarget, 'settings.json'), 'utf8'), /PRIVATE_SETTINGS_CANARY/);
+  assert.equal((await lstat(envLink)).isSymbolicLink(), true);
+  assert.equal((await lstat(settingsLink)).isSymbolicLink(), true);
+});
+
+test('qwen-early-sandbox-exit-keeps-cause-and-releases-reader', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const wrapper = path.join(fixture.root, 'failed-bwrap');
+  const runtime = await prepareExternalCliRuntime(adapter, fixture.config, fixture.env);
+
+  await writeFile(wrapper, '#!/bin/sh\n'
+    + 'echo "synthetic sandbox startup failure $QWEN_TEST_KEY" >&2\nexit 1\n', { mode: 0o700 });
+  process.env.GRIGDESK_QWEN_BWRAP_BIN = wrapper;
+
+  const reason = await rejectedTurn(() => adapter.run(runInput(fixture, 'shared-model(openai)')));
+
+  assert.match(reason, /synthetic sandbox startup failure/);
+  assert.equal(reason.includes(QWEN_KEY), false, 'Ранний stderr проходит общую маскировку');
+  assert.doesNotMatch(reason, /\/proc\/\d+\/stat/, 'Исчезновение child не подменяет причину запуска');
+
+  const leases = await inspectCliLeases({
+    directory: runtime.process.leaseDirectory,
+    providerId: 'qwen',
+    resourceKey: runtime.process.resourceKey,
+  });
+
+  assert.equal(leases.length, 0, 'После раннего выхода копия CLI доступна для следующего запуска');
+});
 
 test('qwen-acp-steps-and-final', async (t) => {
   const fixture = await qwenFixture(t);
@@ -68,7 +124,7 @@ test('qwen-acp-steps-and-final', async (t) => {
 
   assert.deepEqual(modes.map((mode) => mode.id).sort(), ['auto', 'default', 'plan', 'yolo']);
 
-  const modeCases = [['default', 'default'], ['auto', 'default'], ['plan', 'plan'], ['yolo', 'yolo']];
+  const modeCases = [['default', 'default'], ['auto', 'auto'], ['plan', 'plan'], ['yolo', 'yolo']];
 
   for (const [mode, expected] of modeCases) {
     await fixture.fake();
@@ -162,29 +218,29 @@ test('qwen-abort-no-late-effect', async (t) => {
 
   const before = (await fixture.records()).filter((item) => item.event === 'spawn').length;
 
-  await rejectedTurn(() => adapter.run(runInput(fixture, model, { signal: preAborted.signal })));
+  await assert.rejects(adapter.run(runInput(fixture, model, { signal: preAborted.signal })), (error) => {
+    assert.equal(error.stopped, true);
+    assert.deepEqual(error.steps, []);
+
+    return true;
+  });
   assert.equal((await fixture.records()).filter((item) => item.event === 'spawn').length, before);
   await fixture.fake({ hold: true });
 
   const controller = new AbortController();
-  let notifyText;
-  const textReady = new Promise((resolve) => {
-    notifyText = resolve;
-  });
+  const live = [];
 
   t.after(() => controller.abort());
 
   const outcome = adapter.run(runInput(fixture, model, {
     signal: controller.signal,
-    onStep: (step) => {
-      if (step.k === 'text') {
-        notifyText('text');
-      }
-    },
+    onStep: (step) => live.push(step),
   }));
   const finished = outcome.then(() => 'finished', () => 'failed');
+  const reached = until(async () => (await fixture.records())
+    .some((entry) => entry.frame?.method === 'session/prompt') ? 'prompt' : '', 'активный prompt');
 
-  assert.equal(await Promise.race([textReady, finished]), 'text');
+  assert.equal(await Promise.race([reached, finished]), 'prompt');
 
   const holders = await inspectCliLeases({
     directory: path.join(fixture.dataHome, 'provider-cli-leases'), providerId: 'qwen',
@@ -193,7 +249,18 @@ test('qwen-abort-no-late-effect', async (t) => {
 
   assert.ok(processIds.length, 'Остановка проверяется по host PID, а не PID внутри bwrap');
   controller.abort();
-  await rejectedTurn(() => outcome);
+
+  let stopped;
+
+  await assert.rejects(outcome, (error) => {
+    stopped = error;
+    assert.equal(error.stopped, true);
+    assert.ok(error.sessionId);
+    assert.deepEqual(error.steps, live, 'Сохранённая лента содержит выпущенный при остановке хвост');
+    assert.equal(error.steps.at(-1).text, 'Начало');
+
+    return true;
+  });
 
   await until(() => {
     return processIds.every((pid) => {
@@ -206,6 +273,13 @@ test('qwen-abort-no-late-effect', async (t) => {
       }
     });
   }, 'завершение своего ACP child');
+
+  await fixture.fake();
+
+  const resumed = await adapter.run(runInput(fixture, model, { sessionId: stopped.sessionId }));
+
+  assert.equal(resumed.sessionId, stopped.sessionId);
+  assert.equal(resumed.reply, 'Новый ответ');
 
   const effect = path.join(fixture.workspace, 'late-effect');
   const approvalAbort = new AbortController();
@@ -231,6 +305,128 @@ test('qwen-abort-no-late-effect', async (t) => {
   assert.equal(typeof lateAllow, 'function', 'Сценарий должен дойти до ожидания разрешения');
   lateAllow({ allow: true });
   await absent(effect);
+});
+
+test('Qwen: native cancelled является остановкой, ошибки CLI сохраняют причину', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+
+  await fixture.fake({
+    ask: true,
+    tool: { name: 'run_shell_command', args: { command: 'printf synthetic' } },
+  });
+  await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)')), (error) => {
+    assert.equal(error.stopped, true);
+    assert.ok(error.sessionId);
+    assert.equal(error.steps[0].k, 'start');
+
+    return true;
+  });
+  await fixture.fake({ error: `synthetic failure ${QWEN_KEY}` });
+  await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)')), (error) => {
+    assert.equal(error.stopped, undefined);
+    assert.match(error.message, /synthetic failure/);
+    assert.equal(error.message.includes(QWEN_KEY), false);
+
+    return true;
+  });
+});
+
+test('Qwen: отмена после создания сессии не отправляет prompt', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const controller = new AbortController();
+  let sessionId;
+
+  await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', {
+    signal: controller.signal,
+    onSessionCreated(value) {
+      sessionId = value;
+      controller.abort();
+    },
+  })), (error) => {
+    assert.equal(error.stopped, true);
+    assert.equal(error.sessionId, sessionId);
+
+    return true;
+  });
+  assert.equal((await fixture.records()).some((entry) => entry.frame?.method === 'session/prompt'), false);
+});
+
+test('Qwen: уточнение подтверждается drain один раз; закрытие и отказ снимают ожидание', async () => {
+  let available = true;
+  let wakes = 0;
+  const inTurn = createQwenInTurn({
+    available: () => available,
+    sendNow: async () => {
+      wakes += 1;
+    },
+  });
+  const message = {
+    messageId: 'qwen-in-turn-message',
+    text: 'Уточнение',
+    sequence: 1,
+  };
+  const delivery = inTurn.port.deliver(message);
+
+  await Promise.resolve();
+  assert.equal(wakes, 1);
+  available = false;
+  assert.deepEqual(inTurn.drain().messages, []);
+  assert.equal((await inTurn.port.deliver({ ...message, sequence: 2 })).ok, false);
+  available = true;
+
+  const drained = inTurn.drain();
+
+  assert.match(drained.messages[0], /Уточнение/);
+  assert.match(drained.messages[0], /вернись к ранее поставленной задаче/);
+  assert.deepEqual(await delivery, { ok: true, state: 'forwarded' });
+  assert.deepEqual(inTurn.drain().messages, []);
+
+  const pending = inTurn.port.deliver({ ...message, sequence: 3 });
+
+  inTurn.close();
+  assert.equal((await pending).ok, false);
+  assert.equal((await inTurn.port.deliver({ ...message, sequence: 4 })).ok, false);
+
+  const broken = createQwenInTurn({
+    available: () => true,
+    sendNow: async () => {
+      throw new Error('synthetic RPC failure');
+    },
+  });
+
+  assert.equal((await broken.port.deliver(message)).ok, false);
+  assert.deepEqual(broken.drain().messages, []);
+});
+
+test('Qwen: чужой drain не забирает уточнение текущего prompt', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const blocks = [];
+  let delivery;
+
+  await fixture.fake({ hold: true });
+
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    onInTurnReady(port) {
+      delivery = port.deliver({
+        messageId: 'qwen-synthetic-in-turn',
+        text: 'Текущее уточнение',
+        sequence: 1,
+      });
+    },
+    onAssistantMessage: (block) => blocks.push(block),
+  }));
+  const records = await fixture.records();
+
+  assert.deepEqual(await delivery, { ok: true, state: 'forwarded' });
+  assert.deepEqual(records.find((entry) => entry.event === 'foreign-drain').result.messages, []);
+  assert.match(records.find((entry) => entry.event === 'mid-turn-drain').result.messages[0],
+    /Текущее уточнение/);
+  assert.equal(result.reply, 'Новый ответ');
+  assert.deepEqual(blocks.map((block) => block.text), ['Начало', 'Новый ответ']);
+  assert.equal(records.filter((entry) => entry.frame?.method === 'session/prompt').length, 1);
 });
 
 test('qwen-final-guard-before-effect', async (t) => {
@@ -280,7 +476,7 @@ test('qwen-filesystem-mcp-workdir', async (t) => {
   const capability = typeof adapter.workdir === 'function'
     ? adapter.workdir(fixture.config) : adapter.workdir;
 
-  assert.deepEqual(capability, { switch: 'reseed', roots: 'single' });
+  assert.deepEqual(capability, { switch: 'reseed', roots: 'multi' });
   assert.equal(typeof adapter.validateWorkdir, 'function');
 
   const sibling = path.join(fixture.root, 'sibling');
@@ -296,9 +492,8 @@ test('qwen-filesystem-mcp-workdir', async (t) => {
     extraDirs: [sibling],
   });
 
-  assert.ok(validation.error || validation.rejected?.length,
-    'Дополнительный writable root не поддерживается');
-  assert.equal(validation.extraDirs?.includes(sibling), false);
+  assert.equal(validation.error, undefined);
+  assert.deepEqual(validation.extraDirs, [sibling]);
 
   const model = await selectedModel(adapter, fixture);
 
@@ -350,24 +545,17 @@ test('qwen-cli-lease', async (t) => {
     resourceKey: runtime.process.resourceKey,
   };
   const controller = new AbortController();
-  let notifyReady;
-  const ready = new Promise((resolve) => {
-    notifyReady = resolve;
-  });
 
   t.after(() => controller.abort());
 
   const running = adapter.run(runInput(fixture, model, {
     signal: controller.signal,
-    onStep: (step) => {
-      if (step.k === 'text') {
-        notifyReady('ready');
-      }
-    },
   }));
   const outcome = running.then(() => 'ended', () => 'failed');
+  const reached = until(async () => (await fixture.records())
+    .some((entry) => entry.frame?.method === 'session/prompt') ? 'prompt' : '', 'активный prompt');
 
-  assert.equal(await Promise.race([ready, outcome]), 'ready');
+  assert.equal(await Promise.race([reached, outcome]), 'prompt');
 
   const observed = await inspectCliLeases(leaseInput);
 

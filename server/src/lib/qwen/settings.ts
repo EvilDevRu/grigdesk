@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { accessSync, constants, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse, type ParseError } from 'jsonc-parser';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { DEFAULT_QWEN_SERVICE, QWEN_SERVICE_ENV, qwenServiceCredential } from './services.ts';
 
 export interface QwenConfig {
   rootDir?: string;
@@ -26,12 +27,31 @@ export interface QwenSnapshot {
   settings: Record<string, unknown>;
   fingerprint: string;
   envKeys: string[];
+  automatic: boolean;
 }
 
 export const qwenConfig = (value: unknown): QwenConfig => isRecord(value) ? value : {};
 
 export const qwenBin = (value: unknown): string =>
   qwenConfig(value).qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen';
+
+/**
+ * Omni требует обе утилиты ещё до ACP handshake, иначе CLI не запускает даже чат.
+ * Проверяются только каталоги PATH, которые действительно выдаются песочнице.
+ */
+function nativeMediaAvailable(): boolean {
+  const directories = [path.dirname(process.execPath), '/usr/bin', '/bin'];
+
+  return ['ffmpeg', 'ffprobe'].every((name) => directories.some((directory) => {
+    try {
+      accessSync(path.join(directory, name), constants.X_OK);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }));
+}
 
 /**
  * Имена доступа не могут менять загрузчик, команду или окружение хоста.
@@ -48,7 +68,10 @@ export function safeQwenEnvKey(value: unknown): value is string {
  * Слои читаются по содержимому, без доверия к mtime; повреждение даёт явный отказ.
  * modelProviders заменяется целиком, как в native settings CLI, а ключи не копируются.
  */
-export function readQwenSnapshot(value: unknown): QwenSnapshot {
+export function readQwenSnapshot(
+  value: unknown,
+  automaticModels?: Record<string, unknown>[],
+): QwenSnapshot {
   const config = qwenConfig(value);
   const home = config.qwenHome || process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME
     || path.join(os.homedir(), '.qwen');
@@ -60,6 +83,7 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
   ];
   const inputs: unknown[] = [];
   let providers: Record<string, unknown> = {};
+  let automatic = true;
   let preferredModel: string | undefined;
   let preferredAuthType: string | undefined;
 
@@ -88,6 +112,7 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
     }
 
     if (Object.hasOwn(layer, 'modelProviders')) {
+      automatic = false;
       providers = isRecord(layer.modelProviders) ? layer.modelProviders : {};
     }
 
@@ -105,6 +130,10 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
   const models: QwenModel[] = [];
   const envKeys = new Set(['DASHSCOPE_API_KEY']);
   const sanitized: Record<string, unknown[]> = {};
+
+  if (automatic && automaticModels) {
+    providers = { openai: automaticModels };
+  }
 
   for (const [authType, entries] of Object.entries(providers)) {
     if (!Array.isArray(entries)) {
@@ -146,14 +175,27 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
     modelProviders: sanitized,
     // Прямые имена MCP проходят final guard; скрывающий их ToolCall-мост не выдаётся.
     // При отключённом поиске CLI объявляет разрешённые MCP-инструменты сразу.
-    tools: { toolSearch: { enabled: false } },
+    tools: {
+      toolSearch: { enabled: false },
+      todoWrite: { enabled: true },
+      workflowsEnabled: true,
+      lspEnabled: true,
+    },
+    experimental: {
+      agentTeam: true,
+    },
+    // ACP живёт один ход: обычный субагент должен вернуть результат до выхода родителя.
+    // Явный фон остаётся native-возможностью с тем же сроком жизни процесса.
+    agents: { defaultBackground: false },
+    omni: { enabled: nativeMediaAvailable() },
     telemetry: { enabled: false },
     general: { enableAutoUpdate: false },
     security: { auth: { selectedType: models[0]?.authType || 'openai' } },
     model: { name: models[0]?.entry.id || '' },
   };
   const fingerprint = createHash('sha256').update(JSON.stringify([
-    inputs, qwenBin(config), [...envKeys].map((key) => [key, process.env[key] || '']),
+    inputs, qwenBin(config), automatic ? process.env[QWEN_SERVICE_ENV] || DEFAULT_QWEN_SERVICE : '',
+    [...envKeys].map((key) => [key, process.env[key] || '']),
   ])).digest('hex');
 
   return {
@@ -161,6 +203,7 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
     settings,
     fingerprint,
     envKeys: [...envKeys],
+    automatic,
   };
 }
 
@@ -170,17 +213,21 @@ export function readQwenSnapshot(value: unknown): QwenSnapshot {
  */
 export function qwenCredentials(config: unknown) {
   let names = ['DASHSCOPE_API_KEY'];
+  let automatic = false;
 
   try {
-    names = readQwenSnapshot(config).envKeys;
+    const snapshot = readQwenSnapshot(config);
+
+    names = snapshot.envKeys;
+    automatic = snapshot.automatic;
   } catch {
     // Повреждённый источник диагностируется каталогом, writer остаётся доступен.
   }
 
-  return names.map((env) => ({
+  return [...(automatic ? [qwenServiceCredential()] : []), ...names.map((env) => ({
     env,
     kind: 'secret',
     label: env === 'DASHSCOPE_API_KEY' ? 'Ключ API' : env,
     ...(env === 'DASHSCOPE_API_KEY' ? { hint: 'Ключ API сервиса модели.' } : {}),
-  }));
+  }))];
 }

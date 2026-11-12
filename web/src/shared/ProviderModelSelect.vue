@@ -31,15 +31,24 @@
       <ProviderIcon v-if="entries.get(option.value)" :provider="entries.get(option.value)!.provider"
                     :size="14" :style="{ color: entries.get(option.value)!.provider.color }" />
     </template>
+    <template v-if="incomplete.length" #footer="{ close }">
+      <UiButton v-for="provider in incomplete" :key="provider.id" variant="ghost" size="compact"
+        data-model-provider-setup :data-provider-id="provider.id"
+        @click="configure(close, provider.id)">
+        {{ provider.name }} · {{ provider.readiness.label }}
+      </UiButton>
+    </template>
   </UiSelect>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import { UiSelect, type UiSelectOptionSnapshot, type UiSelectValue } from '../ui.ts';
+import { UiButton, UiSelect, uiLocale, type UiSelectOptionSnapshot, type UiSelectValue } from '../ui.ts';
 import type { ProviderModelEntry } from '../../../shared/chat/providersContracts.ts';
 import ProviderIcon from './ProviderIcon.vue';
+import { openSettings } from './settingsNavigation.ts';
+import { providerChatReadiness } from '../features/providers/providerLocale.ts';
 import {
   modelSelectValue,
   type ModelSelectProvider,
@@ -75,6 +84,12 @@ const emit = defineEmits<{
   blur: [event: FocusEvent];
 }>();
 const select = ref<InstanceType<typeof UiSelect> | null>(null);
+const incomplete = computed(() => props.providers.flatMap((provider) => {
+  const readiness = providerChatReadiness(provider, uiLocale);
+
+  return readiness && !readiness.available && (provider.installed || provider.available)
+    ? [{ ...provider, readiness }] : [];
+}));
 const entries = computed(() => {
   const result = new Map<string, {
     provider: ModelSelectProvider;
@@ -94,6 +109,15 @@ const entries = computed(() => {
   return result;
 });
 const selected = computed(() => entries.value.get(props.modelValue));
+
+/**
+ * Настройка открывается поверх исходного экрана после закрытия списка.
+ * Модель и память разговора до выбора человека остаются прежними.
+ */
+function configure(close: () => void, providerId?: string): void {
+  close();
+  openSettings({ pageId: 'agents.providers', entityId: providerId });
+}
 
 defineExpose({
   get el() {

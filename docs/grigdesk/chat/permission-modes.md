@@ -34,3 +34,7 @@
   Неизвестный ID отвергается через optional `normalizePermissionMode` адаптера до общего
   fallback. Меню и HTTP используют один effective mode текущего провайдера.
   [Полный контракт DeepSeek](deepseek-tool-permissions.md).
+- У Qwen «Авто» передаётся в native `auto` с собственным классификатором CLI.
+  «Спрашивать» использует `default`, «План» — `plan`, «Без подтверждений» — `yolo`.
+  Режим подтверждается до prompt; отказ классификатора не снимает файловую изоляцию
+  и final guard. [Корни и режимы Qwen](qwen-workspace-permissions.md).

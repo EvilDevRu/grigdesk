@@ -169,6 +169,7 @@ import type { StepRow } from './chatStepRows.ts';
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
 // (в истории сообщения) ленты рисуются одним компонентом.
 const props = defineProps({
+  legacyTextDeltas: { type: Boolean, default: false },
   steps: { type: Array as PropType<ChatStep[]>, default: () => [] },
   live: { type: Boolean, default: false }, // ход идёт прямо сейчас
   section: { type: Boolean, default: false }, // участок общей ленты между репликами
@@ -202,6 +203,7 @@ watch(() => props.live, (live) => {
 const rows = computed(() => nestChatStepRows(foldChatSteps(
   props.steps || [],
   new Set(props.displayedAssistantIds),
+  props.legacyTextDeltas,
 )));
 
 const toolCount = computed(() => rows.value.filter((r) => r.k === 'tool').length);

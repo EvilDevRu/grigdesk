@@ -1,9 +1,72 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { evaluateDirectCommand } from '../executors/_directSshPolicy.ts';
 import type { QwenMcpServer } from './sandbox.ts';
+
+// Имена закреплены за проверенным CLI: новый инструмент не получает права автоматически.
+// Служебные записи этих инструментов остаются в отдельном home текущего разговора.
+const SESSION_TOOLS = new Set([
+  'todo_write',
+  'save_memory',
+  'manage_memory',
+  'search_memory',
+  'ask_user_question',
+  'enter_plan_mode',
+  'exit_plan_mode',
+  'agent',
+  'task',
+  'skill',
+  'list_agents',
+  'task_stop',
+  'task_create',
+  'task_update',
+  'task_list',
+  'team_create',
+  'team_delete',
+  'team_plan_approval',
+  'request_shutdown',
+  'send_message',
+  'structured_output',
+  'cron_create',
+  'cron_list',
+  'cron_delete',
+  'loop_wakeup',
+  'get_goal',
+  'update_goal',
+  'propose_goal',
+]);
+
+const MEDIA_TOOLS = new Set([
+  'image_gen',
+  'zoom_image',
+  'display_image',
+  'omni_downsample_image',
+  'omni_downscale_video',
+  'omni_downsample_audio',
+  'omni_extract_keyframes',
+  'omni_extract_audio',
+  'omni_clip_video',
+  'omni_convert_image',
+  'omni_transcribe_audio',
+  'omni_clip_image',
+  'omni_clip_audio',
+  'omni_caption_image',
+  'omni_caption_audio',
+  'omni_ocr_image',
+  'omni_understand_video_segments',
+  'omni_recall_media_memory',
+]);
+
+const WORKFLOW_TOOLS = new Set([
+  'workflow',
+  'artifact',
+  'record_artifact',
+  'record_source',
+  'report_findings',
+]);
 
 /**
  * Проверка физического родителя работает и для ещё не созданного файла.
@@ -37,6 +100,7 @@ export async function qwenToolAllowed(value: unknown, context: {
   sessionId: string;
   promptId: string;
   cwd: string;
+  writableRoots: string[];
   mode: string;
   readonlyRoots: string[];
   mcpServers: QwenMcpServer[];
@@ -57,23 +121,38 @@ export async function qwenToolAllowed(value: unknown, context: {
       && evaluateDirectCommand(args.command, { blockDirectSsh: context.blockDirectSsh }).verdict === 'allow';
   }
 
-  const reads = ['read_file', 'read_many_files', 'list_directory', 'glob', 'grep_search'];
-  const writes = ['write_file', 'edit', 'replace'];
+  const reads = ['read_file', 'read_many_files', 'list_directory', 'glob', 'grep_search', 'lsp'];
+  const writes = ['write_file', 'edit', 'replace', 'notebook_edit'];
 
   if (reads.includes(name) || writes.includes(name)) {
     const write = writes.includes(name);
-    const file = args.file_path ?? args.absolute_path ?? args.path ?? context.cwd;
+    let file = args.file_path ?? args.absolute_path ?? args.path ?? args.filePath
+      ?? args.notebook_path ?? context.cwd;
+
+    if (name === 'lsp' && isRecord(args.item) && typeof args.item.uri === 'string') {
+      try {
+        file = fileURLToPath(args.item.uri);
+      } catch {
+        return false;
+      }
+    }
 
     if (typeof file !== 'string' || (write && context.mode === 'plan')) {
       return false;
     }
 
     return contained(path.resolve(context.cwd, file),
-      write ? [context.cwd] : [context.cwd, ...context.readonlyRoots]);
+      write ? context.writableRoots : [...context.writableRoots, ...context.readonlyRoots]);
   }
 
-  if (name === 'save_memory' || name === 'ask_user_question' || name === 'task') {
-    return false;
+  if (name === 'web_search' || name === 'web_fetch' || SESSION_TOOLS.has(name)) {
+    return true;
+  }
+
+  if (MEDIA_TOOLS.has(name) || WORKFLOW_TOOLS.has(name)) {
+    // Обработка медиа и workflow могут создавать файлы даже без стандартного write_file.
+    // В режиме плана допускаются лишь инструменты чтения и служебное состояние сессии.
+    return context.mode !== 'plan';
   }
 
   return context.mcpServers.some((server) =>

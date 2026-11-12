@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile, stat, utimes } from 'node:fs/promises';
+import { access, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
 import { declaredCredentials } from '../../server/src/lib/executorCredentials.ts';
 import { mergeCatalog } from '../../server/src/lib/modelsRegistry.ts';
+import { markSupersededModels } from '../../shared/chat/modelFamily.ts';
 import providersModule from '../../server/src/modules/providers/index.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
 import { QWEN_KEY, qwenAdapter, qwenFixture } from '../helpers/qwenFixture.mjs';
@@ -44,6 +45,41 @@ async function providerApi(t, fixture, adapter, { auth = false } = {}) {
   };
 }
 
+test('qwen-clean-access-form-saves-service-and-key-without-manual-config', async (t) => {
+  const fixture = await qwenFixture(t, { settings: {} });
+
+  await rm(fixture.file);
+
+  const adapter = await qwenAdapter();
+  const { app, env } = await providerApi(t, fixture, adapter);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/providers/qwen/credentials',
+    payload: { values: {
+      GRIGDESK_QWEN_SERVICE: 'qwencloud-intl',
+      DASHSCOPE_API_KEY: QWEN_KEY,
+    } },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(env.GRIGDESK_QWEN_SERVICE, 'qwencloud-intl');
+  assert.equal(env.DASHSCOPE_API_KEY, QWEN_KEY);
+  assert.match(await readFile(fixture.config.envPath, 'utf8'), /GRIGDESK_QWEN_SERVICE=qwencloud-intl/);
+  assert.equal((await stat(fixture.config.envPath)).mode & 0o777, 0o600);
+  await assert.rejects(access(fixture.file), { code: 'ENOENT' });
+  assert.equal(response.body.includes(QWEN_KEY.slice(0, -4)), false);
+
+  const previous = await readFile(fixture.config.envPath, 'utf8');
+  const refused = await app.inject({
+    method: 'POST',
+    url: '/api/providers/qwen/credentials',
+    payload: { values: { GRIGDESK_QWEN_SERVICE: 'unknown-endpoint' } },
+  });
+
+  assert.equal(refused.statusCode, 400);
+  assert.equal(await readFile(fixture.config.envPath, 'utf8'), previous);
+});
+
 test('qwen-card-npm-version', async (t) => {
   const fixture = await qwenFixture(t);
   const adapter = await qwenAdapter();
@@ -81,7 +117,11 @@ test('qwen-card-npm-version', async (t) => {
   assert.match(JSON.stringify(installation.install), /@qwen-code\/qwen-code/);
   assert.ok(!installation.loginCommand, 'OAuth login не должен предлагаться');
   assert.ok(!adapter.login);
-  assert.equal(adapter.usage, undefined, 'Неизвестные квоты нельзя выдавать за нулевые');
+
+  const usage = await adapter.usage(fixture.config);
+
+  assert.equal(usage.state, 'unsupported', 'Неизвестные квоты нельзя выдавать за нулевые');
+  assert.match(usage.message, /в GrigDesk/);
 
   const policy = await adapter.directSshPolicy(fixture.config);
   const { app } = await providerApi(t, fixture, adapter);
@@ -92,6 +132,12 @@ test('qwen-card-npm-version', async (t) => {
   const card = response.json().providers.find((entry) => entry.id === 'qwen');
 
   assert.equal(card.installed, true);
+  assert.equal(card.capabilities.legacyTextStepDeltas, true);
+  assert.deepEqual(card.inTurn, {
+    protocol: 1,
+    text: true,
+    confirmation: 'forwarded',
+  });
   assert.match(card.version, /0\.27\.3/);
   assert.equal(policy.enforcement, 'command-hook');
   assert.ok(policy.note?.trim(), 'Адаптер должен объяснять границу запрета SSH');
@@ -223,6 +269,30 @@ test('qwen-catalog-source-refresh', async (t) => {
   assert.equal(await readFile(fixture.config.modelsPath, 'utf8'), 'sentinel-owner-registry');
 });
 
+/**
+ * Каталог QwenCloud содержит разные модели, а не версии одного семейства default.
+ * Даже новая модель остаётся видимой в кратком списке без настройки «Показывать все».
+ */
+test('qwen-catalog-does-not-hide-unrelated-models-as-superseded', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter();
+  const ids = ['qwen4-max-preview', 'qwen3.8-max', 'qwen3.8-flash', 'glm-5.3', 'auto'];
+
+  await fixture.writeSettings({
+    modelProviders: { openai: ids.map((id) => ({
+      id,
+      envKey: 'QWEN_TEST_KEY',
+      baseUrl: 'http://127.0.0.1:9/v1',
+    })) },
+  });
+
+  const catalog = await adapter.catalog(fixture.config);
+  const visible = markSupersededModels(catalog).filter((model) => !model.extra);
+
+  assert.deepEqual(visible.map((model) => model.id), ids.map((id) => `${id}(openai)`));
+  assert.ok(catalog.every((model) => !model.family), 'CLI не объявлял линию замены моделей');
+});
+
 test('qwen-catalog-opaque-routes', async (t) => {
   const fixture = await qwenFixture(t);
 
@@ -275,4 +345,32 @@ test('qwen-catalog-invalid-and-empty', async (t) => {
       'Нельзя чинить конфиг владельца автоматически');
     assert.deepEqual(adapter.seedModels(), [], 'Из пустого источника нельзя придумывать seed');
   }
+});
+
+/**
+ * Общий реестр может удержать прежние модели, но отказ CLI не должен терять причину.
+ * Исправленный CLI возвращает готовность того же доступа без смены ключа.
+ */
+test('qwen-catalog-cli-failure-is-visible-safe-and-recovers', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter();
+  const registry = { qwen: [], _meta: {} };
+
+  await fixture.fake({ noAck: true, stderr: QWEN_KEY });
+  await mergeCatalog(registry, 'qwen', adapter, fixture.config);
+
+  const refused = adapter.auth(fixture.config);
+
+  assert.equal(registry.qwen.length, 0);
+  assert.equal(refused.available, false);
+  assert.match(refused.label, /несовместим.*Обновите или переустановите/);
+  assert.equal(refused.label.includes(QWEN_KEY), false);
+  await fixture.fake();
+  await mergeCatalog(registry, 'qwen', adapter, fixture.config);
+  assert.equal(registry.qwen.length, 2);
+  assert.equal(adapter.auth(fixture.config).available, true);
+  await fixture.writeSettings({ modelProviders: {} });
+  await mergeCatalog(registry, 'qwen', adapter, fixture.config);
+  assert.equal(adapter.auth(fixture.config).available, false);
+  assert.match(adapter.auth(fixture.config).label, /не вернул модели.*Доступ/);
 });

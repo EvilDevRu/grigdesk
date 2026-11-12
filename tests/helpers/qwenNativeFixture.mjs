@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { createAcpClient } from '../../server/src/lib/acp/client.ts';
 import { qwenFixture, sourceSettings } from './qwenFixture.mjs';
@@ -9,9 +12,12 @@ import { qwenFixture, sourceSettings } from './qwenFixture.mjs';
  * Настоящий Qwen видит только локальный OpenAI-compatible API с синтетическим ключом.
  * Ответы задают реальные native tools; их результат наблюдается в файлах и MCP.
  */
-export async function qwenNativeFixture(t) {
+export async function qwenNativeFixture(t, { dashscope = false } = {}) {
   const requests = [];
   const actions = [];
+  const classifications = [];
+  const classifierReplies = [];
+  const catalog = [{ id: 'shared-model' }];
   const connections = new Set();
   let sequence = 0;
   let notifyHeld;
@@ -19,6 +25,13 @@ export async function qwenNativeFixture(t) {
     notifyHeld = resolve;
   });
   const server = createServer(async (request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/models') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ data: catalog }));
+
+      return;
+    }
+
     let text = '';
 
     for await (const chunk of request) {
@@ -28,6 +41,67 @@ export async function qwenNativeFixture(t) {
     const body = JSON.parse(text);
 
     requests.push(body);
+
+    const structuredTool = body.tools?.find((tool) => tool.function?.parameters?.properties?.shouldBlock);
+    const classifierSchema = structuredTool?.function.parameters ?? body.response_format?.json_schema?.schema;
+
+    if (classifierSchema?.properties?.shouldBlock) {
+      classifications.push(body);
+
+      const decision = classifierReplies.shift() ?? false;
+      const content = decision === 'unavailable' ? 'synthetic invalid classifier reply' : JSON.stringify({
+        shouldBlock: decision,
+        ...(classifierSchema.properties.thinking
+          ? { thinking: 'Synthetic local policy decision', reason: 'Synthetic local block' } : {}),
+      });
+
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({
+        id: 'synthetic-classifier',
+        object: 'chat.completion',
+        created: 1,
+        model: body.model,
+        choices: [{
+          index: 0,
+          message: structuredTool ? {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              id: 'synthetic-classification',
+              type: 'function',
+              function: { name: structuredTool.function.name, arguments: content },
+            }],
+          } : { role: 'assistant', content },
+          finish_reason: structuredTool ? 'tool_calls' : 'stop',
+        }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+        },
+      }));
+
+      return;
+    }
+
+    // WebFetch пересказывает страницу обычным JSON-запросом без инструментов.
+    // Он не должен потреблять сценарий основного SSE-диалога с моделью.
+    if (body.stream === false && !body.tools?.length) {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({
+        id: 'synthetic-side-query',
+        object: 'chat.completion',
+        created: 1,
+        model: body.model,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'Ответ настоящего CLI.' },
+          finish_reason: 'stop',
+        }],
+      }));
+
+      return;
+    }
 
     const chunk = (delta, finishReason = null) => ({
       id: `native-fixture-${sequence}`,
@@ -63,7 +137,12 @@ export async function qwenNativeFixture(t) {
       return;
     }
 
-    if (action) {
+    if (action?.delayMs) {
+      emit(chunk({ role: 'assistant', reasoning_content: 'Долгое локальное размышление.' }));
+      await delay(action.delayMs);
+    }
+
+    if (action?.name || action?.match) {
       const tool = body.tools.find((entry) => action.match
         ? entry.function?.name.includes(action.match) : entry.function?.name === action.name);
 
@@ -113,6 +192,18 @@ export async function qwenNativeFixture(t) {
   delete settings.modelProviders.anthropic;
 
   const fixture = await qwenFixture(t, { native: true, settings });
+
+  if (dashscope) {
+    const wrapper = path.join(fixture.root, 'bwrap-dashscope');
+    const baseUrl = settings.modelProviders.openai[0].baseUrl;
+
+    // Штатный proxy переключает native wire-адаптер на DashScope для loopback API.
+    // Настоящие домены и ключи не используются; exec сохраняет PID и контракт reader lease.
+    await writeFile(wrapper, '#!/bin/sh\n'
+      + `exec /usr/bin/bwrap --setenv DASHSCOPE_PROXY_BASE_URL '${baseUrl}' "$@"\n`, { mode: 0o700 });
+    process.env.GRIGDESK_QWEN_BWRAP_BIN = wrapper;
+  }
+
   const bwrap = spawnSync('/usr/bin/bwrap', ['--ro-bind', '/', '/', '/usr/bin/true'], {
     encoding: 'utf8', timeout: 5000,
   });
@@ -125,6 +216,9 @@ export async function qwenNativeFixture(t) {
     ...fixture,
     requests,
     actions,
+    classifications,
+    classifierReplies,
+    catalog,
     held,
     metadata,
     readMetadata: () => nativeMetadata(fixture),

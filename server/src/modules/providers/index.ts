@@ -351,6 +351,7 @@ async function providersModule(
         chatEnabled,
         ...(chatEnabled && ex.chatSpeed ? { chatSpeed: { modes: [...ex.chatSpeed.modes] } } : {}),
         capabilities: {
+          ...(ex.legacyTextStepDeltas ? { legacyTextStepDeltas: true } : {}),
           chatAutoCompact: universal && (ex.chatAutoCompact === true || !!ex.autoCompactEnv),
           scopedWorkspace: chatEnabled && await supportsScopedWorkspace(ex, config),
           untrustedText: chatEnabled

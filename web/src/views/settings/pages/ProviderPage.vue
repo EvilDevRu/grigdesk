@@ -90,6 +90,34 @@
             {{ item.label }}
           </UiTab>
         </UiTabs>
+        <UiInlineMessage
+          v-if="selected.chatReadiness && (accessDirty || !selected.chatReadiness.available)"
+          data-provider-chat-notice
+          tone="warning"
+          :heading="accessDirty ? t('settings.providerAccessPending') : selected.chatReadiness.label"
+        >
+          <p v-if="accessDirty">{{ t('settings.providerAccessPendingHint') }}</p>
+          <template v-else>
+            <p>{{ selected.chatReadiness.message }}</p>
+            <p>{{ t('settings.providerChatUnavailableHint') }}</p>
+          </template>
+          <template #actions>
+            <UiButton v-if="accessDirty" data-provider-apply-access
+              :disabled="settings.snapshot.applying" @click="settings.apply()">
+              {{ t('settings.apply') }}
+            </UiButton>
+            <UiButton v-else :disabled="refreshing" @click="refreshRegistry">
+              {{ t('settings.recheck') }}
+            </UiButton>
+            <UiButton v-if="!accessDirty && tab !== 'access' && selected.installed !== false"
+              @click="selectTab('access')">
+              {{ t('settings.providerChatConfigureAccess') }}
+            </UiButton>
+            <UiButton v-if="!accessDirty && tab !== 'overview'" @click="selectTab('overview')">
+              {{ t('settings.overview') }}
+            </UiButton>
+          </template>
+        </UiInlineMessage>
         <AccessProfilePanel v-if="tab === 'access' && selected.accessProfiles?.supported"
           :provider-id="selected.id" />
         <p v-else-if="!ready">{{ t('settings.loading') }}</p>
@@ -323,11 +351,13 @@
           <p v-else-if="updateResult">{{ updateResult.text }}</p>
         </template>
         <template v-else-if="ready && tab === 'models'">
-          <p>{{ t('settings.providerCatalogReadOnlySharedVisibilityIs') }}</p>
+          <p v-if="selected.models?.length">{{ t('settings.providerCatalogReadOnlySharedVisibilityIs') }}</p>
           <div v-for="model in selected.models ?? []" :key="model.id" class="settings-provider-model">
             <strong>{{ model.name }}</strong>
             <code>{{ model.id }}</code>
-            <span v-if="model.extra || model.hidden">{{ t('settings.hiddenFromTheShortlist') }}</span>
+            <span v-if="!providers.showAllModels && (model.extra || model.hidden)">
+              {{ t('settings.hiddenFromTheShortlist') }}
+            </span>
             <span v-if="model.unknown">{{ t('settings.unknownToCLI') }}</span>
             <span v-if="model.efforts?.length">{{ t('settings.effort3') }} {{ model.efforts.join(', ') }}</span>
           </div>
@@ -392,6 +422,7 @@ import {
   UiRange,
   UiPasswordInput,
   UiButton,
+  UiInlineMessage,
   UiDisclosureButton,
   UiSegmentedControl,
   UiCommandButton,
@@ -424,7 +455,7 @@ import { useToolLauncher } from '../../../shared/tools/launcher.ts';
 import ProviderMcpStatus from '../ProviderMcpStatus.vue';
 import ProviderUsageResources from '../../../features/providers/ProviderUsageResources.vue';
 import { providerCliActions } from '../../../features/providers/providerCliActions.ts';
-import { providerAvailability } from '../../../features/providers/providerLocale.ts';
+import { providerAvailability, providerChatReadiness } from '../../../features/providers/providerLocale.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import type { FieldAddress } from '../../../features/settings/contracts.ts';
 import ProviderQuotaPreferences from '../ProviderQuotaPreferences.vue';
@@ -439,7 +470,8 @@ const installation = useProviderInstallStore();
 const native = useProviderSettingsStore();
 const registry = computed(() => (providers.providers as ProviderEntry[]).map((entry) => ({
   ...localizeProviderMetadata(entry, uiLocale.value),
-  availability: providerAvailability(entry, uiLocale),
+  availability: providerChatReadiness(entry, uiLocale) ?? providerAvailability(entry, uiLocale),
+  chatReadiness: providerChatReadiness(localizeProviderMetadata(entry, uiLocale.value), uiLocale),
 })));
 const selected = computed(() => registry.value.find((entry) => entry.id === settings.entityId));
 const cliActions = computed(() => selected.value ? providerCliActions(selected.value) : {
@@ -490,6 +522,8 @@ const confirming = ref('');
 const nativePanelId = `settings-native-${useId()}`;
 const tab = computed(() => settings.tabId ?? 'overview');
 const credentialsId = computed(() => `providerCredentials:${settings.entityId}`);
+const accessDirty = computed(() => settings.snapshot.resources.find((resource) =>
+  resource.id === credentialsId.value)?.fields.some((field) => field.dirty) === true);
 const ordinaryId = computed(() => `providerSettings:${settings.entityId}`);
 const nativeId = computed(() => `providerNative:${settings.entityId}`);
 const nativeState = computed(() => {
@@ -580,6 +614,10 @@ async function refreshRegistry(): Promise<void> {
     } else {
       await providers.load(true);
     }
+
+    const state = await providers.whenRegistryReady();
+
+    error.value = state.ok ? '' : state.message || t('settings.providerRegistryFailure');
   } catch (cause) {
     error.value = failureText(cause);
   } finally {

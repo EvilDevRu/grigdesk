@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -8,6 +8,105 @@ import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import {
   QWEN_KEY, qwenAdapter, rejectedTurn, runInput, selectedModel, successful,
 } from '../helpers/qwenFixture.mjs';
+
+test('qwen-native-model-specific-efforts-and-dashscope-wire', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t, { dashscope: true });
+  const base = fixture.settings.modelProviders.openai[0];
+
+  fixture.settings.modelProviders.openai = [
+    'qwen4-max-preview', 'qwen3.7-max', 'qwen-audio-3.0-asr-flash', 'glm-5.3', 'wan3.0-video',
+  ]
+    .map((id) => ({
+      ...base,
+      id,
+      name: id,
+      generationConfig: {},
+    }));
+  await fixture.writeSettings(fixture.settings);
+
+  const adapter = await qwenAdapter({ runnable: true });
+  const catalog = await adapter.catalog(fixture.config);
+  const qwen4 = catalog.find((model) => model.name === 'qwen4-max-preview');
+
+  assert.deepEqual(qwen4.efforts, ['none', 'low', 'medium', 'xhigh']);
+  assert.deepEqual(catalog.find((model) => model.name === 'qwen3.7-max').efforts, ['none', 'default']);
+  assert.deepEqual(catalog.find((model) => model.name === 'qwen-audio-3.0-asr-flash').efforts, []);
+  assert.deepEqual(catalog.find((model) => model.name === 'glm-5.3').efforts, []);
+  assert.deepEqual(catalog.find((model) => model.name === 'wan3.0-video').efforts, []);
+  assert.ok(qwen4.context > 0 && !qwen4.contextUnverified, 'Размер сообщает native CLI');
+
+  for (const effort of qwen4.efforts) {
+    const offset = fixture.requests.length;
+    const result = await adapter.run(runInput(fixture, qwen4.id, { effort }));
+    const wire = fixture.requests.slice(offset).find((request) => request.tools?.length);
+
+    assert.match(result.reply, /Ответ настоящего CLI/);
+    assert.equal(wire.model, 'qwen4-max-preview');
+    assert.equal(wire.reasoning_effort, effort, 'Выбранный уровень доходит до API выбранного сервиса');
+  }
+});
+
+test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const baseUrl = fixture.settings.modelProviders.openai[0].baseUrl;
+
+  await rm(fixture.file);
+  delete process.env.GRIGDESK_QWEN_SERVICE;
+
+  const catalog = await adapter.catalog(fixture.config, {
+    service: { label: 'Локальный API', baseUrl },
+  });
+
+  assert.deepEqual(catalog.map((entry) => entry.id), ['shared-model(openai)']);
+
+  const steps = [];
+  const metadata = [];
+  const result = await adapter.run(runInput(fixture, catalog[0].id, {
+    onStep: (step) => steps.push(step),
+    onRunMetadata: (value) => metadata.push(value),
+  }));
+
+  assert.equal(successful(result), true, JSON.stringify(result));
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.ok(steps.some((step) => step.k === 'text'));
+  assert.equal(steps.filter((step) => step.k === 'think').length, 1);
+  assert.equal(steps.filter((step) => step.k === 'text').length, 1);
+  assert.deepEqual(steps, result.steps);
+  assert.equal(result.actualModel, catalog[0].id);
+  assert.ok(metadata.some((value) => value.actualModelId === catalog[0].id
+    && value.modelSource === 'session'));
+  fixture.catalog.push({ id: 'new-model-without-release' });
+
+  const refreshed = await adapter.catalog(fixture.config, {
+    service: { label: 'Локальный API', baseUrl },
+  });
+
+  assert.ok(refreshed.some((entry) => entry.id === 'new-model-without-release(openai)'));
+  await assert.rejects(access(fixture.file), { code: 'ENOENT' });
+  assert.equal(JSON.stringify(result).includes(QWEN_KEY), false);
+});
+
+test('qwen-native-prompt-survives-30-seconds', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const live = [];
+
+  fixture.actions.push({ delayMs: 31_000 });
+
+  const started = Date.now();
+  const result = await adapter.run(runInput(fixture, model, {
+    signal: AbortSignal.timeout(45_000),
+    onStep: (step) => live.push(step),
+  }));
+
+  assert.ok(Date.now() - started >= 31_000, 'Проверяется реальное ожидание, часы не подменены');
+  assert.equal(successful(result), true, JSON.stringify(result));
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.match(live.find((step) => step.k === 'think').text, /Долгое локальное размышление/);
+  assert.deepEqual(live, result.steps);
+});
 
 test('qwen-native-catalog-stream-resume-abort', { timeout: 60000 }, async (t) => {
   const fixture = await qwenNativeFixture(t);

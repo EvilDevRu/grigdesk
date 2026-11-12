@@ -439,6 +439,7 @@
             <StepList
               v-if="steps.length"
               :steps="steps"
+              :legacy-text-deltas="group.provider?.capabilities?.legacyTextStepDeltas"
               :model-label="modelLabelOf"
               :live="live"
               :section="group.turn"
@@ -1206,7 +1207,6 @@ const currentModelTitle = computed(() => (
 const modelOptionTitle = (model: ProviderModelEntry) => modelContextTitle(model, model.name)
   + (model.unknown ? ' · нет в каталоге установленного CLI' : '');
 const modelOptionLabel = (model: ProviderModelEntry) => model.name
-  + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
 
 /**

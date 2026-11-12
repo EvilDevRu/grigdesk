@@ -122,6 +122,12 @@ export function compileChatSession(prefix, {
       '../../stores/providers.ts': (
         `export const useProvidersStore = globalThis.${prefix}ProvidersStore;`
       ),
+      './settingsNavigation.ts': [
+        'export const openSettings = (request) => {',
+        `  const handler = globalThis.${prefix}OpenSettings;`,
+        '  return handler ? handler(request) : true;',
+        '};',
+      ].join('\n'),
       './EffortSlider.vue': effortSliderStub(),
       ...(realSteps ? {} : { './StepList.vue': inertComponentStub('step-list-stub') }),
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),

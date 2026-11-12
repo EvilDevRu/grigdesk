@@ -40,6 +40,7 @@ export function chatStepKey(step: ChatStep): string {
 export function foldChatSteps(
   steps: ChatStep[],
   displayed = new Set<string | undefined>(),
+  legacyTextDeltas = false,
 ): StepRow[] {
   const finish = startChatPerformance('chat.steps.fold', () => ({ steps: steps.length }));
   const out: StepRow[] = [];
@@ -64,6 +65,14 @@ export function foldChatSteps(
     }
 
     const previous = out.at(-1);
+
+    if (legacyTextDeltas && !step.id && !previous?.id
+      && (step.k === 'think' || step.k === 'text') && previous?.k === step.k
+      && previous.parent === step.parent) {
+      previous.text = String(previous.text || '') + String(step.text || '');
+
+      continue;
+    }
 
     if (step.k === 'note' && previous?.k === 'note'
       && previous.text === step.text && previous.parent === step.parent) {

@@ -429,6 +429,7 @@ export function routeLaunchEnv(
     GRIGDESK_QWEN_BIN: config.qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen',
     GRIGDESK_QWEN_HOME: config.qwenHome || process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || '',
     GRIGDESK_QWEN_CONFIG_ROOT: root,
+    GRIGDESK_QWEN_SERVICE: process.env.GRIGDESK_QWEN_SERVICE || '',
     QWEN_CODE_SYSTEM_SETTINGS_PATH: process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH || '',
     QWEN_CODE_SYSTEM_DEFAULTS_PATH: process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || '',
     HOME: process.env.HOME || '',
