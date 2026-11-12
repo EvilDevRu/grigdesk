@@ -143,7 +143,7 @@
 - [Сон агента: знак ожидания задач, защита процесса и границы исполнителей](agent-sleep.md)
 - [Фоновый запуск: поколения процесса, очередь, публикация и стоп](background-run-lifecycle.md)
 - [Выход хода и последний контекст: источники, partial-поток Claude, шаги Kimi и сохранение итога](turn-usage-metrics.md)
-- [Общее автообновление квот: default false, адресная ↻, ревизии и заморозка](usage-refresh-policy.md)
+- [Общее автообновление квот: default false, адресная ↻, ревизии, заморозка и 400 старого клиента](usage-refresh-policy.md)
 - [Живые квоты аккаунта: оверлей, порядок событий, поколения и ограничения прогноза](live-account-quotas.md)
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)

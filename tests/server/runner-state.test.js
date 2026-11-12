@@ -236,6 +236,48 @@ test('runner state falls back from stage policy to project policy', () => {
   assert.equal(resolveRunnerState(profile, {}, 'BUILD').source, 'profile-project');
 });
 
+test('локальная модель и effort не меняют фактический запуск и независимое наследование', () => {
+  const profile = {
+    PROJECT_RUNNER_PRIMARY: 'codex',
+    MODEL_DEFAULT_CODEX_EXACT: 'profile-model',
+    MODEL_DEFAULT_CODEX_EFFORT: 'high',
+  };
+  const registry = {
+    RUNNER_OVERRIDE_STAGE_BUILD: 'claude',
+    RUNNER_ACTUAL_BUILD: 'codex',
+    MODEL_ACTUAL_BUILD: 'running-model',
+    RUNNER_REASON_BUILD: 'primary',
+  };
+  const settings = {
+    selection: {
+      primary: null,
+      parametersFor: 'codex',
+      model: 'next-model',
+      effort: '',
+    },
+    failover: [],
+  };
+  const runner = resolveRunnerState(profile, registry, 'BUILD', [], settings);
+
+  assert.equal(runner.primary, 'codex', 'null снимает прежний stage override');
+  assert.equal(runner.model, 'running-model');
+  assert.equal(runner.models.codex.exact, 'next-model');
+  assert.equal(runner.models.codex.effort, '');
+
+  settings.selection.primary = 'claude';
+  settings.selection.parametersFor = 'claude';
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).switched, false,
+    'настройка следующего запуска не превращает текущего primary в резерв');
+  settings.selection.primary = null;
+  settings.selection.parametersFor = 'codex';
+
+  settings.selection.model = null;
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).models.codex.exact,
+    'profile-model');
+  settings.selection.parametersFor = 'claude';
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).models.codex.effort, 'high');
+});
+
 test('active failover reason comes from completed primary attempt, not stale registry data', () => {
   const runner = {
     primary: 'claude',

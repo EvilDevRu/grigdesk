@@ -15,6 +15,7 @@ import { GLM_FACTORY_MODELS } from './glm/factoryCatalog.ts';
 import { openRunDirectory, readRunFile, readRunnerFailure } from './runnerArtifacts.ts';
 import { runnerFailureDetail } from './runnerFailure.ts';
 import { runnerModelName } from './runnerModel.ts';
+import type { StageRunnerProjection } from './factoryStageRunnerSettings.ts';
 
 // Реестр задачи и runners.env профиля читаются одинаково: плоские строковые пары.
 export type RunnerRegistry = Record<string, string | undefined>;
@@ -166,19 +167,24 @@ export function resolveProjectRunnerState(profileConfig: RunnerRegistry): Runner
 
 /**
  * Цепочка, runtime-телеметрия и подписи этапа собираются на серверной границе DTO.
- * Последняя GLM-попытка уточняет модель до старта, не подменяя фактическую модель реестра.
+ * Локальная selection перекрывает базовую политику, сохраняя факт текущего запуска.
+ * Последняя GLM-попытка уточняет модель без локального выбора, не подменяя actual.
  */
 export function resolveRunnerState(
   profileConfig: RunnerRegistry,
   registry: RunnerRegistry,
   stage: string,
   attempts: RunnerAttempt[] = [],
+  settings: StageRunnerProjection | null = null,
 ): RunnerState {
   const key = STAGE_ID.test(String(stage || '')) ? stage : '';
   let resolved: RunnerPolicy;
 
-  const taskStage = key ? splitChain(registry[`RUNNER_OVERRIDE_STAGE_${key}`]) : [];
-  if (taskStage.length) {
+  const taskStage = key && !settings ? splitChain(registry[`RUNNER_OVERRIDE_STAGE_${key}`]) : [];
+
+  if (settings?.selection.primary) {
+    resolved = policy(settings.selection.primary, settings.failover.join(','), 'node');
+  } else if (taskStage.length) {
     resolved = policy(taskStage[0], taskStage.slice(1).join(','), 'task-stage');
   } else if (splitChain(registry.RUNNER_OVERRIDE_PRIMARY).length) {
     resolved = policy(
@@ -203,23 +209,43 @@ export function resolveRunnerState(
     provider,
     modelPolicy(profileConfig, key, provider),
   ]));
+  const selection = settings?.selection;
+
+  if (selection && selection.parametersFor === resolved.primary) {
+    const base = models[selection.parametersFor];
+    const exact = selection.model === null ? base?.exact ?? null : runnerModelName(selection.model);
+
+    models[selection.parametersFor] = {
+      exact,
+      label: selection.model === null ? base?.label : exact,
+      family: base?.family ?? null,
+      version: base?.version ?? null,
+      variant: base?.variant ?? null,
+      effort: selection.effort ?? base?.effort ?? null,
+    };
+  }
 
   const glmPolicy = models.glm;
   const latestGlm = attempts.findLast((attempt) => attempt.runner === 'glm' && attempt.model);
 
-  if (glmPolicy && latestGlm?.model) {
+  if (glmPolicy && latestGlm?.model && selection?.model == null) {
     glmPolicy.label = latestGlm.model;
   }
+
+  const reason = key ? registry[`RUNNER_REASON_${key}`] || null : null;
+  const actualReason = attempts.findLast((attempt) => attempt.runner === actual)?.reason || reason;
+  const switched = Boolean(actual && (settings && actualReason
+    ? actualReason !== 'primary' : resolved.primary && actual !== resolved.primary));
 
   return {
     ...resolved,
     actual,
     family: key ? registry[`MODEL_FAMILY_${key}`] || null : null,
     model: runnerModelName(key ? registry[`MODEL_ACTUAL_${key}`] : null),
-    reason: key ? registry[`RUNNER_REASON_${key}`] || null : null,
+    reason,
     planLevel: key ? registry[`PLAN_LEVEL_${key}`] || null : null,
     catalogRevision: key ? registry[`CATALOG_REVISION_${key}`] || null : null,
-    switched: !!(actual && resolved.primary && actual !== resolved.primary),
+    switched,
     models,
   };
 }
