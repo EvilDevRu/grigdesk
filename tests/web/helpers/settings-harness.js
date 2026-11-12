@@ -171,6 +171,8 @@ export async function settingsHarness(t, pageId, component, options = {}) {
 
   return {
     browser,
+    pinia,
+    mount,
     wrapper,
     module,
     settings,

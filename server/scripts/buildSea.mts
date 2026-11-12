@@ -127,7 +127,8 @@ export async function buildRelease(options: BuildArgs) {
         });
         await normalizeStageModes(directory);
 
-        const required = ['server/help/help.json', 'server/help/site/index.html',
+        const required = ['server/help/help.json', 'server/help/help.en.json',
+          'server/help/site/help.en.json', 'server/help/site/index.html',
           'server/help/site/help.json', 'VERSION', 'server/grigdesk-server', 'runtime/node/bin/node',
           'server/package.json', 'server/node_modules/fastify/package.json',
           'server/runtime/esmBridge.cjs', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',

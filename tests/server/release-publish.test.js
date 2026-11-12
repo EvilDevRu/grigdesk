@@ -1,3 +1,5 @@
+import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
+import { sha256 } from '../../shared/node/hash.ts';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -115,6 +117,7 @@ async function installedPublicationFixture(t, channel) {
   const site = path.join(temporary, 'site');
   const mirror = path.join(temporary, 'mirror');
   const preparedRoot = path.join(temporary, 'runtime', 'b'.repeat(64));
+  let englishBytes = '';
 
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   await fs.mkdir(bins, { recursive: true });
@@ -130,6 +133,12 @@ async function installedPublicationFixture(t, channel) {
 
       await fs.writeFile(path.join(help, 'help.json'), JSON.stringify(bundle));
       await fs.writeFile(path.join(help, 'site/help.json'), JSON.stringify(bundle));
+
+      const { revision: _revision, ...english } = { ...bundle, locale: 'en' };
+
+      englishBytes = JSON.stringify({ ...english, revision: sha256(canonicalJson(english)) });
+      await fs.writeFile(path.join(help, 'help.en.json'), englishBytes);
+      await fs.writeFile(path.join(help, 'site/help.en.json'), englishBytes);
 
       for (const name of ['index.html', 'latest.html', 'latest.js']) {
         await fs.writeFile(path.join(help, 'site', name), `ресурс:${name}`);
@@ -220,6 +229,7 @@ async function installedPublicationFixture(t, channel) {
     mirror,
     targets,
     publishInstalledRelease,
+    englishBytes,
   };
 }
 
@@ -239,6 +249,13 @@ for (const channel of ['release', 'dev']) {
     delete process.env.PUBLISH_FAIL_SCP;
 
     await box.publishInstalledRelease(box.built.directory, box.targets);
+
+    // HELP-KEEP-PUBLISH-EN: publisher копирует добавочный EN ресурс без изменения байтов.
+    for (const site of [box.site, box.mirror]) {
+      assert.equal(await fs.readFile(path.join(site, 'help', version, 'help.en.json'), 'utf8'),
+        box.englishBytes);
+    }
+
     assert.deepEqual(JSON.parse(await fs.readFile(latest, 'utf8')), box.built.index);
     assert.equal(await fs.readFile(other, 'utf8'), 'OTHER');
     assert.equal(await fs.readFile(path.join(box.site, 'releases', version,

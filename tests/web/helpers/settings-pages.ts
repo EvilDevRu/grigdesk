@@ -44,3 +44,5 @@ export { default as HelpDialog } from '../../../web/src/features/help/HelpDialog
 export { useHelpStore } from '../../../web/src/stores/help.ts';
 export { useAuthStore } from '../../../web/src/stores/auth.ts';
 export { installHelpNavigation } from '../../../web/src/shared/helpNavigation.ts';
+export * as localeAdapter from '../../../web/src/shared/uiLocale.ts';
+export { bindHelpAccess } from '../../../web/src/shared/helpNavigation.ts';

@@ -337,7 +337,7 @@
 - [Рабочая папка разговора — подробный контракт](workdir-reference.md)
 - [DeepSeek Harness — подробный контракт](deepseek-reference.md)
 - [Прогноз лимитов — подробный контракт](usage-forecast-reference.md)
-- [Инструмент справки: общий registry, версии и порционное чтение](help-tool.md)
+- [Инструмент справки: ru/en, общий registry, версии и порционное чтение](help-tool.md)
 
 ## История решений
 

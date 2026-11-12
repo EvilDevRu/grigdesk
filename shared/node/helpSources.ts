@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { canonicalJson } from '../lib/canonicalJson.ts';
 import { decodeHelpBundle, HELP_MAX_BYTES, helpInvalid } from '../help/helpContracts.ts';
-import type { HelpBundle } from '../help/helpContracts.ts';
+import type { HelpBundle, HelpLocale } from '../help/helpContracts.ts';
 import { HELP_CONTEXT_ARTICLES, helpHref } from '../help/helpLinks.ts';
 import { readContainedText } from './readContainedText.ts';
 import { sha256 } from './hash.ts';
@@ -24,12 +24,13 @@ export function verifyHelpBundle(raw: unknown): HelpBundle {
  * Только каталог guide и его явные обычные файлы образуют корпус.
  * Локальные заметки, планы и внешние каталоги не становятся транзитивными ресурсами.
  */
-export async function compileHelpSources(sourceRoot: string, identity: {
+async function compileLocaleSources(sourceRoot: string, identity: {
   version: string;
   commit: string;
-}): Promise<HelpBundle> {
-  const root = path.join(sourceRoot, 'docs/grigdesk/guide');
-  const catalogText = await readContainedText(sourceRoot, 'docs/grigdesk/guide/catalog.json', 64000);
+}, locale: HelpLocale): Promise<HelpBundle> {
+  const relative = `docs/grigdesk/guide${locale === 'en' ? '/en' : ''}`;
+  const root = path.join(sourceRoot, relative);
+  const catalogText = await readContainedText(sourceRoot, `${relative}/catalog.json`, 64000);
 
   if (!catalogText || catalogText.length > 64000) {
     helpInvalid();
@@ -39,6 +40,22 @@ export async function compileHelpSources(sourceRoot: string, identity: {
 
   if (!Array.isArray(catalog) || catalog.length === 0 || catalog.length > 128) {
     helpInvalid();
+  }
+
+  if (locale === 'en') {
+    const russian = await compileHelpSources(sourceRoot, identity);
+    const expected = russian.articles.map(({ id, file }) => ({
+      id,
+      file
+    }));
+    const translated = catalog.map((entry) => ({
+      id: entry?.id,
+      file: entry?.file
+    }));
+
+    if (JSON.stringify(expected) !== JSON.stringify(translated)) {
+      helpInvalid();
+    }
   }
 
   const articles = [];
@@ -51,7 +68,7 @@ export async function compileHelpSources(sourceRoot: string, identity: {
       helpInvalid();
     }
 
-    const markdown = await readContainedText(sourceRoot, `docs/grigdesk/guide/${raw.file}`, 128000);
+    const markdown = await readContainedText(sourceRoot, `${relative}/${raw.file}`, 128000);
 
     if (!markdown || markdown.length > 128000) {
       helpInvalid();
@@ -70,7 +87,7 @@ export async function compileHelpSources(sourceRoot: string, identity: {
   const content = {
     format: 1,
     ...identity,
-    locale: 'ru',
+    locale,
     articles
   };
   const result = decodeHelpBundle({
@@ -79,8 +96,15 @@ export async function compileHelpSources(sourceRoot: string, identity: {
   const entries = await readdir(root, { withFileTypes: true });
   const expectedFiles = new Set(['catalog.json', ...result.articles.map((entry) => entry.file)]);
 
-  if (entries.some((entry) => !entry.isFile() || !expectedFiles.has(entry.name))
-    || entries.length !== expectedFiles.size) {
+  const sourceEntries = locale === 'ru' ? entries.filter((entry) => entry.name !== 'en') : entries;
+  const english = entries.find((entry) => entry.name === 'en');
+
+  if (locale === 'ru' && english && !english.isDirectory()) {
+    helpInvalid();
+  }
+
+  if (sourceEntries.some((entry) => !entry.isFile() || !expectedFiles.has(entry.name))
+    || sourceEntries.length !== expectedFiles.size) {
     helpInvalid();
   }
 
@@ -110,4 +134,51 @@ export async function compileHelpSources(sourceRoot: string, identity: {
   }
 
   return result;
+}
+
+/**
+ * Закрытая локаль проверяется до построения пути; отсутствующий перевод отличим от повреждения.
+ * Любая другая ошибка источника превращается в безопасный публичный код без файловых путей.
+ */
+export async function compileHelpSources(sourceRoot: string, identity: {
+  version: string;
+  commit: string;
+}, locale: HelpLocale = 'ru'): Promise<HelpBundle> {
+  if (locale !== 'ru' && locale !== 'en') {
+    helpInvalid();
+  }
+
+  if (locale === 'en') {
+    const directory = await lstat(path.join(sourceRoot, 'docs/grigdesk/guide/en'))
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          throw new Error('help_locale_unavailable');
+        }
+
+        helpInvalid();
+      });
+
+    if (!directory.isDirectory() || directory.isSymbolicLink()) {
+      helpInvalid();
+    }
+
+    const catalog = await lstat(path.join(sourceRoot, 'docs/grigdesk/guide/en/catalog.json'))
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          throw new Error('help_locale_unavailable');
+        }
+
+        helpInvalid();
+      });
+
+    if (!catalog.isFile() || catalog.isSymbolicLink()) {
+      helpInvalid();
+    }
+  }
+
+  try {
+    return await compileLocaleSources(sourceRoot, identity, locale);
+  } catch {
+    helpInvalid();
+  }
 }
