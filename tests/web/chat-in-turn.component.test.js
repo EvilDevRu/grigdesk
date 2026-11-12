@@ -177,6 +177,33 @@ async function mountChat(t, {
   };
 }
 
+test('заметка новой сессии стоит перед действиями, а статус остаётся в конце хода', async (t) => {
+  const { wrapper, session, run, flushPromises } = await mountChat(t);
+
+  session.messages[0].turnId = 'session-note-turn';
+  run.parentTurnId = session.messages[0].turnId;
+  session.messages.push({ role: 'note', text: 'Новая сессия: профиль исполнителя изменился' });
+  session.steps.push({ k: 'start', at: 1 }, {
+    k: 'tool',
+    id: 'session-note-tool',
+    name: 'Read',
+    title: 'Проверяю файл',
+    at: 2,
+  });
+  await flushPromises();
+
+  const note = wrapper.get('.msg.note').element;
+  const turn = wrapper.get('[data-role="chat-turn"]').element;
+  const status = wrapper.get('[data-role="chat-status"]').element;
+
+  assert.ok(note.compareDocumentPosition(turn) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(turn.contains(note), false);
+  assert.equal(turn.contains(status), true);
+  assert.equal(wrapper.findAll('[data-role="chat-status"]').length, 1);
+  assert.equal(wrapper.get('.conversation-group:last-child .msg:last-child').element.contains(status), true);
+  assert.equal(wrapper.findAll('.msg.note').length, 1);
+});
+
 test('индикатор раскладки задаёт тот же минимум высоты для поля и его разделителя', async (t) => {
   const { wrapper } = await mountChat(t, { desktop: true });
   const separator = wrapper.get('.cs-resize');

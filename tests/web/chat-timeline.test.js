@@ -220,6 +220,70 @@ test('пустой живой ход встаёт после своего зап
   assert.equal(rows[0].index, 0);
 });
 
+test('заметки подготовки остаются перед живым ходом и не уходят под его индикатор', () => {
+  const note = { role: 'note', text: 'Новая сессия: профиль исполнителя изменился' };
+  const nextNote = { role: 'note', text: 'Рабочая папка подготовлена' };
+  const queued = {
+    role: 'user',
+    text: 'Следующая задача',
+    queued: true,
+  };
+  const messages = [parent, note, nextNote, queued];
+  const snapshot = JSON.stringify(messages);
+  const projector = createChatTimelineProjector();
+
+  for (const liveSteps of [[], steps.slice(0, 2)]) {
+    const expected = [
+      parent.text, note.text, nextNote.text,
+      ...liveSteps.map((step) => step.title || step.k),
+      'Работает', queued.text,
+    ];
+
+    assert.deepEqual(labels(chatTimeline(messages, liveSteps, true, run)), expected);
+    assert.deepEqual(labels(projector.project(messages, liveSteps, true, run)), expected);
+  }
+
+  assert.equal(JSON.stringify(messages), snapshot);
+});
+
+test('заметка новой сессии сохраняет место до первой реплики, после неё и в истории', () => {
+  const note = { role: 'note', text: 'Новая сессия: профиль исполнителя изменился' };
+  const queued = {
+    role: 'user',
+    text: 'Следующая задача',
+    queued: true,
+  };
+  const final = {
+    ...answer,
+    text: 'Готово',
+    steps,
+    finalAssistantMessageId: 'answer-final',
+  };
+  const projector = createChatTimelineProjector();
+  const phases = [
+    [[parent, note, queued], true],
+    [[parent, note, reply, queued], true],
+    [[parent, note, reply, final, queued], false],
+  ];
+  let noteKey;
+
+  for (const [messages, sending] of phases) {
+    const projected = projector.project(messages, steps, sending, run);
+
+    for (const rows of [chatTimeline(messages, steps, sending, run), projected]) {
+      const text = labels(rows);
+      const noteRow = rows.find((row) => row.message === note);
+
+      assert.deepEqual(text.slice(0, 3), [parent.text, note.text, 'start']);
+      assert.equal(text.at(-1), queued.text);
+      assert.equal(rows.filter((row) => row.message === note).length, 1);
+      assert.equal(noteRow.index, 1);
+      noteKey ??= noteRow.key;
+      assert.equal(noteRow.key, noteKey);
+    }
+  }
+});
+
 test('индикатор остаётся в конце текущего запуска до первого шага и после реплики', () => {
   const empty = chatTimeline([parent], [], true, run);
 
