@@ -843,7 +843,8 @@ watch([sortBy, triageMode, selectedSources, selectedGroup], () => {
 
 const numericAllowed = (task: BoardTask) => task.source === data.value?.source
   || (!data.value?.multiSource && !isTaskSourceId(task.source));
-const triageOf = (task: BoardTask) => numericAllowed(task) ? analysis.byTask[task.id] || null : null;
+const triageOf = (task: BoardTask) => analysis.byReference?.[taskReferenceKey(task)]
+  || (numericAllowed(task) ? analysis.byTask[task.id] || null : null);
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => allTasks.value.filter((t) => {
   if (!analysisEnabled.value || !numericAllowed(t)) {
@@ -883,7 +884,7 @@ async function analyzeAllUnrated() {
 }
 
 const projectedAnalysis = computed(() => Object.fromEntries(allTasks.value
-  .filter(numericAllowed).map((task) => [taskReferenceKey(task), analysis.byTask[task.id]])));
+  .map((task) => [taskReferenceKey(task), triageOf(task)])));
 
 const myTasks = computed(() => {
   return selectBoardTasks({

@@ -321,3 +321,143 @@ test('EXTERNAL-ARBITER-01: профиль beta сохраняет границу
   assert.equal(entries.find((entry) => entry.questionId === 'q-product').status, 'human_required');
   assert.equal(fx.reevaluations(), 1);
 });
+
+/**
+ * Получает два пакета через настоящий Analyzer и меняет только ответы внешних моделей.
+ * Перезапуск удерживается на границе enqueue: проверяемая маршрутизация арбитра остаётся настоящей.
+ */
+async function sourceArbiterFixture(t) {
+  const {
+    analysisSourceFixture, completed, eventually, MODEL, modelRegistry,
+  } = await import('./helpers/analysisSource.js');
+  const { AnalysisArbiter } = await import('../../server/src/lib/analysis/arbiter.ts');
+  const fx = await analysisSourceFixture(t, {
+    resultFor: (label) => ({
+      questions: [
+        {
+          id: `fact-${label}`,
+          text: `Факт ${label}`,
+          kind: 'factual',
+          options: [],
+        },
+        {
+          id: `choice-${label}`,
+          text: `Выбор ${label}`,
+          kind: 'product_choice',
+          options: [],
+        },
+      ],
+    }),
+  });
+
+  for (const source of [fx.a.source, fx.b.source]) {
+    const response = await fx.request('POST', '/api/tasks/42/analyze', { source });
+
+    assert.equal(response.statusCode, 200, response.body);
+    await completed(fx, source);
+    await eventually(() => fx.analyzer._jobs.size, (size) => size === 0);
+  }
+
+  const enqueued = [];
+  const prompts = [];
+
+  fx.analyzer.enqueue = async (...args) => {
+    enqueued.push(args);
+
+    return { outcome: 'queued' };
+  };
+
+  const arbiter = new AnalysisArbiter({
+    analyzer: fx.analyzer,
+    pluginEnabled: () => true,
+    pluginSettings: () => ({ triageModel: MODEL, autoArbitrate: true }),
+    providerRegistry: modelRegistry,
+    executorFor: async () => ({
+      id: 'codex',
+      scopedWorkspace: true,
+      async run(options) {
+        prompts.push(options.message);
+
+        return { reply: JSON.stringify({ answers: [
+          {
+            questionId: 'fact-A',
+            kind: 'factual',
+            status: 'answered',
+            text: 'Ответ A по коду',
+            proof: ['fixture.ts:7'],
+          },
+          {
+            questionId: 'choice-A',
+            kind: 'product_choice',
+            status: 'answered',
+            text: 'Навязанный выбор запрещён',
+            proof: ['fixture.ts:8'],
+          },
+        ] }) };
+      },
+    }),
+  });
+
+  return {
+    ...fx,
+    arbiter,
+    enqueued,
+    arbiterPrompts: prompts,
+  };
+}
+
+test('SOURCE-ARBITER-01: ручной и automatic повтор читают и меняют только A42', async (t) => {
+  const { sourceQuery, packageBytes } = await import('./helpers/analysisSource.js');
+
+  for (const automatic of [false, true]) {
+    await t.test(automatic ? 'automatic' : 'manual', async (st) => {
+      const fx = await sourceArbiterFixture(st);
+      const before = await packageBytes(fx.config.analysisDir);
+      const bUrl = `/api/tasks/42/clarifications?${sourceQuery(fx.b.source)}`;
+      const bBefore = (await fx.request('GET', bUrl)).body;
+      const result = await fx.arbiter.arbitrate('42', { automatic, source: fx.a.source });
+
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.answered, 1, 'Арбитр A должен увидеть factual-вопрос A, а не B');
+      assert.equal(fx.arbiterPrompts.length, 1);
+      assert.match(fx.arbiterPrompts[0], /Факт A/);
+      assert.doesNotMatch(fx.arbiterPrompts[0], /Факт B/);
+      assert.equal(fx.enqueued.length, 1);
+      assert.equal(String(fx.enqueued[0][0]), '42');
+      assert.ok(JSON.stringify(fx.enqueued[0].slice(1)).includes(fx.a.source));
+
+      const a = (await fx.request('GET', `/api/tasks/42/clarifications?${sourceQuery(fx.a.source)}`)).json();
+      const b = await fx.request('GET', `/api/tasks/42/clarifications?${sourceQuery(fx.b.source)}`);
+
+      assert.equal(a.entries.find((entry) => entry.questionId === 'fact-A')?.status, 'answered');
+      assert.equal(a.entries.find((entry) => entry.questionId === 'choice-A')?.status, 'human_required');
+      assert.equal(b.body, bBefore);
+      assert.doesNotMatch(a.text, /Навязанный выбор запрещён/);
+
+      const after = await packageBytes(fx.config.analysisDir);
+
+      for (const [file, bytes] of Object.entries(before)) {
+        assert.equal(after[file], bytes, 'Существующие оценки и статус B не переписываются');
+      }
+
+      await fx.arbiter.arbitrate('42', { automatic, source: fx.a.source });
+      assert.equal(fx.enqueued.length, 1, 'Повтор не дублирует ответы и переоценку');
+    });
+  }
+});
+
+test('SOURCE-ARBITER-01: callback worker передаёт источник автоматическому повтору', async (t) => {
+  const { analysisSourceFixture, eventually } = await import('./helpers/analysisSource.js');
+  const fx = await analysisSourceFixture(t);
+  const callbacks = [];
+
+  fx.analyzer.onAnalyzed = (...args) => {
+    callbacks.push(args);
+  };
+  await fx.request('POST', '/api/tasks/42/analyze', { source: fx.a.source });
+  await eventually(() => callbacks, (calls) => calls.length > 0);
+
+  assert.equal(String(callbacks[0][0]), '42');
+  assert.ok(JSON.stringify(callbacks[0].slice(1)).includes(fx.a.source),
+    'Автоматический арбитр должен получить A вместе с номером');
+});

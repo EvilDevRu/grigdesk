@@ -11,6 +11,9 @@ tracker timer <id> start|pause|stop
 tracker start <id>
 tracker complete <id>
 tracker renew <id>
+tracker analyze <id>           # очередь триажа
+tracker launch-options <id>    # профиль, маршруты и подсказки
+tracker launch <id>            # запуск из JSON-объекта stdin
 tracker create                 # JSON читается из stdin
 tracker users [запрос]
 ```
@@ -24,6 +27,14 @@ tracker users [запрос]
 `boards` печатает JSON включённых внешних драйверов в сохранённом порядке: `id`, `name`,
 `status`, `default`, `reason`. Встроенного источника задач нет.
 Неизвестная или выключенная цель даёт явный отказ; обращения к дефолту вместо неё нет.
+
+Для analyze/launch-options/launch флаг `--board` сначала читает адресный context,
+проверяет полный source и передаёт его серверу в body/query.source. Launch читает один
+JSON-объект с прежними полями запуска (profile, route, title, description, acceptanceCriteria и т. д.).
+Выбирайте профиль и маршрут по launch-options. Противоречие source в stdin и --board,
+неверный JSON или не-объект дают код 2 до POST. Без флага source не добавляется; явно
+указанный source в launch stdin сохраняется. Unknown/disabled context даёт отказ без fallback.
+`start` по-прежнему означает renew + timer, а `launch` запускает конвейер.
 
 Просьба «поставь задачу в Битриксе» выполняется сразу через `tracker create`, без поиска
 другого API и без предварительной проверки сессии:
@@ -65,7 +76,7 @@ JSON
   `Не удалось связаться с GrigDesk.`; после 300 с ожидания сообщение предупреждает, что
   операция могла выполниться, и просит проверить результат перед повтором;
 - 1 — нет токена (`Нет токена: <путь>.`) или неверные настройки; HTTP не выполняется;
-- 2 — неверные аргументы: причина и справка `tracker --help`.
+- 2 — неверные аргументы (причина и справка `tracker --help`) либо неверный stdin запуска/конфликт source.
 
 `start <id>` подавляет отказ возобновления и возвращает только ответ запуска таймера. Запрос
 `users` из нескольких слов берётся в кавычки: лишний аргумент — код 2. Адрес, токен, сборка

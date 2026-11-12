@@ -81,8 +81,28 @@ export default function createDriver(host) {
         widgets: [],
       };
     },
-    taskDetail: async (id) => { record('taskDetail', [id]); return task; },
-    taskPageData: async (id) => { record('taskPageData', [id]); return { comments: [] }; },
+    taskDetail: async (id) => {
+      record('taskDetail', [id]);
+
+      if (control().detailError) {
+        throw new Error(control().detailError);
+      }
+
+      return task;
+    },
+    taskPageData: async (id) => {
+      record('taskPageData', [id]);
+
+      if (control().pageError) {
+        throw new Error(control().pageError);
+      }
+
+      if (control().hold === 'taskPageData') {
+        await host.fetch('https://held.fixture/taskPageData');
+      }
+
+      return { comments: control().comments || [] };
+    },
     createTask: effect('createTask'),
     updateTask: effect('updateTask'),
     addComment: effect('addComment'),

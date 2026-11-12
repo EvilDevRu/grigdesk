@@ -1430,8 +1430,9 @@ let detailRequest = 0;
 const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
 const canUsePersonal = computed(() => isB24Task.value);
-const canAnalyzeTask = computed(() => (!taskSource.value || taskSource.value === board.data?.source)
-  && isB24Task.value);
+const canAnalyzeTask = computed(() => isB24Task.value);
+let triageRequest = 0;
+let clarificationsRequest = 0;
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
 const commentText = ref('');
@@ -2482,17 +2483,25 @@ async function loadTriage() {
     return;
   }
 
-  try {
-    const reference = currentTaskKey.value;
-    const response = await readAnalysisDetail(taskId.value!);
+  const request = ++triageRequest;
+  const reference = currentTaskKey.value;
+  const id = taskId.value;
+  const source = taskSource.value;
 
-    if (currentTaskKey.value !== reference) {
+  try {
+    const response = await readAnalysisDetail(id, source);
+
+    if (request !== triageRequest || reference !== currentTaskKey.value) {
       return;
     }
 
     triage.value = response;
     syncClarifyDrafts();
   } catch { /* блок триажа не ломает модалку */ }
+
+  if (request !== triageRequest || reference !== currentTaskKey.value) {
+    return;
+  }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
   if (triageBusy.value && !triageTimer) {
     triageTimer = setInterval(loadTriage, 6000);
@@ -2570,19 +2579,22 @@ async function loadClarifications() {
     return;
   }
 
+  const request = ++clarificationsRequest;
   const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
 
   try {
-    const response = await analysisApi.clarifications(taskId.value!);
+    const response = await analysisApi.clarifications(id, source);
 
-    if (currentTaskKey.value !== reference) {
+    if (request !== clarificationsRequest || reference !== currentTaskKey.value) {
       return;
     }
 
     clarifySaved.value = response.text || '';
     clarifyEntries.value = response.entries || [];
   } catch {
-    if (currentTaskKey.value === reference) {
+    if (request === clarificationsRequest && reference === currentTaskKey.value) {
       clarifySaved.value = '';
       clarifyEntries.value = [];
     }
@@ -2625,7 +2637,14 @@ const sendClarify = () => act('clarify', async () => {
         .filter(Boolean),
     ].filter(Boolean).join('\n');
   }).filter(Boolean).join('\n\n');
-  const r = await analysisApi.answer(taskId.value!, answers, legacyText);
+  const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
+  const r = await analysisApi.answer(id, answers, legacyText, source);
+
+  if (reference !== currentTaskKey.value) {
+    return;
+  }
 
   clarifySaved.value = r.text || '';
   clarifyEntries.value = r.entries || clarifyEntries.value;
@@ -2636,7 +2655,14 @@ const sendClarify = () => act('clarify', async () => {
 });
 
 const arbitrateQuestions = () => act('arbitrate', async () => {
-  await analysisApi.arbitrate(taskId.value!);
+  const reference = currentTaskKey.value;
+
+  await analysisApi.arbitrate(taskId.value!, taskSource.value);
+
+  if (reference !== currentTaskKey.value) {
+    return;
+  }
+
   await Promise.all([loadClarifications(), loadTriage()]);
 });
 
@@ -2883,15 +2909,21 @@ async function sandboxDown() {
  * Снятие busy происходит при любом исходе без повторной мутации сервера.
  */
 async function act(name: string, fn: () => Promise<unknown>) {
+  const reference = currentTaskKey.value;
+
   busy.value = name;
   err.value = null;
 
   try {
     await fn();
   } catch (e) {
-    err.value = failureText(e);
+    if (reference === currentTaskKey.value) {
+      err.value = failureText(e);
+    }
   } finally {
-    busy.value = null;
+    if (reference === currentTaskKey.value) {
+      busy.value = null;
+    }
   }
 }
 
@@ -3040,14 +3072,14 @@ async function refreshLaunchOptions() {
   launchOptionsFailed.value = true;
 
   try {
-    let opts = await tasks.launchOptions(id);
+    let opts = await tasks.launchOptions(id, undefined, taskSource.value);
 
     if (requestId !== launchOptionsRequest) {
       return;
     }
 
     if (profile && opts.profiles?.includes(profile) && opts.profile !== profile) {
-      opts = await tasks.launchOptions(id, profile);
+      opts = await tasks.launchOptions(id, profile, taskSource.value);
     }
     if (requestId !== launchOptionsRequest) {
       return;
@@ -3217,7 +3249,9 @@ async function openLaunch() {
   launchOptionsBusy.value = true;
 
   try {
-    opts = await tasks.launchOptions(taskId.value!);
+    opts = await tasks.launchOptions(
+      taskId.value!, undefined, taskSource.value,
+    );
   } catch (e) {
     if (requestId === launchOptionsRequest) {
       err.value = `Не удалось узнать параметры запуска: ${failureText(e)}`;
@@ -3275,7 +3309,7 @@ async function changeLaunchProfile() {
   err.value = null;
 
   try {
-    const opts = await tasks.launchOptions(taskId.value!, profile);
+    const opts = await tasks.launchOptions(taskId.value!, profile, taskSource.value);
 
     if (requestId !== launchOptionsRequest || !launchForm.value) {
       return;
@@ -3428,13 +3462,22 @@ async function doLaunch(payload: unknown) {
     return;
   }
 
+  const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
+
   busy.value = 'launch';
   err.value = null;
 
   try {
-    const r = await tasks.launch(taskId.value!, { ...objectOrEmpty(payload),
-      ...(taskSource.value ? { source: taskSource.value } : {}),
+    const r = await tasks.launch(id, {
+      ...objectOrEmpty(payload),
+      ...(source ? { source } : {}),
     });
+
+    if (reference !== currentTaskKey.value) {
+      return;
+    }
 
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
@@ -3444,6 +3487,10 @@ async function doLaunch(payload: unknown) {
       : r.note || 'Отправлено';
     await loadConveyor();
   } catch (e) {
+    if (reference !== currentTaskKey.value) {
+      return;
+    }
+
     const message = launchErrorText(e);
 
     if (objectOrEmpty(objectOrEmpty(e).data).error === 'tombstoned') {
@@ -3451,9 +3498,13 @@ async function doLaunch(payload: unknown) {
       await refreshLaunchOptions();
     }
 
-    err.value = message;
+    if (reference === currentTaskKey.value) {
+      err.value = message;
+    }
   } finally {
-    busy.value = null;
+    if (reference === currentTaskKey.value) {
+      busy.value = null;
+    }
   }
 }
 /**
@@ -3559,9 +3610,19 @@ watch(() => [taskId.value, taskSource.value, ui.taskUnavailable], ([id]) => {
   commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
+  triageRequest += 1;
+  clarificationsRequest += 1;
+
+  if (triageTimer) {
+    clearInterval(triageTimer);
+    triageTimer = null;
+  }
+
   comLoading.value = false;
   detail.value = null;
   loading.value = false;
+  busy.value = null;
+  err.value = null;
   closeLaunch();
   acknowledgedShelfTask = '';
   personalTarget = '';
@@ -3679,14 +3740,19 @@ onUnmounted(() => {
   commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
+  triageRequest += 1;
+  clarificationsRequest += 1;
+
+  if (triageTimer) {
+    clearInterval(triageTimer);
+    triageTimer = null;
+  }
+
   stopLaunchEvents();
   closeLaunch();
 
   if (ticker) {
     clearInterval(ticker);
-  }
-  if (triageTimer) {
-    clearInterval(triageTimer);
   }
 
   void dictationLease.release();
