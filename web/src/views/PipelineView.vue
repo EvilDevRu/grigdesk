@@ -912,23 +912,13 @@
 
             <div v-show="stageTab === 'executors'" id="stage-executors-panel" class="stage-tab-panel"
                  role="tabpanel" aria-labelledby="stage-executors-tab">
-              <div class="stage-section-heading">
-                <h4>{{ translate('core.stageExecutors') }}</h4>
-                <p>{{ translate('core.stageExecutorsHint') }}</p>
-              </div>
               <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
               <div v-if="stage!.meta.runner" class="sect runner-sect">
-                <div v-if="stage!.readOnly || stageRunnerLive" class="runner-override-row">
-                  <span class="runner-override-lbl">Исполнитель этапа</span>
-                  <span class="runner-source">{{ stageRunnerSource }}</span>
-                </div>
                 <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
                 <div v-if="!stage!.readOnly && stageRunnerOptions.length" class="runner-override">
-                  <div class="runner-override-row">
-                    <span class="runner-override-lbl">Исполнитель этапа</span>
-                    <span class="runner-source">{{ stageRunnerSource }}</span>
+                  <div v-if="runnerDraft?.primary || stage!.meta.runner.source === 'task-stage'"
+                       class="runner-override-row">
                     <UiButton
-                      v-if="runnerDraft?.primary || stage!.meta.runner.source === 'task-stage'"
                       class="btn runner-reset"
                       data-role="pipeline-compact-action"
                       variant="text"
@@ -939,30 +929,23 @@
                       Сбросить
                     </UiButton>
                   </div>
-                  <p id="stage-executor-preview" class="runner-preview-notice">
+                  <span id="stage-executor-preview" class="ui-visually-hidden">
                     {{ translate('core.stageSettingsScope') }}
+                  </span>
+                  <p v-if="runnerSettingsLoading" class="runner-hint" role="status">
+                    {{ translate('core.stageSettingsLoading') }}
                   </p>
-                  <p v-if="runnerSettingsLoading" role="status">{{ translate('core.stageSettingsLoading') }}</p>
-                  <p v-if="runnerSettingsError" role="alert">{{ runnerSettingsError }}</p>
-                  <UiButton v-if="runnerSettingsError" variant="text" @click="loadRunnerSettings(true)">
+                  <p v-if="runnerSettingsError" class="runner-hint" role="alert">{{ runnerSettingsError }}</p>
+                  <UiButton v-if="runnerSettingsError && !runnerSettings" variant="text"
+                            @click="retryRunnerSettings">
                     {{ translate('core.stageSettingsRetry') }}
                   </UiButton>
-                  <p v-if="runnerSettings && !runnerSettings.models.length">
+                  <p v-if="runnerSettings && !runnerSettings.models.length" class="runner-hint">
                     {{ translate('core.stageSettingsEmpty') }}
                   </p>
-                  <p v-if="runnerConfirmed">
-                    {{ translate('core.stageSettingsFuture', {
-                      model: runnerConfirmedModel,
-                      effort: runnerConfirmed?.effective.effort || ''
-                    }) }}
+                  <p v-if="runnerSettingsInvalid" class="runner-hint" role="alert">
+                    {{ translate('core.stageSettingsInvalid') }}
                   </p>
-                  <p v-if="runnerConfirmed">
-                    {{ translate('core.stageSettingsFutureChain', {
-                      chain: runnerConfirmed.chain.map(providerLabel).join(' → ')
-                    }) }}
-                  </p>
-                  <p v-if="runnerSettingsDirty">{{ translate('core.stageSettingsDraft') }}</p>
-                  <p v-if="runnerSettingsInvalid" role="alert">{{ translate('core.stageSettingsInvalid') }}</p>
                   <div class="runner-picks">
                     <UiSelectableRow
                       v-for="id in stageRunnerOptions"
@@ -973,7 +956,7 @@
                       :selected="id === stageRunnerActive"
                       :pressed="id === stageRunnerActive"
                       :aria-busy="runnerPending === id"
-                      :disabled="Boolean(stageBusy)"
+                      :disabled="Boolean(stageBusy && stageBusy !== 'runner-options')"
                       @select="pickStageRunner(id)"
                     >
                       <span class="executor-identity">
@@ -998,9 +981,17 @@
                       </template>
                     </UiSelectableRow>
                   </div>
-                  <div class="runner-settings-actions">
-                    <UiButton :disabled="runnerSettingsDisabled" @click="applyRunnerSettings('next')">
-                      {{ translate(stageRunnerLive ? 'core.stageSettingsSaveNext' : 'core.stageSettingsApply') }}
+                  <p v-if="stageRunnerLive && runnerConfirmed" class="runner-hint">
+                    {{ translate('core.stageSettingsFuture', {
+                      model: runnerConfirmedModel,
+                      effort: runnerConfirmed.effective.effort || ''
+                    }) }}
+                  </p>
+                  <div v-if="stageRunnerLive || runnerSettingsError && runnerSettingsDirty"
+                       class="runner-settings-actions">
+                    <UiButton v-if="runnerSettingsError && runnerSettingsDirty"
+                              :disabled="runnerSettingsDisabled" @click="applyRunnerSettings('next')">
+                      {{ translate('core.stageSettingsRetrySave') }}
                     </UiButton>
                     <UiButton v-if="stageRunnerLive" tone="warning" :disabled="runnerSettingsDisabled"
                               @click="applyRunnerSettings('restart')">
@@ -1010,14 +1001,11 @@
                   <p v-if="runnerSettings?.receipt?.reason" role="alert">
                     {{ translate('core.stageSettingsSaved') }}: {{ runnerSettings.receipt.reason }}
                   </p>
-                  <p v-if="stage!.meta.runner.source === 'task-stage'" class="runner-hint">
-                    Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
-                  </p>
                   <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint">
                     Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
                   </p>
                 </div>
-                <!-- Базовая политика остаётся справкой; подтверждённая цепочка следующего запуска показана выше. -->
+                <!-- Цепочка остаётся одной справочной строкой под выбором исполнителя. -->
                 <div class="runner-chain">
                   <span class="runner-chain-lbl">{{ translate('core.stageSettingsPolicyChain') }}</span>
                   <template v-for="(id, i) in stage!.meta.runner.chain" :key="id">
@@ -1215,11 +1203,14 @@ interface StageNode {
   status: string;
 }
 
-type StageAction = 'gate' | 'force' | 'runner-switch' | 'runner-override';
+type StageAction = 'gate' | 'force' | 'runner-switch' | 'runner-options' | 'runner-override';
 
 interface PendingStageAction {
   action: StageAction;
   runner?: string;
+  selection?: StageRunnerSelection;
+  options?: StageRunnerOptions;
+  token?: symbol;
 }
 
 import { useSse } from '../composables/useSse.ts';
@@ -2048,13 +2039,6 @@ function stageStatusHint(s: Stage) {
 }
 
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
-const RUNNER_SOURCE: Record<string, string> = {
-  'profile-project': 'политика проекта',
-  'profile-stage': 'политика этапа',
-  task: 'переопределение задачи',
-  'task-stage': 'переопределение этапа задачи',
-};
-
 const LIVE_ICONS: Record<string, string> = {
   tool: '⚙',
   subagent: '🤖',
@@ -2593,15 +2577,6 @@ const runnerConfirmedModel = computed(() => {
 
   return options?.models.find((item) => item.id === model || item.aliases?.includes(model))?.label || model;
 });
-const stageRunnerSource = computed(() => {
-  const source = runnerConfirmed.value?.sources.primary || stage.value?.meta.runner?.source || '';
-
-  if (source === 'node') {
-    return translate('core.stageSourceLocal');
-  }
-
-  return source === 'profile' ? translate('core.stageSourceProfile') : RUNNER_SOURCE[source] || source;
-});
 const runnerDraft = ref<StageRunnerSelection | null>(null);
 const runnerSettingsLoading = ref(false);
 const runnerSettingsError = ref('');
@@ -2634,6 +2609,20 @@ const runnerSettingsDisabled = computed(() => Boolean(stageBusy.value || runnerS
   || !runnerSettings.value?.models.length || !runnerDraft.value || runnerSettingsInvalid.value));
 
 /**
+ * Запрос захватывает точную identity до ожидания и не зависит от жизни модального окна.
+ * Каталог можно использовать для сохранения даже после закрытия исходного открытия.
+ */
+async function readRunnerSettings(opened: Stage, provider?: string) {
+  return decodeStageRunnerOptions(await taskStore.getStageRunnerOptions(opened.task, {
+    profile: opened.profile || '',
+    attempt: String(opened.attempt),
+    node: opened.id,
+    stage: opened.runnerKey,
+    ...(provider === undefined ? {} : { provider }),
+  }));
+}
+
+/**
  * Discovery читает future отдельно от actual и не стирает набранный черновик.
  * Запоздалые ответы не могут попасть в другое открытие даже с тем же node id.
  */
@@ -2652,13 +2641,20 @@ async function loadRunnerSettings(keepDraft = false) {
   runnerSettings.value = null;
 
   try {
-    const result = decodeStageRunnerOptions(await taskStore.getStageRunnerOptions(opened.task, {
-      profile: opened.profile || '',
-      attempt: String(opened.attempt),
-      node: opened.id,
-      stage: opened.runnerKey,
-      ...(provider === undefined ? {} : { provider }),
-    }));
+    console.log('AGENT-DBG[1] Запрос настроек этапа', {
+      sequence,
+      provider,
+      keepDraft,
+    });
+
+    const result = await readRunnerSettings(opened, provider);
+
+    console.log('AGENT-DBG[2] Ответ настроек этапа', {
+      sequence,
+      provider,
+      models: result.models.length,
+      selection: result.selection,
+    });
 
     if (stage.value !== opened || sequence !== runnerSettingsSequence) {
       return;
@@ -2684,6 +2680,7 @@ async function loadRunnerSettings(keepDraft = false) {
     }
   } catch (error) {
     if (stage.value === opened && sequence === runnerSettingsSequence) {
+      console.log('AGENT-DBG[3] Ошибка настроек этапа', errorMessage(error, ''));
       runnerSettingsError.value = errorMessage(error, '');
     }
   } finally {
@@ -2705,6 +2702,18 @@ watch(() => stage.value, () => {
   runnerSettingsError.value = '';
   runnerSettingsLoading.value = false;
   runnerApplyRequest = null;
+
+  const pending = stagePending.value;
+
+  if (pending?.selection) {
+    runnerDraft.value = { ...pending.selection };
+    runnerSettings.value = pending.options ?? null;
+    runnerConfirmed.value = pending.options ?? null;
+    runnerSettingsLoading.value = pending.action === 'runner-options';
+
+    return;
+  }
+
   void loadRunnerSettings();
 });
 
@@ -2716,61 +2725,165 @@ watch(runnerRunObservation, () => {
   }
 });
 
+/**
+ * Поле сразу сохраняет совместимую пару; несовместимая остаётся видимой для исправления.
+ * Второй параметр никогда не сбрасывается ради автоматического сохранения.
+ */
 function setRunnerParameter(field: 'model' | 'effort', value: string | null) {
   if (runnerDraft.value && !stageBusy.value) {
     runnerDraft.value = { ...runnerDraft.value, [field]: value };
     runnerApplyRequest = null;
+    void applyRunnerSettings('next');
   }
 }
 
 /**
- * Выбор исполнителя составляет черновик, затем читает его собственные metadata.
- * Пара предыдущего исполнителя не переносится на нового кандидата.
+ * Повтор discovery сохраняет захваченный выбор независимо от закрытия окна.
+ * Начальная загрузка сама по себе не создаёт новую локальную настройку.
  */
-function pickStageRunner(primary: string) {
-  if (primary === stageRunnerActive.value || stageBusy.value) {
+async function retryRunnerSettings() {
+  const opened = stage.value;
+  const draft = runnerDraft.value;
+
+  if (opened && draft && runnerSettingsDirty.value) {
+    await saveRunnerSelection(opened, { ...draft });
+  } else {
+    await loadRunnerSettings(true);
+  }
+}
+
+/**
+ * Ошибка сохраняет черновик своего узла; закрытое окно не скрывает отказ от человека.
+ * Новое окно другого узла получает только сообщение с исходной задачей и этапом.
+ */
+function reportRunnerSaveError(opened: Stage, message: string) {
+  if (runnerSaveVisible(opened)) {
+    runnerSettingsError.value = message;
+    runnerSettingsLoading.value = false;
+  } else {
+    void alertDialog(translate('core.stageSettingsSaveFailed', {
+      task: String(opened.task),
+      stage: opened.label,
+      message,
+    }));
+  }
+}
+
+function runnerSaveVisible(opened: Stage) {
+  return Boolean(stage.value && stageActionKey(stage.value) === stageActionKey(opened));
+}
+
+/**
+ * Metadata и запись принадлежат узлу до первого await, а не открытому диалогу.
+ * Новый выбор до POST заменяет старый; закрытие и повторное открытие его не отменяют.
+ */
+async function saveRunnerSelection(opened: Stage, selection: StageRunnerSelection) {
+  const key = stageActionKey(opened);
+  const previous = pendingStageActions.value.get(key);
+
+  if (previous && previous.action !== 'runner-options') {
     return;
   }
 
-  runnerDraft.value = {
+  const token = Symbol();
+
+  pendingStageActions.value.set(key, {
+    action: 'runner-options',
+    runner: selection.parametersFor,
+    selection: { ...selection },
+    token,
+  });
+  runnerSettingsSequence += 1;
+  runnerDraft.value = { ...selection };
+  runnerSettings.value = null;
+  runnerSettingsLoading.value = true;
+  runnerSettingsError.value = '';
+  runnerApplyRequest = null;
+
+  try {
+    const options = await readRunnerSettings(opened, selection.parametersFor);
+
+    if (pendingStageActions.value.get(key)?.token !== token) {
+      return;
+    }
+
+    if (runnerSaveVisible(opened)) {
+      runnerSettings.value = options;
+      runnerConfirmed.value = options;
+      runnerSettingsLoading.value = false;
+    }
+
+    const invalid = stageRunnerSelectionError(selection, options);
+
+    if (invalid) {
+      throw new Error(invalid);
+    }
+
+    await persistRunnerSettings(opened, options, selection, 'next', token);
+  } catch (error) {
+    if (pendingStageActions.value.get(key)?.token === token) {
+      reportRunnerSaveError(opened, errorMessage(error, ''));
+    }
+  } finally {
+    if (pendingStageActions.value.get(key)?.token === token) {
+      finishStageAction(opened);
+    }
+  }
+}
+
+/**
+ * Клик по исполнителю создаёт отдельное сохранение с точной identity узла.
+ * Пока читается каталог, следующий клик может заменить ещё не отправленный выбор.
+ */
+async function pickStageRunner(primary: string) {
+  const opened = stage.value;
+
+  if (!opened || primary === stageRunnerActive.value
+    || stageBusy.value && stageBusy.value !== 'runner-options') {
+    return;
+  }
+
+  await saveRunnerSelection(opened, {
     primary,
     parametersFor: primary,
     model: null,
     effort: null,
-  };
-  runnerApplyRequest = null;
-  void loadRunnerSettings(true);
+  });
 }
 
 /**
- * Сброс исполнителя тоже остаётся черновиком до явного применения всей связки.
- * Модель и effort сохраняют своё независимое наследование.
+ * Сброс немедленно возвращает наследование исполнителя из действующей политики.
+ * При смене provider сначала загружаются его собственные параметры и каталог.
  */
-function setStageRunner(primary: string) {
+async function setStageRunner(primary: string) {
+  const opened = stage.value;
+
   if (primary) {
-    pickStageRunner(primary);
-  } else if (runnerDraft.value) {
+    await pickStageRunner(primary);
+  } else if (opened && runnerDraft.value) {
     const inheritedProvider = runnerSettings.value?.inherited?.primary || runnerDraft.value.parametersFor;
 
     if (inheritedProvider !== runnerDraft.value.parametersFor) {
-      runnerDraft.value = {
+      await saveRunnerSelection(opened, {
         primary: null,
         parametersFor: inheritedProvider,
         model: null,
         effort: null,
-      };
-      void loadRunnerSettings(true);
+      });
+
+      return;
     } else {
       runnerDraft.value = { ...runnerDraft.value, primary: null };
     }
 
     runnerApplyRequest = null;
+    await applyRunnerSettings('next');
   }
 }
 
 /**
- * Явный apply сохраняет всю selection, не закрывая окно и не меняя историю.
- * Restart подтверждается общим диалогом с повторной проверкой исходного открытия.
+ * Изменение поля сохраняет целую selection, не закрывая окно и не меняя историю.
+ * Только restart подтверждается общим диалогом и останавливает текущий процесс.
  */
 async function applyRunnerSettings(mode: 'next' | 'restart') {
   const opened = stage.value;
@@ -2787,53 +2900,78 @@ async function applyRunnerSettings(mode: 'next' | 'restart') {
     return;
   }
 
-  if (stage.value !== opened || !beginStageAction(opened, 'runner-override', draft.parametersFor)) {
+  if (stage.value === opened) {
+    await persistRunnerSettings(opened, options, { ...draft }, mode);
+  }
+}
+
+/**
+ * Сохранение использует собственные options и selection независимо от открытого окна.
+ * Повторное открытие того же узла подхватывает результат; чужое окно не меняется.
+ */
+async function persistRunnerSettings(
+  opened: Stage, options: StageRunnerOptions, selection: StageRunnerSelection,
+  mode: 'next' | 'restart', token = Symbol(),
+) {
+  const key = stageActionKey(opened);
+  let pending = pendingStageActions.value.get(key);
+
+  if (pending?.token === token) {
+    pending.action = 'runner-override';
+  } else if (beginStageAction(opened, 'runner-override', selection.parametersFor)) {
+    pending = pendingStageActions.value.get(key)!;
+    pending.token = token;
+  } else {
     return;
   }
 
-  const payload: StageRunnerApply = runnerApplyRequest?.mode === mode ? runnerApplyRequest : {
+  pending.selection = { ...selection };
+  pending.options = options;
+
+  const retry = runnerSaveVisible(opened) ? runnerApplyRequest : null;
+  const payload: StageRunnerApply = retry?.mode === mode ? retry : {
     identity: options.identity,
     expectedRevision: options.revision,
     expectedRun: options.actual?.run ?? null,
     catalogRevision: options.catalogRevision,
     requestId: crypto.randomUUID(),
     mode,
-    selection: { ...draft },
+    selection: { ...selection },
   };
 
-  runnerApplyRequest = payload;
+  if (runnerSaveVisible(opened)) {
+    runnerApplyRequest = payload;
+  }
 
   try {
     const result = decodeStageRunnerOptions(await taskStore.applyStageRunnerSettings(opened.task, payload));
 
-    if (stage.value === opened) {
+    if (runnerSaveVisible(opened)) {
+      runnerSettingsSequence += 1;
       runnerSettings.value = result;
       runnerConfirmed.value = result;
       runnerDraft.value = { ...result.selection };
       runnerSettingsError.value = '';
+      runnerSettingsLoading.value = false;
       runnerApplyRequest = null;
     }
 
     await load();
 
-    if (stage.value === opened) {
+    if (runnerSaveVisible(opened) && mode === 'restart') {
       await loadRunnerSettings(true);
     }
   } catch (error) {
-    if (stage.value === opened) {
-      const message = errorMessage(error, '');
-
-      if (error instanceof ApiError && error.status === 409) {
-        runnerApplyRequest = null;
-        await loadRunnerSettings(true);
-      }
-
-      if (stage.value === opened) {
-        runnerSettingsError.value = message;
-      }
+    if (runnerSaveVisible(opened) && error instanceof ApiError && error.status === 409) {
+      runnerApplyRequest = null;
+      await loadRunnerSettings(true);
     }
+
+    reportRunnerSaveError(opened, errorMessage(error, ''));
   } finally {
-    finishStageAction(opened);
+    if (pendingStageActions.value.get(key)?.token === token) {
+      finishStageAction(opened);
+    }
   }
 }
 // Подпись у `meta.comment`: один и тот же ключ реестра (`<КЛЮЧ>_COMMENT`) значит разное.
@@ -4562,8 +4700,6 @@ function cardState(g: PipelineViewGraph) {
 .runner-sect {
   gap: 16px;
 }
-.runner-source { margin-left: auto; font-size: 10.5px; text-transform: none;
-  letter-spacing: 0; font-weight: 400; text-align: right; opacity: .8; }
 /* Цепочка — справка, а не выбор: одна мелкая строка чипов, без заливки и веса. */
 .runner-chain { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   font-size: 11px; color: var(--ink-mid); }
@@ -4606,7 +4742,6 @@ function cardState(g: PipelineViewGraph) {
 .runner-switches { display: flex; flex-wrap: wrap; gap: 7px; }
 /* Выбор исполнителя до запуска этапа (override) — главное действие блока, отсюда карточки. */
 .runner-override { display: flex; flex-direction: column; gap: 8px; }
-.runner-override-lbl { color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .runner-picks {
   display: flex;
@@ -4648,15 +4783,6 @@ function cardState(g: PipelineViewGraph) {
   margin-left: auto;
   color: var(--accent);
   font-size: 12px;
-}
-.runner-preview-notice {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-  margin: 0 0 8px;
-  color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 1.6;
 }
 .stage-soon {
   flex: none;
@@ -4873,9 +4999,6 @@ function cardState(g: PipelineViewGraph) {
   }
   .stage-section-heading h4 {
     font-size: 16px;
-  }
-  .runner-source {
-    font-size: 10px;
   }
   .runner-attempt {
     grid-template-columns: 28px minmax(0, 1fr) auto;

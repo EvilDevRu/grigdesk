@@ -20,6 +20,7 @@ import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
 import { readProfileServiceHost } from '../lib/profileServiceHost.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
+import { readStageRunnerProjection } from '../lib/factoryStageRunnerSettings.ts';
 import { bootstrapNodeVerdict, readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
 import { stallIsArbitrable } from '../lib/factoryArbiter.ts';
 import {
@@ -891,7 +892,14 @@ export class FactoryStateAdapter {
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
       if (def.nodes[nid]?.[0] === 'agent') {
         const attempts = await readRunnerAttempts(stateDir, task, runnerKey);
-        const runner = resolveRunnerState(runnerConfig, registry, runnerKey, attempts);
+        const settings = trusted ? await readStageRunnerProjection(this.controlDir, {
+          task: String(task),
+          profile,
+          attempt: trusted.attempt,
+          node: nid,
+          stage: runnerKey,
+        }) : null;
+        const runner = resolveRunnerState(runnerConfig, registry, runnerKey, attempts, settings);
         // Этап и попытки — проекция для UI поверх политики runner-а, а не её поля.
         nodeMeta[nid] = {
           ...nodeMeta[nid],
