@@ -35,6 +35,7 @@ export async function openQwenTransport(
 
     return {
       client,
+      images: record(record(initialized.agentCapabilities).promptCapabilities).image === true,
       stderr: sandbox.stderr,
       async close() {
         client.close();

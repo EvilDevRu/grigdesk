@@ -5,7 +5,72 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
-import { qwenAdapter, runInput, selectedModel } from '../helpers/qwenFixture.mjs';
+import {
+  QWEN_TEST_PNG, qwenAdapter, qwenImage, runInput, selectedModel,
+} from '../helpers/qwenFixture.mjs';
+
+for (const midTurn of [false, true]) {
+  test(`Qwen native: изображение в ${midTurn ? 'уточнении' : 'обычном ходе'} доходит до API`, {
+    timeout: 60000,
+  }, async (t) => {
+    const fixture = await qwenNativeFixture(t);
+    const adapter = await qwenAdapter({ runnable: true });
+    const image = await qwenImage(fixture);
+    const controller = new AbortController();
+    const entry = fixture.settings.modelProviders.openai[0];
+    let port;
+
+    entry.generationConfig.modalities = { image: true };
+    await fixture.writeSettings(fixture.settings);
+
+    if (midTurn) {
+      fixture.actions.push({ hold: true });
+    }
+
+    const running = adapter.run(runInput(fixture, 'shared-model(openai)', {
+      attachmentsDir: image.root,
+      attachmentPaths: midTurn ? [] : [image.file],
+      message: midTurn ? 'Начни работу.' : '',
+      signal: controller.signal,
+      onInTurnReady(value) {
+        port = value;
+      },
+    }));
+
+    running.catch(() => {});
+
+    try {
+      if (midTurn) {
+        await fixture.held;
+
+        const delivered = await port.deliver({
+          messageId: 'qwen-native-image-in-turn',
+          text: '',
+          images: [{ path: image.file }],
+          sequence: 1,
+        });
+
+        assert.deepEqual(delivered, { ok: true, state: 'forwarded' });
+      }
+
+      const result = await running;
+      const imageCalls = fixture.requests.map((request) => (request.messages ?? [])
+        .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'image_url')).filter((images) => images.length);
+
+      assert.match(result.reply, /Ответ настоящего CLI/);
+      assert.ok(imageCalls.length, 'Картинка доходит в запрос модели, а не остаётся файловым путём');
+
+      for (const images of imageCalls) {
+        assert.equal(images.length, 1, 'Каждый запрос содержит картинку ровно один раз');
+        assert.equal(images[0].image_url.url, `data:image/png;base64,${QWEN_TEST_PNG.toString('base64')}`);
+      }
+    } finally {
+      controller.abort();
+      await running.catch(() => {});
+    }
+  });
+}
 
 test('Qwen native: уточнение прерывает генерацию и получает отдельный ответ', {
   timeout: 60000,

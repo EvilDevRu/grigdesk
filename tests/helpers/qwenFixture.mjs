@@ -9,6 +9,24 @@ import { createAcpClient } from '../../server/src/lib/acp/client.ts';
 
 export const QWEN_KEY = 'synthetic-qwen-secret-0123456789';
 export const SECOND_KEY = 'synthetic-secondary-secret-9876543210';
+export const QWEN_TEST_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGP4z8BA'
+    + 'EiJN9aiGUQ1DSgMAkPn/Afnh+ngAAAAASUVORK5CYII=', 'base64',
+);
+
+/**
+ * Изображение лежит вне workspace, как обычное вложение разговора.
+ * Собственные байты позволяют проверить доставку в API без настоящего ключа.
+ */
+export async function qwenImage(fixture) {
+  const root = path.join(fixture.dataHome, 'attachments');
+  const file = path.join(root, 'image.png');
+
+  await mkdir(root, { recursive: true });
+  await writeFile(file, QWEN_TEST_PNG);
+
+  return { root, file };
+}
 
 /**
  * Настройки повторяют modelProviders настоящего CLI, включая opaque native id.
@@ -355,7 +373,8 @@ lines.on('line', (line) => {
       guard: process.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD,
       provider: process.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD_PROVIDER,
     });
-    reply(frame.id, { protocolVersion: 1, agentCapabilities: { loadSession: true },
+    reply(frame.id, { protocolVersion: 1, agentCapabilities: { loadSession: true,
+      promptCapabilities: { image: options.images !== false } },
       agentInfo: { name: 'qwen-code', version: '0.27.2' },
       _meta: options.noAck ? {} : { 'qwen-code/external-tool-guard-ready': 'required-v1' } });
   } else if (frame.method === 'craft/midTurnSendNow') {

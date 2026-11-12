@@ -15,6 +15,7 @@ import { resolveQwenWorkspace } from './workspace.ts';
 import { qwenToolAllowed } from './policy.ts';
 import { qwenPermissionResponse } from './permissions.ts';
 import { createQwenInTurn } from './inTurn.ts';
+import { qwenPromptContent, readQwenImages } from './images.ts';
 import type { QwenMcpServer } from './sandbox.ts';
 
 /**
@@ -44,9 +45,10 @@ export async function runQwenTurn(input: ExecutorRunInput): Promise<ExecutorRunR
 async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResult> {
   input.signal?.throwIfAborted();
 
-  if (Array.isArray(input.attachmentPaths) && input.attachmentPaths.length) {
-    throw new Error('Qwen: вложения пока не поддерживаются; перенесите файлы в рабочую папку');
-  }
+  const attachmentsDir = typeof input.attachmentsDir === 'string' ? input.attachmentsDir : undefined;
+  const imageContent = await readQwenImages(
+    Array.isArray(input.attachmentPaths) ? input.attachmentPaths : [], attachmentsDir, input.signal,
+  );
 
   const config = qwenConfig(input.config);
   const snapshot = await resolveQwenSnapshot(config, { signal: input.signal });
@@ -102,6 +104,13 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   const inTurn = createQwenInTurn({
     available: () => active && !awaitingAnswer && !input.signal?.aborted,
     sendNow: () => transport.client.request('craft/midTurnSendNow', { sessionId }),
+    readImages: async (images) => {
+      if (!transport.images) {
+        throw new Error('Qwen: установленный CLI не поддерживает изображения. Обновите Qwen Code.');
+      }
+
+      return readQwenImages(images.map((image) => image.path), attachmentsDir, input.signal);
+    },
   });
 
   /**
@@ -297,6 +306,10 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   let abort: (() => void) | undefined;
 
   try {
+    if (imageContent.length && !transport.images) {
+      throw new Error('Qwen: установленный CLI не поддерживает изображения. Обновите Qwen Code.');
+    }
+
     const aborted = new Promise<never>((_resolve, reject) => {
       abort = () => {
         try {
@@ -400,7 +413,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
     // Ему нужен суточный предел общего ACP-клиента; настройки сохраняют свои 30 секунд.
     const prompt = request('session/prompt', {
       sessionId,
-      prompt: [{ type: 'text', text: input.message || '' }],
+      prompt: qwenPromptContent(input.message || '', imageContent),
       _meta: {
         'qwen-code/invocation': {
           version: 1,

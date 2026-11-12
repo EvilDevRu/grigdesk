@@ -1,10 +1,12 @@
 import type {
-  InTurnDeliverResult, InTurnPort,
+  InTurnDeliverResult, InTurnImage, InTurnPort,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
+import { qwenPromptContent, type QwenImageContent } from './images.ts';
 
 interface QueuedMessage {
   messageId: string;
   text: string;
+  images: QwenImageContent[];
   settle: (result: InTurnDeliverResult) => void;
 }
 
@@ -15,6 +17,7 @@ interface QueuedMessage {
 export function createQwenInTurn(options: {
   available: () => boolean;
   sendNow: () => Promise<unknown>;
+  readImages?: (images: readonly InTurnImage[]) => Promise<QwenImageContent[]>;
 }) {
   const queue: QueuedMessage[] = [];
   let closed = false;
@@ -25,7 +28,7 @@ export function createQwenInTurn(options: {
      * Отказ пробуждения удаляет ещё не переданный текст без автоматического повтора.
      */
     async deliver({ messageId, text, images = [] }) {
-      if (closed || !options.available() || images.length) {
+      if (closed || !options.available() || (images.length && !options.readImages)) {
         return {
           ok: false,
           code: 'in_turn_unavailable',
@@ -33,10 +36,33 @@ export function createQwenInTurn(options: {
         };
       }
 
+      let imageContent: QwenImageContent[] = [];
+
+      if (images.length) {
+        try {
+          imageContent = await options.readImages!(images);
+        } catch (error) {
+          return {
+            ok: false,
+            code: 'attachment_unavailable',
+            message: error instanceof Error ? error.message : 'Qwen: изображение недоступно.',
+          };
+        }
+      }
+
+      if (closed || !options.available()) {
+        return {
+          ok: false,
+          code: 'turn_changed',
+          message: 'Активный ход Qwen завершился.',
+        };
+      }
+
       return new Promise<InTurnDeliverResult>((settle) => {
         const message = {
           messageId,
           text,
+          images: imageContent,
           settle,
         };
 
@@ -73,14 +99,25 @@ export function createQwenInTurn(options: {
       return { messages: [], hasQueuedPrompt: false };
     }
 
-    const messages = queue.splice(0).map((entry) => {
+    const entries = queue.splice(0);
+    const messages = entries.map((entry) => {
       entry.settle({ ok: true, state: 'forwarded' });
 
       return `${entry.text}\n\nОтветь на уточнение отдельным сообщением до итогового ответа. `
         + 'После ответа самостоятельно вернись к ранее поставленной задаче и закончи её.';
     });
 
-    return { messages, hasQueuedPrompt: false };
+    const items = entries.map((entry, index) => ({
+      messageId: entry.messageId,
+      displayText: entry.text,
+      content: qwenPromptContent(messages[index]!, entry.images),
+    }));
+
+    return {
+      messages,
+      ...(entries.some((entry) => entry.images.length) ? { items } : {}),
+      hasQueuedPrompt: false,
+    };
   }
 
   /**

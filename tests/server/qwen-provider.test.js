@@ -137,6 +137,7 @@ test('qwen-card-npm-version', async (t) => {
     protocol: 1,
     text: true,
     confirmation: 'forwarded',
+    images: true,
   });
   assert.match(card.version, /0\.27\.3/);
   assert.equal(policy.enforcement, 'command-hook');

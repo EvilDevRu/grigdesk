@@ -1,14 +1,96 @@
 import assert from 'node:assert/strict';
-import { access, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, symlink, truncate, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
 import { acquireCliLease, inspectCliLeases } from '../../server/src/lib/providerInstall/leases.ts';
 import { prepareExternalCliRuntime } from '../../server/src/lib/providerInstall/externalCliRuntime.ts';
 import { createQwenInTurn } from '../../server/src/lib/qwen/inTurn.ts';
+import { readQwenImages } from '../../server/src/lib/qwen/images.ts';
+import { CHAT_IMAGE_MAX_BYTES } from '../../server/src/lib/chat/chatImages.ts';
 import {
-  QWEN_KEY, qwenAdapter, qwenFixture, rejectedTurn, runInput, selectedModel, successful, until,
+  QWEN_KEY, QWEN_TEST_PNG, qwenAdapter, qwenFixture, qwenImage,
+  rejectedTurn, runInput, selectedModel, successful, until,
 } from '../helpers/qwenFixture.mjs';
+
+test('Qwen: PNG передаётся байтами; несовместимый CLI отказывает до prompt', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const image = await qwenImage(fixture);
+  const input = runInput(fixture, 'shared-model(openai)', {
+    attachmentsDir: image.root,
+    attachmentPaths: [image.file],
+    message: '',
+  });
+  const result = await adapter.run(input);
+  const prompt = (await fixture.records()).find((entry) => entry.frame?.method === 'session/prompt');
+
+  assert.equal(result.reply, 'Новый ответ');
+  assert.deepEqual(prompt.frame.params.prompt[1], {
+    type: 'image',
+    mimeType: 'image/png',
+    data: QWEN_TEST_PNG.toString('base64'),
+  });
+  await fixture.fake({ images: false });
+
+  const before = (await fixture.records()).filter((entry) => entry.frame?.method === 'session/prompt').length;
+
+  await assert.rejects(adapter.run(input), /CLI не поддерживает изображения/);
+  assert.equal((await fixture.records()).filter((entry) => entry.frame?.method === 'session/prompt').length,
+    before);
+});
+
+test('Qwen: границы картинок, сигнатура, размер, отсутствие файла и отмена', async (t) => {
+  const fixture = await qwenFixture(t);
+  const image = await qwenImage(fixture);
+  const outside = path.join(fixture.workspace, 'outside.png');
+  const link = path.join(image.root, 'escape.png');
+  const fake = path.join(image.root, 'fake.png');
+  const oversized = path.join(image.root, 'oversized.png');
+
+  await writeFile(outside, QWEN_TEST_PNG);
+  await symlink(outside, link);
+  await writeFile(fake, 'Это не картинка');
+  await writeFile(oversized, QWEN_TEST_PNG);
+  await truncate(oversized, CHAT_IMAGE_MAX_BYTES + 1);
+
+  for (const file of [outside, link, fake, path.join(image.root, 'missing.png')]) {
+    await assert.rejects(readQwenImages([file], image.root), /изображение недоступно/);
+  }
+
+  await assert.rejects(readQwenImages([oversized], image.root), /превышает 10 МБ/);
+  await truncate(oversized, 9 * 1024 * 1024);
+  await assert.rejects(readQwenImages(Array(4).fill(oversized), image.root), /общий размер/);
+  await assert.rejects(readQwenImages(Array(11).fill(image.file), image.root), /не больше 10/);
+  await assert.rejects(readQwenImages([image.file], undefined), /каталог вложений недоступен/);
+  await assert.rejects(readQwenImages([image.file], image.root, AbortSignal.abort()), { name: 'AbortError' });
+});
+
+test('Qwen: остановка во время чтения картинки не передаёт позднее уточнение', async () => {
+  let finishRead;
+  let wakes = 0;
+  const inTurn = createQwenInTurn({
+    available: () => true,
+    sendNow: async () => {
+      wakes += 1;
+    },
+    readImages: () => new Promise((resolve) => {
+      finishRead = resolve;
+    }),
+  });
+  const pending = inTurn.port.deliver({
+    messageId: 'qwen-image-late',
+    text: '',
+    images: [{ path: '/synthetic/image.png' }],
+    sequence: 1,
+  });
+
+  inTurn.close();
+  finishRead([]);
+  assert.equal((await pending).ok, false);
+  assert.equal(wakes, 0);
+  assert.deepEqual(inTurn.drain().messages, []);
+});
 
 /**
  * Canary принадлежит только тесту; отсутствие файла доказывает запрет эффекта.

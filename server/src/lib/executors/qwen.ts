@@ -76,6 +76,7 @@ const adapter: ExecutorAdapter = {
     protocol: 1,
     text: true,
     confirmation: 'forwarded',
+    images: true,
   },
   catalog: qwenCatalog,
   catalogCacheKey: (config) => `${readQwenSnapshot(config).fingerprint}:native-model-options-v1`,
