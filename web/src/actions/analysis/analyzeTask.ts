@@ -56,7 +56,7 @@ export async function analyzeTask(
     ? await resolveTrackerTarget(source) : null;
   const result = await analysisApi.enqueue(id, isTaskSourceId(source) ? source : undefined, target?.options);
 
-  store.markQueued(id);
+  store.markQueued(id, isTaskSourceId(source) ? source : undefined);
 
   await shelveAnalyzed(id, source);
 

@@ -482,3 +482,174 @@ test('MD-CLI-HTTP: source CLI выбирает default, --board и JSON board ч
   assert.match(off.stderr.toString(), /fixture-a/u);
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-b'), before);
 });
+
+/**
+ * CLI говорит по TCP с настоящими analysis/factory HTTP и реестром двух драйверов.
+ * HOME, токен, модель и движок синтетические; установленный бинарник не используется.
+ */
+async function pipelineCliFixture(t: test.TestContext) {
+  const { analysisSourceFixture } = await import('../server/helpers/analysisSource.js');
+  const { factoryLaunchFixture } = await import('../server/helpers/factoryLaunch.js');
+  const requests: Array<{ method: string; url: string }> = [];
+  const fixture = await analysisSourceFixture(t, {
+    register: async ({ app, config, runtime, analyzer }) => {
+      app.addHook('onRequest', async (request) => {
+        requests.push({ method: request.method, url: request.url });
+      });
+      await factoryLaunchFixture(t, {
+        app,
+        sourceFixture: {
+          config,
+          tracker: runtime.tracker,
+          analyzer,
+        },
+      });
+    },
+  });
+
+  await fixture.app.listen({ host: '127.0.0.1', port: 0 });
+
+  const address = fixture.app.server.address();
+
+  assert.ok(address && typeof address === 'object');
+
+  const { home } = await syntheticHome();
+  const env = childEnv(home, {
+    GRIGDESK_URL: `http://127.0.0.1:${address.port}`,
+    GRIGDESK_TOKEN: 'tracker-test-cli',
+  });
+  const run = (args: string[], input?: string) => runProcess(t, process.execPath, [SOURCE_MAIN, ...args], {
+    env,
+    input,
+  });
+
+  return {
+    ...fixture,
+    run,
+    requests,
+  };
+}
+
+test('SOURCE-CLI-HTTP: дочерний CLI оценивает A42 при default B и B42 без --board', async (t) => {
+  const { completed, eventually } = await import('../server/helpers/analysisSource.js');
+
+  for (const addressed of [true, false]) {
+    await t.test(addressed ? 'адресная A' : 'default B', async (st) => {
+      const fx = await pipelineCliFixture(st);
+      const result = await fx.run(addressed ? ['analyze', '42', '--board', 'fixture-a'] : ['analyze', '42']);
+
+      assert.equal(result.code, 0, result.stderr.toString());
+      assert.equal(result.stderr.length, 0);
+      assert.equal(JSON.parse(result.stdout.toString()).outcome, 'queued');
+      await eventually(() => fx.analyzer._jobs.size, (size) => size === 0);
+
+      const detail = await completed(fx, addressed ? fx.a.source : fx.b.source);
+
+      assert.equal(detail.analysis?.summary, addressed ? 'Оценка A' : 'Оценка B');
+      assert.equal(fx.requests.filter((request) => request.url.endsWith('/analyze')).length, 1);
+      assert.equal(fx.runtime.catalog().default, 'fixture-b');
+    });
+  }
+});
+
+test('SOURCE-CLI-HTTP: options и один launch доходят до A, stdout содержит только ACK', async (t) => {
+  const fx = await pipelineCliFixture(t);
+  const options = await fx.run(['--board', 'fixture-a', 'launch-options', '42']);
+
+  assert.equal(options.code, 0, options.stderr.toString());
+  assert.equal(JSON.parse(options.stdout.toString()).profile, 'demo');
+
+  const launched = await fx.run(['launch', '42', '--board', 'fixture-a'], JSON.stringify({
+    profile: 'demo',
+    route: 'feature',
+    title: 'Постановка A',
+    description: 'Запуск CLI из выбранной доски',
+    acceptanceCriteria: [],
+  }));
+
+  assert.equal(launched.code, 0, launched.stderr.toString());
+  assert.equal(launched.stderr.length, 0);
+  assert.equal(JSON.parse(launched.stdout.toString()).outcome, 'launched');
+
+  const launches = fx.requests.filter((request) => (
+    request.method === 'POST' && request.url.endsWith('/launch')
+  ));
+
+  assert.equal(launches.length, 1);
+  assert.equal(fx.runtime.catalog().default, 'fixture-b');
+  assert.equal((await trackerCalls(fx.config, 'fixture-b'))
+    .some((call: { method: string }) => call.method === 'taskPageData'), false);
+});
+
+test('SOURCE-CLI-HTTP: own без досок сохраняет приоритет оценки и запуска', async (t) => {
+  const { ownTask, seedTasks } = await import('../server/helpers/grigdesk-tasks.js');
+  const { completed, eventually } = await import('../server/helpers/analysisSource.js');
+  const fx = await pipelineCliFixture(t);
+  const task = ownTask('100000000001', 'demo');
+
+  await mkdir(path.join(fx.config.profilesDir, 'demo'), { recursive: true });
+  await writeFile(path.join(fx.config.profilesDir, 'demo', 'profile.sh'),
+    "PROFILE_CTX='Собственный проект demo'\n");
+  await seedTasks(fx.config, [task]);
+  await fx.runtime.writeSettings({ drivers: [], default: null }, {});
+
+  const result = await fx.run(['analyze', task.id]);
+
+  assert.equal(result.code, 0, result.stderr.toString());
+  await eventually(() => fx.analyzer._jobs.size, (size) => size === 0);
+  assert.equal((await completed(fx, 'grigdesk', task.id)).status?.state, 'done');
+  assert.match(fx.prompts[0], /Собственная постановка/);
+
+  const launched = await fx.run(['launch', task.id], JSON.stringify({
+    profile: 'demo',
+    route: 'feature',
+    title: 'Тело клиента',
+    description: 'Собственная запись сильнее тела',
+    acceptanceCriteria: [],
+  }));
+
+  assert.equal(launched.code, 0, launched.stderr.toString());
+  assert.equal(JSON.parse(launched.stdout.toString()).outcome, 'launched');
+
+  for (const id of ['fixture-a', 'fixture-b']) {
+    assert.equal((await trackerCalls(fx.config, id))
+      .some((call: { method: string }) => ['taskDetail', 'taskPageData'].includes(call.method)), false);
+  }
+});
+
+test('SOURCE-CLI-HTTP: unknown/disabled context не вызывает целевой POST', async (t) => {
+  for (const board of ['missing-board', 'fixture-a']) {
+    await t.test(board, async (st) => {
+      const fx = await pipelineCliFixture(st);
+
+      if (board === 'fixture-a') {
+        const disabled = await saveMulti(fx, ['fixture-b'], 'fixture-b');
+
+        assert.equal(disabled.statusCode, 200, disabled.body);
+      }
+
+      const before = fx.requests.length;
+      const result = await fx.run(['analyze', '42', '--board', board]);
+
+      assert.equal(result.code, 22, result.stderr.toString());
+      assert.equal(result.stdout.length, 0);
+      assert.equal(fx.requests.slice(before).some((request) => request.method === 'POST'), false);
+    });
+  }
+});
+
+test('SOURCE-CLI-HTTP: invalid stdin и конфликт source завершаются exit2 без POST', async (t) => {
+  const fx = await pipelineCliFixture(t);
+  const ready = await fx.run(['launch-options', '42', '--board', 'fixture-a']);
+
+  assert.equal(ready.code, 0, ready.stderr.toString());
+
+  for (const input of ['{broken', '[]', 'null', JSON.stringify({ source: fx.b.source })]) {
+    const before = fx.requests.length;
+    const result = await fx.run(['launch', '42', '--board', 'fixture-a'], input);
+
+    assert.equal(result.code, 2, result.stderr.toString());
+    assert.equal(result.stdout.length, 0);
+    assert.equal(fx.requests.slice(before).some((request) => request.method === 'POST'), false);
+  }
+});

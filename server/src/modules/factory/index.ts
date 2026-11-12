@@ -7,8 +7,10 @@ import type { StageRunnerIdentity } from '../../../../shared/pipeline/stageRunne
 import { probeFactoryStageRunnerSettingsCapability } from '../../lib/factoryRuntimeCapabilities.ts';
 import { StageRunnerCommandError } from '../../lib/runnerControl.ts';
 import { FactoryTaskSources, factoryTicketHash } from '../../lib/factoryTaskSources.ts';
-import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
-import type { TrackerContext } from '../../lib/trackers/facade.ts';
+import { resolveTaskTarget, taskSource } from '../../lib/trackers/taskTarget.ts';
+import type { TaskTargetOptions } from '../../lib/trackers/taskTarget.ts';
+import { TrackerError } from '../../lib/trackers/contract.ts';
+import type { TrackerFacade, TrackerContext } from '../../lib/trackers/facade.ts';
 import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
@@ -108,6 +110,7 @@ interface PreparedLaunch {
   ticket: RouteTicket;
   source?: TaskSourceId;
   sourceContext?: TrackerContext;
+  sourceTracker?: TrackerPort | null;
 }
 
 // Ответ HTTP, собранный до отправки: статус и тело.
@@ -188,21 +191,27 @@ type Registry = Record<string, string>;
 // Соседи, которых модуль получает сборкой приложения. Их полные контракты живут
 // в своих файлах; здесь перечислено ровно то, что использует раздел.
 interface TrackerPort {
+  forDriver?: (id: string) => TrackerFacade;
+  context?: TrackerFacade['context'];
   captureContext?: () => TrackerContext;
   assertContext?: (context: TrackerContext) => void;
   accountIdentity?: () => Promise<import('../../lib/trackers/accountScope.ts').TrackerIdentity | null>;
   sourceUrl?: (id: string) => Promise<string> | string;
   capabilities?: () => { comments?: boolean } | undefined;
-  taskPageData: (id: string) => Promise<{ comments?: unknown }>;
+  taskPageData: (id: string) => Promise<unknown>;
 }
 
 interface AnalyzerPort {
-  readClarifications: (id: string) => Promise<string | null>;
-  readOpenQuestions: (id: string) => Promise<{ questions: string[]; unknowns: string[] } | null>;
+  readClarifications: (id: string, options?: TaskTargetOptions) => Promise<string | null>;
+  readOpenQuestions: (
+    id: string, options?: TaskTargetOptions,
+  ) => Promise<{ questions: string[]; unknowns: string[] } | null>;
   // Что по задаче уже решено: идентификаторы вопросов и ключи их текстов. Второй ключ
   // обязателен — заход триажа переписывает вопросы, и по одному id ответ теряется.
-  answeredQuestions?: (id: string) => Promise<{ ids: Set<string>; keys: Set<string> }>;
-  get?: (id: string) => Promise<{
+  answeredQuestions?: (
+    id: string, options?: TaskTargetOptions,
+  ) => Promise<{ ids: Set<string>; keys: Set<string> }>;
+  get?: (id: string, options?: TaskTargetOptions) => Promise<{
     analysis: (TriageAnalysis & {
       route_catalog_hash?: string;
       route_guess?: string | null;
@@ -428,7 +437,10 @@ async function factoryModule(
         if (body?.expectedLaunch !== undefined) {
           const options = await fastify.inject({
             method: 'GET',
-            url: `/api/tasks/${id}/launch-options?profile=${encodeURIComponent(String(body.profile || ''))}`,
+            url: `/api/tasks/${id}/launch-options?${new URLSearchParams({
+              profile: String(body.profile || ''),
+              ...(body.source !== undefined ? { source: String(body.source) } : {}),
+            })}`,
             headers: request.headers,
           });
 
@@ -842,13 +854,13 @@ async function factoryModule(
 
   // Ссылка на задачу в трекере — обязательное поле immutable ticket (движок требует http(s) URL).
   // Адрес даёт сам драйвер: ядро не строит URL по правилам конкретного поставщика.
-  async function taskSourceUrl(id: string) {
-    if (!tracker?.sourceUrl) {
+  async function taskSourceUrl(id: string, sourceTracker = tracker) {
+    if (!sourceTracker?.sourceUrl) {
       return '';
     }
 
     try {
-      return await tracker.sourceUrl(id);
+      return await sourceTracker.sourceUrl(id);
     } catch (e) {
       fastify.log.warn({ task: id, err: errorMessage(e) }, 'ссылка на задачу для тикета не получена');
       return '';
@@ -860,21 +872,26 @@ async function factoryModule(
   // из трекера. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
-  async function ticketSections(id: string, { profile = null, title = '', description = '', own = false }: {
+  async function ticketSections(id: string, {
+    profile = null, title = '', description = '', own = false, sourceTracker = tracker, source,
+  }: {
+    sourceTracker?: TrackerPort | null;
+    source?: TaskSourceId;
     profile?: string | null;
     title?: string;
     description?: string;
     own?: boolean;
   } = {}) {
     const sections: Array<{ title: string; text: string }> = [];
-    const clarify = await analyzer.readClarifications(id);
+    const clarify = await analyzer.readClarifications(id, { source });
     if (clarify) {
       sections.push({
         title: '[Внутренние уточнения триажа — учитывай автора каждой записи; пометки «[приложено фото: /путь]» открывай инструментом Read]',
         text: clarify.slice(0, CAP_CLARIFICATIONS),
       });
     }
-    const open = await analyzer.readOpenQuestions(id);
+
+    const open = await analyzer.readOpenQuestions(id, { source });
     if (open) {
       const lines: string[] = [];
       if (open.questions.length) {
@@ -896,9 +913,9 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (tracker && !own && tracker.capabilities?.()?.comments !== false) {
+    if (sourceTracker && !own && sourceTracker.capabilities?.()?.comments !== false) {
       try {
-        const page = await tracker.taskPageData(id);
+        const page = await sourceTracker.taskPageData(id) as { comments?: unknown };
         const comments = (page.comments || []) as Array<{
           isSystem?: unknown;
           text?: unknown;
@@ -952,14 +969,17 @@ async function factoryModule(
    * ответами нельзя. Отвечать нечем (ответов нет, профиль или каталог недоступны) —
    * возвращаем null, и форма берёт то, что записал триаж.
    */
-  async function liveRouteDecision(id: string, profile: string, analysis: any, catalog: any) {
+  async function liveRouteDecision(
+    id: string, profile: string, analysis: any, catalog: any, source?: TaskSourceId,
+  ) {
     if (!analysis || typeof analyzer?.answeredQuestions !== 'function') {
       return null;
     }
 
     let answered;
+
     try {
-      answered = await analyzer.answeredQuestions(id);
+      answered = await analyzer.answeredQuestions(id, { source });
     } catch {
       return null;
     }
@@ -1156,30 +1176,37 @@ async function factoryModule(
   }: LaunchOptions = {}, { dynamicSections = true }: {
     dynamicSections?: boolean;
   } = {}): Promise<PreflightResult> {
-    const sourceContext = tracker?.captureContext?.();
     const ownSourceTask = await readGrigdeskTask(config, id);
-    let launchSource: TaskSourceId | undefined = ownSourceTask ? 'grigdesk' : undefined;
+    const requestedSource = taskSource(source);
+    let launchSource: TaskSourceId | undefined;
+    let sourceContext: TrackerContext | undefined;
+    let sourceTracker = tracker;
 
-    if (reuseTicket && sourceIndex) {
-      const records = await sourceIndex.read();
+    if (reuseTicket) {
+      if (sourceIndex) {
+        const records = await sourceIndex.read();
 
-      try {
-        launchSource = FactoryTaskSources.verified(records.entries[id],
-          await factoryState.readTrustedTicketProof(id));
-      } catch {
-        launchSource = ownSourceTask ? 'grigdesk' : undefined;
+        try {
+          launchSource = FactoryTaskSources.verified(records.entries[id],
+            await factoryState.readTrustedTicketProof(id));
+        } catch {
+          // Неизвестное происхождение старого тикета не подтверждается текущей доской.
+        }
       }
-    } else if (!ownSourceTask && tracker?.accountIdentity && sourceContext?.trackerId) {
-      const identity = await tracker.accountIdentity();
 
-      launchSource = `${sourceContext.trackerId}@${trackerAccountScope(identity)}`;
-    }
+      launchSource ||= ownSourceTask ? 'grigdesk' : undefined;
 
-    if (sourceContext && !ownSourceTask && !reuseTicket) {
-      tracker?.assertContext?.(sourceContext);
-    }
-    if (source !== undefined && (!isTaskSourceId(source) || source !== launchSource)) {
-      return { ok: false, result: { status: 409, body: { error: 'task_source_mismatch' } } };
+      if (requestedSource !== undefined && requestedSource !== launchSource) {
+        return { ok: false, result: { status: 409, body: { error: 'task_source_mismatch' } } };
+      }
+    } else {
+      const target = await resolveTaskTarget(config, tracker as TrackerFacade | undefined, id, {
+        source: requestedSource,
+      });
+
+      launchSource = target.source;
+      sourceContext = target.context;
+      sourceTracker = target.tracker || tracker;
     }
 
     const wanted = String(route || 'feature');
@@ -1331,13 +1358,15 @@ async function factoryModule(
           title: ticketTitle,
           description: ticketDescription,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
-          sourceUrl: own?.sourceUrl || sourceUrl || (await taskSourceUrl(id)),
+          sourceUrl: own?.sourceUrl || sourceUrl || (await taskSourceUrl(id, sourceTracker)),
           sections: dynamicSections
             ? await ticketSections(id, {
               profile,
               title: ticketTitle,
               description: ticketDescription,
               own: Boolean(own),
+              sourceTracker,
+              source: source === undefined ? undefined : launchSource,
             })
             : [],
         });
@@ -1363,6 +1392,7 @@ async function factoryModule(
         ticket: built,
         source: launchSource,
         sourceContext: !ownSourceTask && !reuseTicket ? sourceContext : undefined,
+        sourceTracker,
       },
     };
   }
@@ -1383,7 +1413,7 @@ async function factoryModule(
     } = prepared.value;
 
     if (prepared.value.sourceContext) {
-      tracker?.assertContext?.(prepared.value.sourceContext);
+      prepared.value.sourceTracker?.assertContext?.(prepared.value.sourceContext);
     }
 
     const dispatchId = randomUUID();
@@ -1419,13 +1449,13 @@ async function factoryModule(
       // Именно spawn — первая граница, после которой вызывающий уже не может доказать,
       // появился ли detached engine. До неё ошибки git/slot/ticket безопасно повторяемы.
       if (prepared.value.sourceContext) {
-        tracker?.assertContext?.(prepared.value.sourceContext);
+        prepared.value.sourceTracker?.assertContext?.(prepared.value.sourceContext);
       }
       if (pendingSource) {
         await sourceIndex!.put(pendingSource);
       }
       if (prepared.value.sourceContext) {
-        tracker?.assertContext?.(prepared.value.sourceContext);
+        prepared.value.sourceTracker?.assertContext?.(prepared.value.sourceContext);
       }
 
       taskLaunchPending.set(String(id), { startedAt: Date.now() });
@@ -1742,6 +1772,30 @@ async function factoryModule(
           },
         };
       }
+
+      if (opts.source !== undefined) {
+        const requestedSource = taskSource(opts.source);
+        let verified: TaskSourceId | undefined;
+
+        try {
+          const records = await sourceIndex?.read();
+
+          verified = FactoryTaskSources.verified(records?.entries[id],
+            await factoryState.readTrustedTicketProof(id));
+        } catch {
+          // Номер существующего прогона сам по себе не доказывает источник.
+        }
+
+        if (await readGrigdeskTask(config, id)) {
+          verified = 'grigdesk';
+        }
+        if (!verified || verified !== requestedSource) {
+          return {
+            status: 409,
+            body: { error: verified ? 'task_source_mismatch' : 'run_exists' },
+          };
+        }
+      }
       if (factoryState.isDaemonAlive(reg.ORCH_PID, id)) {
         return {
           status: null,
@@ -1821,9 +1875,24 @@ async function factoryModule(
 
   // Чем заполнять модалку запуска: профиль и маршруты только опубликованного каталога.
   // Отсутствие/повреждение каталога — fail closed, а не выбор другого двигателя.
-  fastify.get<FactoryRoute>('/api/tasks/:id/launch-options', async (request, reply) => {
+  fastify.get<FactoryRoute>('/api/tasks/:id/launch-options', {
+    errorHandler: (error, _request, reply) => {
+      if (error instanceof TrackerError) {
+        return reply.code(error.status).send({ error: error.code, message: error.message });
+      }
+
+      return reply.send(error);
+    },
+  }, async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
+    const source = taskSource(request.query.source);
+
+    if (source !== undefined) {
+      await resolveTaskTarget(config, tracker as TrackerFacade | undefined, id, { source });
+    }
+
     const installedProfiles = factoryState.discoverProfiles().filter((name) => PROFILE_RE.test(name));
     const requested = request.query?.profile;
     if (requested !== undefined
@@ -1880,8 +1949,9 @@ async function factoryModule(
     // и маршрут, и файлы инструментации. Разъехавшись, они дают пустое поле scope у
     // explicit-маршрута — то есть форму, которую нечем отправить.
     let analysis = null;
+
     if (typeof analyzer?.get === 'function') {
-      try { analysis = (await analyzer.get(id))?.analysis || null; }
+      try { analysis = (await analyzer.get(id, { source }))?.analysis || null; }
       catch { /* триаж — только подсказка, запуск от него не зависит */ }
     }
     const suggested = requested
@@ -1980,7 +2050,7 @@ async function factoryModule(
     // переопубликованы после оценки, и подсказка на снятый маршрут ведёт в отказ движка.
     // Пересчёт по ответам человека считается уже по текущему каталогу, поэтому
     // протухание проверяем только у записанной оценки.
-    const live = await liveRouteDecision(id, profile, analysis, catalog);
+    const live = await liveRouteDecision(id, profile, analysis, catalog, source);
     const suggestionIsStale = !live && typeof analysis?.route_catalog_hash === 'string'
       && analysis.route_catalog_hash !== catalog.catalogHash;
     const routeGuess = live?.route || analysis?.route_guess;
@@ -2029,6 +2099,9 @@ async function factoryModule(
 
       return r.status ? reply.code(r.status).send(r.body) : r.body;
     } catch (error) {
+      if (error instanceof TrackerError) {
+        return reply.code(error.status).send({ error: error.code, message: error.message });
+      }
       if ((error as { status?: number }).status === 409) {
         return reply.code(409).send({ error: (error as { code: string }).code });
       }

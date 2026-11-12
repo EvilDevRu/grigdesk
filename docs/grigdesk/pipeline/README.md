@@ -20,7 +20,7 @@
 - [Закрепление доступа цепочек исполнителей, identity попытки, паузы и рестарт](access-profile-pins.md)
 
 - [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
-- [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
+- [Адресный preflight и триаж, подтверждённый источник и ограничение одного номера](task-source-index.md)
 - [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
 - [Браузер этапа: pinned authority, CLI/MCP, lifecycle и поставка](browser-transport.md)

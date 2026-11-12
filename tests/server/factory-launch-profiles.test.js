@@ -13,7 +13,12 @@ import factoryModule from '../../server/src/modules/factory/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
+/**
+ * Профили и каталог живут во временном корне, отдельно от установленного движка.
+ * Для адресных сценариев подключается настоящий Analyzer соседней фикстуры.
+ */
 async function fixture(t, {
+  sourceFixture = null,
   analysisRepos = null,
   twinProfile = false,
   analysisExtra = null,
@@ -104,10 +109,14 @@ exit 99
       stateDir: path.join(root, 'state'),
       profilesDir,
       factoryProfile: '',
+      ...(sourceFixture ? {
+        analysisDir: sourceFixture.config.analysisDir,
+        grigdeskTasksPath: sourceFixture.config.grigdeskTasksPath,
+      } : {}),
     },
     prefs: { read: () => ({}) },
-    tracker: null,
-    analyzer: {
+    tracker: sourceFixture?.tracker || null,
+    analyzer: sourceFixture?.analyzer || {
       readClarifications: async () => null,
       readOpenQuestions: async () => null,
       answeredQuestions: async () => answered,
@@ -401,4 +410,39 @@ test('ответы человека пересчитывают глубину м
       + ' — с учётом ответов человека',
     route: 'consilium-debug',
   });
+});
+
+test('SOURCE-OPTIONS-01: launch-options читает подсказки A42/B42 и отвергает неверную цель', async (t) => {
+  const {
+    analysisSourceFixture, completed, eventually, sourceQuery,
+  } = await import('./helpers/analysisSource.js');
+  const fx = await analysisSourceFixture(t, {
+    resultFor: (label) => ({ scope: { do: [`Критерий ${label}`], skip: [`Не делаем ${label}`] } }),
+  });
+
+  for (const source of [fx.a.source, fx.b.source]) {
+    await fx.request('POST', '/api/tasks/42/analyze', { source });
+    await completed(fx, source);
+    await eventually(() => fx.analyzer._jobs.size, (size) => size === 0);
+  }
+
+  const app = await fixture(t, { sourceFixture: fx });
+
+  for (const [source, label] of [[fx.a.source, 'A'], [fx.b.source, 'B']]) {
+    const url = `/api/tasks/42/launch-options?profile=project-beta&${sourceQuery(source)}`;
+    const response = await app.inject(url);
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json().scopeSuggestion, {
+      criteria: [`Критерий ${label}`],
+      skip: [`Не делаем ${label}`],
+    });
+  }
+
+  const legacy = await app.inject('/api/tasks/42/launch-options?profile=project-beta');
+  const invalid = await app.inject('/api/tasks/42/launch-options?profile=project-beta&source=fixture-a');
+
+  assert.equal(legacy.statusCode, 200);
+  assert.deepEqual(legacy.json().scopeSuggestion.criteria, ['Критерий B']);
+  assert.equal(invalid.statusCode, 400, invalid.body);
 });

@@ -15,37 +15,49 @@ function taskPath(id: string | number, suffix = ''): string {
 }
 
 /**
+ * Пара источника и номера сохраняется в каждом запросе пакета триажа.
+ * Старые вызовы без источника оставляют прежний URL числового API.
+ */
+function sourced(path: string, source?: string): string {
+  return source ? `${path}?${new URLSearchParams({ source })}` : path;
+}
+
+/**
  * Единственная граница сети триажа. Оценку пишет модель, а показывают её бейджем на
  * доске и чипами в карточке: непроверенная форма превратилась бы в «сложность
  * undefined» ровно там, где человек принимает решение брать задачу или нет.
  */
 export const analysisApi = {
   async rows() {
-    const value: unknown = await api.get('/api/analysis');
+    const value: unknown = await api.get('/api/analysis?sources=1');
 
     return parseAnalysisRows(value);
   },
 
-  async detail(id: string | number) {
-    const value: unknown = await api.get(`/api/analysis/${encodeURIComponent(String(id))}`);
+  async detail(id: string | number, source?: string) {
+    const value: unknown = await api.get(sourced(`/api/analysis/${encodeURIComponent(String(id))}`, source));
 
     return parseAnalysisDetail(value);
   },
 
   async enqueue(id: string | number, source?: string, options?: { headers?: Record<string, string> }) {
-    const value: unknown = await api.post(taskPath(id, '/analyze'), source ? { source } : undefined, options);
+    const value: unknown = await api.post(
+      taskPath(id, '/analyze'), source ? { source, taskSource: source } : undefined, options,
+    );
 
     return parseAnalysisQueue(value);
   },
 
-  async dismiss(id: string | number) {
-    const value: unknown = await api.del(`/api/analysis/${encodeURIComponent(String(id))}/status`);
+  async dismiss(id: string | number, source?: string) {
+    const value: unknown = await api.del(
+      sourced(`/api/analysis/${encodeURIComponent(String(id))}/status`, source),
+    );
 
     return parseAnalysisQueue(value);
   },
 
-  async clarifications(id: string | number) {
-    const value: unknown = await api.get(taskPath(id, '/clarifications'));
+  async clarifications(id: string | number, source?: string) {
+    const value: unknown = await api.get(sourced(taskPath(id, '/clarifications'), source));
 
     return parseAnalysisClarifications(value);
   },
@@ -54,14 +66,16 @@ export const analysisApi = {
    * Ответы человека на вопросы триажа. `text` уезжает вместе с ними как читаемая
    * копия: файл уточнений открывают и глазами, и следующим заходом агента.
    */
-  async answer(id: string | number, answers: AnalysisAnswerInput[], text: string) {
-    const value: unknown = await api.post(taskPath(id, '/clarifications'), { answers, text });
+  async answer(id: string | number, answers: AnalysisAnswerInput[], text: string, source?: string) {
+    const value: unknown = await api.post(
+      sourced(taskPath(id, '/clarifications'), source), { answers, text },
+    );
 
     return parseAnalysisClarifications(value);
   },
 
-  async arbitrate(id: string | number) {
-    const value: unknown = await api.post(taskPath(id, '/analysis/arbitrate'), {});
+  async arbitrate(id: string | number, source?: string) {
+    const value: unknown = await api.post(sourced(taskPath(id, '/analysis/arbitrate'), source), {});
 
     return parseAnalysisArbiter(value);
   },

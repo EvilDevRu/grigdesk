@@ -1423,7 +1423,8 @@ async function build(desktopParent: DesktopParent | null) {
     executorFor: asPort((id: string) => fastify.executorFor?.(id)),
     log: fastify.log,
   });
-  analyzer.onAnalyzed = (id: string) => analysisArbiter.arbitrate(id, { automatic: true });
+
+  analyzer.onAnalyzed = (id, options) => analysisArbiter.arbitrate(id, { automatic: true, ...options });
   await analyzer.start();
   await fastify.register(analysisModule, {
     analyzer,

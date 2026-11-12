@@ -10,8 +10,10 @@ ELF для Linux x64 на закреплённом официальном Node 2
 
 ## Целевая доска
 
-Команда `boards` и флаг `--board <id>` доступны в исходниках CLI. Команды без флага,
-навыки и хуки сохраняют прежний HTTP-контракт дефолтной доски и байты stdin create.
+Команды `boards`, `analyze <id>`, `launch-options <id>`, `launch <id>` и флаг `--board <id>`
+доступны в исходниках CLI. Новые команды с --board подтверждают полный source через context.
+Без флага оценка и запуск сохраняют own-first/default, source из launch stdin не теряется.
+Прежние команды, навыки и хуки сохраняют HTTP-контракт дефолтной доски и байты stdin create.
 Адресный HTTP 404 не вызывает повтор на дефолте. Дубликат или пустой `--board` — код 2
 до stdin и HTTP; остальные коды, сроки и запрет автоматического повтора сохраняются.
 Обновление установленного бинарного файла требует отдельной сборки при поставке;
@@ -81,7 +83,10 @@ devDependencies пакета (`npm --prefix tracker ci --include=dev`). Поря
 
 ## Запросы, вывод и коды выхода
 
-Каждая команда — один HTTP-запрос к `/api/tracker/…` с заголовком `X-GrigDesk-Token`; `start <id>` —
+Чтения и мутации доски идут в `/api/tracker/…` с заголовком `X-GrigDesk-Token`.
+Оценка и запуск идут в `/api/tasks/<id>/analyze|launch-options|launch`; с --board перед ними
+выполняется GET адресного context. Launch читает JSON-объект stdin один раз; неверный JSON,
+не-объект и конфликт source дают код 2 до POST. `start <id>` —
 renew с подавлением его ошибки, затем timer/start. Транспорт — `node:http` / `node:https` с
 собственным агентом на каждый запрос, созданным без `proxyEnv`. Прокси не используются:
 `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, их варианты в нижнем регистре и `NODE_USE_ENV_PROXY`

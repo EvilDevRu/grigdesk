@@ -319,8 +319,16 @@ export const useTasksStore = defineStore('tasks', {
       await api.post(`${target.prefix}/task/${id}/comment`, { text }, target.options);
     },
 
-    async launchOptions(id: TaskId, profile = '') {
-      const query = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    /**
+     * Форма получает подсказки той же задачи, которую человек открыл в карточке.
+     * Старые вызовы без source сохраняют прежний адрес и выбор профиля.
+     */
+    async launchOptions(id: TaskId, profile = '', source?: TaskSourceId) {
+      const params = new URLSearchParams({
+        ...(profile ? { profile } : {}),
+        ...(source ? { source } : {}),
+      });
+      const query = params.size ? `?${params}` : '';
 
       return decodeTaskLaunchOptions(await api.get(`/api/tasks/${id}/launch-options${query}`));
     },
