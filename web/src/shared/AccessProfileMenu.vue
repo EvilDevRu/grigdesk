@@ -27,15 +27,6 @@
           </template>
         </UiPopover>
       </UiSegmentedControl>
-      <span class="access-profile-manage">
-        <UiIconButton size="compact" :label="t('settings.accessProfilesManage')"
-          v-tooltip="t('settings.accessProfilesManage')" @click="emit('manage')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-            stroke-linecap="round" aria-hidden="true">
-            <path d="M4 7h16 M7 4v6 M4 17h16 M16 14v6" />
-          </svg>
-        </UiIconButton>
-      </span>
     </div>
     <p v-if="list && !list.switchAllowed" class="access-profile-hint" role="status">
       {{ t('settings.accessProfilesSwitchBusy') }}
@@ -55,7 +46,6 @@
           </UiButton>
           <UiIconButton size="compact" label="…" data-measure-overflow>…</UiIconButton>
         </UiSegmentedControl>
-        <UiIconButton size="compact" :label="t('settings.accessProfilesManage')" data-measure-manage />
       </div>
     </div>
   </div>
@@ -69,7 +59,6 @@ import { useAccessProfilesStore } from '../stores/accessProfiles.ts';
 import { useSse } from '../composables/useSse.ts';
 
 const props = defineProps<{ providerId: string }>();
-const emit = defineEmits<{ manage: [] }>();
 const store = useAccessProfilesStore();
 const rail = ref<HTMLElement | null>(null);
 const measurement = ref<HTMLElement | null>(null);
@@ -100,14 +89,12 @@ function measureProfiles(): void {
 
   const widths = Array.from(measurement.value.querySelectorAll<HTMLElement>('[data-measure-profile]'))
     .map((element) => element.offsetWidth);
-  const gap = Number.parseFloat(getComputedStyle(rail.value).columnGap) || 0;
-  const manageWidth = measurement.value.querySelector<HTMLElement>('[data-measure-manage]')?.offsetWidth ?? 0;
   const overflowWidth = measurement.value.querySelector<HTMLElement>('[data-measure-overflow]')
     ?.offsetWidth ?? 0;
   const groupWidth = measurement.value.querySelector<HTMLElement>('[data-measure-group]')?.offsetWidth ?? 0;
   const total = widths.reduce((sum, width) => sum + width, 0);
   const frame = Math.max(0, groupWidth - total - overflowWidth);
-  const available = rail.value.clientWidth - manageWidth - gap - frame;
+  const available = rail.value.clientWidth - frame;
 
   if (total <= available) {
     visibleCount.value = widths.length;
@@ -176,10 +163,6 @@ onBeforeUnmount(() => observer?.disconnect());
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.access-profile-manage {
-  display: flex;
-  margin-left: auto;
 }
 .access-profile-overflow {
   display: grid;
