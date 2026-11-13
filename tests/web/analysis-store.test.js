@@ -139,10 +139,217 @@ test('стор триажа не знает ни путей API, ни транс
   const source = await readFile(STORE_PATH, 'utf8');
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
-  assert.deepEqual(imports.map(renamedSpecifier).sort(), [
+  assert.deepEqual(imports.map(renamedSpecifier)
+    .filter((from) => from !== '../../../shared/tasks/taskReference.ts').sort(), [
     '../../../shared/pipeline/analysisContracts.ts',
     './plugins.ts',
     'pinia',
   ]);
   assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');
+});
+
+/**
+ * Recorder отвечает валидными DTO существующих ручек и сохраняет параметры сети.
+ * Контекст берётся из того же адресного endpoint, который читает resolveTrackerTarget.
+ */
+function sourceRecorder({ rejected = false, rows = [] } = {}) {
+  const calls = [];
+  const source = `fixture-a@${'a'.repeat(64)}`;
+  const api = {
+    /**
+     * Возвращает DTO именно запрошенной ручки, включая адресный context.
+     * Тест видит исходный URL до декодирования ответа общим API.
+     */
+    async get(url, options) {
+      calls.push({
+        method: 'GET',
+        url,
+        options,
+      });
+
+      const pathname = new URL(url, 'http://fixture.test').pathname;
+
+      if (pathname === '/api/trackers') {
+        return { enabledIds: ['fixture-a', 'fixture-b'] };
+      }
+
+      if (pathname.endsWith('/context')) {
+        return { source, generation: 7 };
+      }
+
+      if (pathname === '/api/analysis') {
+        return rows;
+      }
+
+      if (pathname.endsWith('/clarifications')) {
+        return { text: '', entries: [] };
+      }
+
+      return {
+        task: 42,
+        analysis: null,
+        status: null,
+        note: null,
+        stale: null,
+      };
+    },
+    /**
+     * Отказ моделирует ответ выбранной доски до optimistic обновления.
+     * Успешные ручки возвращают свои штатные конверты.
+     */
+    async post(url, body, options) {
+      calls.push({
+        method: 'POST',
+        url,
+        body,
+        options,
+      });
+
+      if (rejected) {
+        throw Object.assign(new Error('Цель отклонена'), { status: 409 });
+      }
+
+      if (url.includes('/clarifications')) {
+        return { text: '', entries: [] };
+      }
+
+      if (url.includes('/arbitrate')) {
+        return {
+          ok: true,
+          outcome: 'nothing_to_do',
+          answered: 0,
+        };
+      }
+
+      return { outcome: 'queued', position: 1 };
+    },
+    async del(url) {
+      calls.push({ method: 'DELETE', url });
+
+      return { outcome: 'dismissed' };
+    },
+  };
+
+  return {
+    api,
+    calls,
+    source,
+  };
+}
+
+test('SOURCE-ACTIONS-01: sourced строки и optimistic queued разделены по паре', async (t) => {
+  const { taskReferenceKey } = await import('../../shared/tasks/taskReference.ts');
+  const a = `fixture-a@${'a'.repeat(64)}`;
+  const b = `fixture-b@${'b'.repeat(64)}`;
+  const recorder = sourceRecorder({ rows: [
+    {
+      task: 42,
+      source: a,
+      analysis: { risk: 1 },
+      status: { task: 42, state: 'failed' },
+    },
+    {
+      task: 42,
+      source: b,
+      analysis: { risk: 5 },
+      status: { task: 42, state: 'interrupted' },
+    },
+    {
+      task: 7,
+      analysis: { risk: 2 },
+      status: null,
+    },
+  ] });
+  const { module, store } = await analysisFixture(t, recorder.api, { pluginEnabled: true });
+
+  await module.loadAnalysis();
+
+  const keyA = taskReferenceKey({ source: a, id: '42' });
+  const keyB = taskReferenceKey({ source: b, id: '42' });
+
+  assert.equal(store.byReference?.[keyA]?.analysis.risk, 1, 'Decoder/store сохраняет source A');
+  assert.equal(store.byReference?.[keyB]?.analysis.risk, 5);
+  assert.equal(store.byTask['7'].analysis.risk, 2);
+  assert.equal(store.issues.length, 2);
+  assert.equal(new URL(recorder.calls[0].url, 'http://fixture.test').searchParams.get('sources'), '1');
+
+  await module.analyzeTask('42', { source: a });
+
+  assert.equal(store.byReference[keyA].status.state, 'queued');
+  assert.equal(store.byReference[keyB].status.state, 'interrupted');
+  assert.equal(store.active, true);
+
+  const post = recorder.calls.find((call) => call.url.endsWith('/analyze'));
+
+  assert.equal(post.body.source, a);
+  assert.equal(post.options.headers['x-grigdesk-tracker-generation'], '7');
+
+  await module.dismissAnalysis('42', a);
+
+  assert.equal(store.byReference[keyA].status, null);
+  assert.equal(store.byReference[keyB].status.state, 'interrupted');
+});
+
+test('SOURCE-ACTIONS-01: detail, clarify, answer, arbitrate и dismiss передают source', async (t) => {
+  const recorder = sourceRecorder();
+  const { module } = await analysisFixture(t, recorder.api, { pluginEnabled: true });
+  const { analysisApi } = await compileModule(webFile('src/shared/analysisApi.ts'), {
+    stubs: { './apiClient.ts': 'export const api = globalThis.__analysisStoreHarness.api;' },
+  });
+
+  await module.readAnalysisDetail('42', recorder.source);
+  await analysisApi.clarifications('42', recorder.source);
+  await analysisApi.answer('42', [], 'Ответ', recorder.source);
+  await analysisApi.arbitrate('42', recorder.source);
+  await module.dismissAnalysis('42', recorder.source);
+
+  assert.equal(recorder.calls.length, 5);
+
+  for (const call of recorder.calls) {
+    const url = new URL(call.url, 'http://fixture.test');
+
+    assert.equal(url.searchParams.get('source'), recorder.source, `${call.method} ${url.pathname}`);
+  }
+});
+
+test('SOURCE-ALIAS-01: POST дублирует taskSource, отказ не создаёт optimistic очередь', async (t) => {
+  for (const rejected of [false, true]) {
+    await t.test(rejected ? 'HTTP 409' : 'успешная очередь', async (st) => {
+      const recorder = sourceRecorder({ rejected });
+      const { module, store } = await analysisFixture(st, recorder.api, { pluginEnabled: true });
+      let queued = 0;
+      let shelved = 0;
+      const unsubscribe = store.$onAction(({ name }) => {
+        if (name === 'markQueued') {
+          queued += 1;
+        }
+      });
+
+      st.after(unsubscribe);
+      globalThis.__analysisStoreHarness.shelf = {
+        forSource() {
+          return this;
+        },
+        async autoAdd() {
+          shelved += 1;
+        },
+      };
+
+      const action = module.analyzeTask('42', { source: recorder.source });
+
+      if (rejected) {
+        await assert.rejects(action, /Цель отклонена/);
+        assert.equal(queued, 0);
+        assert.equal(shelved, 0);
+      } else {
+        await action;
+        assert.equal(queued, 1);
+      }
+
+      const post = recorder.calls.find((call) => call.url.endsWith('/analyze'));
+
+      assert.equal(post.body.source, recorder.source);
+      assert.equal(post.body.taskSource, recorder.source, 'Старый сервер должен отвергнуть чужую цель');
+    });
+  }
 });

@@ -1,7 +1,8 @@
 <template>
   <HelpBrowser :bundle="state.bundle" :status="state.status" :error="state.error"
                :article-id="articleId" :fragment="fragment" :can-ask="chat.loaded" :embedded="embedded"
-               @navigate="(id, hash) => $emit('navigate', id, hash)" @retry="loader.reload" @ask="ask" />
+               @navigate="(id, hash) => $emit('navigate', id, hash)"
+               @retry="loader.reload(uiLocale === 'ru' ? 'ru' : 'en')" @ask="ask" />
 </template>
 
 <script setup lang="ts">
@@ -43,9 +44,12 @@ const state = ref<HelpLoadState>({
   bundle: null,
   error: ''
 });
-const loader = createHelpLoader(() => api.get(`/api/help?locale=${uiLocale.value}`), (value) => {
-  state.value = value;
-});
+const loader = createHelpLoader(
+  (locale) => api.get(locale === 'ru' ? '/api/help' : '/api/help?locale=en'),
+  (value) => {
+    state.value = value;
+  }
+);
 /**
  * Справка становится черновиком нового разговора и не инициирует платный ход.
  * Прежний разговор и его неотправленный текст не изменяются.
@@ -65,7 +69,8 @@ async function ask(id: string): Promise<void> {
     draft: t('core.helpQuestionDraft', {
       title: article.title,
       id,
-      version: bundle.version
+      version: bundle.version,
+      locale: bundle.locale
     })
   });
 
@@ -80,11 +85,14 @@ watch(() => [
 ], () => {
   loader.cancel();
 
-  if (auth.authenticated && auth.clientScope && (!shell.present || shell.status === 'online')) {
-    void loader.reload();
+  // Пустой scope допустим при первом входе: доступ подтверждает authenticated.
+  // Scope остаётся в watch, чтобы смена владельца отменяла прежний запрос.
+  if (auth.authenticated && (!shell.present || shell.status === 'online')) {
+    void loader.reload(uiLocale.value === 'ru' ? 'ru' : 'en');
   }
 }, {
-  immediate: true
+  immediate: true,
+  flush: 'sync'
 });
 onBeforeUnmount(loader.cancel);
 </script>

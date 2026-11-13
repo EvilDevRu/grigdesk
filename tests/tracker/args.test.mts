@@ -154,3 +154,26 @@ test('MD-CLI-ARGS: boards, цель до и после команды, букв�
     rejects(argv);
   }
 });
+
+test('SOURCE-CLI-ARGS: analyze, launch-options, launch принимают адресную доску до и после', () => {
+  for (const kind of ['analyze', 'launch-options', 'launch']) {
+    assert.deepEqual(parseArgs([kind, '0042']), { kind, id: '0042' });
+
+    for (const argv of [
+      ['--board', 'fixture-a', kind, '42'],
+      [kind, '42', '--board', 'fixture-a'],
+    ]) {
+      assert.deepEqual(parseArgs(argv), {
+        kind,
+        id: '42',
+        board: 'fixture-a',
+      });
+    }
+
+    assert.ok(HELP_TEXT.includes(`tracker ${kind}`));
+
+    for (const argv of [[kind], [kind, ''], [kind, '42', 'extra'], [kind, '42', '--board']]) {
+      rejects(argv);
+    }
+  }
+});

@@ -9,7 +9,7 @@ import { selectTracker, trackerCalls } from './helpers/trackerFixture.js';
 import { multiFixture } from './helpers/trackerMulti.js';
 import { inboxConsumerFixture, REVISION } from './helpers/trackerInbox.js';
 
-test('MD-ANALYSIS-GUARD: чужой source получает 409, default проходит', async (t) => {
+test('MD-ANALYSIS-GUARD: включённая A допускается, default проходит', async (t) => {
   const calls = [];
   const fixture = await multiFixture(t, {
     register: async ({ app, runtime, config }) => {
@@ -34,11 +34,10 @@ test('MD-ANALYSIS-GUARD: чужой source получает 409, default про�
   await selectTracker(fixture, 'fixture-b');
 
   const sourceB = (await fixture.request('GET', '/api/tracker/dashboard')).json().source;
-  const rejected = await fixture.request('POST', '/api/tasks/42/analyze', { taskSource: sourceA });
+  const addressed = await fixture.request('POST', '/api/tasks/42/analyze', { taskSource: sourceA });
 
-  assert.equal(rejected.statusCode, 409, rejected.body);
-  assert.deepEqual(calls, []);
-  assert.match(rejected.json().message, /умолчанию|источник|доск/iu);
+  assert.equal(addressed.statusCode, 200, addressed.body);
+  assert.equal(calls.length, 1);
   assert.equal((await fixture.request('POST', '/api/tasks/42/analyze', { taskSource: sourceB }))
     .statusCode, 200);
 

@@ -1,3 +1,8 @@
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+import { resolveTaskTarget } from '../trackers/taskTarget.ts';
+import type { TaskTargetOptions } from '../trackers/taskTarget.ts';
+import { isTaskSourceId, taskReferenceKey } from '../../../../shared/tasks/taskReference.ts';
+import { FactoryTaskSources } from '../factoryTaskSources.ts';
 // Триаж задач: очередь + одиночный headless-запуск выбранной модели (read-only разведка
 // кода, без стенда). Агент сам пишет результат в каталог анализа (t<ID>.analysis.json +
 // t<ID>.md), раннер валидирует и обогащает (SHA репозиториев, стоимость, время).
@@ -284,6 +289,8 @@ export class Analyzer {
 
   _queue: string[];
 
+  _references = new Map<string, { id: string; options: TaskTargetOptions }>();
+
   _jobs: Map<string, 'queued' | 'running'>;
 
   _profile: (TriageProfile & { name: string }) | null;
@@ -301,7 +308,7 @@ export class Analyzer {
 
   _active?: number;
 
-  onAnalyzed?: ((id: string) => unknown) | null;
+  onAnalyzed?: ((id: string, options?: TaskTargetOptions) => unknown) | null;
 
   constructor({
     config, claudeAuth, tracker, factoryState, prefs, log, discussion,
@@ -387,46 +394,141 @@ export class Analyzer {
    */
   async _sweepOrphans() {
     const requeue = [];
-    for (const f of await fs.readdir(this.dir)) {
-      if (!/^t\d+\.status\.json$/.test(f)) continue;
-      const p = path.join(this.dir, f);
-      try {
-        const st = JSON.parse(await fs.readFile(p, 'utf8'));
-        if (st.state !== 'queued' && st.state !== 'running') continue;
-        const jsonStat = await fs.stat(this._paths(st.task).json).catch(() => null);
-        if (jsonStat && st.startedAt && jsonStat.mtimeMs > st.startedAt) {
-          await this._writeStatus(st.task, { ...st, state: 'done', note: 'дописан агентом после рестарта сервера', finishedAt: Date.now() });
-        } else if (st.state === 'queued') {
-          requeue.push({ id: String(st.task), at: st.queuedAt || 0 });
+
+    for (const { dir, source } of await this._packageDirs()) {
+      for (const file of await fs.readdir(dir)) {
+        if (file.endsWith('.json.tmp')) {
+          await fs.rm(path.join(dir, file), { force: true });
+        }
+        if (!/^t\d+\.status\.json$/.test(file)) {
+          continue;
+        }
+
+        const status = await this._readJson(path.join(dir, file));
+
+        if (!status || !['queued', 'running'].includes(status.state)) {
+          continue;
+        }
+
+        const options: TaskTargetOptions = { source, legacyFallback: status.legacyFallback };
+        const id = String(status.task);
+        const json = await fs.stat(this._paths(id, options).json).catch(() => null);
+
+        if (json && status.startedAt && json.mtimeMs > status.startedAt) {
+          await this._writeStatus(id, {
+            ...status,
+            state: 'done',
+            finishedAt: Date.now(),
+          }, options);
+        } else if (status.state === 'queued') {
+          requeue.push({
+            id,
+            options,
+            at: status.queuedAt || 0,
+          });
         } else {
-          await this._writeStatus(st.task, {
-            ...st,
+          await this._writeStatus(id, {
+            ...status,
             state: 'interrupted',
             error: 'агент прерван рестартом сервера',
             finishedAt: Date.now(),
-          });
+          }, options);
         }
-      } catch { /* битый статус не мешает остальным */ }
-    }
-    if (requeue.length) {
-      requeue.sort((a, b) => a.at - b.at);
-      for (const r of requeue) {
-        if (this._jobs.has(r.id)) continue;
-        this._jobs.set(r.id, 'queued');
-        this._queue.push(r.id);
       }
-      this.log?.info({ count: requeue.length }, 'триаж: очередь восстановлена после рестарта');
+    }
+
+    requeue.sort((a, b) => a.at - b.at);
+
+    for (const reference of requeue) {
+      const key = taskReferenceKey({ id: reference.id, source: reference.options.source });
+
+      this._references.set(key, reference);
+      this._jobs.set(key, 'queued');
+      this._queue.push(key);
     }
   }
 
-  _paths(id: string | number) {
+  /**
+   * Каталог источника назначает сервер по полному владельцу, не по ответу модели.
+   * Метаданные позволяют восстановить очередь без выбора новой основной доски.
+   */
+  async _packageDirs() {
+    const result: Array<{ dir: string; source?: TaskTargetOptions['source'] }> = [{ dir: this.dir }];
+    const root = path.join(this.dir, 'by-source');
+    const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const dir = path.join(root, entry.name);
+      const metadata = await this._readJson(path.join(dir, 'source.json'));
+
+      if (isTaskSourceId(metadata?.source)
+        && createHash('sha256').update(metadata.source).digest('hex') === entry.name) {
+        result.push({ dir, source: metadata.source });
+      }
+    }
+
+    return result;
+  }
+
+  _paths(id: string | number, options: TaskTargetOptions = {}) {
+    const source = options.source;
+    const dir = source
+      ? path.join(this.dir, 'by-source', createHash('sha256').update(source).digest('hex'))
+      : this.dir;
+
     return {
-      json: path.join(this.dir, `t${id}.analysis.json`),
-      note: path.join(this.dir, `t${id}.md`),
-      status: path.join(this.dir, `t${id}.status.json`),
-      log: path.join(this.dir, `t${id}.log`),
-      clarify: path.join(this.dir, `t${id}.clarify.md`),
+      json: path.join(dir, `t${id}.analysis.json`),
+      note: path.join(dir, `t${id}.md`),
+      status: path.join(dir, `t${id}.status.json`),
+      log: path.join(dir, `t${id}.log`),
+      clarify: path.join(dir, `t${id}.clarify.md`),
     };
+  }
+
+  /**
+   * Старый числовой вход читает пакет текущего default, затем безымянный legacy.
+   * При недоступном трекере старые файлы остаются доступны без миграции.
+   */
+  async _readOptions(id: string | number, options: TaskTargetOptions = {}): Promise<TaskTargetOptions> {
+    if (options.source !== undefined || options.rootOnly) {
+      return options;
+    }
+
+    try {
+      const target = await resolveTaskTarget(this.config, this.tracker, id);
+      const candidate = { source: target.source, legacyFallback: true };
+      const files = this._paths(id, candidate);
+      const exists = await Promise.all(Object.values(files).map((file) => fs.stat(file).catch(() => null)));
+
+      if (exists.some(Boolean)) {
+        return candidate;
+      }
+    } catch {
+      // Чтение legacy не требует доступного подключения доски.
+    }
+
+    return {};
+  }
+
+  /**
+   * Только исходно числовой вызов может читать безымянный файл при отсутствии нового.
+   * Проверка выполняется для каждого материала, чтобы старая история не исчезла из очереди.
+   */
+  async _readPath(
+    id: string | number, field: keyof ReturnType<Analyzer['_paths']>, options: TaskTargetOptions,
+  ): Promise<string> {
+    const file = this._paths(id, options)[field];
+
+    if (options.legacyFallback && options.source
+      && !await fs.stat(file).catch(() => null)) {
+      return this._paths(id)[field];
+    }
+
+    return file;
   }
 
   /**
@@ -434,12 +536,22 @@ export class Analyzer {
    * а рабочие пояснения (ответы на вопросы триажа, скрины) — внутренняя кухня.
    * Файл накапливается append'ом; его читают триаж и запуск конвейера.
    */
-  async readClarifications(id: string | number): Promise<string> {
-    try { return await fs.readFile(this._paths(id).clarify, 'utf8'); } catch { return ''; }
+  async readClarifications(id: string | number, options: TaskTargetOptions = {}): Promise<string> {
+    options = await this._readOptions(id, options);
+
+    try {
+      return await fs.readFile(await this._readPath(id, 'clarify', options), 'utf8');
+    } catch {
+      return '';
+    }
   }
 
-  async readClarificationEntries(id: string | number): Promise<AnalysisClarificationEntry[]> {
-    return clarificationEntries(await this.readClarifications(id));
+  async readClarificationEntries(
+    id: string | number, options: TaskTargetOptions = {},
+  ): Promise<AnalysisClarificationEntry[]> {
+    options = await this._readOptions(id, options);
+
+    return clarificationEntries(await this.readClarifications(id, options));
   }
 
   /**
@@ -447,11 +559,13 @@ export class Analyzer {
    * триажа. Это мост «триаж → конвейер»: запуск вклеивает их в тикет, и планировщик
    * начинает с них (секция «## Открытые решения»), а не переспрашивает человека с нуля.
    */
-  async readOpenQuestions(id: string | number) {
-    const analysis = await this._readJson(this._paths(id).json);
+  async readOpenQuestions(id: string | number, options: TaskTargetOptions = {}) {
+    options = await this._readOptions(id, options);
+
+    const analysis = await this._readJson(await this._readPath(id, 'json', options));
     if (!analysis) return null;
     const clean = (v: unknown) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : []);
-    const answered = await this.answeredQuestions(id);
+    const answered = await this.answeredQuestions(id, options);
     const questions = normalizeAnalysisQuestions(analysis.questions)
       .filter((question) => !answered.ids.has(question.id) && !answered.keys.has(questionKey(question.text)))
       .map((question) => question.text);
@@ -464,8 +578,12 @@ export class Analyzer {
    * смыслу текста: заход триажа переписывает questions[] целиком, и без второго ключа
    * тот же вопрос в новой формулировке снова открыт, а ответ человека потерян.
    */
-  async answeredQuestions(id: string | number): Promise<{ ids: Set<string>; keys: Set<string> }> {
-    const entries = (await this.readClarificationEntries(id))
+  async answeredQuestions(
+    id: string | number, options: TaskTargetOptions = {},
+  ): Promise<{ ids: Set<string>; keys: Set<string> }> {
+    options = await this._readOptions(id, options);
+
+    const entries = (await this.readClarificationEntries(id, options))
       .filter((entry) => entry.status === 'answered');
 
     return {
@@ -480,9 +598,14 @@ export class Analyzer {
    * те же вопросы снова. Записи без сохранённого текста вопроса (старые файлы) сюда
    * не попадают: пара без вопроса промпту бесполезна.
    */
-  async readAnsweredQuestions(id: string | number): Promise<TriageAnsweredQuestion[]> {
+  async readAnsweredQuestions(
+    id: string | number, options: TaskTargetOptions = {},
+  ): Promise<TriageAnsweredQuestion[]> {
+    options = await this._readOptions(id, options);
+
     const answers: TriageAnsweredQuestion[] = [];
-    for (const entry of await this.readClarificationEntries(id)) {
+
+    for (const entry of await this.readClarificationEntries(id, options)) {
       if (entry.status !== 'answered' || !entry.questionText) {
         continue;
       }
@@ -499,12 +622,25 @@ export class Analyzer {
     return answers;
   }
 
-  async appendClarification(id: string | number, text: string): Promise<string> {
+  /**
+   * Свободное уточнение остаётся в пакете выбранной задачи.
+   * Числовой вызов сохраняет прежнее чтение истории без переноса файлов.
+   */
+  async appendClarification(
+    id: string | number, text: string, options: TaskTargetOptions = {},
+  ): Promise<string> {
+    options = await this._readOptions(id, options);
+
     const stamp = new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
-    const cur = await this.readClarifications(id);
-    await fs.mkdir(this.dir, { recursive: true });
-    await fs.writeFile(this._paths(id).clarify, `${cur}${cur ? '\n' : ''}## ${stamp}\n${text.trim()}\n`);
-    return this.readClarifications(id);
+    const cur = await this.readClarifications(id, options);
+
+    await fs.mkdir(path.dirname(this._paths(id, options).clarify), { recursive: true });
+    await fs.writeFile(
+      this._paths(id, options).clarify,
+      `${cur}${cur ? '\n' : ''}## ${stamp}\n${text.trim()}\n`,
+    );
+
+    return this.readClarifications(id, options);
   }
 
   /**
@@ -514,9 +650,11 @@ export class Analyzer {
   async appendClarificationBatch(
     id: string | number,
     answers: ClarificationAnswer[],
-    { actor = 'human' }: { actor?: 'human' | 'grigdesk-arbiter' } = {},
+    { actor = 'human', ...options }: TaskTargetOptions & { actor?: 'human' | 'grigdesk-arbiter' } = {},
   ): Promise<ClarificationBatchResult> {
-    const analysis = await this._readJson(this._paths(id).json);
+    options = await this._readOptions(id, options);
+
+    const analysis = await this._readJson(await this._readPath(id, 'json', options));
     const questions = new Map(
       normalizeAnalysisQuestions(analysis?.questions).map((question) => [question.id, question]),
     );
@@ -579,7 +717,7 @@ export class Analyzer {
       });
     }
 
-    const current = await this.readClarifications(id);
+    const current = await this.readClarifications(id, options);
     const blocks = entries.map((entry: AnalysisClarificationEntry) => {
       const heading = entry.actor === 'grigdesk-arbiter'
         ? 'Разбор арбитра — машинный'
@@ -588,14 +726,41 @@ export class Analyzer {
       return `${clarificationBlock(entry, heading)}\n<!-- grigdesk-clarification:v1 ${marker} -->`;
     });
     const next = `${current}${current ? '\n' : ''}${blocks.join('\n\n')}\n`;
-    await fs.mkdir(this.dir, { recursive: true });
-    await fs.writeFile(this._paths(id).clarify, next);
+
+    await fs.mkdir(path.dirname(this._paths(id, options).clarify), { recursive: true });
+    await fs.writeFile(this._paths(id, options).clarify, next);
     return { ok: true, text: next, entries };
   }
 
-  async _writeStatus(id: string | number, st: Record<string, unknown>): Promise<void> {
-    const p = this._paths(id).status;
-    await fs.writeFile(p + '.tmp', JSON.stringify({ task: Number(id), ...st }, null, 2));
+  /**
+   * Статус и серверная принадлежность каталога переживают рестарт очереди.
+   * Атомарная публикация не оставляет читаемый наполовину JSON.
+   */
+  async _writeStatus(
+    id: string | number, st: Record<string, unknown>, options: TaskTargetOptions = {},
+  ): Promise<void> {
+    const p = this._paths(id, options).status;
+
+    await fs.mkdir(path.dirname(p), { recursive: true });
+
+    if (options.source) {
+      const metadata = path.join(path.dirname(p), 'source.json');
+      const temporary = path.join(path.dirname(p), `source.${randomUUID()}.json.tmp`);
+
+      try {
+        await fs.writeFile(temporary, JSON.stringify({ source: options.source }));
+        await fs.rename(temporary, metadata);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    }
+
+    await fs.writeFile(p + '.tmp', JSON.stringify({
+      task: Number(id),
+      ...st,
+      source: options.source,
+      legacyFallback: options.legacyFallback,
+    }, null, 2));
     await fs.rename(p + '.tmp', p);
   }
 
@@ -607,7 +772,7 @@ export class Analyzer {
    * Оценка внешней задачи использует профиль машины и общий кеш профиля.
    * Старые задачи и вызовы без номера сохраняют прежний выбор глобального профиля.
    */
-  async profile(id?: string | number) {
+  async profile(_id?: string | number, _options: TaskTargetOptions = {}) {
     if (!this._profile) {
       const name = this.config.factoryProfile
         || (await this.factoryState.primaryProfile().catch(() => '')) || '';
@@ -632,57 +797,94 @@ export class Analyzer {
     }
   }
 
-  /** Сводка по всем анализам: оценки + статусы (для бейджей доски). */
-  async list(): Promise<AnalysisRow[]> {
+  /**
+   * Расширенная сводка сохраняет пары, а старый вход проецирует только дефолтную доску.
+   * Безымянные файлы остаются отдельными строками до явной новой оценки.
+   */
+  async list({ sources = false }: { sources?: boolean } = {}): Promise<AnalysisRow[]> {
     await this._ready;
-    const byTask = new Map<string, AnalysisRow>();
-    for (const f of await fs.readdir(this.dir)) {
-      const m = f.match(/^t(\d+)\.(analysis|status)\.json$/);
-      if (!m) continue;
-      const id = String(m[1]);
-      const row: AnalysisRow = byTask.get(id) || { task: Number(id), analysis: null, status: null };
-      const data = await this._readJson(path.join(this.dir, f));
-      if (data) {
-        // Вопросы нормализуются и здесь: у списка и у детали одна форма ответа,
-        // иначе бейдж доски читал бы сырой ответ модели, а карточка — разобранный.
-        if (m[2] === 'analysis') {
-          row.analysis = {
-            ...data,
-            questions: normalizeAnalysisQuestions(data.questions),
-            scope: normalizeAnalysisScope(data.scope),
-          };
-        } else {
-          row.status = data;
-        }
-      }
-      byTask.set(id, row);
-    }
-    // Живые статусы очереди поверх файлов (queued ещё не имеет файла).
-    for (const [id, state] of this._jobs) {
-      const row: AnalysisRow = byTask.get(String(id))
-        || { task: Number(id), analysis: null, status: null };
 
-      row.status = { ...(row.status || {}), task: Number(id), state } as AnalysisStatus;
-      byTask.set(String(id), row);
+    const rows: AnalysisRow[] = [];
+    let defaultSource: string | undefined;
+
+    if (!sources) {
+      try {
+        defaultSource = (await this.tracker?.context?.())?.source;
+      } catch {
+        // Без трекера доступна прежняя числовая сводка.
+      }
     }
-    return [...byTask.values()].sort((a, b) => b.task - a.task);
+
+    for (const { dir, source } of await this._packageDirs()) {
+      if (!sources && source && source !== defaultSource) {
+        continue;
+      }
+
+      const ids = new Set((await fs.readdir(dir))
+        .map((file) => file.match(/^t(\d+)\.(analysis|status)\.json$/)?.[1]).filter(Boolean));
+
+      for (const id of ids) {
+        const detail = await this.get(id!, { source, rootOnly: source === undefined });
+        const row: AnalysisRow = {
+          task: Number(id),
+          analysis: detail.analysis,
+          status: detail.status,
+          ...(sources && source ? { source } : {}),
+        };
+
+        if (!sources) {
+          if (row.status) {
+            const { source: _source, ...status } = row.status;
+
+            row.status = status;
+          }
+
+          const previous = rows.findIndex((entry) => entry.task === row.task);
+
+          if (previous >= 0) {
+            rows.splice(previous, 1);
+          }
+        }
+
+        rows.push(row);
+      }
+    }
+
+    return rows.sort((a, b) => b.task - a.task);
   }
 
-  /** Деталь одного анализа: оценки + разведнота + статус + протухание. */
-  async get(id: string | number): Promise<AnalysisDetail> {
+  /**
+   * Деталь объединяет оценку, разведноту и статус только выбранной пары.
+   * Старые вызовы сохраняют чтение числового пакета без миграции.
+   */
+  async get(id: string | number, options: TaskTargetOptions = {}): Promise<AnalysisDetail> {
     await this._ready;
-    const p = this._paths(id);
-    const [analysis, status] = await Promise.all([this._readJson(p.json), this._readJson(p.status)]);
+    options = await this._readOptions(id, options);
+
+    const [analysis, storedStatus] = await Promise.all([
+      this._readJson(await this._readPath(id, 'json', options)),
+      this._readJson(await this._readPath(id, 'status', options)),
+    ]);
+    const { legacyFallback: _legacy, ...publicStatus } = storedStatus || {};
+    const status = storedStatus ? publicStatus : null;
     let note = null;
-    try { note = await fs.readFile(p.note, 'utf8'); } catch { /* разведноты может не быть */ }
-    const live = this._jobs.get(String(id));
+
+    try {
+      note = await fs.readFile(await this._readPath(id, 'note', options), 'utf8');
+    } catch {
+      // Разведноты может не быть.
+    }
+
+    const live = this._jobs.get(taskReferenceKey({ id, source: options.source }));
     const normalizedAnalysis = analysis ? {
       ...analysis,
       questions: normalizeAnalysisQuestions(analysis.questions),
       scope: normalizeAnalysisScope(analysis.scope),
     } : analysis;
+
     return {
       task: Number(id),
+      ...(options.source ? { source: options.source } : {}),
       analysis: normalizedAnalysis,
       note,
       stale: normalizedAnalysis ? await this._staleFiles(normalizedAnalysis) : null,
@@ -741,30 +943,55 @@ export class Analyzer {
     return files;
   }
 
-  /** Скрыть прерванный/упавший статус (решение «не перезапускать»). Живые задачи не трогаем. */
-  async dismiss(id: string | number): Promise<QueueResult> {
+  /**
+   * Человек скрывает неудачный статус конкретной пары, сохраняя оценку.
+   * Живая очередь той же пары защищена от удаления статуса.
+   */
+  async dismiss(id: string | number, options: TaskTargetOptions = {}): Promise<QueueResult> {
     await this._ready;
     id = String(id);
-    if (this._jobs.has(id)) return { outcome: 'busy' };
-    await fs.rm(this._paths(id).status, { force: true });
+    options = await this._readOptions(id, options);
+
+    const key = taskReferenceKey({ id, source: options.source });
+
+    if (this._jobs.has(key)) {
+      return { outcome: 'busy' };
+    }
+
+    await fs.rm(this._paths(id, options).status, { force: true });
     return { outcome: 'dismissed' };
   }
 
-  /** Поставить задачу в очередь анализа. Дедуп: уже queued/running → не дублируем. */
-  async enqueue(id: string | number): Promise<QueueResult> {
+  /**
+   * Постановка подтверждает источник до записи durable статуса и запуска worker.
+   * Дедуп учитывает пару: одинаковые номера разных досок имеют отдельные задания.
+   */
+  async enqueue(id: string | number, options: TaskTargetOptions = {}): Promise<QueueResult> {
     await this._ready;
     id = String(id);
     if (!this.pluginEnabled('analysis')) {
       return { outcome: 'plugin_disabled' };
     }
-    if (this._jobs.has(id)) {
+
+    const target = await resolveTaskTarget(this.config, this.tracker, id, options);
+
+    options = {
+      source: target.source,
+      legacyFallback: options.legacyFallback ?? options.source === undefined,
+    };
+
+    const key = taskReferenceKey({ id, source: options.source });
+
+    if (this._jobs.has(key)) {
       return {
-        outcome: this._jobs.get(id) === 'running' ? 'already_running' : 'already_queued',
+        outcome: this._jobs.get(key) === 'running' ? 'already_running' : 'already_queued',
       };
     }
-    this._jobs.set(id, 'queued');
-    this._queue.push(id);
-    await this._writeStatus(id, { state: 'queued', queuedAt: Date.now() });
+
+    this._references.set(key, { id, options });
+    this._jobs.set(key, 'queued');
+    await this._writeStatus(id, { state: 'queued', queuedAt: Date.now() }, options);
+    this._queue.push(key);
     this._pump();
     return { outcome: 'queued', position: this._queue.length };
   }
@@ -776,11 +1003,15 @@ export class Analyzer {
     // Конкуренция настраиваемая: большая очередь при одном воркере обрабатывается часами.
     const max = Math.max(1, Number(this.config.analysisConcurrency) || 1);
     this._active = this._active || 0;
+
     while (this._active < max && this._queue.length) {
-      const id = String(this._queue.shift() ?? '');
+      const key = this._queue.shift()!;
+      const { id, options } = this._references.get(key)!;
       this._active += 1;
+
       let result: { ok: boolean } | null = null;
-      this.analyze(id)
+
+      this.analyze(id, options)
         .then((value) => {
           result = value;
         })
@@ -789,11 +1020,15 @@ export class Analyzer {
           'триаж упал вне раннера',
         ))
         .finally(() => {
-          this._jobs.delete(id);
+          const reference = this._references.get(key)?.options || options;
+
+          this._jobs.delete(key);
+          this._references.delete(key);
           this._active = (this._active ?? 1) - 1;
           this._pump();
+
           if (result?.ok) {
-            Promise.resolve(this.onAnalyzed?.(id)).catch((error: unknown) => {
+            Promise.resolve(this.onAnalyzed?.(id, reference)).catch((error: unknown) => {
               this.log?.warn(
                 { task: id, err: failureText(error) },
                 'авторазбор вопросов не запущен',
@@ -810,33 +1045,59 @@ export class Analyzer {
     }
   }
 
-  /** Полный цикл анализа одной задачи (используется очередью и CLI). */
-  async analyze(id: string | number): Promise<{ ok: boolean; error?: unknown }> {
+  /**
+   * Worker повторно подтверждает принятого владельца до модели и публикации.
+   * Ошибка остаётся в пакете этой пары и не запускает поиск на другой доске.
+   */
+  async analyze(
+    id: string | number, options: TaskTargetOptions = {},
+  ): Promise<{ ok: boolean; error?: unknown }> {
     await this._ready;
     id = String(id);
-    const p = this._paths(id);
+
+    let p = this._paths(id, options);
     const startedAt = Date.now();
     if (!this.pluginEnabled('analysis')) {
       return { ok: false, error: 'plugin_disabled' };
     }
-    this._jobs.set(id, 'running');
-    await this._writeStatus(id, { state: 'running', startedAt });
+
+    const key = taskReferenceKey({ id, source: options.source });
+    const managed = this._jobs.has(key);
+    const original = options;
+    const originalStatus = p.status;
     let staging = null;
     let lease: TriageSourceLease | null = null;
+
     try {
+      const target = await resolveTaskTarget(this.config, this.tracker, id, options);
+
+      options = {
+        ...options,
+        source: target.source,
+        legacyFallback: options.legacyFallback ?? options.source === undefined,
+      };
+      p = this._paths(id, options);
+
+      if (managed) {
+        this._jobs.set(key, 'running');
+        this._references.set(key, { id, options });
+      }
+
+      await this._writeStatus(id, { state: 'running', startedAt }, options);
+
       const selected = await this._resolveRunSelection();
       if (!selected.ok) {
         throw Object.assign(new Error(selected.error), { analysisCode: selected.error });
       }
 
-      const profile = await this.profile(id);
+      const profile = await this.profile(id, options);
       const gitRefresh = await this._refreshBeforeRun(id, profile);
       // Оцениваем тот код, с которого начнёт конвейер: у isolated-профиля это снимок
       // интеграционной ветки, а не рабочая копия человека (lib/analysis/triageSource.ts).
       lease = await this._sources.acquire(profile);
 
       const { repos: sources, roots } = lease;
-      const ticket = await this._fetchTicket(id);
+      const ticket = await this._fetchTicket(id, options);
       staging = await fs.mkdtemp(path.join(this.dir, `.t${id}.run-`));
       const inputDir = path.join(staging, 'input');
       const outputDir = path.join(staging, 'output');
@@ -844,7 +1105,8 @@ export class Analyzer {
         fs.mkdir(inputDir),
         fs.mkdir(outputDir),
       ]);
-      const clarifications = await this._materializeClarifications(id, inputDir);
+
+      const clarifications = await this._materializeClarifications(id, inputDir, options);
       const outputJson = path.join(outputDir, `t${id}.analysis.json`);
       const outputNote = path.join(outputDir, `t${id}.md`);
       const catalog = await this._routeCatalog(profile.name);
@@ -854,8 +1116,8 @@ export class Analyzer {
         description: ticket.description,
         comments: ticket.comments,
         clarifications,
-        answered: await this.readAnsweredQuestions(id),
-        discussion: await this._discussion(id, ticket),
+        answered: await this.readAnsweredQuestions(id, options),
+        discussion: await this._discussion(id, ticket, options),
         profile,
         sources,
         routeChoice: {
@@ -884,6 +1146,11 @@ export class Analyzer {
         ? await createWorkIpc({ workTools, root: staging })
         : null;
       let run;
+
+      if (target.context) {
+        target.tracker?.assertContext(target.context);
+      }
+
       try {
         run = await selected.executor.run({
           config: this.config,
@@ -924,17 +1191,49 @@ export class Analyzer {
         sources,
         gitRefresh,
       });
+
+      if (target.context) {
+        target.tracker?.assertContext(target.context);
+      }
+
       await fs.rename(outputJson, p.json);
       if (await fs.stat(outputNote).then(() => true, () => false)) {
         await fs.rename(outputNote, p.note);
       }
-      await this._writeStatus(id, { state: 'done', startedAt, finishedAt: Date.now(), durationMs: Date.now() - startedAt });
+
+      const status = {
+        state: 'done',
+        startedAt,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+
+      await this._writeStatus(id, status, options);
+
+      if (managed && originalStatus !== p.status) {
+        await this._writeStatus(id, status, original);
+      }
+
       this.log?.info({ task: id, ms: Date.now() - startedAt, cost: run.cost }, 'триаж готов');
+
       return { ok: true };
     } catch (e) {
       const failure = e !== null && typeof e === 'object' ? e as { analysisCode?: unknown } : {};
       const error = failure.analysisCode || failureText(e).slice(0, 600);
-      await this._writeStatus(id, { state: 'failed', startedAt, finishedAt: Date.now(), error });
+
+      const status = {
+        state: 'failed',
+        startedAt,
+        finishedAt: Date.now(),
+        error,
+      };
+
+      await this._writeStatus(id, status, options);
+
+      if (managed && originalStatus !== p.status) {
+        await this._writeStatus(id, status, original);
+      }
+
       this.log?.warn({ task: id, err: failureText(e) }, 'триаж упал');
       return { ok: false, error };
     } finally {
@@ -1025,8 +1324,10 @@ export class Analyzer {
    * К конкретному запуску копируются только token-ы из локальных server-owned marker-ов.
    * В prompt попадает путь копии; общий каталог вложений исполнителю не раскрывается.
    */
-  async _materializeClarifications(id: string | number, inputDir: string): Promise<string> {
-    const markdown = await this.readClarifications(id);
+  async _materializeClarifications(
+    id: string | number, inputDir: string, options: TaskTargetOptions = {},
+  ): Promise<string> {
+    const markdown = await this.readClarifications(id, options);
     const lines = [];
     const root = path.join(this.config.chatsDir || '', 'attachments');
     const copyResolved = async (
@@ -1078,13 +1379,16 @@ export class Analyzer {
    * Постановка читается у внешнего трекера и нормализуется в обычный текст.
    * Для Б24 сохраняются прежние детали и несистемные комментарии с best effort чтением.
    */
-  async _fetchTicket(id: string | number): Promise<any> {
-    const detail = await this.tracker.taskDetail(id);
+  async _fetchTicket(id: string | number, options: TaskTargetOptions = {}): Promise<any> {
+    const target = await resolveTaskTarget(this.config, this.tracker, id, options);
+    const detail = objectOrEmpty(await target.tracker!.taskDetail(id));
     let comments = [];
 
     try {
-      const page = await this.tracker.taskPageData(id);
-      comments = (page.comments || []).filter((c: any) => !c.isSystem && c.text);
+      const page = objectOrEmpty(await target.tracker!.taskPageData(id));
+
+      comments = (Array.isArray(page.comments) ? page.comments : [])
+        .filter((c: any) => !c.isSystem && c.text);
     } catch (e) {
       this.log?.warn(
         { task: id, err: failureText(e) },
@@ -1108,7 +1412,7 @@ export class Analyzer {
    * Оценка задачи не зависит от исправности телеграма: любой отказ здесь — это
    * триаж без переписки, а не упавший триаж.
    */
-  async _discussion(id: string | number, ticket: any): Promise<string> {
+  async _discussion(id: string | number, ticket: any, options: TaskTargetOptions = {}): Promise<string> {
     if (typeof this.discussion !== 'function') return '';
     const source = [
       ticket.title,
@@ -1118,8 +1422,9 @@ export class Analyzer {
       ...(ticket.comments || []).map((c: any) => String(c.text || '')),
     ].filter(Boolean).join('\n');
     if (!source.trim()) return '';
+
     try {
-      const view = await this.discussion(source, { project: await this._taskProject(id) });
+      const view = await this.discussion(source, { project: await this._taskProject(id, options) });
       return view?.text || '';
     } catch (e) {
       this.log?.warn(
@@ -1139,8 +1444,18 @@ export class Analyzer {
    * задач (`primaryProfile`), то есть граница безопасности зависела бы от того,
    * что сейчас бежит на конвейере.
    */
-  async _taskProject(id: string | number): Promise<any> {
+  async _taskProject(id: string | number, options: TaskTargetOptions = {}): Promise<any> {
     try {
+      if (options.source && !options.legacyFallback) {
+        const index = new FactoryTaskSources(String(this.config.factoryTaskSourcesPath || ''));
+        const record = (await index.read()).entries[String(id)];
+        const proof = await this.factoryState.readTrustedTicketProof(id);
+
+        if (FactoryTaskSources.verified(record, proof) !== options.source) {
+          return null;
+        }
+      }
+
       const { registry } = await this.factoryState.readRegistry(id);
       return String(registry?.PROFILE || '').trim() || null;
     } catch {

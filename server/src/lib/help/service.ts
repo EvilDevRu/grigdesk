@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { HELP_MAX_BYTES, helpInvalid, helpResourceFile } from '../../../../shared/help/helpContracts.ts';
+import { lstat, readFile } from 'node:fs/promises';
+import { HELP_MAX_BYTES, helpInvalid, parseHelpInput } from '../../../../shared/help/helpContracts.ts';
 import type { HelpBundle, HelpLocale } from '../../../../shared/help/helpContracts.ts';
 import { queryHelp } from '../../../../shared/help/helpQuery.ts';
 import { compileHelpSources, verifyHelpBundle } from '../../../../shared/node/helpSources.ts';
@@ -32,8 +32,18 @@ export function createHelpService(options: {
       }, locale);
     }
 
-    const file = `server/help/${helpResourceFile(locale)}`;
-    const text = await readContainedText(options.root, file, HELP_MAX_BYTES);
+    const file = locale === 'en' ? 'help.en.json' : 'help.json';
+    const text = await readContainedText(options.root, `server/help/${file}`, HELP_MAX_BYTES);
+
+    if (text === null && locale === 'en') {
+      await lstat(path.join(options.root, 'server/help', file)).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          throw new Error('help_locale_unavailable');
+        }
+
+        helpInvalid();
+      });
+    }
 
     if (!text || Buffer.byteLength(text) > HELP_MAX_BYTES) {
       helpInvalid();
@@ -47,18 +57,36 @@ export function createHelpService(options: {
    * Отказ снимает кеш Promise, поэтому следующий запрос пробует чтение заново.
    */
   async function bundle(locale: HelpLocale = 'ru'): Promise<HelpBundle> {
-    if (options.kind === 'source') {
-      return read(locale);
+    if (locale !== 'ru' && locale !== 'en') {
+      throw new Error('help_input_invalid');
     }
-    if (!pending.has(locale)) {
-      pending.set(locale, read(locale).catch((error: unknown) => {
+
+    const load = async () => {
+      const result = await read(locale);
+
+      if (result.locale !== locale) {
+        helpInvalid();
+      }
+
+      return result;
+    };
+
+    if (options.kind === 'source') {
+      return load();
+    }
+
+    let result = pending.get(locale);
+
+    if (!result) {
+      result = load().catch((error: unknown) => {
         pending.delete(locale);
 
         throw error;
-      }));
+      });
+      pending.set(locale, result);
     }
 
-    return pending.get(locale)!;
+    return result;
   }
 
   /**
@@ -67,9 +95,21 @@ export function createHelpService(options: {
    */
   async function invoke(input: unknown): Promise<unknown> {
     try {
-      return queryHelp(await bundle(), input);
+      const parsed = parseHelpInput(input);
+
+      return queryHelp(await bundle(parsed.locale ?? 'ru'), parsed);
     }
     catch (error) {
+      if (error instanceof Error && error.message === 'help_locale_unavailable') {
+        const parsed = parseHelpInput(input);
+
+        return {
+          ok: false,
+          error: 'help_locale_unavailable',
+          locale: parsed.locale ?? 'ru'
+        };
+      }
+
       return {
         ok: false, error: error instanceof Error && error.message === 'help_input_invalid'
           ? 'help_input_invalid' : 'help_unavailable'

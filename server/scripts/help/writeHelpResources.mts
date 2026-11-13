@@ -4,7 +4,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { compileHelpSources } from '../../../shared/node/helpSources.ts';
-import { HELP_LOCALES, helpResourceFile } from '../../../shared/help/helpContracts.ts';
 import { buildHelpSite } from './buildHelpSite.mts';
 
 const execute = promisify(execFile);
@@ -20,34 +19,33 @@ export async function writeHelpResources(input: {
   const commit = await execute('git', ['rev-parse', 'HEAD'], {
     cwd: input.sourceRoot, timeout: 5000,
   }).then((result) => result.stdout.trim()).catch(() => 'source');
-  const bundles = await Promise.all(HELP_LOCALES.map((locale) =>
-    compileHelpSources(input.sourceRoot, {
-      version,
-      commit,
-    }, locale)));
-  const bundle = bundles[0]!;
+  const bundle = await compileHelpSources(input.sourceRoot, {
+    version, commit
+  });
+  const englishBundle = await compileHelpSources(input.sourceRoot, {
+    version,
+    commit
+  }, 'en');
   const directory = path.join(input.directory, 'server/help');
 
   await mkdir(directory, {
     recursive: true
   });
-
-  for (const entry of bundles) {
-    await writeFile(path.join(directory, helpResourceFile(entry.locale)), JSON.stringify(entry));
-  }
+  await writeFile(path.join(directory, 'help.json'), JSON.stringify(bundle));
+  await writeFile(path.join(directory, 'help.en.json'), JSON.stringify(englishBundle));
 
   const packages = await site({
     sourceRoot: input.sourceRoot,
 
     output: path.join(directory, 'site'),
     bundle,
-    translations: bundles.slice(1),
+    englishBundle
   });
 
-  for (const entry of bundles) {
-    const published = await readFile(path.join(directory, 'site', helpResourceFile(entry.locale)), 'utf8');
+  for (const [name, corpus] of [['help.json', bundle], ['help.en.json', englishBundle]] as const) {
+    const published = await readFile(path.join(directory, 'site', name), 'utf8');
 
-    if (published !== JSON.stringify(entry)) {
+    if (published !== JSON.stringify(corpus)) {
       throw new Error('help_site_mismatch');
     }
   }

@@ -29,6 +29,18 @@ export type ApiCommand = (
     kind: 'renew';
     id: string;
   }
+  | {
+    kind: 'analyze';
+    id: string;
+  }
+  | {
+    kind: 'launch-options';
+    id: string;
+  }
+  | {
+    kind: 'launch';
+    id: string;
+  }
   | { kind: 'create' }
   | {
     kind: 'users';
@@ -49,6 +61,9 @@ export const HELP_TEXT = `tracker — команды задач Б24 через 
   tracker start <id>                   взять в работу: возобновить и запустить таймер
   tracker complete <id>                завершить задачу со стопом таймера
   tracker renew <id>                   возобновить задачу
+  tracker analyze <id>                 поставить задачу в очередь оценки
+  tracker launch-options <id>          параметры запуска конвейера
+  tracker launch <id>                  запустить конвейер с JSON из stdin
   tracker create                       создать задачу из JSON на stdin
   tracker users [запрос]               сотрудники для выбора исполнителя
   tracker --version                    показать версию
@@ -142,6 +157,13 @@ function parseTaskCommand(command: string, rest: readonly string[]): ApiCommand 
   const id = requireId(command, rest[0]);
 
   switch (command) {
+    case 'analyze':
+    case 'launch-options':
+    case 'launch':
+      return {
+        kind: command,
+        id,
+      };
     case 'task':
       return {
         kind: 'task',
@@ -240,6 +262,9 @@ function parseCommand(argv: readonly string[]): Command {
         kind: 'users',
         query: rest[0] ?? '',
       };
+    case 'analyze':
+    case 'launch-options':
+    case 'launch':
     case 'task':
     case 'comment':
     case 'timer':

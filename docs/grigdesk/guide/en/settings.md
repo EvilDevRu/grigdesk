@@ -17,6 +17,8 @@ Check the selected machine: server configuration and device preferences have dif
 Interface language is a device preference and changes immediately. English and Russian apply to help contents,
 search and articles as well as buttons. An open help window keeps its selected article when language changes.
 Cancel does not undo a language change. The website link carries the selected language.
+If an older server lacks English help, the reader shows the Russian guide with an explanation.
+The standalone help website has its own language selector and remembers its choice.
 
 Select the language in Interface → Behavior → Interface language. Labels in chats, tasks,
 pipelines, routes, meetings and tools update without reloading the page. Dates, numbers,

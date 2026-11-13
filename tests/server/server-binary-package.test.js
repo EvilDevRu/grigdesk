@@ -57,7 +57,7 @@ async function put(root, name) {
 }
 
 test('SB19: пропавшие helper, license, npm, native, schemas и навык запрещают payload', async (t) => {
-  for (const name of required) {
+  for (const name of required.filter((entry) => !entry.endsWith('help.en.json'))) {
     const root = await fixture(t);
 
     await rm(path.join(root, name));
@@ -147,4 +147,15 @@ test('SB19: shared-исходники в payload запрещены', async (t) 
   await assert.rejects(auditPayload(root,
     { ...options, wrappers: ['shared/runtime/legacyBrand.ts'] }),
   /Запрещён корень состава payload|Лишний собственный исходник/u);
+});
+
+
+test('HELP-PACK-REQUIRED-EN: оба EN ресурса обязательны в готовом payload', async (t) => {
+  for (const name of ['server/help/help.en.json', 'server/help/site/help.en.json']) {
+    const root = await fixture(t);
+
+    await auditPayload(root, options);
+    await rm(path.join(root, name));
+    await assert.rejects(auditPayload(root, options), /обязательного файла/u, name);
+  }
 });

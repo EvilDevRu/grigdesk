@@ -44,6 +44,8 @@ const bundle = d.objectOf({
 export type HelpArticle = ReturnType<typeof article>;
 export type HelpBundle = ReturnType<typeof bundle>;
 export type HelpInput = {
+  locale?: HelpLocale;
+} & ({
   action: 'index';
 } | {
   action: 'search';
@@ -52,7 +54,7 @@ export type HelpInput = {
   action: 'read';
   id: string;
   offset: number;
-};
+});
 /**
  * JSON из сети и payload получает одинаковые пределы, уникальные ID и простые пути.
  * Неизвестная схема либо лишние поля не превращаются в частично прочитанное руководство.
@@ -109,20 +111,30 @@ export function parseHelpInput(value: unknown): HelpInput {
 
   const source = value as Record<string, unknown>;
   const action = source.action;
-  const allowed = action === 'index' ? ['action'] : action === 'search'
-    ? ['action', 'query'] : action === 'read' ? ['action', 'id', 'offset'] : [];
+  const allowed = action === 'index' ? ['action', 'locale'] : action === 'search'
+    ? ['action', 'query', 'locale'] : action === 'read' ? ['action', 'id', 'offset', 'locale'] : [];
+  const locale = source.locale;
+
+  if ('locale' in source && locale !== 'ru' && locale !== 'en') {
+    throw new Error('help_input_invalid');
+  }
+
+  const preference: { locale?: HelpLocale } = locale === 'ru' || locale === 'en' ? { locale } : {};
 
   if (allowed.length === 0 || Object.keys(source).some((key) => !allowed.includes(key))) {
     throw new Error('help_input_invalid');
   }
   if (action === 'index') {
     return {
-      action
+      action,
+      ...preference
     };
   }
   if (action === 'search' && typeof source.query === 'string' && source.query.length <= 256) {
     return {
-      action, query: source.query
+      action,
+      ...preference,
+      query: source.query
     };
   }
   if (action === 'read' && typeof source.id === 'string' && HELP_ID.test(source.id)
@@ -130,6 +142,7 @@ export function parseHelpInput(value: unknown): HelpInput {
       && Number(source.offset) >= 0 && Number(source.offset) <= 128000)) {
     return {
       action,
+      ...preference,
       id: source.id,
       offset: Number(source.offset ?? 0)
     };

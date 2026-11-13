@@ -102,7 +102,20 @@ The task is evaluated point by point, substantial questions are resolved and the
 
 Commands without a target use the default external board. Removing or disabling it selects the first remaining
 enabled board. Older clients without a target continue to use that default.
-External-task evaluation is bound to the default board; other sources are rejected before evaluation starts.
+A task card can evaluate and launch tasks from any enabled board without changing the default.
+The selected source is sent with the task number; a failed connection never falls back to another board.
+
+Evaluations, questions and answers for identical numbers on different boards or accounts remain separate.
+Old evaluations without a source stay historical; a targeted card may require a new evaluation.
+Evaluate all still covers only the default board. Retrying or dismissing an evaluation keeps its source.
+
+CLI supports `tracker analyze <id>`, `tracker launch-options <id>` and `tracker launch <id>`
+with `--board <driverId>`. Launch reads a JSON object from stdin; choose profile and route
+from launch-options. Two pipelines for the same number cannot run simultaneously, even across boards.
+
+Update and manually restart the server before updating desktop, phone and CLI clients.
+For rollback, remove new clients before rolling back the server. Keep new source-specific evaluations
+on disk; the previous server does not display them.
 A link or implementation alone does not establish acceptance. Restore failed tracker access.
 Never repeat creation after an unknown response before checking for the task.
 Human clarifications have a total limit of 30,000 characters.

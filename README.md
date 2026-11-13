@@ -146,7 +146,7 @@ Open **Help** or press **F1** in the app to read the user guide included with yo
 | [Projects](docs/grigdesk/guide/en/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/en/pipelines.md) — move a task through its stages |
 | [Tasks](docs/grigdesk/guide/en/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/en/gates.md) — inspect results and decide |
 
-Help navigation, search and articles follow the active interface language, in English or Russian. For help, see [troubleshooting](docs/grigdesk/guide/en/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
+Help navigation, search and articles follow the active interface language, in English or Russian. Both guides ship offline; the [Russian guide](docs/grigdesk/guide/ru/README.md) is also available separately. For help, see [troubleshooting](docs/grigdesk/guide/en/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
 
 ## Contributing
 
