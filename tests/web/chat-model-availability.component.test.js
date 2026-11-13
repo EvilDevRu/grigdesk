@@ -209,6 +209,41 @@ test('модели доступного исполнителя доступны 
   assert.equal(option.element.disabled, false);
 });
 
+test('нечат-модель видна только как запрещённый вариант с причиной', async (t) => {
+  const provider = {
+    id: 'qwen',
+    name: 'Qwen Code',
+    available: true,
+    models: [
+      {
+        id: 'qwen3.8-max',
+        name: 'Qwen3.8 Max',
+        efforts: [],
+      },
+      {
+        id: 'wan3.0-video',
+        name: 'Wan3.0 Video',
+        efforts: [],
+        extra: true,
+        nonChat: true,
+        nonChatReason: 'Генерация видео, не текстовый чат',
+      },
+    ],
+  };
+
+  PROVIDERS.push(provider);
+  t.after(() => PROVIDERS.splice(PROVIDERS.indexOf(provider), 1));
+
+  const { wrapper } = await mountChat(t);
+  const option = modelOption(wrapper, 'wan3.0-video');
+
+  assert.ok(option, 'нечат-модель остаётся видимой под «все модели»');
+  assert.equal(option.element.disabled, true);
+  assert.match(option.text(), /не для чата/u);
+  assert.match(option.attributes('title'), /Генерация видео/u);
+  assert.equal(modelOption(wrapper, 'qwen3.8-max').element.disabled, false);
+});
+
 test('каталог доступных исполнителей не содержит пометок недоступности', async (t) => {
   const { wrapper } = await mountChat(t);
   const groups = wrapper.findAll('.sel.model optgroup');

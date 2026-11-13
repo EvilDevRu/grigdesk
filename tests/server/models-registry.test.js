@@ -57,6 +57,10 @@ test('первый scope доступа сохраняет алиасы акту
 
   await mergeCatalog(file, 'fixture', adapter, {});
 
+  const [mergedModel] = file.fixture;
+
+  assert.match(mergedModel.firstSeen, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  delete mergedModel.firstSeen;
   assert.deepEqual(file.fixture, [{
     id: 'current-model',
     name: 'Новое имя',
@@ -464,4 +468,104 @@ test('runtime Claude снимает старый ultracode без свежего
     assert.equal(filtered.includes('manual'), false);
     assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
   }
+});
+
+test('момент первого наблюдения переживает пересборку и ручной выбор', () => {
+  const first = mergeCatalogModel({ id: 'model' }, undefined);
+  const customCurrent = {
+    id: 'model',
+    custom: true,
+    firstSeen: '2026-01-01T00:00:00.000Z',
+  };
+
+  assert.match(first.firstSeen, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.equal(mergeCatalogModel({ id: 'model', name: 'Новое имя' }, first).firstSeen, first.firstSeen);
+  assert.equal(mergeCatalogModel({ id: 'model' }, customCurrent).firstSeen, '2026-01-01T00:00:00.000Z');
+});
+
+test('нечат-модель уходит под «все модели», а порядок задают сила и свежесть', async (t) => {
+  await unavailableExecutorFixture(t);
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-nonchat-catalog-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+  const catalogJson = JSON.stringify({
+    'test-live': [
+      {
+        id: 'old-chat',
+        tier: 10,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'fresh-chat',
+        tier: 10,
+        createdAt: '2026-10-01T00:00:00.000Z',
+      },
+      {
+        id: 'video-model',
+        tier: 10,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        nonChat: true,
+        nonChatReason: 'Генерация видео, не текстовый чат',
+      },
+      { id: 'no-date-b', tier: 10 },
+      { id: 'no-date-a', tier: 10 },
+      {
+        id: 'strong-old',
+        tier: 20,
+        createdAt: '2025-01-01T00:00:00.000Z',
+      },
+    ],
+  });
+
+  await fs.writeFile(modelsPath, catalogJson);
+
+  const runtimeRegistry = await getModelsRegistry({ modelsPath }, { refresh: true });
+  const models = runtimeRegistry['test-live'];
+
+  assert.deepEqual(models.map((model) => model.id), [
+    'strong-old', 'fresh-chat', 'video-model', 'old-chat', 'no-date-a', 'no-date-b',
+  ]);
+  assert.equal(models.find((model) => model.id === 'video-model').extra, true);
+  assert.equal(models.find((model) => model.id === 'video-model').nonChatReason,
+    'Генерация видео, не текстовый чат');
+  assert.deepEqual(models.filter((model) => !model.extra).map((model) => model.id), [
+    'strong-old', 'fresh-chat', 'old-chat', 'no-date-a', 'no-date-b',
+  ]);
+  assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
+});
+
+test('без даты сервиса свежесть задаёт момент первого наблюдения реестра', async (t) => {
+  let catalogIds = ['old-model'];
+
+  await unavailableExecutorFixture(t, {
+    catalogLive: true,
+    probe: async () => ({ version: 'v1' }),
+    catalog: async () => catalogIds.map((id) => ({ id })),
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-firstseen-catalog-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+
+  await fs.writeFile(modelsPath, JSON.stringify({ 'test-live': [] }));
+  await getModelsRegistry({ modelsPath }, { refresh: true });
+
+  catalogIds = ['old-model', 'new-model'];
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const registry = await getModelsRegistry({ modelsPath }, { refresh: true });
+
+  assert.deepEqual(registry['test-live'].map((model) => model.id), ['new-model', 'old-model']);
+
+  const stored = JSON.parse(await fs.readFile(modelsPath, 'utf8'))['test-live'];
+  const oldSeen = stored.find((model) => model.id === 'old-model').firstSeen;
+  const newSeen = stored.find((model) => model.id === 'new-model').firstSeen;
+
+  assert.ok(oldSeen && newSeen);
+  assert.ok(newSeen > oldSeen);
 });

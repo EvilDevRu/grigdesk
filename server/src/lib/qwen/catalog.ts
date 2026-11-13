@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { qwenConfig, readQwenSnapshot, type QwenSnapshot } from './settings.ts';
 import { qwenDiscoveryError, resolveQwenSnapshot } from './discovery.ts';
+import { classifyQwenModel } from './modelClassification.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption } from './modelMetadata.ts';
 
@@ -51,6 +52,8 @@ function catalogProblem(config: unknown, error: unknown): string {
  * Неизвестные контекст и усилие остаются неизвестными, без выдуманных ступеней.
  * CLI не объявляет линию замены моделей: общее семейство скрыло бы весь каталог,
  * оставив одну случайную модель вместо Qwen, GLM и других доступных маршрутов.
+ * Нечат-пригодность объявляют данные: явная модальность сервиса и таблица семейств;
+ * неизвестная модель остаётся чатовой.
  */
 export function projectQwenModels(
   snapshot: QwenSnapshot,
@@ -69,12 +72,19 @@ export function projectQwenModels(
     const context = record(confirmed?._meta).contextLimit
       ?? record(model.entry.generationConfig).contextWindowSize;
     const effort = qwenEffortOption(optionsByModel.get(model.id));
+    const classification = classifyQwenModel(model.entry.id);
+    const nonChat = model.nonChat === true || classification !== null;
 
     return [{
       id: model.id,
       name: String(confirmed?.name || model.entry.name || model.entry.id),
       ...(typeof context === 'number' && context > 0 ? { context } : { contextUnverified: true }),
       efforts: effort?.levels ?? [],
+      ...(model.createdAt ? { createdAt: model.createdAt } : {}),
+      ...(nonChat ? {
+        nonChat: true,
+        nonChatReason: model.nonChatReason || classification?.reason || '',
+      } : {}),
     }];
   });
 }

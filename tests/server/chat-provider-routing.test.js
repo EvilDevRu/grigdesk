@@ -33,7 +33,7 @@ const kimiSessionBinding = {
  * Поднимает чат-модуль с урезанной конфигурацией и подставным исполнителем.
  * withArtifacts добавляет временную папку артефактов, как у рабочего сервера.
  */
-async function apiFixture(t, { executor = null, withArtifacts = false } = {}) {
+async function apiFixture(t, { executor = null, withArtifacts = false, registry = null } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-routing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
@@ -62,7 +62,7 @@ async function apiFixture(t, { executor = null, withArtifacts = false } = {}) {
     },
     claudeAuth: null,
     internalToken: 'test',
-    modelsRegistry: async () => ({
+    modelsRegistry: async () => registry || ({
       claude: [{ id: 'claude-test', efforts: [] }],
       kimi: [{ id: 'kimi-test', efforts: [] }],
     }),
@@ -242,6 +242,50 @@ test('Kimi retry разрешён только до подтверждённог
   assert.equal(mayRetryEmptyRun(kimi, { emptyRun: true, retryState: 'prompt_accepted' }), false);
   assert.equal(mayRetryEmptyRun(kimi, { emptyRun: true, retryState: 'ambiguous_outcome' }), false);
   assert.equal(mayRetryEmptyRun(kimi, { emptyRun: true, retryState: 'pre_prompt' }, { compact: true }), false);
+});
+
+test('нечат-модель каталога не запускает ход и объясняет причину', async (t) => {
+  const { app, executorCalls } = await apiFixture(t, {
+    registry: {
+      claude: [
+        { id: 'claude-test', efforts: [] },
+        {
+          id: 'wan3.0-video',
+          efforts: [],
+          extra: true,
+          nonChat: true,
+          nonChatReason: 'Генерация видео, не текстовый чат',
+        },
+      ],
+    },
+  });
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'video-chat',
+        modelRef: { provider: 'claude', model: 'wan3.0-video' },
+        messages: [],
+        createdAt: Date.UTC(2026, 10, 1),
+        updatedAt: Date.UTC(2026, 10, 1),
+        revision: 0,
+      },
+    },
+  });
+
+  assert.equal(saved.statusCode, 200);
+
+  const run = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: { chatKey: 'video-chat', message: 'не запускать' },
+  });
+
+  assert.equal(run.statusCode, 400);
+  assert.equal(run.json().error, 'non_chat_model');
+  assert.match(run.json().message, /видео/u);
+  assert.equal(executorCalls(), 0);
 });
 
 test('chat API не принимает client-owned surface и не запускает unknown model/provider', async (t) => {

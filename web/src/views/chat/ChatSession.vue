@@ -138,8 +138,10 @@
                   <!-- Вкладки и модели строятся только по доступным исполнителям.
                        Сохранённый выбор недоступного исполнителя остаётся скрытым native option. -->
                   <optgroup v-for="p in provGroups" :key="p.id" :label="p.name">
-                    <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
+                    <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает);
+                         «не для чата» — нечат-модель каталога, выбор запрещён -->
                     <option v-for="m in p.models" :key="m.id" :value="m.id"
+                            :disabled="m.nonChat"
                             :data-description="modelOptionDescription(m)"
                             :title="modelOptionTitle(m)">
                       {{ modelOptionLabel(m) }}
@@ -1179,9 +1181,11 @@ const currentModelTitle = computed(() => (
 // Подсказка доступной модели сохраняет окно и оговорки исходного каталога.
 // Недоступные исполнители отсекаются до создания вариантов списка.
 const modelOptionTitle = (model: ProviderModelEntry) => modelContextTitle(model, model.name)
-  + (model.unknown ? t('core.chatNetVKatalogeUstanovlennogo') : '');
+  + (model.unknown ? t('core.chatNetVKatalogeUstanovlennogo') : '')
+  + (model.nonChat ? ` · ${model.nonChatReason || t('core.chatModelNonChat')}` : '');
 const modelOptionLabel = (model: ProviderModelEntry) => model.name
-  + (model.unknown ? ' ?' : '');
+  + (model.unknown ? ' ?' : '')
+  + (model.nonChat ? ` · ${t('core.chatModelNonChat')}` : '');
 
 /**
  * В списке оставляем только известный размер окна; wire-id может оказаться JSON-массивом.

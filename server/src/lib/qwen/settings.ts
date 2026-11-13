@@ -20,6 +20,9 @@ export interface QwenModel {
   id: string;
   authType: string;
   entry: Record<string, unknown>;
+  createdAt?: string;
+  nonChat?: boolean;
+  nonChatReason?: string;
 }
 
 export interface QwenSnapshot {
@@ -148,11 +151,18 @@ export function readQwenSnapshot(
 
       envKeys.add(entry.envKey);
 
-      const { apiKey: _secret, ...safe } = entry;
-      const model = {
+      // Признаки каталога живут в снимке, но не попадают в settings CLI:
+      // там остаются только маршрут, имя и заданные нами baseUrl/envKey.
+      const { apiKey: _secret, createdAt, nonChat, nonChatReason, ...safe } = entry;
+      const model: QwenModel = {
         id: `${entry.id}(${authType})`,
         authType,
         entry: safe,
+        ...(typeof createdAt === 'string' && createdAt ? { createdAt } : {}),
+        ...(nonChat === true ? {
+          nonChat: true,
+          nonChatReason: typeof nonChatReason === 'string' ? nonChatReason : '',
+        } : {}),
       };
 
       if (!models.some((old) => old.id === model.id)) {

@@ -2577,6 +2577,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         message: messages[resolution.error] || 'модель чата нельзя разрешить',
       };
     }
+    // Нечат-модель (видео, речь, эмбеддинги) видна только под «Показывать все модели»;
+    // запуск отвергается до очереди и session state с причиной из каталога.
+    if (resolution.model.nonChat) {
+      return {
+        ok: false,
+        error: 'non_chat_model',
+        message: resolution.model.nonChatReason || 'Модель не предназначена для текстового чата',
+      };
+    }
     const provider = resolution.modelRef.provider;
     return {
       ok: true,

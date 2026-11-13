@@ -297,6 +297,7 @@
   "selectGroups": "Option groups",
   "chatModelPicker": "Choose a model",
   "chatModelContext": "Context: {tokens} tokens",
+  "chatModelNonChat": "not for chat",
   "saveFailure": "Could not save the interface language.",
   "localComputer": "This computer",
   "caption": "{pName} ({pVendor}) · {value3} · {pAuthLabel}",

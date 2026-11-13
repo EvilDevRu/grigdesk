@@ -15,7 +15,7 @@ and local headers for the selected Node during installation; missing headers cau
 3. Enter the API key and Apply. Empty input preserves the saved key; removal is a separate action.
 4. The chosen service's API loads models automatically. No manual JSON is needed:
    GrigDesk prepares private CLI settings. Installation, updating and reinstallation use the same access;
-   refreshed catalogs expose new models.
+   refreshed catalogs expose new models at the top of the list.
 5. Select Qwen and a model in chat. Catalog failures show a reason such as HTTP 401.
    Check service, region and key. GrigDesk never tries the key against other services.
    Loading the catalog does not prove a paid model request will succeed.
@@ -27,6 +27,9 @@ Saving access remains successful while models reload. After connection loss, Acc
 do not re-enter the saved key. Unsaved access shows Save connection and Apply;
 rechecking before saving uses the old connection.
 The short model list keeps confirmed new and third-party models distinct.
+Chat shows only models usable for text conversation, newer ones first.
+Video, speech and other non-chat service models stay hidden with a reason
+until the full list is enabled, and cannot be selected for chat.
 Enable the full list in Settings → AI executors → Models.
 
 If you already configured `modelProviders` in Qwen CLI, GrigDesk uses it without modifying it.

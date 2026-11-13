@@ -201,3 +201,37 @@ test('qwen-discovery-preserves-existing-provider-config-and-does-not-commit-stal
   }), /настройки доступа изменились/);
   assert.notEqual(readQwenSnapshot(fixture.config).fingerprint, initial);
 });
+
+test('qwen-discovery-marks-nonchat-and-captures-created-without-leaking-into-cli-settings', async (t) => {
+  const fixture = await cleanInstall(t);
+  const adapter = await qwenAdapter();
+  const data = [
+    { id: 'qwen3.8-max', created: 1760000000 },
+    { id: 'wan3.0-video', created: 1760000001 },
+    { id: 'qwen-audio-3.0-tts-plus' },
+    { id: 'image-route', architecture: { output_modalities: ['image'] } },
+    { id: 'bad-date', created: -5 },
+  ];
+  const models = await adapter.catalog(fixture.config, {
+    fetch: async () => Response.json({ data }),
+  });
+  const byId = new Map(models.map((model) => [model.id, model]));
+
+  assert.equal(byId.get('qwen3.8-max(openai)').createdAt, new Date(1760000000 * 1000).toISOString());
+  assert.equal(byId.get('qwen3.8-max(openai)').nonChat, undefined);
+  assert.equal(byId.get('wan3.0-video(openai)').nonChat, true);
+  assert.match(byId.get('wan3.0-video(openai)').nonChatReason, /видео/u);
+  assert.equal(byId.get('qwen-audio-3.0-tts-plus(openai)').nonChat, true);
+  assert.equal(byId.get('image-route(openai)').nonChat, true);
+  assert.match(byId.get('image-route(openai)').nonChatReason, /нетекстовый/u);
+  assert.equal(byId.get('bad-date(openai)').createdAt, undefined);
+
+  const snapshot = await resolveQwenSnapshot(fixture.config, {
+    fetch: async () => assert.fail('Каталог уже получен и закэширован'),
+  });
+  const serialized = JSON.stringify(snapshot.settings);
+
+  assert.equal(serialized.includes('nonChat'), false);
+  assert.equal(serialized.includes('createdAt'), false);
+  assert.equal(serialized.includes(QWEN_KEY), false);
+});

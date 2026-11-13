@@ -14,8 +14,22 @@ const MAX_ENTRIES = 16;
 const CACHE_MS = 60_000;
 
 /**
+ * Unix-время сервиса становится ISO-датой каталога; мусор и переполнение даты
+ * не получают выдуманной свежести.
+ */
+function serviceCreatedAt(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 8_640_000_000_000) {
+    return '';
+  }
+
+  return new Date(value * 1000).toISOString();
+}
+
+/**
  * Ответ сервиса ограничивается декларациями моделей, без копирования его настроек.
- * Явно нетекстовые маршруты исключаются; отсутствие metadata не выдумывает capabilities.
+ * Явно нетекстовый вывод помечается признаком нечат-модели, а не выбрасывается:
+ * запись остаётся видимой под «Показывать все модели» с причиной. Отсутствие
+ * metadata не выдумывает capabilities.
  */
 function automaticModels(body: unknown, baseUrl: string): Record<string, unknown>[] {
   if (!isRecord(body) || !Array.isArray(body.data) || body.data.length > 10_000) {
@@ -31,20 +45,28 @@ function automaticModels(body: unknown, baseUrl: string): Record<string, unknown
       continue;
     }
 
-    const architecture = isRecord(entry.architecture) ? entry.architecture : {};
-    const outputs = architecture.output_modalities;
-
-    if (Array.isArray(outputs) && !outputs.includes('text')) {
-      continue;
-    }
-
-    ids.add(entry.id);
-    models.push({
+    const model: Record<string, unknown> = {
       id: entry.id,
       name: typeof entry.name === 'string' ? entry.name.slice(0, 256) : entry.id,
       baseUrl,
       envKey: 'DASHSCOPE_API_KEY',
-    });
+    };
+    const created = serviceCreatedAt(entry.created);
+
+    if (created) {
+      model.createdAt = created;
+    }
+
+    const architecture = isRecord(entry.architecture) ? entry.architecture : {};
+    const outputs = architecture.output_modalities;
+
+    if (Array.isArray(outputs) && !outputs.includes('text')) {
+      model.nonChat = true;
+      model.nonChatReason = 'Сервис объявил нетекстовый вывод модели';
+    }
+
+    ids.add(entry.id);
+    models.push(model);
   }
 
   if (!models.length) {
