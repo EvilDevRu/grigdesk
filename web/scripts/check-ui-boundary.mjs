@@ -56,6 +56,10 @@ const NON_ACTIVATION_HANDLERS = new Set([
   'web/src/features/help/HelpBrowser.vue|article|click|followLink',
   // Карточка не активируется: capture отменяет ложный click после свайпа закрытия.
   'web/src/components/feedback/UiToastCard.vue|article|click|onClick',
+  // Сцена картинки обрабатывает жест увеличения и закрытие по свободному фону.
+  // Клавиатурные альтернативы остаются в controls масштаба и закрытия, а также Escape.
+  'web/src/views/MediaViewer.vue|div|dblclick|zoom.doubleClick',
+  'web/src/views/MediaViewer.vue|div|click|onStageClick',
   // Доступные split-resizer: pointer drag дополняют keyboard и exact dblclick reset.
   'web/src/views/ChatsView.vue|div|dblclick|resetListWidth',
   'web/src/views/chat/ChatSession.vue|div|dblclick|resetComposerHeight',
