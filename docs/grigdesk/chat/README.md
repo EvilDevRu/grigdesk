@@ -194,6 +194,7 @@
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 - [GigaCode временно отключён: сохранённые исходники и граница проверки](gigacode-cli-contract.md)
 - [Правило Qwen Code: подключение без ручного JSON, живой каталог, внешний npm-CLI](qwen-integration-policy.md)
+- [Источники квот QwenCloud: месячный Individual, отдельный вход, ограничения CLI и API кабинета](qwen-token-plan-usage.md)
 - [Qwen Code: discovery, усилие, подтверждённая модель сессии, native-окно и символические ссылки](qwen-integration-boundaries.md)
 - [Qwen: цельные блоки, отдельные реплики в ходе и отображение старых токеновых шагов](qwen-stream-blocks.md)
 - [Qwen: полный ход дольше 30 секунд, остановка без ошибки, сохранение сессии и ошибки CLI](qwen-prompt-lifetime.md)
