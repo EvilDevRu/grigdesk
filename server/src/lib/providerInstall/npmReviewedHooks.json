@@ -1,6 +1,32 @@
 [
   {
     "name": "@qwen-code/audio-capture",
+    "reviewedVersion": "0.27.3",
+    "integrity":
+      "sha512-eFBjDE5MLEXaQnnHH7DP85Kx3rO71FbHCtU2jdwO2oRwkh821JEaiWMaBiZK9UgUxF6F2jD3Hg2PLo0HTUTYTw==",
+    "lifecycle": {
+      "install": "node install.js"
+    },
+    "files": {
+      "install.js": "bf91a3db08fdaf1622a0fa938f1f0e29cef712586ca13c2b0ac2422dd3f916fd",
+      "binding.gyp": "38bdf4bb86bcf2864b20075f9ab3b0c6a6ac3b6408abb3d6b9fe6a131bac6ee7",
+      "native/audio_capture.cc": "4d2b421f969a78d4c3feb7c0f01d8eb8aff75f7cbbfbfa54c7e3a5bc85083c26",
+      "native/mac_permission.mm": "216135ee2d633b02965be7bf60126f011fae081ebdd921851829694617d5e345",
+      "native/miniaudio.h": "9019743287e443c55e5737a7297f38e5e358561701d6db2d905afb114390c410",
+      "prebuilds/darwin-arm64/@qwen-code+audio-capture.node":
+        "81d517bdf4b1ae4b9e39e2dc7c61e9d3594fe1b7f12245676e3cd5d98035faa1",
+      "prebuilds/darwin-x64/@qwen-code+audio-capture.node":
+        "5acdc2b53e0076ab038c6d444615ee3a0d6404642527b8d76c3816f2d9c8adb9",
+      "prebuilds/linux-arm64/@qwen-code+audio-capture.node":
+        "4c3f7485bb83e914d66e900d962d06e6367c358f1380d56dc038051a5423b17d",
+      "prebuilds/linux-x64/@qwen-code+audio-capture.node":
+        "01b4a08d0d551854d0ad7ab89066ff04fadc03f4b46b34da8c96634461cc7086",
+      "prebuilds/win32-x64/@qwen-code+audio-capture.node":
+        "3395645b55d4336457920cff58b356479929f70ab6a915a68cd15873a3955ae6"
+    }
+  },
+  {
+    "name": "@qwen-code/audio-capture",
     "reviewedVersion": "0.27.2",
     "integrity":
       "sha512-jZFGcGH0RxAwDYGeYzkOIKp9AQ4L0rwlgfUvVQSQqXg70fRg66eBCo0Uk609vyKuPJQwUrpFFsmSwjLT9PBxmQ==",

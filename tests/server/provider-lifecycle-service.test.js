@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +13,87 @@ import { acquireCliLease } from '../../server/src/lib/providerInstall/leases.ts'
 import { readEnvFile } from '../../server/src/lib/envFile.ts';
 import { discoverExternalCli } from '../../server/src/lib/providerInstall/inventory.ts';
 import { readInstallState } from '../../server/src/lib/providerInstall/stateStore.ts';
+import { InstallEnvironmentError } from '../../server/src/lib/providerInstall/npmEnvironment.ts';
+import { registerProviderInstallations } from '../../server/src/modules/providers/installations.ts';
+
+const require = createRequire(new URL('../../server/package.json', import.meta.url));
+const Fastify = require('fastify');
+
+test('HTTP prepare отдаёт переводимые коды отказа настоящей проверки npm до старта', async (t) => {
+  for (const code of ['installer_strategy_unverified', 'npm_graph_invalid']) {
+    await t.test(code, async (scenario) => {
+      const stand = await fixture(scenario);
+      const app = Fastify({ logger: false });
+
+      scenario.after(() => app.close());
+      registerProviderInstallations(app, stand.service);
+
+      if (code === 'installer_strategy_unverified') {
+        const manifestPath = path.join(stand.root, 'package.json');
+        const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+
+        manifest.scripts = { postinstall: 'node unreviewed.js' };
+        await fs.writeFile(manifestPath, JSON.stringify(manifest));
+      } else {
+        const modules = path.join(stand.root, 'node_modules');
+
+        await fs.mkdir(modules);
+        await fs.symlink(stand.home, path.join(modules, 'outside'));
+      }
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/providers/installations/v2/fixture/uninstall/prepare',
+        payload: {},
+      });
+
+      assert.equal(response.statusCode, 409, response.body);
+      assert.deepEqual(response.json(), { error: code, message: '' });
+      assert.equal((await stand.service.currentLifecycle()).active, null);
+      assert.equal(stand.mutations.length, 0);
+      assert.equal(await fs.readFile(path.join(stand.root, 'cli.js'), 'utf8'),
+        '#!/bin/sh\necho 1.0.0\n');
+    });
+  }
+});
+
+test('HTTP prepare сохраняет собственную подробную причину и скрывает сторонний текст', async (t) => {
+  const cases = [
+    {
+      error: new InstallEnvironmentError('npm_graph_invalid', 'Получен другой npm-пакет'),
+      code: 'npm_graph_invalid',
+      message: 'Получен другой npm-пакет',
+    },
+    {
+      error: Object.assign(new Error('private registry credentials'), { code: 'third_party_failure' }),
+      code: 'third_party_failure',
+      message: 'Подготовка операции не удалась',
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.code, async (scenario) => {
+      const stand = await fixture(scenario);
+      const app = Fastify({ logger: false });
+
+      scenario.after(() => app.close());
+      registerProviderInstallations(app, stand.service);
+      stand.adapter.externalCli = () => {
+        throw entry.error;
+      };
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/providers/installations/v2/fixture/update/prepare',
+        payload: {},
+      });
+
+      assert.equal(response.statusCode, 409, response.body);
+      assert.deepEqual(response.json(), { error: entry.code, message: entry.message });
+      assert.equal(stand.mutations.length, 0);
+    });
+  }
+});
 
 /**
  * Реальные Bash discovery, prefix/CAS и сервис работают с искусственным npm transport.

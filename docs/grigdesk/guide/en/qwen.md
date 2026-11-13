@@ -37,8 +37,12 @@ Service selection is hidden and access uses the configured `envKey` names.
 Invalid JSON must be repaired at its source, rather than replaced automatically.
 
 Installation checks dependency installer hooks before confirmation.
-“This version's installation method has not been verified” requires reviewing the changed package.
-Verified CLI 0.27.2 works with this protection enabled.
+“This installation method is not verified for the version” requires reviewing the changed package.
+Verified CLI versions 0.27.2 and 0.27.3 work with this protection enabled.
+If an older server reports “Подготовка операции не удалась” (operation preparation failed)
+while updating to 0.27.3,
+apply the GrigDesk update containing the verified profile for that version,
+restart the server manually, and retry the Qwen update.
 The optional microphone backend uses a prebuilt addon; compiling it needs Python 3, make and a C++ toolchain.
 It is not required for GrigDesk chat.
 

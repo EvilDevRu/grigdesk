@@ -53,7 +53,7 @@
 - [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
 - [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
 - [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
-- [Установка Qwen: проверенный audio-capture, native build и offline start](qwen-install-hooks.md)
+- [Установка Qwen: профили audio-capture 0.27.2/0.27.3, offline start и аудит метаданных prebuild](qwen-install-hooks.md)
 - [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
 - [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
 - [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
