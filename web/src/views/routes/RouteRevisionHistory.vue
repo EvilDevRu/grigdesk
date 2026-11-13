@@ -1,24 +1,20 @@
 <template>
   <section class="route-revision-history revs">
     <div v-if="healthy.length > 1" class="route-revision-history__compare">
-      <label>От
-        <UiSelect data-test="revision-from" :model-value="fromHash"
+      <label>{{ t('core.routeOt') }} <UiSelect data-test="revision-from" :model-value="fromHash"
                   @update:model-value="fromHash = String($event ?? '')">
           <option v-for="revision in healthy" :key="revision.catalogHash"
                   :value="revision.catalogHash">{{ revision.catalogHash.slice(0, 12) }}</option>
         </UiSelect>
       </label>
-      <label>К
-        <UiSelect data-test="revision-to" :model-value="toHash"
+      <label>{{ t('core.routeK') }} <UiSelect data-test="revision-to" :model-value="toHash"
                   @update:model-value="toHash = String($event ?? '')">
           <option v-for="revision in healthy" :key="revision.catalogHash"
                   :value="revision.catalogHash">{{ revision.catalogHash.slice(0, 12) }}</option>
         </UiSelect>
       </label>
       <UiButton data-context="workspace-form" variant="ghost" data-test="compare-revisions" :disabled="busy || !fromHash || !toHash
-                || fromHash === toHash" @click="$emit('compare', fromHash, toHash)">
-        Сравнить ревизии
-      </UiButton>
+                || fromHash === toHash" @click="$emit('compare', fromHash, toHash)"> {{ t('core.routeSravnitRevizii') }} </UiButton>
     </div>
     <div v-for="revision in revisions" :key="revision.catalogHash" class="route-revision-history__row">
       <span class="mono">{{ revision.catalogHash.slice(0, 12) }}</span>
@@ -26,20 +22,19 @@
       <span v-if="revision.routes" class="muted route-revision-history__routes">
         {{ Object.keys(revision.routes).join(', ') }}
       </span>
-      <span v-if="revision.isCurrent">current</span>
-      <span v-if="revision.integrity !== 'ok'" class="bad">
-        Повреждена: {{ revision.integrity }}
+      <span v-if="revision.isCurrent">{{ 'current' }}</span>
+      <span v-if="revision.integrity !== 'ok'" class="bad"> {{ t('core.routePovrezhdena') }} {{ revision.integrity }}
       </span>
       <div class="route-revision-history__actions">
         <UiButton data-context="workspace-form" variant="ghost" :data-test="`view-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
-                  @click="$emit('view', revision.catalogHash)">Открыть</UiButton>
+                  @click="$emit('view', revision.catalogHash)">{{ t('core.open') }}</UiButton>
         <UiButton data-context="workspace-form" variant="ghost" :data-test="`create-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
-                  @click="$emit('create', revision.catalogHash)">Создать черновик</UiButton>
+                  @click="$emit('create', revision.catalogHash)">{{ t('core.routeSozdatChernovik') }}</UiButton>
         <UiButton data-context="workspace-form" variant="ghost" v-if="!revision.isCurrent" :data-test="`rollback-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
-                  @click="$emit('rollback', revision)">Откатить</UiButton>
+                  @click="$emit('rollback', revision)">{{ t('core.trackerRollback') }}</UiButton>
       </div>
     </div>
   </section>
@@ -48,7 +43,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { RouteRevision } from '../../../../shared/pipeline/routesContracts.ts';
-import { UiButton, UiSelect } from '../../ui';
+import { UiButton, UiSelect, t, uiLocale } from '../../ui';
 
 const props = defineProps<{ revisions: RouteRevision[]; busy: boolean }>();
 
@@ -77,7 +72,7 @@ watch(healthy, (revisions) => {
 function formatDate(value: string): string {
   const date = new Date(value);
 
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(uiLocale.value);
 }
 </script>
 

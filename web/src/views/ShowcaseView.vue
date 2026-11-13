@@ -1,17 +1,15 @@
 <template>
   <UiWorkspacePage aria-labelledby="showcase-title">
-      <template v-if="!store.opened" #title><h1 id="showcase-title">Презентации</h1></template>
+      <template v-if="!store.opened" #title><h1 id="showcase-title">{{ t('core.navShowcase') }}</h1></template>
       <template v-if="!store.opened" #actions>
-        <UiIconButton label="Обновить" data-context="workspace-toolbar"
+        <UiIconButton :label="t('core.trackerUpdate')" data-context="workspace-toolbar"
                       :loading="store.loading" @click="loadShowcase(store)">
           <UiRefreshIcon />
         </UiIconButton>
       </template>
-    <h1 v-if="store.opened" id="showcase-title" class="ui-visually-hidden">Презентации</h1>
+    <h1 v-if="store.opened" id="showcase-title" class="ui-visually-hidden">{{ t('core.navShowcase') }}</h1>
     <div class="showcase" :class="{ 'showcase--film': store.opened }">
-    <p v-if="!store.opened" class="ui-workspace-intro">
-      Выберите стенд, чтобы создать ролик с озвучкой и субтитрами.
-    </p>
+    <p v-if="!store.opened" class="ui-workspace-intro"> {{ t('core.showcaseVyberiteStendChtobySozdat') }} </p>
 
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
@@ -76,8 +74,8 @@
     <template v-else>
       <section class="showcase__panel" aria-labelledby="showcase-create-title">
         <div class="showcase__panel-head">
-          <h2 id="showcase-create-title">Новый ролик</h2>
-          <p>Выберите стенд, о котором рассказать: адрес и профиль подставятся сами.</p>
+          <h2 id="showcase-create-title">{{ t('core.showcaseNovyyRolik') }}</h2>
+          <p>{{ t('core.showcaseVyberiteStendOKotorom') }}</p>
         </div>
         <ShowcaseTargetPicker
           :targets="store.targets"
@@ -96,13 +94,11 @@
            «всё готово» ничего не решает, а красная строка называет, что чинить. -->
       <UiInlineMessage v-if="doctorBlockers.length" tone="warning">
         <span class="showcase__blockers">
-          <strong>Записи мешает:</strong>
+          <strong>{{ t('core.showcaseZapisiMeshaet') }}</strong>
           <span v-for="operation in doctorBlockers" :key="operation.id">
             {{ operation.title }} — {{ operation.reason }}
           </span>
-          <UiButton variant="ghost" @click="openSettings({ pageId: 'tools.showcase' })">
-            Открыть настройки
-          </UiButton>
+          <UiButton variant="ghost" @click="openSettings({ pageId: 'tools.showcase' })"> {{ t('core.showcaseOtkrytNastroyki') }} </UiButton>
         </span>
       </UiInlineMessage>
 
@@ -117,17 +113,15 @@
 
       <section class="showcase__block" aria-labelledby="showcase-list-title">
         <div class="showcase__block-head">
-          <h2 id="showcase-list-title">Ролики</h2>
+          <h2 id="showcase-list-title">{{ t('core.showcaseRoliki') }}</h2>
           <span v-if="store.projects.length" class="showcase__count">
             {{ store.projects.length }}
           </span>
         </div>
 
         <div v-if="!store.projects.length" class="showcase__empty">
-          <strong>{{ store.loaded ? 'Роликов ещё нет' : 'Читаем состояние…' }}</strong>
-          <p v-if="store.loaded">
-            Нажмите «Снять ролик» у стенда: разбор задачи и сцены появятся здесь.
-          </p>
+          <strong>{{ store.loaded ? t('core.showcaseRolikovEscheNet') : t('core.showcaseChitaemSostoyanie') }}</strong>
+          <p v-if="store.loaded"> {{ t('core.showcaseNazhmiteSnyatRolikU') }} </p>
         </div>
         <div v-else class="showcase__list">
           <ShowcaseProjectRow
@@ -153,14 +147,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
-  UiActionLink,
-  UiButton,
-  UiInlineMessage,
-  UiIconButton,
-  UiWorkspacePage,
-  UiRefreshIcon,
-  confirmDialog,
-  promptDialog,
+  UiActionLink, UiButton, UiInlineMessage, UiIconButton, UiWorkspacePage, UiRefreshIcon,
+  confirmDialog, promptDialog, t, messageRef,
 } from '../ui';
 import {
   addShowcaseScene,
@@ -461,11 +449,10 @@ async function confirmReanalyze(): Promise<boolean> {
   }
 
   return confirmDialog(
-    'Разобрать заново? Сцены заменятся новым сценарием, и правки текста в них пропадут. '
-      + 'Голос и темп ролика сохранятся.',
+    messageRef('core.showcaseRazobratZanovoStsenyZamenyatsya'),
     {
-      title: 'Повторный разбор',
-      okText: 'Разобрать',
+      title: t('core.showcasePovtornyyRazbor'),
+      okText: t('core.showcaseRazobrat'),
     },
   );
 }
@@ -524,8 +511,7 @@ async function applySource(source: ShowcaseStorySource | null) {
     }
 
     if (store.opened?.id !== id || store.opened.revision !== revision) {
-      store.setError('Ролик изменился, пока вы подтверждали, — выбор «О чём ролик» не применён. '
-        + 'Проверьте его и примените ещё раз.');
+      store.setError(t('core.showcaseChangedWhileConfirming'));
 
       return;
     }
@@ -592,10 +578,10 @@ async function rename() {
   }
 
   const title = await promptDialog({
-    title: 'Название ролика',
+    title: t('core.showcaseNazvanieRolika'),
       multiline: false,
     value: opened.title,
-    okText: 'Сохранить',
+    okText: t('core.save'),
   });
 
   if (title === null) {
@@ -614,12 +600,10 @@ async function remove(id: string) {
   const project = store.projects.find((item) => item.id === id);
   const title = project?.title ?? store.opened?.title ?? id;
   const accepted = await confirmDialog(
-    `Удалить ролик «${title}»?\n\n`
-      + 'Вместе с записью будут удалены её сцены, звук и собранный файл. '
-      + 'Идущие задания сначала отменяются.',
+    messageRef('core.showcaseUdalitRolikTitleVmeste', { title }),
     {
-      title: 'Удаление ролика',
-      okText: 'Удалить',
+      title: t('core.showcaseUdalenieRolika'),
+      okText: t('core.taskDelete'),
       danger: true,
     },
   );
@@ -655,12 +639,13 @@ async function open(id: string) {
  */
 async function prepareData(recipeFingerprint: string) {
   const accepted = await confirmDialog(
-    `Запустить подготовку данных на цели «${seed.value?.targetLabel ?? ''}»?\n\n`
-      + `Рецепт профиля «${seed.value?.profile ?? ''}» изменит данные стенда. `
-      + 'После этого все записанные сцены устареют и их придётся снять заново.',
+    messageRef('core.showcaseZapustitPodgotovkuDannyhNa', {
+      targetLabel: seed.value?.targetLabel ?? '',
+      profile: seed.value?.profile ?? '',
+    }),
     {
-      title: 'Подготовка демо-данных',
-      okText: 'Подготовить',
+      title: t('core.showcasePodgotovkaDemoDannyh'),
+      okText: t('core.showcasePodgotovit'),
       danger: true,
     },
   );
@@ -716,11 +701,10 @@ async function setSceneContinues(payload: { id: string; value: boolean }) {
 async function removeScene(sceneId: string) {
   const scene = store.opened?.scenes.find((item) => item.id === sceneId);
   const accepted = await confirmDialog(
-    `Удалить сцену «${scene?.title ?? sceneId}»?\n\n`
-      + 'Вместе со сценой удалятся её звук и запись экрана.',
+    messageRef('core.showcaseUdalitStsenuTitlesceneidVmeste', { titlesceneId: scene?.title ?? sceneId }),
     {
-      title: 'Удаление сцены',
-      okText: 'Удалить',
+      title: t('core.showcaseUdalenieStseny'),
+      okText: t('core.taskDelete'),
       danger: true,
     },
   );

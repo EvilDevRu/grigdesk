@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { ApplicationLauncherState } from '../../shared/desktop/applicationLauncher.ts';
 import { desktopCommand } from './desktopEntry.ts';
+import { desktopText } from './locale.ts';
 
 export interface ApplicationLauncher {
   read(): Promise<ApplicationLauncherState>;
@@ -100,7 +101,7 @@ export function createApplicationLauncher(options: LauncherOptions): Application
     const args = [executable, ...(options.arguments ?? [])];
 
     if (!path.isAbsolute(executable) || args.some((value) => /[\r\n\0]/u.test(value))) {
-      throw new Error('Некорректный путь приложения для ярлыка');
+      throw new Error(desktopText('desktop.desktopNekorrektnyyPutPrilozheniyaDlya'));
     }
 
     return [

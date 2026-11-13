@@ -19,7 +19,7 @@
   доверенных каталогов и её API удалены. DeepSeek не расширяет cwd до общего предка,
   Kimi contained проверяет запреты монтирования тем же валидатором в preview и runtime.
 - **Метрики кольца описаны в продуктовом контракте**
-  `docs/grigdesk/guide/chat-context.md`. Claude и Codex измеряют вход последнего
+  `docs/grigdesk/guide/ru/chat-context.md`. Claude и Codex измеряют вход последнего
   основного model request; Kimi — статус открытой ACP-сессии после хода;
   DeepSeek — ACP `usage_update.used` во время хода. Накопительный расход не становится контекстом.
   Полный снимок (`contextTokens`, `contextWindow`, `contextMetric`,

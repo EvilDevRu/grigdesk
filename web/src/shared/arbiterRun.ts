@@ -1,4 +1,9 @@
 import type { ArbiterRun } from '../../../shared/pipeline/factoryGraphContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 // Идущий разбор арбитра — общая формулировка для всех поверхностей.
 //
@@ -17,9 +22,13 @@ export function arbiterRunLabel(run: ArbiterRun | null | undefined): string {
     return '';
   }
 
-  const who = run.actor === 'auto' ? 'сам' : 'по кнопке';
+  const who = run.actor === 'auto'
+    ? translateUi('core.arbiterRunAutomatically')
+    : translateUi('core.arbiterRunOnRequest');
   const sec = Math.max(0, Number(run.elapsedSec) || 0);
-  const time = sec < 60 ? `${sec} с` : `${Math.floor(sec / 60)} мин`;
+  const time = sec < 60
+    ? translateUi('core.arbiterRunS', { sec: sec })
+    : translateUi('core.arbiterRunMin', { value: Math.floor(sec / 60) });
 
   return `${who} · ${time}`;
 }

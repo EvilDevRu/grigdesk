@@ -1,8 +1,10 @@
 import type {
+
   BrowserGrantInput,
   BrowserHostStatus,
   BrowserOwnerChoice,
 } from './browserUi.ts';
+
 
 export interface BrowserHostIdentity {
   id: string;

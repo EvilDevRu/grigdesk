@@ -21,19 +21,25 @@ const routes: RouteRecordRaw[] = [
     path: '/board',
     name: 'board',
     component: () => import('./views/BoardView.vue'),
-    meta: { title: 'Доска' },
+    meta: { get title() {
+      return t('core.board');
+    } },
   },
   {
     path: '/pipeline',
     name: 'pipeline',
     component: () => import('./views/PipelineView.vue'),
-    meta: { title: 'Конвейер', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.pipeline');
+    }, layout: 'workspace' },
   },
   {
     path: '/sandboxes',
     name: 'sandboxes',
     component: () => import('./views/SandboxesView.vue'),
-    meta: { title: 'Песочницы', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.sandboxes');
+    }, layout: 'workspace' },
   },
   {
     path: '/browser',
@@ -50,7 +56,9 @@ const routes: RouteRecordRaw[] = [
     path: '/showcase/:id?',
     name: 'showcase',
     component: () => import('./views/ShowcaseView.vue'),
-    meta: { title: 'Презентации', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.navShowcase');
+    }, layout: 'workspace' },
   },
   {
     path: '/chats',
@@ -58,7 +66,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/ChatsView.vue'),
     meta: {
       layout: 'workspace',
-      title: 'Чаты',
+      get title() {
+        return t('settings.chats');
+      },
     },
   },
   { path: '/agents', redirect: '/routes' },
@@ -67,7 +77,9 @@ const routes: RouteRecordRaw[] = [
     name: 'diff',
     component: () => import('./views/DiffView.vue'),
     meta: {
-      title: 'Диф',
+      get title() {
+        return t('core.coreDif');
+      },
       layout: 'workspace',
     },
   },
@@ -86,7 +98,9 @@ const routes: RouteRecordRaw[] = [
     path: '/documents',
     name: 'documents',
     component: () => import('./views/DocumentsView.vue'),
-    meta: { title: 'Документ' },
+    meta: { get title() {
+      return t('core.coreDokument');
+    } },
   },
   {
     path: '/terminal',
@@ -94,7 +108,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/TerminalView.vue'),
     meta: {
       layout: 'workspace',
-      title: 'Терминал',
+      get title() {
+        return t('core.terminal');
+      },
       tool: 'terminal',
     },
   },
@@ -113,7 +129,9 @@ const routes: RouteRecordRaw[] = [
     name: 'db',
     component: () => import('./views/DbView.vue'),
     meta: {
-      title: 'Базы',
+      get title() {
+        return t('core.databases');
+      },
       tool: 'db',
       layout: 'workspace',
     },
@@ -123,7 +141,9 @@ const routes: RouteRecordRaw[] = [
     name: 'docker',
     component: () => import('./views/DockerView.vue'),
     meta: {
-      title: 'Докер',
+      get title() {
+        return t('core.docker');
+      },
       tool: 'docker',
       layout: 'workspace',
     },
@@ -132,14 +152,18 @@ const routes: RouteRecordRaw[] = [
     path: '/routes',
     name: 'routes',
     component: () => import('./views/RoutesView.vue'),
-    meta: { title: 'Маршруты', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.routes');
+    }, layout: 'workspace' },
   },
   {
     path: '/projects/:id?',
     name: 'projects',
     component: () => import('./views/ProjectsView.vue'),
     meta: {
-      title: 'Проекты',
+      get title() {
+        return t('core.projects');
+      },
       layout: 'workspace',
     },
   },
@@ -149,7 +173,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/CodeView.vue'),
     meta: {
       layout: 'workspace',
-      title: 'Код',
+      get title() {
+        return t('core.code');
+      },
       tool: 'code',
     },
   },
@@ -158,7 +184,9 @@ const routes: RouteRecordRaw[] = [
     name: 'shelf',
     component: () => import('./views/ShelfView.vue'),
     meta: {
-      title: 'Полка',
+      get title() {
+        return t('core.shelf');
+      },
       tool: 'shelf',
       layout: 'workspace',
     },
@@ -167,26 +195,34 @@ const routes: RouteRecordRaw[] = [
     path: '/tools',
     name: 'tools',
     component: () => import('./views/ToolsView.vue'),
-    meta: { title: 'Инструменты', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.tools');
+    }, layout: 'workspace' },
   },
   // Страница пользовательского плагина: панель-iframe ведёт ToolHost, id — из адреса.
   {
     path: '/ext/:id',
     name: 'ext',
     component: () => import('./views/PluginView.vue'),
-    meta: { title: 'Плагин', tool: 'ext' },
+    meta: { get title() {
+      return t('core.corePlagin');
+    }, tool: 'ext' },
   },
   {
     path: '/video',
     name: 'video',
     component: () => import('./views/VideoView.vue'),
-    meta: { title: 'Видео', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.navVideo');
+    }, layout: 'workspace' },
   },
   {
     path: '/inbox',
     name: 'inbox',
     component: () => import('./views/InboxView.vue'),
-    meta: { title: 'Входящие', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.navInbox');
+    }, layout: 'workspace' },
   },
   {
     path: '/github',
@@ -198,19 +234,25 @@ const routes: RouteRecordRaw[] = [
     path: '/telegram',
     name: 'telegram',
     component: () => import('./views/TelegramView.vue'),
-    meta: { title: 'Телеграм', layout: 'workspace' },
+    meta: { get title() {
+      return t('core.pluginTelegram');
+    }, layout: 'workspace' },
   },
   {
     path: '/surface',
     name: 'surface',
     component: { render: () => null },
-    meta: { title: 'Карточка задачи' },
+    meta: { get title() {
+      return t('core.taskCard');
+    } },
   },
   {
     path: '/settings',
     name: 'settings',
     component: SettingsRouteStub,
-    meta: { title: 'Настройки' },
+    meta: { get title() {
+      return t('core.settings');
+    } },
   },
 ];
 

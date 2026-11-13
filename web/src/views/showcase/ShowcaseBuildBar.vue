@@ -1,5 +1,5 @@
 <template>
-  <section class="build" :data-running="running ? 'yes' : 'no'" aria-label="Сборка ролика">
+  <section class="build" :data-running="running ? 'yes' : 'no'" :aria-label="t('core.showcaseSborkaRolika')">
     <template v-if="running">
       <div class="build__running" role="status" aria-live="polite">
         <UiSpinner decorative />
@@ -7,19 +7,15 @@
           <strong>{{ stageTitle }}</strong>
           <span class="build__detail">{{ stageDetail }}</span>
         </div>
-        <UiButton v-if="canCancelRun" variant="ghost" @click="emit('cancel-build', activeRun!.id)">
-          Отменить
-        </UiButton>
+        <UiButton v-if="canCancelRun" variant="ghost" @click="emit('cancel-build', activeRun!.id)"> {{ t('core.trackerCancel') }} </UiButton>
         <UiButton
           v-else-if="activeJob && isCancellable(activeJob.state)"
           variant="ghost"
           @click="emit('cancel-job', activeJob.id)"
-        >
-          Отменить
-        </UiButton>
+        > {{ t('core.trackerCancel') }} </UiButton>
       </div>
       <UiProgress
-        label="Ход сборки ролика"
+        :label="t('core.showcaseHodSborkiRolika')"
         :value="progressValue"
         :max="progressMax"
         :indeterminate="!progressMax"
@@ -35,7 +31,7 @@
           :loading="busy"
           @click="emit('build')"
         >
-          {{ project.latestFinal ? 'Пересобрать ролик' : 'Собрать ролик' }}
+          {{ project.latestFinal ? t('core.showcasePeresobratRolik') : t('core.showcaseSobratRolik') }}
         </UiButton>
         <span class="build__note">{{ readinessText }}</span>
       </div>
@@ -65,7 +61,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiButton, UiInlineMessage, UiProgress, UiSpinner } from '../../ui';
+import { UiButton, UiInlineMessage, UiProgress, UiSpinner, t } from '../../ui';
 import { sceneChains } from '../../../../shared/plugins/showcase/showcaseChains';
 import { SHOWCASE_BUILD_STAGES } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type {
@@ -91,50 +87,114 @@ const emit = defineEmits<{
 }>();
 
 const JOB_KIND: Record<ShowcaseJob['kind'], string> = {
-  script: 'сценарий',
-  voice: 'озвучка',
-  record: 'запись',
-  assemble: 'сборка',
+  get script() {
+    return t('core.showcaseStsenariy');
+  },
+  get voice() {
+    return t('core.showcaseOzvuchka');
+  },
+  get record() {
+    return t('core.showcaseZapis');
+  },
+  get assemble() {
+    return t('core.showcaseSborka');
+  },
 };
 
 const JOB_STATE: Record<ShowcaseJob['state'], string> = {
-  queued: 'в очереди',
-  running: 'идёт',
-  awaiting_review: 'ждёт решения',
-  cancelling: 'останавливается',
-  succeeded: 'готово',
-  failed: 'отказ',
-  interrupted: 'оборвалось',
-  cancelled: 'отменено',
+  get queued() {
+    return t('settings.queued');
+  },
+  get running() {
+    return t('core.showcaseIdet');
+  },
+  get awaiting_review() {
+    return t('core.showcaseZhdetResheniya');
+  },
+  get cancelling() {
+    return t('core.showcaseOstanavlivaetsya');
+  },
+  get succeeded() {
+    return t('settings.done2');
+  },
+  get failed() {
+    return t('settings.remoteStepFailed');
+  },
+  get interrupted() {
+    return t('core.showcaseOborvalos');
+  },
+  get cancelled() {
+    return t('settings.cancelled');
+  },
 };
 
 const JOB_TITLE: Record<ShowcaseJob['kind'], string> = {
-  script: 'Составляю сценарий',
-  voice: 'Озвучиваю сцены',
-  record: 'Записываю сцены',
-  assemble: 'Собираю ролик',
+  get script() {
+    return t('core.showcaseSostavlyayuStsenariy');
+  },
+  get voice() {
+    return t('core.showcaseOzvuchivayuStseny');
+  },
+  get record() {
+    return t('core.showcaseZapisyvayuStseny');
+  },
+  get assemble() {
+    return t('core.showcaseSobirayuRolik');
+  },
 };
 
 const STAGE_TITLE: Record<ShowcaseBuildStage, string> = {
-  preflight: 'Проверяю готовность',
-  'script-if-empty': 'Проверяю сценарий',
-  bindings: 'Связываю речь и действия',
-  'voice-and-alignment': 'Готовлю озвучку',
-  'record-if-needed': 'Записываю сцены',
-  'timeline-and-assemble': 'Собираю ролик',
-  validate: 'Проверяю готовый ролик',
-  done: 'Ролик готов',
+  get preflight() {
+    return t('core.showcaseProveryayuGotovnost');
+  },
+  get 'script-if-empty'() {
+    return t('core.showcaseProveryayuStsenariy');
+  },
+  get bindings() {
+    return t('core.showcaseSvyazyvayuRechIDeystviya');
+  },
+  get 'voice-and-alignment'() {
+    return t('core.showcaseGotovlyuOzvuchku');
+  },
+  get 'record-if-needed'() {
+    return t('core.showcaseZapisyvayuStseny');
+  },
+  get 'timeline-and-assemble'() {
+    return t('core.showcaseSobirayuRolik');
+  },
+  get validate() {
+    return t('core.showcaseProveryayuGotovyyRolik');
+  },
+  get done() {
+    return t('core.showcaseRolikGotov');
+  },
 };
 
 const STAGE_DETAIL: Record<ShowcaseBuildStage, string> = {
-  preflight: 'проверяю цель и входные данные',
-  'script-if-empty': 'проверяю действия на стенде и сверяю рассказ с кадрами',
-  bindings: 'строю точные смысловые связи',
-  'voice-and-alignment': 'синтезирую и выравниваю речь',
-  'record-if-needed': 'снимаю только устаревшие сцены',
-  'timeline-and-assemble': 'свожу видео, звук и субтитры',
-  validate: 'сверяю итоговые файлы и шкалу времени',
-  done: 'все стадии завершены',
+  get preflight() {
+    return t('core.showcaseProveryayuTselIVhodnye');
+  },
+  get 'script-if-empty'() {
+    return t('core.showcaseProveryayuDeystviyaNaStende');
+  },
+  get bindings() {
+    return t('core.showcaseStroyuTochnyeSmyslovyeSvyazi');
+  },
+  get 'voice-and-alignment'() {
+    return t('core.showcaseSinteziruyuIVyravnivayuRech');
+  },
+  get 'record-if-needed'() {
+    return t('core.showcaseSnimayuTolkoUstarevshieStseny');
+  },
+  get 'timeline-and-assemble'() {
+    return t('core.showcaseSvozhuVideoZvukI');
+  },
+  get validate() {
+    return t('core.showcaseSveryayuItogovyeFaylyI');
+  },
+  get done() {
+    return t('core.showcaseVseStadiiZaversheny');
+  },
 };
 
 const ACTIVE_RUN_STATES = new Set<ShowcaseBuildRun['state']>([
@@ -182,11 +242,11 @@ const canCancelRun = computed(() => Boolean(
 const stageTitle = computed(() => {
   if (activeRun.value) {
     return activeRun.value.state === 'cancelling'
-      ? 'Останавливаю сборку'
+      ? t('core.showcaseOstanavlivayuSborku')
       : STAGE_TITLE[activeRun.value.stage];
   }
 
-  return activeJob.value ? JOB_TITLE[activeJob.value.kind] : 'Готовлю сборку';
+  return activeJob.value ? JOB_TITLE[activeJob.value.kind] : t('core.showcaseGotovlyuSborku');
 });
 
 const stageDetail = computed(() => {
@@ -194,7 +254,7 @@ const stageDetail = computed(() => {
 
   if (job) {
     const counter = job.progress.total
-      ? `сцена ${job.progress.index} из ${job.progress.total}`
+      ? t('core.showcaseStsenaIndexIzTotal', { index: job.progress.index, total: job.progress.total })
       : '';
     const label = job.progress.label || JOB_STATE[job.state];
 
@@ -203,7 +263,7 @@ const stageDetail = computed(() => {
 
   return activeRun.value
     ? STAGE_DETAIL[activeRun.value.stage]
-    : 'жду следующую стадию';
+    : t('core.showcaseZhduSleduyuschuyuStadiyu');
 });
 
 const stageProgress = computed(() => {
@@ -253,19 +313,19 @@ const runProblem = computed(() => {
   if (run.state === 'cancelled') {
     return {
       tone: 'warning' as const,
-      title: 'Сборка отменена.',
-      message: run.error?.message || 'Можно запустить её снова после проверки сцен.',
+      title: t('core.showcaseSborkaOtmenena'),
+      message: run.error?.message || t('core.showcaseMozhnoZapustitEeSnova'),
     };
   }
 
   return {
     tone: run.state === 'awaiting_review' ? 'warning' as const : 'danger' as const,
     title: run.state === 'awaiting_review'
-      ? 'Сборка ждёт исправления.'
+      ? t('core.showcaseSborkaZhdetIspravleniya')
       : run.state === 'interrupted'
-        ? 'Сборка оборвалась.'
-        : 'Сборка остановлена.',
-    message: run.error?.message || 'Причина не названа. Повторите после проверки проекта.',
+        ? t('core.showcaseSborkaOborvalas')
+        : t('core.showcaseSborkaOstanovlena'),
+    message: run.error?.message || t('core.showcasePrichinaNeNazvanaPovtorite'),
   };
 });
 
@@ -287,15 +347,15 @@ const canBuild = computed(() => (
 
 const readinessText = computed(() => {
   if (props.project.target.status !== 'ready') {
-    return 'Цель показа недоступна — записывать нечего.';
+    return t('core.showcaseTselPokazaNedostupnaZapisyvat');
   }
 
   if (props.unsavedCount) {
-    return `Есть несохранённые правки: ${props.unsavedCount} сцен(ы). Сборка сохранит их сама.`;
+    return t('core.showcaseEstNesohranennyePravkiUnsavedcount', { unsavedCount: props.unsavedCount });
   }
 
   if (!props.project.scenes.length) {
-    return 'Сценарий ещё не создан — сборка подготовит план и сцены сама.';
+    return t('core.showcaseStsenariyEscheNeSozdan');
   }
 
   const stale = sceneChains(props.project.scenes)
@@ -304,16 +364,16 @@ const readinessText = computed(() => {
   const withoutAudio = props.project.scenes.filter((scene) => !scene.audio).length;
 
   if (withoutAudio) {
-    return `Без звука: ${withoutAudio} сцен(ы). Сборка озвучит их сама.`;
+    return t('core.showcaseBezZvukaWithoutaudioStsen', { withoutAudio: withoutAudio });
   }
 
   if (stale) {
-    return `Нужна запись: ${stale} сцен(ы). Остальные не переснимаются.`;
+    return t('core.showcaseNuzhnaZapisStaleStsen', { stale: stale });
   }
 
   return props.project.latestFinal?.current
-    ? 'Ролик собран из текущих сцен.'
-    : 'Все сцены готовы к сборке.';
+    ? t('core.showcaseRolikSobranIzTekuschih')
+    : t('core.showcaseVseStsenyGotovyK');
 });
 
 function isCancellable(state: ShowcaseJob['state']): boolean {
@@ -322,8 +382,8 @@ function isCancellable(state: ShowcaseJob['state']): boolean {
 
 function describeJob(job: ShowcaseJob): string {
   return job.state === 'interrupted'
-    ? 'Задание оборвалось — повторите сборку.'
-    : job.progress.label || 'Причина не названа.';
+    ? t('core.showcaseZadanieOborvalosPovtoriteSborku')
+    : job.progress.label || t('core.showcasePrichinaNeNazvana');
 }
 </script>
 

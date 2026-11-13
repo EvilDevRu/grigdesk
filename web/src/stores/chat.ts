@@ -6,7 +6,7 @@ import { isChatSpeed, chatSpeedModes } from '../../../shared/chat/chatSpeed.ts';
 import { chatReplyKey, chatSearchSnippet, projectWebChatHead }
   from '../../../shared/chat/chatListProjection.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
-import { messageRef, t } from '../ui.ts';
+import { messageRef, t as tr } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
 // размер контекста. История хранится НА СЕРВЕРЕ (файл в .state GrigDesk) — общая для всех
@@ -69,6 +69,7 @@ import {
   provisionalChatTitle,
   shouldRequestChatTitle,
 } from '../shared/chatTitle.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 // Оценочное окно контекста модели — для индикатора заполнения.
 export const CONTEXT_WINDOW = 200000;
@@ -89,7 +90,9 @@ export const DEFAULT_SPEECH = Object.freeze<SpeechSnapshot>({
   conditionOnPreviousText: true,
   resident: false,
   keepAliveMin: 5,
-  local: Object.freeze({ ready: false, reason: 'Локальный движок не настроен.' }),
+  local: Object.freeze({ ready: false, get reason() {
+    return tr('core.chatLokalnyyDvizhokNeNastroen');
+  } }),
   capabilities: Object.freeze({
     models: Object.freeze([]),
     cuda: Object.freeze({ state: 'probe_failed', reason: '' }),
@@ -650,7 +653,7 @@ function deliveryOf(chatId: string, state: string, attempt: number) {
 }
 
 function chatRevisionConflict() {
-  const error = new Error(t('core.chatSelectionConflict'));
+  const error = new Error(tr('core.chatSelectionConflict'));
 
   Object.assign(error, { code: 'chat_revision_conflict' });
 
@@ -827,7 +830,7 @@ function pushStep(steps: ChatStep[], step: ChatStep) {
     level: 'warn',
     truncated: true,
     dropped,
-    text: `… ранние шаги хода скрыты: ${dropped}`,
+    text: tr('core.coreRannieShagiHodaSkryty', { dropped }),
     at: Date.now(),
   });
 }
@@ -1151,7 +1154,7 @@ async function requestModel(session: ChatRecord) {
   }
 
   if (!resolved.provider || !resolved.model) {
-    throw new Error('Выбранная модель недоступна в реестре.');
+    throw new Error(tr('core.coreVybrannayaModelNedostupnaV'));
   }
 
   return {
@@ -1236,7 +1239,7 @@ function applyContextUsage(session: ChatSession, payload: ChatResult | null | un
 function applyCompactResult(session: ChatSession, result: ChatResult, before: number) {
   if (result.compact?.kind === 'summary') {
     if (!result.compact.seed) {
-      throw new Error('Сервер не вернул выжимку — контекст не сжат.');
+      throw new Error(tr('core.coreServerNeVernulVyzhimku'));
     }
 
     session.pendingSeed = result.compact.seed;
@@ -1255,7 +1258,10 @@ function applyCompactResult(session: ChatSession, result: ChatResult, before: nu
   session.compactedAt = Date.now();
   session.messages.push({
     role: 'note',
-    text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.`,
+    text: tr(
+      'core.coreKontekstSzhatByloTolocalestringru',
+      { toLocaleStringru: before.toLocaleString(uiLocalePort.value) },
+    ),
   });
 }
 
@@ -1486,7 +1492,8 @@ export const useChatStore = defineStore('chat', {
       return (id) => this._archivedById.has(id);
     },
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
-    tabLabel: () => (sess: ChatRecord) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
+    tabLabel: () => (sess: ChatRecord) => sess.title
+      || (sess.taskId ? `#${sess.taskId}` : tr('core.chatNovyyChat')),
     // Непрочитанные: агент ответил, а мы на этот чат ещё не смотрели. Считаем и архивные —
     // чат могли закрыть, пока агент думал, и ответ приехал уже в архив.
     unreadCount(): number {
@@ -1577,7 +1584,9 @@ export const useChatStore = defineStore('chat', {
        *       Поиск и архив сохраняют прежние приоритеты текста и времени.
        */
       const row = (sess: ChatSession, archived: boolean) => {
-        const title = sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат');
+        const title =
+          sess.title
+            || (sess.taskId ? tr('core.coreTaskid', { taskId: sess.taskId }) : tr('core.chatNovyyChat'));
         const msgs = sess.messages || [];
         let snippet = '';
 
@@ -1608,7 +1617,9 @@ export const useChatStore = defineStore('chat', {
         } else if (msgs.length) {
           const last = msgs[msgs.length - 1]!;
 
-          snippet = (last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : '') + last.text;
+          snippet = (last.role === 'user'
+            ? tr('core.chatTy')
+            : last.role === 'error' ? '⚠ ' : '') + last.text;
         }
 
         return {
@@ -2177,7 +2188,7 @@ export const useChatStore = defineStore('chat', {
           const data = decodeChatEnvelope(raw);
 
           if (!data.chat || data.chat.id !== id || !isRecord(raw) || typeof raw.version !== 'string') {
-            throw new Error(t('core.chatHistoryWindowFailed'));
+            throw new Error(tr('core.chatHistoryWindowFailed'));
           }
 
           data.chat.historyWindow = decodeChatWindow(raw.window, data.chat.messages.length);
@@ -2202,7 +2213,7 @@ export const useChatStore = defineStore('chat', {
           }
         } catch (error) {
           if (!runtime.disposed && this.historyPaging[id]) {
-            this.historyPaging[id]!.error = errorMessage(error, t('core.chatHistoryRefreshFailed'));
+            this.historyPaging[id]!.error = errorMessage(error, tr('core.chatHistoryRefreshFailed'));
           }
 
           throw error;
@@ -2272,7 +2283,7 @@ export const useChatStore = defineStore('chat', {
           const data = decodeChatEnvelope(raw);
 
           if (!data.chat || data.chat.id !== id || !isRecord(raw)) {
-            throw new Error(t('core.chatHistoryWindowInvalid'));
+            throw new Error(tr('core.chatHistoryWindowInvalid'));
           }
 
           const older = decodeChatWindow(raw.window, data.chat.messages.length);
@@ -2301,7 +2312,7 @@ export const useChatStore = defineStore('chat', {
           state.markSent(snapshot, fingerprintOf(snapshot));
         } catch (error) {
           if (!runtime.disposed) {
-            this.historyPaging[id]!.error = errorMessage(error, t('core.chatHistoryOlderFailed'));
+            this.historyPaging[id]!.error = errorMessage(error, tr('core.chatHistoryOlderFailed'));
 
             if (chatFailure(error).data?.error === 'chat_window_changed') {
               local.historyWindow.stale = true;
@@ -2364,7 +2375,7 @@ export const useChatStore = defineStore('chat', {
         const data = decodeChatEnvelope(raw);
 
         if (!data.chat || !isRecord(raw) || typeof raw.version !== 'string') {
-          throw new Error(t('core.chatHistoryBaseFailed'));
+          throw new Error(tr('core.chatHistoryBaseFailed'));
         }
 
         data.chat.historyWindow = decodeChatWindow(raw.window, data.chat.messages.length);
@@ -2381,7 +2392,7 @@ export const useChatStore = defineStore('chat', {
           const older = decodeChatEnvelope(page);
 
           if (!older.chat || !isRecord(page)) {
-            throw new Error(t('core.chatHistoryOlderFailed'));
+            throw new Error(tr('core.chatHistoryOlderFailed'));
           }
 
           boundary = decodeChatWindow(page.window, older.chat.messages.length);
@@ -2392,7 +2403,7 @@ export const useChatStore = defineStore('chat', {
         if (runtime.disposed || this._find(id) !== local
           || historyPersistenceFor(this).generation(id) !== generation
           || fingerprintOf(slimOf(local)) !== fingerprint) {
-          throw new Error(t('core.chatHistoryChanged'));
+          throw new Error(tr('core.chatHistoryChanged'));
         }
 
         data.chat.historyWindow = {
@@ -2480,7 +2491,7 @@ export const useChatStore = defineStore('chat', {
           || typeof raw.window.prefixHash !== 'string' || !/^[a-f0-9]{64}$/.test(raw.window.prefixHash)
           || !Number.isSafeInteger(raw.window.baseEnd)
           || typeof raw.window.baseHash !== 'string' || !/^[a-f0-9]{64}$/.test(raw.window.baseHash)) {
-          throw new Error(t('core.chatHistoryWindowAckMissing'));
+          throw new Error(tr('core.chatHistoryWindowAckMissing'));
         }
         if (runtime.disposed || this._find(id) !== live || state.generation(id) !== generation) {
           return response;
@@ -2893,7 +2904,7 @@ export const useChatStore = defineStore('chat', {
 
             if (!isRecord(raw) || !isRecord(raw.chat) || !Array.isArray(raw.chat.messages)
               || raw.chat.id !== id || typeof raw.version !== 'string' || !isChatSession(raw.chat)) {
-              throw new Error('Ответ не содержит полную ленту чата');
+              throw new Error(tr('core.coreOtvetNeSoderzhitPolnuyu'));
             }
 
             const patch = runtime.patches.get(id);
@@ -2945,7 +2956,10 @@ export const useChatStore = defineStore('chat', {
               continue;
             }
             if (raw.version !== runtime.versions.get(id)) {
-              this.messageLoads[id] = { state: 'error', error: 'Чат изменился. Повторите загрузку.' };
+              this.messageLoads[id] = {
+                state: 'error',
+                error: tr('core.coreChatIzmenilsyaPovtoriteZagruzku'),
+              };
 
               return;
             }
@@ -2987,12 +3001,12 @@ export const useChatStore = defineStore('chat', {
             return;
           }
 
-          this.messageLoads[id] = { state: 'error', error: 'Чат изменился. Повторите загрузку.' };
+          this.messageLoads[id] = { state: 'error', error: tr('core.coreChatIzmenilsyaPovtoriteZagruzku') };
         } catch (error) {
           if (!runtime.disposed && this._find(id)) {
             this.messageLoads[id] = {
               state: 'error',
-              error: errorMessage(error, 'Не загрузились сообщения'),
+              error: errorMessage(error, tr('core.chatNeZagruzilisSoobscheniya')),
             };
           }
 
@@ -3110,7 +3124,7 @@ export const useChatStore = defineStore('chat', {
           await this.ensureChatMessages(id);
 
           if (!this.isChatMessagesLoaded(id)) {
-            throw new Error(this.messageLoads[id]?.error || 'Не загрузилась история для восстановления');
+            throw new Error(this.messageLoads[id]?.error || tr('core.coreNeZagruzilasIstoriyaDlya'));
           }
           if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
             return;
@@ -3147,7 +3161,7 @@ export const useChatStore = defineStore('chat', {
           return;
         }
         if (!response) {
-          throw new Error('Сервер не подтвердил восстановление истории');
+          throw new Error(tr('core.coreServerNePodtverdilVosstanovlenie'));
         }
 
         runtime.snapshots.delete(id);
@@ -3164,7 +3178,7 @@ export const useChatStore = defineStore('chat', {
         runtime.snapshotDelays.set(id, delay);
         this.snapshotRecovery[id] = {
           state: 'error',
-          error: errorMessage(error, 'Не удалось восстановить страховочную копию'),
+          error: errorMessage(error, tr('core.chatNeUdalosVosstanovitStrahovochnuyu')),
           retryAt: Date.now() + delay,
         };
       }
@@ -3283,7 +3297,7 @@ export const useChatStore = defineStore('chat', {
         if (!isRecord(result) || !Array.isArray(result.matches)
           || !result.matches.every((match) => isRecord(match) && typeof match.id === 'string'
             && typeof match.snippetSource === 'string')) {
-          throw new Error('Некорректный ответ поиска');
+          throw new Error(tr('core.coreNekorrektnyyOtvetPoiska'));
         }
         if (!runtime.disposed && epoch === runtime.searchEpoch) {
           this.search.matches = Object.fromEntries(result.matches.map((match) => [
@@ -3292,7 +3306,7 @@ export const useChatStore = defineStore('chat', {
         }
       } catch (error) {
         if (epoch === runtime.searchEpoch) {
-          this.search.error = errorMessage(error, 'Не загрузились результаты поиска');
+          this.search.error = errorMessage(error, tr('core.chatNeZagruzilisRezultatyPoiska'));
         }
       } finally {
         if (epoch === runtime.searchEpoch) {
@@ -3559,7 +3573,9 @@ export const useChatStore = defineStore('chat', {
           // Исход передачи всё ещё неизвестен; тот же id сохранён для ручного повтора.
         }
 
-        this.inTurnError = error?.data?.message || error?.message || 'Не удалось отправить уточнение.';
+        this.inTurnError = error?.data?.message || error?.message || tr(
+          'core.chatNeUdalosOtpravitUtochnenie',
+        );
 
         return false;
       }
@@ -3688,7 +3704,7 @@ export const useChatStore = defineStore('chat', {
         if (runtime.snapshots.size) {
           void recover().catch((error) => {
             if (!runtime.disposed) {
-              this._saveFailed(true, errorMessage(error, 'Не удалось сверить историю'));
+              this._saveFailed(true, errorMessage(error, tr('core.chatNeUdalosSveritIstoriyu')));
             }
           });
         } else {
@@ -4003,7 +4019,10 @@ export const useChatStore = defineStore('chat', {
         } catch (caught) {
           const e = chatFailure(caught);
 
-          s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
+          s.messages.push({
+            role: 'error',
+            text: tr('core.coreSzhatKontekstNeUdalos', { message: e.message }),
+          });
         }
 
         s.messages.at(-1)!.pid = p.id;
@@ -4039,7 +4058,7 @@ export const useChatStore = defineStore('chat', {
 
       applyAssistantFinal(s.messages, p, {
         role,
-        text: p.reply || '(пусто)',
+        text: p.reply || tr('core.corePusto'),
         cost: p.cost ?? null,
         pid: p.id,
         steps: p.steps || [],
@@ -4084,7 +4103,7 @@ export const useChatStore = defineStore('chat', {
       // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
       s.offline = false;
       s.updatedAt = p.at || Date.now();
-      this._notifyReply(s, p.reply || '(пусто)', `${p.chatKey}:pid:${p.id}`);
+      this._notifyReply(s, p.reply || tr('core.corePusto'), `${p.chatKey}:pid:${p.id}`);
     },
     // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
     // flush=true — писать немедленно (критичные моменты: только что добавленное
@@ -4266,7 +4285,7 @@ export const useChatStore = defineStore('chat', {
      */
     async _saveChatNow(session: ChatSession): Promise<ChatEnvelope | null> {
       if (!session?.id) {
-        throw new Error('чат не выбран');
+        throw new Error(tr('core.telegramChatNeVybran'));
       }
 
       clearTimeout(persistTimer ?? undefined);
@@ -4292,7 +4311,7 @@ export const useChatStore = defineStore('chat', {
         const response = await this._writeChat(session.id, { force: true });
 
         if (runtime.disposed || this._find(session.id) !== session) {
-          throw new Error(t('core.chatHistoryChanged'));
+          throw new Error(tr('core.chatHistoryChanged'));
         }
         if (selections.newer(session.id, selected)) {
           throw chatRevisionConflict();
@@ -4305,7 +4324,7 @@ export const useChatStore = defineStore('chat', {
           const responseHead = decodeChatHead(isRecord(rawHead) ? rawHead.head : null);
 
           if (runtime.disposed || this._find(session.id) !== session) {
-            throw new Error(t('core.chatHistoryChanged'));
+            throw new Error(tr('core.chatHistoryChanged'));
           }
           if (selections.newer(session.id, selected)) {
             throw chatRevisionConflict();
@@ -4323,7 +4342,7 @@ export const useChatStore = defineStore('chat', {
         if (!sameChatWorkdir(intendedWorkdir, session.workdir)
           || intendedTask !== (session.taskId || null)
           || intendedEpoch !== (session.workdirState?.epoch || 0)) {
-          throw new Error('Рабочая папка изменена в другом окне. Проверьте её перед отправкой.');
+          throw new Error(tr('core.coreRabochayaPapkaIzmenenaV'));
         }
         if (confirmed) {
           // Дополнительная шапка могла подтвердить исходный выбор после чужого.
@@ -4356,7 +4375,7 @@ export const useChatStore = defineStore('chat', {
         return this._patchChatHead(id);
       }
       if (!this.loaded) {
-        return Promise.reject(new Error(t('core.chatStoreNotLoaded')));
+        return Promise.reject(new Error(tr('core.chatStoreNotLoaded')));
       }
 
       let slot = chatSaves.get(id);
@@ -4414,11 +4433,11 @@ export const useChatStore = defineStore('chat', {
      */
     async _putChat(id: string, force: boolean, attempt = 0): Promise<ChatEnvelope | null> {
       if (!this.loaded) {
-        throw new Error(t('core.chatStoreNotLoaded'));
+        throw new Error(tr('core.chatStoreNotLoaded'));
       }
 
       if (!this.isChatMessagesLoaded(id)) {
-        throw new Error('Сообщения чата ещё не загружены');
+        throw new Error(tr('core.coreSoobscheniyaChataEscheNe'));
       }
 
       const live = this._find(id);
@@ -4435,7 +4454,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       if (!this.loaded) {
-        throw new Error(t('core.chatStoreNotLoaded'));
+        throw new Error(tr('core.chatStoreNotLoaded'));
       }
 
       const archived = (this.archived || []).some((item) => item.id === id);
@@ -4715,7 +4734,7 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
-      this.saveError = msg || 'сервер не принял запись';
+      this.saveError = msg || tr('core.chatServerNePrinyalZapis');
 
       if (saveWarned) {
         return;
@@ -4880,7 +4899,7 @@ export const useChatStore = defineStore('chat', {
       draft?: string;
     } = {}) {
       if (opts.purpose === 'companion') {
-        throw new Error('Companion-чат создаётся только атомарно на сервере.');
+        throw new Error(tr('core.coreCompanionChatSozdaetsyaTolko'));
       }
       if (!this.loaded) {
         return null;
@@ -5380,7 +5399,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       const s = this._find(req.chatKey);
-      const who = s ? this.tabLabel(s) : 'чат';
+      const who = s ? this.tabLabel(s) : tr('core.chatChat');
       const what = req.kind === 'question'
         ? (req.prompt || req.questions?.[0]?.question || messageRef('core.agentQuestion'))
         : (req.input?.kind === 'external_url'
@@ -6389,8 +6408,13 @@ export const useChatStore = defineStore('chat', {
         if (s) {
           s.messages.push({
             role: 'assistant',
-            text: `**План — ${allow ? 'утверждён' : 'на доработку'}**\n\n${p.input.plan}`
-              + (!allow && comment ? `\n\n**Пояснение:** ${comment}` : ''),
+            text: tr('core.corePlanAllowPlanAllowcommentnncomment', {
+              allow: allow ? tr('core.chatUtverzhden') : tr('core.chatNaDorabotku'),
+              plan: p.input.plan,
+              allowcommentnncomment: (!allow && comment
+                ? tr('core.chatPoyasnenieComment', { comment: comment })
+                : ''),
+            }),
           });
           s.updatedAt = Date.now();
           this._persist();
@@ -6417,7 +6441,10 @@ export const useChatStore = defineStore('chat', {
       // канал не готов (Kimi/ACP, ход уже кончился) или текст не приняли.
       if (!allow && comment && res?.commentDelivered === false) {
         const key = p.chatKey || '';
-        const text = `Пояснение к отказу (${p.tool || 'действие'}): ${comment}`;
+        const text = tr('core.corePoyasnenieKOtkazuTool', {
+          tool: p.tool || tr('core.chatActionWord'),
+          comment,
+        });
         const delivered = await this.sendInTurn(key, text);
 
         if (!delivered) {
@@ -6738,7 +6765,10 @@ export const useChatStore = defineStore('chat', {
         const live = this._find(id);
 
         if (!done && live?.error && !live.workdirProposal) {
-          live.messages.push({ role: 'error', text: `Сменить задачу не удалось: ${live.error}` });
+          live.messages.push({
+            role: 'error',
+            text: tr('core.coreSmenitZadachuNeUdalos', { error: live.error }),
+          });
           this._persist();
         }
 
@@ -6771,7 +6801,7 @@ export const useChatStore = defineStore('chat', {
         }
 
         session.workdir = { kind: 'grigdesk' };
-        session.error = 'Папка по умолчанию недоступна. Для нового чата выбран GrigDesk.';
+        session.error = tr('core.corePapkaPoUmolchaniyuNedostupna');
       }
 
       session.workdirInitializing = false;
@@ -6828,7 +6858,7 @@ export const useChatStore = defineStore('chat', {
         const preview = await this.previewWorkdir(id, candidate);
 
         if (!preview) {
-          throw new Error('Сервер ещё не поддерживает выбор папки.');
+          throw new Error(tr('core.coreServerEscheNePodderzhivaet'));
         }
 
         const proposal = {
@@ -6921,7 +6951,7 @@ export const useChatStore = defineStore('chat', {
         session.workdirProposal = null;
 
         if (transition?.phase !== 'done') {
-          session.error = transition?.error || 'Перенос не завершён.';
+          session.error = transition?.error || tr('core.corePerenosNeZavershen');
 
           return false;
         }
@@ -7001,7 +7031,7 @@ export const useChatStore = defineStore('chat', {
       session.workdirPreview = preview;
 
       if (preview.transfer === 'reseed' || preview.transfer === 'unavailable') {
-        throw new Error('Рабочие папки изменились. Откройте выбор папки и подтвердите перенос разговора.');
+        throw new Error(tr('core.coreRabochiePapkiIzmenilisOtkroyte'));
       }
       if (message) {
         message.outbox ||= {};
@@ -7314,7 +7344,7 @@ export const useChatStore = defineStore('chat', {
           if (note) {
             live.messages.push({
               role: 'note',
-              text: '🧹 Память агента сброшена — следующее сообщение начнёт разговор с нуля.',
+              text: tr('core.corePamyatAgentaSbroshenaSleduyuschee'),
             });
           }
 
@@ -7327,8 +7357,7 @@ export const useChatStore = defineStore('chat', {
           live.error = error.message;
           live.messages.push({
             role: 'error',
-            text: `Сбросить память агента не удалось: ${error.message}. `
-              + 'Повтори сброс перед следующим сообщением.',
+            text: tr('core.coreSbrositPamyatAgentaNe', { message: error.message }),
           });
 
           return false;
@@ -7409,10 +7438,10 @@ export const useChatStore = defineStore('chat', {
             s.sessionResetFailed = false;
             s.messages.push({
               role: 'note',
-              text: '⏹ Сжатие прервано — сессия Kimi сброшена, следующий ход начнётся с нуля.',
+              text: tr('core.coreSzhatiePrervanoSessiyaKimi'),
             });
           } else {
-            s.messages.push({ role: 'note', text: '⏹ Сжатие прервано — контекст остался прежним.' });
+            s.messages.push({ role: 'note', text: tr('core.coreSzhatiePrervanoKontekstOstalsya') });
           }
 
           return;
@@ -7431,7 +7460,9 @@ export const useChatStore = defineStore('chat', {
         }
 
         s.error = e.message;
-        s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
+        s.messages.push(
+          { role: 'error', text: tr('core.coreSzhatKontekstNeUdalos', { message: e.message }) },
+        );
       } finally {
         compactInflight.delete(id);
         s.compacting = false;
@@ -7667,7 +7698,7 @@ export const useChatStore = defineStore('chat', {
             // Сбой доставки (CLI не достучался до API) — не ответ агента: показываем
             // плашкой ошибки, но с лентой и сессией, чтобы ход можно было продолжить.
             role: r.deliveryFailure ? 'error' : 'assistant',
-            text: r.reply || '(пусто)',
+            text: r.reply || tr('core.corePusto'),
             cost: r.cost,
             steps: responseSteps,
             model: r.model || s.model,
@@ -7684,7 +7715,7 @@ export const useChatStore = defineStore('chat', {
         s.steps = [];
         // Пользователь не смотрит на этот exact chat на зарегистрированной поверхности —
         // ставим метку «непрочитано» и показываем оповещение.
-        this._notifyReply(s, r.reply || '(пусто)');
+        this._notifyReply(s, r.reply || tr('core.corePusto'));
       } catch (caught) {
           const e = chatFailure(caught);
 
@@ -7831,13 +7862,13 @@ export const useChatStore = defineStore('chat', {
     _turnRequest(s: ChatSession, m: ChatMessage) {
       if (m.outbox?.modeSelectionRevoked || (m.outbox?.modeSelection && JSON.stringify(m.outbox.modeSelection)
         !== JSON.stringify(s.modeSelection))) {
-        throw new Error(t('core.chatModeSelectionRevoked'));
+        throw new Error(tr('core.chatModeSelectionRevoked'));
       }
 
       const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
 
       if (!resolvedModel.provider || !resolvedModel.model) {
-        throw new Error('Выбранная модель недоступна в реестре.');
+        throw new Error(tr('core.coreVybrannayaModelNedostupnaV'));
       }
       // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
       // явный effort не отправляем: CLI применит собственный актуальный дефолт.
@@ -8014,7 +8045,7 @@ export const useChatStore = defineStore('chat', {
         s.sessionResetFailed = true;
       }
 
-      s.error = e?.message || 'Сервер не принял сообщение';
+      s.error = e?.message || tr('core.coreServerNePrinyalSoobschenie');
       s.messages.push({ role: 'error', text: s.error || '' });
       s.updatedAt = Date.now();
       this._persist();

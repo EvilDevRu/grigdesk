@@ -2,6 +2,11 @@ import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { saveDraft } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Получает разницу черновика с текущим опубликованным каталогом.
@@ -38,7 +43,7 @@ export async function compareDraft(): Promise<void> {
     store.compareGeneration = generation;
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.error = failureText(error, 'Не удалось сравнить черновик с каталогом.');
+      store.error = failureText(error, translateUi('core.compareCouldNotCompareTheDraftWithThe'));
     }
   }
 }

@@ -2,16 +2,30 @@
 // и в каком состоянии её клип. Два места обязаны говорить одинаково, поэтому
 // формулировка одна.
 import type { ShowcaseAction, ShowcaseScene } from '../../../../shared/plugins/showcase/showcaseContracts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 // Ожидания и паузы в строку не попадают: зрителю важно, куда нажали и что
 // подсветили, а не сколько миллисекунд между этим прошло.
 const ACTION_WORDS: Record<ShowcaseAction['kind'], string> = {
-  goto: 'переход',
-  click: 'клик',
-  hover: 'курсор',
-  highlight: 'подсветка',
+  get goto() {
+    return t('core.showcasePerehod');
+  },
+  get click() {
+    return t('core.showcaseKlik');
+  },
+  get hover() {
+    return t('core.showcaseKursor');
+  },
+  get highlight() {
+    return t('core.showcasePodsvetka');
+  },
   waitVisible: '',
-  scroll: 'прокрутка',
+  get scroll() {
+    return t('core.showcaseProkrutka');
+  },
   wait: '',
 };
 
@@ -22,7 +36,9 @@ export interface SceneStateText {
 
 // Подпись сцены-продолжения: одна и та же в списке и в редакторе, чтобы человек
 // узнавал её с первого взгляда.
-export const CONTINUATION_LABEL = '↳ продолжает предыдущую';
+export function continuationLabel(): string {
+  return t('core.showcaseProdolzhaetPredyduschuyu');
+}
 
 // Экран, найденный браузером на пробном проходе: его нет в карте профиля, а
 // идентификатор несёт адрес — человеку он говорит больше, чем название.
@@ -43,7 +59,7 @@ export function screenLabelOf(
   }
 
   return scene.screenId.startsWith(PAGE_SCREEN_PREFIX)
-    ? `страница ${scene.screenId.slice(PAGE_SCREEN_PREFIX.length)}`
+    ? t('core.showcaseStranitsaLength', { length: scene.screenId.slice(PAGE_SCREEN_PREFIX.length) })
     : scene.screenId;
 }
 
@@ -73,15 +89,15 @@ export function actionsText(scene: ShowcaseScene): string {
 export function sceneStateOf(scene: ShowcaseScene): SceneStateText {
   if (scene.stale) {
     return scene.clip
-      ? { tone: 'warn', label: 'нужна пересъёмка' }
-      : { tone: 'warn', label: 'ещё не записана' };
+      ? { tone: 'warn', label: t('core.showcaseNuzhnaPeresemka') }
+      : { tone: 'warn', label: t('core.showcaseEscheNeZapisana') };
   }
 
   if (!scene.audio) {
-    return { tone: 'warn', label: 'без звука' };
+    return { tone: 'warn', label: t('core.showcaseBezZvuka') };
   }
 
-  return { tone: 'good', label: 'готова' };
+  return { tone: 'good', label: t('settings.ready') };
 }
 
 /**

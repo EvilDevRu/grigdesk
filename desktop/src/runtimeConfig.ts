@@ -277,7 +277,7 @@ async function loadBinaryRuntime(
     // Файл окружения не переназначает корни данных; старые имена не распознаются вовсе.
     for (const reserved of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
       if (Object.hasOwn(dotenv, reserved)) {
-        throw new Error(`Ключ ${reserved} запрещён в файле настроек.`);
+        throw new Error(desktopText('desktop.serverSettingsKeyForbidden', { key: reserved }));
       }
     }
 
@@ -557,7 +557,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
     if (Object.hasOwn(dotenv, reserved)) {
       return {
         problem: 'invalid',
-        message: `Ключ ${reserved} запрещён в файле настроек.`,
+        message: desktopText('desktop.serverSettingsKeyForbidden', { key: reserved }),
       };
     }
   }

@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { compileHelpSources } from '../../../shared/node/helpSources.ts';
+import { HELP_LOCALES, helpResourceFile } from '../../../shared/help/helpContracts.ts';
 import { buildHelpSite } from './buildHelpSite.mts';
 
 const execute = promisify(execFile);
@@ -19,26 +20,36 @@ export async function writeHelpResources(input: {
   const commit = await execute('git', ['rev-parse', 'HEAD'], {
     cwd: input.sourceRoot, timeout: 5000,
   }).then((result) => result.stdout.trim()).catch(() => 'source');
-  const bundle = await compileHelpSources(input.sourceRoot, {
-    version, commit
-  });
+  const bundles = await Promise.all(HELP_LOCALES.map((locale) =>
+    compileHelpSources(input.sourceRoot, {
+      version,
+      commit,
+    }, locale)));
+  const bundle = bundles[0]!;
   const directory = path.join(input.directory, 'server/help');
 
   await mkdir(directory, {
     recursive: true
   });
-  await writeFile(path.join(directory, 'help.json'), JSON.stringify(bundle));
+
+  for (const entry of bundles) {
+    await writeFile(path.join(directory, helpResourceFile(entry.locale)), JSON.stringify(entry));
+  }
 
   const packages = await site({
     sourceRoot: input.sourceRoot,
 
     output: path.join(directory, 'site'),
-    bundle
+    bundle,
+    translations: bundles.slice(1),
   });
-  const published = await readFile(path.join(directory, 'site/help.json'), 'utf8');
 
-  if (published !== JSON.stringify(bundle)) {
-    throw new Error('help_site_mismatch');
+  for (const entry of bundles) {
+    const published = await readFile(path.join(directory, 'site', helpResourceFile(entry.locale)), 'utf8');
+
+    if (published !== JSON.stringify(entry)) {
+      throw new Error('help_site_mismatch');
+    }
   }
 
   return packages;

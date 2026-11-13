@@ -2,6 +2,7 @@ import { isPlainRecord } from '../../../../shared/lib/objects.ts';
 import { browserFavicon, normalizeBrowserPreferences } from '../../../../shared/browser/browserContract.ts';
 import type { BrowserPreferences } from '../../../../shared/browser/browserContract.ts';
 
+
 export interface BrowserApp {
   id: string;
   name: string;

@@ -6,7 +6,7 @@
     :role="arbitrating ? 'status' : 'alert'"
   >
     <div class="stop-heading">
-      <span class="stop-title" v-tooltip="`${view.nodeLabel} — ${view.reason}`">
+      <span class="stop-title" v-tooltip="t('core.pipelineNodelabelReason', { nodeLabel: view.nodeLabel, reason: view.reason })">
         <strong class="stop-node">{{ view.nodeLabel }}</strong> — {{ view.reason }}
       </span>
       <span class="stop-metrics">
@@ -16,14 +16,13 @@
         <span v-if="view.returns != null" class="stop-tag">
           {{ metricLabel(view.returns, 'returns') }}
         </span>
-      <span v-if="view.fails != null" class="stop-tag">{{ view.fails }} сбоев</span>
+      <span v-if="view.fails != null" class="stop-tag">{{ view.fails }} {{ t('core.pipelineSboev') }}</span>
       <span v-if="view.lastFailure" class="stop-tag stop-failure" v-tooltip="view.lastFailure">
         {{ view.lastFailure }}
       </span>
       <span v-if="view.model" class="stop-tag stop-model mono" v-tooltip="view.model">{{ view.model }}</span>
       </span>
-      <span v-if="arbitrating" class="sarbrun" v-tooltip="arbiterRunLabel(arbitrating)">
-        Арбитр разбирает остановку · {{ arbiterRunLabel(arbitrating) }}
+      <span v-if="arbitrating" class="sarbrun" v-tooltip="arbiterRunLabel(arbitrating)"> {{ t('core.pipelineArbitrRazbiraetOstanovku2') }} {{ arbiterRunLabel(arbitrating) }}
       </span>
       <span v-else-if="conversation" class="sarbnote">{{ conversationLabel }}</span>
       <span v-else-if="arbiterNote" class="sarbnote" :class="arbiterVerdict" v-tooltip="arbiterModel">
@@ -38,9 +37,7 @@
         :controls="detailsId"
         density="compact"
         tone="accent"
-      >
-        подробнее
-      </UiDisclosureButton>
+      > {{ t('core.pipelinePodrobnee') }} </UiDisclosureButton>
     </div>
     <slot />
     <dl v-if="open && !collapsed" :id="detailsId" class="stop-details">
@@ -58,7 +55,7 @@ import type { ArbiterRun } from '../../../../shared/pipeline/factoryGraphContrac
 import { arbiterRunLabel } from '../../shared/arbiterRun.ts';
 import type { GraphStallView } from '../../shared/graphStall.ts';
 import type { ArbiterConversationSummary } from '../../../../shared/pipeline/arbiterConversation.ts';
-import { UiDisclosureButton, vTooltip, t } from '../../ui';
+import { UiDisclosureButton, vTooltip, t, uiLocale } from '../../ui';
 
 const props = defineProps<{
   view: GraphStallView | null;
@@ -85,33 +82,37 @@ const conversationLabel = computed(() => {
   return labels[props.conversation?.state || 'idle'];
 });
 
-const metricPluralRules = new Intl.PluralRules('ru');
+const metricPluralRules = computed(() => new Intl.PluralRules(uiLocale.value));
 const metricNouns = {
-  attempts: ['заход', 'захода', 'заходов'],
-  returns: ['возврат', 'возврата', 'возвратов'],
+  get attempts() {
+    return [t('core.pipelineZahod'), t('core.pipelineZahoda'), t('core.pipelineZahodov')];
+  },
+  get returns() {
+    return [t('core.pipelineVozvrat'), t('core.pipelineVozvrata'), t('core.pipelineVozvratov')];
+  },
 } as const;
 
 const open = ref(false);
 const detailsId = `pipeline-stop-${useId()}`;
-const shelfLabels = [
-  ['what', 'Что случилось'],
-  ['cause', 'Возможная причина'],
-  ['retained', 'Что уцелело'],
-  ['action', 'Что делать'],
-] as const;
+const shelfLabels = computed(() => [
+  ['what', t('core.pipelineChtoSluchilos')],
+  ['cause', t('core.pipelineVozmozhnayaPrichina')],
+  ['retained', t('core.pipelineChtoUtselelo')],
+  ['action', t('core.pipelineChtoDelat')],
+] as const);
 
-const shelves = computed(() => shelfLabels.map(([key, label]) => ({
+const shelves = computed(() => shelfLabels.value.map(([key, label]) => ({
   key,
   label,
   text: props.view?.details[key],
 })).filter((shelf) => shelf.text?.trim()));
 
 /**
- * Склоняет короткие метки остановки по русским правилам, включая 11–14 и 21.
- * Формы выбирает стандартный Intl; тексты немигрировавшего раздела остаются русскими.
+ * Склоняет короткие метки остановки на текущем языке интерфейса.
+ * Формы выбирает Intl, поэтому английская ветвь не наследует русское правило для 21.
  */
 function metricLabel(count: number, kind: keyof typeof metricNouns): string {
-  const category = metricPluralRules.select(count);
+  const category = metricPluralRules.value.select(count);
   const word = metricNouns[kind][category === 'one' ? 0 : category === 'few' ? 1 : 2];
 
   return `${count} ${word}`;

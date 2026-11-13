@@ -94,7 +94,7 @@ test('сценарий цикла передаёт выбранный потол
   store.simulation.stepIndex = 1201;
   await actions.stepRouteSimulation(observation);
   assert.equal(calls.length, 2);
-  assert.match(store.simulation.error, /1200/);
+  assert.match(store.simulation.error, /1[\s\u00a0]?200/);
 });
 
 test('сценарий цикла без выбора берёт потолок 20, неверный потолок не стартует', async (t) => {

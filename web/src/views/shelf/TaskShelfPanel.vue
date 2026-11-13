@@ -1,10 +1,10 @@
 <template>
   <section ref="panel" class="task-shelf-panel ui-workspace" data-ui-workspace
-           tabindex="-1" aria-label="Полка задач" :aria-busy="shelf.loading || undefined">
+           tabindex="-1" :aria-label="t('core.taskPolkaZadach')" :aria-busy="shelf.loading || undefined">
     <header class="shelf-head">
       <div class="shelf-pane-heading">
         <UiPaneHeader>
-          <template #title><h2>Полка задач</h2></template>
+          <template #title><h2>{{ t('core.taskPolkaZadach') }}</h2></template>
           <template #actions>
             <UiIconButton v-if="!shelf._viewMirror" role="embedded" data-context="workspace-toolbar"
                           :label="t('core.shelfDesignRefresh')" v-tooltip="t('core.shelfDesignRefresh')"
@@ -17,28 +17,28 @@
       <div v-if="shelf.allRows.length || hasFilters" class="shelf-toolbar">
         <div class="shelf-search">
           <UiSearchInput ref="searchInput" v-model="query"
-                         aria-label="Поиск задач на полке" placeholder="Найти задачу…"
-                         v-tooltip="'Поиск по номеру, названию, проекту и ответственному'"
-                         aria-description="Поиск по номеру, названию, проекту и ответственному" />
+                         :aria-label="t('core.taskPoiskZadachNaPolke')" :placeholder="t('core.taskNaytiZadachu')"
+                         v-tooltip="t('core.taskPoiskPoNomeruNazvaniyu')"
+                         :aria-description="t('core.taskPoiskPoNomeruNazvaniyu')" />
         </div>
-        <div class="shelf-filters" role="group" aria-label="Фильтр задач на полке">
+        <div class="shelf-filters" role="group" :aria-label="t('core.taskFiltrZadachNaPolke')">
           <UiButton v-for="filter in filters" :key="filter.id" data-context="workspace-toolbar"
                     :data-shelf-filter="filter.id" :pressed="activeFilter === filter.id"
-                    :aria-label="`${filter.label}: ${filter.count}`"
+                    :aria-label="t('core.boardPageLabel', { label: filter.label, count: filter.count })"
                     @click="activeFilter = filter.id">
             {{ filter.label }}<span class="shelf-filter-count">{{ filter.count }}</span>
           </UiButton>
         </div>
       </div>
       <div v-if="hasFilters" class="shelf-filter-summary">
-        <span role="status">Показано {{ visibleCount }} из {{ shelf.allRows.length }}</span>
-        <UiButton variant="text" size="compact" @click="resetFilters">Сбросить фильтры</UiButton>
+        <span role="status">{{ t('core.taskPokazano') }} {{ visibleCount }} {{ t('settings.from') }} {{ shelf.allRows.length }}</span>
+        <UiButton variant="text" size="compact" @click="resetFilters">{{ t('core.inboxResetFilters') }}</UiButton>
       </div>
     </header>
 
     <div class="shelf-content">
       <p class="shelf-heading ui-workspace-intro">{{ summaryText }}</p>
-      <UiLoadingState v-if="shelf.loading && !shelf.loaded" label="Загружаю полку…"
+      <UiLoadingState v-if="shelf.loading && !shelf.loaded" :label="t('core.taskZagruzhayuPolku')"
                       :failed="Boolean(shelf.error)">
         <div class="shelf-loading"><UiSkeletonLayout layout="list" :header="true" /></div>
       </UiLoadingState>
@@ -47,22 +47,22 @@
       </UiInlineMessage>
       <UiInlineMessage v-if="shelf.sourceIssues?.length" class="source-issues" tone="warning">
         <details>
-          <summary>Часть данных временно недоступна</summary>
+          <summary>{{ t('core.taskChastDannyhVremennoNedostupna') }}</summary>
           <span>{{ shelf.sourceIssues.join(' · ') }}</span>
         </details>
       </UiInlineMessage>
       <div v-if="!shelf.loading && !shelf.error && !shelf.allRows.length" class="shelf-empty">
         <span class="shelf-empty-icon" aria-hidden="true">◇</span>
         <div>
-          <h3>На полке пока пусто</h3>
-          <p>Откладывайте сюда задачи, по которым ждёте оценку, прогон или ответ.</p>
+          <h3>{{ t('core.taskNaPolkePokaPusto') }}</h3>
+          <p>{{ t('core.taskOtkladyvayteSyudaZadachiPo') }}</p>
         </div>
       </div>
       <div v-else-if="shelf.allRows.length && !visibleCount" class="shelf-empty">
         <span class="shelf-empty-icon" aria-hidden="true">⌕</span>
         <div>
-          <h3>Ничего не найдено</h3>
-          <p>Измените поисковый запрос или выберите другую группу задач.</p>
+          <h3>{{ t('core.inboxNoResults') }}</h3>
+          <p>{{ t('core.taskIzmenitePoiskovyyZaprosIli') }}</p>
         </div>
       </div>
 
@@ -104,14 +104,13 @@
                     <strong class="shelf-title" v-tooltip="row.title">{{ row.title }}</strong>
 
                     <span v-if="row.state === 'lit'" class="shelf-event">
-                      <span class="shelf-event-label">
-                        Новое событие<template v-if="eventSource(row)"> · {{ eventSource(row) }}</template>
+                      <span class="shelf-event-label"> {{ t('core.taskNovoeSobytie') }}<template v-if="eventSource(row)"> · {{ eventSource(row) }}</template>
                       </span>
                       <span class="shelf-event-message">{{ row.message }}</span>
-                      <span class="shelf-event-hint">Открытие задачи отметит событие просмотренным</span>
+                      <span class="shelf-event-hint">{{ t('core.taskOtkrytieZadachiOtmetitSobytie') }}</span>
                     </span>
                     <span v-else class="shelf-waiting">
-                      <span>{{ row.needsHuman && !row.completed ? 'Требует внимания' : 'Ожидание' }}</span>
+                      <span>{{ row.needsHuman && !row.completed ? t('core.taskTrebuetVnimaniya') : t('core.taskOzhidanie') }}</span>
                       {{ row.reasonText }}
                     </span>
 
@@ -138,14 +137,14 @@
                           <circle cx="12" cy="8" r="3" />
                           <path d="M5 21v-2a7 7 0 0 1 14 0v2" />
                         </svg>
-                        <span class="ui-visually-hidden">Ответственный: </span>{{ row.details.responsible }}
+                        <span class="ui-visually-hidden">{{ t('core.taskOtvetstvennyy') }}{{ ' ' }}</span>{{ row.details.responsible }}
                       </span>
                       <span
                         v-if="row.details?.deadline"
                         class="shelf-deadline"
                         :class="{ overdue: row.details.overdue }"
                       >
-                        {{ row.details.overdue ? 'Просрочена · до' : 'до' }} {{ row.details.deadline }}
+                        {{ row.details.overdue ? t('core.taskProsrochenaDo') : t('core.taskDo') }} {{ row.details.deadline }}
                       </span>
                       <span v-if="row.details?.unread" class="shelf-unread">
                         <span class="ui-visually-hidden">, </span>{{ unreadLabel(row.details.unread) }}
@@ -163,7 +162,7 @@
                       <span class="shelf-progress-count">
                         <span class="shelf-progress-label">{{ bar.label }}<span
                           class="ui-visually-hidden"
-                        >, пройдено:</span></span>
+                        >{{ t('core.taskProydeno') }}</span></span>
                         {{ progressText(bar.progress!) }}
                       </span>
                       <UiProgress
@@ -183,8 +182,8 @@
                 <template #actions>
                   <UiIconButton
                     v-if="row.state === 'lit'"
-                    label="Отметить событие просмотренным"
-                    v-tooltip="'Отметить событие просмотренным'"
+                    :label="t('core.taskOtmetitSobytieProsmotrennym')"
+                    v-tooltip="t('core.taskOtmetitSobytieProsmotrennym')"
                     role="embedded"
                     tone="success"
                     :loading="shelfState(row).isPending?.(row.taskId)"
@@ -202,8 +201,8 @@
                     карточки и обещал последствия, которых у действия нет.
                   -->
                   <UiIconButton
-                    label="Убрать с полки"
-                    v-tooltip="'Убрать с полки'"
+                    :label="t('core.taskUbratSPolki')"
+                    v-tooltip="t('core.taskUbratSPolki')"
                     role="embedded"
                     tone="neutral"
                     :loading="row.state !== 'lit' && shelfState(row).isPending?.(row.taskId)"
@@ -231,19 +230,10 @@ import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
 import { useUiStore } from '../../stores/ui.ts';
+import { t, uiLocale } from '../../ui';
 import {
-  UiRefreshIcon,
-  UiButton,
-  UiPaneHeader,
-  UiInlineMessage,
-  UiSkeletonLayout,
-  UiIconButton,
-  UiProgress,
-  UiSearchInput,
-  UiSelectableRow,
-  vTooltip,
-  t,
-  UiLoadingState,
+  UiRefreshIcon, UiButton, UiPaneHeader, UiInlineMessage, UiSkeletonLayout, UiIconButton,
+  UiProgress, UiSearchInput, UiSelectableRow, vTooltip, UiLoadingState,
 } from '../../ui';
 import type { UiActionTone } from '../../ui';
 
@@ -258,10 +248,18 @@ interface ShelfGroup {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  analysis: 'оценка',
-  pipeline: 'конвейер',
-  comments: 'комментарии',
-  b24: 'Битрикс24',
+  get analysis() {
+    return t('core.taskOtsenka');
+  },
+  get pipeline() {
+    return t('settings.pipeline');
+  },
+  get comments() {
+    return t('core.taskKommentarii');
+  },
+  get b24() {
+    return t('settings.bitrix');
+  },
 };
 
 // Полка и UI-kit говорят о цвете разными словарями: у карточки это состояние конвейера,
@@ -290,17 +288,17 @@ const activeFilter = ref<ShelfFilter>('all');
 const allGroups = computed<ShelfGroup[]>(() => [
   {
     id: 'attention',
-    title: 'Требуют внимания',
+    title: t('core.needAttention'),
     rows: shelf.allRows.filter((row) => (row.state === 'lit' || row.needsHuman) && !row.completed),
   },
   {
     id: 'waiting',
-    title: 'В ожидании',
+    title: t('core.taskVOzhidanii'),
     rows: shelf.allRows.filter((row) => row.state !== 'lit' && !row.needsHuman && !row.completed),
   },
   {
     id: 'completed',
-    title: 'Завершённые',
+    title: t('core.taskZavershennye'),
     rows: shelf.allRows.filter((row) => row.completed),
   },
 ]);
@@ -308,12 +306,12 @@ const allGroups = computed<ShelfGroup[]>(() => [
 const filters = computed(() => [
   {
     id: 'all' as const,
-    label: 'Все',
+    label: t('core.selectAllGroups'),
     count: shelf.allRows.length,
   },
   ...allGroups.value.map((group) => ({
     id: group.id,
-    label: group.id === 'attention' ? 'Внимание' : group.title,
+    label: group.id === 'attention' ? t('core.taskVnimanie') : group.title,
     count: group.rows.length,
   })),
 ]);
@@ -334,14 +332,16 @@ const visibleCount = computed(() => groups.value.reduce((total, group) => total 
  */
 const summaryText = computed(() => {
   if (!shelf.allRows.length) {
-    return 'Задачи, по которым ждём событие';
+    return t('core.taskZadachiPoKotorymZhdem');
   }
 
-  const total = `${shelf.allRows.length} ${wordForm(shelf.allRows.length, ['задача', 'задачи', 'задач'])}`;
+  const total = t('core.shelfTaskCount', { count: shelf.allRows.length });
 
   const attention = allGroups.value.find((group) => group.id === 'attention')?.rows.length ?? 0;
 
-  return attention ? `${total} · требуют внимания: ${attention}` : `${total} под наблюдением`;
+  return attention
+    ? t('core.taskTotalTrebuyutVnimaniyaAttention', { total, attention })
+    : t('core.taskTotalPodNablyudeniem', { total });
 });
 
 function normalizeSearch(value: string): string {
@@ -404,16 +404,19 @@ function ageLabel(value: string): string {
   const timestamp = Date.parse(value);
 
   if (!Number.isFinite(timestamp)) {
-    return 'дата неизвестна';
+    return t('core.taskDataNeizvestna');
   }
 
   const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000));
 
   if (days === 0) {
-    return 'добавлена сегодня';
+    return t('core.taskDobavlenaSegodnya');
   }
 
-  return `на полке ${days} ${wordForm(days, ['день', 'дня', 'дней'])}`;
+  return t('core.taskNaPolkeDaysWordformdays', {
+                      days: days,
+                      wordFormdays: t('core.shelfDayWord', { count: days }),
+                    });
 }
 
 function fullDate(value: string): string {
@@ -423,7 +426,7 @@ function fullDate(value: string): string {
     return '';
   }
 
-  return new Date(timestamp).toLocaleString('ru-RU', {
+  return new Date(timestamp).toLocaleString(uiLocale.value, {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
@@ -437,7 +440,7 @@ function eventSource(row: ShelfRow): string {
 }
 
 function unreadLabel(value: number): string {
-  return `${value} ${wordForm(value, ['непрочитанный', 'непрочитанных', 'непрочитанных'])}`;
+  return t('core.shelfUnreadCount', { count: value });
 }
 
 function progressTone(tone: string): UiActionTone {
@@ -445,7 +448,7 @@ function progressTone(tone: string): UiActionTone {
 }
 
 function progressText(progress: ShelfActivityProgress): string {
-  return progress.total ? `${progress.done}/${progress.total}` : 'Идёт';
+  return progress.total ? `${progress.done}/${progress.total}` : t('core.taskIdet');
 }
 
 /**

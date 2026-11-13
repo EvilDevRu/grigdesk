@@ -1,5 +1,6 @@
 import { inject, provide, type InjectionKey } from 'vue';
 import type { UiTabsActivation } from '../types/uiSelection';
+import { t } from '../services/locale.ts';
 
 export interface UiTabRegistration {
   value: string | number;
@@ -22,8 +23,16 @@ export function provideUiTabsContext(context: UiTabsContext): void {
   provide(UI_TABS_CONTEXT, context);
 }
 
+/**
+ * Контекст вкладок читается только внутри UiTabs: без провайдера
+ * вкладка не может ни активироваться, ни зарегистрироваться.
+ */
 export function useUiTabsContext(): UiTabsContext {
   const context = inject(UI_TABS_CONTEXT, null);
-  if (!context) throw new Error('UiTab должен находиться внутри UiTabs');
+
+  if (!context) {
+    throw new Error(t('core.coreUitabDolzhenNahoditsyaVnutri'));
+  }
+
   return context;
 }

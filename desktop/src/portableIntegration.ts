@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { desktopCommand } from './desktopEntry.ts';
+import { desktopText } from './locale.ts';
 
 interface IntegrationOptions {
   isPortable: boolean;
@@ -48,7 +49,7 @@ export async function offerPortableIntegration(options: IntegrationOptions): Pro
     }
 
     if (!path.isAbsolute(options.windowPath) || /[\r\n\0]/u.test(options.windowPath)) {
-      throw new Error('Некорректный путь окна для меню приложений');
+      throw new Error(desktopText('desktop.desktopNekorrektnyyPutOknaDlya'));
     }
 
     const xdg = options.env.XDG_DATA_HOME;

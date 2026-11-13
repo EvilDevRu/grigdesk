@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { build } from '../../../web/node_modules/vite/dist/node/index.js';
 import vue from '../../../web/node_modules/@vitejs/plugin-vue/dist/index.mjs';
 import type { HelpBundle } from '../../../shared/help/helpContracts.ts';
+import { helpResourceFile } from '../../../shared/help/helpContracts.ts';
 import { verifyHelpBundle } from '../../../shared/node/helpSources.ts';
 
 const execute = promisify(execFile);
@@ -35,8 +36,16 @@ export async function buildHelpSite(input: {
   sourceRoot: string;
   output: string;
   bundle: HelpBundle;
+  translations?: HelpBundle[];
 }): Promise<string[]> {
   const bundle = verifyHelpBundle(input.bundle);
+  const bundles = [bundle, ...(input.translations ?? []).map(verifyHelpBundle)];
+
+  if (new Set(bundles.map((entry) => entry.locale)).size !== bundles.length
+    || bundles.some((entry) => entry.version !== bundle.version || entry.commit !== bundle.commit)) {
+    throw new Error('help_site_mismatch');
+  }
+
   const webRoot = path.join(input.sourceRoot, 'web');
   const modules = new Set<string>();
 
@@ -75,7 +84,10 @@ export async function buildHelpSite(input: {
   await mkdir(input.output, {
     recursive: true
   });
-  await writeFile(path.join(input.output, 'help.json'), JSON.stringify(bundle));
+
+  for (const entry of bundles) {
+    await writeFile(path.join(input.output, helpResourceFile(entry.locale)), JSON.stringify(entry));
+  }
 
   const rendererFile = path.join(webRoot, '.generated/markdown/mermaid-renderer.meta.json');
   const renderer = JSON.parse(await readFile(rendererFile, 'utf8')) as {
@@ -122,7 +134,7 @@ export const latestScript = `(() => {
         || (channel === 'release' && !stable.test(version))) {
         throw new Error('version');
       }
-      location.replace('./' + version + '/index.html' + location.hash);
+      location.replace('./' + version + '/index.html' + location.search + location.hash);
     }).catch(() => {
       target.textContent = english ? 'Could not open the current guide. Try again later.'
         : 'Не удалось открыть актуальное руководство. Повторите позже.';

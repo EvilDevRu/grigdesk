@@ -68,6 +68,7 @@
   "runtimeFileMissing": "GrigDesk directory {root} is missing {relative}.",
   "serverPackageDamaged": "GrigDesk server package is damaged: {root}.",
   "serverSettingsUnreadable": "Could not read server settings: {path}.",
+  "serverSettingsKeyForbidden": "Key {key} is not allowed in the settings file.",
   "interfaceMissing": "Built interface is missing: {path}.",
   "unsupportedNode": "Node {node} is unavailable or older than {minimum} (requires ^{required} || >=24.0.0).",
   "invalidPortValue": "Invalid GrigDesk port: {port}.",
@@ -119,5 +120,12 @@
   "exitSettingHint": "Saved immediately for the desktop app.",
   "exitSaveFailed": "Could not save the quit preference.",
   "exitDeadline": "The stop deadline has expired. The app is closing.",
-  "exitServerStopFailed": "Stopping the owned server was not confirmed."
+  "exitServerStopFailed": "Stopping the owned server was not confirmed.",
+  "desktopNekorrektnyyPutPrilozheniyaDlya": "Invalid application path for the shortcut",
+  "desktopNevernoeDeystvieOkna": "Invalid window action.",
+  "desktopNekorrektnyyPutOknaDlya": "Invalid window path for the application menu",
+  "desktopNeNaydenaRabochayaOblast": "No display work area found.",
+  "desktopOtkrytieOknaPrevysiloSrok": "Opening the window timed out.",
+  "desktopOtkrytieOtmeneno": "Opening cancelled.",
+  "installCorruptedHtml": "<h1>Installation corrupted</h1><p>Reinstall the application.</p>"
 }

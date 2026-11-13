@@ -1,5 +1,10 @@
 import { getActivePinia } from 'pinia';
 import { useShellStore } from '../stores/shell.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /**
  * Capability читается из уже обнаруженной оболочки текущего документа.
@@ -25,7 +30,7 @@ export async function saveFile(blob: Blob, name: string): Promise<void> {
     });
 
     if (!response.ok) {
-      throw new Error('Не удалось сохранить файл.');
+      throw new Error(t('core.couldNotSaveTheFile'));
     }
 
     return;
@@ -54,10 +59,10 @@ export async function saveLinkedFile(href: string, name?: string): Promise<void>
   const response = await fetch(href, { credentials: 'same-origin' });
 
   if (!response.ok) {
-    throw new Error('Не удалось скачать файл.');
+    throw new Error(t('core.coreNeUdalosSkachatFayl'));
   }
 
-  const filename = name || new URL(href, location.href).pathname.split('/').pop() || 'файл';
+  const filename = name || new URL(href, location.href).pathname.split('/').pop() || t('core.codeFayl');
 
   await saveFile(await response.blob(), filename);
 }

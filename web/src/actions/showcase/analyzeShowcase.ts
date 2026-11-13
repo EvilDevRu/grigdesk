@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Разбор стенда: сервер сам читает связанную задачу и код, а затем предлагает
@@ -23,7 +28,9 @@ export async function analyzeShowcase(store: ShowcaseStore): Promise<boolean> {
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось разобрать стенд.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.analyzeShowcaseCouldNotAnalyzeTheEnvironment')),
+    );
 
     return false;
   } finally {
@@ -52,7 +59,9 @@ export async function generateShowcaseBindings(store: ShowcaseStore): Promise<bo
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось построить привязки речи.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.analyzeShowcaseCouldNotBuildSpeechBindings')),
+    );
 
     try {
       store.setOpened(await showcaseApi.project(opened.id));
@@ -70,10 +79,10 @@ export async function generateShowcaseBindings(store: ShowcaseStore): Promise<bo
 // не ломается — пункт без своего элемента показан ближайшим объявленным экраном.
 // Дополнять карту экранов профиля — работа агента, поэтому подсказка ведёт в чат,
 // а не в JSON профиля.
-export const SCRIPT_GAPS_INTRO = 'Эти пункты показаны ближайшим объявленным экраном — '
-  + 'в карте экранов профиля для них нет своих элементов:';
-export const SCRIPT_GAPS_HINT = 'Ролик от этого не страдает. Чтобы показать их точнее, попросите '
-  + 'агента в чате дополнить карту экранов профиля — он видит этот ролик, — и разберите заново.';
+export const SCRIPT_GAPS_INTRO = translateUi('core.analyzeShowcaseTheseItemsUseTheNearestDeclaredScreen')
+  + translateUi('core.analyzeShowcaseTheProfileScreenMapHasNoElements');
+export const SCRIPT_GAPS_HINT = translateUi('core.analyzeShowcaseTheVideoStillWorksForAMore')
+  + translateUi('core.analyzeShowcaseTheAgentInChatToExtendThe');
 
 /**
  * Сцены старше карты экранов: после разбора профиль объявил новые экраны или
@@ -92,6 +101,6 @@ export function showcaseScriptOutdated(project: ShowcaseProject | null | undefin
   return Boolean(generatedFor) && Boolean(current) && generatedFor !== current;
 }
 
-export const SCRIPT_OUTDATED_TEXT = 'Карта экранов профиля изменилась после разбора — сцены не знают '
-  + 'её новых элементов и снимут прежние действия. Нажмите «Разобрать заново», '
-  + 'чтобы сценарий их использовал.';
+export const SCRIPT_OUTDATED_TEXT = translateUi('core.analyzeShowcaseTheProfileScreenMapChangedAfterAnalysis')
+  + translateUi('core.analyzeShowcaseItsNewElementsAndWillRecordThe')
+  + translateUi('core.analyzeShowcaseToIncludeThemInTheScript');

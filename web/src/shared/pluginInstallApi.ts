@@ -23,10 +23,15 @@ import type {
   PluginInstallInfo,
   PluginInstalledVersion,
 } from '../../../shared/plugins/pluginInstallContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export class PluginInstallProtocolError extends Error {
   constructor() {
-    super('Сервер вернул некорректные данные установки. Обновите состояние перед новым действием.');
+    super(translateUi('core.pluginInstallApiTheServerReturnedInvalidInstallationDataRefresh'));
     this.name = 'PluginInstallProtocolError';
   }
 }

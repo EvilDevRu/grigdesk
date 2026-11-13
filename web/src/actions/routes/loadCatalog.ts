@@ -2,6 +2,11 @@ import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { cancelDraftSave } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Загружает полный опубликованный каталог для чтения и сравнения.
@@ -60,7 +65,7 @@ export async function loadCatalog(profile: string, catalogHash: string): Promise
     store.jsonBuffer = null;
   } catch (error) {
     if (request === runtime.openRequest) {
-      store.error = failureText(error, 'Не удалось прочитать опубликованный каталог.');
+      store.error = failureText(error, translateUi('core.loadCatalogCouldNotReadThePublishedCatalog'));
     }
   } finally {
     if (request === runtime.openRequest) {

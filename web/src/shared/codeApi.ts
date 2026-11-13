@@ -35,6 +35,11 @@ import type {
   CodePartialOptions,
   CodeRequestContext,
 } from '../../../shared/plugins/code/codeContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface CodeStageOptions {
   all?: boolean;
@@ -331,7 +336,9 @@ export const codeApi = {
  * Сообщение HTTP имеет приоритет над транспортной ошибкой. Нестандартное исключение
  * не получает доступ к полям без проверки и заменяется понятным запасным текстом.
  */
-export function codeErrorMessage(error: unknown, fallback = 'Не удалось выполнить действие'): string {
+export function codeErrorMessage(error: unknown, fallback = translateUi(
+  'core.couldNotPerformTheAction',
+)): string {
   if (typeof error !== 'object' || error === null) {
     return fallback;
   }

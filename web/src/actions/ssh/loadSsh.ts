@@ -4,6 +4,11 @@ import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { sshApi } from '../../shared/sshApi.ts';
 import { useSshStore } from '../../stores/ssh.ts';
 import { detachSshTerminal } from './sshTerminal.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Свежий снимок раздела: серверы, живые сессии и журнал одним заходом. Если активной
@@ -33,7 +38,7 @@ export async function loadSsh(): Promise<void> {
       detachSshTerminal();
     }
   } catch (error) {
-    store.setError(errorMessage(error, 'Не удалось загрузить SSH'));
+    store.setError(errorMessage(error, translateUi('core.loadSshCouldNotLoadSSH')));
   } finally {
     store.setLoading(false);
   }
@@ -62,7 +67,7 @@ export async function loadSshProjects(): Promise<void> {
       return;
     }
 
-    store.setProjectsError(errorMessage(error, 'Не удалось загрузить проекты'));
+    store.setProjectsError(errorMessage(error, translateUi('core.loadDbCouldNotLoadProjects')));
   } finally {
     if (request === runtime.projectsRequest) {
       store.setProjectsLoading(false);

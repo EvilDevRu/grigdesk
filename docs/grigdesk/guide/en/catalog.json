@@ -1,0 +1,414 @@
+[
+  {
+    "file": "README.md",
+    "id": "overview",
+    "title": "GrigDesk Guide",
+    "section": "Getting started",
+    "keywords": [
+      "help",
+      "guide",
+      "documentation",
+      "contents"
+    ]
+  },
+  {
+    "file": "getting-started.md",
+    "id": "getting-started",
+    "title": "Getting started",
+    "section": "Getting started",
+    "keywords": [
+      "start",
+      "setup",
+      "launch",
+      "introduction"
+    ]
+  },
+  {
+    "file": "installation.md",
+    "id": "installation",
+    "title": "Installing the application",
+    "section": "Getting started",
+    "keywords": [
+      "install",
+      "download",
+      "linux",
+      "package"
+    ]
+  },
+  {
+    "file": "updates.md",
+    "id": "updates",
+    "title": "Updates and rollback",
+    "section": "Getting started",
+    "keywords": [
+      "update",
+      "version",
+      "rollback",
+      "release"
+    ]
+  },
+  {
+    "file": "data-and-backups.md",
+    "id": "data-and-backups",
+    "title": "Data and backups",
+    "section": "Getting started",
+    "keywords": [
+      "data",
+      "backup",
+      "restore",
+      "cleanup",
+      "artifacts"
+    ]
+  },
+  {
+    "file": "chats.md",
+    "id": "chats",
+    "title": "Conversations with agents",
+    "section": "Conversations",
+    "keywords": [
+      "chat",
+      "agent",
+      "executor",
+      "model",
+      "permissions"
+    ]
+  },
+  {
+    "file": "chat-context.md",
+    "id": "chat-context",
+    "title": "Conversation memory and context",
+    "section": "Conversations",
+    "keywords": [
+      "context",
+      "memory",
+      "compaction",
+      "compact",
+      "tokens"
+    ]
+  },
+  {
+    "file": "chat-workdir.md",
+    "id": "chat-workdir",
+    "title": "Conversation working folder",
+    "section": "Conversations",
+    "keywords": [
+      "working",
+      "folder",
+      "directory",
+      "cwd",
+      "repository"
+    ]
+  },
+  {
+    "file": "deepseek.md",
+    "id": "deepseek",
+    "title": "DeepSeek and GLM",
+    "section": "Conversations",
+    "keywords": [
+      "deepseek",
+      "glm",
+      "key",
+      "balance",
+      "harness"
+    ]
+  },
+  {
+    "file": "usage-forecast.md",
+    "id": "usage-forecast",
+    "title": "Usage forecasts",
+    "section": "Conversations",
+    "keywords": [
+      "forecast",
+      "limit",
+      "quota",
+      "rate",
+      "reset"
+    ]
+  },
+  {
+    "file": "projects.md",
+    "id": "projects",
+    "title": "Projects and repositories",
+    "section": "Projects and tasks",
+    "keywords": [
+      "project",
+      "repository",
+      "archive",
+      "registration"
+    ]
+  },
+  {
+    "file": "tasks.md",
+    "id": "tasks",
+    "title": "Tasks and triage",
+    "section": "Projects and tasks",
+    "keywords": [
+      "task",
+      "triage",
+      "board",
+      "shelf",
+      "bitrix",
+      "tracker",
+      "GrigTasks",
+      "Discript",
+      "create",
+      "multiple",
+      "historical"
+    ]
+  },
+  {
+    "file": "incoming.md",
+    "id": "incoming",
+    "title": "Inbox, Telegram and GitHub",
+    "section": "Projects and tasks",
+    "keywords": [
+      "inbox",
+      "telegram",
+      "github",
+      "issue",
+      "queue"
+    ]
+  },
+  {
+    "file": "pipelines.md",
+    "id": "pipelines",
+    "title": "Starting and running pipelines",
+    "section": "Pipelines",
+    "keywords": [
+      "pipeline",
+      "start",
+      "attempt",
+      "status",
+      "stage"
+    ]
+  },
+  {
+    "file": "gates.md",
+    "id": "gates",
+    "title": "Human decisions and stops",
+    "section": "Pipelines",
+    "keywords": [
+      "gate",
+      "acceptance",
+      "arbiter",
+      "stop",
+      "return"
+    ]
+  },
+  {
+    "file": "routes.md",
+    "id": "routes",
+    "title": "Route editor",
+    "section": "Pipelines",
+    "keywords": [
+      "route",
+      "draft",
+      "publish",
+      "diagram",
+      "conflict"
+    ]
+  },
+  {
+    "file": "plugins.md",
+    "id": "plugins",
+    "title": "Plugins",
+    "section": "Tools",
+    "keywords": [
+      "plugin",
+      "catalog",
+      "install",
+      "extension",
+      "placement"
+    ]
+  },
+  {
+    "file": "code.md",
+    "id": "code",
+    "title": "Code and Git",
+    "section": "Tools",
+    "keywords": [
+      "code",
+      "git",
+      "diff",
+      "commit",
+      "file",
+      "changes"
+    ]
+  },
+  {
+    "file": "docker.md",
+    "id": "docker",
+    "title": "Docker",
+    "section": "Tools",
+    "keywords": [
+      "docker",
+      "container",
+      "image",
+      "volume",
+      "log"
+    ]
+  },
+  {
+    "file": "sandboxes.md",
+    "id": "sandboxes",
+    "title": "Sandboxes and test environments",
+    "section": "Tools",
+    "keywords": [
+      "sandbox",
+      "environment",
+      "slot",
+      "start",
+      "remove"
+    ]
+  },
+  {
+    "file": "showcase.md",
+    "id": "showcase",
+    "title": "Presentations and videos",
+    "section": "Tools",
+    "keywords": [
+      "presentation",
+      "clip",
+      "scene",
+      "narration",
+      "voice",
+      "video"
+    ]
+  },
+  {
+    "file": "browser.md",
+    "id": "browser",
+    "title": "Browser and agent access",
+    "section": "Tools",
+    "keywords": [
+      "browser",
+      "tab",
+      "access",
+      "page"
+    ]
+  },
+  {
+    "file": "settings.md",
+    "id": "settings",
+    "title": "GrigDesk settings",
+    "section": "Settings",
+    "keywords": [
+      "settings",
+      "search",
+      "preferences",
+      "apply",
+      "language",
+      "english"
+    ]
+  },
+  {
+    "file": "connections.md",
+    "id": "connections",
+    "title": "Machines and connections",
+    "section": "Settings",
+    "keywords": [
+      "machine",
+      "server",
+      "phone",
+      "connection",
+      "qr",
+      "remote",
+      "VPS",
+      "relay",
+      "setup",
+      "restore",
+      "route",
+      "job",
+      "wait",
+      "rollback",
+      "SSH"
+    ]
+  },
+  {
+    "file": "speech.md",
+    "id": "speech",
+    "title": "Dictation and meetings",
+    "section": "Settings",
+    "keywords": [
+      "speech",
+      "dictation",
+      "meeting",
+      "whisper",
+      "video"
+    ]
+  },
+  {
+    "file": "web-log.md",
+    "id": "web-log",
+    "title": "Window log and diagnostics",
+    "section": "Help",
+    "keywords": [
+      "journal",
+      "diagnostics",
+      "log",
+      "error",
+      "marker"
+    ]
+  },
+  {
+    "file": "troubleshooting.md",
+    "id": "troubleshooting",
+    "title": "Troubleshooting",
+    "section": "Help",
+    "keywords": [
+      "error",
+      "failure",
+      "connection",
+      "quota",
+      "recovery"
+    ]
+  },
+  {
+    "file": "glossary.md",
+    "id": "glossary",
+    "title": "Glossary",
+    "section": "Help",
+    "keywords": [
+      "terms",
+      "glossary",
+      "turn",
+      "profile",
+      "route"
+    ]
+  },
+  {
+    "file": "access-profiles.md",
+    "id": "access-profiles",
+    "title": "Executor access profiles",
+    "section": "Executors and conversations",
+    "keywords": [
+      "account",
+      "profile",
+      "access",
+      "login",
+      "authentication",
+      "CLI",
+      "GLM",
+      "DeepSeek",
+      "key"
+    ]
+  },
+  {
+    "file": "qwen.md",
+    "id": "qwen",
+    "title": "Connecting Qwen Code",
+    "section": "Conversations",
+    "keywords": [
+      "qwen",
+      "executor",
+      "API",
+      "modelProviders",
+      "models",
+      "ACP",
+      "timeout",
+      "additional",
+      "folders",
+      "auto"
+    ]
+  }
+]

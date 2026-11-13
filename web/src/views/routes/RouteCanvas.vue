@@ -1,48 +1,46 @@
 <template>
   <section class="route-canvas">
     <div class="route-canvas__toolbar">
-      <strong>Схема</strong>
-      <div class="route-canvas__zoom" role="group" aria-label="Масштаб схемы">
-        <UiIconButton data-context="workspace-form" label="Уменьшить масштаб"
-                      v-tooltip="'Уменьшить масштаб'" data-test="zoom-out"
+      <strong>{{ t('core.routeShema2') }}</strong>
+      <div class="route-canvas__zoom" role="group" :aria-label="t('core.routeMasshtabShemy')">
+        <UiIconButton data-context="workspace-form" :label="t('core.routeUmenshitMasshtab')"
+                      v-tooltip="t('core.routeUmenshitMasshtab')" data-test="zoom-out"
                       :disabled="scale <= MIN_SCALE" @click="zoomBy(1 / ZOOM_STEP)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
         </UiIconButton>
         <UiButton data-context="workspace-form" variant="ghost" data-test="zoom-reset"
-                  v-tooltip="'Масштаб 100%'" :disabled="scale === 1" @click="scale = 1">100%</UiButton>
-        <UiIconButton data-context="workspace-form" label="Увеличить масштаб"
-                      v-tooltip="'Увеличить масштаб'" data-test="zoom-in"
+                  v-tooltip="t('core.routeMasshtab100')" :disabled="scale === 1" @click="scale = 1">100%</UiButton>
+        <UiIconButton data-context="workspace-form" :label="t('core.routeUvelichitMasshtab')"
+                      v-tooltip="t('core.routeUvelichitMasshtab')" data-test="zoom-in"
                       :disabled="scale >= MAX_SCALE" @click="zoomBy(ZOOM_STEP)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
         </UiIconButton>
-        <UiIconButton data-context="workspace-form" label="Показать всё"
-                      v-tooltip="'Показать всю схему'" data-test="fit-all" @click="fitAll">
+        <UiIconButton data-context="workspace-form" :label="t('core.routePokazatVse')"
+                      v-tooltip="t('core.routePokazatVsyuShemu')" data-test="fit-all" @click="fitAll">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
           </svg>
         </UiIconButton>
       </div>
-      <label class="route-canvas__search"><span class="ui-visually-hidden">Найти этап</span>
-        <UiInput data-test="search-nodes" :model-value="searchTerm" placeholder="Название этапа или ID"
+      <label class="route-canvas__search"><span class="ui-visually-hidden">{{ t('core.routeNaytiEtap') }}</span>
+        <UiInput data-test="search-nodes" :model-value="searchTerm" :placeholder="t('core.routeNazvanieEtapaIliId')"
                  @update:model-value="searchTerm = String($event ?? '')"
                  @keydown.enter="searchNode" />
       </label>
       <details v-if="!chooseMode" class="route-canvas__connections">
-        <summary>Соединения</summary>
+        <summary>{{ t('core.routeSoedineniya') }}</summary>
         <div class="route-canvas__connection-fields">
-      <label>Источник
-        <UiSelect data-test="connect-source" :model-value="connectSourceId"
+      <label>{{ t('core.trackerSource') }} <UiSelect data-test="connect-source" :model-value="connectSourceId"
                   @update:model-value="changeConnectSource(String($event ?? ''))">
           <option v-for="source in executableNodes" :key="source.id" :value="source.id">
             {{ source.label || source.id }}
           </option>
         </UiSelect>
       </label>
-      <label>Исход
-        <UiSelect data-test="connect-outcome" :model-value="connectOutcome"
+      <label>{{ t('core.routeIshod') }} <UiSelect data-test="connect-outcome" :model-value="connectOutcome"
                   @update:model-value="connectOutcome = String($event ?? '')">
           <option v-for="outcome in connectOutcomes" :key="outcome" :value="outcome">
             {{ outcome }}
@@ -50,9 +48,9 @@
         </UiSelect>
       </label>
       <UiButton data-context="workspace-form" variant="ghost" data-test="connect-start" :disabled="!connectSourceId || !connectOutcome"
-                @click="connecting = true">Соединить с узлом</UiButton>        </div>
+                @click="connecting = true">{{ t('core.routeSoedinitSUzlom') }}</UiButton>        </div>
       </details>
-      <span v-if="connecting" class="muted">Выберите цель на схеме</span>
+      <span v-if="connecting" class="muted">{{ t('core.routeVyberiteTselNaSheme') }}</span>
       <span v-if="connectError" class="bad">{{ connectError }}</span>
     </div>
     <div ref="viewport" class="route-canvas__graph">
@@ -73,7 +71,7 @@ import type { RouteDraft, RouteEditorIssue } from '../../../../shared/pipeline/r
 import FactoryGraph from '../pipeline/FactoryGraph.vue';
 import type { RouteCommandScope } from './routeCommands.ts';
 import { setTransition } from './routeCommands.ts';
-import { UiButton, UiIconButton, UiInput, UiSelect, vTooltip } from '../../ui';
+import { UiButton, UiIconButton, UiInput, UiSelect, vTooltip, t } from '../../ui';
 
 // Узел, который схема отдаёт по активации: ID на схеме и ID в машине.
 interface ActivatedNode {
@@ -256,7 +254,7 @@ function connectTo(targetId: string): void {
     connectOutcome.value, { next: targetId });
 
   if (result.draft === plain) {
-    connectError.value = result.issues[0]?.message ?? 'Переход не изменён.';
+    connectError.value = result.issues[0]?.message ?? t('core.routePerehodNeIzmenen');
 
     return;
   }

@@ -4,6 +4,11 @@ import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { cancelDraftSave } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /** Читает три точных документа только для сохранённой версии черновика. */
 /**
@@ -19,7 +24,7 @@ export async function previewDraftRebase(): Promise<void> {
     return;
   }
   if (store.dirty || store.saving || store.conflict) {
-    store.rebaseError = 'Сначала сохраните черновик или разрешите конфликт записи.';
+    store.rebaseError = translateUi('core.previewSaveTheDraftOrResolveTheSave');
 
     return;
   }
@@ -44,7 +49,7 @@ export async function previewDraftRebase(): Promise<void> {
     store.rebaseGeneration = generation;
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.rebaseError = failureText(error, 'Не удалось сравнить основания каталога.');
+      store.rebaseError = failureText(error, translateUi('core.rebaseCouldNotCompareCatalogBases'));
     }
   } finally {
     if (identity === runtime.openRequest) {
@@ -109,7 +114,7 @@ export async function applyDraftRebase(resolutions: RouteRebaseResolution[]): Pr
     store.promptPreview = null;
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.rebaseError = failureText(error, 'Не удалось перенести черновик.');
+      store.rebaseError = failureText(error, translateUi('core.rebaseCouldNotRebaseTheDraft'));
 
       if ((error as { status?: number } | null)?.status === 409) {
         store.rebasePreview = null;

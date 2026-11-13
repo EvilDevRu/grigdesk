@@ -9,6 +9,11 @@ import {
   parseAnalysisRows,
 } from '../../../shared/pipeline/analysisContracts.ts';
 import type { AnalysisAnswerInput } from '../../../shared/pipeline/analysisContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 function taskPath(id: string | number, suffix = ''): string {
   return `/api/tasks/${encodeURIComponent(String(id))}${suffix}`;
@@ -82,7 +87,9 @@ export function analysisDisabledFailure(error: unknown): boolean {
  * Текст отказа для человека. Сервер триажа отдаёт машинный код, а обрыв сети приходит
  * без тела вовсе — тогда остаётся сообщение самой ошибки.
  */
-export function analysisErrorMessage(error: unknown, fallback = 'Триаж недоступен'): string {
+export function analysisErrorMessage(error: unknown, fallback = translateUi(
+  'core.analysisApiTriageIsUnavailable',
+)): string {
   const message = objectOrEmpty(error).message;
 
   return typeof message === 'string' && message ? message : fallback;

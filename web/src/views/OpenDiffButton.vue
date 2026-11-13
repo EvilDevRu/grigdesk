@@ -1,12 +1,11 @@
 <template>
-  <UiButton v-tooltip="'Диф задачи (несохранённые изменения воркдира)'" @click="openDiff">
-    <span class="ic mono">±</span> Диф
-  </UiButton>
+  <UiButton v-tooltip="t('core.diffDifZadachiNesohranennyeIzmeneniya')" @click="openDiff">
+    <span class="ic mono">±</span> {{ t('core.diffDif2') }} </UiButton>
 </template>
 
 <script setup lang="ts">
 import { useDiffStore } from '../stores/diff.ts';
-import { UiButton, vTooltip } from '../ui';
+import { UiButton, vTooltip, t } from '../ui';
 
 // Кнопка задачи: открыть диф (несохранённые изменения воркдира) в большом модале.
 // Нижний модал (приёмка/задача) НЕ закрываем — при закрытии дифа пользователь

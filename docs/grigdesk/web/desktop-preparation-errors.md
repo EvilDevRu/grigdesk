@@ -10,5 +10,11 @@
 `desktop/src/clientRuntime.ts`. Собственные надписи по-прежнему проверяются по
 [контракту языка интерфейса](interface-language.md).
 
+Отказ из-за `GRIGDESK_HOME` или `GRIGDESK_ENV_FILE` внутри файла настроек использует
+`desktop.serverSettingsKeyForbidden` с параметром `key`. Исходный запуск показывает
+текущий RU/EN текст окна, сохраняя имя запрещённого ключа. Ветка внешнего ELF сохраняет
+свой общий отказ подготовки пакета. Проверка ключей по-прежнему выполняется до запуска:
+файл окружения не может переназначить корни установки.
+
 Проверки: `npm --prefix web run check:ui`,
 `tests/desktop/{client-startup,portable-runtime}.test.js`.

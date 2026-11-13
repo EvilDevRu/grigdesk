@@ -23,7 +23,7 @@
                       :key="item.ref" :value="item.ref"
                       :disabled="Boolean(item.occupied && !item.current)"
                       :data-description="item.commit.slice(0, 10)">
-                {{ item.name }}{{ item.current ? ` · ${t('core.codeBranchCurrent')}` : '' }}
+                {{ item.name }}{{ item.current ? t('core.codeCodebranchcurrent', { codeBranchCurrent: t('core.codeBranchCurrent') }) : '' }}
               </option>
             </optgroup>
           </UiSelect>

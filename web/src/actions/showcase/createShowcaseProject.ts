@@ -2,6 +2,11 @@ import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseSelectableTargetRef } from '../../../../shared/plugins/showcase/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface CreateShowcaseInput {
   ref: ShowcaseSelectableTargetRef;
@@ -26,7 +31,9 @@ export async function createShowcaseProject(
 
     return project.id;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось создать ролик.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.createShowcaseProjectCouldNotCreateAVideo')),
+    );
 
     return '';
   }

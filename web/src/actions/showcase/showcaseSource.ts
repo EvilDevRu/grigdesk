@@ -6,6 +6,11 @@ import type {
   ShowcaseStorySource,
 } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface ShowcaseSourceRead {
   options: ShowcaseSourceOptions | null;
@@ -37,7 +42,10 @@ export async function loadShowcaseSource(
   } catch (error) {
     return {
       options: null,
-      error: showcaseErrorMessage(error, 'Не удалось прочитать историю репозиториев стенда.'),
+      error: showcaseErrorMessage(
+        error,
+        translateUi('core.showcaseSourceCouldNotReadEnvironmentRepositoryHistory'),
+      ),
     };
   }
 }
@@ -73,7 +81,9 @@ export async function saveShowcaseSource(
     return saved;
   } catch (error) {
     if (current()) {
-      store.setError(showcaseErrorMessage(error, 'Не удалось сохранить выбор «О чём ролик».'));
+      store.setError(
+        showcaseErrorMessage(error, translateUi('core.showcaseSourceCouldNotSaveTheVideoSubjectSelection')),
+      );
     }
 
     if (isRevisionConflict(error)) {
@@ -99,5 +109,5 @@ export function showcaseSourceOutdated(project: ShowcaseProject | null | undefin
   return Boolean(project?.scenes.length) && !showcaseSourceEqual(project?.source, project?.scriptSource);
 }
 
-export const SOURCE_OUTDATED_TEXT = 'Выбор «О чём ролик» изменился после разбора — сцены рассказывают '
-  + 'о прежнем. Нажмите «Разобрать заново», чтобы сценарий следовал новому выбору.';
+export const SOURCE_OUTDATED_TEXT = translateUi('core.showcaseSourceTheVideoSubjectChangedAfterAnalysisThe')
+  + translateUi('core.showcaseSourceThePreviousSelectionClickAnalyzeAgainTo');

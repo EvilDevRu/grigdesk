@@ -21,6 +21,9 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeBoardDashboard, isBoardDashboard } from '../shared/boardContracts.ts';
 import type { BoardDashboard } from '../shared/boardContracts.ts';
 
+const translateUi = localeTranslator(uiLocalePort);
+
+
 type BoardCatalog = Pick<TrackerCatalog, 'enabledIds' | 'default' | 'externalId' | 'revision'> & {
   drivers: Array<Pick<TrackerCatalog['drivers'][number], 'id' | 'dataRevision'>>;
 };
@@ -408,7 +411,7 @@ export const useBoardStore = defineStore('board', {
             this.failedBranchTimes = failedBranchTimes;
           }
 
-          this.error = errorMessage(error, 'Доска недоступна');
+          this.error = errorMessage(error, translateUi('core.boardBoardUnavailable'));
           this.lastRefreshAttemptAt = Date.now();
         }
       } finally {
@@ -545,7 +548,7 @@ export const useBoardStore = defineStore('board', {
                 dataRevision: descriptor?.dataRevision,
                 lastOkAt: 0,
               }),
-              error: errorMessage(error, 'Доска недоступна'),
+              error: errorMessage(error, translateUi('core.boardBoardUnavailable')),
             };
             this.error = null;
             this.failedSnapshotAt = 0;

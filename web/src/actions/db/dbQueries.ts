@@ -2,13 +2,24 @@ import { dbApi } from '../../shared/dbApi.ts';
 import type { DbCancelOutcome } from '../../../../shared/plugins/db/dbContracts.ts';
 import { useDbStore } from '../../stores/db.ts';
 import { refreshDbQueries } from './loadDb.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 // Нажатие «Прервать» обязано что-то ответить: часть команд снять нельзя вовсе,
 // а часть снимается только вместе с соединением — и тогда сессии больше нет.
 const CANCEL_FAILURES: Record<string, string> = {
-  cancel_not_supported: 'Команда уже выполняется на сервере и прервать её нечем — дождитесь ответа.',
-  cancel_failed: 'Прервать запрос не удалось.',
-  not_found: 'Запрос уже завершился.',
+  get cancel_not_supported() {
+    return translateUi('core.dbQueriesTheCommandIsAlreadyRunningOnThe');
+  },
+  get cancel_failed() {
+    return translateUi('core.dbQueriesCouldNotCancelTheQuery');
+  },
+  get not_found() {
+    return translateUi('core.dbQueriesTheQueryHasAlreadyFinished');
+  },
 };
 
 /**
@@ -18,11 +29,11 @@ const CANCEL_FAILURES: Record<string, string> = {
 function cancelNotice(outcome: DbCancelOutcome): string {
   if (outcome.ok) {
     return outcome.method === 'connection'
-      ? 'Запрос снят вместе с соединением — сессия закрыта, откройте её заново.'
+      ? translateUi('core.dbQueriesTheQueryWasCancelledByClosingIts')
       : '';
   }
 
-  return CANCEL_FAILURES[String(outcome.error)] || 'Прервать запрос не удалось.';
+  return CANCEL_FAILURES[String(outcome.error)] || translateUi('core.dbQueriesCouldNotCancelTheQuery');
 }
 
 /**

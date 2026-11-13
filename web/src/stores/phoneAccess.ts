@@ -83,7 +83,10 @@ function serverCode(cause: unknown): string {
 export const usePhoneAccessStore = defineStore('phoneAccess', () => {
   const shell = useShellStore();
   const auth = useAuthStore();
-  const owner = computed(() => `${shell.profile?.id ?? 'origin'}:${auth.clientScope}`);
+  const owner = computed(() => t('core.coreIdoriginClientscope', {
+    idorigin: shell.profile?.id ?? 'origin',
+    clientScope: auth.clientScope,
+  }));
   const open = ref(false);
   const status = ref<PhoneAccessStatus | null>(null);
   const code = ref<PhoneCode | null>(null);

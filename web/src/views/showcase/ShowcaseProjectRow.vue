@@ -27,12 +27,8 @@
         v-if="activeJob && isRunning(activeJob.state)"
         variant="ghost"
         @click="emit('cancel', activeJob.id)"
-      >
-        Отменить
-      </UiButton>
-      <UiButton variant="ghost" tone="danger" :loading="busy" @click="emit('remove', project.id)">
-        Удалить
-      </UiButton>
+      > {{ t('core.trackerCancel') }} </UiButton>
+      <UiButton variant="ghost" tone="danger" :loading="busy" @click="emit('remove', project.id)"> {{ t('core.taskDelete') }} </UiButton>
     </template>
   </UiSelectableRow>
 </template>
@@ -40,7 +36,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiButton, UiSelectableRow } from '../../ui';
+import { UiButton, UiSelectableRow, t, uiLocale } from '../../ui';
 import type {
   ShowcaseJob,
   ShowcaseProjectSummary,
@@ -59,35 +55,75 @@ const emit = defineEmits<{
 }>();
 
 const STATE_TEXT: Record<ShowcaseProjectSummary['state'], string> = {
-  draft: 'без сцен',
-  ready: 'сцены готовы',
-  building: 'идёт сборка',
-  blocked: 'нужен человек',
-  done: 'ролик собран',
+  get draft() {
+    return t('core.showcaseBezStsen');
+  },
+  get ready() {
+    return t('core.showcaseStsenyGotovy');
+  },
+  get building() {
+    return t('core.showcaseIdetSborka');
+  },
+  get blocked() {
+    return t('core.showcaseNuzhenChelovek');
+  },
+  get done() {
+    return t('core.showcaseRolikSobran');
+  },
 };
 
 const JOB_KIND: Record<ShowcaseJob['kind'], string> = {
-  script: 'сценарий',
-  voice: 'озвучка',
-  record: 'запись',
-  assemble: 'сборка',
+  get script() {
+    return t('core.showcaseStsenariy');
+  },
+  get voice() {
+    return t('core.showcaseOzvuchka');
+  },
+  get record() {
+    return t('core.showcaseZapis');
+  },
+  get assemble() {
+    return t('core.showcaseSborka');
+  },
 };
 
 const JOB_STATE: Record<ShowcaseJob['state'], string> = {
-  queued: 'в очереди',
-  running: 'идёт',
-  awaiting_review: 'ждёт решения',
-  cancelling: 'останавливается',
-  succeeded: 'готово',
-  failed: 'отказ',
-  interrupted: 'оборвалось',
-  cancelled: 'отменено',
+  get queued() {
+    return t('settings.queued');
+  },
+  get running() {
+    return t('core.showcaseIdet');
+  },
+  get awaiting_review() {
+    return t('core.showcaseZhdetResheniya');
+  },
+  get cancelling() {
+    return t('core.showcaseOstanavlivaetsya');
+  },
+  get succeeded() {
+    return t('settings.done2');
+  },
+  get failed() {
+    return t('settings.remoteStepFailed');
+  },
+  get interrupted() {
+    return t('core.showcaseOborvalos');
+  },
+  get cancelled() {
+    return t('settings.cancelled');
+  },
 };
 
 const KIND_TEXT: Record<ShowcaseProjectSummary['ref']['kind'], string> = {
-  project: 'проект',
-  sandbox: 'песочница',
-  task: 'задача',
+  get project() {
+    return t('core.showcaseProekt');
+  },
+  get sandbox() {
+    return t('settings.sandbox');
+  },
+  get task() {
+    return t('settings.diagnosticSourceTask');
+  },
 };
 
 const ACTIVE_STATES = new Set<ShowcaseJob['state']>([
@@ -105,15 +141,21 @@ const activeJob = computed(() => props.jobs.find((job) => ACTIVE_STATES.has(job.
 const metaText = computed(() => {
   const target = props.project.targetLabel
     || `${KIND_TEXT[props.project.ref.kind]} ${props.project.ref.id}`;
-  const scenes = props.project.sceneCount ? `${scenesCount(props.project.sceneCount)}` : 'сцен нет';
-  const updated = new Date(props.project.updatedAt).toLocaleString('ru-RU', {
+  const scenes = props.project.sceneCount
+  ? `${scenesCount(props.project.sceneCount)}`
+  : t('core.showcaseStsenNet');
+  const updated = new Date(props.project.updatedAt).toLocaleString(uiLocale.value, {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   });
 
-  return `${target} · ${scenes} · изменён ${updated}`;
+  return t('core.showcaseTargetScenesIzmenenUpdated', {
+    target,
+    scenes,
+    updated,
+  });
 });
 
 /**
@@ -125,14 +167,14 @@ function scenesCount(count: number): string {
   const teen = count % 100 >= 11 && count % 100 <= 14;
 
   if (tail === 1 && !teen) {
-    return `${count} сцена`;
+    return t('core.showcaseCountStsena', { count: count });
   }
 
   if (tail >= 2 && tail <= 4 && !teen) {
-    return `${count} сцены`;
+    return t('core.showcaseCountStseny', { count: count });
   }
 
-  return `${count} сцен`;
+  return t('core.showcaseCountStsen', { count: count });
 }
 
 function jobText(job: ShowcaseJob): string {

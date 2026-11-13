@@ -1,3 +1,9 @@
+
+import { localeTranslator, messageList } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 // Живая строка идущего хода: чем агент занят ПРЯМО СЕЙЧАС и что уже потратил.
 //
 // Строка состоит из трёх независимых фактов, и каждый отвечает за своё:
@@ -21,49 +27,189 @@ export interface ChatThinkingStep {
 // без вопросов человеку и без обещаний; длина не больше «Выполняю команду», под которое
 // зарезервирована ячейка слова (фраза длиннее сдвинула бы числа справа). Дубли и длину
 // сторожит тест THINK-04.
-export const THINKING_WORDS = [
-  'Думаю', 'Размышляю', 'Обдумываю', 'Соображаю', 'Прикидываю', 'Взвешиваю', 'Вникаю', 'Разбираюсь',
-  'Сопоставляю', 'Продумываю', 'Формулирую', 'Осмысливаю', 'Оцениваю', 'Прорабатываю', 'Рассуждаю',
-  'Вдумываюсь', 'Анализирую', 'Вчитываюсь', 'Всматриваюсь', 'Присматриваюсь', 'Приглядываюсь',
-  'Осматриваюсь', 'Углубляюсь', 'Погружаюсь', 'Концентрируюсь', 'Фокусируюсь', 'Вспоминаю', 'Припоминаю',
-  'Прокручиваю', 'Моделирую', 'Раскладываю', 'Распутываю', 'Разгадываю', 'Структурирую', 'Систематизирую',
-  'Перепроверяю', 'Пересматриваю', 'Переосмысливаю', 'Подступаюсь', 'Определяюсь', 'Подытоживаю',
-  'Обобщаю', 'Резюмирую', 'Сравниваю', 'Упрощаю', 'Собираю мысли', 'Ищу решение', 'Изучаю вопрос',
-  'Изучаю код', 'Копаю глубже', 'Смотрю глубже', 'Меняю ракурс', 'Ищу другой угол', 'Ищу подход',
-  'Ищу зацепку', 'Ищу причину', 'Ищу лучший ход', 'Ищу вариант', 'Ищу нестыковки', 'Ищу компромисс',
-  'Ищу изящный ход', 'Ищу простой путь', 'Ищу паттерн', 'Ищу суть', 'Нахожу суть', 'Дохожу до сути',
-  'Схватываю суть', 'Сверяю детали', 'Сверяю факты', 'Сверяю данные', 'Сверяю версии', 'Сверяю с задачей',
-  'Сверяю с целью', 'Сверяюсь с кодом', 'Проверяю догадку', 'Проверяю логику', 'Строю гипотезу',
-  'Строю план', 'Строю логику', 'Строю цепочку', 'Намечаю шаги', 'Намечаю план', 'Планирую шаги',
-  'Набрасываю план', 'Рисую схему', 'Достраиваю план', 'Дорабатываю план', 'Прикидываю объём',
-  'Оцениваю риски', 'Оцениваю объём', 'Взвешиваю риски', 'Считаю варианты', 'Перебираю ходы',
-  'Проигрываю в уме', 'Подбираю слова', 'Подбираю решение', 'Примеряю решение', 'Выбираю путь',
-  'Выбираю вариант', 'Выбираю решение', 'Собираю картину', 'Складываю пазл', 'Свожу воедино',
-  'Собираю факты', 'Собираю решение', 'Составляю ответ', 'Готовлю ответ', 'Держу нить', 'Слежу за нитью',
-  'Иду по следу', 'Ловлю мысль', 'Развиваю мысль', 'Обкатываю идею', 'Тестирую мысль', 'Шлифую решение',
-  'Довожу до ума', 'Упрощаю задачу', 'Разбиваю на шаги', 'Дроблю задачу', 'Сортирую мысли',
-  'Отсекаю лишнее', 'Отделяю главное', 'Выделяю главное', 'Учитываю нюансы', 'Ловлю нюансы',
-  'Ловлю детали', 'Замечаю детали', 'Держу контекст', 'Нащупываю путь', 'Прощупываю почву',
-  'Прокладываю путь', 'Расчищаю путь', 'Иду к ответу', 'Делаю выводы', 'Вывожу итог',
-];
+export const THINKING_WORDS = messageList([
+  'core.chatThinkingThinking',
+  'core.chatThinkingReflecting',
+  'core.chatThinkingConsidering',
+  'core.chatThinkingReasoning',
+  'core.chatThinkingEstimating',
+  'core.chatThinkingWeighingOptions',
+  'core.chatThinkingExamining',
+  'core.chatThinkingWorkingItOut',
+  'core.chatThinkingMatchingClues',
+  'core.chatThinkingThinkingAhead',
+  'core.chatThinkingFormulating',
+  'core.chatThinkingMakingSense',
+  'core.chatThinkingEvaluating',
+  'core.chatThinkingWorkingThrough',
+  'core.chatThinkingReasoningItOut',
+  'core.chatThinkingThinkingDeeply',
+  'core.chatThinkingAnalyzing',
+  'core.chatThinkingReadingClosely',
+  'core.chatThinkingLookingClosely',
+  'core.chatThinkingTakingALook',
+  'core.chatThinkingInspecting',
+  'core.chatThinkingLookingAround',
+  'core.chatThinkingGoingDeeper',
+  'core.chatThinkingDivingIn',
+  'core.chatThinkingConcentrating',
+  'core.chatThinkingFocusing',
+  'core.chatThinkingRecalling',
+  'core.chatThinkingRemembering',
+  'core.chatThinkingReplaying',
+  'core.chatThinkingModeling',
+  'core.chatThinkingBreakingItDown',
+  'core.chatThinkingUntangling',
+  'core.chatThinkingDeciphering',
+  'core.chatThinkingStructuring',
+  'core.chatThinkingOrganizing',
+  'core.githubPereproveryayu',
+  'core.chatThinkingReviewing',
+  'core.chatThinkingRethinking',
+  'core.chatThinkingApproaching',
+  'core.chatThinkingDeciding',
+  'core.chatThinkingSummingUp',
+  'core.chatThinkingGeneralizing',
+  'core.chatThinkingSummarizing',
+  'core.chatThinkingComparing',
+  'core.chatThinkingSimplifying',
+  'core.chatThinkingGatheringThoughts',
+  'core.chatThinkingSeekingASolution',
+  'core.chatThinkingStudyingTheIssue',
+  'core.chatThinkingStudyingCode',
+  'core.chatThinkingDiggingDeeper',
+  'core.chatThinkingLookingDeeper',
+  'core.chatThinkingShiftingFocus',
+  'core.chatThinkingTryingAnAngle',
+  'core.chatThinkingSeekingAnApproach',
+  'core.chatThinkingSeekingAClue',
+  'core.chatThinkingSeekingACause',
+  'core.chatThinkingSeekingABetterMove',
+  'core.chatThinkingSeekingAnOption',
+  'core.chatThinkingFindingMismatches',
+  'core.chatThinkingFindingACompromise',
+  'core.chatThinkingSeekingAnElegantFix',
+  'core.chatThinkingSeekingASimpleWay',
+  'core.chatThinkingSeekingAPattern',
+  'core.chatThinkingSeekingTheCore',
+  'core.chatThinkingFindingTheCore',
+  'core.chatThinkingGettingToTheCore',
+  'core.chatThinkingGraspingTheCore',
+  'core.chatThinkingCheckingDetails',
+  'core.chatThinkingCheckingFacts',
+  'core.chatThinkingCheckingData',
+  'core.chatThinkingCheckingVersions',
+  'core.chatThinkingCheckingTheTask',
+  'core.chatThinkingCheckingTheGoal',
+  'core.chatThinkingCheckingTheCode',
+  'core.chatThinkingTestingAHunch',
+  'core.chatThinkingCheckingLogic',
+  'core.chatThinkingFormingAHypothesis',
+  'core.chatThinkingBuildingAPlan',
+  'core.chatThinkingBuildingTheLogic',
+  'core.chatThinkingBuildingAChain',
+  'core.chatThinkingOutliningSteps',
+  'core.chatThinkingOutliningAPlan',
+  'core.chatThinkingPlanningSteps',
+  'core.chatThinkingDraftingAPlan',
+  'core.chatThinkingSketchingADiagram',
+  'core.chatThinkingExtendingThePlan',
+  'core.chatThinkingRefiningThePlan',
+  'core.chatThinkingEstimatingScope',
+  'core.chatThinkingAssessingRisks',
+  'core.chatThinkingAssessingScope',
+  'core.chatThinkingWeighingRisks',
+  'core.chatThinkingCountingOptions',
+  'core.chatThinkingExploringMoves',
+  'core.chatThinkingRehearsing',
+  'core.chatThinkingChoosingWords',
+  'core.chatThinkingFindingASolution',
+  'core.chatThinkingTryingASolution',
+  'core.chatThinkingChoosingAPath',
+  'core.chatThinkingChoosingAnOption',
+  'core.chatThinkingChoosingASolution',
+  'core.chatThinkingBuildingAPicture',
+  'core.chatThinkingSolvingThePuzzle',
+  'core.chatThinkingBringingItTogether',
+  'core.chatThinkingGatheringFacts',
+  'core.chatThinkingAssemblingASolution',
+  'core.chatThinkingComposingAnAnswer',
+  'core.chatThinkingPreparingAnAnswer',
+  'core.chatThinkingKeepingTheThread',
+  'core.chatThinkingFollowingTheThread',
+  'core.chatThinkingFollowingATrail',
+  'core.chatThinkingCatchingAThought',
+  'core.chatThinkingDevelopingAThought',
+  'core.chatThinkingTryingAnIdea',
+  'core.chatThinkingTestingAThought',
+  'core.chatThinkingPolishingASolution',
+  'core.chatThinkingRefiningTheResult',
+  'core.chatThinkingSimplifyingTheTask',
+  'core.chatThinkingBreakingIntoSteps',
+  'core.chatThinkingSplittingTheTask',
+  'core.chatThinkingSortingThoughts',
+  'core.chatThinkingRemovingTheExcess',
+  'core.chatThinkingIsolatingTheKey',
+  'core.chatThinkingHighlightingTheKey',
+  'core.chatThinkingConsideringNuances',
+  'core.chatThinkingCatchingNuances',
+  'core.chatThinkingCatchingDetails',
+  'core.chatThinkingNoticingDetails',
+  'core.chatThinkingKeepingContext',
+  'core.chatThinkingFindingAPath',
+  'core.chatThinkingTestingTheGround',
+  'core.chatThinkingMappingAPath',
+  'core.chatThinkingClearingAPath',
+  'core.chatThinkingFindingTheAnswer',
+  'core.chatThinkingDrawingConclusions',
+  'core.chatThinkingReachingAResult',
+], uiLocalePort);
 
 // Действие инструмента — факт, а не настроение: пока он идёт, слово не меняется.
 // Имена нейтральные (их даёт нормализатор исполнителя), поэтому таблица одна на всех.
 const TOOL_ACTIONS: Record<string, string> = {
-  Bash: 'Выполняю команду',
-  Read: 'Читаю файлы',
-  Write: 'Пишу файл',
-  Edit: 'Правлю код',
-  NotebookEdit: 'Правлю блокнот',
-  Glob: 'Ищу файлы',
-  Grep: 'Ищу по коду',
-  WebFetch: 'Читаю страницу',
-  WebSearch: 'Ищу в сети',
-  Task: 'Веду подагента',
-  TodoWrite: 'Планирую',
-  ExitPlanMode: 'Готовлю план',
-  Skill: 'Запускаю навык',
-  AskUserQuestion: 'Жду твоего ответа',
+  get Bash() {
+    return translateUi('core.chatThinkingRunningACommand');
+  },
+  get Read() {
+    return translateUi('core.chatThinkingReadingFiles');
+  },
+  get Write() {
+    return translateUi('core.chatThinkingWritingAFile');
+  },
+  get Edit() {
+    return translateUi('core.chatThinkingEditingCode');
+  },
+  get NotebookEdit() {
+    return translateUi('core.chatThinkingEditingANotebook');
+  },
+  get Glob() {
+    return translateUi('core.chatThinkingFindingFiles');
+  },
+  get Grep() {
+    return translateUi('core.chatThinkingSearchingCode');
+  },
+  get WebFetch() {
+    return translateUi('core.chatThinkingReadingAPage');
+  },
+  get WebSearch() {
+    return translateUi('core.chatThinkingSearchingTheWeb');
+  },
+  get Task() {
+    return translateUi('core.chatThinkingManagingAnAgent');
+  },
+  get TodoWrite() {
+    return translateUi('core.chatThinkingPlanning');
+  },
+  get ExitPlanMode() {
+    return translateUi('core.chatThinkingPreparingAPlan');
+  },
+  get Skill() {
+    return translateUi('core.chatThinkingRunningASkill');
+  },
+  get AskUserQuestion() {
+    return translateUi('core.chatThinkingAwaitingYourReply');
+  },
 };
 
 /**
@@ -139,16 +285,18 @@ export function thinkingWord(steps: unknown, tick: number, order: readonly numbe
     if (name.startsWith('mcp__')) {
       const server = name.split('__')[1];
 
-      return server ? `Работаю через ${server}` : 'Работаю с инструментом';
+      return server
+        ? translateUi('core.chatThinkingWorkingVia', { server: server })
+        : translateUi('core.chatThinkingUsingATool');
     }
 
-    return 'Работаю с инструментом';
+    return translateUi('core.chatThinkingUsingATool');
   }
 
   const slot = Math.abs(Math.trunc(Number(tick) || 0)) % THINKING_WORDS.length;
   const index = order.length === THINKING_WORDS.length ? (order[slot] ?? slot) : slot;
 
-  return THINKING_WORDS[index] || 'Думаю';
+  return THINKING_WORDS[index] || translateUi('core.chatThinkingThinking');
 }
 
 /**
@@ -191,7 +339,11 @@ export function formatTurnTokens(tokens: unknown, estimate: boolean, includeUnit
     return '';
   }
 
-  return `${estimate ? '≈ ' : ''}${value.toLocaleString('ru')}${includeUnit ? ' ток.' : ''}`;
+  return `${estimate
+    ? '≈ '
+    : ''}${value.toLocaleString(
+      uiLocalePort.value,
+    )}${includeUnit ? translateUi('core.chatThinkingTokens') : ''}`;
 }
 
 /**
@@ -209,10 +361,13 @@ export function formatTurnTokensShort(tokens: unknown, estimate: boolean): strin
   const mark = estimate ? '≈ ' : '';
 
   if (value < 1_000_000) {
-    return `${mark}${Math.floor(value / 1_000)}\u00a0тыс.`;
+    return translateUi('core.chatThinkingK', { mark: mark, value: Math.floor(value / 1_000) });
   }
 
   const millions = Math.floor(value / 100_000) / 10;
 
-  return `${mark}${millions.toLocaleString('ru')}\u00a0млн`;
+  return translateUi(
+    'core.chatThinkingM',
+    { mark: mark, value: millions.toLocaleString(uiLocalePort.value) },
+  );
 }

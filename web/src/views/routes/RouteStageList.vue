@@ -1,8 +1,8 @@
 <template>
-  <section class="route-stage-list ui-workspace-section" tabindex="0" aria-label="Список этапов маршрута"
+  <section class="route-stage-list ui-workspace-section" tabindex="0" :aria-label="t('core.routeSpisokEtapovMarshruta')"
            @keydown="onKeydown">
     <UiPaneHeader>
-      <template #title><h3>Этапы</h3></template>
+      <template #title><h3>{{ t('core.routeEtapy') }}</h3></template>
       <template #meta>{{ nodes.length }}</template>
     </UiPaneHeader>
     <div class="ui-workspace-section__body">
@@ -13,99 +13,94 @@
         </li>
       </ol>
       <details class="route-stage-list__manage ui-workspace-disclosure">
-        <summary>Управление этапами</summary>
+        <summary>{{ t('core.routeUpravlenieEtapami') }}</summary>
         <div class="ui-workspace-section__body">
-          <small class="muted">Insert — добавить · Alt+↑/↓ — переместить · Delete — показать удаление</small>
+          <small class="muted">{{ t('core.routeInsertDobavitAltPeremestit') }}</small>
           <div class="route-stage-list__tools">
-            <label>Тип нового этапа
-              <UiSelect data-test="stage-new-type" :model-value="newType"
+            <label>{{ t('core.routeTipNovogoEtapa') }} <UiSelect data-test="stage-new-type" :model-value="newType"
                         @update:model-value="newType = String($event) as NewExecutor">
-                <option value="agent">Агент ИИ</option><option value="command">Команда</option>
-                <option value="gate">Решение человека</option><option value="status">Статус</option>
+                <option value="agent">{{ t('core.routeAgentIi') }}</option><option value="command">{{ t('core.interventionCommand') }}</option>
+                <option value="gate">{{ t('core.routeReshenieCheloveka') }}</option><option value="status">{{ t('core.codeReviewFilterStatus') }}</option>
               </UiSelect>
             </label>
-            <UiField v-if="newType === 'status'" label="Владелец"
-                     help="Этап, который создаёт этот статус. Статус показывает его результат и не выполняется отдельно.">
+            <UiField v-if="newType === 'status'" :label="t('core.routeVladelets')"
+                     :help="t('core.routeStageListTheStageThatProducesThisStatus')">
               <UiSelect data-test="stage-owner" :model-value="statusOwnerId"
                         @update:model-value="statusOwnerId = String($event)">
-                <option value="">Выберите этап</option>
+                <option value="">{{ t('core.arbiterTarget') }}</option>
                 <option v-for="node in executableNodes" :key="node.id" :value="node.id">
                   {{ node.label || node.id }}
                 </option>
               </UiSelect>
             </UiField>
-            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-add" @click="requestAdd">Добавить этап</UiButton>
+            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-add" @click="requestAdd">{{ t('core.stageWizardApply') }}</UiButton>
           </div>
 
           <div class="route-stage-list__tools">
-            <UiIconButton data-context="workspace-form" data-test="stage-up" label="Выше"
-                          v-tooltip="'Переместить этап выше'" :disabled="!canMove(-1)" @click="move(-1)">
+            <UiIconButton data-context="workspace-form" data-test="stage-up" :label="t('core.routeVyshe')"
+                          v-tooltip="t('core.routePeremestitEtapVyshe')" :disabled="!canMove(-1)" @click="move(-1)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 19V5m-6 6 6-6 6 6" />
               </svg>
             </UiIconButton>
-            <UiIconButton data-context="workspace-form" data-test="stage-down" label="Ниже"
-                          v-tooltip="'Переместить этап ниже'" :disabled="!canMove(1)" @click="move(1)">
+            <UiIconButton data-context="workspace-form" data-test="stage-down" :label="t('core.routeNizhe')"
+                          v-tooltip="t('core.routePeremestitEtapNizhe')" :disabled="!canMove(1)" @click="move(1)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 5v14m-6-6 6 6 6-6" />
               </svg>
             </UiIconButton>
-            <UiField v-if="scope.kind === 'route'" label="Фаза"
-                     help="Основная часть — выполнение задачи. Завершение — этапы, завершающие работу маршрута. Перенос меняет фазу выбранного этапа, но не создаёт переходы между этапами.">
+            <UiField v-if="scope.kind === 'route'" :label="t('core.routeFaza')"
+                     :help="t('core.routeStageListMainStagesPerformTheTaskFinalization')">
               <UiSelect data-test="stage-phase" :model-value="targetPhase"
                         @update:model-value="targetPhase = String($event) as 'main' | 'tail'">
-                <option value="main">Основная</option><option value="tail">Завершение</option>
+                <option value="main">{{ t('core.routeOsnovnaya') }}</option><option value="tail">{{ t('core.routeZavershenie') }}</option>
               </UiSelect>
             </UiField>
             <UiButton data-context="workspace-form" variant="ghost" v-if="scope.kind === 'route'" data-test="stage-move-phase"
                       :disabled="!selectedNode || selectedNode.executor === 'status'"
-                      @click="moveToPhase">Перенести в фазу</UiButton>
-            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-delete" :disabled="!selectedNodeId" @click="previewDelete">
-              Удалить этап
-            </UiButton>
+                      @click="moveToPhase">{{ t('core.routePerenestiVFazu') }}</UiButton>
+            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-delete" :disabled="!selectedNodeId" @click="previewDelete"> {{ t('core.routeUdalitEtap') }} </UiButton>
           </div>
           <div v-if="selectedNode && selectedNode.executor !== 'status'" class="route-stage-list__tools">
-            <UiField label="Исход"
-                     help="Результат выполнения выбранного этапа, например done — выполнено, skipped — пропущено. Соединение задаёт, куда идти при этом результате.">
+            <UiField :label="t('core.routeIshod')"
+                     :help="t('core.routeStageListTheSelectedStageSOutcomeSuch')">
               <UiSelect data-test="stage-outcome" :model-value="outcome"
                         @update:model-value="outcome = String($event)">
                 <option v-for="key in outcomes" :key="key" :value="key">{{ key }}</option>
               </UiSelect>
             </UiField>
-            <UiField label="Цель"
-                     help="Этап, который должен выполняться после выбранного результата. Кнопка «Соединить» добавляет переход к нему.">
+            <UiField :label="t('core.routeTsel')"
+                     :help="t('core.routeStageListTheStageToRunAfterThe')">
               <UiSelect data-test="stage-target" :model-value="targetId"
                         @update:model-value="targetId = String($event)">
-                <option value="">Выберите этап</option>
+                <option value="">{{ t('core.arbiterTarget') }}</option>
                 <option v-for="node in executableNodes" :key="node.id" :value="node.id">
                   {{ node.label || node.id }}
                 </option>
               </UiSelect>
             </UiField>
             <UiButton data-context="workspace-form" variant="ghost" data-test="stage-connect" :disabled="!outcome || !targetId"
-                      @click="connect">Соединить</UiButton>
+                      @click="connect">{{ t('core.routeSoedinit') }}</UiButton>
           </div>
         </div>
       </details>
       <div v-if="deletePreview" data-test="stage-delete-preview" class="route-stage-list__preview">
-        <strong>Удаление «{{ deletePreview.nodeId }}»</strong>
-        <p>Входящие связи и инструкции:</p>
+        <strong>{{ t('core.routeUdalenie') }}{{ deletePreview.nodeId }}»</strong>
+        <p>{{ t('core.routeVhodyaschieSvyaziIInstruktsii') }}</p>
         <ul>
           <li v-for="reference in deletePreview.references" :key="reference.path">
             {{ reference.path }} → {{ reference.target }}
           </li>
           <li v-for="file in deletePreview.promptFiles" :key="file.file">
-            {{ file.file }} · используют: {{ [...file.selectedUsers, ...file.otherUsers].join(', ') }}
+            {{ file.file }} {{ t('core.routeIspolzuyut') }} {{ [...file.selectedUsers, ...file.otherUsers].join(', ') }}
           </li>
         </ul>
-        <p v-if="!deletePreview.references.length && !deletePreview.promptFiles.length" class="muted">
-          Входящих связей и файлов инструкций нет.
-        </p>
-        <p class="muted">Связи без новой цели останутся проблемами черновика.</p>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="stage-confirm-delete" @click="remove">Удалить с показанными связями</UiButton>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="stage-cancel-delete" @click="deletePreview = null">Отмена</UiButton>
+        <p v-if="!deletePreview.references.length && !deletePreview.promptFiles.length" class="muted"> {{ t('core.routeVhodyaschihSvyazeyIFaylov') }} </p>
+        <p class="muted">{{ t('core.routeSvyaziBezNovoyTseli') }}</p>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="stage-confirm-delete" @click="remove">{{ t('core.routeUdalitSPokazannymiSvyazyami') }}</UiButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="stage-cancel-delete" @click="deletePreview = null">{{ t('core.cancel') }}</UiButton>
       </div>
       <ul v-if="issues.length" data-test="stage-issues" role="alert">
         <li v-for="(issue, index) in issues" :key="index">{{ issue.message }}</li>
@@ -121,18 +116,32 @@ import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContrac
 import type { RouteCommandIssue, RouteCommandResult, RouteCommandScope,
   NewExecutor, NodeInspection } from './routeCommands.ts';
 import { addNode, inspectNodeReferences, moveStage, removeNodes, setTransition } from './routeCommands.ts';
-import { UiButton, UiField, UiIconButton, UiPaneHeader, UiSelect, vTooltip } from '../../ui';
+import { UiButton, UiField, UiIconButton, UiPaneHeader, UiSelect, vTooltip, t } from '../../ui';
 
 const executorNames: Record<string, string> = {
-  agent: 'Агент',
-  command: 'Команда',
-  gate: 'Человек',
-  status: 'Статус',
+  get agent() {
+    return t('core.chatSettingsAgent');
+  },
+  get command() {
+    return t('core.interventionCommand');
+  },
+  get gate() {
+    return t('core.routeChelovek');
+  },
+  get status() {
+    return t('core.codeReviewFilterStatus');
+  },
 };
 const phaseNames: Record<string, string> = {
-  main: 'Основная',
-  tail: 'Завершение',
-  bootstrap: 'Разведка',
+  get main() {
+    return t('core.routeOsnovnaya');
+  },
+  get tail() {
+    return t('core.routeZavershenie');
+  },
+  get bootstrap() {
+    return t('core.routeRazvedka');
+  },
 };
 
 const props = defineProps<{

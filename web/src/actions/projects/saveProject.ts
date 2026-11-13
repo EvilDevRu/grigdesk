@@ -4,6 +4,11 @@ import { useProjectsStore } from '../../stores/projects';
 import { changedFields, createDraft, toInput } from '../../views/projects/projectDraft';
 import { loadProjects } from './loadProjects';
 import type { ProjectDraft } from '../../views/projects/projectDraft';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export interface SaveProjectResult {
   ok: boolean;
@@ -84,7 +89,7 @@ export async function saveProject(
       };
     }
 
-    store.setError(projectsFailureText(error, 'Не удалось сохранить паспорт проекта.'));
+    store.setError(projectsFailureText(error, t('core.projectNeUdalosSohranitPasport')));
 
     return {
       ok: false,

@@ -1,24 +1,24 @@
 <template>
   <form class="scene-form" @submit.prevent="submit">
-    <UiField label="Экран новой сцены" class="scene-form__screen">
+    <UiField :label="t('core.showcaseEkranNovoyStseny')" class="scene-form__screen">
       <UiSelect v-model="screenId" :disabled="busy || !screens.length">
-        <option v-if="!screens.length" value="">профиль не объявил экранов</option>
+        <option v-if="!screens.length" value="">{{ t('core.showcaseProfilNeObyavilEkranov') }}</option>
         <option v-for="screen in screens" :key="screen.id" :value="screen.id">
           {{ screen.title }}
         </option>
       </UiSelect>
     </UiField>
-    <UiField label="Текст озвучки" class="scene-form__text">
-      <UiInput v-model="narration" :disabled="busy" placeholder="Открываем обзор задач." />
+    <UiField :label="t('core.showcaseTekstOzvuchki')" class="scene-form__text">
+      <UiInput v-model="narration" :disabled="busy" :placeholder="t('core.showcaseOtkryvaemObzorZadach')" />
     </UiField>
-    <UiButton type="submit" variant="outline" :aria-disabled="!canAdd">Добавить сцену</UiButton>
+    <UiButton type="submit" variant="outline" :aria-disabled="!canAdd">{{ t('core.showcaseDobavitStsenu') }}</UiButton>
   </form>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 
-import { UiButton, UiField, UiInput, UiSelect } from '../../ui';
+import { UiButton, UiField, UiInput, UiSelect, t } from '../../ui';
 import type { ShowcaseScreen } from '../../../../shared/plugins/showcase/showcaseContracts';
 
 const props = defineProps<{

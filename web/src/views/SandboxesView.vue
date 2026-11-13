@@ -1,16 +1,16 @@
 <template>
   <section class="sandboxes ui-page ui-workspace" data-ui-workspace aria-labelledby="sandboxes-title">
     <UiPaneHeader class="sandboxes__header">
-      <template #title><h1 id="sandboxes-title">Песочницы</h1></template>
-      <template #meta><span v-if="store.loaded">Стендов: {{ rows.length }}</span></template>
+      <template #title><h1 id="sandboxes-title">{{ t('core.sandboxes') }}</h1></template>
+      <template #meta><span v-if="store.loaded">{{ t('core.sandboxStendov') }} {{ rows.length }}</span></template>
       <template #actions>
-        <UiIconButton label="Обновить песочницы" v-tooltip="'Обновить песочницы'"
+        <UiIconButton :label="t('core.sandboxObnovitPesochnitsy')" v-tooltip="t('core.sandboxObnovitPesochnitsy')"
                       data-context="workspace-toolbar" :loading="store.loading" @click="loadSandboxes()">
           <UiRefreshIcon />
         </UiIconButton>
         <UiButton v-if="store.loaded" tone="accent" data-context="workspace-toolbar"
                   :aria-expanded="showCreate" aria-controls="sandboxes-create" @click="toggleCreate">
-          {{ createOpen ? 'Скрыть форму' : '+ Поднять стенд' }}
+          {{ createOpen ? t('core.dbDesignHideForm') : t('core.sandboxPodnyatStend') }}
         </UiButton>
       </template>
     </UiPaneHeader>
@@ -18,57 +18,51 @@
     <UiInlineMessage v-if="store.error" class="sandboxes__error" tone="danger">
       {{ store.error }}
     </UiInlineMessage>
-    <UiInlineMessage v-if="sandboxPipelineSnapshot.error" class="sandboxes__error" tone="warning">
-      Сведения конвейера устарели: {{ sandboxPipelineSnapshot.error }}
+    <UiInlineMessage v-if="sandboxPipelineSnapshot.error" class="sandboxes__error" tone="warning"> {{ t('core.sandboxSvedeniyaKonveyeraUstareli') }} {{ sandboxPipelineSnapshot.error }}
     </UiInlineMessage>
 
     <div class="sandboxes__tabs">
-      <UiTabs v-model="panel" size="compact" data-ui-workspace-tabs label="Область песочниц">
-        <UiTab value="list" controls="sandboxes-list">Список</UiTab>
-        <UiTab value="detail" controls="sandboxes-detail">Стенд</UiTab>
+      <UiTabs v-model="panel" size="compact" data-ui-workspace-tabs :label="t('core.sandboxOblastPesochnits')">
+        <UiTab value="list" controls="sandboxes-list">{{ t('core.sandboxSpisok') }}</UiTab>
+        <UiTab value="detail" controls="sandboxes-detail">{{ t('core.sandboxStend') }}</UiTab>
       </UiTabs>
     </div>
 
     <div class="sandboxes__panels" :data-panel="panel">
       <div id="sandboxes-list" class="sandboxes__catalog sandboxes__scroll">
         <div class="sandboxes__filters">
-          <UiInput v-model="search" type="search" aria-label="Поиск стенда"
-                   placeholder="Название, номер, профиль или ветка" />
-          <UiSelect v-model="profile" aria-label="Проект стенда">
-            <option value="all">Все проекты ({{ stateRows.length }})</option>
+          <UiInput v-model="search" type="search" :aria-label="t('core.sandboxPoiskStenda')"
+                   :placeholder="t('core.sandboxNazvanieNomerProfilIli')" />
+          <UiSelect v-model="profile" :aria-label="t('core.sandboxProektStenda')">
+            <option value="all">{{ t('core.sandboxVseProekty') }}{{ stateRows.length }})</option>
             <option v-for="option in profiles" :key="option.value" :value="option.value">
               {{ option.label }} ({{ option.count }})
             </option>
           </UiSelect>
-          <UiSelect v-model="owner" aria-label="Какие стенды показать">
+          <UiSelect v-model="owner" :aria-label="t('core.sandboxKakieStendyPokazat')">
             <option v-for="state in states" :key="state.value" :value="state.value">
               {{ state.label }} ({{ state.count }})
             </option>
           </UiSelect>
-          <UiButton v-if="filtered" variant="text" data-context="workspace-form" @click="resetFilters">
-            Сбросить
-          </UiButton>
-          <span v-if="filtered" class="sandboxes__note" role="status">
-            Найдено: {{ visibleCount }} из {{ rows.length }}
+          <UiButton v-if="filtered" variant="text" data-context="workspace-form" @click="resetFilters"> {{ t('settings.reset') }} </UiButton>
+          <span v-if="filtered" class="sandboxes__note" role="status"> {{ t('core.sandboxNaydeno') }} {{ visibleCount }} {{ t('settings.from') }} {{ rows.length }}
           </span>
         </div>
 
-        <UiLoadingState v-if="!store.loaded && !store.error" label="Читаем состояние песочниц…" >
+        <UiLoadingState v-if="!store.loaded && !store.error" :label="t('core.sandboxChitaemSostoyaniePesochnits')" >
           <div class="sandboxes-loading"><UiSkeletonLayout layout="list" :header="true" /></div>
         </UiLoadingState>
         <p v-if="store.loaded && !store.error && !store.sandboxes.length" class="sandboxes__empty">
-          <template v-if="awaitingStand">Подготовка идёт. Текущий шаг — в строке стенда.</template>
-          <template v-else>Стендов пока нет. Выберите профиль и поднимите первую песочницу.</template>
+          <template v-if="awaitingStand">{{ t('core.sandboxPodgotovkaIdetTekuschiyShag') }}</template>
+          <template v-else>{{ t('core.sandboxStendovPokaNetVyberite') }}</template>
         </p>
-        <p v-if="rows.length && !visibleCount" class="sandboxes__empty">
-          Подходящих стендов нет. Измените запрос или сбросьте фильтры.
-        </p>
+        <p v-if="rows.length && !visibleCount" class="sandboxes__empty"> {{ t('core.sandboxPodhodyaschihStendovNetIzmenite') }} </p>
 
         <div class="sandboxes__groups">
           <section v-for="group in groups" :key="group.profile" class="sandboxes__block">
             <div class="sandboxes__block-head">
               <h2>{{ group.label }}</h2>
-              <span class="sandboxes__note">{{ group.rows.length }} · Слоты: {{ group.slots.join(', ') || '—' }}</span>
+              <span class="sandboxes__note">{{ group.rows.length }} {{ t('core.sandboxSloty') }} {{ group.slots.join(', ') || '—' }}</span>
             </div>
             <div class="sandboxes__list">
               <SandboxListRow v-for="row in group.rows" :key="row.task" :row="row"
@@ -79,11 +73,11 @@
 
         <details v-if="store.orphanJobs.length" class="sandboxes__recent ui-workspace-disclosure"
                  data-context="workspace-inline">
-          <summary>Недавние задания ({{ store.orphanJobs.length }})</summary>
-          <p class="sandboxes__note">Стенд ещё не появился в списке или уже удалён.</p>
+          <summary>{{ t('core.sandboxNedavnieZadaniya') }}{{ store.orphanJobs.length }})</summary>
+          <p class="sandboxes__note">{{ t('core.sandboxStendEscheNePoyavilsya') }}</p>
           <ul class="sandboxes__jobs">
             <li v-for="job in store.orphanJobs" :key="job.task">
-              <strong>t{{ job.task }}</strong>
+              <strong>{{ 't' }}{{ job.task }}</strong>
               <span>{{ jobKind(job) }} · {{ jobState(job) }}</span>
               <span v-if="job.profile" class="sandboxes__note">{{ job.profile }}</span>
               <p v-if="job.state === 'running' && job.label" class="sandboxes__job-message">
@@ -99,7 +93,7 @@
         <section v-show="showCreate" id="sandboxes-create" class="sandboxes__create"
                  aria-labelledby="sandboxes-raise-title">
           <UiPaneHeader>
-            <template #title><h2 id="sandboxes-raise-title">Новая песочница</h2></template>
+            <template #title><h2 id="sandboxes-raise-title">{{ t('core.sandboxNovayaPesochnitsa') }}</h2></template>
           </UiPaneHeader>
           <div class="ui-workspace-section__body">
             <SandboxRaiseForm :options="store.capableProfiles" :range="store.manualRange"
@@ -107,24 +101,22 @@
           </div>
         </section>
         <div v-show="!showCreate" class="sandboxes__selection">
-          <p v-if="outsideFilter" class="sandboxes__empty">Выбранный стенд вне фильтра</p>
+          <p v-if="outsideFilter" class="sandboxes__empty">{{ t('core.sandboxVybrannyyStendVneFiltra') }}</p>
           <SandboxCard v-if="selected?.entry" :key="selected.task" :entry="selected.entry"
                        :job="selected.job" :busy="store.isBusy(selected.task)"
                        :profiles="store.profiles"
                        :task-title="selected.title" :state-label="selected.stateLabel"
                        :state-detail="selected.detail" @dismantle="dismantle" @run="run" />
           <section v-else-if="selected" class="ui-workspace-section sandboxes__pending">
-            <h3>Стенд t{{ selected.task }} · {{ selected.title }}</h3>
-            <p>Подготовка идёт</p>
-            <UiProgress v-if="selected.job" :label="`Подъём стенда t${selected.task}`"
+            <h3>{{ t('core.sandboxStendT') }}{{ selected.task }} · {{ selected.title }}</h3>
+            <p>{{ t('core.sandboxPodgotovkaIdet') }}</p>
+            <UiProgress v-if="selected.job" :label="t('core.sandboxPodemStendaTTask', { task: selected.task })"
                         :value="selected.job.index" :max="selected.job.total"
                         :indeterminate="!selected.job.total" :value-text="selected.step" />
             <p>{{ selected.step }}</p>
             <p v-if="selected.job?.message">{{ selected.job.message }}</p>
           </section>
-          <aside v-else class="sandboxes__placeholder ui-workspace-guide">
-            Выберите стенд в списке или поднимите новую песочницу.
-          </aside>
+          <aside v-else class="sandboxes__placeholder ui-workspace-guide"> {{ t('core.sandboxVyberiteStendVSpiske') }} </aside>
         </div>
       </div>
     </div>
@@ -132,25 +124,12 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
+import { UiSkeletonLayout, t, messageRef } from '../ui';
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
-  UiRefreshIcon,
-  UiButton,
-  UiIconButton,
-  UiInlineMessage,
-  UiInput,
-  UiPaneHeader,
-  UiProgress,
-  UiSelect,
-  UiTab,
-  UiTabs,
-  confirmDialog,
-  promptDialog,
-  vTooltip,
-  UiLoadingState,
-  t,
+  UiRefreshIcon, UiButton, UiIconButton, UiInlineMessage, UiInput, UiPaneHeader, UiProgress,
+  UiSelect, UiTab, UiTabs, confirmDialog, promptDialog, vTooltip, UiLoadingState,
 } from '../ui';
 import {
   dismantleSandbox,
@@ -210,7 +189,7 @@ const filtered = computed(() => Boolean(search.value.trim())
 const awaitingStand = computed(() => rows.value.some((row) => !row.entry));
 const profiles = computed(() => sandboxGroups(rows.value, rows.value).map((group) => ({
   value: group.profile,
-  label: group.profile === NO_PROFILE ? 'Без профиля' : group.profile,
+  label: group.profile === NO_PROFILE ? t('core.sandboxBezProfilya') : group.profile,
   count: stateRows.value.filter((row) => sandboxProfileKey(row) === group.profile).length,
 })));
 const states = computed(() => SANDBOX_STATES.map((state) => ({
@@ -324,20 +303,20 @@ onUnmounted(() => clearInterval(clock));
  */
 function jobKind(job: SandboxJob) {
   if (job.action === 'run') {
-    return job.actionLabel || 'прогон';
+    return job.actionLabel || t('core.coreProgon');
   }
 
-  return job.action === 'up' ? 'подъём' : 'снос';
+  return job.action === 'up' ? t('core.corePodem') : t('core.coreSnos');
 }
 
 // Состояние задания словами: у стенда, которого уже нет в реестре, это единственное,
 // что остаётся человеку от подъёма или сноса.
 function jobState(job: SandboxJob) {
   if (job.state === 'running') {
-    return 'выполняется';
+    return t('settings.running');
   }
 
-  return job.state === 'done' ? 'выполнено' : 'ошибка';
+  return job.state === 'done' ? t('settings.remoteStepCompleted') : t('settings.error');
 }
 
 /**
@@ -345,14 +324,14 @@ function jobState(job: SandboxJob) {
  * скрипт профиля создаёт контейнеры и схемы данных. Отказ показывает сам стор.
  */
 async function raise(payload: { profile: string; task: string | null }) {
-  const target = payload.task ? `задачи ${payload.task}` : 'без задачи (служебный номер)';
+  const target = payload.task
+                          ? t('core.coreZadachiTask', { task: payload.task })
+                          : t('core.coreBezZadachiSluzhebnyyNomer');
   const accepted = await confirmDialog(
-    `Поднять песочницу профиля «${payload.profile}» ${target}?\n\n`
-      + 'Скрипт профиля создаст worktree, контейнеры и свои схемы данных. '
-      + 'Обычно это 12–15 минут и один занятый слот стенда.',
+    messageRef('core.sandboxPodnyatPesochnitsuProfilyaProfile', { profile: payload.profile, target }),
     {
-      title: 'Подъём песочницы',
-      okText: 'Поднять',
+      title: t('core.sandboxPodemPesochnitsy'),
+      okText: t('core.sandboxPodnyat'),
     },
   );
 
@@ -386,15 +365,16 @@ async function dismantle(payload: {
     ? `${t('core.sandboxRemovalProfileConfirm', { profile: payload.profile })}\n\n`
     : '';
   const accepted = await confirmDialog(
-    `Снести стенд t${payload.task}?\n\n`
-      + profileNotice
-      + (payload.force
-        ? 'Worktree будет удалён вместе с незакоммиченными изменениями — профиль сохранит их патчем в архив.'
-        : 'Контейнеры и схемы данных будут удалены. Незакоммиченное в worktree сохраняется: '
-          + 'скрипт профиля оставит каталог и предупредит об этом.'),
+    messageRef('core.sandboxSnestiStendTTask', {
+      task: payload.task,
+      profileNotice,
+      value: payload.force
+        ? t('core.sandboxWorktreeRemovedWithChanges')
+        : t('core.sandboxContainersRemovedWorktreeKept'),
+    }),
     {
-      title: 'Снос стенда',
-      okText: 'Снести',
+      title: t('core.sandboxSnosStenda'),
+      okText: t('core.sandboxSnesti'),
       danger: true,
     },
   );
@@ -417,10 +397,10 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 
   for (const arg of action.args) {
     const answer = await promptDialog({
-      title: `${action.label} — стенд t${task}`,
-      text: arg.hint ? `${arg.label}. ${arg.hint}` : arg.label,
-      placeholder: arg.type === 'number' ? 'целое число' : '',
-      okText: 'Дальше',
+      title: t('core.sandboxLabelStendTTask', { label: action.label, task }),
+      text: arg.hint ? t('core.sandboxLabelHint', { label: arg.label, hint: arg.hint }) : arg.label,
+      placeholder: arg.type === 'number' ? t('core.sandboxTseloeChislo') : '',
+      okText: t('core.sandboxDalshe'),
     });
 
     if (answer === null) {
@@ -435,10 +415,14 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
   }
 
   const accepted = await confirmDialog(
-    `${action.label} на стенде t${task}?\n\n${action.confirm || action.description}`,
+    messageRef('core.sandboxLabelNaStendeT', {
+      label: action.label,
+      task,
+      description: action.confirm || action.description,
+    }),
     {
-      title: 'Прогон на стенде',
-      okText: 'Запустить',
+      title: t('core.sandboxProgonNaStende'),
+      okText: t('core.sandboxZapustit'),
     },
   );
 

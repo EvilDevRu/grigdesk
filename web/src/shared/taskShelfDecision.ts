@@ -2,6 +2,10 @@
 // и называет наступившее событие. Панель, чип и оповещение получают уже готовый row.
 
 import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const TERMINAL_ANALYSIS = new Set(['done', 'finished', 'failed', 'interrupted']);
 const TERMINAL_TRACKER = new Set(['completed', 'done', 'closed']);
@@ -192,29 +196,29 @@ function waitingText(reason: string, current: ShelfObservedSnapshot): string {
   const pipeline = current.pipeline;
 
   if (pipeline?.attempt && pipeline.gate) {
-    return 'Жду моего решения';
+    return t('core.coreZhduMoegoResheniya');
   }
   if (pipeline?.attempt && pipeline.stall) {
-    return 'Конвейер встал';
+    return t('core.pipelineKonveyerVstal');
   }
   if (analysisState === 'queued' || analysisState === 'running') {
-    return 'Жду оценку';
+    return t('core.taskZhduOtsenku');
   }
   if (pipeline?.attempt && !pipeline.result && pipeline.daemon === 'running') {
-    return 'Жду конвейер';
+    return t('core.taskZhduKonveyer');
   }
   if (pipeline?.attempt && pipeline.result && current.b24?.present) {
-    return 'Жду ответ в задаче';
+    return t('core.taskZhduOtvetVZadache');
   }
 
   const byReason: Record<string, string> = {
-    manual: 'Наблюдаю вручную',
-    analysis: 'Жду оценку',
-    pipeline: 'Жду конвейер',
-    comments: 'Жду ответ в задаче',
+    manual: t('core.taskNablyudayuVruchnuyu'),
+    analysis: t('core.taskZhduOtsenku'),
+    pipeline: t('core.taskZhduKonveyer'),
+    comments: t('core.taskZhduOtvetVZadache'),
   };
 
-  return byReason[reason] || 'Наблюдаю вручную';
+  return byReason[reason] || t('core.taskNablyudayuVruchnuyu');
 }
 
 /**
@@ -240,10 +244,10 @@ export default function taskShelfDecision({
     && current.analysis.state && TERMINAL_ANALYSIS.has(current.analysis.state)
     && JSON.stringify(before.analysis) !== JSON.stringify(current.analysis)) {
     const messages: Record<string, string> = {
-      done: 'Оценка готова',
-      finished: 'Оценка готова',
-      failed: 'Оценка завершилась с ошибкой',
-      interrupted: 'Оценка была прервана',
+      done: t('core.taskOtsenkaGotova'),
+      finished: t('core.taskOtsenkaGotova'),
+      failed: t('core.taskOtsenkaZavershilasSOshibkoy'),
+      interrupted: t('core.taskOtsenkaBylaPrervana'),
     };
     const fingerprint = [
       'analysis',
@@ -273,7 +277,7 @@ export default function taskShelfDecision({
       return event(
         'lit',
         'pipeline',
-        `Конвейер ждёт решения: ${currentPipeline.gate}`,
+        t('core.coreKonveyerZhdetResheniyaGate', { gate: currentPipeline.gate }),
         `pipeline:gate:${currentPipeline.attempt}:${currentPipeline.gate}`,
         candidate,
         reasonText,
@@ -283,7 +287,7 @@ export default function taskShelfDecision({
       return event(
         'lit',
         'pipeline',
-        `Конвейер остановился: ${currentPipeline.stall}`,
+        t('core.coreKonveyerOstanovilsyaStall', { stall: currentPipeline.stall }),
         `pipeline:stall:${currentPipeline.attempt}:${currentPipeline.stall}`,
         candidate,
         reasonText,
@@ -291,8 +295,8 @@ export default function taskShelfDecision({
     }
     if (currentPipeline.result && currentPipeline.result !== beforePipeline.result) {
       const message = currentPipeline.result === 'completed'
-        ? 'Прогон конвейера завершён'
-        : `Прогон конвейера завершён: ${currentPipeline.result}`;
+        ? t('core.taskProgonKonveyeraZavershen')
+        : t('core.taskProgonKonveyeraZavershenResult', { result: currentPipeline.result });
 
       return event(
         'lit',
@@ -311,7 +315,7 @@ export default function taskShelfDecision({
     return event(
       'lit',
       'comments',
-      `Новые комментарии: ${growth}`,
+      t('core.coreNovyeKommentariiGrowth', { growth: growth }),
       `comments:${current.b24.unread}`,
       candidate,
       reasonText,
@@ -328,7 +332,7 @@ export default function taskShelfDecision({
     return event(
       'lit',
       'b24',
-      'Задача завершена или закрыта',
+      t('core.coreZadachaZavershenaIliZakryta'),
       `b24:closed:${current.b24?.status || 'absent'}`,
       candidate,
       reasonText,

@@ -1,4 +1,5 @@
 import type {
+
   TaskPersonalSource, TaskSourceOptions, TaskSourceId,
 } from '../../../shared/tasks/taskReference.ts';
 import { isTaskSourceId, taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
@@ -24,6 +25,11 @@ import { useAnalysisStore } from './analysis.ts';
 import { useNotifyWatchStore } from './notifyWatch.ts';
 import { useBoardStore } from './board.ts';
 import { usePluginsStore } from './plugins.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 // Триаж уже на TypeScript, и полка читает его настоящий стор: собственная копия
 // формы разошлась бы с ним молча. Остальные соседи ещё на JavaScript, поэтому для
@@ -196,10 +202,18 @@ const BOARD_LISTS = ['tasks', 'toReview', 'created', 'accomplice', 'auditor'];
 // Подписи терминальных состояний: идущий заход называет сама строка активности,
 // потому что его имя зависит ещё и от наличия прошлой оценки.
 const ANALYSIS_LABELS: Record<string, string> = {
-  done: 'Готова',
-  finished: 'Готова',
-  failed: 'Завершилась с ошибкой',
-  interrupted: 'Прервана',
+  get done() {
+    return t('core.taskGotova');
+  },
+  get finished() {
+    return t('core.taskGotova');
+  },
+  get failed() {
+    return t('core.taskZavershilasSOshibkoy');
+  },
+  get interrupted() {
+    return t('core.taskPrervana');
+  },
 };
 const ANALYSIS_TONES: Record<string, string> = {
   queued: 'neutral',
@@ -321,7 +335,7 @@ function detailProject(detail: ShelfTaskDetail | null): string {
 
   const id = Number(detail?.group_id);
 
-  return Number.isSafeInteger(id) && id > 0 ? `Проект #${id}` : '';
+  return Number.isSafeInteger(id) && id > 0 ? t('core.coreProektId', { id: id }) : '';
 }
 
 /**
@@ -542,33 +556,33 @@ function analysisActivity(
 
     return {
       kind: 'analysis',
-      label: 'Оценка',
+      label: t('core.taskDesignAnalysis'),
       value: again
-        ? (started ? 'Переоценка идёт' : 'Переоценка в очереди')
-        : (started ? 'Разведка идёт' : 'В очереди'),
+        ? (started ? t('core.corePereotsenkaIdet') : t('core.corePereotsenkaVOcheredi'))
+        : (started ? t('core.coreRazvedkaIdet') : t('core.queued')),
       tone: ANALYSIS_TONES[state] || 'neutral',
     };
   }
 
-  const parts = [ANALYSIS_LABELS[String(state)] || 'Состояние неизвестно'];
+  const parts = [ANALYSIS_LABELS[String(state)] || t('settings.unknownStatus')];
   const complexity = scale(analysis?.complexity);
   const risk = scale(analysis?.risk);
 
   if (complexity) {
-    parts.push(`сложность ${complexity}/5`);
+    parts.push(t('core.coreSlozhnostComplexity5', { complexity: complexity }));
   }
   if (risk) {
-    parts.push(`риск ${risk}/5`);
+    parts.push(t('core.coreRiskRisk5', { risk: risk }));
   }
   if (typeof analysis?.diff_size === 'string' && analysis.diff_size) {
-    parts.push(`дифф ${analysis.diff_size}`);
+    parts.push(t('core.coreDiffDiffsize', { diffsize: analysis.diff_size }));
   }
 
   const needsClarification = analysis?.needs_clarification === true
     || analysis?.confidence === 'low';
 
   if (needsClarification) {
-    parts.push('нужно уточнение');
+    parts.push(t('core.coreNuzhnoUtochnenie'));
   }
 
   const terminal = state === 'failed' || state === 'interrupted';
@@ -576,7 +590,7 @@ function analysisActivity(
 
   return {
     kind: 'analysis',
-    label: 'Оценка',
+    label: t('core.taskDesignAnalysis'),
     value: parts.join(' · '),
     tone: terminalTone
       || (needsClarification ? 'warn' : ANALYSIS_TONES[String(state)] || 'neutral'),
@@ -621,31 +635,34 @@ function pipelineActivity(
   if (!pipeline) {
     return {
       kind: 'pipeline',
-      label: 'Конвейер',
-      value: 'Данные ещё не получены',
+      label: t('core.pipeline'),
+      value: t('core.coreDannyeEscheNePolucheny'),
       tone: 'neutral',
     };
   }
   if (!current && snapshot && !snapshot.result) {
     return {
       kind: 'pipeline',
-      label: 'Конвейер',
-      value: 'Последний прогон сейчас не виден',
+      label: t('core.pipeline'),
+      value: t('core.corePosledniyProgonSeychasNe'),
       tone: 'neutral',
     };
   }
 
-  let value = 'Состояние неизвестно';
+  let value = t('settings.unknownStatus');
   let tone = 'neutral';
 
   if (pipeline.gate) {
-    value = `Нужно решение · ${pipeline.gate}`;
+    value = t('core.shelfNeedDecision', { gate: pipeline.gate });
     tone = 'warn';
   } else if (pipeline.stall) {
-    value = `Остановлен · ${pipeline.stall}`;
+    value = t('core.shelfStoppedStall', { stall: pipeline.stall });
     tone = 'bad';
   } else if (pipeline.result) {
-    value = pipeline.result === 'completed' ? 'Завершён' : `Завершён · ${pipeline.result}`;
+    value =
+       pipeline.result === 'completed'
+         ? t('core.coreZavershen')
+         : t('core.coreZavershenResult', { result: pipeline.result });
     tone = pipeline.result === 'completed' ? 'good' : 'warn';
   } else if (pipeline.daemon === 'running') {
     const progress = pipeline.progress;
@@ -653,19 +670,19 @@ function pipelineActivity(
     const total = Number(progress?.total);
     const count = Number.isSafeInteger(done) && Number.isSafeInteger(total) && total > 0
       ? `${done}/${total}`
-      : 'Идёт';
+      : t('core.taskIdet');
 
     value = pipeline.stage?.label ? `${count} · ${pipeline.stage.label}` : count;
     tone = pipeline.stage?.state === 'wait' || pipeline.stage?.state === 'premature'
       ? 'warn'
       : 'accent';
   } else if (pipeline.attempt) {
-    value = 'Прогон остановлен';
+    value = t('core.shelfRunStopped');
   }
 
   return {
     kind: 'pipeline',
-    label: 'Конвейер',
+    label: t('core.pipeline'),
     value,
     tone,
     progress: pipelineProgress(current),
@@ -698,8 +715,8 @@ function trackerActivity(
   if (task) {
     return {
       kind: 'b24',
-      label: 'Битрикс24',
-      value: task.statusText || task.statusLabel || 'На доске',
+      label: t('settings.bitrix'),
+      value: task.statusText || task.statusLabel || t('core.coreNaDoske'),
       tone: B24_TONES[String(task.statusKind)] || 'neutral',
     };
   }
@@ -709,8 +726,8 @@ function trackerActivity(
 
   return {
     kind: 'b24',
-    label: 'Битрикс24',
-    value: snapshot.present ? 'Последний статус сохранён' : 'Не видна на текущей доске',
+    label: t('settings.bitrix'),
+    value: snapshot.present ? t('core.corePosledniyStatusSohranen') : t('core.coreNeVidnaNaTekuschey'),
     tone: B24_TONES[String(snapshot.statusKind)] || 'neutral',
   };
 }
@@ -753,13 +770,13 @@ function sourceIssues(controller: ShelfController): string[] {
   const issues = [];
 
   if (controller.source === 'tracker' && controller.board.error) {
-    issues.push('Статусы Битрикс24 могут быть устаревшими');
+    issues.push(t('core.coreStatusyBitriks24MogutByt'));
   }
   if (controller.analysis.error && controller.analysis.disabled !== true) {
-    issues.push('Состояние оценки может быть устаревшим');
+    issues.push(t('core.coreSostoyanieOtsenkiMozhetByt'));
   }
   if (controller.pipeline.error) {
-    issues.push('Состояние конвейера может быть устаревшим');
+    issues.push(t('core.coreSostoyanieKonveyeraMozhetByt'));
   }
 
   return issues;
@@ -971,7 +988,7 @@ const createTaskShelfStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorText(error) || 'Полка недоступна';
+          this.error = errorText(error) || t('core.taskPolkaNedostupna');
         }
 
         return false;
@@ -1043,7 +1060,7 @@ const createTaskShelfStore = (
             id: `task-shelf-${entry.taskId}-${decision.fingerprint}`,
             scope: `task:${entry.taskId}`,
             tone: 'accent',
-            title: `Полка — задача #${entry.taskId}`,
+            title: t('core.taskPolkaZadachaTaskid', { taskId: entry.taskId }),
             body: decision.message,
             target: {
               kind: 'task',
@@ -1108,7 +1125,7 @@ const createTaskShelfStore = (
         reason,
       }).snapshot;
       const task = boardTask(controller, key);
-      const title = existing?.title || textOr(task?.title) || `Задача #${key}`;
+      const title = existing?.title || textOr(task?.title) || t('core.taskZadachaKey', { key });
       const epoch = this._epoch;
       const requestSeq = ++this._requestSeq;
 
@@ -1137,7 +1154,7 @@ const createTaskShelfStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorText(error) || 'Не удалось изменить полку';
+          this.error = errorText(error) || t('core.taskNeUdalosIzmenitPolku');
         }
 
         return false;
@@ -1195,7 +1212,7 @@ const createTaskShelfStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorText(error) || 'Не удалось убрать задачу';
+          this.error = errorText(error) || t('core.taskNeUdalosUbratZadachu');
         }
 
         return false;

@@ -80,7 +80,7 @@
           <UiSelect v-model="afterId" data-test="wizard-after">
             <option v-for="place in places" :key="place.afterId" :value="place.afterId"
                     :disabled="Boolean(place.disabledReason)">
-              {{ place.label }}{{ place.disabledReason ? ` — ${reasonText(place.disabledReason)}` : '' }}
+              {{ place.label }}{{ place.disabledReason ? t('core.routeDisabledreason', { disabledReason: reasonText(place.disabledReason) }) : '' }}
             </option>
           </UiSelect>
         </label>

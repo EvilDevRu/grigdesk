@@ -9,7 +9,7 @@
       :role="arbitrating ? 'status' : 'alert'"
     >
       <span class="graph-stop-stage">{{ arbitrating ? '⚖' : '🛑' }} {{ stallView.nodeLabel }}</span>
-      <strong>{{ arbitrating ? 'Арбитр разбирает остановку' : stallView.title }}</strong>
+      <strong>{{ arbitrating ? t('core.pipelineArbitrRazbiraetOstanovku') : stallView.title }}</strong>
       <span
         v-if="arbitrating"
         class="graph-stop-fails mono"
@@ -17,7 +17,7 @@
       <span
         v-else-if="stallView.fails != null"
         class="graph-stop-fails"
-      >{{ stallView.fails }} сбоев</span>
+      >{{ stallView.fails }} {{ t('core.pipelineSboev') }}</span>
       <span class="graph-stop-hint">{{
         arbitrating ? stallView.title : stallView.hint
       }}</span>
@@ -516,43 +516,83 @@ const doneLike = new Set<string | undefined>(['done', 'skip']);
 // Подсказка следа арбитра. Вердикты те же, что в `lib/arbiter-cards.js`; незнакомый
 // вердикт метки не даёт вовсе — выдумывать за сервер смысл нельзя.
 const ARBITER_NODE_TITLE: Record<string, string> = {
-  human: 'Арбитр разобрал эту остановку и вернул решение тебе — открой узел',
-  resolve: 'Арбитр снял здесь тупик и вернул конвейер сам',
-  deferred: 'Арбитр выбрал минимальный вариант за тебя — проверишь на воротах',
+  get human() {
+    return t('core.pipelineArbitrRazobralEtuOstanovku');
+  },
+  get resolve() {
+    return t('core.pipelineArbitrSnyalZdesTupik');
+  },
+  get deferred() {
+    return t('core.pipelineArbitrVybralMinimalnyyVariant');
+  },
 };
 const statusMarks = MARKS as Record<string, string>;
 // Пилюля следа арбитра над узлом.
 const MARK_WIDTH = 24;
 const MARK_HEIGHT = 14;
 const KIND_LABEL: Record<string, string> = {
-  agent: 'Агент',
-  code: 'Автоматически',
-  human: 'Решение человека',
+  get agent() {
+    return t('core.chatSettingsAgent');
+  },
+  get code() {
+    return t('settings.automatic');
+  },
+  get human() {
+    return t('core.pipelineReshenieCheloveka');
+  },
 };
 const KIND_HEADING: Record<string, string> = {
-  agent: 'Агент',
-  code: 'Проверка',
-  human: 'Человек',
+  get agent() {
+    return t('core.chatSettingsAgent');
+  },
+  get code() {
+    return t('core.stageWizardVerify');
+  },
+  get human() {
+    return t('core.pipelineChelovek');
+  },
 };
 // Значки дополняют силуэт типа, а цвет состояния остаётся самостоятельным сигналом.
 // Все контуры нарисованы в одной сетке 16 × 16.
 const KIND_ICON: Record<string, string> = {
-  agent: 'M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z',
-  code: 'M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6',
-  human: 'M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2',
+  agent: "M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z",
+  code: "M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6",
+  human: "M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2",
 };
 const STATUS_LABEL: Record<string, string> = {
-  done: 'Готово',
-  run: 'В работе',
-  wait: 'Ждёт тебя',
-  stall: 'Остановка',
-  skipbad: 'Аномалия',
-  premature: 'Раньше срока',
-  fail: 'Ошибка',
-  arb: 'Разбор',
-  skip: 'Пропущен',
-  idle: 'Нет данных',
-  pending: 'Не начат',
+  get done() {
+    return t('core.chatSettingsDone');
+  },
+  get run() {
+    return t('core.running');
+  },
+  get wait() {
+    return t('core.pipelineZhdetTebya2');
+  },
+  get stall() {
+    return t('core.pipelineOstanovka');
+  },
+  get skipbad() {
+    return t('core.pipelineAnomaliya');
+  },
+  get premature() {
+    return t('core.pipelineRansheSroka');
+  },
+  get fail() {
+    return t('core.error');
+  },
+  get arb() {
+    return t('core.pipelineRazbor');
+  },
+  get skip() {
+    return t('core.pipelinePropuschen');
+  },
+  get idle() {
+    return t('core.pipelineNetDannyh');
+  },
+  get pending() {
+    return t('core.pipelineNeNachat');
+  },
 };
 
 const nodeInteractive = computed(() => props.interactive || !props.reference);
@@ -624,7 +664,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
 
     if (cycleEdge) {
       className = 'e-cycle';
-      label = transfer ? 'Задание на круг' : 'На проверку';
+      label = transfer ? t('core.pipelineZadanieNaKrug') : t('core.pipelineNaProverku');
       labelClass = 'elbl-cycle';
 
       // На первом входе ведущий ещё не получил результат исполнителя.
@@ -679,7 +719,10 @@ const edgeElements = computed<EdgeElement[]>(() => {
       source,
       destination,
       title: [
-        `${graph.nodes[source]?.[1] || 'Старт'} → ${graph.nodes[destination]?.[1] || destination}`,
+        t('core.pipelineEdgeTitle', {
+    from: graph.nodes[source]?.[1] || t('core.pipelineStartNode'),
+    to: graph.nodes[destination]?.[1] || destination,
+  }),
         label,
         cycleEdge ? originalLabel : '',
       ].filter(Boolean).join(' · '),
@@ -825,10 +868,12 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
     // человеке, её прямо сейчас делает арбитр. Красный узел в это время звал бы к
     // курьерской работе, которую он и снимает.
     const status = nodeIsArbitrated(committed, props.arbitrating) ? 'arb' : committed;
-    const kindLabel = parallelNodes.value.includes(nodeId) ? 'Стенд' : KIND_HEADING[kind] || kind;
+    const kindLabel = parallelNodes.value.includes(nodeId)
+    ? t('core.pipelineStend2')
+    : KIND_HEADING[kind] || kind;
     const statusLabel = STATUS_LABEL[status] || '';
     const loopRole = loop.value?.lead === nodeId
-      ? 'Ведущий' : loop.value?.worker === nodeId ? 'Исполнитель' : '';
+      ? t('core.pipelineVeduschiy') : loop.value?.worker === nodeId ? t('core.taskEditResponsible') : '';
     const description = [kindLabel, loopRole, statusLabel].filter(Boolean).join(' · ');
     const runnerMetadata = graph.nodeMeta?.[nodeId]?.runner ?? null;
     const runner = runnerMetadata ? runnerNodeLabel(runnerMetadata) : '';
@@ -837,14 +882,19 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
       ? [runner, runnerModel].filter(Boolean).join(' · ')
       : subtitle || KIND_LABEL[kind] || '';
     const nodeStall = stallView.value?.node === nodeId ? stallView.value : null;
-    const arbitratedReason = nodeStall?.title || 'узел остановил маршрут';
+    const arbitratedReason = nodeStall?.title || t('core.pipelineUzelOstanovilMarshrut');
     const stallTitle = status === 'arb'
-      ? `Арбитр разбирает остановку (${arbiterRunLabel(props.arbitrating)}) — ${arbitratedReason}`
+      ? t('core.pipelineArbitrRazbiraetOstanovkuArbitrating', {
+   arbitrating: arbiterRunLabel(props.arbitrating),
+   arbitratedReason: arbitratedReason,
+ })
       : (nodeStall
         ? `${nodeStall.title}${nodeStall.hint ? ` — ${nodeStall.hint}` : ''}`
         : '');
     const runnerTitle = runnerMetadata
-      ? `${runnerChainLabel(runnerMetadata)}${runnerModel ? ` · модель ${runnerModel}` : ''}`
+      ? `${runnerChainLabel(runnerMetadata)}${runnerModel
+    ? t('core.pipelineModelRunnermodel', { runnerModel: runnerModel })
+    : ''}`
       : '';
     const arbiterVerdict = props.reference ? '' : (props.arbitrated?.[nodeId] ?? '');
     const arbiterTitle = arbiterVerdict ? ARBITER_NODE_TITLE[arbiterVerdict] ?? '' : '';

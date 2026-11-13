@@ -3,6 +3,11 @@ import { useRoutesStore } from '../../stores/routes.ts';
 import { compareDraft } from './compare.ts';
 import { loadEditor } from './loadEditor.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Переводит профиль на публикацию через редактор.
@@ -43,7 +48,7 @@ export async function enableEditorSource(approve: () => Promise<boolean>): Promi
     await compareDraft();
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.error = failureText(error, 'Не удалось переключить источник маршрутов.');
+      store.error = failureText(error, translateUi('core.sourceCouldNotSwitchTheRouteSource'));
     }
   }
 }

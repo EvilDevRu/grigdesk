@@ -1,9 +1,15 @@
 import type {
+
   RouteTransferBundle, RouteTransferImportResult,
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { loadDraft } from './loadDraft.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /** Экспортирует только сохранённую ревизию открытого черновика. */
 /**
@@ -16,7 +22,7 @@ export async function exportRouteTransfer(routeId: string | null): Promise<Route
 
   if (!opened?.draftId || !store.serverSnapshot || store.dirty || store.saving
     || store.conflict || store.jsonBuffer?.dirty) {
-    throw new Error('Сначала сохраните черновик и разрешите конфликт записи.');
+    throw new Error(t('core.routeSnachalaSohraniteChernovikI'));
   }
 
   return runtimeOf(store).api.exportDraftTransfer(opened.profile, opened.draftId, routeId);
@@ -48,7 +54,7 @@ export async function addRouteTransfer(bundle: RouteTransferBundle,
 
   if (!opened?.draftId || !snapshot || opened.readOnly || store.dirty || store.saving
     || store.conflict || store.jsonBuffer?.dirty) {
-    throw new Error('Сначала сохраните редактируемый черновик.');
+    throw new Error(t('core.routeSnachalaSohraniteRedaktiruemyyChernovik'));
   }
 
   const result = await runtimeOf(store).api.addRouteTransfer(opened.profile, opened.draftId, {

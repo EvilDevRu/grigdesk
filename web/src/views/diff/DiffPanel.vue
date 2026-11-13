@@ -1,18 +1,18 @@
 <template>
   <section class="diff-core ui-workspace" data-ui-workspace :aria-busy="loading || undefined"
            :aria-label="t('core.diffDesignWorkspace')">
-    <DiffLoading v-if="showLoading" label="Считаю диф…" :side-by-side="sideBySide" />
+    <DiffLoading v-if="showLoading" :label="t('core.diffSchitayuDif')" :side-by-side="sideBySide" />
     <div v-else-if="error && !repos.length" class="state"
     :data-perf-error="error && !repos.length && !loading ? '' : undefined" role="status">
       <span class="state__icon" aria-hidden="true">±</span>
       <strong>{{ t('core.diffDesignLoadFailed') }}</strong>
       <p class="bad">{{ error }}</p>
-      <UiButton tone="accent" @click="load">Повторить</UiButton>
+      <UiButton tone="accent" @click="load">{{ t('core.pluginNotificationsRetry') }}</UiButton>
     </div>
     <div v-else-if="!files.length" class="state" role="status">
       <span class="state__icon" aria-hidden="true">±</span>
-      <strong>Несохранённых изменений нет</strong>
-      <p>Правки задачи уже закоммичены — смотри их в PR.</p>
+      <strong>{{ t('core.diffNesohranennyhIzmeneniyNet') }}</strong>
+      <p>{{ t('core.diffPravkiZadachiUzheZakommicheny') }}</p>
       <UiButton data-context="workspace-toolbar" :loading="loading" @click="load">
         {{ t('core.diffDesignRefresh') }}
       </UiButton>
@@ -72,7 +72,7 @@
                            :data-diff-file="`${r.name}:${row.file.path}`"
                            :pressed="selectedKey === `${r.name}:${row.file.path}`"
                            :style="{ paddingLeft: indent(row.depth) }"
-                           :aria-label="`${repoLabel(r.name)} · ${row.file.path}`"
+                           :aria-label="t('core.diffNamePath', { name: repoLabel(r.name), path: row.file.path })"
                            v-tooltip="row.file.path" @click="selectFile(r.name, row.file.path)">
                 <span class="st" :class="row.file.status" :aria-label="statusLabel(row.file.status)">
                   {{ STLABEL[row.file.status] || row.file.status }}
@@ -339,13 +339,13 @@ function isDiffRepo(value: unknown): value is DiffRepo {
  */
 function parseRepos(value: unknown): DiffRepo[] {
   if (!isRecord(value)) {
-    throw new Error('Сервер вернул некорректный диф');
+    throw new Error(t('core.diffServerVernulNekorrektnyyDif'));
   }
   if (value.repos == null) {
     return [];
   }
   if (!Array.isArray(value.repos) || !value.repos.every(isDiffRepo)) {
-    throw new Error('Сервер вернул некорректный диф');
+    throw new Error(t('core.diffServerVernulNekorrektnyyDif'));
   }
 
   return value.repos;
@@ -439,7 +439,7 @@ function buildTree(list: DiffFile[]): DirectoryNode {
         node.children.set(part, child);
       }
       if (!child.dir) {
-        throw new Error('Некорректные пути файлов дифа');
+        throw new Error(t('core.diffNekorrektnyePutiFaylovDifa'));
       }
 
       node = child;
@@ -624,7 +624,7 @@ watch(sideBySide, (v) => {
  */
 async function load() {
   if (!tid.value) {
-    error.value = 'не указана задача';
+    error.value = t('core.diffNeUkazanaZadacha');
 
     return;
   }

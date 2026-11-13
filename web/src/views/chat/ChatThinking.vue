@@ -42,7 +42,7 @@
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8.6" />
         <circle cx="12" cy="12" r="3.4" />
-      </svg>{{ tokensText }}<span class="tok-unit"> ток.</span>
+      </svg>{{ tokensText }}<span class="tok-unit">{{ t('core.chatThinkingTokens') }}</span>
     </span>
   </div>
 </template>
@@ -52,7 +52,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   THINKING_WORDS, formatElapsed, formatTurnTokens, formatTurnTokensShort, shuffledOrder, thinkingWord,
 } from './chatThinking.ts';
-import { vTooltip } from '../../ui';
+import { vTooltip, t } from '../../ui';
 
 // Живая строка идущего хода. Три факта рядом: чем агент занят сейчас (слово), сколько
 // ход идёт (по часам ЭТОГО окна) и сколько токенов вывода он потратил (если исполнитель
@@ -72,8 +72,7 @@ const props = withDefaults(defineProps<{
 const WORD_MS = 4_000;
 const TICK_MS = 1_000;
 
-const ELAPSED_HINT = 'Сколько идёт этот ход — минуты:секунды по часам этого окна';
-const TOKENS_HINT = 'Выход текущего хода';
+const ELAPSED_HINT = computed(() => t('core.chatSkolkoIdetEtotHod'));
 
 const mountedAt = ref(Date.now());
 const now = ref(mountedAt.value);
@@ -92,7 +91,7 @@ const tokensText = computed(() => formatTurnTokensShort(props.tokens, props.toke
 const tokensHint = computed(() => {
   const value = formatTurnTokens(props.tokens, props.tokensEstimate).replace('≈ ', '≈');
 
-  return `${TOKENS_HINT}: ${value}`;
+  return t('core.chatTokenshintValue', { tOKENSHINT: t('core.chatVyhodTekuschegoHoda'), value });
 });
 
 // Слово, не влезшее в ячейку, уже кончается многоточием обрезки — анимированные точки

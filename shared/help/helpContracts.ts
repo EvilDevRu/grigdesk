@@ -5,6 +5,13 @@ export const HELP_FORMAT = 1;
 export const HELP_MAX_BYTES = 1024 * 1024;
 export const HELP_PAGE_SIZE = 12000;
 export const HELP_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+export const HELP_LOCALES = ['ru', 'en'] as const;
+
+export type HelpLocale = typeof HELP_LOCALES[number];
+
+export const helpResourceFile = (locale: HelpLocale): string =>
+  locale === 'ru' ? 'help.json' : `help.${locale}.json`;
+
 /**
  * Ошибка публичного корпуса не раскрывает путь или содержимое файла машины.
  * Один код распознаётся API, инструментом и сетевым декодером интерфейса.
@@ -30,7 +37,7 @@ const bundle = d.objectOf({
   version: d.text,
   commit: d.text,
   revision: d.text,
-  locale: d.oneOf('ru'),
+  locale: d.oneOf(...HELP_LOCALES),
   articles: d.listOf(article),
 });
 

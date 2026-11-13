@@ -1,8 +1,6 @@
 <template>
   <div class="page projects ui-page ui-workspace" data-ui-workspace>
-    <UiInlineMessage v-if="registrationDeleted" tone="warning">
-      Регистрация проекта удалена.
-    </UiInlineMessage>
+    <UiInlineMessage v-if="registrationDeleted" tone="warning"> {{ t('core.projectRegistratsiyaProektaUdalena') }} </UiInlineMessage>
     <div ref="workspace" class="workspace" :class="{ 'single-pane': !splitView }">
       <!--
         На широком экране список и паспорт стоят рядом: так видно, куда вернёшься.
@@ -23,12 +21,11 @@
               data-role="project-create"
               data-context="workspace-toolbar"
               variant="ghost"
-              aria-label="Новый проект"
-              v-tooltip="'Новый проект'"
+              :aria-label="t('core.projectNovyyProekt')"
+              v-tooltip="t('core.projectNovyyProekt')"
               @click="createProject"
             >
-              <template #leading><ProjectIcon name="plus" /></template>Новый
-            </UiButton>
+              <template #leading><ProjectIcon name="plus" /></template>{{ t('core.projectNovyy') }} </UiButton>
           </template>
         </ProjectList>
       </div>
@@ -38,21 +35,20 @@
           <template v-if="!splitView" #navigation>
             <UiButton variant="ghost" data-context="workspace-toolbar"
               data-role="project-back" @click="backToList">
-              <template #leading><ProjectIcon name="back" /></template>Проекты
-            </UiButton>
+              <template #leading><ProjectIcon name="back" /></template>{{ t('core.projects') }} </UiButton>
           </template>
           <template #title><h2>{{ formTitle }}</h2></template>
           <template v-if="!creating && currentDetail" #meta>
             <span class="project-status">
               <span :class="['status-dot', { archived: currentDetail.archivedAt }]" />
-              {{ currentDetail.archivedAt ? 'В архиве' : 'Активный' }}
+              {{ currentDetail.archivedAt ? t('core.projectVArhive') : t('settings.accessProfilesActive') }}
             </span>
           </template>
           <template v-if="!creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted" #actions>
             <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
-              aria-label="Чат с проектом" :disabled="!chat.loaded" @click="openChat">
+              :aria-label="t('core.projectChatSProektom')" :disabled="!chat.loaded" @click="openChat">
               <template #leading><ProjectIcon name="chat" /></template>
-              <span class="chat-full">Чат с проектом</span><span class="chat-short">Чат</span>
+              <span class="chat-full">{{ t('core.projectChatSProektom') }}</span><span class="chat-short">{{ t('core.projectChat') }}</span>
             </UiButton>
           </template>
         </UiPaneHeader>
@@ -107,9 +103,7 @@
                   v-if="!creating && !currentDetail"
                   data-role="project-detail-retry"
                   @click="retryProject"
-                >
-                  Повторить
-                </UiButton>
+                > {{ t('core.pluginNotificationsRetry') }} </UiButton>
               </div>
               <ProjectConflict
                 v-if="currentDraft && store.conflict"
@@ -122,10 +116,8 @@
 
               <div v-if="saveFailure === 'exists'" class="form-notice" data-role="project-save-failure">
                 <UiInlineMessage tone="warning">
-                  <p class="sub">Проект с таким идентификатором уже есть. Правки не потеряны.</p>
-                  <UiButton data-role="project-open-found" variant="text" @click="openFound">
-                    Открыть найденный проект
-                  </UiButton>
+                  <p class="sub">{{ t('core.projectProektSTakimIdentifikatorom') }}</p>
+                  <UiButton data-role="project-open-found" variant="text" @click="openFound"> {{ t('core.projectOtkrytNaydennyyProekt') }} </UiButton>
                 </UiInlineMessage>
               </div>
 
@@ -134,11 +126,9 @@
           <div v-else class="form-notice">
             <template v-if="store.error">
               <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
-              <UiButton v-if="!creating" data-role="project-detail-retry" @click="retryProject">
-                Повторить
-              </UiButton>
+              <UiButton v-if="!creating" data-role="project-detail-retry" @click="retryProject"> {{ t('core.pluginNotificationsRetry') }} </UiButton>
             </template>
-            <UiLoadingState v-else label="Загрузка проекта…" variant="document">
+            <UiLoadingState v-else :label="t('core.projectZagruzkaProekta')" variant="document">
               <div class="passport-loading">
                 <UiSkeletonLayout layout="form" :header="false" />
               </div>
@@ -157,18 +147,18 @@
             <path d="M8 19h32M19 19v19M24 25h10M24 30h7" />
           </svg>
         </div>
-        <h2>{{ store.items.length ? 'Выберите проект' : 'Создайте первый проект' }}</h2>
+        <h2>{{ store.items.length ? t('core.taskFormChooseProject') : t('core.projectSozdaytePervyyProekt') }}</h2>
         <p>{{ store.items.length
-          ? 'Здесь будут его настройки, репозитории и связи с фабрикой.'
-          : 'Объедините рабочие копии кода под одним названием.' }}</p>
-        <UiButton variant="outline" @click="createProject">Создать проект</UiButton>
+          ? t('core.projectZdesBudutEgoNastroyki')
+          : t('core.projectObediniteRabochieKopiiKoda') }}</p>
+        <UiButton variant="outline" @click="createProject">{{ t('core.projectSozdatProekt') }}</UiButton>
       </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
+import { UiSkeletonLayout, t, messageRef } from '../ui';
 
 // Раздел «Проекты»: список паспортов слева, паспорт открытого проекта справа.
 //
@@ -179,13 +169,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 
 import {
-  UiButton,
-  UiInlineMessage,
-  UiPaneHeader,
-  confirmDialog,
-  vTooltip,
-  t,
-  resolveUiText,
+  UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip, resolveUiText,
   UiLoadingState,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
@@ -247,7 +231,7 @@ const currentDetail = computed(() => {
 });
 const currentDraft = computed(() => creating.value || store.draft?.id === openedId.value);
 const formTitle = computed(() => (
-  creating.value ? 'Новый проект' : currentDetail.value?.title || openedId.value
+  creating.value ? t('core.projectNovyyProekt') : currentDetail.value?.title || openedId.value
 ));
 
 /**
@@ -267,7 +251,7 @@ async function openChat() {
       projectId: openedId.value,
       repoKey: selectedRepo.value || null
     },
-    title: `Проект · ${formTitle.value}`,
+    title: t('core.projectProektFormtitle', { formTitle: formTitle.value }),
   });
 
   if (!id) {
@@ -368,7 +352,10 @@ async function canLeave(): Promise<boolean> {
     return true;
   }
 
-  return confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+  return confirmDialog(
+    messageRef('core.projectEstNesohranennyeIzmeneniyaBrosit'),
+    { okText: t('core.projectBrosit') },
+  );
 }
 
 onBeforeRouteLeave(() => canLeave());
@@ -461,8 +448,8 @@ async function submit(): Promise<void> {
  */
 async function reloadFromServer(): Promise<void> {
   const confirmed = await confirmDialog(
-    'Перечитать серверную версию? Несохранённые правки будут потеряны.',
-    { okText: 'Перечитать' },
+    messageRef('core.projectPerechitatServernuyuVersiyuNesohranennye'),
+    { okText: t('core.projectPerechitat') },
   );
 
   if (!confirmed) {
@@ -550,8 +537,8 @@ async function remove(): Promise<void> {
 
   try {
     const confirmed = await confirmDialog(
-      `Удалить регистрацию «${detail.title}»? Файлы проекта останутся на диске.`,
-      { okText: 'Удалить регистрацию' },
+      messageRef('core.projectUdalitRegistratsiyuTitleFayly', { title: detail.title }),
+      { okText: t('core.projectUdalitRegistratsiyu') },
     );
 
     if (!confirmed) {

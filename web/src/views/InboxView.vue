@@ -2,18 +2,18 @@
   <main class="inbox-page ui-workspace"
     :data-perf-pending="loading ? '' : undefined" data-ui-workspace>
     <UiPaneHeader>
-      <template #title><h1 class="ui-workspace-title">Входящие</h1></template>
+      <template #title><h1 class="ui-workspace-title">{{ t('core.navInbox') }}</h1></template>
       <template #actions>
-        <UiIconButton label="Обновить" :loading="loading" data-context="workspace-toolbar"
-                      loading-label="Обновляю" @click="load">
+        <UiIconButton :label="t('core.trackerUpdate')" :loading="loading" data-context="workspace-toolbar"
+                      :loading-label="t('core.updating')" @click="load">
           <UiRefreshIcon />
         </UiIconButton>
       </template>
     </UiPaneHeader>
 
     <section v-if="unavailable" class="state-card" data-state="plugin-disabled">
-      <h2>Входящие недоступны</h2>
-      <p>Включите системный плагин «Входящие» в разделе «Настройки → Плагины».</p>
+      <h2>{{ t('core.inboxVhodyaschieNedostupny') }}</h2>
+      <p>{{ t('core.inboxVklyuchiteSistemnyyPlaginVhodyaschie') }}</p>
     </section>
 
     <template v-else>
@@ -24,11 +24,9 @@
           data-state="automation-notice" role="status">
           {{ automationNotice.text }}
           <UiActionLink v-if="automationNotice.settings" href="#/settings" variant="text"
-            @click.prevent="openInboxSettings">Выбрать модель</UiActionLink>
+            @click.prevent="openInboxSettings">{{ t('core.inboxVybratModel') }}</UiActionLink>
         </p>
-        <p v-if="payload.truncated" class="banner warn">
-          Показана только часть очереди: достигнут лимит ответа.
-        </p>
+        <p v-if="payload.truncated" class="banner warn"> {{ t('core.inboxPokazanaTolkoChastOcheredi') }} </p>
       </div>
 
       <details class="channels-disclosure ui-workspace-disclosure"
@@ -39,22 +37,22 @@
             connected: connectedChannels,
           }) }}
         </summary>
-        <section class="channels" aria-label="Каналы Inbox">
+        <section class="channels" :aria-label="t('core.inboxKanalyInbox')">
           <article v-for="channel in payload.channels" :key="channel.id" class="channel-card"
             :data-channel="channel.id">
             <div class="channel-main">
               <strong>{{ channel.label }}</strong>
-              <span v-if="channel.plugin === 'disabled'" class="pill off">Плагин выключен</span>
+              <span v-if="channel.plugin === 'disabled'" class="pill off">{{ t('core.inboxPlaginVyklyuchen') }}</span>
             </div>
             <dl class="channel-state">
               <div>
-                <dt>Подключение</dt>
+                <dt>{{ t('core.machineConnectionTitle') }}</dt>
                 <dd>
                   <span class="pill" :class="channel.connection">{{ connectionLabel(channel.connection) }}</span>
                 </dd>
               </div>
               <div>
-                <dt>Приём новых</dt>
+                <dt>{{ t('core.inboxPriemNovyh') }}</dt>
                 <dd>
                   <span class="pill" :class="channel.participation">
                     {{ participationLabel(channel.participation) }}
@@ -62,58 +60,48 @@
                 </dd>
               </div>
             </dl>
-            <p v-if="channel.participation === 'never_activated'">
-              Приём ещё не начат. Старая история не будет импортирована.
-            </p>
-            <p v-else-if="channel.participation === 'deactivated'" class="gap-warning">
-              Сообщения за время паузы не появятся после возобновления.
-            </p>
-            <p v-else>Новые обращения сразу попадают в очередь.</p>
-            <p v-if="channel.connection !== 'connected'" class="read-only">
-              Ранее принятые обращения доступны только для чтения до переподключения.
-            </p>
+            <p v-if="channel.participation === 'never_activated'"> {{ t('core.inboxPriemEscheNeNachat') }} </p>
+            <p v-else-if="channel.participation === 'deactivated'" class="gap-warning"> {{ t('core.inboxSoobscheniyaZaVremyaPauzy') }} </p>
+            <p v-else>{{ t('core.inboxNovyeObrascheniyaSrazuPopadayut') }}</p>
+            <p v-if="channel.connection !== 'connected'" class="read-only"> {{ t('core.inboxRaneePrinyatyeObrascheniyaDostupny') }} </p>
             <div class="channel-actions">
               <UiActionLink v-if="channelSettingsHref(channel.id)" class="btn" wrap
-                :href="channelSettingsHref(channel.id)">
-                Подключение и настройки
-              </UiActionLink>
+                :href="channelSettingsHref(channel.id)"> {{ t('core.inboxPodklyuchenieINastroyki') }} </UiActionLink>
               <UiButton v-if="channel.participation !== 'active'" class="btn accent" tone="accent"
                 :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
                 @click="changeParticipation(channel, 'activate')">
                 {{ channel.participation === 'deactivated'
-                  ? 'Возобновить приём новых' : 'Начать принимать новые' }}
+                  ? t('core.inboxVozobnovitPriemNovyh') : t('core.inboxNachatPrinimatNovye') }}
               </UiButton>
               <UiButton v-else class="btn"
                 :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
-              @click="changeParticipation(channel, 'deactivate')">Остановить приём</UiButton>
+              @click="changeParticipation(channel, 'deactivate')">{{ t('core.inboxOstanovitPriem') }}</UiButton>
             </div>
           </article>
           <div v-if="!payload.channels.length && !loading" class="state-card">
-            <h2>Каналов пока нет</h2>
-            <p>Включите и подключите хотя бы один канал.</p>
+            <h2>{{ t('core.inboxKanalovPokaNet') }}</h2>
+            <p>{{ t('core.inboxVklyuchiteIPodklyuchiteHotya') }}</p>
           </div>
         </section>
 
       </details>
 
-      <section v-if="payload.errors.length" class="channel-errors" aria-label="Ошибки каналов">
+      <section v-if="payload.errors.length" class="channel-errors" :aria-label="t('core.inboxOshibkiKanalov')">
         <p v-for="entry in payload.errors" :key="`${entry.channel}:${entry.code}`" class="banner bad">
           {{ entry.channel }}: {{ entry.message }}
         </p>
       </section>
 
-      <InboxLoading v-if="loading && !payload.items.length" label="Загружаю очередь…" :failed="Boolean(error)" />
+      <InboxLoading v-if="loading && !payload.items.length" :label="t('core.inboxZagruzhayuOchered')" :failed="Boolean(error)" />
       <template v-else-if="payload.items.length">
         <div class="inbox-workspace" :data-panel="panel">
           <aside ref="catalog" class="inbox-catalog" :aria-label="t('core.inboxQueueLabel')">
             <div class="catalog-tools">
               <UiTabs v-model="activeSection" class="section-tabs" data-ui-workspace-tabs size="compact"
-                label="Разделы входящих">
-                <UiTab class="section-tab" value="review" data-section="review">
-                  К разбору <span>{{ reviewItems.length }}</span>
+                :label="t('core.inboxRazdelyVhodyaschih')">
+                <UiTab class="section-tab" value="review" data-section="review"> {{ t('core.inboxKRazboru') }} <span>{{ reviewItems.length }}</span>
                 </UiTab>
-                <UiTab class="section-tab" value="history" data-section="history">
-                  История <span>{{ historyItems.length }}</span>
+                <UiTab class="section-tab" value="history" data-section="history"> {{ t('core.inboxIstoriya') }} <span>{{ historyItems.length }}</span>
                 </UiTab>
               </UiTabs>
               <UiSearchInput v-model="search" :placeholder="t('core.inboxSearchPlaceholder')"
@@ -153,9 +141,9 @@
                   <UiButton variant="text" @click="resetFilters">{{ t('core.inboxResetFilters') }}</UiButton>
                 </template>
                 <template v-else>
-                  <h2>{{ activeSection === 'review' ? 'Всё разобрано' : 'История пуста' }}</h2>
-                  <p v-if="activeSection === 'review'">Новых и частично разобранных обращений нет.</p>
-                  <p v-else>Здесь появятся пропущенные обращения и созданные задачи.</p>
+                  <h2>{{ activeSection === 'review' ? t('core.inboxVseRazobrano') : t('core.inboxIstoriyaPusta') }}</h2>
+                  <p v-if="activeSection === 'review'">{{ t('core.inboxNovyhIChastichnoRazobrannyh') }}</p>
+                  <p v-else>{{ t('core.inboxZdesPoyavyatsyaPropuschennyeObrascheniya') }}</p>
                 </template>
               </section>
             </div>
@@ -200,19 +188,11 @@
                   </ul>
                 </div>
                 <p v-if="item.status === 'mixed'" class="mixed-note">
-                  <template v-if="pendingMessages(item).length">
-                    Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
-                    пропущенные, чтобы вернуть их к разбору.
-                  </template>
+                  <template v-if="pendingMessages(item).length"> {{ t('core.inboxChastSoobscheniyUzheRazobrana') }} </template>
 
-                  <template v-else>
-                    Обращение разобрано по частям: у сообщений разные решения. Пропущенные можно
-                    вернуть к разбору, выбрав их ниже.
-                  </template>
+                  <template v-else> {{ t('core.inboxObraschenieRazobranoPoChastyam') }} </template>
                 </p>
-                <p v-if="itemReadOnly(item)" class="read-only item-read-only">
-                  Канал отключён: это обращение доступно только для чтения.
-                </p>
+                <p v-if="itemReadOnly(item)" class="read-only item-read-only"> {{ t('core.inboxKanalOtklyuchenEtoObraschenie') }} </p>
                 <div v-for="alert in itemAlertList(item)" :key="`${item.ref}:alert`"
                   class="item-alert" :class="alert.kind"
                   :role="alert.kind === 'bad' ? 'alert' : 'status'">
@@ -229,7 +209,7 @@
                     <UiCheckbox v-if="selectable(message)"
                       :disabled="itemReadOnly(item) || !!busy"
                       :checked="selectedRefs(item).includes(message.messageRef)"
-                      :aria-label="`Выбрать сообщение ${message.author.name}`"
+                      :aria-label="t('core.inboxVybratSoobschenieName', { name: message.author.name ?? '' })"
                       @update:checked="toggleMessage(item, message.messageRef, $event)" />
                     <span v-else class="selection-placeholder" aria-hidden="true">✓</span>
                     <span class="message-body">
@@ -239,7 +219,7 @@
                           {{ statusLabel(message.decision.status) }}
                         </span>
                       </span>
-                      <span class="message-text">{{ message.text || 'Без текста' }}</span>
+                      <span class="message-text">{{ message.text || t('core.inboxBezTeksta') }}</span>
                       <span v-if="message.attachments?.length" class="attachments">
                         <span class="attachment-list">
                           <span v-for="(attachment, attachmentIndex) in message.attachments"
@@ -250,10 +230,7 @@
                             <small>{{ attachmentAnalysis(attachment, item).label }}</small>
                           </span>
                         </span>
-                        <span class="attachment-note">
-                          Перед задачей GrigDesk проверит содержимое. Без полного разбора
-                          автозадача не создастся, а вручную задача ставится с вашим пояснением.
-                        </span>
+                        <span class="attachment-note"> {{ t('core.inboxPeredZadacheyGrigdeskProverit') }} </span>
                         <span v-for="(attachment, attachmentIndex) in message.attachments"
                           :key="`${message.messageRef}:transcript:${attachmentIndex}`">
                           <span v-if="attachmentAnalysis(attachment, item).text"
@@ -268,30 +245,23 @@
               </div>
 
               <footer class="actions">
-                <span v-if="item.messages.some(selectable)" class="selected-count">
-                  Выбрано: {{ selectedRefs(item).length }}
+                <span v-if="item.messages.some(selectable)" class="selected-count"> {{ t('core.inboxVybrano') }} {{ selectedRefs(item).length }}
                 </span>
                 <UiActionLink v-for="link in taskLinks(item)" :key="link.url" class="btn task-link" wrap
                 :href="link.url" target="_blank" rel="noreferrer">{{ link.label }}</UiActionLink>
                 <template v-if="selectionMode(item) === 'new'">
                   <UiButton class="btn accent" tone="accent" :loading="busy === `${item.ref}:task`"
                     :disabled="itemReadOnly(item) || (!!busy && busy !== `${item.ref}:task`)"
-                  loading-label="Разбираю и создаю" @click="mutateItem(item, 'task')">
-                  Создать задачу
-                </UiButton>
+                  :loading-label="t('core.inboxRazbirayuISozdayu')" @click="mutateItem(item, 'task')"> {{ t('core.inboxSozdatZadachu') }} </UiButton>
                   <UiButton class="btn" :disabled="itemReadOnly(item) || !!busy"
-                  @click="mutateItem(item, 'dismiss')">Пропустить</UiButton>
+                  @click="mutateItem(item, 'dismiss')">{{ t('core.inboxPropustit') }}</UiButton>
                 </template>
                 <template v-else-if="selectionMode(item) === 'skipped'">
-                  <span class="action-help">
-                    Вернёт выбранные сообщения в «К разбору». Созданные задачи не изменятся.
-                  </span>
+                  <span class="action-help"> {{ t('core.inboxVernetVybrannyeSoobscheniyaV') }} </span>
                   <UiButton class="btn" :disabled="itemReadOnly(item) || !!busy"
-                  @click="mutateItem(item, 'reset')">Вернуть на разбор</UiButton>
+                  @click="mutateItem(item, 'reset')">{{ t('core.inboxVernutNaRazbor') }}</UiButton>
                 </template>
-                <span v-else-if="item.messages.some(selectable)" class="action-help">
-                  Выберите сообщения для действия.
-                </span>
+                <span v-else-if="item.messages.some(selectable)" class="action-help"> {{ t('core.inboxVyberiteSoobscheniyaDlyaDeystviya') }} </span>
               </footer>
             </article>
             <div v-if="!selectedItem" class="detail-empty">
@@ -306,8 +276,8 @@
         </div>
       </template>
       <section v-else-if="payload.channels.length" class="state-card">
-        <h2>Очередь пуста</h2>
-        <p>Новых и ранее разобранных обращений пока нет.</p>
+        <h2>{{ t('core.inboxOcheredPusta') }}</h2>
+        <p>{{ t('core.inboxNovyhIRaneeRazobrannyh') }}</p>
       </section>
     </template>
   </main>
@@ -337,21 +307,8 @@ import type {
   InboxMessage,
 } from '../../../shared/inbox/inboxContracts.ts';
 import {
-  UiActionLink,
-  UiButton,
-  UiCheckbox,
-  UiIconButton,
-  UiRefreshIcon,
-  UiSpinner,
-  UiTab,
-  UiTabs,
-  confirmDialog,
-  promptDialog,
-  showToast,
-  UiPaneHeader,
-  UiSearchInput,
-  UiSelect,
-  t,
+  UiActionLink, UiButton, UiCheckbox, UiIconButton, UiRefreshIcon, UiSpinner, UiTab, UiTabs,
+  confirmDialog, promptDialog, showToast, UiPaneHeader, UiSearchInput, UiSelect, t, messageRef, uiLocale
 } from '../ui';
 import { openSettings } from '../shared/settingsNavigation.ts';
 import { pluginSettingsTarget } from '../features/settings/pluginPages.ts';
@@ -455,14 +412,14 @@ const automationNotice = computed(() => {
   if (worker.readiness === 'no_model') {
     return {
       kind: 'warn',
-      text: 'Автозадачи приостановлены: в плагине «Входящие» не выбрана модель разбора.',
+      text: t('core.inboxAvtozadachiPriostanovlenyVPlagine'),
       settings: true,
     };
   }
   if (worker.readiness === 'no_b24') {
     return {
       kind: 'warn',
-      text: 'Автозадачи приостановлены: Битрикс24 не подключён.',
+      text: t('core.inboxAvtozadachiPriostanovlenyBitriks24Ne'),
       settings: false,
     };
   }
@@ -484,29 +441,28 @@ const automationNotice = computed(() => {
       || incompatibleModel.includes(String(worker.lastReason))) {
     return {
       kind: 'warn',
-      text: 'Автозадачи приостановлены: выбранная модель не поддерживает '
-        + 'безопасный разбор входящих.',
+      text: t('core.inboxAvtozadachiPriostanovlenyVybrannayaModel'),
       settings: true,
     };
   }
   if (worker.readiness === 'stopped') {
     return {
       kind: 'bad',
-      text: 'Автообработчик входящих остановлен.',
+      text: t('core.inboxAvtoobrabotchikVhodyaschihOstanovlen'),
       settings: false,
     };
   }
   if (worker.readiness === 'unavailable') {
     return {
       kind: 'bad',
-      text: 'Состояние автообработчика временно недоступно.',
+      text: t('core.inboxSostoyanieAvtoobrabotchikaVremennoNedostupno'),
       settings: false,
     };
   }
   if (['snapshot_failed', 'tick_failed'].includes(String(worker.lastReason))) {
     return {
       kind: 'bad',
-      text: 'Последний автоматический разбор завершился технической ошибкой.',
+      text: t('core.inboxPosledniyAvtomaticheskiyRazborZavershilsya'),
       settings: false,
     };
   }
@@ -705,7 +661,7 @@ async function load(): Promise<void> {
         worker: null,
       };
     } else {
-      error.value = errorMessage(err, 'Не удалось загрузить входящие.');
+      error.value = errorMessage(err, t('core.coreNeUdalosZagruzitVhodyaschie'));
     }
   } finally {
     if (own === loadVersion) {
@@ -813,8 +769,8 @@ function taskLinks(item: InboxItem) {
   }).map((decision, index, links) => ({
     url: String(decision?.taskUrl || ''),
     label: links.length === 1
-      ? 'Открыть задачу'
-      : `Открыть задачу ${decision?.taskId || index + 1}`,
+      ? t('core.openTask')
+      : t('core.inboxOtkrytZadachuTaskidindex1', { taskIdindex1: decision?.taskId || index + 1 }),
   }));
 }
 
@@ -823,9 +779,15 @@ function itemReadOnly(item: InboxItem): boolean {
 }
 
 const notificationReasons: Record<string, string> = Object.freeze({
-  unreachable: 'связь с Telegram оборвалась',
-  rejected: 'канал отклонил отправку',
-  plugin_disabled: 'канал выключен',
+  get unreachable() {
+    return t('core.coreSvyazSTelegramOborvalas');
+  },
+  get rejected() {
+    return t('core.coreKanalOtklonilOtpravku');
+  },
+  get plugin_disabled() {
+    return t('core.coreKanalVyklyuchen');
+  },
 });
 
 /**
@@ -843,7 +805,7 @@ function notificationFailure(notification: InboxDecisionResult['notification']):
 
   const why = notificationReasons[String(notification.reason)];
 
-  return `, но ответ в исходный чат не отправлен${why ? ` (${why})` : ''} — сообщите там сами`;
+  return t('core.coreNoOtvetVIshodnyy', { whywhy: why ? ` (${why})` : '' });
 }
 
 /**
@@ -904,9 +866,9 @@ async function mutateItem(
     const undelivered = action === 'task' && notificationFailure(done.notification);
 
     showNotice(
-      action === 'task' ? `Задача создана${undelivered}`
-        : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
-          : 'Обращение возвращено к разбору',
+      action === 'task' ? t('core.coreZadachaSozdanaUndelivered', { undelivered: undelivered || '' })
+        : action === 'dismiss' ? t('core.coreObrascheniePropuschenoIPereneseno')
+          : t('core.coreObraschenieVozvraschenoKRazboru'),
       Boolean(undelivered),
     );
     delete selection[item.ref];
@@ -916,7 +878,7 @@ async function mutateItem(
     const code = inboxErrorCode(err);
 
     if (['stale_item', 'stale_decision', 'account_changed'].includes(code)) {
-      const text = 'Обращение изменилось — данные обновлены';
+      const text = t('core.inboxObraschenieIzmenilosDannyeObnovleny');
 
       delete selection[item.ref];
       await load();
@@ -932,13 +894,13 @@ async function mutateItem(
       // пересказать суть. Модалка открывается сразу — отдельная плашка с кнопкой
       // означала бы лишний клик ровно там, где решение уже принято.
       openNoteDialog(item, messageRefs, {
-        message: errorMessage(err, 'Содержимое вложений разобрано не полностью.'),
+        message: errorMessage(err, t('core.coreSoderzhimoeVlozheniyRazobranoNe')),
         attachments: inboxBlockedAttachments(err),
       });
     } else {
       itemAlerts[item.ref] = {
         kind: 'bad',
-        text: errorMessage(err, 'Не удалось выполнить действие с обращением.'),
+        text: errorMessage(err, t('core.coreNeUdalosVypolnitDeystvie')),
       };
     }
   } finally {
@@ -962,7 +924,7 @@ async function openNoteDialog(
   const lines = [message];
 
   if (attachments.length) {
-    lines.push('', 'Не удалось разобрать:');
+    lines.push('', t('core.coreNeUdalosRazobrat'));
 
     for (const attachment of attachments) {
       lines.push(attachment.reason
@@ -973,15 +935,15 @@ async function openNoteDialog(
 
   lines.push(
     '',
-    'Опишите своими словами, что там было и что нужно сделать.',
-    'Текст уйдёт на разбор модели вместе с обращением и попадёт в описание задачи.',
+    t('core.coreOpishiteSvoimiSlovamiChto'),
+    t('core.coreTekstUydetNaRazbor'),
   );
 
   const answer = await promptDialog({
-    title: 'Опишите содержимое вложений',
+    title: t('core.inboxOpishiteSoderzhimoeVlozheniy'),
     text: lines.join('\n'),
-    placeholder: 'Например: на видео после сохранения фильтра таблица сбрасывает сортировку…',
-    okText: 'Разобрать и создать задачу',
+    placeholder: t('core.inboxNaprimerNaVideoPosle'),
+    okText: t('core.inboxRazobratISozdatZadachu'),
     value: noteDrafts[item.ref] || '',
   });
 
@@ -998,8 +960,7 @@ async function openNoteDialog(
   if (!note) {
     itemAlerts[item.ref] = {
       kind: 'warn',
-      text: 'Без пояснения задача потеряет суть вложения. '
-        + 'Нажмите «Создать задачу» ещё раз и опишите содержимое.',
+      text: t('core.inboxBezPoyasneniyaZadachaPoteryaet'),
     };
 
     return;
@@ -1011,8 +972,7 @@ async function openNoteDialog(
       || !sameRefs(messageRefs, selectedRefs(item))) {
     itemAlerts[item.ref] = {
       kind: 'warn',
-      text: 'Обращение или выбор изменились, пока вы писали. Проверьте выбор '
-        + 'и нажмите «Создать задачу» — текст пояснения сохранён.',
+      text: t('core.inboxObraschenieIliVyborIzmenilis'),
     };
 
     return;
@@ -1028,9 +988,8 @@ async function changeParticipation(channel: InboxChannel, action: string): Promi
     return;
   }
   if (action === 'deactivate' && !(await confirmDialog(
-    'Остановить приём? Сообщения, пришедшие во время паузы, '
-    + 'не попадут в очередь после возобновления.',
-    { okText: 'Остановить приём' },
+    messageRef('core.inboxOstanovitPriemSoobscheniyaPrishedshie'),
+    { okText: t('core.inboxOstanovitPriem') },
   ))) {
     return;
   }
@@ -1041,11 +1000,11 @@ async function changeParticipation(channel: InboxChannel, action: string): Promi
   try {
     await inboxApi.changeParticipation(channel.id, action, channel.activationVersion);
     showNotice(action === 'activate'
-      ? `${channel.label}: приём новых обращений включён.`
-      : `${channel.label}: приём остановлен; пауза не станет backlog.`);
+      ? t('core.coreLabelPriemNovyhObrascheniy', { label: channel.label })
+      : t('core.coreLabelPriemOstanovlenPauza', { label: channel.label }));
     await load();
   } catch (err) {
-    error.value = errorMessage(err, 'Не удалось изменить приём канала.');
+    error.value = errorMessage(err, t('core.coreNeUdalosIzmenitPriem'));
   } finally {
     busy.value = '';
   }
@@ -1053,17 +1012,17 @@ async function changeParticipation(channel: InboxChannel, action: string): Promi
 
 function statusLabel(status: string): string {
   return ({
-    new: 'К разбору',
-    mixed: 'Частично разобрано',
-    task: 'Задача создана',
-    skipped: 'Пропущено',
-  })[status] || 'Разобрано';
+    new: t('core.videoKRazboru'),
+    mixed: t('core.coreChastichnoRazobrano'),
+    task: t('core.coreZadachaSozdana'),
+    skipped: t('core.corePropuscheno'),
+  })[status] || t('core.coreRazobrano');
 }
 
 /** «Частично» верно только пока есть что разбирать: разбитая карточка покрыта целиком. */
 function itemStatusLabel(item: InboxItem): string {
   if (item.status === 'mixed' && !pendingMessages(item).length) {
-    return 'Разобрано по частям';
+    return t('core.coreRazobranoPoChastyam');
   }
 
   return statusLabel(item.status);
@@ -1071,18 +1030,18 @@ function itemStatusLabel(item: InboxItem): string {
 
 function connectionLabel(connection: string): string {
   return ({
-    connected: 'Подключён',
-    disconnected: 'Не подключён',
-    degraded: 'Ошибка канала',
-  })[connection] || 'Состояние неизвестно';
+    connected: t('settings.connected'),
+    disconnected: t('core.trackerNone'),
+    degraded: t('core.coreOshibkaKanala'),
+  })[connection] || t('settings.unknownStatus');
 }
 
 function participationLabel(participation: string): string {
   return ({
-    active: 'Включён',
-    deactivated: 'На паузе',
-    never_activated: 'Не запускался',
-  })[participation] || 'Состояние неизвестно';
+    active: t('core.trackerEnabled'),
+    deactivated: t('core.coreNaPauze'),
+    never_activated: t('core.coreNeZapuskalsya'),
+  })[participation] || t('settings.unknownStatus');
 }
 
 function channelSettingsHref(id: string): string {
@@ -1097,7 +1056,7 @@ function formatTime(value: number): string {
   const millis = numeric > 0 && numeric < 10_000_000_000 ? numeric * 1000 : numeric;
   const date = new Date(millis);
 
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(uiLocale.value);
 }
 
 // Остаток тишины до авторазбора. Секунды показываются только вместе с минутами:
@@ -1108,10 +1067,12 @@ function formatRemaining(value: number): string {
   const seconds = total % 60;
 
   if (!minutes) {
-    return `${seconds} с`;
+    return t('core.interventionTimeoutSeconds', { seconds: seconds });
   }
 
-  return seconds ? `${minutes} мин ${seconds} с` : `${minutes} мин`;
+  return seconds
+      ? t('core.coreMinutesMinSecondsS', { minutes: minutes, seconds: seconds })
+      : t('core.coreMinutesMin', { minutes: minutes });
 }
 
 // Размер вложения человеческой единицей. Отрицательное и нечисловое значение — это
@@ -1123,22 +1084,24 @@ function formatBytes(value: unknown): string {
     return '';
   }
   if (size < 1024) {
-    return `${Math.round(size)} Б`;
+    return t('core.coreRoundsizeB', { roundsize: Math.round(size) });
   }
   if (size < 1024 * 1024) {
-    return `${Math.round(size / 1024)} КБ`;
+    return t('core.coreRoundsize1024Kb', { roundsize1024: Math.round(size / 1024) });
   }
 
-  return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
+  return t('core.coreTofixedsize101024102410Mb', {
+    toFixedsize101024102410: (size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0),
+  });
 }
 
 // Подпись вложения: род, имя файла и размер. Имя, повторяющее род, не показывается —
 // иначе строка читалась бы как «Фото: Фото» у файлов без собственного названия.
 function attachmentLabel(attachment: InboxAttachment): string {
-  const kind = String(attachment?.displayLabel || attachment?.kind || 'Вложение').trim();
+  const kind = String(attachment?.displayLabel || attachment?.kind || t('core.inboxVlozhenie')).trim();
   const name = String(attachment?.name || '').trim();
   const size = formatBytes(attachment?.size);
-  const label = kind || 'Вложение';
+  const label = kind || t('core.inboxVlozhenie');
 
   return [name && name !== label ? `${label}: ${name}` : label, size].filter(Boolean).join(' · ');
 }
@@ -1152,37 +1115,37 @@ function attachmentAnalysis(attachment: InboxAttachment, item: InboxItem) {
     (typeof rawAnalysis === 'string' ? rawAnalysis : nested?.status) || attachment?.status || '',
   ).toLowerCase();
   const labels: Record<string, string> = {
-    queued: 'Ждёт разбора',
-    pending: 'Ждёт разбора',
-    processing: 'Разбирается',
-    running: 'Разбирается',
-    transcribing: 'Разбирается',
-    analyzing: 'Разбирается',
-    ready: 'Содержимое разобрано',
-    completed: 'Содержимое разобрано',
-    done: 'Содержимое разобрано',
-    transcribed: 'Содержимое разобрано',
-    failed: 'Не удалось разобрать',
-    error: 'Не удалось разобрать',
-    unsupported: 'Разбор недоступен',
-    skipped: 'Разбор недоступен',
+    queued: t('core.inboxZhdetRazbora'),
+    pending: t('core.inboxZhdetRazbora'),
+    processing: t('core.inboxRazbiraetsya'),
+    running: t('core.inboxRazbiraetsya'),
+    transcribing: t('core.inboxRazbiraetsya'),
+    analyzing: t('core.inboxRazbiraetsya'),
+    ready: t('core.inboxSoderzhimoeRazobrano'),
+    completed: t('core.inboxSoderzhimoeRazobrano'),
+    done: t('core.inboxSoderzhimoeRazobrano'),
+    transcribed: t('core.inboxSoderzhimoeRazobrano'),
+    failed: t('core.inboxNeUdalosRazobrat'),
+    error: t('core.inboxNeUdalosRazobrat'),
+    unsupported: t('core.inboxRazborNedostupen'),
+    skipped: t('core.inboxRazborNedostupen'),
   };
   const blocked = ['new', 'mixed'].includes(item?.status)
     && analysisBlocksByRef.value.has(item?.ref);
   const autoTaskDone = item?.status === 'task' && item?.decision?.by === 'auto';
   let fallbackStatus = 'pending';
-  let fallbackLabel = 'Будет проверено до задачи';
+  let fallbackLabel = t('core.inboxBudetProverenoDoZadachi');
 
   if (blocked) {
     fallbackStatus = 'failed';
-    fallbackLabel = 'Не удалось разобрать';
+    fallbackLabel = t('core.inboxNeUdalosRazobrat');
   } else if (autoTaskDone) {
     fallbackStatus = 'ready';
-    fallbackLabel = 'Содержимое разобрано';
+    fallbackLabel = t('core.inboxSoderzhimoeRazobrano');
   } else if (item?.status === 'task') {
-    fallbackLabel = 'Приложено к задаче';
+    fallbackLabel = t('core.inboxPrilozhenoKZadache');
   } else if (item?.status === 'skipped') {
-    fallbackLabel = 'Не разбиралось';
+    fallbackLabel = t('core.inboxNeRazbiralos');
   }
 
   return {
@@ -1216,8 +1179,7 @@ function autoTaskState(item: InboxItem) {
   if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) {
     return {
       kind: 'judging',
-      text: 'Разбирается прямо сейчас: модель читает обращение '
-        + 'и решает, какие задачи создать.',
+      text: t('core.inboxRazbiraetsyaPryamoSeychasModel'),
     };
   }
   if (item.status !== 'new' || !item.autoTask || typeof item.autoTask !== 'object') {
@@ -1226,7 +1188,7 @@ function autoTaskState(item: InboxItem) {
   if (item.autoTask.enabled !== true) {
     return {
       kind: 'off',
-      text: 'Автосоздание выключено для этого источника.',
+      text: t('core.inboxAvtosozdanieVyklyuchenoDlyaEtogo'),
     };
   }
 
@@ -1235,11 +1197,11 @@ function autoTaskState(item: InboxItem) {
   if (analysisBlock) {
     return {
       kind: 'blocked',
-      text: 'Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите '
-        + `«Создать задачу» и опишите содержимое${
-          Number.isSafeInteger(analysisBlock.retryAtMs)
-            ? ` либо дождитесь новой попытки после ${formatTime(Number(analysisBlock.retryAtMs))}`
-            : ''}.`,
+      text: t('core.inboxVlozheniyaNeUdalosPolnostyu', {
+        retryAtMs: Number.isSafeInteger(analysisBlock.retryAtMs)
+          ? t('core.inboxRetryAfterTime', { time: formatTime(Number(analysisBlock.retryAtMs)) })
+          : '',
+      }),
       // Причина у каждого файла своя: потолок Telegram в 20 МБ не лечится
       // ожиданием, а сетевой сбой лечится. Без неё человек не знает, что делать.
       attachments: Array.isArray(analysisBlock.attachments) ? analysisBlock.attachments : [],
@@ -1251,8 +1213,7 @@ function autoTaskState(item: InboxItem) {
   if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) {
     return {
       kind: 'waiting',
-      text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. `
-        + 'Новые сообщения продлят ожидание.',
+      text: t('core.inboxAvtorazborCherezValueTishiny', { value: formatRemaining(readyAtMs - nowMs.value) }),
     };
   }
 
@@ -1261,14 +1222,13 @@ function autoTaskState(item: InboxItem) {
   if (readiness && readiness !== 'ready') {
     return {
       kind: 'blocked',
-      text: 'Обращение готово к авторазбору, но автоматика приостановлена.',
+      text: t('core.inboxObraschenieGotovoKAvtorazboru'),
     };
   }
 
   return {
     kind: 'queued',
-    text: 'Обращение готово к авторазбору. Если модель не уверена, '
-      + 'оно останется здесь для ручного решения.',
+    text: t('core.inboxObraschenieGotovoKAvtorazboru2'),
   };
 }
 

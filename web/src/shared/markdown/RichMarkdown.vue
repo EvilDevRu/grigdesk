@@ -19,6 +19,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { t } from '../../ui';
 
 import { mdTokensToHtml } from '../md.ts';
 import type { HrefResolver } from '../md.ts';
@@ -65,7 +66,7 @@ function imageError(event: Event): void {
     return;
   }
 
-  const text = target.getAttribute('alt') || 'Изображение недоступно';
+  const text = target.getAttribute('alt') || t('core.mdIzobrazhenieNedostupno');
 
   target.replaceWith(target.ownerDocument.createTextNode(text));
 }

@@ -1,43 +1,40 @@
 <template>
-  <section class="route-node-inspector ui-workspace-section" aria-label="Свойства этапа">
+  <section class="route-node-inspector ui-workspace-section" :aria-label="t('core.routeSvoystvaEtapa')">
     <UiPaneHeader>
-      <template #title><h3>Свойства этапа</h3></template>
-      <template #meta>{{ node?.label || node?.id || 'Этап не найден' }}</template>
+      <template #title><h3>{{ t('core.routeSvoystvaEtapa') }}</h3></template>
+      <template #meta>{{ node?.label || node?.id || t('core.routeEtapNeNayden') }}</template>
     </UiPaneHeader>
     <div class="ui-workspace-section__body">
-      <p v-if="node" class="route-node-help">
-        Поля с кнопкой «Сохранить» применяются после нажатия.
-        Остальные изменения сохраняются автоматически в черновик.
-      </p>
+      <p v-if="node" class="route-node-help"> {{ t('core.routePolyaSKnopkoySohranit') }} </p>
       <div v-if="node" class="route-node-basics">
-        <UiField label="Название этапа"
-                 help="Название видно на схеме и в списке этапов. Например: «Разработка» или «Проверка результата». На порядок выполнения оно не влияет.">
+        <UiField :label="t('core.routeNazvanieEtapa')"
+                 :help="t('core.routeNodeInspectorTheNameAppearsOnTheGraph')">
           <div class="route-node-field-row">
             <UiInput data-test="node-label" :model-value="pendingLabel"
                      @update:model-value="pendingLabel = String($event ?? '')" />
             <UiButton data-context="workspace-form" variant="outline" data-test="node-save-label"
-                      aria-label="Сохранить название этапа" :disabled="pendingLabel === (node.label ?? '')"
-                      @click="saveLabel">Сохранить</UiButton>
+                      :aria-label="t('core.routeSohranitNazvanieEtapa')" :disabled="pendingLabel === (node.label ?? '')"
+                      @click="saveLabel">{{ t('core.save') }}</UiButton>
           </div>
         </UiField>
-        <UiField label="Описание"
-                 help="Необязательная заметка о назначении этапа для людей, которые читают маршрут. Например: «Проверяем тесты и сборку». Задание для ИИ задаётся отдельно в инструкции этапа.">
+        <UiField :label="t('core.taskDescription')"
+                 :help="t('core.routeNodeInspectorAnOptionalNoteForPeopleReading')">
           <div class="route-node-field-row">
             <UiInput data-test="node-description" :model-value="pendingDescription"
                      @update:model-value="pendingDescription = String($event ?? '')" />
             <UiButton data-context="workspace-form" variant="outline" data-test="node-save-description"
-                      aria-label="Сохранить описание" :disabled="pendingDescription === (node.description ?? '')"
-                      @click="saveDescription">Сохранить</UiButton>
+                      :aria-label="t('core.routeSohranitOpisanie')" :disabled="pendingDescription === (node.description ?? '')"
+                      @click="saveDescription">{{ t('core.save') }}</UiButton>
           </div>
         </UiField>
-        <UiField label="Тип этапа"
-                 help="Агент ИИ выполняет инструкцию. Команда проекта запускает настроенную команду. Решение человека ждёт одобрения или отказа. Статус результата показывает итог другого этапа и не запускается отдельно.">
+        <UiField :label="t('core.routeTipEtapa')"
+                 :help="t('core.routeNodeInspectorAnAIAgentFollowsInstructionsA')">
           <UiSelect data-test="executor-type" :model-value="pendingType ?? node.executor"
                     @update:model-value="chooseType(String($event ?? ''))">
-            <option value="agent">Агент ИИ</option>
-            <option value="command">Команда проекта</option>
-            <option value="gate">Решение человека</option>
-            <option value="status">Статус результата</option>
+            <option value="agent">{{ t('core.routeAgentIi') }}</option>
+            <option value="command">{{ t('core.routeKomandaProekta') }}</option>
+            <option value="gate">{{ t('core.routeReshenieCheloveka') }}</option>
+            <option value="status">{{ t('core.routeStatusRezultata') }}</option>
           </UiSelect>
         </UiField>
       </div>
@@ -45,86 +42,83 @@
         {{ issue.message }}
       </p>
       <div v-if="pendingType && pendingType !== node?.executor" data-test="type-change-preview">
-        <strong>Перед сменой типа</strong>
+        <strong>{{ t('core.routePeredSmenoyTipa') }}</strong>
         <p v-for="(issue, index) in typeChangeIssues" :key="index">{{ issue.message }}</p>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="cancel-type-change" @click="pendingType = null">Отмена</UiButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="cancel-type-change" @click="pendingType = null">{{ t('core.cancel') }}</UiButton>
         <UiButton data-context="workspace-form" variant="ghost" data-test="apply-type-change" :disabled="!typeChangeAllowed"
-                  @click="applyTypeChange">Применить</UiButton>
+                  @click="applyTypeChange">{{ t('core.stageSettingsApply') }}</UiButton>
       </div>
       <template v-if="node?.executor === 'gate'">
-        <p>Человек выбирает: одобрить (approved) или отклонить (rejected).</p>
-        <p>Обновляет статусы: {{ node.emits?.join(', ') || 'нет' }}</p>
+        <p>{{ t('core.routeChelovekVybiraetOdobritApproved') }}</p>
+        <p>{{ t('core.routeObnovlyaetStatusy') }} {{ node.emits?.join(', ') || t('core.routeNet') }}</p>
       </template>
       <template v-if="node?.executor === 'status'">
-        <UiField label="Ключ статуса"
-                 help="Технический код результата, который обновляет этап-владелец. Например, BUILD_DONE. Статус сам не запускает работу.">
+        <UiField :label="t('core.routeKlyuchStatusa')"
+                 :help="t('core.routeNodeInspectorAResultCodeUpdatedByIts')">
           <UiInput data-test="status-key" :model-value="node.key ?? ''"
                    @update:model-value="updateStatusKey(String($event ?? ''))" />
         </UiField>
-        <UiField label="Этап-владелец"
-                 help="Этап, результат которого отражает этот статус. Выберите его из списка; редактор свяжет статус с выбранным этапом.">
+        <UiField :label="t('core.routeEtapVladelets')"
+                 :help="t('core.routeNodeInspectorTheStageWhoseResultThisStatus')">
           <UiSelect data-test="status-owner" :model-value="node.owner ?? ''"
                     @update:model-value="updateStatusOwner(String($event ?? ''))">
             <option v-if="node.owner && !statusOwnerKnown"
-                    :value="node.owner">{{ node.owner }} (недоступен)</option>
+                    :value="node.owner">{{ node.owner }} {{ t('core.routeNedostupen') }}</option>
             <option v-for="owner in owners" :key="owner.id" :value="owner.id">
               {{ owner.label || owner.id }}
             </option>
           </UiSelect>
         </UiField>
       </template>
-      <UiField v-if="node?.executor === 'command'" label="Команда проекта"
-               help="Готовая команда из настроек проекта, например запуск тестов или сборки. Здесь выбирают команду из списка, а не вводят произвольный текст для терминала.">
+      <UiField v-if="node?.executor === 'command'" :label="t('core.routeKomandaProekta')"
+               :help="t('core.routeNodeInspectorACommandConfiguredInProjectSettings')">
         <UiSelect data-test="command-id" :model-value="node.commandId ?? ''"
                   @update:model-value="updateCommand(String($event ?? ''))">
-          <option value="">Выберите команду</option>
+          <option value="">{{ t('core.routeVyberiteKomandu') }}</option>
           <option v-if="node.commandId && !commandKnown" :value="node.commandId">
-            {{ node.commandId }} (недоступна)
-          </option>
+            {{ node.commandId }} {{ t('core.routeNedostupna') }} </option>
           <option v-for="command in capabilities?.commands ?? []" :key="command.id"
                   :value="command.id">{{ command.label }}</option>
         </UiSelect>
-        <small v-if="node.commandId && !commandKnown" class="bad">
-          Команда недоступна в профиле. Публикация заблокирована проверкой.
-        </small>
+        <small v-if="node.commandId && !commandKnown" class="bad"> {{ t('core.routeKomandaNedostupnaVProfile') }} </small>
       </UiField>
       <details v-if="node" class="route-node-options route-node-technical ui-workspace-disclosure">
-        <summary>Технические параметры</summary>
+        <summary>{{ t('core.routeTehnicheskieParametry') }}</summary>
         <div class="ui-workspace-section__body">
-          <UiField label="ID этапа"
-                   help="Уникальное техническое имя, например build. По нему этап указан в переходах и JSON. Чтобы изменить видимое название, используйте поле «Название этапа». При смене ID редактор обновит связанные ссылки.">
+          <UiField :label="t('core.routeIdEtapa')"
+                   :help="t('core.routeNodeInspectorAUniqueStageIDSuchAs')">
             <div class="route-node-field-row">
               <UiInput data-test="node-new-id" :model-value="pendingId"
                        @update:model-value="pendingId = String($event ?? '')" />
               <UiButton data-context="workspace-form" variant="outline" data-test="node-rename"
-                        :disabled="pendingId === node.id" @click="renameIdentity">Изменить ID</UiButton>
+                        :disabled="pendingId === node.id" @click="renameIdentity">{{ t('core.routeIzmenitId') }}</UiButton>
             </div>
           </UiField>
-          <UiField v-if="node.executor !== 'status'" label="Ключ запуска"
-                   help="Технический ключ связывает этап с настройками запуска проекта, например BUILD. Используйте латинские заглавные буквы, цифры и подчёркивания; первый символ — буква. Ключ должен быть уникальным в маршруте. Меняйте его, когда настраиваете запуск этапа.">
+          <UiField v-if="node.executor !== 'status'" :label="t('core.routeKlyuchZapuska')"
+                   :help="t('core.routeNodeInspectorTheLaunchKeyLinksAStage')">
             <div class="route-node-field-row">
               <UiInput data-test="node-run-key" :model-value="pendingRunKey"
                        @update:model-value="pendingRunKey = String($event ?? '')" />
               <UiButton data-context="workspace-form" variant="outline" data-test="node-save-run-key"
-                        aria-label="Сохранить ключ запуска"
+                        :aria-label="t('core.routeSohranitKlyuchZapuska')"
                         :disabled="pendingRunKey === (node.runKey ?? node.key ?? '')"
-                        @click="saveRunKey">Сохранить</UiButton>
+                        @click="saveRunKey">{{ t('core.save') }}</UiButton>
             </div>
           </UiField>
           <div v-if="node.emits?.length" class="route-node-identity__emits">
-            <span>Статусы, которые обновляет этот этап</span>
+            <span>{{ t('core.routeStatusyKotoryeObnovlyaetEtot') }}</span>
             <div v-for="statusId in node.emits" :key="statusId">
               {{ statusId }}
               <UiButton data-context="workspace-form" variant="ghost"
                         :data-test="`node-remove-emit-${statusId}`"
-                        @click="removeEmit(statusId)">Убрать ссылку</UiButton>
+                        @click="removeEmit(statusId)">{{ t('core.routeUbratSsylku') }}</UiButton>
             </div>
           </div>
         </div>
       </details>
       <details v-if="node && (node.executor === 'agent' || node.executor === 'command')"
                class="route-node-options ui-workspace-disclosure">
-        <summary>Права, ограничения и повторы</summary>
+        <summary>{{ t('core.routePravaOgranicheniyaIPovtory') }}</summary>
         <div class="ui-workspace-section__body">
           <RoutePolicyFields v-if="node.policy && node.fanout" :policy="node.policy"
                              :fanout="node.fanout" :capabilities="capabilities"
@@ -135,20 +129,19 @@
         </div>
       </details>
       <details v-if="node && node.executor !== 'status'" class="route-node-options ui-workspace-disclosure">
-        <summary>Исполнитель и модель — из настроек проекта</summary>
+        <summary>{{ t('core.routeIspolnitelIModelIz') }}</summary>
         <div class="ui-workspace-section__body">
-          <p class="route-node-help">Эти параметры задаются в проекте и здесь доступны только для просмотра.</p>
-          <UiLoadingState v-if="policyLoading" label="Читаю политику запуска…" variant="document" >
+          <p class="route-node-help">{{ t('core.routeEtiParametryZadayutsyaV') }}</p>
+          <UiLoadingState v-if="policyLoading" :label="t('core.routeChitayuPolitikuZapuska')" variant="document" >
             <UiSkeletonLayout layout="text" :header="false" />
           </UiLoadingState>
-          <p v-else-if="!effectivePolicy" class="muted">Политика запуска недоступна.</p>
+          <p v-else-if="!effectivePolicy" class="muted">{{ t('core.routePolitikaZapuskaNedostupna') }}</p>
           <template v-else>
-            <p>Основной исполнитель: {{ effectivePolicy.primary || 'не указан' }}</p>
-            <p>Резервные: {{ effectivePolicy.failover.join(', ') || 'не указаны' }}</p>
-            <p>Источник: {{ effectivePolicy.source }}</p>
+            <p>{{ t('core.routeOsnovnoyIspolnitel') }} {{ effectivePolicy.primary || t('core.routeNeUkazan') }}</p>
+            <p>{{ t('core.routeRezervnye') }} {{ effectivePolicy.failover.join(', ') || t('core.routeNeUkazany') }}</p>
+            <p>{{ t('core.routeIstochnik') }} {{ effectivePolicy.source }}</p>
             <div v-for="(model, provider) in effectivePolicy.models" :key="provider">
-              {{ provider }}: {{ model?.exact || model?.family || 'модель недоступна' }}
-              · effort {{ model?.effort || 'недоступен' }}
+              {{ provider }}: {{ model?.exact || model?.family || t('core.routeModelNedostupna') }} {{ t('core.routeEffort') }} {{ model?.effort || t('core.unavailable') }}
             </div>
           </template>
         </div>
@@ -158,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
+import { UiSkeletonLayout, t } from '../../ui';
 
 import { computed, onUnmounted, ref, watch } from 'vue';
 import type {

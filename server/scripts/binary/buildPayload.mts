@@ -25,7 +25,8 @@ export interface PayloadAuditOptions {
  */
 export async function auditPayload(root: string, options: PayloadAuditOptions): Promise<PackageFile[]> {
   const required = [
-    'server/help/help.json', 'server/help/site/index.html', 'server/help/site/help.json',
+    'server/help/help.json', 'server/help/help.en.json', 'server/help/site/index.html',
+    'server/help/site/help.json', 'server/help/site/help.en.json',
     'VERSION', 'runtime/node/bin/node', 'runtime/node/bin/npm',
     'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
     'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',

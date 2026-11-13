@@ -1,6 +1,6 @@
 <template>
   <div v-if="block?.text?.trim()" class="chat-in-turn-reply" data-role="chat-in-turn-reply"
-       aria-label="Реплика агента">
+       :aria-label="t('core.chatReplikaAgenta')">
     <div :id="bodyId" class="chat-in-turn-reply__body"
          :class="{ collapsed: !expanded, faded: !expanded && overflows }">
       <div ref="content" class="text md">
@@ -9,14 +9,14 @@
     </div>
     <UiDisclosureButton v-if="overflows" v-model:open="expanded" density="compact" :controls="bodyId"
                         data-role="chat-reply-expand">
-      {{ expanded ? 'Свернуть' : 'Показать полностью' }}
+      {{ expanded ? t('core.chatSvernut') : t('core.chatPokazatPolnostyu') }}
     </UiDisclosureButton>
     <!-- «Пишет…» обещаем только у незавершённого блока идущего хода. Брошенный черновик и
          черновик законченного хода уже не допишутся; законченный блок подписи не получает. -->
     <span v-if="block.complete === false && (block.abandoned || !live)"
-          class="chat-in-turn-reply__draft">Ответ оборван</span>
-    <span v-else-if="block.complete === false" class="chat-in-turn-reply__draft">Пишет…</span>
-    <span v-if="block.truncated" class="chat-in-turn-reply__draft">Ответ сокращён</span>
+          class="chat-in-turn-reply__draft">{{ t('core.chatOtvetOborvan') }}</span>
+    <span v-else-if="block.complete === false" class="chat-in-turn-reply__draft">{{ t('core.chatPishet') }}</span>
+    <span v-if="block.truncated" class="chat-in-turn-reply__draft">{{ t('core.chatOtvetSokraschen') }}</span>
   </div>
 </template>
 
@@ -25,7 +25,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'v
 import RichMarkdown from '../../shared/markdown/RichMarkdown.vue';
 import { chatImageHref } from './chatImages.ts';
 import { chatFileLinkHref } from '../../features/code/links.ts';
-import { UiDisclosureButton } from '../../ui';
+import { UiDisclosureButton, t } from '../../ui';
 import { startChatPerformance } from '../../shared/chatPerformance.ts';
 
 const props = defineProps<{

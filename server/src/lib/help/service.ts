@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { HELP_MAX_BYTES, helpInvalid } from '../../../../shared/help/helpContracts.ts';
-import type { HelpBundle } from '../../../../shared/help/helpContracts.ts';
+import { HELP_MAX_BYTES, helpInvalid, helpResourceFile } from '../../../../shared/help/helpContracts.ts';
+import type { HelpBundle, HelpLocale } from '../../../../shared/help/helpContracts.ts';
 import { queryHelp } from '../../../../shared/help/helpQuery.ts';
 import { compileHelpSources, verifyHelpBundle } from '../../../../shared/node/helpSources.ts';
 import { readContainedText } from '../../../../shared/node/readContainedText.ts';
@@ -12,27 +12,28 @@ import { readContainedText } from '../../../../shared/node/readContainedText.ts'
 export function createHelpService(options: {
   root: string;
   kind: 'source' | 'packaged';
-  read?: () => Promise<HelpBundle>;
+  read?: (locale: HelpLocale) => Promise<HelpBundle>;
 }) {
-  let pending: Promise<HelpBundle> | null = null;
+  const pending = new Map<HelpLocale, Promise<HelpBundle>>();
 
   /**
    * Читает только источник выбранного вида runtime и проверяет полный корпус.
    * Подмена injected-reader разрешена лишь модульным fixture, не пользовательскому запросу.
    */
-  async function read(): Promise<HelpBundle> {
+  async function read(locale: HelpLocale): Promise<HelpBundle> {
     if (options.read) {
-      return verifyHelpBundle(await options.read());
+      return verifyHelpBundle(await options.read(locale));
     }
     if (options.kind === 'source') {
       const version = (await readFile(path.join(options.root, 'VERSION'), 'utf8')).trim();
 
       return compileHelpSources(options.root, {
         version, commit: 'source'
-      });
+      }, locale);
     }
 
-    const text = await readContainedText(options.root, 'server/help/help.json', HELP_MAX_BYTES);
+    const file = `server/help/${helpResourceFile(locale)}`;
+    const text = await readContainedText(options.root, file, HELP_MAX_BYTES);
 
     if (!text || Buffer.byteLength(text) > HELP_MAX_BYTES) {
       helpInvalid();
@@ -45,19 +46,19 @@ export function createHelpService(options: {
    * Совмещает параллельное чтение неизменяемого пакета одного поколения.
    * Отказ снимает кеш Promise, поэтому следующий запрос пробует чтение заново.
    */
-  async function bundle(): Promise<HelpBundle> {
+  async function bundle(locale: HelpLocale = 'ru'): Promise<HelpBundle> {
     if (options.kind === 'source') {
-      return read();
+      return read(locale);
     }
-    if (!pending) {
-      pending = read().catch((error: unknown) => {
-        pending = null;
+    if (!pending.has(locale)) {
+      pending.set(locale, read(locale).catch((error: unknown) => {
+        pending.delete(locale);
 
         throw error;
-      });
+      }));
     }
 
-    return pending;
+    return pending.get(locale)!;
   }
 
   /**

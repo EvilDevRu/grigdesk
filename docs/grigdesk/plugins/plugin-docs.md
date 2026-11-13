@@ -62,7 +62,7 @@ recovery установщика, в каталог не попадает — и 
   `restartOn`: изменился список плагинов — живая сессия переоткрывается с тем же sessionId.
 - **Codex** без строгих readable roots читает файлы вне рабочих корней сам.
 - **DeepSeek и GLM** (DSH) в `workspace-write` не спрашивают approval на read; чтение вне
-  cwd песочница оставляет доступным ([DeepSeek Harness](../guide/deepseek.md)).
+  cwd песочница оставляет доступным ([DeepSeek Harness](../guide/ru/deepseek.md)).
 - **Kimi** живёт в своём mount namespace только с рабочей папкой и вложениями: оглавление
   плагина вне рабочей папки ему не видно.
 

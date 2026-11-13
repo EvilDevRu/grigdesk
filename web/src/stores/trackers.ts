@@ -4,10 +4,13 @@ import { setTrackerMutationGeneration, setTrackerDriverGenerations } from '../sh
 import { defineStore } from 'pinia';
 import { useBoardStore } from './board.ts';
 
+
 import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { api, ApiError } from '../shared/apiClient.ts';
 import { LEGACY_TRACKER_CAPABILITIES, trackerCapabilities } from '../shared/trackerCapabilities.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const catalogJobs = new WeakMap<object, Promise<void>>();
 
@@ -108,7 +111,7 @@ export const useTrackersStore = defineStore('trackers', {
           || !Array.isArray(raw.activeIds) || !raw.activeIds.every((id) => typeof id === 'string')
           || (raw.externalId !== null && typeof raw.externalId !== 'string')
           || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
-          throw new Error('Некорректные возможности трекера');
+          throw new Error(t('core.coreNekorrektnyeVozmozhnostiTrekera'));
         }
 
         const descriptors = raw.drivers;

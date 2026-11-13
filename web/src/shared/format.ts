@@ -1,5 +1,9 @@
 import { intlLocale } from '../../../shared/i18n/formats.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 // Форматирование времени под доску B24.
 
@@ -26,7 +30,7 @@ export function hoursToHM(h: unknown): string {
   const H = Math.floor(totalMin / 60);
   const M = totalMin % 60;
 
-  return H ? `${H}ч ${M}мин` : `${M}мин`;
+  return H ? translateUi('core.formatHMin', { H: H, M: M }) : translateUi('core.formatMin', { M: M });
 }
 
 /**
@@ -119,10 +123,10 @@ export function fmtBytes(n: number): string {
   }
 
   if (n < 1024 * 1024) {
-    return `${Math.round(n / 1024)} КБ`;
+    return translateUi('core.formatKB', { value: Math.round(n / 1024) });
   }
 
-  return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+  return translateUi('core.formatMB', { value: (n / 1024 / 1024).toFixed(1) });
 }
 
 /**

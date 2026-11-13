@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from '../../../web/node_modules/esbuild/lib/main.js';
+import { parse as parseJavaScript } from '../../../web/node_modules/acorn/dist/acorn.mjs';
 import { compileScript, parse } from '../../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js';
 
 import { ApiError, failureText } from '../../../web/src/shared/apiClient.ts';
@@ -79,7 +80,9 @@ function vuePlugin(expose = [], entryFilename = null) {
         const parsed = parse(source, { filename: args.path });
 
         if (parsed.errors.length) {
-          throw new Error(parsed.errors.map((error) => error instanceof Error ? error.message : String(error)).join('\n'));
+          throw new Error(
+            parsed.errors.map((error) => error instanceof Error ? error.message : String(error)).join('\n'),
+          );
         }
 
         const descriptor = parsed.descriptor;
@@ -103,13 +106,19 @@ function vuePlugin(expose = [], entryFilename = null) {
 function dependencyPlugin(stubs) {
   return {
     name: 'grigdesk-test-dependencies',
+    /**
+     * Компилятор сохраняет singleton UI-библиотек и точные подмены зависимостей.
+     * Заглушки диалогов получают локализованный текст по публичному контракту UI.
+     */
     setup(builder) {
       for (const [specifier, singletonPath] of SINGLETONS) {
         if (Object.hasOwn(stubs, specifier)) {
           continue;
         }
 
-        builder.onResolve({ filter: new RegExp(`^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }, () => ({
+        builder.onResolve({ filter: new RegExp(
+          `^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+        ) }, () => ({
           path: pathToFileURL(singletonPath).href,
           external: true,
         }));
@@ -147,7 +156,8 @@ function dependencyPlugin(stubs) {
             namespace: 'grigdesk-stub',
           },
           () => ({
-            contents,
+            contents: /(?:\/ui(?:\.ts)?|\/services\/dialogs(?:\.ts)?)$/.test(specifier)
+              ? withLocaleExports(contents) : contents,
             loader: 'js',
             resolveDir: WEB_ROOT
           }),
@@ -174,6 +184,87 @@ function dependencyPlugin(stubs) {
       });
     },
   };
+}
+
+/**
+ * Заглушки controls сохраняют настоящий переводчик и один реактивный источник языка.
+ * Явные экспорты фикстуры приоритетны; старые заглушки не скрывают новые подписи экранов.
+ */
+function withLocaleExports(contents) {
+  const tree = parseJavaScript(contents, { ecmaVersion: 'latest', sourceType: 'module' });
+  const exports = new Set();
+  const dialogs = [];
+  let reexportsUi = false;
+
+  for (const statement of tree.body) {
+    if (statement.type === 'ExportAllDeclaration' && !statement.exported) {
+      reexportsUi = true;
+
+      continue;
+    }
+
+    if (statement.type !== 'ExportNamedDeclaration') {
+      continue;
+    }
+
+    for (const specifier of statement.specifiers) {
+      exports.add(specifier.exported.name || specifier.exported.value);
+    }
+
+    for (const declaration of statement.declaration?.declarations || []) {
+      exports.add(declaration.id.name);
+
+      if (['alertDialog', 'confirmDialog', 'promptDialog'].includes(declaration.id.name)) {
+        dialogs.push(declaration.id);
+      }
+    }
+
+    if (statement.declaration?.id) {
+      exports.add(statement.declaration.id.name);
+
+      if (['alertDialog', 'confirmDialog', 'promptDialog'].includes(statement.declaration.id.name)) {
+        dialogs.push(statement.declaration.id);
+      }
+    }
+  }
+
+  for (const identifier of [...dialogs].sort((left, right) => right.start - left.start)) {
+    contents = contents.slice(0, identifier.start)
+      + `__fixture_${identifier.name}` + contents.slice(identifier.end);
+  }
+
+  if (dialogs.length) {
+    contents += `
+      import { resolveUiText as __fixture_text } from './src/services/locale.ts';
+      const __fixture_options = (options) => {
+        if (!options || typeof options !== 'object') return options;
+        const next = { ...options };
+        for (const key of ['title', 'text', 'subtitle', 'placeholder', 'okText', 'cancelText', 'label']) {
+          if (next[key] !== undefined) next[key] = __fixture_text(next[key]);
+        }
+        return next;
+      };
+    `;
+
+    for (const identifier of dialogs) {
+      contents += `
+        export const ${identifier.name} = (...args) => {
+          if (args.length) args[0] = ${identifier.name === 'promptDialog'
+            ? '__fixture_options' : '__fixture_text'}(args[0]);
+          if (args.length > 1) args[1] = __fixture_options(args[1]);
+          return __fixture_${identifier.name}(...args);
+        };
+      `;
+    }
+  }
+
+  const missing = reexportsUi ? [] : [
+    't', 'uiLocale', 'setUiLocale', 'messageRef', 'resolveUiText', 'snapshotText', 'locales',
+  ].filter((name) => !exports.has(name));
+
+  return missing.length
+    ? `${contents}\nexport { ${missing.join(', ')} } from './src/services/locale.ts';\n`
+    : contents;
 }
 
 /**

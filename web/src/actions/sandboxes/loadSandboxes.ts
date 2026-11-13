@@ -1,6 +1,11 @@
 import { sandboxApi, sandboxErrorMessage } from '../../shared/sandboxApi';
 import { useSandboxesStore } from '../../stores/sandboxes';
 import { runtimeOf } from './sandboxesRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Обзор целиком: профили, стенды и задания приходят одним ответом, потому что
@@ -38,7 +43,9 @@ export function loadSandboxes({ fresh = false }: { fresh?: boolean } = {}): Prom
         }
       } catch (error) {
         if (generation === runtime.generation) {
-          store.setError(sandboxErrorMessage(error, 'Не удалось прочитать состояние песочниц.'));
+          store.setError(
+            sandboxErrorMessage(error, translateUi('core.loadSandboxesCouldNotReadSandboxStatus')),
+          );
         }
       }
     } while (runtime.refreshPending);

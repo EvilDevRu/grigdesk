@@ -9,6 +9,10 @@ import type {
   ProviderSettingsOverrideRequest,
   ProviderSettingsOverrideResponse,
 } from '../../../shared/chat/providerSettingsContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 export interface ProviderSettingsApi {
   catalog: (id: string, refresh?: boolean) => Promise<ProviderSettingsCatalog>;
@@ -45,7 +49,7 @@ export function createProviderSettingsApi(
       } | null;
 
       if (response?.ok !== true || typeof response.changed !== 'boolean') {
-        throw new Error('Некорректный ответ сохранения настроек');
+        throw new Error(t('core.coreNekorrektnyyOtvetSohraneniyaNastroek'));
       }
 
       return {

@@ -139,6 +139,10 @@ test('I18N-G02: bare RU и EN во всех видимых sinks не прохо
     ['metadata', (text) => `<script setup>const fields = [{ label: '${text}', id: 'stable' }];</script>`],
     ['message', (text) => `<script setup>showToast({ id: 'stable', title: '${text}' });</script>`],
     ['dialog', (text) => `<script setup>confirmDialog('${text}');</script>`],
+    ['help', (text) => `<template><UiField help="${text}" /></template>`],
+    ['aria-description', (text) => `<template><span aria-description="${text}" /></template>`],
+    ['clear-label', (text) => `<template><UiSearchInput clear-label="${text}" /></template>`],
+    ['action-failure', (text) => `<script setup>store.setError(failureText(error, '${text}'));</script>`],
   ];
 
   for (const [sink, source] of sinks) {
@@ -166,6 +170,16 @@ const command = 'npm run build';
 </script>`);
     assert.deepEqual(f.check().errors, []);
   });
+});
+
+test('I18N-G04: список переводов проверяет каждый ключ до запуска интерфейса', async (t) => {
+  const f = await fixture(t);
+
+  await f.put('web/src/translated/words.ts', "const words = messageList(['core.save']);");
+  assert.deepEqual(f.check().errors, []);
+
+  await f.put('web/src/translated/words.ts', "const words = messageList(['core.save', 'core.absent']);");
+  assert.match(f.check().errors.join('\n'), /core\.absent: ключ отсутствует/u);
 });
 
 test('I18N-G03: третий зарегистрированный каталог переводит тот же экран без ветвления по языку',

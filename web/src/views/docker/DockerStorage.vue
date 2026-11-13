@@ -3,31 +3,28 @@
     <section class="docker-storage__block">
       <header class="docker-storage__head">
         <div class="docker-storage__heading">
-          <h3>Тома <span>{{ store.volumes.length }}</span></h3>
-          <p>Постоянные данные контейнеров. Неиспользуемых: {{ unusedVolumes }}.</p>
+          <h3>{{ t('core.dockerToma') }} <span>{{ store.volumes.length }}</span></h3>
+          <p>{{ t('core.dockerPostoyannyeDannyeKonteynerovNeispolzuemyh') }} {{ unusedVolumes }}.</p>
         </div>
-        <UiCheckbox v-model="onlyUnusedVolumes">Только неиспользуемые</UiCheckbox>
-        <p v-if="!allowVolumeRemoval" class="docker-storage__note">
-          Удаление томов выключено в настройках плагина.
-        </p>
+        <UiCheckbox v-model="onlyUnusedVolumes">{{ t('core.dockerTolkoNeispolzuemye') }}</UiCheckbox>
+        <p v-if="!allowVolumeRemoval" class="docker-storage__note"> {{ t('core.dockerUdalenieTomovVyklyuchenoV2') }} </p>
       </header>
 
       <p v-if="!visibleVolumes.length" class="docker-storage__empty">
-        {{ store.volumes.length ? 'Неиспользуемых томов нет.' : 'Томов пока нет.' }}
+        {{ store.volumes.length ? t('core.dockerNeispolzuemyhTomovNet') : t('core.dockerTomovPokaNet') }}
       </p>
-      <ul v-else class="docker-list" aria-label="Тома Docker">
+      <ul v-else class="docker-list" :aria-label="t('core.dockerTomaDocker')">
         <li v-for="volume in visibleVolumes" :key="volume.name" class="docker-item">
           <div class="docker-item__main">
             <strong v-tooltip="volume.name">{{ volume.name }}</strong>
             <div class="docker-item__meta">
-              <span>{{ volume.compose ? `проект ${volume.compose}` : volume.driver }}</span>
-              <span v-if="volume.anonymous">безымянный</span>
+              <span>{{ volume.compose ? t('core.dockerProektCompose', { compose: volume.compose }) : volume.driver }}</span>
+              <span v-if="volume.anonymous">{{ t('core.dockerBezymyannyy') }}</span>
               <span :class="{ 'is-used': volume.inUse }">
-                {{ volume.inUse ? 'используется' : 'не используется' }}
+                {{ volume.inUse ? t('core.dockerIspolzuetsya') : t('core.dockerNeIspolzuetsya') }}
               </span>
               <span v-if="volume.usedBy.length" class="docker-item__used"
-                    v-tooltip="volume.usedBy.join(', ')">
-                Контейнеры: {{ volume.usedBy.join(', ') }}
+                    v-tooltip="volume.usedBy.join(', ')"> {{ t('core.dockerKonteynery') }} {{ volume.usedBy.join(', ') }}
               </span>
             </div>
           </div>
@@ -39,7 +36,7 @@
             <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              :label="`Удалить том ${volume.name}`"
+              :label="t('core.dockerUdalitTomName', { name: volume.name })"
               v-tooltip="volumeRemovalTitle(volume)"
               tone="danger"
               :disabled="volume.inUse || !allowVolumeRemoval"
@@ -58,29 +55,29 @@
     <section class="docker-storage__block">
       <header class="docker-storage__head">
         <div class="docker-storage__heading">
-          <h3>Сети <span>{{ store.networks.length }}</span></h3>
-          <p>Соединения между контейнерами. Встроенные и занятые сети сохраняются.</p>
+          <h3>{{ t('core.dockerSeti') }} <span>{{ store.networks.length }}</span></h3>
+          <p>{{ t('core.dockerSoedineniyaMezhduKonteyneramiVstroennye') }}</p>
         </div>
       </header>
 
-      <p v-if="!store.networks.length" class="docker-storage__empty">Сетей пока нет.</p>
-      <ul v-else class="docker-list" aria-label="Сети Docker">
+      <p v-if="!store.networks.length" class="docker-storage__empty">{{ t('core.dockerSeteyPokaNet') }}</p>
+      <ul v-else class="docker-list" :aria-label="t('core.dockerSetiDocker')">
         <li v-for="network in store.networks" :key="network.id" class="docker-item">
           <div class="docker-item__main">
             <strong v-tooltip="network.name">{{ network.name }}</strong>
             <div class="docker-item__meta">
               <span>{{ network.driver }}</span>
               <span v-if="network.subnets.length">{{ network.subnets.join(', ') }}</span>
-              <span v-if="network.builtin">встроенная</span>
+              <span v-if="network.builtin">{{ t('core.dockerVstroennaya') }}</span>
             </div>
           </div>
 
           <div class="docker-item__end">
-            <span class="docker-item__size">{{ network.containers }} конт.</span>
+            <span class="docker-item__size">{{ network.containers }} {{ t('core.dockerKont') }}</span>
             <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              :label="`Удалить сеть ${network.name}`"
+              :label="t('core.dockerUdalitSetName', { name: network.name })"
               v-tooltip="networkRemovalTitle(network)"
               tone="danger"
               :disabled="network.builtin || network.containers > 0"
@@ -114,7 +111,7 @@ import type {
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.ts';
-import { UiCheckbox, UiIconButton, UiInlineMessage, confirmDialog, vTooltip } from '../../ui';
+import { UiCheckbox, UiIconButton, UiInlineMessage, confirmDialog, vTooltip, t, messageRef } from '../../ui';
 import { formatSize } from './format';
 import { dockerSettings } from './settings';
 
@@ -150,13 +147,13 @@ const visibleVolumes = computed(() => (onlyUnusedVolumes.value
  */
 function volumeRemovalTitle(volume: DockerVolume): string {
   if (!allowVolumeRemoval.value) {
-    return 'Удаление томов выключено в настройках плагина';
+    return t('core.dockerUdalenieTomovVyklyuchenoV');
   }
   if (volume.inUse) {
-    return 'Том используется контейнером';
+    return t('core.dockerTomIspolzuetsyaKonteynerom');
   }
 
-  return 'Удалить том';
+  return t('core.dockerUdalitTom');
 }
 
 /**
@@ -165,13 +162,13 @@ function volumeRemovalTitle(volume: DockerVolume): string {
  */
 function networkRemovalTitle(network: DockerNetwork): string {
   if (network.builtin) {
-    return 'Встроенная сеть Docker';
+    return t('core.dockerVstroennayaSetDocker');
   }
   if (network.containers > 0) {
-    return 'К сети подключены контейнеры';
+    return t('core.dockerKSetiPodklyuchenyKonteynery');
   }
 
-  return 'Удалить сеть';
+  return t('core.dockerUdalitSet');
 }
 
 /**
@@ -181,7 +178,7 @@ function networkRemovalTitle(network: DockerNetwork): string {
 function report(result: DockerActionResult, okText: string): void {
   message.value = result.ok
     ? { tone: 'success', text: okText }
-    : { tone: 'danger', text: result.message || 'Демон отклонил удаление' };
+    : { tone: 'danger', text: result.message || t('core.dockerDemonOtklonilUdalenie') };
 
   clearTimeout(messageTimer);
   messageTimer = setTimeout(() => {
@@ -198,12 +195,12 @@ async function removeVolume(volume: DockerVolume): Promise<void> {
     return;
   }
 
-  const size = volume.size === null ? '' : `\n\nРазмер тома: ${formatSize(volume.size)}.`;
+  const size = volume.size === null ? '' : t('core.dockerRazmerTomaSize', { size: formatSize(volume.size) });
   const accepted = await confirmDialog(
-    `Удалить том «${volume.name}»? Данные внутри восстановить будет нельзя.${size}`,
+    messageRef('core.dockerUdalitTomNameDannye', { name: volume.name, size }),
     {
-      title: 'Удаление тома',
-      okText: 'Удалить том',
+      title: t('core.dockerUdalenieToma'),
+      okText: t('core.dockerUdalitTom'),
       danger: true,
     },
   );
@@ -212,7 +209,7 @@ async function removeVolume(volume: DockerVolume): Promise<void> {
     return;
   }
 
-  report(await store.removeVolume(volume.name), 'Том удалён');
+  report(await store.removeVolume(volume.name), t('core.dockerTomUdalen'));
 }
 
 /**
@@ -225,10 +222,10 @@ async function removeNetwork(network: DockerNetwork): Promise<void> {
   }
 
   const accepted = await confirmDialog(
-    `Удалить сеть «${network.name}»?`,
+    messageRef('core.dockerUdalitSetName2', { name: network.name }),
     {
-      title: 'Удаление сети',
-      okText: 'Удалить',
+      title: t('core.dockerUdalenieSeti'),
+      okText: t('core.taskDelete'),
       danger: true,
     },
   );
@@ -237,7 +234,7 @@ async function removeNetwork(network: DockerNetwork): Promise<void> {
     return;
   }
 
-  report(await store.removeNetwork(network.id), 'Сеть удалена');
+  report(await store.removeNetwork(network.id), t('core.dockerSetUdalena'));
 }
 
 onBeforeUnmount(() => {

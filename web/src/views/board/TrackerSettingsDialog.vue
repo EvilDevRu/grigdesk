@@ -75,8 +75,8 @@
                 <option v-if="!externalDrivers.length" value="">{{ t('core.trackerNone') }}</option>
                 <option v-for="driver in externalDrivers" :key="driver.id" :value="driver.id">
                   {{ driver.name }}{{ savedEnabledIds.includes(driver.id)
-                    ? ` · ${t('core.trackerEnabled')}` : '' }}{{ savedDefaultId === driver.id
-                    ? ` · ${t('core.trackerInUse')}` : '' }}
+                    ? t('core.taskTrackerenabled', { trackerEnabled: t('core.trackerEnabled') }) : '' }}{{ savedDefaultId === driver.id
+                    ? t('core.taskTrackerinuse', { trackerInUse: t('core.trackerInUse') }) : '' }}
                 </option>
               </UiSelect>
             </UiField>

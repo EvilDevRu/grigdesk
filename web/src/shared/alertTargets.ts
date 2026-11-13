@@ -4,6 +4,7 @@ import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts'
 import { messageRef, type MessageRef } from '../../../shared/i18n/core.ts';
 import { decodePluginPanelParams } from '../../../shared/plugins/pluginPanelParams.ts';
 
+
 export const ALERT_CHAT_QUERY = 'openChat';
 export const ALERT_TASK_QUERY = 'openTask';
 

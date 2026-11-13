@@ -2,6 +2,10 @@ import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from '../shared/trackerMutation.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+
 // Серверные отметки двух личных пространств синхронизируются между устройствами.
 // Пока базовой линии нет, давние задачи не объявляются новыми.
 import { defineStore } from 'pinia';
@@ -9,6 +13,8 @@ import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 function taskKey(value: unknown): string {
   return String(value ?? '').trim();
@@ -20,7 +26,7 @@ function taskKey(value: unknown): string {
  */
 function normalizedSnapshot(value: unknown) {
   if (!isRecord(value)) {
-    throw new Error('Сервер вернул некорректные отметки просмотра');
+    throw new Error(t('core.taskServerVernulNekorrektnyeOtmetki'));
   }
 
   const scope = String(value.scope || '');
@@ -28,7 +34,7 @@ function normalizedSnapshot(value: unknown) {
 
   if (!scope || !Number.isSafeInteger(revision) || revision < 0
     || typeof value.initialized !== 'boolean' || !Array.isArray(value.taskIds)) {
-    throw new Error('Сервер вернул некорректные отметки просмотра');
+    throw new Error(t('core.taskServerVernulNekorrektnyeOtmetki'));
   }
 
   return {
@@ -171,7 +177,7 @@ const createTaskSeenStore = (
           return true;
         } catch (error) {
           if (epoch === this._epoch) {
-            this.error = errorMessage(error, 'Отметки просмотра недоступны');
+            this.error = errorMessage(error, t('core.coreOtmetkiProsmotraNedostupny'));
           }
 
           return false;
@@ -232,7 +238,7 @@ const createTaskSeenStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorMessage(error, 'Не удалось отметить задачу просмотренной');
+          this.error = errorMessage(error, t('core.coreNeUdalosOtmetitZadachu'));
         }
 
         return false;

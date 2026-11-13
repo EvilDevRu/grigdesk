@@ -2,8 +2,8 @@
   <section class="scene" :data-stale="scene.stale ? 'yes' : 'no'" aria-labelledby="showcase-scene-title">
     <header class="scene__head">
       <div class="scene__heading">
-        <p class="scene__kicker">Сцена {{ index }} из {{ total }}</p>
-        <h3 id="showcase-scene-title">{{ scene.title || `Сцена ${index}` }}</h3>
+        <p class="scene__kicker">{{ t('core.showcaseStsena') }} {{ index }} {{ t('settings.from') }} {{ total }}</p>
+        <h3 id="showcase-scene-title">{{ scene.title || t('core.showcaseStsenaIndex', { index }) }}</h3>
       </div>
       <span class="scene__state" :data-tone="state.tone">{{ state.label }}</span>
     </header>
@@ -11,9 +11,9 @@
     <!-- Что запись покажет на экране. Действия задаёт карта профиля через разбор:
          править их руками здесь нельзя, но видеть — обязательно. -->
     <p class="scene__plan" :data-static="actions ? 'no' : 'yes'">
-      <span v-if="continues" class="scene__plan-chain">{{ CONTINUATION_LABEL }}</span>
+      <span v-if="continues" class="scene__plan-chain">{{ continuationLabel() }}</span>
       <span class="scene__plan-screen">{{ screenTitle }}</span>
-      <span>{{ actions || 'без действий — неподвижный экран' }}</span>
+      <span>{{ actions || t('core.showcaseBezDeystviyNepodvizhnyyEkran') }}</span>
     </p>
 
     <!-- Откуда сцена начинается: со своего экрана или там, где закончилась
@@ -25,27 +25,25 @@
         :disabled="busy || first"
         data-role="scene-continues"
         @update:model-value="emit('continue', Boolean($event))"
-      >
-        Начинать там, где закончилась предыдущая сцена
-      </UiSwitch>
+      > {{ t('core.showcaseNachinatTamGdeZakonchilas') }} </UiSwitch>
       <p class="scene__hint">{{ startHint }}</p>
     </div>
 
     <!-- Запись и звук самой сцены: увидеть, что сняли, можно без просмотра всего
          ролика. Пока записи нет, место честно говорит, когда она появится. -->
     <div class="scene__preview">
-      <UiVideo v-if="clipUrl" :src="clipUrl" :label="`Запись сцены «${scene.title}»`" />
+      <UiVideo v-if="clipUrl" :src="clipUrl" :label="t('core.showcaseZapisStsenyTitle', { title: scene.title })" />
       <div v-else class="scene__placeholder">
-        <strong>Записи ещё нет</strong>
-        <span>Запись экрана появится после сборки ролика.</span>
+        <strong>{{ t('core.showcaseZapisiEscheNet') }}</strong>
+        <span>{{ t('core.showcaseZapisEkranaPoyavitsyaPosle') }}</span>
       </div>
-      <UiAudio v-if="audioUrl" :src="audioUrl" :label="`Звук сцены «${scene.title}»`" />
+      <UiAudio v-if="audioUrl" :src="audioUrl" :label="t('core.showcaseZvukStsenyTitle', { title: scene.title })" />
       <div v-if="canJump" class="scene__jump">
-        <UiButton variant="outline" @click="emit('jump')">Смотреть в ролике</UiButton>
+        <UiButton variant="outline" @click="emit('jump')">{{ t('core.showcaseSmotretVRolike') }}</UiButton>
       </div>
     </div>
 
-    <UiField label="Название сцены">
+    <UiField :label="t('core.showcaseNazvanieStseny')">
       <UiInput
         :model-value="draft.title"
         :disabled="busy"
@@ -54,8 +52,8 @@
     </UiField>
 
     <UiField
-      label="Текст озвучки"
-      hint="Ударение — «+» перед гласной: з+амок. Числа и латиницу — словами."
+      :label="t('core.showcaseTekstOzvuchki')"
+      :hint="t('core.showcaseUdareniePeredGlasnoyZ')"
     >
       <UiTextarea
         :model-value="draft.narration"
@@ -72,10 +70,8 @@
     >
       <div class="scene__pronunciation-head">
         <div>
-          <strong id="scene-pronunciation-title">Как звучит реплика</strong>
-          <p class="scene__hint">
-            Прослушивание использует несохранённый текст и те же настройки, что сборка.
-          </p>
+          <strong id="scene-pronunciation-title">{{ t('core.showcaseKakZvuchitReplika') }}</strong>
+          <p class="scene__hint"> {{ t('core.showcaseProslushivanieIspolzuetNesohranennyyTekst') }} </p>
         </div>
         <UiButton
           variant="outline"
@@ -83,9 +79,7 @@
           :disabled="busy || !voiceRef || !canonicalNarration"
           :loading="previewing"
           @click="previewNarration"
-        >
-          Прослушать реплику
-        </UiButton>
+        > {{ t('core.showcaseProslushatRepliku') }} </UiButton>
       </div>
 
       <p class="scene__voice-support" :data-state="capabilityState(voiceCapabilities?.stress)">
@@ -93,8 +87,8 @@
       </p>
 
       <UiField
-        label="Фрагмент для явного произношения"
-        hint="Выделите слово или фразу в каноническом тексте; экранное написание не изменится."
+        :label="t('core.showcaseFragmentDlyaYavnogoProiznosheniya')"
+        :hint="t('core.showcaseVydeliteSlovoIliFrazu')"
       >
         <UiTextarea
           :model-value="canonicalNarration"
@@ -108,16 +102,16 @@
 
       <p class="scene__selection">
         {{ pronunciationSelectedText
-          ? `Выбрано: «${pronunciationSelectedText}»`
-          : 'Фрагмент ещё не выбран.' }}
+          ? t('core.showcaseVybranoPronunciationselectedtext', { pronunciationSelectedText })
+          : t('core.showcaseFragmentEscheNeVybran') }}
       </p>
 
       <div class="scene__pronunciation-controls">
-        <UiField label="Произнести как">
+        <UiField :label="t('core.showcaseProiznestiKak')">
           <UiInput
             :model-value="pronunciationDraft"
             :disabled="busy || !voiceRef"
-            placeholder="например, зам+ок"
+            :placeholder="t('core.showcaseNaprimerZamOk')"
             data-role="pronunciation-value"
             @update:model-value="pronunciationDraft = String($event ?? '')"
           />
@@ -127,7 +121,7 @@
           data-role="add-pronunciation"
           @click="addPronunciation"
         >
-          {{ replacingPronunciation ? 'Заменить исправление' : 'Добавить исправление' }}
+          {{ replacingPronunciation ? t('core.showcaseZamenitIspravlenie') : t('core.showcaseDobavitIspravlenie') }}
         </UiButton>
       </div>
 
@@ -136,7 +130,7 @@
         class="scene__pronunciation-error"
         role="alert"
       >
-        {{ pronunciationError || 'Выбранный фрагмент пересекается с другим исправлением.' }}
+        {{ pronunciationError || t('core.showcaseVybrannyyFragmentPeresekaetsyaS') }}
       </p>
 
       <ul v-if="draft.pronunciationOverrides.length" class="scene__pronunciation-list">
@@ -154,9 +148,7 @@
             tone="danger"
             :disabled="busy"
             @click="removePronunciation(entryIndex)"
-          >
-            Удалить
-          </UiButton>
+          > {{ t('core.taskDelete') }} </UiButton>
         </li>
       </ul>
 
@@ -169,17 +161,15 @@
     <section class="scene__bindings" data-role="scene-bindings" aria-labelledby="scene-bindings-title">
       <div class="scene__bindings-head">
         <div>
-          <strong id="scene-bindings-title">Речь и действия</strong>
-          <p class="scene__hint">Связь выбирается по фрагменту речи, без миллисекунд.</p>
+          <strong id="scene-bindings-title">{{ t('core.showcaseRechIDeystviya') }}</strong>
+          <p class="scene__hint">{{ t('core.showcaseSvyazVybiraetsyaPoFragmentu') }}</p>
         </div>
         <UiButton
           variant="ghost"
           :disabled="busy"
           data-role="generate-bindings"
           @click="emit('generate-bindings')"
-        >
-          Построить привязки
-        </UiButton>
+        > {{ t('core.showcasePostroitPrivyazki') }} </UiButton>
       </div>
 
       <p class="scene__binding-state" :data-status="visibleBindingStatus">
@@ -188,8 +178,8 @@
 
       <template v-if="bindableActions.length && canonicalNarration">
         <UiField
-          label="Фрагмент речи"
-          hint="Выделите слова в каноническом тексте: знаки ударения здесь уже скрыты."
+          :label="t('core.showcaseFragmentRechi')"
+          :hint="t('core.showcaseVydeliteSlovaVKanonicheskom')"
         >
           <UiTextarea
             :model-value="canonicalNarration"
@@ -202,18 +192,18 @@
         </UiField>
 
         <p class="scene__selection">
-          {{ selectedText ? `Выбрано: «${selectedText}»` : 'Фрагмент ещё не выбран.' }}
+          {{ selectedText ? t('core.showcaseVybranoSelectedtext', { selectedText }) : t('core.showcaseFragmentEscheNeVybran') }}
         </p>
 
         <div class="scene__binding-controls">
-          <UiField label="Действие">
+          <UiField :label="t('core.showcaseDeystvie')">
             <UiSelect v-model.number="bindingActionIndex" :disabled="busy">
               <option v-for="item in bindableActions" :key="item.index" :value="item.index">
                 {{ item.label }}
               </option>
             </UiSelect>
           </UiField>
-          <UiField label="Связь">
+          <UiField :label="t('core.showcaseSvyaz')">
             <UiSelect v-model="bindingKind" :disabled="busy">
               <option
                 v-for="item in BINDING_KIND_OPTIONS"
@@ -226,13 +216,11 @@
             </UiSelect>
           </UiField>
           <UiButton :disabled="busy || !canAddBinding" @click="addBinding">
-            {{ boundAction ? 'Заменить связь' : 'Добавить связь' }}
+            {{ boundAction ? t('core.showcaseZamenitSvyaz') : t('core.showcaseDobavitSvyaz') }}
           </UiButton>
         </div>
       </template>
-      <p v-else class="scene__hint">
-        У сцены нет действия, которое можно связать с речью.
-      </p>
+      <p v-else class="scene__hint"> {{ t('core.showcaseUStsenyNetDeystviya') }} </p>
 
       <ul v-if="draft.syncCues.length" class="scene__binding-list">
         <li v-for="cue in draft.syncCues" :key="cue.id ?? cueKey(cue)">
@@ -240,17 +228,15 @@
             <strong>«{{ cueText(cue) }}»</strong>
             <small>
               {{ bindingKindLabel(cue.kind) }} · {{ actionLabel(cue.actionIndex) }} ·
-              {{ cue.origin === 'manual' ? 'вручную' : 'автоматически' }}
+              {{ cue.origin === 'manual' ? t('core.showcaseVruchnuyu') : t('core.showcaseAvtomaticheski') }}
             </small>
           </span>
-          <UiButton variant="ghost" tone="danger" :disabled="busy" @click="removeBinding(cue)">
-            Удалить
-          </UiButton>
+          <UiButton variant="ghost" tone="danger" :disabled="busy" @click="removeBinding(cue)"> {{ t('core.taskDelete') }} </UiButton>
         </li>
       </ul>
     </section>
 
-    <UiField label="Подпись на экране" hint="Короткая, не дословный субтитр.">
+    <UiField :label="t('core.showcasePodpisNaEkrane')" :hint="t('core.showcaseKorotkayaNeDoslovnyySubtitr')">
       <UiInput
         :model-value="draft.caption"
         :disabled="busy"
@@ -267,11 +253,11 @@
     </ul>
 
     <UiDisclosureButton v-model:open="moreOpen" :controls="`${scene.id}-more`" density="compact">
-      {{ moreOpen ? 'Скрыть субтитр и свой звук' : 'Субтитр и свой звук' }}
+      {{ moreOpen ? t('core.showcaseSkrytSubtitrISvoy') : t('core.showcaseSubtitrISvoyZvuk') }}
     </UiDisclosureButton>
 
     <div v-show="moreOpen" :id="`${scene.id}-more`" class="scene__more">
-      <UiField label="Субтитр" hint="Тот же смысл, что в речи, обычной письменной формой.">
+      <UiField :label="t('core.showcaseSubtitr')" :hint="t('core.showcaseTotZheSmyslChto')">
         <UiTextarea
           :model-value="draft.subtitleText"
           :disabled="busy"
@@ -281,30 +267,24 @@
       </UiField>
 
       <div class="scene__media-block">
-        <span class="scene__media-title">Свой звук вместо синтеза</span>
-        <p class="scene__hint">
-          Загруженную запись озвучка не трогает: правка текста её не переозвучит.
-        </p>
+        <span class="scene__media-title">{{ t('core.showcaseSvoyZvukVmestoSinteza') }}</span>
+        <p class="scene__hint"> {{ t('core.showcaseZagruzhennuyuZapisOzvuchkaNe') }} </p>
         <UiFilePicker
           accept="audio/wav,audio/x-wav,.wav"
           :disabled="busy"
-          :label="scene.audioSource.kind === 'recorded' ? 'Заменить звук' : 'Загрузить звук'"
+          :label="scene.audioSource.kind === 'recorded' ? t('core.showcaseZamenitZvuk') : t('core.showcaseZagruzitZvuk')"
           @change="pickAudio"
         />
       </div>
     </div>
 
     <footer class="scene__actions">
-      <UiButton variant="solid" tone="accent" :disabled="!changed || busy" @click="emit('save')">
-        Сохранить
-      </UiButton>
-      <span v-if="changed" class="scene__unsaved">не сохранено</span>
+      <UiButton variant="solid" tone="accent" :disabled="!changed || busy" @click="emit('save')"> {{ t('core.save') }} </UiButton>
+      <span v-if="changed" class="scene__unsaved">{{ t('core.showcaseNeSohraneno') }}</span>
       <span class="scene__spacer" aria-hidden="true"></span>
-      <UiButton variant="ghost" :disabled="busy || first" @click="emit('move', -1)">Выше</UiButton>
-      <UiButton variant="ghost" :disabled="busy || last" @click="emit('move', 1)">Ниже</UiButton>
-      <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove')">
-        Удалить сцену
-      </UiButton>
+      <UiButton variant="ghost" :disabled="busy || first" @click="emit('move', -1)">{{ t('core.showcaseVyshe') }}</UiButton>
+      <UiButton variant="ghost" :disabled="busy || last" @click="emit('move', 1)">{{ t('core.showcaseNizhe') }}</UiButton>
+      <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove')"> {{ t('core.showcaseUdalitStsenu') }} </UiButton>
     </footer>
   </section>
 </template>
@@ -313,16 +293,8 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 
 import {
-  UiAudio,
-  UiButton,
-  UiDisclosureButton,
-  UiField,
-  UiFilePicker,
-  UiInput,
-  UiSelect,
-  UiSwitch,
-  UiTextarea,
-  UiVideo,
+  UiAudio, UiButton, UiDisclosureButton, UiField, UiFilePicker, UiInput, UiSelect, UiSwitch,
+  UiTextarea, UiVideo, t,
 } from '../../ui';
 import type {
   ShowcaseCheck,
@@ -332,7 +304,7 @@ import type {
 import type { ShowcaseSyncCueKind } from '../../../../shared/plugins/showcase/showcaseContracts';
 import { parseNarration } from '../../../../shared/plugins/showcase/showcaseNarration';
 import { SHOWCASE_SYNC_ACTIONS_BY_CUE } from '../../../../shared/plugins/showcase/showcaseSync';
-import { actionsText, CONTINUATION_LABEL, sceneStateOf } from './sceneText';
+import { actionsText, continuationLabel, sceneStateOf } from './sceneText';
 import {
   bindingStatusOf,
   narrationTextHash,
@@ -392,10 +364,18 @@ const emit = defineEmits<{
 // Пропущенная проверка показывается наравне с пройденной, но своим словом: место,
 // которое никто не слушал, зелёным быть не должно.
 const CHECK_TEXT: Record<ShowcaseCheck['status'], string> = {
-  passed: 'речь проверена',
-  warning: 'спорное место',
-  blocked: 'проверка не пускает дальше',
-  skipped: 'проверка пропущена',
+  get passed() {
+    return t('core.showcaseRechProverena');
+  },
+  get warning() {
+    return t('core.showcaseSpornoeMesto');
+  },
+  get blocked() {
+    return t('core.showcaseProverkaNePuskaetDalshe');
+  },
+  get skipped() {
+    return t('core.showcaseProverkaPropuschena');
+  },
 };
 
 const moreOpen = ref(false);
@@ -460,35 +440,54 @@ const canAddPronunciation = computed(() => Boolean(
 
 const stressSupportText = computed(() => {
   if (!props.voiceRef) {
-    return 'Сначала выберите голос ролика.';
+    return t('core.showcaseSnachalaVyberiteGolosRolika');
   }
 
   if (props.voiceCapabilities?.stress === true) {
-    return 'Знаки «+» и словарь ударений применятся; явную замену можно проверить здесь же.';
+    return t('core.showcaseZnakiISlovarUdareniy');
   }
 
   if (props.voiceCapabilities?.stress === false) {
-    return 'Этот голос не применяет словарь ударений. Для спорного слова '
-      + 'используйте явную замену и прослушайте её.';
+    return t('core.showcaseEtotGolosNePrimenyaet');
   }
 
-  return 'Поддержка словаря у этого голоса неизвестна. Проверьте результат прослушиванием.';
+  return t('core.showcasePodderzhkaSlovaryaUEtogo');
 });
 
 const ACTION_NAMES: Record<ShowcaseScene['actions'][number]['kind'], string> = {
-  goto: 'переход',
-  click: 'клик',
-  hover: 'наведение',
-  highlight: 'подсветка',
-  waitVisible: 'готовность',
-  scroll: 'прокрутка',
-  wait: 'ожидание',
+  get goto() {
+    return t('core.showcasePerehod');
+  },
+  get click() {
+    return t('core.showcaseKlik');
+  },
+  get hover() {
+    return t('core.showcaseNavedenie');
+  },
+  get highlight() {
+    return t('core.showcasePodsvetka');
+  },
+  get waitVisible() {
+    return t('core.showcaseGotovnost');
+  },
+  get scroll() {
+    return t('core.showcaseProkrutka');
+  },
+  get wait() {
+    return t('core.showcaseOzhidanie');
+  },
 };
 
 const BINDING_KIND_OPTIONS: { value: ShowcaseSyncCueKind; label: string }[] = [
-  { value: 'align-start', label: 'начать вместе' },
-  { value: 'ready-before', label: 'должно быть готово до фразы' },
-  { value: 'hold-through', label: 'держать во время фразы' },
+  { value: 'align-start', get label() {
+    return t('core.showcaseNachatVmeste');
+  } },
+  { value: 'ready-before', get label() {
+    return t('core.showcaseDolzhnoBytGotovoDo');
+  } },
+  { value: 'hold-through', get label() {
+    return t('core.showcaseDerzhatVoVremyaFrazy');
+  } },
 ];
 
 const bindableActions = computed(() => props.scene.actions
@@ -514,15 +513,15 @@ const visibleBindingStatus = computed(() => (
 
 const bindingStatusText = computed(() => {
   if (visibleBindingStatus.value === 'changed') {
-    return 'Привязки изменены и ещё не сохранены.';
+    return t('core.showcasePrivyazkiIzmenenyIEsche');
   }
 
   return {
-    missing: 'Точных привязок пока нет.',
-    valid: 'Привязки относятся к текущему тексту и действиям.',
-    stale: 'Привязки потеряли актуальность после правки текста или действий.',
-    invalid: 'Привязки требуют исправления в этой сцене.',
-    unknown: 'Актуальность привязок проверит сервер при сохранении.',
+    missing: t('core.showcaseTochnyhPrivyazokPokaNet'),
+    valid: t('core.showcasePrivyazkiOtnosyatsyaKTekuschemu'),
+    stale: t('core.showcasePrivyazkiPoteryaliAktualnostPosle'),
+    invalid: t('core.showcasePrivyazkiTrebuyutIspravleniyaV'),
+    unknown: t('core.showcaseAktualnostPrivyazokProveritServer'),
   }[savedBindingStatus.value];
 });
 
@@ -530,13 +529,12 @@ const bindingStatusText = computed(() => {
 // за собой всю цепочку, и узнать об этом человек должен до сборки, а не по счётчику.
 const startHint = computed(() => {
   if (props.first) {
-    return 'Первая сцена ролика всегда открывает свой экран сама.';
+    return t('core.showcasePervayaStsenaRolikaVsegda');
   }
 
   return props.continues
-    ? 'Открытый диалог и выбранные строки остаются на экране, путь к ним заново не '
-      + 'снимается. Переснимается такая сцена вместе со всей цепочкой.'
-    : 'Сцена открывает свой экран заново и от предыдущих не зависит.';
+    ? t('core.showcaseOtkrytyyDialogIVybrannye')
+    : t('core.showcaseStsenaOtkryvaetSvoyEkran');
 });
 
 watch(bindableActions, (actions) => {
@@ -617,7 +615,7 @@ function actionLabel(index: number): string {
   const action = props.scene.actions[index];
 
   if (!action) {
-    return `действие ${index + 1} удалено`;
+    return t('core.showcaseDeystvieIndex1Udaleno', { index1: index + 1 });
   }
 
   const target = 'targetId' in action && action.targetId ? `: ${action.targetId}` : '';
@@ -693,26 +691,26 @@ function pronunciationStatusText(entry: ScenePronunciationDraft): string {
   const status = pronunciationStatus(entry);
 
   if (status === 'new') {
-    return 'новое исправление · сохранится для выбранного голоса';
+    return t('core.showcaseNovoeIspravlenieSohranitsyaDlya');
   }
 
   if (status === 'stale') {
-    return 'не применяется: текст реплики изменился';
+    return t('core.showcaseNePrimenyaetsyaTekstRepliki');
   }
 
   if (status === 'voice') {
-    return `не применяется к выбранному голосу · сохранено для ${entry.voiceRef}`;
+    return t('core.showcaseNePrimenyaetsyaKVybrannomu', { voiceRef: entry.voiceRef });
   }
 
   if (status === 'unknown') {
-    return 'актуальность подтвердит сервер при сохранении';
+    return t('core.showcaseAktualnostPodtverditServerPri');
   }
 
-  return 'применяется к выбранному голосу';
+  return t('core.showcasePrimenyaetsyaKVybrannomuGolosu');
 }
 
 function pronunciationSource(entry: ScenePronunciationDraft): string {
-  return canonicalNarration.value.slice(entry.from, entry.to) || 'фрагмент потерян';
+  return canonicalNarration.value.slice(entry.from, entry.to) || t('core.showcaseFragmentPoteryan');
 }
 
 function pronunciationKey(entry: ScenePronunciationDraft, index: number): string {
@@ -727,7 +725,7 @@ function addPronunciation(): void {
   pronunciationError.value = '';
 
   if (pronunciationConflict.value) {
-    pronunciationError.value = 'Выбранный фрагмент пересекается с другим исправлением.';
+    pronunciationError.value = t('core.showcaseVybrannyyFragmentPeresekaetsyaS');
 
     return;
   }
@@ -832,7 +830,7 @@ async function previewNarration(): Promise<void> {
 
   previewController = controller;
   previewing.value = true;
-  previewNote.value = 'Готовлю реплику выбранным голосом…';
+  previewNote.value = t('core.showcaseGotovlyuReplikuVybrannymGolosom');
   previewError.value = '';
 
   try {
@@ -850,7 +848,7 @@ async function previewNarration(): Promise<void> {
     if (!controller.signal.aborted) {
       previewError.value = error instanceof Error && error.message
         ? error.message
-        : 'Реплика не воспроизвелась: голосовой движок не ответил.';
+        : t('core.showcaseReplikaNeVosproizvelasGolosovoy');
     }
   } finally {
     if (previewController === controller) {
@@ -893,7 +891,7 @@ function removeBinding(cue: SceneSyncCueDraft): void {
 }
 
 function cueText(cue: SceneSyncCueDraft): string {
-  return canonicalNarration.value.slice(cue.from, cue.to) || 'фрагмент потерян';
+  return canonicalNarration.value.slice(cue.from, cue.to) || t('core.showcaseFragmentPoteryan');
 }
 
 function cueKey(cue: SceneSyncCueDraft): string {

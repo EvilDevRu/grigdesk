@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { t } from '../../ui.ts';
+import { t, uiLocale } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import { createHelpLoader } from '../../shared/helpLoader.ts';
 import type { HelpLoadState } from '../../shared/helpLoader.ts';
@@ -43,7 +43,7 @@ const state = ref<HelpLoadState>({
   bundle: null,
   error: ''
 });
-const loader = createHelpLoader(() => api.get('/api/help'), (value) => {
+const loader = createHelpLoader(() => api.get(`/api/help?locale=${uiLocale.value}`), (value) => {
   state.value = value;
 });
 /**
@@ -75,7 +75,9 @@ async function ask(id: string): Promise<void> {
   }
 }
 
-watch(() => [auth.authenticated, auth.clientScope, shell.profile?.id, shell.status, shell.present], () => {
+watch(() => [
+  auth.authenticated, auth.clientScope, shell.profile?.id, shell.status, shell.present, uiLocale.value
+], () => {
   loader.cancel();
 
   if (auth.authenticated && auth.clientScope && (!shell.present || shell.status === 'online')) {

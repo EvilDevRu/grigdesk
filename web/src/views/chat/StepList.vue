@@ -8,7 +8,7 @@
       density="compact"
       :open="open"
       :controls="`${baseId}-list`"
-      :aria-label="section ? `Действия агента: ${summary}` : undefined"
+      :aria-label="section ? t('core.chatDeystviyaAgentaSummary', { summary }) : undefined"
       @update:open="open = $event"
     >
       <span v-if="section" class="head activity-summary">
@@ -18,7 +18,7 @@
         </svg>
         <span class="sum">{{ summary }}</span>
       </span>
-      <span v-else class="sum">Ход агента: {{ summary }}</span>
+      <span v-else class="sum">{{ t('core.chatHodAgenta') }} {{ summary }}</span>
     </UiDisclosureButton>
     <div v-if="open || live" :id="`${baseId}-list`" class="list">
       <div v-for="r in rows" :key="r.rowKey" class="step" :class="[r.k, isNested(r) ? 'nested' : '']">
@@ -35,8 +35,7 @@
           >
             <span class="head think">
               <span class="ico">✻</span>
-              <span class="ttl">
-                Размышление<template v-if="r.secs"> · {{ r.secs }} с</template>
+              <span class="ttl"> {{ t('core.chatRazmyshlenie') }}<template v-if="r.secs"> · {{ r.secs }} {{ t('core.chatS') }}</template>
               </span>
             </span>
           </UiDisclosureButton>
@@ -66,7 +65,7 @@
               <span class="nm">{{ toolLabel(r.name) }}</span>
               <span class="ttl">{{ r.title }}</span>
               <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
-              <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+              <span v-else-if="r.lines" class="stat">{{ r.lines }} {{ t('core.chatStr') }}</span>
               <span v-if="r.res" class="mark" :class="{ bad: !r.res!.ok }">
                 {{ r.res.ok ? '✓' : '✕' }}
               </span>
@@ -78,9 +77,9 @@
             <!-- Рассмотренная картинка идёт через защищённый маршрут рабочей папки чата.
                  Обычный щелчок по ней перехватывает чат и открывает общий просмотрщик. -->
             <template v-if="imageOf(r)">
-              <div v-if="brokenImages.has(imageOf(r))" class="step-image-missing">Изображение недоступно</div>
+              <div v-if="brokenImages.has(imageOf(r))" class="step-image-missing">{{ t('core.chatIzobrazhenieNedostupno') }}</div>
               <a v-else class="step-image" :href="imageOf(r)" target="_blank" rel="noopener">
-                <img :src="imageOf(r)" :alt="r.title || 'Изображение'" loading="lazy"
+                <img :src="imageOf(r)" :alt="r.title || t('core.chatIzobrazhenie')" loading="lazy"
                      @error="brokenImages.add(imageOf(r))" />
               </a>
             </template>
@@ -91,7 +90,7 @@
               <div v-for="(change, c) in changesOf(r)" :key="`${change.path || ''}:${c}`" class="change">
                 <div v-if="change.path" class="path">{{ change.path }}</div>
                 <div v-if="hasChangeDiff(change)" class="diff">
-                  <div class="dhead"><span>было</span><span>стало</span></div>
+                  <div class="dhead"><span>{{ t('core.chatBylo') }}</span><span>{{ t('core.chatStalo') }}</span></div>
                   <div v-for="(d, k) in splitChangeOf(change)" :key="k" class="drow">
                     <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
                     <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
@@ -101,7 +100,7 @@
             </div>
             <!-- Дифф правки в две колонки: слева убранное, справа добавленное -->
             <div v-if="r.diff && !hasRichDiff(r)" class="diff">
-              <div class="dhead"><span>было</span><span>стало</span></div>
+              <div class="dhead"><span>{{ t('core.chatBylo') }}</span><span>{{ t('core.chatStalo') }}</span></div>
               <div v-for="(d, k) in splitOf(r)" :key="k" class="drow">
                 <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
                 <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
@@ -125,9 +124,9 @@
           >
             <span class="head other">
               <span class="ico">•</span>
-              <span class="nm">Итог</span>
-              <span class="ttl">действие вытеснено из ленты</span>
-              <span v-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+              <span class="nm">{{ t('core.chatItog') }}</span>
+              <span class="ttl">{{ t('core.chatDeystvieVytesnenoIzLenty') }}</span>
+              <span v-if="r.lines" class="stat">{{ r.lines }} {{ t('core.chatStr') }}</span>
               <span class="mark" :class="{ bad: !r.ok }">{{ r.ok ? '✓' : '✕' }}</span>
             </span>
           </UiDisclosureButton>
@@ -140,8 +139,7 @@
         </template>
 
         <!-- Служебное: старт хода, ретраи, сжатие контекста -->
-        <div v-else-if="r.k === 'start'" class="note start">
-          старт · модель <b>{{ modelLabel(r.model) || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
+        <div v-else-if="r.k === 'start'" class="note start"> {{ t('core.chatStartModel') }} <b>{{ modelLabel(r.model) || '?' }}</b><template v-if="r.mode"> {{ t('core.chatRezhim') }} {{ r.mode }}</template>
         </div>
         <div v-else-if="r.k === 'note'" class="note" :class="r.level">
           {{ r.text }}<template v-if="r.times! > 1"> ×{{ r.times }}</template>
@@ -160,7 +158,7 @@ import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.ts';
 import { api } from '../../shared/apiClient.ts';
 import { NAV_ICONS } from '../../shared/navIcons.ts';
-import { UiDisclosureButton } from '../../ui';
+import { UiDisclosureButton, t } from '../../ui';
 import { chatWorkdirImageHref } from './chatImages.ts';
 import { foldChatSteps, nestChatStepRows } from './chatStepRows.ts';
 import type { StepRow } from './chatStepRows.ts';
@@ -212,13 +210,13 @@ const summary = computed(() => {
   const parts = [];
 
   if (toolCount.value) {
-    parts.push(`${toolCount.value} действ.`);
+    parts.push(t('core.chatToolcountDeystv', { toolCount: toolCount.value }));
   }
   if (think) {
-    parts.push(`${think} размышл.`);
+    parts.push(t('core.chatThinkRazmyshl', { think: think }));
   }
 
-  return parts.join(' · ') || `${rows.value.length} шаг.`;
+  return parts.join(' · ') || t('core.chatLengthShag', { length: rows.value.length });
 });
 
 // Дифф правки считаем лениво — только для раскрытого шага.
@@ -339,20 +337,20 @@ const IMAGE_STEPS = new Set(['Read', 'GenerateImage']);
 // Общие знаки терминала, агента и настроек совпадают с навигацией приложения.
 const ICON = {
   bash: NAV_ICONS.terminal,
-  read: 'M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+  read: "M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
   image: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z '
     + 'M3 16l5-5 5 5 3-3 5 5 M16 7h.01',
-  write: 'M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5',
-  find: 'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6',
+  write: "M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5",
+  find: "M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6",
   task: NAV_ICONS.agents,
   web: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M3 12h18 '
     + 'M12 3c5 5 5 13 0 18-5-5-5-13 0-18z',
-  todo: 'M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2',
-  ask: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01',
-  plan: 'M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5',
+  todo: "M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2",
+  ask: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01",
+  plan: "M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5",
   skill: NAV_ICONS.settings,
-  mcp: 'M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4',
-  other: 'M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0',
+  mcp: "M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4",
+  other: "M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
 };
 
 // Иконка и вид строки инструмента не зависят от исполнителя или темы окна.

@@ -2,33 +2,31 @@
   <section class="list"
     :data-perf-pending="loading && !items.length ? '' : undefined" data-role="project-list">
     <UiPaneHeader>
-      <template #title><h1>Проекты</h1></template>
+      <template #title><h1>{{ t('core.projects') }}</h1></template>
       <template #meta><span class="count">{{ items.length }}</span></template>
       <template #actions><slot name="actions" /></template>
     </UiPaneHeader>
     <div class="tools">
       <label class="search" data-role="project-search">
         <UiSearchInput v-model="search" size="compact"
-                       aria-label="Поиск проектов" placeholder="Найти проект…" />
+                       :aria-label="t('core.projectPoiskProektov')" :placeholder="t('core.projectNaytiProekt')" />
       </label>
       <div data-role="project-sort" :data-sort="sort">
       <UiIconButton data-context="workspace-toolbar"
-        :label="sort === 'title' ? 'Сортировка: по названию' : 'Сортировка: по изменению'"
+        :label="sort === 'title' ? t('core.projectSortirovkaPoNazvaniyu') : t('core.projectSortirovkaPoIzmeneniyu')"
         :pressed="sort === 'updated'" :data-sort="sort"
-        v-tooltip="sort === 'title' ? 'Сортировка: по названию' : 'Сортировка: по изменению'"
+        v-tooltip="sort === 'title' ? t('core.projectSortirovkaPoNazvaniyu') : t('core.projectSortirovkaPoIzmeneniyu')"
         @click="sort = sort === 'title' ? 'updated' : 'title'">
         <ProjectIcon name="sort" />
       </UiIconButton>
       </div>
     </div>
-    <div class="filters" data-role="project-filter" role="group" aria-label="Показывать проекты">
+    <div class="filters" data-role="project-filter" role="group" :aria-label="t('core.projectPokazyvatProekty')">
       <UiButton variant="ghost" data-context="workspace-filter" data-value="active"
-        :pressed="filter === 'active'" @click="filter = 'active'">
-        Активные <span class="count">{{ items.filter(item => !item.archivedAt).length }}</span>
+        :pressed="filter === 'active'" @click="filter = 'active'"> {{ t('core.projectAktivnye') }} <span class="count">{{ items.filter(item => !item.archivedAt).length }}</span>
       </UiButton>
       <UiButton variant="ghost" data-context="workspace-filter" data-value="archive"
-        :pressed="filter === 'archive'" @click="filter = 'archive'">
-        Архив <span class="count">{{ items.filter(item => item.archivedAt).length }}</span>
+        :pressed="filter === 'archive'" @click="filter = 'archive'"> {{ t('core.projectArhiv') }} <span class="count">{{ items.filter(item => item.archivedAt).length }}</span>
       </UiButton>
     </div>
 
@@ -39,23 +37,23 @@
     <div v-if="error" class="failure" data-role="project-error"
     :data-perf-error="!items.length && !loading ? '' : undefined" role="alert">
       <UiInlineMessage tone="danger">{{ error }}</UiInlineMessage>
-      <UiButton variant="text" data-role="project-retry" @click="emit('retry')">Повторить</UiButton>
+      <UiButton variant="text" data-role="project-retry" @click="emit('retry')">{{ t('core.pluginNotificationsRetry') }}</UiButton>
     </div>
 
-    <UiLoadingState v-if="loading && !items.length" label="Загрузка…" :failed="Boolean(error)" >
+    <UiLoadingState v-if="loading && !items.length" :label="t('core.browserLoading')" :failed="Boolean(error)" >
       <div class="project-loading"><UiSkeletonLayout layout="list" :header="false" /></div>
     </UiLoadingState>
     <div v-else-if="!items.length && !error" class="empty">
-      <strong>Проектов пока нет.</strong>
-      <span>Создайте первый, чтобы собрать его настройки и репозитории вместе.</span>
+      <strong>{{ t('core.projectProektovPokaNet') }}</strong>
+      <span>{{ t('core.projectSozdaytePervyyChtobySobrat') }}</span>
     </div>
     <div v-else-if="items.length && !visible.length" class="empty" role="status">
-      <strong>{{ search.trim() ? 'Ничего не найдено.'
-        : filter === 'archive' ? 'Архив пуст.' : 'Нет активных проектов.' }}</strong>
-      <span>{{ search.trim() ? 'Попробуйте другое название, метку или путь.'
-        : filter === 'archive' ? 'Здесь появятся архивированные проекты.'
-          : 'Создайте проект или восстановите его из архива.' }}</span>
-      <UiButton v-if="search.trim()" variant="text" @click="search = ''">Сбросить поиск</UiButton>
+      <strong>{{ search.trim() ? t('core.projectNichegoNeNaydeno')
+        : filter === 'archive' ? t('core.projectArhivPust') : t('core.projectNetAktivnyhProektov') }}</strong>
+      <span>{{ search.trim() ? t('core.projectPoprobuyteDrugoeNazvanieMetku')
+        : filter === 'archive' ? t('core.projectZdesPoyavyatsyaArhivirovannyeProekty')
+          : t('core.projectSozdayteProektIliVosstanovite') }}</span>
+      <UiButton v-if="search.trim()" variant="text" @click="search = ''">{{ t('core.dbDesignClearSearch') }}</UiButton>
     </div>
 
     <div v-else class="rows">
@@ -72,9 +70,9 @@
         <span class="row-content">
           <span class="head">
             <span class="title">{{ item.title }}</span>
-            <span v-if="item.archivedAt" class="archived">Архив</span>
+            <span v-if="item.archivedAt" class="archived">{{ t('core.projectArhiv') }}</span>
             <span v-if="item.repos.length" class="repo-count">
-              <ProjectIcon name="repo" /><span class="ui-visually-hidden">Репозитории: </span>
+              <ProjectIcon name="repo" /><span class="ui-visually-hidden">{{ t('core.projectRepozitorii2') }} </span>
               {{ item.repos.length }}
             </span>
           </span>
@@ -86,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
+import { UiSkeletonLayout, t } from '../../ui';
 
 // Список проектов: строка отвечает на «что это за проект и где его код», а поиск
 // и фильтр — на «как его найти». Сети и состояния здесь нет: список приходит

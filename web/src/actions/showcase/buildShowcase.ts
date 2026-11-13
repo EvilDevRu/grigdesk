@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { openShowcaseProject } from './openShowcaseProject';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Запуск записи сцен. Сервер сам решает, какие сцены снимать: те, чей клип не
@@ -20,7 +25,7 @@ export async function recordShowcase(store: ShowcaseStore): Promise<boolean> {
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось запустить запись.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotStartRecording')));
 
     return false;
   }
@@ -48,7 +53,7 @@ export async function proposeShowcaseBrief(
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось получить бриф.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotGenerateABrief')));
 
     return false;
   } finally {
@@ -78,7 +83,7 @@ export async function proposeShowcaseScript(
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось получить сценарий.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotGenerateAScript')));
 
     return false;
   } finally {
@@ -103,7 +108,7 @@ export async function synthesizeShowcase(store: ShowcaseStore): Promise<boolean>
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось запустить озвучку.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotStartNarration')));
 
     return false;
   }
@@ -127,7 +132,7 @@ export async function assembleShowcase(store: ShowcaseStore): Promise<boolean> {
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось собрать ролик.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotAssembleTheVideo')));
 
     return false;
   }

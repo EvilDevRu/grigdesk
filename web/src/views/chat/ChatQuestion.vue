@@ -15,8 +15,8 @@
       </div>
       <div class="q-text">
         {{ question.question }}
-        <span v-if="structured && question.required" class="q-required">обязательно</span>
-        <span v-if="question.multiSelect" class="q-multi">можно несколько</span>
+        <span v-if="structured && question.required" class="q-required">{{ t('core.chatObyazatelno') }}</span>
+        <span v-if="question.multiSelect" class="q-multi">{{ t('core.chatMozhnoNeskolko') }}</span>
       </div>
 
       <div v-if="question.hint" class="q-hint">{{ question.hint }}</div>
@@ -94,9 +94,7 @@
           tone="neutral"
           :pressed="state[questionIndex]!.own"
           @click="toggleOwn(questionIndex)"
-        >
-          свой ответ…
-        </UiButton>
+        > {{ t('core.chatSvoyOtvet') }} </UiButton>
 
         <UiTextarea
           v-if="freeText(question) && state[questionIndex]!.own"
@@ -104,7 +102,7 @@
           v-model="state[questionIndex]!.text"
           class="q-own"
           data-context="workspace-note"
-          placeholder="напиши своими словами"
+          :placeholder="t('core.chatNapishiSvoimiSlovami')"
           :aria-label="question.header || question.question"
           :rows="2"
           @keydown.ctrl.enter.prevent="ready && submit()"
@@ -149,16 +147,14 @@
             </UiButton>
           </template>
           <template v-else>
-            <UiButton size="compact" variant="link" @click="emit('skip')">Пропустить</UiButton>
+            <UiButton size="compact" variant="link" @click="emit('skip')">{{ t('core.chatPropustit') }}</UiButton>
             <UiButton
               size="compact"
               variant="solid"
               tone="accent"
               :disabled="!ready"
               @click="submit"
-            >
-              Ответить
-            </UiButton>
+            > {{ t('core.chatOtvetit') }} </UiButton>
           </template>
         </UiFormActions>
       </div>
@@ -235,11 +231,21 @@ const ready = computed(() => (structured.value
 
 const DEFAULT_ACTIONS = Object.freeze(['accept', 'cancel']);
 const ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  accept: 'Отправить',
-  accept_session: 'Разрешить на сессию',
-  accept_always: 'Разрешать всегда',
-  decline: 'Отклонить',
-  cancel: 'Отменить',
+  get accept() {
+    return t('core.send');
+  },
+  get accept_session() {
+    return t('core.chatRazreshitNaSessiyu');
+  },
+  get accept_always() {
+    return t('core.chatRazreshatVsegda');
+  },
+  get decline() {
+    return t('core.deny');
+  },
+  get cancel() {
+    return t('core.trackerCancel');
+  },
 });
 const actions = computed(() => {
   const given = Array.isArray(props.req?.actions) ? props.req.actions : DEFAULT_ACTIONS;
@@ -296,8 +302,8 @@ function structuredChoices(question: ChatQuestionItem) {
 function structuredOptions(question: ChatQuestionItem) {
   if (question?.inputType === 'boolean') {
     return [
-      { value: true, label: 'Да' },
-      { value: false, label: 'Нет' },
+      { value: true, label: t('core.yes') },
+      { value: false, label: t('core.chatNet') },
     ];
   }
 
@@ -500,22 +506,22 @@ function constraintText(question: ChatQuestionItem) {
   const parts = [];
 
   if (question?.minLength !== undefined) {
-    parts.push(`минимум ${question.minLength} симв.`);
+    parts.push(t('core.chatMinimumMinlengthSimv', { minLength: question.minLength }));
   }
   if (question?.maxLength !== undefined) {
-    parts.push(`максимум ${question.maxLength} симв.`);
+    parts.push(t('core.chatMaksimumMaxlengthSimv', { maxLength: question.maxLength }));
   }
   if (question?.minimum !== undefined) {
-    parts.push(`не меньше ${question.minimum}`);
+    parts.push(t('core.chatNeMensheMinimum', { minimum: question.minimum }));
   }
   if (question?.maximum !== undefined) {
-    parts.push(`не больше ${question.maximum}`);
+    parts.push(t('core.chatNeBolsheMaximum', { maximum: question.maximum }));
   }
   if (question?.minItems !== undefined) {
-    parts.push(`выбрать минимум ${question.minItems}`);
+    parts.push(t('core.chatVybratMinimumMinitems', { minItems: question.minItems }));
   }
   if (question?.maxItems !== undefined) {
-    parts.push(`выбрать максимум ${question.maxItems}`);
+    parts.push(t('core.chatVybratMaksimumMaxitems', { maxItems: question.maxItems }));
   }
 
   return parts.join(' · ');
@@ -527,7 +533,7 @@ function hasAction(action: string) {
 
 function actionLabel(action: string) {
   if (action === 'accept' && !questions.value.length) {
-    return 'Разрешить';
+    return t('core.allow');
   }
 
   return actions.value.find((entry) => entry.action === action)?.label || ACTION_LABELS[action];

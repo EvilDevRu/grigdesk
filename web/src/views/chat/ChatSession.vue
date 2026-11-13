@@ -3,7 +3,7 @@
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
-      <div class="drop-box">📎 Отпусти, чтобы приложить</div>
+      <div class="drop-box">{{ t('core.chatOtpustiChtobyPrilozhit') }}</div>
     </div>
     <!-- Шапка в два ряда: сверху название и задача, снизу — настройки хода.
          Высота фиксирована токеном --chat-head-h: линия под шапкой чата идёт по той же
@@ -15,8 +15,8 @@
           <UiIconButton
             class="back"
             role="rail"
-            label="К списку чатов"
-            v-tooltip="'К списку чатов'"
+            :label="t('core.chatKSpiskuChatov')"
+            v-tooltip="t('core.chatKSpiskuChatov')"
             data-context="chat-session-back"
             @click="emit('back')"
           >
@@ -41,8 +41,8 @@
               <UiIconButton
                 class="tedit"
                 role="embedded"
-                label="Переименовать чат"
-                v-tooltip="'Переименовать чат'"
+                :label="t('core.chatPereimenovatChat')"
+                v-tooltip="t('core.chatPereimenovatChat')"
                 data-context="chat-title-edit"
                 @click="startTitleEdit"
               >
@@ -81,7 +81,7 @@
                     :disabled="frozen || sess.sending || sess.purpose === 'companion'"
                     @change="onTaskChange"
                   >
-                    <option value="">без задачи</option>
+                    <option value="">{{ t('core.chatBezZadachi') }}</option>
                     <option v-for="o in taskOpts" :key="o.task" :value="o.task">
                       {{ optLabel(o) }}
                     </option>
@@ -101,16 +101,13 @@
              иначе показываем запрошенный id и не откатываемся к старому ходу другого ИИ. -->
         <div v-if="lastRunView.model || modelUnknown" class="factbar">
           <template v-if="lastRun">
-            <span class="fb" :class="{ warn: lastRunView.mismatch }">
-              последний ход · {{ lastRunView.source }}: <b>{{ modelLabelOf(lastRunView.model) }}</b>
-              <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
+            <span class="fb" :class="{ warn: lastRunView.mismatch }"> {{ t('core.chatPosledniyHod') }} {{ lastRunView.source }}: <b>{{ modelLabelOf(lastRunView.model) }}</b>
+              <template v-if="lastRun.effort"> {{ t('core.chatUsilie') }} {{ lastRun.effort }}</template>
             </span>
-            <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
+            <span v-if="lastRunView.mismatch" class="fb warn">{{ t('core.chatZaprosheno') }}{{ lastRequestedName }}»</span>
           </template>
           <span v-if="modelUnknown" class="fb warn"
-                v-tooltip="'установленный CLI не знает эту модель — обнови его в настройках'">
-            установленный CLI не знает эту модель — обнови его в настройках
-          </span>
+                v-tooltip="t('core.chatUstanovlennyyCliNeZnaet')"> {{ t('core.chatUstanovlennyyCliNeZnaet') }} </span>
         </div>
         <div class="spacer"></div>
         <Teleport :to="controlOptionsHost || 'body'"
@@ -135,7 +132,7 @@
                 </template>
                 <option v-if="modelId && (!currentModel || currentModelHidden)"
                         :value="modelId" :hidden="currentModelHidden" disabled>
-                  {{ currentModel ? modelOptionLabel(currentModel) : modelId + ' — нет в реестре' }}
+                  {{ currentModel ? modelOptionLabel(currentModel) : t('core.chatModelidNetVReestre', { modelId }) }}
                 </option>
                 <template v-if="prov.loaded || prov.providers.length">
                   <!-- Вкладки и модели строятся только по доступным исполнителям.
@@ -242,7 +239,7 @@
               <template #tip>
                 <span class="ctx-pop" data-testid="context-tooltip">
                   <span class="ctx-pop-head">
-                    <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
+                    <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> {{ t('core.chatTokeny') }}</span></span>
                     <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
                       {{ ctxTooltip.percent }}
                     </span>
@@ -259,8 +256,8 @@
                     </span>
                   </span>
                   <span v-if="ctxTooltip.actions && !phoneLayout" class="ctx-pop-actions">
-                    <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
-                    <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+                    <span class="ctx-pop-action"><b>{{ t('core.chatKlik') }}</b><span>{{ t('core.chatSzhat') }}</span></span>
+                    <span class="ctx-pop-action"><b>{{ t('core.chatAltKlik') }}</b><span>{{ t('core.chatSbrosit') }}</span></span>
                   </span>
                 </span>
               </template>
@@ -390,17 +387,14 @@
           </UiButton>
         </div>
         <div v-if="messagesReady && !sess.messages?.length" class="empty">
-          <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
+          <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : t('core.chatSprosiAgenta') }}</div>
           <div class="e-sub muted">
-            <p class="e-workdir">
-              Работаем в: {{ sess.workdirPreview?.target?.cwd
+            <p class="e-workdir"> {{ t('core.chatRabotaemV') }} {{ sess.workdirPreview?.target?.cwd
                 || sess.workdirState?.committed?.cwd || chatWorkdirLabel(sess.workdir) }}
             </p>
             <p>
-              <span class="keyboard-hint">Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.</span>
-              <span class="touch-keyboard-hint">{{ t('core.chatTouchKeyboardHint') }}</span>
-              «/» — команды, «$» — навыки Codex.
-            </p>
+              <span class="keyboard-hint">{{ t('core.chatModelIUsilieSverhu') }}</span>
+              <span class="touch-keyboard-hint">{{ t('core.chatTouchKeyboardHint') }}</span> {{ t('core.chatKomandyNavykiCodex') }} </p>
           </div>
         </div>
         <div v-for="group in timelineGroups" :key="group.key" class="conversation-group"
@@ -423,12 +417,12 @@
               <span class="ahead-mark">
                 <ProviderIcon v-if="group.provider" :provider="group.provider" :size="12" />
               </span>
-              <span>Агент</span>
+              <span>{{ t('core.chatSettingsAgent') }}</span>
               <span v-if="current && status.modelId" class="amodel">
                 {{ status.modelLabel }} · {{ status.modelKind }}<template v-if="effortValue"> · {{ effortValue }}</template>
               </span>
               <span v-else-if="m.actualModel || m.model" class="amodel">
-                {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+                {{ runModelLabel(m) }}<template v-if="!m.actualModel">{{ t('core.chatZaprosheno2') }}</template><template v-if="m.effort"> · {{ m.effort }}</template>
               </span>
             </div>
             <div v-if="m.kind === 'in-turn'" class="m-delivery" data-role="chat-in-turn-delivery">
@@ -447,7 +441,7 @@
               @click="onMarkdownClick"
             />
             <div v-if="m.kind === 'assistant-block' && compact" class="agent-reply">
-              <span class="reply-mark" role="img" aria-label="Ответ агента">
+              <span class="reply-mark" role="img" :aria-label="t('core.chatOtvetAgenta')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -458,7 +452,7 @@
             <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))
                    || deliveryMark(m)" class="mrow"
                  :class="{ 'agent-reply': m.role === 'assistant' }">
-              <span v-if="m.role === 'assistant'" class="reply-mark" role="img" aria-label="Ответ агента">
+              <span v-if="m.role === 'assistant'" class="reply-mark" role="img" :aria-label="t('core.chatOtvetAgenta')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -506,8 +500,8 @@
                    turnId, поэтому дошедшее всё-таки сообщение второй раз агента не запустит. -->
               <UiIconButton
                 v-if="deliveryMark(m)?.kind === 'failed'"
-                :label="`${deliveryMark(m)?.label}. Повторить отправку`"
-                v-tooltip="`${deliveryMark(m)?.label}. Нажмите, чтобы повторить отправку`"
+                :label="t('core.chatLabelPovtoritOtpravku', { label: deliveryMark(m)?.label })"
+                v-tooltip="t('core.chatLabelNazhmiteChtobyPovtorit', { label: deliveryMark(m)?.label })"
                 data-context="chat-delivery-retry"
                 :disabled="frozen"
                 @click="confirmRetryDelivery(m)"
@@ -524,8 +518,8 @@
                 class="copy"
                 :class="{ done: copiedIdx === i }"
                 role="stepper"
-                :label="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
-                v-tooltip="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+                :label="copiedIdx === i ? t('core.chatSkopirovano') : t('core.chatKopirovatSoobschenie')"
+                v-tooltip="copiedIdx === i ? t('core.chatSkopirovano') : t('core.chatKopirovatSoobschenie')"
                 data-context="chat-message-copy"
                 @click="copyMsg(m, i)"
               >
@@ -548,9 +542,7 @@
                 size="compact"
                 data-role="chat-resume-interrupted"
                 @click="resumeInterrupted"
-              >
-                ▶ Продолжить ход
-              </UiButton>
+              > {{ t('core.chatProdolzhitHod') }} </UiButton>
             </div>
             <!-- Индикатор остаётся последней строкой запуска внутри ленты.
                  Модель, папка и лимиты дополняют ту же линию только справа. -->
@@ -566,7 +558,7 @@
              chats/pending. Плашка ЛОКАЛЬНАЯ (поле offline в историю не едет) — порвалось
              у этого окна, другим устройствам показывать нечего. -->
         <div v-if="sess.offline" class="msg offline">
-          <div class="text">📡 Связь с сервером прервалась — ход продолжается, ответ появится, когда связь вернётся.</div>
+          <div class="text">{{ t('core.chatSvyazSServeromPrervalas') }}</div>
         </div>
       </div>
     </div>
@@ -588,10 +580,10 @@
       <!-- Разделитель высоты поля ввода: стоит на верхней кромке (поверх линии),
            поэтому места в раскладке не занимает и ничего не сдвигает. -->
       <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
-           aria-label="Высота поля ввода"
+           :aria-label="t('core.chatVysotaPolyaVvoda')"
            :aria-valuemin="composerMin" :aria-valuemax="composerMax()"
            :aria-valuenow="clampComposer(composerH ?? composerMin)"
-           v-tooltip="'Потяни — высота поля ввода. Двойной клик — вернуть обычную'"
+           v-tooltip="t('core.chatPotyaniVysotaPolyaVvoda')"
            @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
            @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
            @dblclick="resetComposerHeight" @keydown="onComposerResizeKey">
@@ -618,8 +610,8 @@
             <UiIconButton
               class="x"
               role="stepper"
-              label="Убрать вложение"
-              v-tooltip="'Убрать'"
+              :label="t('core.chatUbratVlozhenie')"
+              v-tooltip="t('settings.remove')"
               data-context="chat-pending-remove"
               @click="removePending(i)"
             >
@@ -653,9 +645,8 @@
         </div>
         <div v-if="consentPending" class="speech-prompt" data-testid="speech-consent">
           <div>
-            <b>Перед первой диктовкой</b>
-            <p>Браузер может обработать звук на этом устройстве или передать своему сервису.
-              До подтверждения микрофон не включается.</p>
+            <b>{{ t('core.chatPeredPervoyDiktovkoy') }}</b>
+            <p>{{ t('core.chatBrauzerMozhetObrabotatZvuk') }}</p>
           </div>
           <div class="speech-actions">
             <UiButton
@@ -665,30 +656,24 @@
               data-role="chat-speech-action"
               data-testid="speech-consent-browser"
               @click="confirmBrowserConsent"
-            >
-              Продолжить в браузере
-            </UiButton>
+            > {{ t('core.chatProdolzhitVBrauzere') }} </UiButton>
             <UiButton
               variant="outline"
               data-role="chat-speech-action"
               data-testid="speech-consent-whisper"
               @click="useWhisperFromPrompt"
-            >
-              Использовать Whisper
-            </UiButton>
+            > {{ t('core.chatIspolzovatWhisper') }} </UiButton>
             <UiButton
               variant="outline"
               data-role="chat-speech-action"
               @click="stopSpeech({ cancel: true })"
-            >
-              Отмена
-            </UiButton>
+            > {{ t('core.cancel') }} </UiButton>
           </div>
         </div>
         <div v-else-if="browserInstallPending" class="speech-prompt" data-testid="speech-browser-install">
           <div>
-            <b>Нужна локальная языковая модель</b>
-            <p>Браузер может скачать её и после этого распознавать речь только на этом устройстве.</p>
+            <b>{{ t('core.chatNuzhnaLokalnayaYazykovayaModel') }}</b>
+            <p>{{ t('core.chatBrauzerMozhetSkachatEe') }}</p>
           </div>
           <div class="speech-actions">
             <UiButton
@@ -698,27 +683,21 @@
               data-role="chat-speech-action"
               data-testid="speech-install-browser"
               @click="installBrowserLanguage"
-            >
-              Скачать и продолжить
-            </UiButton>
+            > {{ t('core.chatSkachatIProdolzhit') }} </UiButton>
             <UiButton
               variant="outline"
               data-role="chat-speech-action"
               data-testid="speech-install-whisper"
               @click="useWhisperFromPrompt"
-            >
-              Использовать Whisper
-            </UiButton>
+            > {{ t('core.chatIspolzovatWhisper') }} </UiButton>
             <UiButton
               variant="outline"
               data-role="chat-speech-action"
               @click="stopSpeech({ cancel: true })"
-            >
-              Отмена
-            </UiButton>
+            > {{ t('core.cancel') }} </UiButton>
           </div>
         </div>
-        <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
+        <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">{{ t('core.chatSlyshu') }} {{ interimSpeech }}</div>
         <div class="composer">
           <ChatKeyboardLayout @visibility-change="keyboardLayoutVisible = $event" />
           <UiFilePicker
@@ -729,9 +708,9 @@
             :busy="attachBusy"
             :show-summary="false"
             :show-reset="false"
-            label="Приложить файл"
-            loading-label="Прикладываю файл"
-            v-tooltip="'Приложить файл (или перетащи/вставь из буфера)'"
+            :label="t('core.chatPrilozhitFayl')"
+            :loading-label="t('core.chatPrikladyvayuFayl')"
+            v-tooltip="t('core.chatPrilozhitFaylIliPeretaschi')"
             @change="onPick"
           >
             <template #leading>
@@ -747,20 +726,20 @@
             rows="1"
             data-role="chat-composer"
             enterkeyhint="enter"
-            :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
+            :placeholder="recording ? t('core.chatGovoriKlikPoMikrofonu') : drainingSpeech ? t('core.chatZavershayuRaspoznavanie') : speechBusy ? t('core.chatPodgotavlivayuDiktovku') : t('core.chatSoobschenieAgentu')"
             @keydown="onKey"
             @paste="onPaste"
           />
           <UiTooltip
             placement="top-end"
-            :text="recording ? 'Остановить · Ctrl+D; отменить · Esc' : drainingSpeech ? 'Завершаю распознавание… Esc — отмена' : transcribing ? 'Расшифровываю запись…' : preparingSpeech || browserInstalling ? 'Подготавливаю… Esc — отмена' : 'Надиктовать голосом · Ctrl+D'"
+            :text="recording ? t('core.chatOstanovitCtrlDOtmenit') : drainingSpeech ? t('core.chatZavershayuRaspoznavanieEscOtmena') : transcribing ? t('core.chatRasshifrovyvayuZapis') : preparingSpeech || browserInstalling ? t('core.chatPodgotavlivayuEscOtmena') : t('core.chatNadiktovatGolosomCtrlD')"
           >
             <template #trigger>
               <UiIconButton
                 class="tool mic"
                 :class="{ rec: recording, wait: transcribing || preparingSpeech || browserInstalling || drainingSpeech }"
                 role="peer"
-                :label="recording ? 'Остановить диктовку' : 'Начать диктовку'"
+                :label="recording ? t('core.chatOstanovitDiktovku') : t('core.chatNachatDiktovku')"
                 :pressed="recording"
                 :disabled="transcribing || drainingSpeech"
                 data-context="chat-microphone"
@@ -792,10 +771,10 @@
             variant="solid"
             tone="danger"
             :disabled="sess.stopping"
-            :label="sess.stopping ? 'Останавливаю…'
-              : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
-            v-tooltip="sess.stopping ? 'Останавливаю…'
-              : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
+            :label="sess.stopping ? t('core.chatOstanavlivayu')
+              : sess.compacting ? t('core.chatPrervatSzhatieKonteksta') : t('core.chatOstanovitAgenta')"
+            v-tooltip="sess.stopping ? t('core.chatOstanavlivayu')
+              : sess.compacting ? t('core.chatPrervatSzhatieKonteksta') : t('core.chatOstanovitAgenta')"
             data-context="chat-stop"
             @click="chat.stop(sid)"
           >
@@ -807,16 +786,16 @@
             variant="solid"
             tone="accent"
             :disabled="frozen || speechBusy || modeUnavailable || (!input.trim() && !pending.length)"
-            :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
+            :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? t('core.chatSnachalaZavershiDiktovku')
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
-                ? 'Уточнить сейчас' : 'Отправить после текущего хода')
-              : 'Отправить'"
-            v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
+                ? t('core.chatUtochnitSeychas') : t('core.chatOtpravitPosleTekuschegoHoda'))
+              : t('core.send')"
+            v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? t('core.chatSnachalaZavershiDiktovku')
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
-                ? 'Уточнить сейчас' : 'Отправить после текущего хода')
-              : 'Отправить'"
+                ? t('core.chatUtochnitSeychas') : t('core.chatOtpravitPosleTekuschegoHoda'))
+              : t('core.send')"
             data-context="chat-send"
             @click="submit"
           >
@@ -879,22 +858,9 @@ import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ProviderModelSelect from '../../shared/ProviderModelSelect.vue';
 import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 import {
-  UiRefreshIcon,
-  confirmDialog,
-  t,
-  UiButton,
-  UiFilePicker,
-  UiDialog,
-  UiIconButton,
-  UiInlineMessage,
-  UiInput,
-  UiProgress,
-  UiSelect,
-  UiSpinner,
-  UiTextarea,
-  UiTooltip,
-  vTooltip,
-  type UiActionTone,
+  UiRefreshIcon, confirmDialog, t, UiButton, UiFilePicker, UiDialog, UiIconButton,
+  UiInlineMessage, UiInput, UiProgress, UiSelect, UiSpinner, UiTextarea, UiTooltip, vTooltip,
+  type UiActionTone, messageRef, uiLocale
 } from '../../ui';
 import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.ts';
@@ -960,7 +926,7 @@ function onMarkdownClick(event: MouseEvent) {
     event.preventDefault();
     documentPreview.showImage({
       src: image.currentSrc || image.getAttribute('src') || '',
-      name: image.getAttribute('alt') || image.getAttribute('title') || 'Изображение',
+      name: image.getAttribute('alt') || image.getAttribute('title') || t('core.chatIzobrazhenie'),
       mime: '',
     }, feedImages(image));
 
@@ -1170,7 +1136,7 @@ const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
 const currentModelHidden = computed(() => Boolean(current.value.provider)
   && !isSelectableModelProvider(current.value.provider));
-const fmtTokens = (value: unknown) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+const fmtTokens = (value: unknown) => Math.max(0, Number(value) || 0).toLocaleString(uiLocale.value);
 
 /**
  * Каталог Codex намеренно не сообщает окно. Для выбранной модели точнее всего замер
@@ -1183,29 +1149,37 @@ function modelContextTitle(model: ProviderModelEntry | null, label: string) {
     : 0;
 
   if (runtimeWindow) {
-    return `${label} · рабочее окно ${fmtTokens(runtimeWindow)} токенов`;
+    return t('core.chatLabelRabocheeOknoFmttokensruntimewindow', {
+                    label: label,
+                    fmtTokensruntimeWindow: fmtTokens(runtimeWindow),
+                  });
   }
   if (model?.contextRuntimeOnly) {
-    return `${label} · рабочее окно появится после первого хода`;
+    return t('core.chatLabelRabocheeOknoPoyavitsya', { label: label });
   }
 
   const context = Math.max(0, Number(model?.context) || 0);
 
   if (!context) {
-    return `${label} · окно контекста неизвестно`;
+    return t('core.chatLabelOknoKontekstaNeizvestno', { label: label });
   }
 
-  return `${label} · контекст ${fmtTokens(context)} токенов`
-    + (model?.contextUnverified ? ' · окно не подтверждено' : '');
+  return t('core.chatLabelKontekstFmttokenscontextTokenov', {
+    label: label,
+    fmtTokenscontext: fmtTokens(context),
+    contextUnverified: model?.contextUnverified ? ` ${t('core.chatOknoNePodtverzhdeno')}` : '',
+  });
 }
 
 const currentModelTitle = computed(() => (
-  currentModel.value ? modelContextTitle(currentModel.value, currentModel.value.name) : 'Модель'
+  currentModel.value
+    ? modelContextTitle(currentModel.value, currentModel.value.name)
+    : t('core.chatOptionModel')
 ));
 // Подсказка доступной модели сохраняет окно и оговорки исходного каталога.
 // Недоступные исполнители отсекаются до создания вариантов списка.
 const modelOptionTitle = (model: ProviderModelEntry) => modelContextTitle(model, model.name)
-  + (model.unknown ? ' · нет в каталоге установленного CLI' : '');
+  + (model.unknown ? t('core.chatNetVKatalogeUstanovlennogo') : '');
 const modelOptionLabel = (model: ProviderModelEntry) => model.name
   + (model.unknown ? ' ?' : '');
 
@@ -1251,9 +1225,11 @@ const activeModeLabel = computed(() => (
 ));
 const modeHint = computed(() => (
   !modeState.value.available ? t('core.chatModeUnavailable')
-    : `${modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'}${
-      sess.value?.sending ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
-        t('core.chatModeNextTurn')}` : ''}`
+    : t('core.chatHintChatmodenextturn', { hint: modes.value.find((m) => m.id === currentMode.value)?.hint
+          || t('core.chatAgentRightsMode'), chatModeNextTurn: sess.value?.sending
+        ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
+        t('core.chatModeNextTurn')}`
+        : '' })
 ));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
@@ -1454,19 +1430,22 @@ function optLabel(o: {
   title: string;
   route?: unknown;
 }) {
-  return `#${o.task} · ${o.title || o.route || 'задача'}`;
+  return t(
+    'core.chatTaskHeader',
+    { task: String(o.task ?? ''), title: String(o.title || o.route || '') || t('core.chatTaskWord') },
+  );
 }
 
 const activeTaskLabel = computed(() => {
   const id = String(sess.value?.taskId || '');
 
   if (!id) {
-    return 'Без привязки к задаче';
+    return t('core.sandboxBezPrivyazkiKZadache');
   }
 
   const option = taskOpts.value.find((o) => o.task === id);
 
-  return option ? optLabel(option) : `#${id}`;
+  return option ? optLabel(option) : t('core.chatId', { id });
 });
 // Селект задачи показывает фактическую привязку чата. Смена задачи идёт через переход
 // рабочей папки: пока он ждёт решения в окне выбора или получил отказ, селект
@@ -1538,7 +1517,7 @@ const ctxSampleHint = computed(() => {
     return '';
   }
 
-  return ctxHasLiveUsage.value ? ' · этот ход' : ' · прошлый ход, ждём замер';
+  return ctxHasLiveUsage.value ? t('core.chatEtotHod') : t('core.chatProshlyyHodZhdemZamer');
 });
 const ctxWindowUnverified = computed(() => (
   !ctxUsage.value?.contextWindow && !!currentModel.value?.contextUnverified
@@ -1550,7 +1529,10 @@ const fmtSessionTokens = (value: unknown) => {
     return fmtTokens(tokens);
   }
 
-  return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
+  return t('core.chatTolocalestringrumaximumfractiondigits1Mln', {
+    toLocaleStringrumaximumFractionDigits1: (tokens / 1_000_000)
+      .toLocaleString(uiLocale.value, { maximumFractionDigits: 1 }),
+  });
 };
 
 /**
@@ -1561,10 +1543,16 @@ const fmtCompactTokens = (value: unknown) => {
   const tokens = Math.max(0, Number(value) || 0);
 
   if (tokens >= 1_000_000) {
-    return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
+    return t('core.chatTolocalestringrumaximumfractiondigits1Mln', {
+    toLocaleStringrumaximumFractionDigits1: (tokens / 1_000_000)
+      .toLocaleString(uiLocale.value, { maximumFractionDigits: 1 }),
+  });
   }
   if (tokens >= 1_000) {
-    return `${(tokens / 1_000).toLocaleString('ru', { maximumFractionDigits: 1 })} тыс.`;
+    return t('core.chatTolocalestringrumaximumfractiondigits1Tys', {
+    toLocaleStringrumaximumFractionDigits1: (tokens / 1_000)
+      .toLocaleString(uiLocale.value, { maximumFractionDigits: 1 }),
+  });
   }
 
   return fmtTokens(tokens);
@@ -1572,7 +1560,7 @@ const fmtCompactTokens = (value: unknown) => {
 const spentHint = computed(() => {
   const total = sess.value?.totalInputTokens || 0;
 
-  return total ? ` · за сессию обработано ${fmtTokens(total)} входных токенов` : '';
+  return total ? t('core.chatZaSessiyuObrabotanoFmttokenstotal', { fmtTokenstotal: fmtTokens(total) }) : '';
 });
 const contextCache = computed(() => {
   const live = sess.value?.sending ? sess.value?.liveContextCache : null;
@@ -1598,10 +1586,10 @@ const contextCacheValue = computed(() => {
   const cache = contextCache.value;
 
   if (cache.status === 'unavailable') {
-    return 'нет данных';
+    return t('core.noData');
   }
   if (cache.status === 'not-applicable') {
-    return 'без тарифа';
+    return t('core.chatBezTarifa');
   }
 
   const read = cacheMetric(cache, 'readTokens');
@@ -1613,23 +1601,26 @@ const contextCacheValue = computed(() => {
   if (read !== null && uncached !== null) {
     const measured = read + (write || 0) + uncached;
     const percent = (measured > 0 ? (read / measured) * 100 : 0)
-      .toLocaleString('ru', { maximumFractionDigits: 1 });
+      .toLocaleString(uiLocale.value, { maximumFractionDigits: 1 });
 
     parts.push(`${percent}%`);
   }
   if (read !== null) {
-    parts.push(`чт. ${fmtCompactTokens(read)}`);
+    parts.push(t('core.chatChtFmtcompacttokensread', { fmtCompactTokensread: fmtCompactTokens(read) }));
   }
   if (write !== null) {
-    parts.push(`зап. ${fmtCompactTokens(write)}`);
+    parts.push(t('core.chatZapFmtcompacttokenswrite', { fmtCompactTokenswrite: fmtCompactTokens(write) }));
   }
   if (uncached !== null) {
-    parts.push(`мимо ${fmtCompactTokens(uncached)}`);
+    parts.push(t('core.chatMimoFmtcompacttokensuncached', {
+      fmtCompactTokensuncached: fmtCompactTokens(uncached),
+    }));
   }
 
   return parts.join(' · ');
 });
-const cacheHint = computed(() => ` · кэш: ${contextCacheValue.value}`);
+const cacheHint =
+  computed(() => t('core.chatKeshContextcachevalue', { contextCacheValue: contextCacheValue.value }));
 const ctxAtWarning = computed(() => !!ctxFill.value.tone);
 const ctxLimitReached = computed(() => ctxFill.value.tone === 'hi');
 const ctxLimitWhat = computed(() => ctxFill.value.limitWhat);
@@ -1640,7 +1631,9 @@ const ctxLimitShort = computed(() => ctxFill.value.limitShort);
 // смысловыми блоками. `ctxTitle` ниже — только компактная доступная подпись кнопки.
 const ctxTooltip = computed(() => {
   const s = sess.value;
-  const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' · неточно' : ''}`;
+  const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value
+          ? t('core.chatNetochno')
+          : ''}`;
   const rows: Array<{
     label: string;
     value: string;
@@ -1649,18 +1642,18 @@ const ctxTooltip = computed(() => {
   }> = ctxRuntimeWindowPending.value
     ? []
     : [{
-      label: 'Окно',
+      label: t('core.chatOkno'),
       value: modelWindow,
       unverified: ctxWindowUnverified.value,
     }];
   const total = s?.totalInputTokens || 0;
   const addSessionRows = () => {
     if (total) {
-      rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
+      rows.push({ label: t('core.chatZaSessiyu'), value: fmtSessionTokens(total) });
     }
 
     rows.push({
-      label: 'Кэш',
+      label: t('core.chatKesh'),
       value: contextCacheValue.value,
       cache: true,
     });
@@ -1668,24 +1661,24 @@ const ctxTooltip = computed(() => {
 
   if (s?.compacting) {
     return {
-      title: 'Контекст сессии',
+      title: t('core.chatKontekstSessii'),
       percent: '',
       tone: 'active',
-      status: 'Сжимаю контекст…',
-      detail: 'Агент готовит рабочую выжимку разговора.',
+      status: t('core.chatSzhimayuKontekst'),
+      detail: t('core.chatAgentGotovitRabochuyuVyzhimku'),
       rows: [],
       actions: false,
     };
   }
   if (!s?.sessionId && !ctxHasLiveUsage.value) {
     return {
-      title: 'Контекст сессии',
+      title: t('core.chatKontekstSessii'),
       percent: '',
       tone: '',
-      status: s?.pendingSeed ? 'Контекст сжат' : 'Контекст пуст',
+      status: s?.pendingSeed ? t('core.chatKontekstSzhat') : t('core.chatKontekstPust'),
       detail: s?.pendingSeed
-        ? 'Выжимка уедет агенту со следующим сообщением.'
-        : 'Размер появится после первого хода.',
+        ? t('core.chatVyzhimkaUedetAgentuSo')
+        : t('core.chatRazmerPoyavitsyaPoslePervogo'),
       rows,
       actions: false,
     };
@@ -1694,11 +1687,11 @@ const ctxTooltip = computed(() => {
     addSessionRows();
 
     return {
-      title: 'Контекст сессии',
+      title: t('core.chatKontekstSessii'),
       percent: '',
       tone: '',
-      status: 'Контекст сжат',
-      detail: 'Новый размер появится после следующего хода.',
+      status: t('core.chatKontekstSzhat'),
+      detail: t('core.chatNovyyRazmerPoyavitsyaPosle'),
       rows,
       actions: true,
     };
@@ -1707,11 +1700,11 @@ const ctxTooltip = computed(() => {
     addSessionRows();
 
     return {
-      title: 'Контекст сессии',
+      title: t('core.chatKontekstSessii'),
       percent: '',
       tone: '',
-      status: 'Точная заполненность пока недоступна',
-      detail: 'Исполнитель пока не сообщил свежий размер контекста.',
+      status: t('core.chatTochnayaZapolnennostPokaNedostupna'),
+      detail: t('core.chatIspolnitelPokaNeSoobschil'),
       rows,
       actions: true,
     };
@@ -1719,20 +1712,20 @@ const ctxTooltip = computed(() => {
 
   rows.unshift(
     {
-      label: 'Сейчас',
+      label: t('settings.speechFactPath'),
       value: `${ctxIsEstimate.value ? '≈ ' : ''}${fmtTokens(ctxTokens.value)}${ctxSampleHint.value}`,
     },
-    { label: 'Порог', value: `${fmtTokens(ctxLimit.value)} · ${ctxLimitShort.value}` },
+    { label: t('core.chatPorog'), value: `${fmtTokens(ctxLimit.value)} · ${ctxLimitShort.value}` },
   );
   addSessionRows();
 
   return {
-    title: 'Контекст сессии',
+    title: t('core.chatKontekstSessii'),
     percent: `${ctxPct.value}%`,
     tone: ctxLimitReached.value ? 'bad' : (ctxAtWarning.value ? 'warn' : ''),
     status: ctxLimitReached.value
-      ? 'Порог достигнут — пора сжать'
-      : (ctxAtWarning.value ? 'Порог близко — пора сжать' : ''),
+      ? t('core.chatPorogDostignutPoraSzhat')
+      : (ctxAtWarning.value ? t('core.chatPorogBlizkoPoraSzhat') : ''),
     detail: '',
     rows,
     actions: true,
@@ -1743,39 +1736,43 @@ const ctxTitle = computed(() => {
   const tokens = fmtTokens(ctxTokens.value);
 
   if (s?.compacting) {
-    return 'Сжимаю контекст…';
+    return t('core.chatSzhimayuKontekst');
   }
   if (!s?.sessionId && !ctxHasLiveUsage.value) {
     const empty = s?.pendingSeed
-      ? 'Контекст сжат — выжимка уедет со следующим сообщением'
-      : 'Контекст: пусто';
+      ? t('core.chatKontekstSzhatVyzhimkaUedet')
+      : t('core.chatKontekstPusto');
 
     if (ctxRuntimeWindowPending.value) {
-      return `${empty} · рабочее окно появится после первого хода`;
+      return t('core.chatEmptyRabocheeOknoPoyavitsya', { empty: empty });
     }
 
     return ctxWindowUnverified.value
-      ? `${empty} · окно модели ${fmtTokens(ctxWindow.value)} (не подтверждено)`
+      ? t('core.chatEmptyOknoModeliValue', { empty: empty, value: fmtTokens(ctxWindow.value) })
       : empty;
   }
   if (s?.compactedAt && !ctxTokens.value) {
-    return 'Контекст сжат — размер покажется после следующего хода';
+    return t('core.chatKontekstSzhatRazmerPokazhetsya');
   }
 
-  const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
+  const hint = t('core.chatKlikSzhatAltKlik');
 
   if (ctxUnavailable.value) {
-    return `Точная заполненность пока недоступна${spentHint.value}${cacheHint.value} · ${hint}`;
+    return t('core.chatTochnayaZapolnennostPokaNedostupna2', {
+                spentHint: spentHint.value,
+                cacheHint: cacheHint.value,
+                hint: hint,
+              });
   }
 
   const warn = ctxLimitReached.value
-    ? ' · порог достигнут — пора сжать'
-    : (ctxAtWarning.value ? ' · порог близко — пора сжать' : '');
-  const estimate = ctxIsEstimate.value ? 'примерно ' : '';
+    ? t('core.chatPorogDostignutPoraSzhat2')
+    : (ctxAtWarning.value ? t('core.chatPorogBlizkoPoraSzhat2') : '');
+  const estimate = ctxIsEstimate.value ? t('core.chatPrimerno') : '';
   // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
   // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
   const live = s?.sending
-    ? (ctxHasLiveUsage.value ? ' (замер этого хода)' : ' (замер прошлого хода)') : '';
+    ? (ctxHasLiveUsage.value ? t('core.chatZamerEtogoHoda') : t('core.chatZamerProshlogoHoda')) : '';
   // Считаем от того же порога, что рисует дугу. Окно модели остаётся в подсказке
   // справочно: на 1M оно вводило в заблуждение как основная шкала — «из 1 000 000»
   // читается как огромный запас там, где до сжатия остались проценты.
@@ -1786,11 +1783,24 @@ const ctxTitle = computed(() => {
   // сменился формат), и окно ниже это заглушка, а не факт. Молчать нельзя: именно по
   // этой цифре человек решает, пора ли сжимать. Замер самой сессии (Codex сообщает своё
   // окно) сильнее каталога, и к нему оговорка не относится.
-  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}`
-    + `${ctxWindowUnverified.value ? ' (не подтверждено)' : ''}`;
+  const window = t('core.chatOknoModeliValueValue2', {
+    value: fmtTokens(ctxWindow.value),
+    value2: ctxWindowUnverified.value ? ` ${t('core.chatNePodtverzhdeno')}` : '',
+  });
 
-  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)`
-    + `${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
+  return t('core.chatKontekstEstimateTokensIz', {
+    estimate,
+    tokens,
+    limit,
+    ctxLimitWhat: ctxLimitWhat.value,
+    ctxPct: ctxPct.value,
+    live,
+    warn,
+    window,
+    spentHint: spentHint.value,
+    cacheHint: cacheHint.value,
+    hint,
+  });
 });
 // Полоса и подпись используют ту же достоверность, что и подробная подсказка.
 // Отсутствие свежего замера не превращается в нулевую или старую заполненность.
@@ -1802,7 +1812,10 @@ const ctxMeterText = computed(() => {
 
   const percent = ctxTooltip.value.percent;
 
-  return percent ? `${ctxIsEstimate.value ? '≈ ' : ''}${percent}` : '—';
+  return percent ? t('core.chatValuePercent', {
+    value: ctxIsEstimate.value ? '≈ ' : '',
+    percent,
+  }) : '—';
 });
 const ctxMeterTone = computed<UiActionTone>(() => {
   if (sess.value?.compacting || ctxIsEstimate.value) {
@@ -1835,11 +1848,10 @@ async function onCtxClick(e: { altKey: boolean }) {
   }
   if (e.altKey) {
     const ok = await confirmDialog(
-      'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. '
-        + 'Переписка на экране останется, но вернуть агенту контекст будет уже нельзя.',
+      messageRef('core.chatAgentZabudetVesRazgovor'),
       {
-        title: 'Сбросить память агента?',
-        okText: 'Сбросить',
+        title: t('core.chatSbrositPamyatAgenta'),
+        okText: t('settings.reset'),
         danger: true,
       },
     );
@@ -1852,13 +1864,11 @@ async function onCtxClick(e: { altKey: boolean }) {
   }
 
   const contextNow = ctxUnavailable.value
-    ? 'Точный размер текущего контекста пока недоступен.'
-    : `Сейчас в контексте ${fmtTokens(ctxTokens.value)} токенов.`;
+    ? t('core.chatTochnyyRazmerTekuschegoKonteksta')
+    : t('core.chatSeychasVKonteksteValue', { value: fmtTokens(ctxTokens.value) });
   const ok = await confirmDialog(
-    `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — `
-      + 'что решили, чего касались, что осталось. Это полноценный ход: '
-      + 'он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.',
-    { title: 'Сжать контекст чата?', okText: 'Сжать' },
+    messageRef('core.chatContextnowAgentSoberetIz', { contextNow }),
+    { title: t('core.chatSzhatKontekstChata'), okText: t('core.chatSzhat2') },
   );
 
   if (ok) {
@@ -1874,10 +1884,10 @@ const frozen = computed(() => !messagesReady.value
   || !!sess.value?.workdirChanging || !!sess.value?.workdirProposal
   || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase || ''));
 const frozenHint = computed(() => (sess.value?.sessionResetting
-  ? 'Сбрасывается память агента — отправка будет доступна после подтверждения сервера'
+  ? t('core.chatSbrasyvaetsyaPamyatAgentaOtpravka')
   : sess.value?.compacting
-    ? 'Идёт сжатие контекста — отправка будет доступна сразу после него'
-    : 'Подтвердите перенос и дождитесь смены рабочей папки'));
+    ? t('core.chatIdetSzhatieKontekstaOtpravka')
+    : t('core.chatPodtverditePerenosIDozhdites')));
 
 /**
  * Повтор присоединяется к единственной загрузке выбранной ленты.
@@ -2198,7 +2208,7 @@ async function submit() {
     const accepted = await chat.sendInTurn(props.sid, text, atts);
 
     if (!accepted) {
-      inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
+      inputErr.value = chat.inTurnError || t('core.chatNeUdalosOtpravitUtochnenie');
 
       return;
     }
@@ -2254,11 +2264,14 @@ async function submit() {
 // исполнителя цела (транскрипт CLI живёт на диске отдельно от GrigDesk), поэтому
 // продолжение — обычное сообщение в ту же сессию. Текст называет причину по метке:
 // агент должен сверить сделанное, а не переделывать с нуля.
-const RESUME_TAIL = 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
+const RESUME_TAIL = computed(() => t('core.chatProdolzhaySMestaOstanovki'));
 const RESUME_TEXT: Readonly<Record<string, string>> = Object.freeze({
-  server_shutdown: `Сервер GrigDesk перезапустился, и твой ход был прерван. ${RESUME_TAIL}`,
-  delivery_failure: 'Твой прошлый ход оборвал сам CLI (сеть или лимит), ответ до меня не дошёл. '
-    + RESUME_TAIL,
+  get server_shutdown() {
+    return t('core.chatServerGrigdeskPerezapustilsyaI', { rESUMETAIL: RESUME_TAIL.value });
+  },
+  get delivery_failure() {
+    return t('core.chatTvoyProshlyyHodOborval', { rESUMETAIL: RESUME_TAIL.value });
+  },
 });
 
 /** Текст продолжения по метке прерывания; без известной метки продолжать нечего. */
@@ -2288,9 +2301,8 @@ async function confirmRetryDelivery(m: ChatMessage) {
   }
 
   const ok = await confirmDialog(
-    'Сервер не подтвердил приём этого сообщения. Повтор безопасен: если оно всё-таки дошло, '
-      + 'агент не выполнит его второй раз.',
-    { title: 'Сообщение не доставлено', okText: 'Повторить отправку' },
+    messageRef('core.chatServerNePodtverdilPriem'),
+    { title: t('core.chatSoobschenieNeDostavleno'), okText: t('core.chatPovtoritOtpravku') },
   );
 
   if (ok) {
@@ -2419,25 +2431,33 @@ interface ChatCommand {
 const COMMANDS: ChatCommand[] = [
   {
     cmd: '/compact',
-    desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки',
+    get desc() {
+      return t('core.chatSzhatKontekstAgentPereskazyvaet');
+    },
     source: 'grigdesk',
     run: 'local',
   },
   {
     cmd: '/clear',
-    desc: 'Очистить историю и сбросить контекст агента',
+    get desc() {
+      return t('core.chatOchistitIstoriyuISbrosit');
+    },
     source: 'grigdesk',
     run: 'local',
   },
   {
     cmd: '/reset',
-    desc: 'Сбросить только контекст (история остаётся)',
+    get desc() {
+      return t('core.chatSbrositTolkoKontekstIstoriya');
+    },
     source: 'grigdesk',
     run: 'local',
   },
   {
     cmd: '/new',
-    desc: 'Открыть новый чат',
+    get desc() {
+      return t('core.chatOtkrytNovyyChat');
+    },
     source: 'grigdesk',
     run: 'local',
   },
@@ -2509,7 +2529,7 @@ const cmdMenu = computed(() => {
 
   if (own.length) {
     items.push({
-      header: providerInfo.value?.name || 'Исполнитель',
+      header: providerInfo.value?.name || t('core.taskEditResponsible'),
       color: providerInfo.value?.color || '',
       key: 'h:provider',
       cmd: '',
@@ -2656,7 +2676,7 @@ async function addFiles(files: Iterable<File | null>) {
       fd.append('file', f, f.name || 'image.png');
       chat.addDraftAttachment(sid, decodeChatAttachment(await api.upload('/api/chat/upload', fd)));
     } catch (e) {
-      inputErr.value = `Загрузка: ${errorMessage(e, '')}`;
+      inputErr.value = t('core.chatZagruzkaErrormessagee', { errorMessagee: errorMessage(e, '') });
     } finally {
       attachBusy.value = false;
     }
@@ -2746,7 +2766,7 @@ const dictationLease = dictation.acquire(Symbol('chat-session'), {
   onCommit: appendDictationText,
   onFinal() {},
   onError(error) {
-    inputErr.value = error?.message || 'Диктовка завершилась с ошибкой';
+    inputErr.value = error?.message || t('core.chatDiktovkaZavershilasSOshibkoy');
   },
 });
 const speechState = dictationLease.state;
@@ -2791,7 +2811,7 @@ function toggleMic() {
   }
 
   void dictationLease.start().catch((error) => {
-    inputErr.value = error?.message || 'Не удалось запустить диктовку';
+    inputErr.value = error?.message || t('core.chatNeUdalosZapustitDiktovku');
   });
 }
 
@@ -2865,14 +2885,14 @@ async function copyMsg(m: ChatMessage, i: number) {
 // Как в мессенджере: в пузыре показываем только компактные часы и минуты, а полную
 // локальную дату оставляем в подсказке и семантическом <time>. Старым сообщениям без
 // sentAt время не придумываем — updatedAt относится ко всему чату, а не к запросу.
-const messageTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
+const messageTimeFormatter = computed(() => new Intl.DateTimeFormat(uiLocale.value, {
   hour: '2-digit',
   minute: '2-digit',
   hourCycle: 'h23',
-});
-const messageDateTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
+}));
+const messageDateTimeFormatter = computed(() => new Intl.DateTimeFormat(uiLocale.value, {
   dateStyle: 'medium', timeStyle: 'short',
-});
+}));
 
 function validMessageTime(value: unknown) {
   const time = Number(value);
@@ -2883,13 +2903,17 @@ function validMessageTime(value: unknown) {
 function messageTime(value: unknown) {
   const time = validMessageTime(value);
 
-  return time ? messageTimeFormatter.format(new Date(time)) : '';
+  return time ? messageTimeFormatter.value.format(new Date(time)) : '';
 }
 
 function messageTimeTitle(value: unknown) {
   const time = validMessageTime(value);
 
-  return time ? `Отправлено ${messageDateTimeFormatter.format(new Date(time))}` : '';
+  return time
+  ? t('core.chatOtpravlenoFormatnewdatetime', {
+    formatnewDatetime: messageDateTimeFormatter.value.format(new Date(time)),
+  })
+  : '';
 }
 
 function messageTimeIso(value: unknown) {

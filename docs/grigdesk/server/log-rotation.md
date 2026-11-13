@@ -72,7 +72,7 @@ node server/scripts/web-log.mjs --since 2h --level warn --dump
 ```
 
 Подробный контракт — [журнал окна](../web/window-log-contract.md), действия
-человека — [руководство](../guide/web-log.md).
+человека — [руководство](../guide/ru/web-log.md).
 
 ## Проверки и применение
 

@@ -38,7 +38,7 @@ export function useToolWindowControls(target: () => SurfaceDocument | null, read
     }) as ToolWindowControlResult;
 
     if (!result.accepted) {
-      throw new Error('Окно инструмента недоступно');
+      throw new Error(t('core.coreOknoInstrumentaNedostupno'));
     }
 
     if (!disposed && current === sequence && target()?.instance === document.instance) {

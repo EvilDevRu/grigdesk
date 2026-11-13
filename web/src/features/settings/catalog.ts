@@ -326,9 +326,24 @@ SETTINGS_FIELDS.push({
 });
 
 const VPN_GATE_FIELDS = [
-  ['requireVpn', 'switch', 'settings.vpnGateRequire', 'settings.vpnGateRequireHint'],
-  ['iface', 'text', 'settings.vpnGateIface', 'settings.vpnGateIfaceHint'],
-  ['probe', 'text', 'settings.vpnGateProbe', 'settings.vpnGateProbeHint'],
+  [
+    'requireVpn',
+    'switch',
+    translator.t('ru', 'settings.vpnGateRequire'),
+    translator.t('ru', 'settings.vpnGateRequireHint'),
+  ],
+  [
+    'iface',
+    'text',
+    translator.t('ru', 'settings.vpnGateIface'),
+    translator.t('ru', 'settings.vpnGateIfaceHint'),
+  ],
+  [
+    'probe',
+    'text',
+    translator.t('ru', 'settings.vpnGateProbe'),
+    translator.t('ru', 'settings.vpnGateProbeHint'),
+  ],
 ] as const;
 
 SETTINGS_FIELDS.push(...VPN_GATE_FIELDS.map(([key, control, label, description]) => ({
@@ -336,8 +351,8 @@ SETTINGS_FIELDS.push(...VPN_GATE_FIELDS.map(([key, control, label, description])
   resourceId: 'vpnGate',
   key,
   control,
-  label: translator.t('ru', label),
-  description: translator.t('ru', description),
+  label,
+  description,
   scope: translator.t('ru', 'settings.selectedServerComputer'),
 })));
 

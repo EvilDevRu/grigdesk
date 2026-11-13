@@ -1,10 +1,15 @@
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
 
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
 import { isAppLockState, type ShellState } from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const controllers = new WeakMap<object, AbortController>();
 const retryWaits = new WeakMap<object, AbortController>();
@@ -125,7 +130,7 @@ export const useShellStore = defineStore('shell', {
      */
     apply(state: ShellState | null) {
       if (state !== null && !isShellState(state)) {
-        throw new Error('Получено некорректное состояние оболочки');
+        throw new Error(t('core.corePoluchenoNekorrektnoeSostoyanieObolochki'));
       }
 
       if (!state && this.present) {

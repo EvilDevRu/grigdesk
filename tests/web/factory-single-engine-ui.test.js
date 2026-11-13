@@ -42,7 +42,7 @@ test('route launch, resume and goto use the single API contract', async () => {
   assert.match(modal, new RegExp(launchFields.map((field) => field.source).join('[\\s\\S]*')));
   assert.match(modal, /instrumentationFiles,[\s\S]*diagnosisKind:/);
   assert.doesNotMatch(modal, /deliveryTargets:\s*launchNeedsDelivery/);
-  assert.match(modal, /<details[\s\S]*Дополнительные параметры[\s\S]*launch-instrumentation/);
+  assert.match(modal, /<details[\s\S]*settings\.advancedParameters[\s\S]*launch-instrumentation/);
   assert.doesNotMatch(modal, /\bticket:\s*`/);
   assert.doesNotMatch(chat, /openTaskLaunch/);
   assert.doesNotMatch(chat, /tasks\.launch\(/);

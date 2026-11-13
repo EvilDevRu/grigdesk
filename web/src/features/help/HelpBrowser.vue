@@ -183,7 +183,7 @@ const website = computed(() => {
 
   const version = props.bundle.version;
 
-  return `https://grigdesk.com/help/${version}/index.html#/help/${props.articleId}`;
+  return `https://grigdesk.com/help/${version}/index.html?lang=${uiLocale.value}#/help/${props.articleId}`;
 });
 const noImages = () => false as const;
 const resolveHref = (href: string) => props.bundle ? helpHref(props.bundle, props.articleId, href) : false;

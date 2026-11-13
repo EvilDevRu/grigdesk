@@ -21,6 +21,11 @@ import type {
   DockerUsage,
   DockerVolume,
 } from '../../../shared/plugins/docker/dockerContracts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 interface DockerState {
   health: DockerHealth | null;
@@ -157,7 +162,7 @@ export const useDockerStore = defineStore('docker', {
         this.networks = overview.networks;
         this.counts = overview.counts;
       } catch (error) {
-        this.error = dockerErrorMessage(error, 'не удалось получить состояние Docker');
+        this.error = dockerErrorMessage(error, translateUi('core.dockerCouldNotReadDockerStatus'));
       } finally {
         this.loading = false;
       }
@@ -175,7 +180,7 @@ export const useDockerStore = defineStore('docker', {
       try {
         this.usage = await dockerApi.usage(force);
       } catch (error) {
-        this.usageError = dockerErrorMessage(error, 'не удалось посчитать занятое место');
+        this.usageError = dockerErrorMessage(error, translateUi('core.dockerCouldNotCalculateDiskUsage'));
       } finally {
         this.usageLoading = false;
       }
@@ -209,7 +214,7 @@ export const useDockerStore = defineStore('docker', {
       } catch (error) {
         return {
           ok: false,
-          message: dockerErrorMessage(error, 'не удалось выполнить действие'),
+          message: dockerErrorMessage(error, translateUi('core.dockerCouldNotPerformTheAction')),
         };
       } finally {
         this.markBusy(id, false);
@@ -235,7 +240,7 @@ export const useDockerStore = defineStore('docker', {
       } catch (error) {
         return {
           ok: false,
-          message: dockerErrorMessage(error, 'не удалось выполнить действие проекта'),
+          message: dockerErrorMessage(error, translateUi('core.dockerCouldNotPerformTheProjectAction')),
         };
       } finally {
         this.markBusy(project, false);
@@ -281,7 +286,7 @@ export const useDockerStore = defineStore('docker', {
       } catch (error) {
         return {
           ok: false,
-          message: dockerErrorMessage(error, 'не удалось удалить ресурс Docker'),
+          message: dockerErrorMessage(error, translateUi('core.dockerCouldNotDeleteTheDockerResource')),
         };
       } finally {
         this.markBusy(key, false);
@@ -302,7 +307,7 @@ export const useDockerStore = defineStore('docker', {
       } catch (error) {
         return {
           ok: false,
-          message: dockerErrorMessage(error, 'не удалось выполнить уборку'),
+          message: dockerErrorMessage(error, translateUi('core.dockerCouldNotCleanUp')),
         };
       }
     },

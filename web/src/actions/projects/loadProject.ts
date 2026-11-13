@@ -2,6 +2,11 @@ import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { createDraft } from '../../views/projects/projectDraft';
 import { runtimeOf } from './projectsRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Паспорт проекта по id.
@@ -52,6 +57,6 @@ export async function loadProject(
       return;
     }
 
-    store.setError(projectsFailureText(error, 'Не удалось прочитать паспорт проекта.'));
+    store.setError(projectsFailureText(error, translateUi('core.loadProjectCouldNotReadTheProjectProfile')));
   }
 }

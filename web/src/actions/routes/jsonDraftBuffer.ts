@@ -2,6 +2,11 @@ import {
   parseRouteDraftContent, RoutesEditorContractError,
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteDraft, RouteDraftContent } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface RouteJsonAuthoringDocument extends RouteDraftContent {
   title: string;
@@ -52,11 +57,11 @@ export function parseJsonDraft(raw: string): RouteJsonAuthoringDocument {
   try {
     value = JSON.parse(raw);
   } catch {
-    throw new RoutesEditorContractError('синтаксис JSON');
+    throw new RoutesEditorContractError(translateUi('core.jsonDraftBufferJSONSyntax'));
   }
 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new RoutesEditorContractError('корневой объект');
+    throw new RoutesEditorContractError(translateUi('core.jsonDraftBufferRootObject'));
   }
 
   const record = value as Record<string, unknown>;

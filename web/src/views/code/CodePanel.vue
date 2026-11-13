@@ -3,7 +3,7 @@
        :aria-busy="loading ? 'true' : undefined" @keydown="onDiffKeydown">
     <div ref="panelHeader" class="code-head" tabindex="-1">
       <UiPaneHeader class="code-pane-heading" :data-ui-host-actions="compact ? '' : undefined">
-        <template #title><h2>Код</h2></template>
+        <template #title><h2>{{ t('core.code') }}</h2></template>
         <template #actions>
       <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
            справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
@@ -23,16 +23,16 @@
       <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
            виден и при свёрнутом дереве, а панели остаётся один смысл — содержимое. -->
       <div class="head-ctx">
-        <div v-if="showsProjectPicker" class="head-pick project" v-tooltip="'Проект'">
-          <label for="code-project">проект</label>
+        <div v-if="showsProjectPicker" class="head-pick project" v-tooltip="t('core.taskEditProject')">
+          <label for="code-project">{{ t('core.codeProekt') }}</label>
           <UiSelect id="code-project" compact data-context="code-head-select"
                     :model-value="project" @change="selectProject">
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
           </UiSelect>
         </div>
         <div v-if="showsContextPicker" class="head-pick tree"
-             v-tooltip="context?.treePath || 'Рабочая копия'">
-          <label for="code-context">рабочая копия</label>
+             v-tooltip="context?.treePath || t('core.diffDesignWorkingCopy')">
+          <label for="code-context">{{ t('core.codeRabochayaKopiya') }}</label>
           <UiSelect id="code-context" compact data-context="code-head-select"
                     option-layout="inline"
                     :model-value="contextId" @change="selectContext">
@@ -74,11 +74,10 @@
       </div>
       <section class="editorwrap loading-editor" aria-hidden="true">
         <div class="ehead"><span class="loading-path"></span></div>
-        <div class="ebody"><span class="loading-status">Загрузка кода…</span></div>
+        <div class="ebody"><span class="loading-status">{{ t('core.codeZagruzkaKoda') }}</span></div>
       </section>
     </div>
-    <div v-else-if="!projects.length" class="empty">
-      Проектов пока нет — заведи в разделе <router-link to="/projects">«Проекты»</router-link>.
+    <div v-else-if="!projects.length" class="empty"> {{ t('core.codeProektovPokaNetZavedi') }} <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
     </div>
 
     <div v-else ref="layHost" class="lay" :class="layoutClasses"
@@ -86,10 +85,10 @@
       <!-- Рейка разделов слева, как activity bar в VS Code: три небольшие кнопки вместо
            вкладок в шапке. Шапка остаётся контексту, а переключатель стоит на одном месте
            при любой ширине — в узкой раскладке он же возвращает навигатор поверх редактора. -->
-      <aside class="rail" aria-label="Разделы кода">
+      <aside class="rail" :aria-label="t('core.codeRazdelyKoda')">
         <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="files"
                       aria-controls="code-navigator" :pressed="mainTab === 'files'"
-                      label="Файлы" v-tooltip="'Файлы: дерево и поиск по коду'"
+                      :label="t('core.diffDesignFiles')" v-tooltip="t('core.codeFaylyDerevoIPoisk')"
                       @click="setMainTab('files')">
           <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -108,7 +107,7 @@
         </UiIconButton>
         <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="commits"
                       aria-controls="code-navigator" :pressed="mainTab === 'commits'"
-                      label="Коммиты" v-tooltip="'Коммиты: журнал и отрезки ветки'"
+                      :label="t('settings.commits')" v-tooltip="t('core.codeKommityZhurnalIOtrezki')"
                       @click="setMainTab('commits')">
           <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -120,26 +119,24 @@
       <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
            копия выбираются в шапке раздела. -->
       <aside id="code-navigator" class="panel">
-        <UiLoadingState v-if="contextLoading" label="Загружаю рабочую копию…" variant="inline" />
+        <UiLoadingState v-if="contextLoading" :label="t('core.codeZagruzhayuRabochuyuKopiyu')" variant="inline" />
 
         <div v-if="error" class="perr">{{ error }}</div>
-        <div v-if="!projectHasRepos" class="pnote">
-          Пути репозиториев не заданы — раздел <router-link to="/projects">«Проекты»</router-link>.
+        <div v-if="!projectHasRepos" class="pnote"> {{ t('core.codePutiRepozitorievNeZadany') }} <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
         </div>
         <div v-if="unavailableRepos.length" class="pnote context-warning">
-          <span>Недоступные репозитории:</span>
+          <span>{{ t('core.codeNedostupnyeRepozitorii') }}</span>
           <span v-for="item in unavailableRepos" :key="item.repoKey" class="unavailable-repo mono">
             {{ item.repoKey }} — {{ item.repoDir }}
-          </span>
-          Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
+          </span> {{ t('core.codeProverPutiVRazdele') }} <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
         </div>
 
         <div v-if="!fileHistoryActive && tab === 'files'" class="code-search">
           <UiSearchInput
             v-model="searchQuery"
             data-action="code-search"
-            placeholder="Поиск по коду"
-            aria-label="Поиск по коду"
+            :placeholder="t('core.codePoiskPoKodu')"
+            :aria-label="t('core.codePoiskPoKodu')"
             @keydown.enter.prevent="openFirstSearchResult"
           />
         </div>
@@ -165,8 +162,8 @@
                          :style="{ width: 'min(300px, calc(100vw - 20px))' }">
                 <template #trigger>
                   <UiIconButton role="embedded" data-context="code-commit"
-                                data-action="commit-more" label="Дополнительные действия коммита"
-                                v-tooltip="'Дополнительные действия коммита'">
+                                data-action="commit-more" :label="t('core.codeDopolnitelnyeDeystviyaKommita')"
+                                v-tooltip="t('core.codeDopolnitelnyeDeystviyaKommita')">
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                       <circle cx="3" cy="8" r="1.15" />
                       <circle cx="8" cy="8" r="1.15" />
@@ -176,21 +173,17 @@
                 </template>
                 <template #default="{ close }">
                   <div class="code-popover-panel commit-more-panel">
-                    <strong class="code-popover-title">Действия коммита</strong>
+                    <strong class="code-popover-title">{{ t('core.codeDeystviyaKommita') }}</strong>
                     <UiSwitch v-model="amendCommit" class="amend-toggle"
                               data-context="code-commit-amend" data-action="amend"
                               :disabled="gitActionBusy || !amendAvailable"
                               v-tooltip="amendTitle"
                               :aria-description="amendTitle"
-                              @change="changeAmend">
-                      Дополнить последний коммит
-                    </UiSwitch>
+                              @change="changeAmend"> {{ t('core.codeDopolnitPosledniyKommit') }} </UiSwitch>
                     <UiButton block variant="ghost" data-context="code-popover-action"
                               data-action="undo-commit" :loading="gitBusy === 'undo'"
                               :disabled="gitActionBusy || !undoAvailable" v-tooltip="undoTitle"
-                              @click="undoGitCommit(); close('action')">
-                      Отменить последний коммит
-                    </UiButton>
+                              @click="undoGitCommit(); close('action')"> {{ t('core.codeOtmenitPosledniyKommit') }} </UiButton>
                   </div>
                 </template>
               </UiPopover>
@@ -200,11 +193,9 @@
             </p>
             <div v-else class="git-compose-body">
               <div v-if="amendCommit" class="amend-active-row">
-                <span>Последний локальный коммит будет изменён.</span>
+                <span>{{ t('core.codePosledniyLokalnyyKommitBudet') }}</span>
                 <UiButton variant="ghost" data-context="code-commit"
-                          data-action="leave-amend" @click="leaveAmend">
-                  Выйти из amend
-                </UiButton>
+                          data-action="leave-amend" @click="leaveAmend"> {{ t('core.codeVyytiIzAmend') }} </UiButton>
               </div>
               <!-- `rows="1"` оставляет поле компактным, но сохраняет многострочное сообщение. -->
               <UiTextarea
@@ -213,8 +204,8 @@
                 data-context="code-commit"
                 rows="1"
                 maxlength="5000"
-                placeholder="Сообщение коммита"
-                aria-label="Сообщение коммита"
+                :placeholder="t('core.codeSoobschenieKommita')"
+                :aria-label="t('core.codeSoobschenieKommita')"
                 :disabled="gitActionBusy"
                 @keydown.enter="commitOnShortcut"
               />
@@ -223,8 +214,8 @@
                   class="generate-commit"
                   role="embedded"
                   data-context="code-commit"
-                  label="Составить сообщение по staged diff"
-                  v-tooltip="'Составить сообщение по staged diff'"
+                  :label="t('core.codeSostavitSoobscheniePoStaged')"
+                  v-tooltip="t('core.codeSostavitSoobscheniePoStaged')"
                   :loading="gitBusy === 'generate'"
                   :disabled="gitActionBusy || !git.staged.length"
                   @click="generateCommitMessage"
@@ -244,7 +235,7 @@
                   :disabled="gitActionBusy || (!amendCommit && !git.staged.length)
                     || !commitMessage.trim()"
                   @click="commitGitChanges"
-                >{{ amendCommit ? 'Дополнить коммит' : 'Создать коммит' }}</UiButton>
+                >{{ amendCommit ? t('core.codeDopolnitKommit') : t('core.codeSozdatKommit') }}</UiButton>
               </div>
             </div>
           </div>
@@ -255,7 +246,7 @@
               {{ trackingNote.text }}
             </p>
             <span v-else class="grow"></span>
-            <div class="git-remote-actions" role="group" aria-label="Синхронизация с remote">
+            <div class="git-remote-actions" role="group" :aria-label="t('core.codeSinhronizatsiyaSRemote')">
               <UiIconButton
                 class="fetch-action"
                 role="embedded"
@@ -310,18 +301,18 @@
         <div v-if="fileHistoryActive" class="scroll tree file-history">
           <div class="subhead file-history-head">
             <UiIconButton role="embedded" data-context="code-group-action"
-                          data-action="close-file-history" label="Вернуться"
-                          v-tooltip="'Вернуться к дереву'" @click="closeFileHistory()">←</UiIconButton>
-            <span class="subtitle">История</span>
+                          data-action="close-file-history" :label="t('core.codeVernutsya')"
+                          v-tooltip="t('core.codeVernutsyaKDerevu')" @click="closeFileHistory()">←</UiIconButton>
+            <span class="subtitle">{{ t('core.codeIstoriya') }}</span>
             <span class="grow"></span>
             <span class="cnt mono">{{ fileHistoryEntries.length }}</span>
           </div>
           <div class="history-path mono" v-tooltip="fileHistoryPath">{{ fileHistoryPath }}</div>
-          <UiLoadingState v-if="fileHistoryLoading" label="Читаю историю…" >
+          <UiLoadingState v-if="fileHistoryLoading" :label="t('core.codeChitayuIstoriyu')" >
             <UiSkeletonLayout layout="list" :header="false" />
           </UiLoadingState>
           <div v-else-if="fileHistoryError" class="perr">{{ fileHistoryError }}</div>
-          <div v-else-if="!fileHistoryEntries.length" class="pnote">История файла пуста.</div>
+          <div v-else-if="!fileHistoryEntries.length" class="pnote">{{ t('core.codeIstoriyaFaylaPusta') }}</div>
           <UiPressable v-for="entry in fileHistoryEntries" :key="entry.hash"
                        class="commit file-history-entry" data-context="code-commit-row"
                        :data-hash="entry.hash" :class="{ sel: fileHistorySelected === entry.hash }"
@@ -337,12 +328,12 @@
 
         <div v-else-if="tab === 'files' && searchActive"
              class="scroll tree code-search-results">
-          <UiLoadingState v-if="searchLoading" label="Ищу…" variant="inline" />
+          <UiLoadingState v-if="searchLoading" :label="t('core.codeIschu')" variant="inline" />
           <div v-else-if="searchError" class="perr">{{ searchError }}</div>
           <template v-else>
             <template v-if="searchResult?.files.length">
               <div class="subhead search-result-head">
-                <span class="subtitle">Файлы</span>
+                <span class="subtitle">{{ t('core.diffDesignFiles') }}</span>
                 <span class="cnt mono">{{ searchResult.files.length }}</span>
               </div>
               <UiPressable v-for="file in searchResult.files" :key="`file:${file.path}`"
@@ -354,7 +345,7 @@
             </template>
             <template v-if="searchResult?.matches.length">
               <div class="subhead search-result-head">
-                <span class="subtitle">Совпадения</span>
+                <span class="subtitle">{{ t('core.codeSovpadeniya') }}</span>
                 <span class="cnt mono">{{ searchResult.matches.length }}</span>
               </div>
               <UiPressable
@@ -364,7 +355,7 @@
                 data-search-kind="match"
                 :data-search-path="match.path"
                 :data-search-line="match.line"
-                v-tooltip="`${match.path}:${match.line}`"
+                v-tooltip="t('core.codePathLine', { path: match.path, line: match.line })"
                 @click="openSearchResult(match.path, match.line)"
               >
                 <span class="search-location mono">{{ match.path }}:{{ match.line }}</span>
@@ -372,10 +363,8 @@
               </UiPressable>
             </template>
             <div v-if="searchResult && !searchResult.files.length && !searchResult.matches.length"
-                 class="pnote">Ничего не найдено.</div>
-            <div v-if="searchResult?.truncated" class="pnote search-truncated">
-              Показаны первые 500 совпадений.
-            </div>
+                 class="pnote">{{ t('core.codeNichegoNeNaydeno') }}</div>
+            <div v-if="searchResult?.truncated" class="pnote search-truncated"> {{ t('core.codePokazanyPervye500Sovpadeniy') }} </div>
           </template>
         </div>
 
@@ -385,22 +374,20 @@
              окном VirtualRows: целиком он замораживал панель. -->
         <div v-else-if="tab === 'files'" class="scroll tree file-tree">
           <p v-if="!rows.length && !contextLoading && !error" class="pnote">
-            {{ context ? 'В этой рабочей копии пока нет файлов.' : 'Выберите рабочую копию репозитория.' }}
+            {{ context ? t('core.codeVEtoyRabocheyKopii') : t('core.codeVyberiteRabochuyuKopiyuRepozitoriya') }}
           </p>
           <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
                          v-tooltip="fileTreeDecorations.directories.has(row.rel)
-                           ? 'В каталоге есть изменения' : undefined"
+                           ? t('core.codeVKatalogeEstIzmeneniya') : undefined"
                          :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
                          @click="toggleDir(row.rel)">
               <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
               <span class="dname">{{ row.name }}</span>
               <span v-if="fileTreeDecorations.directories.has(row.rel)"
                     class="git-dir-dot" aria-hidden="true">•</span>
-              <span v-if="fileTreeDecorations.directories.has(row.rel)" class="ui-visually-hidden">
-                — внутри есть изменения
-              </span>
+              <span v-if="fileTreeDecorations.directories.has(row.rel)" class="ui-visually-hidden"> {{ t('core.codeVnutriEstIzmeneniya') }} </span>
             </UiPressable>
             <UiPressable v-else class="trow frow" data-context="code-tree-row"
                          :class="{ sel: fileSel === row.rel }"
@@ -424,12 +411,12 @@
              коммитов за нижнюю границу навигатора. -->
         <div v-else-if="tab === 'git'" class="git-panel" :class="`${gitPane}-pane`">
           <div v-if="git && gitPane === 'changes'" class="git-panel-toolbar">
-            <span class="git-panel-label">Файлы изменений</span>
+            <span class="git-panel-label">{{ t('core.codeFaylyIzmeneniy') }}</span>
             <span class="grow"></span>
-            <div class="git-view-toggle" role="group" aria-label="Вид изменений">
+            <div class="git-view-toggle" role="group" :aria-label="t('core.codeVidIzmeneniy')">
               <UiIconButton class="git-view-action" role="embedded"
                             data-context="code-group-action" data-view="tree"
-                            v-tooltip="'Показать деревом'" label="Показать деревом"
+                            v-tooltip="t('core.codePokazatDerevom')" :label="t('core.codePokazatDerevom')"
                             :pressed="gitView === 'tree'" @click="setGitView('tree')">
                 <svg aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" />
@@ -437,7 +424,7 @@
               </UiIconButton>
               <UiIconButton class="git-view-action" role="embedded"
                             data-context="code-group-action" data-view="list"
-                            v-tooltip="'Показать списком'" label="Показать списком"
+                            v-tooltip="t('core.codePokazatSpiskom')" :label="t('core.codePokazatSpiskom')"
                             :pressed="gitView === 'list'" @click="setGitView('list')">
                 <svg aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" />
@@ -530,7 +517,7 @@
             </p>
           </div>
           <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
-            <UiLoadingState v-if="gitLoading && !git" label="Читаю гит…" >
+            <UiLoadingState v-if="gitLoading && !git" :label="t('core.codeChitayuGit')" >
               <UiSkeletonLayout layout="list" :header="false" />
             </UiLoadingState>
             <template v-if="git">
@@ -540,11 +527,11 @@
                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="m3.2 8.2 3 3L12.9 4.5" />
                 </svg>
-                <span>Рабочая копия чистая</span>
+                <span>{{ t('core.codeRabochayaKopiyaChistaya') }}</span>
               </div>
               <section v-if="gitPane === 'commits'" class="commit-log-section">
                 <div class="subhead commits-head">
-                  <span class="subtitle">История ветки</span>
+                  <span class="subtitle">{{ t('core.codeIstoriyaVetki') }}</span>
                   <span v-if="commitSel.size" class="cnt mono">{{ commitSel.size }}</span>
                   <span class="grow"></span>
                   <!-- Подпись режима совпадает с хвостом заголовка отрезка «… + текущие»:
@@ -554,9 +541,9 @@
                             data-action="commits-with-work"
                             v-tooltip="commitsWorkTitle" :pressed="commitsWorkActive"
                             :aria-disabled="!commitsWorkAvailable"
-                            @click="toggleCommitsWork">+ текущие</UiButton>
+                            @click="toggleCommitsWork">{{ t('core.codeTekuschie') }}</UiButton>
                   <UiIconButton role="embedded" data-context="code-group-action"
-                                data-action="branch-diff" label="Показать всю ветку"
+                                data-action="branch-diff" :label="t('core.codePokazatVsyuVetku')"
                                 v-tooltip="branchDiffAvailability.title"
                                 :pressed="branchMode" :loading="commitsLoading && branchMode"
                                 :disabled="!branchDiffAvailability.enabled"
@@ -570,7 +557,7 @@
                     </svg>
                   </UiIconButton>
                 </div>
-                <UiLoadingState v-if="commitsLoading" label="Читаю коммиты…" >
+                <UiLoadingState v-if="commitsLoading" :label="t('core.codeChitayuKommity')" >
                   <UiSkeletonLayout layout="list" :header="false" />
                 </UiLoadingState>
                 <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
@@ -599,8 +586,8 @@
                   data-context="code-group-action"
                   data-action="patch-review"
                   :data-group="group.id"
-                  :label="`Обзор группы «${group.title}»`"
-                  v-tooltip="'Показать все изменения одной страницей'"
+                  :label="t('core.codeObzorGruppyTitle', { title: group.title })"
+                  v-tooltip="t('core.codePokazatVseIzmeneniyaOdnoy')"
                   :pressed="patchReviewActive && patchReviewGroupId === group.id"
                   :loading="patchLoading && patchReviewGroupId === group.id"
                   :disabled="!group.files.length"
@@ -616,8 +603,8 @@
                   role="embedded"
                   data-context="code-group-action"
                   data-action="clear-commits"
-                  label="Снять выбор коммитов"
-                  v-tooltip="'Сбросить отрезок и вернуться к журналу'"
+                  :label="t('core.codeSnyatVyborKommitov')"
+                  v-tooltip="t('core.codeSbrositOtrezokIVernutsya')"
                   @click="clearCommitSelection"
                 >
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
@@ -664,8 +651,8 @@
                   data-context="code-group-action"
                   data-action="patch-review"
                   :data-group="group.id"
-                  :label="`Обзор группы «${group.title}»`"
-                  v-tooltip="'Показать все изменения одной страницей'"
+                  :label="t('core.codeObzorGruppyTitle', { title: group.title })"
+                  v-tooltip="t('core.codePokazatVseIzmeneniyaOdnoy')"
                   :pressed="patchReviewActive && patchReviewGroupId === group.id"
                   :loading="patchLoading && patchReviewGroupId === group.id"
                   :disabled="!group.files.length"
@@ -682,7 +669,7 @@
                   <template #trigger>
                     <UiIconButton class="git-group-action" role="embedded"
                                   data-context="code-group-action" data-action="group-more"
-                                  label="Действия группы" v-tooltip="'Действия группы'">
+                                  :label="t('core.codeDeystviyaGruppy')" v-tooltip="t('core.codeDeystviyaGruppy')">
                       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                         <circle cx="3" cy="8" r="1.15" />
                         <circle cx="8" cy="8" r="1.15" />
@@ -694,9 +681,7 @@
                     <UiButton block variant="ghost" tone="danger" role="menuitem"
                               data-context="code-popover-action" data-action="discard-all"
                               :loading="gitBusy === 'discard:all'" :disabled="gitActionBusy"
-                              @click="discardGitGroup(group); close('action')">
-                      Откатить все tracked-правки
-                    </UiButton>
+                              @click="discardGitGroup(group); close('action')"> {{ t('core.codeOtkatitVseTrackedPravki') }} </UiButton>
                   </template>
                 </UiPopover>
                 <UiIconButton
@@ -713,7 +698,7 @@
                 >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
               </div>
               <div v-if="!group.files.length" class="pnote">
-                {{ group.id === 'commits' ? 'В выбранных коммитах нет изменений файлов.' : 'Несохранённых изменений нет.' }}
+                {{ group.id === 'commits' ? t('core.codeVVybrannyhKommitahNet') : t('core.codeNesohranennyhIzmeneniyNet') }}
               </div>
               <template v-else-if="gitPane === 'changes' && collapsedGroups.has(group.id)"></template>
               <!-- Группа бывает на тысячи файлов (новый репозиторий целиком в индексе):
@@ -909,7 +894,7 @@
                 </i><!-- -->
                 <b class="epath-name">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).name }}</b>
               </span>
-              <span v-if="fileHistoryDiffLoading" class="note">читаю diff…</span>
+              <span v-if="fileHistoryDiffLoading" class="note">{{ t('core.codeChitayuDiff') }}</span>
               <span v-else-if="fileHistoryDiffError" class="note diff-error">
                 {{ fileHistoryDiffError }}
               </span>
@@ -919,24 +904,21 @@
                 <i v-if="headPath(fileSel).dir" class="epath-dir">{{ headPath(fileSel).dir }}/</i><!-- -->
                 <b class="epath-name">{{ headPath(fileSel).name }}</b>
               </span>
-              <span v-if="showsImage" class="note img-note">изображение</span>
-              <span v-else-if="fileData?.binary" class="note">бинарный</span>
-              <span v-else-if="fileData?.tooBig" class="note">
-                слишком большой — превью отключено
-              </span>
-              <span v-if="fileLoading" class="note">читаю…</span>
-              <span v-else-if="blameLoading" class="note">считаю blame…</span>
+              <span v-if="showsImage" class="note img-note">{{ t('core.codeIzobrazhenie') }}</span>
+              <span v-else-if="fileData?.binary" class="note">{{ t('core.codeBinarnyy') }}</span>
+              <span v-else-if="fileData?.tooBig" class="note"> {{ t('core.codeSlishkomBolshoyPrevyuOtklyucheno') }} </span>
+              <span v-if="fileLoading" class="note">{{ t('core.codeChitayu') }}</span>
+              <span v-else-if="blameLoading" class="note">{{ t('core.codeSchitayuBlame') }}</span>
               <span v-else-if="blameError" class="note diff-error">{{ blameError }}</span>
             </template>
             <template v-else-if="tab === 'git' && patchReviewActive">
-              <span class="epath review-title" v-tooltip="patchReviewGroup?.title">
-                Обзор · {{ patchReviewGroup?.title }}
+              <span class="epath review-title" v-tooltip="patchReviewGroup?.title"> {{ t('core.codeObzor') }} {{ patchReviewGroup?.title }}
               </span>
               <span v-if="patchReviewGroup" class="note mono range-summary">
                 {{ fileCountLabel(patchReviewGroup.files.length) }},
                 +{{ patchReviewGroup.stat.add }} −{{ patchReviewGroup.stat.del }}
               </span>
-              <span v-if="patchLoading" class="note">читаю патч…</span>
+              <span v-if="patchLoading" class="note">{{ t('core.codeChitayuPatch') }}</span>
               <span v-else-if="patchError" class="note diff-error">{{ patchError }}</span>
             </template>
             <template v-else-if="tab === 'git' && gitFile">
@@ -949,49 +931,47 @@
                 </i><!-- -->
                 <b class="epath-name">{{ headPath(gitFile.path).name }}</b>
               </span>
-              <span v-if="gitFile.binary" class="note">бинарный</span>
-              <span v-else-if="gitFile.tooBig" class="note">
-                слишком большой — превью отключено
-              </span>
+              <span v-if="gitFile.binary" class="note">{{ t('core.codeBinarnyy') }}</span>
+              <span v-else-if="gitFile.tooBig" class="note"> {{ t('core.codeSlishkomBolshoyPrevyuOtklyucheno') }} </span>
             </template>
           </div>
           <span v-if="tab === 'files' && fileSel && !fileHistoryActive"
-                class="file-view-state">Просмотр</span>
+                class="file-view-state">{{ t('core.codeProsmotr') }}</span>
           <span class="grow"></span>
-          <div class="file-head-actions" role="group" aria-label="Действия файла">
+          <div class="file-head-actions" role="group" :aria-label="t('core.codeDeystviyaFayla')">
               <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
                         data-context="code-editor-action" data-action="close-patch-review"
-                        v-tooltip="'Вернуться к файлу'" @click="closePatchReview">
+                        v-tooltip="t('core.codeVernutsyaKFaylu')" @click="closePatchReview">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16" fill="none"
                      stroke="currentColor" stroke-width="1.45" stroke-linecap="round"
                      stroke-linejoin="round">
                   <path d="m7 3-5 5 5 5M2 8h12" />
                 </svg>
-                <span class="label">К файлу</span>
+                <span class="label">{{ t('core.codeKFaylu') }}</span>
               </UiButton>
               <UiButton v-if="canShowFileHistory && !editorNarrowActions" variant="ghost"
                         data-context="code-editor-action" data-action="file-history"
-                        v-tooltip="'Показать историю файла'" @click="openFileHistory">
+                        v-tooltip="t('core.codePokazatIstoriyuFayla')" @click="openFileHistory">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.3a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM7.4 4h1.2v4.2l2.9 1.7-.6 1-3.5-2.1z" />
                 </svg>
-                <span class="label">История</span>
+                <span class="label">{{ t('core.codeIstoriya') }}</span>
               </UiButton>
               <UiButton v-if="canAskAgent && !editorNarrowActions" variant="ghost"
                         data-context="code-editor-action"
                         data-action="ask-agent" :loading="askAgentBusy" :disabled="askAgentBusy"
-                        v-tooltip="'Создать чат с черновиком вопроса'" @click="askAgentAboutCode">
+                        v-tooltip="t('core.codeSozdatChatSChernovikom')" @click="askAgentAboutCode">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 2.5h12v8.5H6.2L3 13.6V11H2z" />
                 </svg>
-                <span class="label">Спросить агента</span>
+                <span class="label">{{ t('core.codeReviewMenuask-agent') }}</span>
               </UiButton>
               <UiPopover v-if="canShowFileMenu" has-popup="dialog" placement="bottom-end"
                          :style="{ width: 'min(300px, calc(100vw - 20px))' }">
                 <template #trigger>
                   <UiIconButton role="embedded" data-context="code-editor-action"
-                                data-action="file-actions" label="Действия файла"
-                                v-tooltip="'Действия файла'">
+                                data-action="file-actions" :label="t('core.codeDeystviyaFayla')"
+                                v-tooltip="t('core.codeDeystviyaFayla')">
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                       <circle cx="3" cy="8" r="1.15" />
                       <circle cx="8" cy="8" r="1.15" />
@@ -1001,34 +981,26 @@
                 </template>
                 <template #default="{ close }">
                   <div class="code-popover-panel">
-                    <strong class="code-popover-title">Действия файла</strong>
+                    <strong class="code-popover-title">{{ t('core.codeDeystviyaFayla') }}</strong>
                     <UiButton v-if="editorNarrowActions && canShowFileHistory" block variant="ghost"
                               data-context="code-popover-action" data-action="file-history"
-                              @click="openFileHistory(); close('action')">
-                      История файла
-                    </UiButton>
+                              @click="openFileHistory(); close('action')"> {{ t('core.codeReviewMenufile-history') }} </UiButton>
                     <UiButton v-if="editorNarrowActions && canAskAgent" block variant="ghost"
                               data-context="code-popover-action" data-action="ask-agent"
                               :loading="askAgentBusy" :disabled="askAgentBusy"
-                              @click="askAgentAboutCode(); close('action')">
-                      Спросить агента
-                    </UiButton>
+                              @click="askAgentAboutCode(); close('action')"> {{ t('core.codeReviewMenuask-agent') }} </UiButton>
                     <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive"
                               block variant="ghost" data-context="code-popover-action"
                               data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
-                              v-tooltip="blameTitle" @click="toggleBlame">
-                      Авторство строк
-                    </UiButton>
+                              v-tooltip="blameTitle" @click="toggleBlame"> {{ t('core.codeAvtorstvoStrok') }} </UiButton>
                     <UiButton v-if="canCopyCodeLink" block variant="ghost"
                               data-context="code-popover-action" data-action="copy-code-link"
                               @click="copyCodeLink(); close('action')">
-                      {{ codeLinkCopied ? 'Ссылка скопирована' : 'Скопировать ссылку' }}
+                      {{ codeLinkCopied ? t('core.codeSsylkaSkopirovana') : t('core.codeSkopirovatSsylku') }}
                     </UiButton>
                     <UiButton block variant="ghost" data-context="code-popover-action"
                               data-action="refresh-file" :loading="gitLoading || fileLoading"
-                              @click="requestRefresh(); close('action')">
-                      Обновить
-                    </UiButton>
+                              @click="requestRefresh(); close('action')"> {{ t('core.trackerUpdate') }} </UiButton>
                   </div>
                 </template>
               </UiPopover>
@@ -1042,15 +1014,13 @@
                 {{ comparisonBadge.label }}
               </span>
               <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
-              <span v-if="diffLoading" class="note">читаю…</span>
+              <span v-if="diffLoading" class="note">{{ t('core.codeChitayu') }}</span>
               <span v-else-if="diffError" class="note diff-error">{{ diffError }}</span>
             </div>
             <UiButton v-if="tab === 'git' && gitPane === 'changes' && (commitSel.size || branchMode)"
                       variant="ghost" data-context="code-editor-action"
-                      data-action="clear-commits" v-tooltip="'Сбросить выбранный диапазон'"
-                      @click="clearCommitSelection">
-              Сбросить диапазон
-            </UiButton>
+                      data-action="clear-commits" v-tooltip="t('core.codeSbrositVybrannyyDiapazon')"
+                      @click="clearCommitSelection"> {{ t('core.codeSbrositDiapazon') }} </UiButton>
             <div v-if="tab === 'git' && !fileHistoryActive" class="hunk-navigation" role="group"
                  :aria-label="t('core.codeDiffHunkNavigation')">
               <UiIconButton role="embedded" data-context="code-editor-action" data-action="hunk-previous"
@@ -1091,9 +1061,9 @@
               {{ renderSideBySide ? t('core.codeDiffSideBySide') : t('core.codeDiffUnified') }}
             </UiButton>
             <div v-if="gitFileNavigation" class="file-navigation" role="group"
-                 :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
+                 :aria-label="t('core.codeNavigatsiyaPoFaylamIzmeneniy', { index1: gitFileNavigation.index + 1, total: gitFileNavigation.total })">
               <UiIconButton role="embedded" data-context="code-editor-action"
-                            label="Предыдущий файл" v-tooltip="'Предыдущий файл'"
+                            :label="t('core.codePredyduschiyFayl')" v-tooltip="t('core.codePredyduschiyFayl')"
                             :disabled="!gitFileNavigation.previous"
                             @click="navigateGitFile(-1)">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -1102,11 +1072,11 @@
                 </svg>
               </UiIconButton>
               <span class="file-position mono" aria-live="polite">
-                <span class="file-position-label">Файл </span>{{ gitFileNavigation.index + 1 }} /
+                <span class="file-position-label">{{ t('core.interventionFile') }}{{ ' ' }}</span>{{ gitFileNavigation.index + 1 }} /
                 {{ gitFileNavigation.total }}
               </span>
               <UiIconButton role="embedded" data-context="code-editor-action"
-                            label="Следующий файл" v-tooltip="'Следующий файл'"
+                            :label="t('core.codeSleduyuschiyFayl')" v-tooltip="t('core.codeSleduyuschiyFayl')"
                             :disabled="!gitFileNavigation.next"
                             @click="navigateGitFile(1)">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -1121,7 +1091,7 @@
                 <UiIconButton class="diff-view-trigger" role="embedded"
                           data-context="code-editor-action" data-action="diff-view"
                           :label="t('core.codeReviewDiffSettings')"
-                          v-tooltip="`Вид сравнения: ${diffLayoutLabel}`">
+                          v-tooltip="t('core.codeVidSravneniyaDifflayoutlabel', { diffLayoutLabel })">
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                        stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
                        aria-hidden="true">
@@ -1130,35 +1100,22 @@
                 </UiIconButton>
               </template>
               <div class="code-popover-panel diff-view-panel">
-                <strong class="code-popover-title">Вид сравнения</strong>
-                <span class="code-popover-label">Расположение</span>
-                <div class="diff-layout-options" role="group" aria-label="Расположение сравнения">
+                <strong class="code-popover-title">{{ t('core.codeReviewDiffSettings') }}</strong>
+                <span class="code-popover-label">{{ t('core.codeRaspolozhenie') }}</span>
+                <div class="diff-layout-options" role="group" :aria-label="t('core.codeRaspolozhenieSravneniya')">
                   <UiButton variant="ghost" data-context="code-popover-choice"
                             :pressed="renderSideBySide"
                             :disabled="oneSidedDiff || editorForcesInlineDiff"
-                            @click="setDiffLayout(true)">
-                    Рядом
-                  </UiButton>
+                            @click="setDiffLayout(true)"> {{ t('core.codeDiffSideBySide') }} </UiButton>
                   <UiButton variant="ghost" data-context="code-popover-choice"
-                            :pressed="!renderSideBySide" @click="setDiffLayout(false)">
-                    В одну колонку
-                  </UiButton>
+                            :pressed="!renderSideBySide" @click="setDiffLayout(false)"> {{ t('core.codeDiffUnified') }} </UiButton>
                 </div>
-                <p v-if="oneSidedDiff" class="code-popover-note">
-                  Новый или удалённый файл показывается в одну колонку.
-                </p>
-                <p v-else-if="editorForcesInlineDiff" class="code-popover-note">
-                  На этой ширине сравнение показано в одну колонку. При расширении вернётся
-                  сохранённый режим «Рядом».
-                </p>
+                <p v-if="oneSidedDiff" class="code-popover-note"> {{ t('core.codeNovyyIliUdalennyyFayl') }} </p>
+                <p v-else-if="editorForcesInlineDiff" class="code-popover-note"> {{ t('core.codeNaEtoyShirineSravnenie') }} </p>
                 <UiSwitch :model-value="diffWrap" data-action="diff-wrap"
-                          @change="toggleDiffWrap">
-                  Переносить длинные строки
-                </UiSwitch>
+                          @change="toggleDiffWrap"> {{ t('core.codePerenositDlinnyeStroki') }} </UiSwitch>
                 <UiSwitch :model-value="ignoreTrimWhitespace" data-action="diff-whitespace"
-                          @change="toggleDiffWhitespace">
-                  Игнорировать пробелы по краям строк
-                </UiSwitch>
+                          @change="toggleDiffWhitespace"> {{ t('core.codeIgnorirovatProbelyPoKrayam') }} </UiSwitch>
                 <UiSwitch :model-value="diffPreferences.collapse" data-action="diff-collapse"
                           @change="setDiffBoolean('collapse', $event)">
                   {{ t('core.codeDiffCollapse') }}
@@ -1339,14 +1296,14 @@
           <PatchReview v-if="patchReviewActive && patchReviewData"
                        :scope-label="patchScopeLabel" :patch="patchReviewData.patch" :truncated="patchReviewData.truncated"
                        :files="patchScopeFiles" @open="openPatchReviewFile" />
-          <div v-else-if="patchReviewActive && patchLoading" class="overlay">Собираю обзор…</div>
+          <div v-else-if="patchReviewActive && patchLoading" class="overlay">{{ t('core.codeSobirayuObzor') }}</div>
           <div v-else-if="patchReviewActive && patchError" class="overlay">{{ patchError }}</div>
           <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
           <div v-if="tab === 'files' && imageSrc && !fileHistoryActive" class="imgwrap">
-            <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = 'Не удалось загрузить изображение'">
+            <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = t('core.codeNeUdalosZagruzitIzobrazhenie')" />
             <div v-else class="imgerr">
-              {{ imageError }}<br>
-              <span class="muted">Возможно, файл больше 10 МБ или его формат не поддерживается предпросмотром.</span>
+              {{ imageError }}<br />
+              <span class="muted">{{ t('core.codeVozmozhnoFaylBolshe10') }}</span>
             </div>
           </div>
           <div v-if="fileHistoryActive && !fileHistoryDiff && !fileHistoryDiffLoading"
@@ -1356,8 +1313,8 @@
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 5h16M4 12h16M4 19h10" />
               </svg>
-              <strong>Выбери коммит</strong>
-              <span>История файла находится в панели слева.</span>
+              <strong>{{ t('core.codeVyberiKommit') }}</strong>
+              <span>{{ t('core.codeIstoriyaFaylaNahoditsyaV') }}</span>
             </div>
           </div>
           <div v-else-if="tab === 'files' && !fileSel" class="overlay">
@@ -1366,8 +1323,8 @@
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M6 3h8l4 4v14H6zM14 3v4h4" />
               </svg>
-              <strong>Выбери файл</strong>
-              <span>Открой его в дереве или найди по имени и содержимому.</span>
+              <strong>{{ t('core.codeVyberiFayl') }}</strong>
+              <span>{{ t('core.codeOtkroyEgoVDereve') }}</span>
             </div>
           </div>
           <div v-else-if="tab === 'git' && !patchReviewActive
@@ -1378,8 +1335,8 @@
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M5 7h14M7 12h10M9 17h6" />
               </svg>
-              <strong>В диапазоне нет изменений</strong>
-              <span>Выбери другой коммит или вернись к текущим правкам.</span>
+              <strong>{{ t('core.codeVDiapazoneNetIzmeneniy') }}</strong>
+              <span>{{ t('core.codeVyberiDrugoyKommitIli') }}</span>
             </div>
           </div>
           <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
@@ -1392,8 +1349,8 @@
                 <circle cx="12" cy="12" r="9" />
                 <path d="m8 12 2.6 2.6L16.5 9" />
               </svg>
-              <strong>Рабочая копия чистая</strong>
-              <span>Несохранённых изменений нет.</span>
+              <strong>{{ t('core.codeRabochayaKopiyaChistaya') }}</strong>
+              <span>{{ t('core.codeNesohranennyhIzmeneniyNet') }}</span>
             </div>
           </div>
         </div>
@@ -1403,7 +1360,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
+import { UiSkeletonLayout, t, messageRef } from '../../ui';
 
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { sendCodeWindowAction } from '../../shared/tools/toolWindowActions.ts';
@@ -1480,22 +1437,9 @@ import type {
   GitGroupStat,
 } from '../../shared/codeTree';
 import {
-  UiButton,
-  UiIconButton,
-  UiPaneHeader,
-  UiInlineMessage,
-  UiPopover,
-  UiPressable,
-  UiSearchInput,
-  UiSelect,
-  UiSwitch,
-  UiTextarea,
-  confirmDialog,
-  promptDialog,
-  vTooltip,
-  UiLoadingState,
+  UiButton, UiIconButton, UiPaneHeader, UiInlineMessage, UiPopover, UiPressable, UiSearchInput,
+  UiSelect, UiSwitch, UiTextarea, confirmDialog, promptDialog, vTooltip, UiLoadingState,
   showToast,
-  t,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';
@@ -1636,7 +1580,9 @@ const headContext = computed(() => {
     return choice.repoKey === project.value ? label : repoLabel;
   }
 
-  return choice.repoKey === project.value ? repoLabel : `${project.value} · ${repoLabel}`;
+  return choice.repoKey === project.value
+    ? repoLabel
+    : t('core.codeProjectRepolabel', { project: project.value, repoLabel });
 });
 
 // ── Дерево файлов (ленивое: каталог читается при раскрытии) ──
@@ -1661,7 +1607,9 @@ const changePathCount = computed(() => new Set([
 const mainTab = computed<CodeMainTab>(() => (tab.value === 'files' ? 'files' : gitPane.value));
 // Счётчик входит в доступное имя кнопки рейки: значок-бейдж читатель экрана не видит.
 const changesRailLabel = computed(() => (
-  changePathCount.value ? `Изменения · ${changePathCount.value}` : 'Изменения'
+  changePathCount.value
+    ? t('core.codeIzmeneniyaChangepathcount', { changePathCount: changePathCount.value })
+    : t('core.trackerChanges')
 ));
 const fileTreeDecorations = computed(() => treeDecorations(git.value));
 const gitLoading = ref(false);
@@ -1693,20 +1641,20 @@ const gitBusy = ref('');
 const gitActionBusy = computed(() => !!gitBusy.value);
 const commitComposerTitle = computed(() => {
   if (!commitComposerOpen.value) {
-    return 'Коммит';
+    return t('settings.commit');
   }
 
-  return amendCommit.value ? 'Изменение последнего коммита' : 'Новый коммит';
+  return amendCommit.value ? t('core.codeIzmeneniePoslednegoKommita') : t('core.codeNovyyKommit');
 });
 const commitIndexLabel = computed(() => (
   git.value?.staged.length
-    ? `${fileCountLabel(git.value.staged.length)} в индексе`
-    : 'Индекс пуст'
+    ? t('core.codeLengthVIndekse', { length: fileCountLabel(git.value.staged.length) })
+    : t('core.codeIndeksPust')
 ));
 const commitComposerHint = computed(() => (
   git.value?.staged.length
-    ? 'Раскройте форму, чтобы написать сообщение.'
-    : 'Подготовьте файлы кнопкой +'
+    ? t('core.codeRaskroyteFormuChtobyNapisat')
+    : t('core.codePodgotovteFaylyKnopkoy')
 ));
 const amendAvailable = computed(() => {
   const current = git.value;
@@ -1717,33 +1665,33 @@ const amendAvailable = computed(() => {
 });
 const amendTitle = computed(() => {
   if (!git.value?.log.length) {
-    return 'В репозитории ещё нет последнего коммита';
+    return t('core.codeVRepozitoriiEscheNet');
   }
   if (git.value.tracking?.detached) {
-    return 'Detached HEAD нельзя переписывать';
+    return t('core.codeDetachedHeadNelzyaPerepisyvat');
   }
   if (git.value.tracking?.upstream && Number(git.value.tracking.ahead) === 0) {
-    return 'Коммит уже отправлен — push без force невозможен';
+    return t('core.codeKommitUzheOtpravlenPush');
   }
 
-  return 'Добавить индекс в последний локальный коммит или изменить его сообщение';
+  return t('core.codeDobavitIndeksVPosledniy');
 });
 const undoAvailable = computed(() => amendAvailable.value && (git.value?.log.length || 0) > 1);
 const undoTitle = computed(() => {
   if (git.value?.tracking?.detached) {
-    return 'Detached HEAD нельзя переписывать';
+    return t('core.codeDetachedHeadNelzyaPerepisyvat');
   }
   if (git.value?.tracking?.upstream && Number(git.value.tracking.ahead) === 0) {
-    return 'Коммит уже отправлен — push без force невозможен';
+    return t('core.codeKommitUzheOtpravlenPush');
   }
   if (!git.value?.log.length) {
-    return 'В репозитории ещё нет последнего коммита';
+    return t('core.codeVRepozitoriiEscheNet');
   }
   if (git.value.log.length < 2) {
-    return 'У последнего коммита нет родителя';
+    return t('core.codeUPoslednegoKommitaNet');
   }
 
-  return 'Отменить последний коммит и вернуть его изменения в индекс';
+  return t('core.codeOtmenitPosledniyKommitI');
 });
 
 watch(() => git.value?.headMessage || '', (next, previous) => {
@@ -1787,16 +1735,16 @@ const fetchRemoteLabel = computed(() => {
 });
 const pushLabel = computed(() => {
   if (!git.value?.tracking?.upstream) {
-    return 'Опубликовать';
+    return t('core.routeOpublikovat');
   }
 
   const ahead = Number(git.value.tracking.ahead) || 0;
 
-  return ahead > 0 ? `Пуш ↑${ahead}` : 'Пуш';
+  return ahead > 0 ? t('core.codePushAhead', { ahead }) : t('core.codePush');
 });
 const pushTitle = computed(() => (git.value?.tracking?.upstream
-  ? 'Отправить текущую ветку'
-  : 'Опубликовать ветку и настроить upstream'));
+  ? t('core.codeOtpravitTekuschuyuVetku')
+  : t('core.codeOpublikovatVetkuINastroit')));
 
 /**
  * Строка под композером говорит только то, чего НЕТ в шапке раздела: связь с remote,
@@ -1811,7 +1759,7 @@ const trackingNote = computed<TrackingNote | null>(() => {
   const tracking = git.value?.tracking || null;
 
   if (tracking?.detached) {
-    return { type: 'err', text: 'detached HEAD — коммит уйдёт в никуда, пуш недоступен' };
+    return { type: 'err', text: t('core.codeDetachedHeadKommitUydet') };
   }
 
   const live = String(git.value?.branch || '');
@@ -1819,13 +1767,13 @@ const trackingNote = computed<TrackingNote | null>(() => {
   if (live && context.value?.branch && live !== context.value.branch) {
     return {
       type: 'err',
-      text: `ветка сменилась на ${live}`,
-      hint: 'откройте рабочую копию заново'
+      text: t('core.codeVetkaSmenilasNaLive', { live }),
+      hint: t('core.codeOtkroyteRabochuyuKopiyuZanovo')
     };
   }
 
   if (!tracking?.upstream) {
-    return { type: 'mid', text: 'ветка ещё не опубликована' };
+    return { type: 'mid', text: t('core.codeVetkaEscheNeOpublikovana') };
   }
 
   const ahead = Number(tracking.ahead) || 0;
@@ -1837,8 +1785,12 @@ const trackingNote = computed<TrackingNote | null>(() => {
 
   return {
     type: 'mid',
-    text: `${tracking.upstream} · ↑${ahead} ↓${behind}`,
-    hint: 'расхождение с веткой отслеживания',
+    text: t('core.codeUpstreamAheadBehind', {
+      upstream: tracking.upstream,
+      ahead,
+      behind,
+    }),
+    hint: t('core.codeRashozhdenieSVetkoyOtslezhivaniya'),
   };
 });
 // Выбор адресуется парой «группа:путь»: один и тот же файл законно лежит и в индексе,
@@ -1855,9 +1807,9 @@ const codePanelWidth = ref(Number.POSITIVE_INFINITY);
 const codePanelNarrow = computed(() => codePanelWidth.value < 760);
 const narrowPane = ref<NarrowPane>('navigator');
 const narrowBackLabel = computed(() => ({
-  files: 'К файлам',
-  changes: 'К изменениям',
-  commits: 'К коммитам',
+  files: t('core.codeKFaylam'),
+  changes: t('core.codeKIzmeneniyam'),
+  commits: t('core.codeKKommitam'),
 }[mainTab.value]));
 const fullSide = ref(localStorage.getItem('grigdesk-diff-side') !== '0');
 const compactSide = ref(localStorage.getItem('grigdesk-dock-diff-side') === '1');
@@ -1913,30 +1865,30 @@ const commitsWorkAvailable = computed(() => {
 const commitsWorkActive = computed(() => commitsWithWork.value && commitsWorkAvailable.value);
 const commitsWorkTitle = computed(() => {
   if (!commitsWorkAvailable.value) {
-    return 'Текущие изменения можно добавить только к отрезку до последнего коммита';
+    return t('core.codeTekuschieIzmeneniyaMozhnoDobavit');
   }
 
   return commitsWithWork.value
-    ? 'Показывать отрезок вместе с несохранёнными правками — выключить'
-    : 'Показывать отрезок вместе с несохранёнными правками';
+    ? t('core.codePokazyvatOtrezokVmesteS')
+    : t('core.codePokazyvatOtrezokVmesteS2');
 });
 const branchDiffAvailability = computed(() => {
   const selected = context.value;
 
   if (!selected || !git.value) {
-    return { enabled: false, title: 'Сначала выбери рабочую копию.' };
+    return { enabled: false, title: t('core.codeSnachalaVyberiRabochuyuKopiyu') };
   }
   if (selected.main) {
     return git.value.tracking.upstream
-      ? { enabled: true, title: 'Показать всю ветку относительно upstream' }
-      : { enabled: false, title: 'У основной ветки нет upstream.' };
+      ? { enabled: true, title: t('core.codePokazatVsyuVetkuOtnositelno') }
+      : { enabled: false, title: t('core.codeUOsnovnoyVetkiNet') };
   }
 
   const main = contexts.value.find((item) => item.repoKey === selected.repoKey && item.main);
 
   return main?.branch && main.branch !== '(detached)'
-    ? { enabled: true, title: `Показать всю ветку относительно ${main.branch}` }
-    : { enabled: false, title: 'У основного дерева не определена ветка.' };
+    ? { enabled: true, title: t('core.codePokazatVsyuVetkuOtnositelno2', { branch: main.branch }) }
+    : { enabled: false, title: t('core.codeUOsnovnogoDerevaNe') };
 });
 const commitGroup = computed(() => {
   const diff = commitsDiff.value;
@@ -2071,7 +2023,11 @@ const rangeSummary = computed(() => {
     return '';
   }
 
-  return `${fileCountLabel(group.files.length)}, +${group.stat.add} −${group.stat.del}`;
+  return t('core.codeLengthAddDel', {
+    length: fileCountLabel(group.files.length),
+    add: group.stat.add,
+    del: group.stat.del,
+  });
 });
 const gitFile = computed<CodeGitFile | null>(() => {
   const entry = shownEntry.value;
@@ -2120,16 +2076,16 @@ const canUseBlame = computed(() => Boolean(
 ));
 const blameTitle = computed(() => {
   if (fileData.value?.binary) {
-    return 'Blame недоступен для бинарного файла';
+    return t('core.codeBlameNedostupenDlyaBinarnogo');
   }
   if (fileData.value?.tooBig) {
-    return 'Blame недоступен для слишком большого файла';
+    return t('core.codeBlameNedostupenDlyaSlishkom');
   }
   if (isImagePath(fileSel.value)) {
-    return 'Blame недоступен для изображения';
+    return t('core.codeBlameNedostupenDlyaIzobrazheniya');
   }
 
-  return blameEnabled.value ? 'Скрыть авторство строк' : 'Показать авторство строк';
+  return blameEnabled.value ? t('core.codeSkrytAvtorstvoStrok') : t('core.codePokazatAvtorstvoStrok');
 });
 const codeLinkCopied = ref(false);
 const askAgentBusy = ref(false);
@@ -2150,7 +2106,7 @@ const STLABEL: Record<string, string> = {
   R: 'R',
   U: '!',
 };
-const CONFLICT_HINT = 'конфликт: разреши в файле, затем добавь в индекс';
+const CONFLICT_HINT = computed(() => t('core.codeKonfliktRazreshiVFayle'));
 // Шаг лесенки дерева задаётся в CSS (`--tree-step`), сюда приезжает только глубина:
 // иначе два числа — px в скрипте и отступ шеврона в стилях — разъезжаются при правке.
 function rowDepth(depth: number) {
@@ -2159,7 +2115,7 @@ function rowDepth(depth: number) {
 
 /** Подсказка итога группы: в заголовке только числа, слово «строк» живёт здесь. */
 function gitStatTitle(stat: GitGroupStat) {
-  return `добавлено строк: ${stat.add}, удалено строк: ${stat.del}`;
+  return t('core.codeDobavlenoStrokAddUdaleno', { add: stat.add, del: stat.del });
 }
 
 /**
@@ -2178,8 +2134,10 @@ function fileCountLabel(count: number) {
   const tail = count % 100;
   const digit = count % 10;
   const word = tail >= 11 && tail <= 14
-    ? 'файлов'
-    : digit === 1 ? 'файл' : digit >= 2 && digit <= 4 ? 'файла' : 'файлов';
+    ? t('core.codeFaylov')
+    : digit === 1
+                      ? t('core.codeFayl')
+                      : digit >= 2 && digit <= 4 ? t('core.codeFayla') : t('core.codeFaylov');
 
   return `${count} ${word}`;
 }
@@ -2236,34 +2194,37 @@ const gitScopeBadge = computed(() => {
 
     return range.work
       ? {
-        label: `${shortRevision(range.base)} → рабочая копия`,
-        hint: 'слева — до первого выбранного коммита, справа — файл на диске',
+        label: t('core.codeBaseRabochayaKopiya', { base: shortRevision(range.base) }),
+        hint: t('core.codeSlevaDoPervogoVybrannogo'),
       }
       : {
-        label: `${shortRevision(range.base)} → ${shortRevision(range.to)}`,
-        hint: 'слева — до первого выбранного коммита, справа — после последнего',
+        label: t('core.codeBaseTo', { base: shortRevision(range.base), to: shortRevision(range.to) }),
+        hint: t('core.codeSlevaDoPervogoVybrannogo2'),
       };
   }
 
   if (entry.file.status === 'U') {
     if (conflictPair.value !== 'work') {
       return {
-        label: `${t('core.codeReviewConflictbase')} → ${t(`core.codeReviewConflict${conflictPair.value}`)}`,
+        label: t('core.codeCodereviewconflictbaseValue', {
+      codeReviewConflictbase: t('core.codeReviewConflictbase'),
+      value: t(`core.codeReviewConflict${conflictPair.value}`),
+    }),
         hint: t('core.codeReviewConflictReadOnly'),
       };
     }
 
     return {
-      label: 'наша версия → рабочая копия',
-      hint: 'слева — наша версия до конфликта, справа — файл с маркерами конфликта',
+      label: t('core.codeNashaVersiyaRabochayaKopiya'),
+      hint: t('core.codeSlevaNashaVersiyaDo'),
     };
   }
 
   return entry.group.id === 'staged'
-    ? { label: 'HEAD → индекс', hint: 'справа то, что уедет в следующий коммит' }
+    ? { label: t('core.codeHeadIndeks'), hint: t('core.codeSpravaToChtoUedet') }
     : {
-      label: 'индекс → рабочая копия',
-      hint: 'справа правки на диске, которые в коммит пока не попадут',
+      label: t('core.codeIndeksRabochayaKopiya'),
+      hint: t('core.codeSpravaPravkiNaDiske'),
     };
 });
 const selectedFileHistoryEntry = computed(() => (
@@ -2278,12 +2239,12 @@ const comparisonBadge = computed(() => {
 
   return entry
     ? {
-      label: `${shortRevision(entry.base)} → ${shortRevision(entry.hash)}`,
-      hint: 'версия файла до коммита и версия в выбранном коммите',
+      label: t('core.codeBaseHash', { base: shortRevision(entry.base), hash: shortRevision(entry.hash) }),
+      hint: t('core.codeVersiyaFaylaDoKommita'),
     }
     : {
-      label: 'История файла',
-      hint: 'выбери коммит в журнале слева',
+      label: t('core.codeReviewMenufile-history'),
+      hint: t('core.codeVyberiKommitVZhurnale'),
     };
 });
 const showsComparisonRow = computed(() => !patchReviewActive.value && (
@@ -2292,7 +2253,7 @@ const showsComparisonRow = computed(() => !patchReviewActive.value && (
     : tab.value === 'git' && Boolean(gitFile.value)
 ));
 const diffLayoutLabel = computed(() => (
-  oneSidedDiff.value || !renderSideBySide.value ? 'Одна колонка' : 'Рядом'
+  oneSidedDiff.value || !renderSideBySide.value ? t('core.codeOdnaKolonka') : t('core.codeDiffSideBySide')
 ));
 
 // ── Monaco: оба редактора живут под v-show, но модели очищаются при смене контекста. ──
@@ -2701,7 +2662,12 @@ async function runScopedAction(options: CodeActionOptions) {
       hidden: includeHiddenSelection.value ? 0 : hiddenSelectionCount.value,
     });
     const accepted = await confirmDialog(
-      `${snapshot.treePath}\n${options.directory || ''}\n${counts}\n${composition}`, {
+      messageRef('core.codeTreepathDirectoryCountsComposition', {
+        treePath: snapshot.treePath,
+        directory: options.directory || '',
+        counts,
+        composition,
+      }), {
       title: t(`core.codeReviewAction${options.action}`),
       danger: ['discard', 'clean-new', 'delete-new-dir'].includes(options.action),
     });
@@ -2855,7 +2821,10 @@ async function ignoreGitScope(target: 'shared' | 'local', scope: { directory?: s
 
   try {
     const preview = await codeApi.ignorePreview(snapshot, { target, ...scope });
-    const accepted = await confirmDialog(`${snapshot.treePath}\n${preview.rules.join('\n')}`, {
+    const accepted = await confirmDialog(messageRef('core.codeTreepathJoinn', {
+      treePath: snapshot.treePath,
+      joinn: preview.rules.join('\n'),
+    }), {
       title: t(target === 'shared' ? 'core.codeReviewMenuignore-shared' : 'core.codeReviewMenuignore-local'),
     });
 
@@ -2938,9 +2907,13 @@ async function applyPartialSelection(wholeHunk: boolean) {
       return;
     }
 
-    const accepted = await confirmDialog(`${comparison.path}\n${atoms.map((atom) => (
-      `-${atom.oldText}\n+${atom.newText}`
-    )).join('\n')}`, { title: t('core.codeReviewPartialPreview') });
+    const accepted = await confirmDialog(
+      messageRef('core.codePathJoinn', {
+        path: comparison.path,
+        joinn: atoms.map((atom) => `-${atom.oldText}\n+${atom.newText}`).join('\n'),
+      }),
+      { title: t('core.codeReviewPartialPreview') },
+    );
 
     if (!accepted || !contextIsCurrent(snapshot) || gitSel.value !== gitRef(group, comparison.path)) {
       return;
@@ -3130,7 +3103,6 @@ async function askConflict() {
   await createReviewDraft(`${treePath.value}/${conflict.path}\n${JSON.stringify(conflict, null, 2)}`);
 }
 
-
 let gitActionId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
@@ -3221,7 +3193,7 @@ const navigatorPreferredWidth = ref(clampNavigatorWidth(
 const navigatorWidth = computed(() => clampNavigatorWidth(navigatorPreferredWidth.value));
 const navigatorCollapsed = ref(false);
 const navigatorToggleLabel = computed(() => (
-  navigatorCollapsed.value ? 'Показать навигатор' : 'Скрыть навигатор'
+  navigatorCollapsed.value ? t('core.codePokazatNavigator') : t('core.codeSkrytNavigator')
 ));
 const compactStyle = computed(() => ({
   '--code-rail-width': `${RAIL_WIDTH}px`,
@@ -3498,7 +3470,7 @@ async function importState(value: ToolWindowState): Promise<void> {
   const target = contexts.value.find((item) => item.repoKey === state.repo && item.treePath === state.root);
 
   if (!target) {
-    error.value = `Рабочая копия ${String(state.root)} недоступна — проверь пути в разделе «Проекты»`;
+    error.value = t('core.codeRabochayaKopiyaRootNedostupna', { root: String(state.root) });
 
     return;
   }
@@ -3871,11 +3843,11 @@ function resetBlameView() {
  */
 function blameLineLabel(line: CodeBlameLine): string {
   if (!line.hash) {
-    return '  не в коммите';
+    return t('core.codeNotCommittedLine');
   }
 
-  const author = line.author || 'неизвестный автор';
-  const when = line.when || 'давно';
+  const author = line.author || t('core.codeNeizvestnyyAvtor');
+  const when = line.when || t('core.codeDavno');
 
   return `  ${line.hash.slice(0, 7)} · ${author} · ${when}`;
 }
@@ -3905,7 +3877,7 @@ function applyBlameDecorations() {
         inlineClassName: 'code-blame-after',
         inlineClassNameAffectsLetterSpacing: true,
       },
-      hoverMessage: { value: line.subject || 'Без темы' },
+      hoverMessage: { value: line.subject || t('core.codeBezTemy') },
     },
   }));
 
@@ -3948,7 +3920,7 @@ async function loadBlame(snapshot: ContextSnapshot, relPath: string) {
     if (contextIsCurrent(snapshot) && own === blameRequestId && fileSel.value === relPath) {
       blameLines.value = [];
       blamePath.value = '';
-      blameError.value = codeErrorMessage(blameLoadError, 'Не удалось посчитать blame');
+      blameError.value = codeErrorMessage(blameLoadError, t('core.codeNeUdalosPoschitatBlame'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === blameRequestId) {
@@ -4041,13 +4013,13 @@ function installBlameClick() {
  */
 function draftWorktreeLabel(selected: CodeContext | null): string {
   if (!selected || selected.main) {
-    return 'Основная';
+    return t('core.routeOsnovnaya');
   }
   if (selected.task) {
-    return `Задача ${selected.task}`;
+    return t('core.codeZadachaTask', { task: selected.task });
   }
 
-  return `Worktree ${selected.name || 'без имени'}`;
+  return t('core.codeWorktreeTitle', { name: selected.name || t('core.codeBezImeni') });
 }
 
 /**
@@ -4124,7 +4096,7 @@ async function openFileHistory() {
     fileHistoryEntries.value = response.entries;
   } catch (historyError) {
     if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
-      fileHistoryError.value = codeErrorMessage(historyError, 'Не удалось прочитать историю файла');
+      fileHistoryError.value = codeErrorMessage(historyError, t('core.codeNeUdalosProchitatIstoriyu'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
@@ -4179,7 +4151,7 @@ async function openFileHistoryEntry(entry: CodeFileLogEntry) {
     }
   } catch (historyError) {
     if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
-      fileHistoryDiffError.value = codeErrorMessage(historyError, 'Не удалось прочитать версию файла');
+      fileHistoryDiffError.value = codeErrorMessage(historyError, t('core.codeNeUdalosProchitatVersiyu'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
@@ -4282,7 +4254,7 @@ async function askAgentAboutCode() {
         projectId: project.value,
         repoKey: selectedContext.repoKey
       },
-      title: `Код · ${relPath.split('/').at(-1) || relPath}`,
+      title: t('core.codeKodAt1relpath', { at1relPath: relPath.split('/').at(-1) || relPath }),
       draft,
     };
 
@@ -4291,7 +4263,7 @@ async function askAgentAboutCode() {
       await router.push('/chats');
     }
   } catch (askError) {
-    error.value = codeErrorMessage(askError, 'Не удалось создать черновик для агента');
+    error.value = codeErrorMessage(askError, t('core.codeNeUdalosSozdatChernovik'));
   } finally {
     askAgentBusy.value = false;
   }
@@ -4332,11 +4304,11 @@ async function copyCodeLink() {
 
   if (!copied) {
     await promptDialog({
-      title: 'Ссылка на файл',
+      title: t('core.codeSsylkaNaFayl'),
       multiline: false,
-      text: 'Буфер обмена недоступен. Скопируй адрес вручную.',
+      text: t('core.codeBuferObmenaNedostupenSkopiruy'),
       value: href,
-      okText: 'Готово',
+      okText: t('core.chatSettingsDone'),
     });
 
     return;
@@ -4387,14 +4359,14 @@ function gitDirActionLabel(group: GitGroup, dir: string) {
   const count = groupDirectoryFiles(group.files, dir).length;
 
   return group.id === 'staged'
-    ? `Вернуть каталог ${dir} из индекса (${fileCountLabel(count)})`
-    : `Добавить каталог ${dir} в индекс (${fileCountLabel(count)})`;
+    ? t('core.codeVernutKatalogDirIz', { dir: dir, fileCountLabelcount: fileCountLabel(count) })
+    : t('core.codeDobavitKatalogDirV', { dir: dir, fileCountLabelcount: fileCountLabel(count) });
 }
 
 function gitGroupActionLabel(group: GitGroupId) {
   return group === 'staged'
-    ? 'Вернуть все изменения из индекса'
-    : 'Добавить все изменения в индекс';
+    ? t('core.codeVernutVseIzmeneniyaIz')
+    : t('core.codeDobavitVseIzmeneniyaV');
 }
 
 /**
@@ -4403,16 +4375,16 @@ function gitGroupActionLabel(group: GitGroupId) {
  */
 function gitFileActionLabel(group: GitGroupId, file: CodeGitEntry) {
   if (file.status === 'U') {
-    return `Пометить разрешённым: ${file.path}`;
+    return t('core.codePometitRazreshennymPath', { path: file.path });
   }
 
   return group === 'staged'
-    ? `Вернуть ${file.path} из индекса`
-    : `Добавить ${file.path} в индекс`;
+    ? t('core.codeVernutPathIzIndeksa', { path: file.path })
+    : t('core.codeDobavitPathVIndeks', { path: file.path });
 }
 
 function gitFileHint(file: CodeGitEntry) {
-  return file.status === 'U' ? CONFLICT_HINT : file.path;
+  return file.status === 'U' ? CONFLICT_HINT.value : file.path;
 }
 
 function discardableGitCount(group: GitGroup) {
@@ -4425,8 +4397,8 @@ function discardGitFileKey(file: CodeGitEntry) {
 
 function discardGitFileLabel(file: CodeGitEntry) {
   return file.status === 'A'
-    ? `Удалить ${file.path}`
-    : `Откатить изменения ${file.path}`;
+    ? t('core.codeUdalitPath', { path: file.path })
+    : t('core.codeOtkatitIzmeneniyaPath', { path: file.path });
 }
 
 /**
@@ -4441,10 +4413,13 @@ async function discardGitFile(group: GitGroup, file: CodeGitEntry) {
   const snapshot = captureContext();
   const clean = file.status === 'A';
   const accepted = await confirmDialog(
-    `${clean ? 'Удалить' : 'Откатить'} «${file.path}» без возможности отмены?`,
+    messageRef('core.codeCleanPathBezVozmozhnosti', {
+  clean: clean ? t('core.taskDelete') : t('core.trackerRollback'),
+  path: file.path,
+}),
     {
-      title: clean ? 'Удалить новый файл' : 'Откатить изменения',
-      okText: clean ? 'Удалить' : 'Откатить',
+      title: clean ? t('core.codeReviewMenuclean-file') : t('core.codeReviewActiondiscard'),
+      okText: clean ? t('core.taskDelete') : t('core.trackerRollback'),
       danger: true,
     },
   );
@@ -4474,10 +4449,10 @@ async function discardGitGroup(group: GitGroup) {
 
   const snapshot = captureContext();
   const accepted = await confirmDialog(
-    `Откатить tracked-файлы (${changed}) без возможности отмены?`,
+    messageRef('core.codeOtkatitTrackedFaylyChanged', { changed }),
     {
-      title: 'Откатить изменения',
-      okText: 'Откатить',
+      title: t('core.codeReviewActiondiscard'),
+      okText: t('core.trackerRollback'),
       danger: true,
     },
   );
@@ -4783,10 +4758,10 @@ async function undoGitCommit() {
 
   const snapshot = captureContext();
   const accepted = await confirmDialog(
-    'Отменить последний коммит? Его изменения вернутся в индекс.',
+    messageRef('core.codeOtmenitPosledniyKommitEgo'),
     {
-      title: 'Отменить последний коммит',
-      okText: 'Отменить коммит',
+      title: t('core.codeOtmenitPosledniyKommit'),
+      okText: t('core.codeOtmenitKommit'),
       danger: true,
     },
   );
@@ -4925,7 +4900,7 @@ async function executeSearch(query: string, snapshot: ContextSnapshot, own: numb
     searchResult.value = response;
   } catch (searchLoadError) {
     if (contextIsCurrent(snapshot) && own === searchRequestId && searchQuery.value === query) {
-      searchError.value = codeErrorMessage(searchLoadError, 'Не удалось выполнить поиск');
+      searchError.value = codeErrorMessage(searchLoadError, t('core.codeNeUdalosVypolnitPoisk'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === searchRequestId) {
@@ -5152,7 +5127,7 @@ async function ensureDiffContent(entry = shownEntry.value) {
     showDiff({ ...entry.file, ...content });
   } catch (diffFailure) {
     if (contextIsCurrent(snapshot) && own === diffRequestId) {
-      diffError.value = codeErrorMessage(diffFailure, 'Не удалось прочитать диф файла');
+      diffError.value = codeErrorMessage(diffFailure, t('core.codeNeUdalosProchitatDif'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === diffRequestId) {
@@ -5245,7 +5220,7 @@ async function openPatchReview(group: GitGroup, scope: { directory?: string; pat
     patchContent.value = next;
   } catch (reviewError) {
     if (contextIsCurrent(snapshot) && own === patchRequestId && patchReviewKey.value === key) {
-      patchError.value = codeErrorMessage(reviewError, 'Не удалось собрать обзор изменений');
+      patchError.value = codeErrorMessage(reviewError, t('core.codeNeUdalosSobratObzor'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === patchRequestId && patchReviewKey.value === key) {
@@ -5356,7 +5331,7 @@ async function syncCommitsDiff(snapshot = captureContext()) {
     await ensureDiffContent();
   } catch (rangeFailure) {
     if (contextIsCurrent(snapshot) && own === commitsRequestId) {
-      commitsError.value = codeErrorMessage(rangeFailure, 'Не удалось прочитать выбранные коммиты');
+      commitsError.value = codeErrorMessage(rangeFailure, t('core.codeNeUdalosProchitatVybrannye'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === commitsRequestId) {
@@ -5413,7 +5388,7 @@ async function loadBranchDiff(snapshot = captureContext()) {
     await ensureDiffContent();
   } catch (branchFailure) {
     if (contextIsCurrent(snapshot) && own === commitsRequestId) {
-      commitsError.value = codeErrorMessage(branchFailure, 'Не удалось прочитать всю ветку');
+      commitsError.value = codeErrorMessage(branchFailure, t('core.codeNeUdalosProchitatVsyu'));
     }
   } finally {
     if (contextIsCurrent(snapshot) && own === commitsRequestId) {
@@ -6218,7 +6193,7 @@ async function openIntentFile(intent: OpenFileIntent) {
 
   if (intent.project && project.value !== intent.project) {
     if (!projects.value.some((item) => item.id === intent.project)) {
-      error.value = `Проект «${intent.project}» недоступен в разделе «Код»`;
+      error.value = t('core.codeProektProjectNedostupenV', { project: intent.project });
 
       return;
     }
@@ -6233,7 +6208,7 @@ async function openIntentFile(intent: OpenFileIntent) {
   const target = contexts.value.find((item) => item.repoKey === wantRepo && item.treePath === wantRoot);
 
   if (!target) {
-    error.value = `Рабочая копия ${wantRoot} недоступна — проверь пути в разделе «Проекты»`;
+    error.value = t('core.codeRabochayaKopiyaWantrootNedostupna', { wantRoot: wantRoot });
 
     return;
   }
@@ -6273,7 +6248,7 @@ async function openIntentFile(intent: OpenFileIntent) {
 
   if ((await openFile(rel)) === false) {
     pendingReveal = null;
-    error.value = `${rel}: файл не найден в этой рабочей копии`;
+    error.value = t('core.codeRelFaylNeNayden', { rel: rel });
   }
 }
 

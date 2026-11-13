@@ -1,3 +1,9 @@
+
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 interface TitleSession {
   title?: string;
   messages?: Array<{ role?: string }>;
@@ -88,7 +94,7 @@ export function provisionalChatTitle(
     return chatTitleFromMessage(source);
   }
 
-  return hasAttachments ? 'Чат с вложением' : '';
+  return hasAttachments ? translateUi('core.chatTitleChatWithAnAttachment') : '';
 }
 
 /**

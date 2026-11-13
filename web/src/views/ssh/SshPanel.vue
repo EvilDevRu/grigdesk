@@ -17,38 +17,33 @@
           <template #title>
             <div class="ssh-panel__title">
               <h2 id="ssh-panel-title">SSH</h2>
-              <span class="ui-maturity-chip" data-product-maturity="beta" aria-label="Бета-версия">
-                бета
-              </span>
+              <span class="ui-maturity-chip" data-product-maturity="beta" :aria-label="t('core.dbBetaVersiya')"> {{ t('core.dbBeta') }} </span>
             </div>
           </template>
           <template #meta>
-            <span class="ssh-panel__summary" aria-label="Сводка SSH">
-              Серверов: {{ store.connections?.length || 0 }} · Сессий: {{ store.sessions?.length || 0 }}
+            <span class="ssh-panel__summary" :aria-label="t('core.sshSvodkaSsh')"> {{ t('core.sshServerov') }} {{ store.connections?.length || 0 }} {{ t('core.sshSessiy') }} {{ store.sessions?.length || 0 }}
             </span>
             <span v-if="sshApprovals.length" class="ssh-waiting">
-              {{ sshApprovals.length }} ждёт решения
-            </span>
+              {{ sshApprovals.length }} {{ t('core.sshZhdetResheniya') }} </span>
           </template>
           <template #actions>
             <UiIconButton class="ssh-refresh" role="embedded" data-context="workspace-toolbar"
-                          label="Обновить SSH" v-tooltip="'Обновить'" :loading="refreshLoading"
-                          loading-label="Обновляю" @click="refresh">
+                          :label="t('core.sshObnovitSsh')" v-tooltip="t('core.trackerUpdate')" :loading="refreshLoading"
+                          :loading-label="t('core.updating')" @click="refresh">
               <UiRefreshIcon />
             </UiIconButton>
-            <UiCreateButton :label="showCreate ? 'Скрыть форму' : 'Добавить сервер'"
+            <UiCreateButton :label="showCreate ? t('core.dbDesignHideForm') : t('core.sshDobavitServer')"
                             :expanded="showCreate" aria-controls="ssh-create" @click="toggleCreate" />
           </template>
         </UiPaneHeader>
       </div>
 
     <div class="ssh-panel__navigation">
-      <UiTabs v-model="mobileWorkspace" size="compact" data-ui-workspace-tabs label="Рабочая область SSH">
-        <UiTab value="connections" controls="ssh-connections">
-          Серверы · {{ store.connections?.length || 0 }}
+      <UiTabs v-model="mobileWorkspace" size="compact" data-ui-workspace-tabs :label="t('core.sshRabochayaOblastSsh')">
+        <UiTab value="connections" controls="ssh-connections"> {{ t('core.sshServery') }} {{ store.connections?.length || 0 }}
         </UiTab>
         <UiTab value="workspace" controls="ssh-workspace">
-          {{ showCreate ? 'Новый сервер' : 'Терминал' }}
+          {{ showCreate ? t('core.sshNovyyServer') : t('core.terminal') }}
         </UiTab>
       </UiTabs>
     </div>
@@ -64,18 +59,18 @@
         <section v-show="showCreate" id="ssh-create" class="ssh-create ui-workspace-section"
                  aria-labelledby="ssh-create-title">
           <UiPaneHeader>
-            <template #title><h3 id="ssh-create-title">Новый сервер</h3></template>
+            <template #title><h3 id="ssh-create-title">{{ t('core.sshNovyyServer') }}</h3></template>
             <template #actions>
-              <UiButton data-context="workspace-toolbar" @click="toggleCreate">Отмена</UiButton>
+              <UiButton data-context="workspace-toolbar" @click="toggleCreate">{{ t('core.cancel') }}</UiButton>
             </template>
           </UiPaneHeader>
           <form class="ssh-profile-form" @submit.prevent="saveConnection">
-            <UiField label="Проект" required>
+            <UiField :label="t('core.taskEditProject')" required>
               <UiSelect
                 v-model="draft.projectId"
                 required
                 :disabled="!projectOptions.length"
-                aria-label="Проект"
+                :aria-label="t('core.taskEditProject')"
                 data-ssh-project-select
               >
                 <option value="" disabled>{{ projectPlaceholder }}</option>
@@ -89,50 +84,50 @@
               </UiSelect>
             </UiField>
 
-            <UiField label="Метка сервера" required>
+            <UiField :label="t('core.sshMetkaServera')" required>
               <UiInput
                 v-model="draft.label"
                 required
-                placeholder="Например, production"
-                aria-label="Метка сервера"
+                :placeholder="t('core.sshNaprimerProduction')"
+                :aria-label="t('core.sshMetkaServera')"
               />
             </UiField>
 
-            <UiField label="Роль" required>
+            <UiField :label="t('core.dbRol')" required>
               <UiInput
                 v-model="draft.role"
                 required
-                placeholder="Например, приложение"
-                aria-label="Роль сервера"
+                :placeholder="t('core.sshNaprimerPrilozhenie')"
+                :aria-label="t('core.sshRolServera')"
               />
             </UiField>
 
-            <UiField label="Адрес" required>
+            <UiField :label="t('core.browserAddress')" required>
               <UiInput
                 v-model="draft.host"
                 required
-                placeholder="server.example.org"
-                aria-label="Адрес сервера"
+                :placeholder="'server.example.org'"
+                :aria-label="t('core.sshAdresServera')"
               />
             </UiField>
 
-            <UiField label="Порт">
+            <UiField :label="t('settings.port')">
               <UiNumberInput
                 v-model="draft.port"
                 :min="1"
                 :max="65535"
                 placeholder="22"
-                aria-label="Порт"
+                :aria-label="t('settings.port')"
               />
             </UiField>
 
-            <UiField label="Пользователь" required>
+            <UiField :label="t('settings.user')" required>
               <UiInput
                 v-model="draft.user"
                 required
                 autocomplete="username"
-                placeholder="deploy"
-                aria-label="Пользователь"
+                :placeholder="'deploy'"
+                :aria-label="t('settings.user')"
               />
             </UiField>
 
@@ -140,15 +135,12 @@
               v-if="store.projectsError"
               class="ssh-project-message"
               tone="danger"
-            >
-              Список проектов не обновлён: {{ store.projectsError }}
+            > {{ t('core.sshSpisokProektovNeObnovlen') }} {{ store.projectsError }}
             </UiInlineMessage>
             <UiInlineMessage
               v-else-if="!store.projectsLoading && !projectOptions.length"
               class="ssh-project-message"
-            >
-              Сначала создайте проект в разделе «Проекты».
-            </UiInlineMessage>
+            > {{ t('core.sshSnachalaSozdayteProektV') }} </UiInlineMessage>
 
             <UiFormActions class="ssh-profile-form__actions">
               <UiButton
@@ -156,11 +148,9 @@
                 variant="solid"
                 tone="accent"
                 :loading="savingConnection"
-                loading-label="Сохраняю"
+                :loading-label="t('core.sshSohranyayu')"
                 :disabled="!draft.projectId"
-              >
-                Сохранить
-              </UiButton>
+              > {{ t('core.save') }} </UiButton>
             </UiFormActions>
           </form>
         </section>
@@ -169,13 +159,13 @@
         <section
           v-if="sshApprovals.length"
           class="ssh-approvals"
-          aria-label="Подтверждения команд"
+          :aria-label="t('core.sshPodtverzhdeniyaKomand')"
         >
           <header class="ssh-approvals__heading">
             <span class="ssh-approvals__icon" aria-hidden="true">!</span>
             <div>
-              <h3>Агент ждёт решения</h3>
-              <small>Команда не выполнится без вашего разрешения.</small>
+              <h3>{{ t('core.sshAgentZhdetResheniya') }}</h3>
+              <small>{{ t('core.sshKomandaNeVypolnitsyaBez') }}</small>
             </div>
             <span class="ssh-count is-waiting">{{ sshApprovals.length }}</span>
           </header>
@@ -192,26 +182,23 @@
                 <span aria-hidden="true"> — </span>
                 <code>{{ approval.server?.host }}:{{ approval.server?.port }}</code>
               </div>
-              <div class="ssh-approval__identity">
-                Пользователь: <strong>{{ approval.user }}</strong>
-                <span v-if="approval.isRoot" class="ssh-badge">root</span>
-                <span v-if="approval.usesSudo" class="ssh-badge">sudo</span>
+              <div class="ssh-approval__identity"> {{ t('core.sshPolzovatel') }} <strong>{{ approval.user }}</strong>
+                <span v-if="approval.isRoot" class="ssh-badge">{{ 'root' }}</span>
+                <span v-if="approval.usesSudo" class="ssh-badge">{{ 'sudo' }}</span>
               </div>
               <pre data-ssh-command>{{ approval.command }}</pre>
               <UiInput
                 v-model="comments[approval.pid]"
-                placeholder="Пояснение к отказу (необязательно)"
-                :aria-label="`Пояснение к команде ${approval.pid}`"
+                :placeholder="t('core.sshPoyasnenieKOtkazuNeobyazatelno')"
+                :aria-label="t('core.sshPoyasnenieKKomandePid', { pid: approval.pid })"
               />
               <div class="ssh-approval__actions">
-                <UiButton tone="danger" @click="deny(approval)">Отказать</UiButton>
+                <UiButton tone="danger" @click="deny(approval)">{{ t('core.sshOtkazat') }}</UiButton>
                 <UiButton
                   variant="solid"
                   tone="accent"
                   @click="allow(approval)"
-                >
-                  Разрешить
-                </UiButton>
+                > {{ t('core.allow') }} </UiButton>
               </div>
             </article>
           </div>
@@ -221,16 +208,16 @@
           v-show="!showCreate"
           class="ssh-console"
           :class="{ 'has-session': activeSession }"
-          aria-label="SSH-терминал"
+          :aria-label="t('core.sshSshTerminal')"
         >
           <header class="ssh-console__header">
             <div v-if="store.sessions?.length" class="ssh-session-switcher">
-              <span class="ssh-session-switcher__label">Сессии</span>
+              <span class="ssh-session-switcher__label">{{ t('core.dbSessii') }}</span>
               <UiTabs
                 ref="sessionTabs"
                 v-model="selectedSessionId"
                 class="ssh-tabs"
-                label="SSH-сессии"
+                :label="t('core.sshSshSessii')"
               >
                 <UiTab
                   v-for="session in store.sessions"
@@ -247,7 +234,7 @@
                     <span class="ssh-tab__dot"></span>
                     <span class="ssh-tab__copy">
                       <span class="ssh-tab__project-line">
-                        <small>Проект</small>
+                        <small>{{ t('core.taskEditProject') }}</small>
                         <strong data-ssh-session-project>
                           {{ sessionProjectLabel(session) }}
                         </strong>
@@ -266,26 +253,22 @@
               class="ssh-session-close"
               role="embedded"
               tone="danger"
-              :label="`Закрыть активную сессию ${activeSession.label}`"
-              v-tooltip="`Закрыть ${activeSession.label}`"
+              :label="t('core.dbZakrytAktivnuyuSessiyuLabel', { label: activeSession.label })"
+              v-tooltip="t('core.dbZakrytLabel', { label: activeSession.label })"
               :loading="closingSessionId === activeSession.id"
-              loading-label="Закрываю сессию"
+              :loading-label="t('core.dbZakryvayuSessiyu')"
               @click="closeActiveSession"
             >
               ×
             </UiIconButton>
 
             <div v-else class="ssh-console__title">
-              <span aria-hidden="true">›_</span>
-              Терминал
-            </div>
+              <span aria-hidden="true">›_</span> {{ t('core.terminal') }} </div>
 
             <div v-if="activeSession" class="ssh-console__context">
               <span class="ssh-role-badge">{{ activeSession.role }}</span>
               <span class="ssh-live-label">
-                <i aria-hidden="true"></i>
-                Подключено
-              </span>
+                <i aria-hidden="true"></i> {{ t('core.machineConnected') }} </span>
               <code>
                 {{ activeSession.user }}@{{ activeSession.host }}:{{ activeSession.port }}
               </code>
@@ -297,7 +280,7 @@
             class="ssh-terminal-stage"
             role="tabpanel"
             :aria-labelledby="activeSession ? sessionTabId(activeSession.id) : undefined"
-            :aria-label="activeSession ? `Терминал ${activeSession.label}` : 'SSH-терминал'"
+            :aria-label="activeSession ? t('core.sshTerminalLabel', { label: activeSession.label }) : t('core.sshSshTerminal')"
           >
             <div
               v-show="activeSession"
@@ -309,20 +292,18 @@
 
             <div v-if="!activeSession" class="ssh-console__empty" role="status">
               <span class="ssh-console__empty-icon" aria-hidden="true">›_</span>
-              <strong>Нет активной SSH-сессии</strong>
-              <span>Выберите сохранённый сервер — терминал появится после входа.</span>
+              <strong>{{ t('core.sshNetAktivnoySshSessii') }}</strong>
+              <span>{{ t('core.sshVyberiteSohranennyyServerTerminal') }}</span>
             </div>
           </div>
 
           <footer v-if="activeSession" class="ssh-session-tools">
             <UiSwitch
               :model-value="activeSession.agentAllowed"
-              :aria-label="`Доступ агента к ${activeSession.label}`"
+              :aria-label="t('core.dbDostupAgentaKLabel', { label: activeSession.label })"
               @update:model-value="toggleAgentAccess(activeSession.id, $event)"
-            >
-              Команды агента
-            </UiSwitch>
-            <p>Каждая команда — после подтверждения</p>
+            > {{ t('core.sshKomandyAgenta') }} </UiSwitch>
+            <p>{{ t('core.sshKazhdayaKomandaPoslePodtverzhdeniya') }}</p>
 
           </footer>
         </section>
@@ -341,14 +322,12 @@
             >
               <path d="M3 7h7l2 2h9v10H3z" />
               <path d="M3 7V5h6l2 2" />
-            </svg>
-            Файлы сессии
-          </summary>
+            </svg> {{ t('core.sshFaylySessii') }} </summary>
           <div class="ssh-sftp__body ui-workspace-section__body">
             <div class="ssh-files-bar">
-              <UiInput v-model="remotePath" aria-label="Путь на сервере" />
-              <UiButton @click="openRemotePath">Открыть</UiButton>
-              <UiFilePicker label="Загрузить файл" @change="uploadFiles" />
+              <UiInput v-model="remotePath" :aria-label="t('core.sshPutNaServere')" />
+              <UiButton @click="openRemotePath">{{ t('core.open') }}</UiButton>
+              <UiFilePicker :label="t('core.sshZagruzitFayl')" @change="uploadFiles" />
             </div>
             <ul v-if="store.files?.length" class="ssh-files">
               <li v-for="file in store.files" :key="file.name">
@@ -359,12 +338,10 @@
                 <a
                   v-if="file.type !== 'directory'"
                   :href="sshDownloadUrl(file.name)"
-                >
-                  Скачать
-                </a>
+                > {{ t('core.mediaDownload') }} </a>
               </li>
             </ul>
-            <small v-else class="ssh-files__empty">Каталог пока не открыт.</small>
+            <small v-else class="ssh-files__empty">{{ t('core.sshKatalogPokaNeOtkryt') }}</small>
           </div>
         </details>
 
@@ -382,9 +359,7 @@
                 aria-hidden="true"
               >
                 <path d="M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5" />
-              </svg>
-              Журнал команд агента
-            </span>
+              </svg> {{ t('core.sshZhurnalKomandAgenta') }} </span>
             <span class="ssh-count">{{ store.audit?.length || 0 }}</span>
           </summary>
           <div v-if="store.audit?.length" class="ssh-audit__list">
@@ -403,7 +378,7 @@
               <pre v-if="entry.output" class="ssh-audit__output">{{ auditOutputText(entry) }}</pre>
             </article>
           </div>
-          <p v-else class="ssh-audit__empty">Команд агента ещё не было.</p>
+          <p v-else class="ssh-audit__empty">{{ t('core.sshKomandAgentaEscheNe') }}</p>
         </details>
       </div>
 
@@ -411,11 +386,11 @@
         id="ssh-connections"
         ref="connectionsRegion"
         class="ssh-connections"
-        aria-label="Серверы"
+        :aria-label="t('core.sshServery2')"
         tabindex="-1"
       >
         <UiPaneHeader class="ssh-connections__header">
-          <template #title><h3>Серверы</h3></template>
+          <template #title><h3>{{ t('core.sshServery2') }}</h3></template>
           <template #meta>
             <span class="ssh-catalog-count" data-ssh-server-count>
               {{ store.connections?.length || 0 }}
@@ -427,8 +402,8 @@
           <UiSearchInput
             v-model="search"
             size="compact"
-            aria-label="Поиск сервера"
-            placeholder="Найти сервер…"
+            :aria-label="t('core.sshPoiskServera')"
+            :placeholder="t('core.sshNaytiServer')"
           />
         </div>
 
@@ -455,7 +430,7 @@
                     group.sessionCount,
                   )"
                   :disabled="Boolean(search.trim() || connectingId)"
-                  v-tooltip="search.trim() ? 'Поиск раскрывает подходящие проекты' : undefined"
+                  v-tooltip="search.trim() ? t('core.sshPoiskRaskryvaetPodhodyaschieProekty') : undefined"
                   @update:open="expandedProjectId = $event ? group.projectId : null"
                 >
                   <span class="ssh-project-heading">
@@ -515,11 +490,9 @@
               </div>
             </section>
             <div v-if="!connectionGroups.length" class="ssh-catalog-empty" role="status">
-              <strong>Подходящих серверов нет.</strong>
-              <span>Измените запрос или очистите поиск.</span>
-              <UiButton variant="text" size="compact" @click="search = ''">
-                Сбросить поиск
-              </UiButton>
+              <strong>{{ t('core.sshPodhodyaschihServerovNet') }}</strong>
+              <span>{{ t('core.dbDesignChangeSearch') }}</span>
+              <UiButton variant="text" size="compact" @click="search = ''"> {{ t('core.dbDesignClearSearch') }} </UiButton>
             </div>
           </div>
 
@@ -537,15 +510,13 @@
               <rect x="3" y="4" width="18" height="16" rx="2" />
               <path d="m7 9 3 3-3 3 M13 15h4" />
             </svg>
-            <strong>Серверов пока нет</strong>
-            <span>Добавьте первое SSH-подключение — оно появится в каталоге проектов.</span>
-            <UiButton variant="solid" tone="accent" @click="toggleCreate">
-              Добавить сервер
-            </UiButton>
+            <strong>{{ t('core.sshServerovPokaNet') }}</strong>
+            <span>{{ t('core.sshDobavtePervoeSshPodklyuchenie') }}</span>
+            <UiButton variant="solid" tone="accent" @click="toggleCreate"> {{ t('core.sshDobavitServer') }} </UiButton>
           </div>
 
           <div v-if="selectedConnection" class="ssh-connections__footer">
-            <section class="ssh-selected" aria-label="Выбранный сервер">
+            <section class="ssh-selected" :aria-label="t('core.sshVybrannyyServer')">
               <p v-if="!selectedRowIsListed" class="ssh-selected__project">
                 {{ selectedConnection.projectId }}
               </p>
@@ -563,10 +534,10 @@
                   variant="solid"
                   tone="accent"
                   data-context="workspace-form"
-                  :aria-label="`Открыть терминал ${selectedConnection.label}`"
+                  :aria-label="t('core.sshOtkrytTerminalLabel', { label: selectedConnection.label })"
                   @click="openConnectionSession(selectedConnection.id)"
                 >
-                  {{ connectionIsActive(selectedConnection.id) ? 'К терминалу' : 'Открыть терминал' }}
+                  {{ connectionIsActive(selectedConnection.id) ? t('core.sshKTerminalu') : t('core.sshOtkrytTerminal') }}
                 </UiButton>
                 <UiButton
                   variant="text"
@@ -575,7 +546,7 @@
                   aria-controls="ssh-login"
                   @click="showNewLogin = !showNewLogin"
                 >
-                  {{ showNewLogin ? 'Скрыть вход' : '+ Новая сессия' }}
+                  {{ showNewLogin ? t('core.dbDesignHideLogin') : t('core.dbDesignNewSession') }}
                 </UiButton>
               </div>
 
@@ -585,11 +556,11 @@
                 class="ssh-connection__login"
                 @submit.prevent="openConnection(selectedConnection)"
               >
-                <UiField label="Пароль на один вход">
+                <UiField :label="t('core.dbParolNaOdinVhod')">
                   <UiPasswordInput
                     ref="passwordInput"
                     v-model="passwords[selectedConnection.id]"
-                    :aria-label="`Пароль для ${selectedConnection.label}`"
+                    :aria-label="t('core.dbParolDlyaLabel', { label: selectedConnection.label })"
                     autocomplete="current-password"
                     :disabled="Boolean(connectingId)"
                   />
@@ -600,11 +571,9 @@
                   tone="accent"
                   data-context="workspace-form"
                   :loading="connectingId === selectedConnection.id"
-                  loading-label="Подключаю"
+                  :loading-label="t('core.sshPodklyuchayu')"
                   :disabled="Boolean(connectingId && connectingId !== selectedConnection.id)"
-                >
-                  Подключиться
-                </UiButton>
+                > {{ t('core.connect') }} </UiButton>
               </form>
             </section>
 
@@ -620,9 +589,7 @@
               >
                 <path d="M7 11V8a5 5 0 0 1 10 0v3" />
                 <rect x="4" y="11" width="16" height="10" rx="2" />
-              </svg>
-              Пароли не сохраняются и не попадают в журнал.
-            </p>
+              </svg> {{ t('core.sshParoliNeSohranyayutsyaI') }} </p>
           </div>
         </div>
       </section>
@@ -644,29 +611,10 @@ import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { sshSessionTabLabel } from '../../../../shared/plugins/ssh/sessionLabels.ts';
 
 import {
-  UiRefreshIcon,
-  UiButton,
-  UiDisclosureButton,
-  UiField,
-  UiFilePicker,
-  UiFormActions,
-  UiIconButton,
-  UiCreateButton,
-  UiInlineMessage,
-  UiInput,
-  UiNumberInput,
-  UiPasswordInput,
-  UiPaneHeader,
-  UiSearchInput,
-  UiSelect,
-  UiSwitch,
-  UiTab,
-  UiTabs,
-  alertDialog,
-  confirmDialog,
-  vTooltip,
-  UiLoadingState,
-  UiSkeletonLayout,
+  UiRefreshIcon, UiButton, UiDisclosureButton, UiField, UiFilePicker, UiFormActions,
+  UiIconButton, UiCreateButton, UiInlineMessage, UiInput, UiNumberInput, UiPasswordInput,
+  UiPaneHeader, UiSearchInput, UiSelect, UiSwitch, UiTab, UiTabs, alertDialog, confirmDialog,
+  vTooltip, UiLoadingState, UiSkeletonLayout, t, messageRef, uiLocale
 } from '../../ui';
 import type {
   SshAuditEntry,
@@ -762,10 +710,10 @@ const selectedSessionId = computed({
 const projectOptions = computed(() => (store.projects || []).filter((project) => !project.archivedAt));
 const projectPlaceholder = computed(() => {
   if (store.projectsLoading && !projectOptions.value.length) {
-    return 'Загрузка проектов…';
+    return t('core.dbZagruzkaProektov');
   }
 
-  return projectOptions.value.length ? 'Выберите проект' : 'Проектов пока нет';
+  return projectOptions.value.length ? t('core.taskFormChooseProject') : t('core.dbProektovPokaNet');
 });
 const refreshLoading = computed(() => store.loading || store.projectsLoading);
 
@@ -930,11 +878,16 @@ function pluralize(count: number, one: string, few: string, many: string): strin
 }
 
 function serverCountLabel(count: number): string {
-  return `${count} ${pluralize(count, 'сервер', 'сервера', 'серверов')}`;
+  return `${count} ${pluralize(count, t('core.sshServer'), t('core.server'), t('core.sshServerov'))}`;
 }
 
 function sessionCountLabel(count: number): string {
-  return `${count} ${pluralize(count, 'живая сессия', 'живые сессии', 'живых сессий')}`;
+  return `${count} ${pluralize(
+    count,
+    t('core.sshZhivayaSessiya'),
+    t('core.sshZhivyeSessii'),
+    t('core.sshZhivyhSessiy'),
+  )}`;
 }
 
 // Заголовок проекта озвучивает имя, серверы и сессии сразу: у свёрнутой группы
@@ -942,13 +895,17 @@ function sessionCountLabel(count: number): string {
 function projectGroupLabel(projectId: string, servers: number, sessions: number): string {
   const live = sessions ? `, ${sessionCountLabel(sessions)}` : '';
 
-  return `Проект ${projectId}, ${serverCountLabel(servers)}${live}`;
+  return t('core.sshProektProjectidServercountlabelserversLive', {
+                      projectId: projectId,
+                      serverCountLabelservers: serverCountLabel(servers),
+                      live: live,
+                    });
 }
 
 const auditDecisionLabel = (decision: string | null | undefined) => ({
-  allow: 'Разрешено',
-  deny: 'Отказано',
-}[String(decision)] || decision || 'Без решения');
+  allow: t('core.sshRazresheno'),
+  deny: t('core.sshOtkazano'),
+}[String(decision)] || decision || t('core.sshNoDecision'));
 
 /**
  * Время записи журнала человеку. Непонятное значение показывается как есть: подменять
@@ -961,7 +918,7 @@ function formatAuditDate(value: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat('ru-RU', {
+  return new Intl.DateTimeFormat(uiLocale.value, {
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -1115,7 +1072,7 @@ function sessionProjectLabel(session: SshSession): string {
   const connection = (store.connections || [])
     .find((item) => item.id === session.connectionId);
 
-  return String(session.projectId || connection?.projectId || 'не указан');
+  return String(session.projectId || connection?.projectId || t('core.routeNeUkazan'));
 }
 
 /**
@@ -1137,7 +1094,7 @@ function sessionTabTitle(session: SshSession): string {
   const endpoint = [session.host, session.port].filter(Boolean).join(':');
   const identity = [session.user, endpoint].filter(Boolean).join('@');
   const parts = [
-    `Проект ${sessionProjectLabel(session)}`,
+    t('core.sshProjectPart', { label: sessionProjectLabel(session) }),
     sessionTargetLabel(session),
     identity,
   ].filter(Boolean);
@@ -1151,8 +1108,8 @@ function sessionTabAriaLabel(session: SshSession): string {
   const endpoint = [session.host, session.port].filter(Boolean).join(':');
   const identity = [session.user, endpoint].filter(Boolean).join('@');
   const parts = [
-    `Проект ${sessionProjectLabel(session)}`,
-    `сессия ${sessionTargetLabel(session)}`,
+    t('core.sshProjectPart', { label: sessionProjectLabel(session) }),
+    t('core.sshSessionPart', { label: sessionTargetLabel(session) }),
     identity,
   ].filter(Boolean);
 
@@ -1236,7 +1193,7 @@ async function closeActiveSession(): Promise<void> {
       await focusSessionTab(sessionId);
     }
 
-    await alertDialog(errorMessage(error, 'Не удалось закрыть SSH-сессию'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, t('core.sshNeUdalosZakrytSsh')), { title: 'SSH' });
   } finally {
     if (closingSessionId.value === sessionId) {
       closingSessionId.value = '';
@@ -1333,11 +1290,13 @@ async function openConnection(connection: SshConnection): Promise<void> {
     if (check.status !== 'trusted') {
       const changed = check.status === 'changed';
       const accepted = await confirmDialog(
-        `${changed ? 'Ключ сервера изменился.' : 'Первое подключение к серверу.'}\n\n`
-          + `Отпечаток: ${check.current?.fingerprint || 'неизвестен'}`,
+        messageRef('core.sshValueOtpechatokFingerprint', {
+          value: changed ? t('core.sshKlyuchServeraIzmenilsya') : t('core.sshPervoePodklyuchenieKServeru'),
+          fingerprint: check.current?.fingerprint || t('core.sshFingerprintUnknown'),
+        }),
         {
-          title: changed ? 'Проверить новый host key' : 'Доверять host key?',
-          okText: changed ? 'Заменить ключ' : 'Доверять',
+          title: changed ? t('core.sshProveritNovyyHostKey') : t('core.sshDoveryatHostKey'),
+          okText: changed ? t('core.sshZamenitKlyuch') : t('core.sshDoveryat'),
           danger: changed,
         },
       );
@@ -1357,7 +1316,7 @@ async function openConnection(connection: SshConnection): Promise<void> {
     showCreate.value = false;
     showConnections.value = false;
   } catch (error) {
-    await alertDialog(errorMessage(error, 'Не удалось подключиться'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, t('core.sshNeUdalosPodklyuchitsya')), { title: 'SSH' });
   } finally {
     passwords[connection.id] = '';
 
@@ -1397,7 +1356,7 @@ async function saveConnection(): Promise<void> {
       user: '',
     });
   } catch (error) {
-    await alertDialog(errorMessage(error, 'Не удалось сохранить соединение'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, t('core.sshNeUdalosSohranitSoedinenie')), { title: 'SSH' });
   } finally {
     savingConnection.value = false;
   }

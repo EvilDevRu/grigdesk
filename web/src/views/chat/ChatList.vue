@@ -8,12 +8,12 @@
           <UiSearchInput
             v-model="q"
             size="compact"
-            :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'"
+            :placeholder="showArchived ? t('core.chatPoiskVArhive') : t('core.search')"
           />
         </div>
         <UiCreateButton
           class="new"
-          label="Новый чат"
+          :label="t('core.chatNovyyChat')"
           :disabled="!chat.loaded"
           @click="newChat"
         />
@@ -115,7 +115,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              v-tooltip="'непрочитанный ответ'"
+              v-tooltip="t('core.chatNeprochitannyyOtvet')"
             />
           </span>
           <span class="mid">
@@ -123,7 +123,7 @@
               ref="editEl"
               v-model="editVal"
               class="edit"
-              aria-label="Название чата"
+              :aria-label="t('core.chatNazvanieChata')"
               @keydown.enter="commitEdit"
               @keydown.esc="editId = null"
               @blur="commitEdit"
@@ -161,7 +161,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              v-tooltip="'непрочитанный ответ'"
+              v-tooltip="t('core.chatNeprochitannyyOtvet')"
             />
           </span>
 
@@ -171,16 +171,14 @@
               <span
                 v-if="r.waiting"
                 class="wchip"
-                v-tooltip="'агент ждёт твоего ответа — работа стоит'"
-              >
-                ждёт ответа
-              </span>
+                v-tooltip="t('core.chatAgentZhdetTvoegoOtveta')"
+              > {{ t('core.chatZhdetOtveta') }} </span>
               <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </span>
             <span class="t2 muted">
-              <span v-if="r.draft" class="dr">черновик:</span>{{
-                r.snippet || 'Пустой чат'
+              <span v-if="r.draft" class="dr">{{ t('core.chatChernovik') }}</span>{{
+                r.snippet || t('core.chatPustoyChat')
               }}
             </span>
           </span>
@@ -193,8 +191,8 @@
               v-if="r.archived"
               data-context="chat-list-action"
               role="rail"
-              label="Достать чат из архива"
-              v-tooltip="'Достать из архива'"
+              :label="t('core.chatDostatChatIzArhiva')"
+              v-tooltip="t('core.chatDostatIzArhiva')"
               tone="accent"
               @click="restore(r)"
             >
@@ -203,8 +201,8 @@
             <UiIconButton
               data-context="chat-list-action"
               role="rail"
-              label="Переименовать чат"
-              v-tooltip="'Переименовать'"
+              :label="t('core.chatPereimenovatChat')"
+              v-tooltip="t('core.machineRename')"
               @click="startEdit(r)"
             >
               ✎
@@ -212,8 +210,8 @@
             <UiIconButton
               data-context="chat-list-action"
               role="rail"
-              :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
-              v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+              :label="r.archived ? t('core.chatUdalitChatNavsegda') : t('core.chatPeremestitChatVArhiv')"
+              v-tooltip="r.archived ? t('core.chatUdalitNavsegda') : t('core.chatPeremestitVArhiv')"
               :tone="r.archived ? 'danger' : 'accent'"
               @click="del(r)"
             >
@@ -222,21 +220,21 @@
           </span>
           <!-- Палец: наведения нет, поэтому действия собраны в меню с полными подписями. -->
           <span class="acts-menu">
-            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
+            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="t('core.chatDeystviyaTitle', { title: r.title })">
               <template #trigger>
-                <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
+                <UiIconButton data-context="chat-list-action" role="rail" :label="t('core.chatDeystviyaTitle', { title: r.title })">
                   ⋯
                 </UiIconButton>
               </template>
               <template #default="{ close }">
                 <div class="ui-action-menu">
                   <UiButton v-if="r.archived" role="menuitem" variant="ghost"
-                            @click="close('action'); restore(r)">Достать из архива</UiButton>
+                            @click="close('action'); restore(r)">{{ t('core.chatDostatIzArhiva') }}</UiButton>
                   <UiButton role="menuitem" variant="ghost"
-                            @click="close('action'); startEdit(r)">Переименовать</UiButton>
+                            @click="close('action'); startEdit(r)">{{ t('core.machineRename') }}</UiButton>
                   <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
                             @click="close('action'); del(r)">
-                    {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
+                    {{ r.archived ? t('core.chatUdalitNavsegda') : t('core.chatPeremestitVArhiv') }}
                   </UiButton>
                 </div>
               </template>
@@ -259,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeleton } from '../../ui';
+import { UiSkeleton, t, messageRef, uiLocale } from '../../ui';
 
 import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
@@ -273,19 +271,8 @@ import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ChatSleepBadge from './ChatSleepBadge.vue';
 import { useChatSleeping } from '../../composables/useChatSleeping.ts';
 import {
-  confirmDialog,
-  UiButton,
-  UiPopover,
-  UiIconButton,
-  UiCreateButton,
-  UiInput,
-  UiPressable,
-  UiSearchInput,
-  UiSpinner,
-  UiSwitch,
-  t,
-  resolveUiText,
-  vTooltip,
+  confirmDialog, UiButton, UiPopover, UiIconButton, UiCreateButton, UiInput, UiPressable,
+  UiSearchInput, UiSpinner, UiSwitch, resolveUiText, vTooltip,
 } from '../../ui';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
@@ -369,14 +356,16 @@ function onRowsScroll() {
 }
 
 const archiveLabel = computed(() => (
-  `Показывать архив${chat.archivedChatCount ? ` · ${chat.archivedChatCount}` : ''}`
+  t('core.chatPokazyvatArhivArchivedchatcount', { archivedChatCount: chat.archivedChatCount
+          ? ` · ${chat.archivedChatCount}`
+          : '' })
 ));
 const emptyLabel = computed(() => {
   if (q.value.trim()) {
-    return 'Ничего не найдено';
+    return t('core.inboxNoResults');
   }
 
-  return showArchived.value ? 'Архив пуст' : 'Нет активных чатов';
+  return showArchived.value ? t('core.chatArhivPust') : t('core.chatNetAktivnyhChatov');
 });
 
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
@@ -444,13 +433,13 @@ function letter(row: ListRow) {
  * Сжатие имеет отдельную подпись при том же индикаторе занятости.
  */
 function avatarTitle(row: ListRow) {
-  const modelName = row.modelName || 'Модель по умолчанию';
+  const modelName = row.modelName || t('core.chatModelPoUmolchaniyu');
 
   if (row.compacting) {
-    return `${modelName} · сжимаю контекст`;
+    return t('core.chatModelnameSzhimayuKontekst', { modelName: modelName });
   }
   if (row.sending) {
-    return `${modelName} · агент работает`;
+    return t('core.chatModelnameAgentRabotaet', { modelName: modelName });
   }
 
   return modelName;
@@ -460,7 +449,9 @@ function avatarTitle(row: ListRow) {
  * Относительное время сохраняет компактный телеграмный формат строки.
  * После недели календарная дата устойчивее постоянно растущего числа дней.
  */
-const calendarDate = new Intl.DateTimeFormat('ru', { day: '2-digit', month: '2-digit' });
+const calendarDate = computed(
+  () => new Intl.DateTimeFormat(uiLocale.value, { day: '2-digit', month: '2-digit' }),
+);
 
 /**
  * Форматтер принадлежит смонтированному списку и создаётся один раз, а не для каждой строки.
@@ -474,19 +465,19 @@ function ago(ts: number) {
   const elapsed = Date.now() - ts;
 
   if (elapsed < 60e3) {
-    return 'сейчас';
+    return t('core.chatSeychas');
   }
   if (elapsed < 3600e3) {
-    return `${Math.floor(elapsed / 60e3)}м`;
+    return t('core.chatFloorelapsed60e3M', { floorelapsed60e3: Math.floor(elapsed / 60e3) });
   }
   if (elapsed < 86400e3) {
-    return `${Math.floor(elapsed / 3600e3)}ч`;
+    return t('core.chatFloorelapsed3600e3Ch', { floorelapsed3600e3: Math.floor(elapsed / 3600e3) });
   }
   if (elapsed < 7 * 86400e3) {
-    return `${Math.floor(elapsed / 86400e3)}д`;
+    return t('core.chatFloorelapsed86400e3D', { floorelapsed86400e3: Math.floor(elapsed / 86400e3) });
   }
 
-  return calendarDate.format(new Date(ts));
+  return calendarDate.value.format(new Date(ts));
 }
 
 const editId = ref<string | null>(null);
@@ -549,11 +540,11 @@ async function del(r: ListRow) {
   const permanent = r.archived;
   const ok = await confirmDialog(
     permanent
-      ? `Удалить чат «${r.title}» безвозвратно? Восстановить его после этого не получится.`
-      : `Переместить чат «${r.title}» в архив?`,
+      ? messageRef('core.chatUdalitChatTitleBezvozvratno', { title: r.title })
+      : messageRef('core.chatPeremestitChatTitleV', { title: r.title }),
     {
-      title: permanent ? 'Удалить чат навсегда' : 'Переместить в архив',
-      okText: permanent ? 'Удалить' : 'В архив',
+      title: permanent ? t('core.chatUdalitChatNavsegda') : t('core.chatPeremestitVArhiv'),
+      okText: permanent ? t('core.taskDelete') : t('core.chatVArhiv'),
       danger: permanent,
     },
   );

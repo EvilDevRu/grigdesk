@@ -7,6 +7,10 @@ import type {
   CodeRepo,
   CodeWorktree,
 } from '../../../shared/plugins/code/codeContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 export interface CodeContext {
   id: string;
@@ -137,7 +141,7 @@ function branchLabel(branch: string) {
     return 'detached HEAD';
   }
 
-  return branch || 'ветка не определена';
+  return branch || t('core.showcaseVetkaNeOpredelena');
 }
 
 /**
@@ -146,13 +150,13 @@ function branchLabel(branch: string) {
  */
 function worktreeLabel(tree: Pick<CodeContext, 'main' | 'task' | 'name'>) {
   if (tree.main) {
-    return 'Основная';
+    return t('core.routeOsnovnaya');
   }
   if (tree.task) {
-    return `Задача ${tree.task}`;
+    return t('core.codeZadachaTask', { task: tree.task });
   }
 
-  return `Worktree ${tree.name || 'без имени'}`;
+  return t('core.codeWorktreeTitle', { name: tree.name || t('core.codeBezImeni') });
 }
 
 /**
@@ -207,7 +211,7 @@ export function buildCodeContexts(repos: readonly CodeRepo[] | null | undefined)
       // Метка без ключа репозитория нужна там, где репозиторий уже назван рядом:
       // иначе в шапке «Кода» одно и то же слово стояло дважды подряд.
       context.treeLabel = `${worktreeLabel(context)} · ${context.branchLabel}`;
-      context.label = `${repoKey} · ${context.treeLabel}`;
+      context.label = t('core.codeRepokeyTreelabel', { repoKey, treeLabel: context.treeLabel });
       contexts.push(context);
     }
   }
@@ -225,7 +229,9 @@ export function buildCodeContexts(repos: readonly CodeRepo[] | null | undefined)
 export function buildCodeContextChoices(contexts: readonly CodeContext[]): CodeContextChoice[] {
   const duplicates = new Map<string, CodeContextChoice[]>();
   const choices = contexts.map((context) => {
-    const label = context.main || context.task ? worktreeLabel(context) : (context.name || 'без имени');
+    const label = context.main || context.task
+      ? worktreeLabel(context)
+      : (context.name || t('core.codeBezImeni'));
     const choice: CodeContextChoice = {
       id: context.id,
       repoKey: context.repoKey,
@@ -261,7 +267,9 @@ export function buildCodeContextChoices(contexts: readonly CodeContext[]): CodeC
 
       const suffix = parts.slice(-depth).join('/');
 
-      choice.label = parts.at(-1) === choice.label ? suffix : `${choice.label} · ${suffix}`;
+      choice.label = parts.at(-1) === choice.label
+        ? suffix
+        : t('core.codeLabelSuffix', { label: choice.label, suffix });
     }
   }
 
@@ -590,8 +598,10 @@ function commitCountLabel(count: number) {
   const tail = count % 100;
   const digit = count % 10;
   const word = tail >= 11 && tail <= 14
-    ? 'коммитов'
-    : digit === 1 ? 'коммит' : digit >= 2 && digit <= 4 ? 'коммита' : 'коммитов';
+    ? t('core.coreKommitov')
+    : digit === 1
+      ? t('core.coreKommit')
+      : digit >= 2 && digit <= 4 ? t('core.coreKommita') : t('core.coreKommitov');
 
   return `${count} ${word}`;
 }
@@ -616,17 +626,17 @@ export function buildGitGroups(
     {
       id: 'staged',
       files: staged,
-      title: 'В индексе',
-      hint: 'git add уже забрал эти правки — они уедут в следующий коммит',
+      title: t('core.codeVIndekse'),
+      hint: t('core.codeGitAddUzheZabral'),
       mutable: true,
     },
     {
       id: 'work',
       files: work,
-      title: staged.length ? 'В рабочем дереве' : 'Не в коммите',
+      title: staged.length ? t('core.codeVRabochemDereve') : t('core.codeNeVKommite'),
       hint: staged.length
-        ? 'правки поверх индекса: в коммит они пока не попадут'
-        : 'несохранённые правки рабочего дерева',
+        ? t('core.codePravkiPoverhIndeksaV')
+        : t('core.codeNesohranennyePravkiRabochegoDereva'),
       mutable: true,
     },
   ];
@@ -652,14 +662,15 @@ export function buildGitGroups(
     const one = commits.from === commits.to;
     const hidden = Math.max(0, commits.commits - commits.selected);
     const range = commits.mode === 'branch'
-      ? `Вся ветка · ${commitCountLabel(commits.commits)}`
-      : (one ? `Коммит ${commits.from}` : `Коммиты ${commits.from}…${commits.to}`);
+      ? t('core.codeRangeWholeBranch', { count: commitCountLabel(commits.commits) })
+      : (one ? t('core.codeRangeOneCommit', { from: commits.from })
+        : t('core.codeRangeCommits', { from: commits.from, to: commits.to }));
     // «+ текущие» — в заголовке, а не только в подсказке: человек должен видеть, что в
     // дифе есть и несохранённые правки, иначе он ищет их в отдельной группе.
-    const title = commits.work ? `${range} + текущие` : range;
+    const title = commits.work ? t('core.codeRangeTekuschie', { range }) : range;
     const hint = commits.work
-      ? 'слева — до первого выбранного коммита, справа — файл на диске с несохранёнными правками'
-      : 'слева — до первого выбранного коммита, справа — после последнего';
+      ? t('core.codeSlevaDoPervogoVybrannogo3')
+      : t('core.codeSlevaDoPervogoVybrannogo2');
 
     groups.push({
       id: 'commits',
@@ -667,7 +678,13 @@ export function buildGitGroups(
       title,
       hint,
       mutable: false,
-      ...(hidden ? { note: `в отрезке ещё ${commitCountLabel(hidden)}` } : {}),
+      ...(hidden
+        ? {
+          note: t('core.codeVOtrezkeEscheCommitcountlabelhidden', {
+            commitCountLabelhidden: commitCountLabel(hidden),
+          }),
+        }
+        : {}),
       tree,
       rows: flattenGitTree(tree, openDirs, 'commits'),
       list: commits.files.map((file) => ({
@@ -850,7 +867,7 @@ function draftLines(value: string, limit: number) {
   const visible = lines.slice(0, limit);
 
   if (truncated) {
-    visible.push('…обрезано');
+    visible.push(t('core.coreObrezano'));
   }
 
   return visible.join('\n');
@@ -874,21 +891,21 @@ export function askAgentDraft(options: AskAgentDraftOptions): string {
   const absPath = String(options.absPath || '');
 
   if (!absPath.startsWith('/') || DRAFT_CONTROL_RE.test(absPath)) {
-    throw new Error('Некорректный абсолютный путь для черновика агенту.');
+    throw new Error(t('core.codeNekorrektnyyAbsolyutnyyPutDlya'));
   }
 
   const label = String(options.label || '').replace(DRAFT_CONTROL_GLOBAL_RE, ' ').trim()
-    || 'без метки';
+    || t('core.codeBezMetki');
   const branch = String(options.branch || '').replace(DRAFT_CONTROL_GLOBAL_RE, ' ').trim()
-    || 'не определена';
+    || t('core.coreNeOpredelena');
   const range = options.lines;
   const from = Math.max(1, Math.floor(Number(range?.from) || Number(options.line) || 1));
   const to = Math.max(from, Math.floor(Number(range?.to) || from));
   const suffix = range ? `:${from}-${to}` : options.line > 0 ? `:${from}` : '';
   const result = [
-    `Рабочая копия ${label}, ветка ${branch}`,
+    t('core.coreRabochayaKopiyaLabelVetka', { label: label, branch: branch }),
     '',
-    `Посмотри ${absPath}${suffix}`,
+    t('core.corePosmotriAbspathSuffix', { absPath: absPath, suffix: suffix }),
   ];
 
   if (options.patch) {

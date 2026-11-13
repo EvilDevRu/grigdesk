@@ -294,7 +294,12 @@ export function createShellApi(options: ShellOptions) {
     transports.delete(id);
     states.set(id, {
       status: 'offline',
-      detail: { code: 'disconnected', message: 'Отключено' },
+      detail: {
+        code: 'disconnected',
+        message: localeTranslator(options.systemLanguage === undefined ? 'ru' : resolveLocale(
+          options.profiles.settings.uiLanguage, options.systemLanguage, locales,
+        ))('core.disconnected'),
+      },
       serverApi: null,
     });
     changed();
@@ -482,7 +487,7 @@ export function createShellApi(options: ShellOptions) {
         const request = pathname === '/__shell/surfaces/main' ? parseMainRequest(body) : null;
 
         if (!target && !request) {
-          json(res, 400, { error: 'invalid_surface', message: 'Неверное действие окна.' });
+          json(res, 400, { error: 'invalid_surface', message: t('desktop.desktopNevernoeDeystvieOkna') });
 
           return;
         }

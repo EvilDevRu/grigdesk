@@ -7,9 +7,9 @@
     aria-live="polite"
     aria-atomic="true"
   >
-    <span class="loop-heading"><span aria-hidden="true">↻</span> Петля агентов</span>
+    <span class="loop-heading"><span aria-hidden="true">↻</span> {{ t('core.pipelinePetlyaAgentov') }}</span>
     <strong class="loop-round">{{ loop.roundLabel }}</strong>
-    <span v-if="loop.stage !== null" class="loop-stage">Этап {{ loop.stage }}</span>
+    <span v-if="loop.stage !== null" class="loop-stage">{{ t('core.pipelineEtap') }} {{ loop.stage }}</span>
     <span class="loop-activity">
       <span v-if="loop.activeNode" class="loop-dot" aria-hidden="true"></span>
       {{ loop.activity }}
@@ -19,6 +19,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { t } from '../../ui';
 
 import type { FactoryGraphData } from '../../../../shared/pipeline/factoryGraphContracts.ts';
 import { factoryLoopView } from '../../shared/factoryLoopView.ts';

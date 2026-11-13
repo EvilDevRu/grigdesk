@@ -1,11 +1,8 @@
 <template>
   <div ref="reviewHost" class="patch-review" data-view="patch-review">
     <p v-if="scopeLabel" class="patch-scope">{{ scopeLabel }}</p>
-    <p v-if="truncated" class="patch-limit" role="status">
-      Показаны первые {{ orderedFiles.length }} файлов или первые 2 МБ патча;
-      остальное открой по отдельному файлу.
-    </p>
-    <p v-if="!orderedFiles.length" class="patch-empty">В этой группе нет строк для обзора.</p>
+    <p v-if="truncated" class="patch-limit" role="status"> {{ t('core.codePokazanyPervye') }} {{ orderedFiles.length }} {{ t('core.codeFaylovIliPervye2') }} </p>
+    <p v-if="!orderedFiles.length" class="patch-empty">{{ t('core.codeVEtoyGruppeNet') }}</p>
 
     <article v-for="(file, fileIndex) in orderedFiles" :key="`${file.path}:${fileIndex}`"
              class="patch-file" :data-file="file.path">
@@ -23,10 +20,8 @@
         </span>
       </UiPressable>
 
-      <p v-if="file.binary" class="patch-special">Бинарные файлы различаются.</p>
-      <p v-else-if="!file.hunks.length" class="patch-special">
-        Строки файла не попали в ограниченный фрагмент патча.
-      </p>
+      <p v-if="file.binary" class="patch-special">{{ t('core.codeBinarnyeFaylyRazlichayutsya') }}</p>
+      <p v-else-if="!file.hunks.length" class="patch-special"> {{ t('core.codeStrokiFaylaNePopali') }} </p>
       <section v-for="(hunk, hunkIndex) in file.hunks"
                :key="`${file.path}:hunk:${hunkIndex}`" class="patch-hunk">
         <div class="patch-hunk-head mono">{{ hunk.header }}</div>
@@ -57,7 +52,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { CodeGitEntry } from '../../../../shared/plugins/code/codeContracts';
 import { monaco, langOf } from '../../shared/monaco';
-import { UiPressable, vTooltip } from '../../ui';
+import { UiPressable, vTooltip, t } from '../../ui';
 import { parseUnifiedDiff } from '../../shared/patch';
 import type { UnifiedDiffLineKind } from '../../shared/patch';
 
@@ -134,20 +129,20 @@ function coloredLine(file: number, hunk: number, line: number): string {
  */
 function patchFileLabel(path: string, status: string, oldPath: string | undefined, add: number, del: number) {
   const statusLabels: Record<string, string> = {
-    A: 'добавлен',
-    M: 'изменён',
-    D: 'удалён',
-    R: 'переименован',
-    U: 'конфликт',
+    A: t('core.codeDobavlen'),
+    M: t('core.codeIzmenen'),
+    D: t('core.codeUdalen'),
+    R: t('core.codePereimenovan'),
+    U: t('core.codeKonflikt'),
   };
   const details = [
     statusLabels[status] || status,
-    oldPath ? `прежний путь ${oldPath}` : '',
-    add ? `добавлено ${add}` : '',
-    del ? `удалено ${del}` : '',
+    oldPath ? t('core.codePrezhniyPutOldpath', { oldPath: oldPath }) : '',
+    add ? t('core.codeDobavlenoAdd', { add: add }) : '',
+    del ? t('core.codeUdalenoDel', { del: del }) : '',
   ].filter(Boolean);
 
-  return `Открыть diff файла ${path}; ${details.join('; ')}`;
+  return t('core.codeOtkrytDiffFaylaPath', { path: path, join: details.join('; ') });
 }
 
 /**

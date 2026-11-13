@@ -1,6 +1,11 @@
 import { api, failureText } from '../../shared/apiClient.ts';
 import { useUsageForecastStore } from '../../stores/usageForecast.ts';
 import { parseUsageForecastSnapshot } from '../../../../shared/chat/usageForecastContracts.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Свежий снимок прогноза. Проверка формы не формальность: по вердикту человек решает,
@@ -15,7 +20,7 @@ export async function loadUsageForecast(): Promise<void> {
 
     store.setSnapshot(parseUsageForecastSnapshot(value));
   } catch (error) {
-    store.setError(failureText(error, 'Не удалось загрузить прогноз лимитов'));
+    store.setError(failureText(error, translateUi('core.loadUsageForecastCouldNotLoadTheUsageForecast')));
   }
 }
 
@@ -29,6 +34,8 @@ export function applyUsageForecast(payload: unknown): void {
   try {
     store.setSnapshot(parseUsageForecastSnapshot(payload));
   } catch (error) {
-    store.setError(failureText(error, 'Прогноз лимитов пришёл в неожиданной форме'));
+    store.setError(
+      failureText(error, translateUi('core.loadUsageForecastTheUsageForecastHasAnUnexpectedFormat')),
+    );
   }
 }

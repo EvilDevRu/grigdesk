@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { runtimeOf } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /** Ключ относится к одному нажатию и пригоден для безопасного повтора POST сервером. */
 function buildRequestId(): string {
@@ -51,7 +56,9 @@ export function buildShowcaseFilm(store: ShowcaseStore): Promise<boolean> {
       return true;
     })
     .catch((error: unknown) => {
-      store.setError(showcaseErrorMessage(error, 'Не удалось запустить сборку ролика.'));
+      store.setError(
+        showcaseErrorMessage(error, translateUi('core.buildShowcaseFilmCouldNotStartTheVideoBuild')),
+      );
 
       return false;
     })
@@ -79,7 +86,9 @@ export async function cancelShowcaseBuild(
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось остановить сборку ролика.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.buildShowcaseFilmCouldNotStopTheVideoBuild')),
+    );
 
     return false;
   }

@@ -15,6 +15,7 @@ import { prepareServerBinary, probeServerBinary, releaseServerPreparation }
   from '../shared/node/serverBinaryRuntime.ts';
 import { readContainedText } from '../shared/node/readContainedText.ts';
 import { verifyHelpBundle } from '../shared/node/helpSources.ts';
+import { HELP_LOCALES, helpResourceFile } from '../shared/help/helpContracts.ts';
 import { shellQuote } from '../shared/lib/shellQuote.ts';
 import { normalizeStageModes } from '../server/scripts/sea/stage.mts';
 
@@ -67,17 +68,21 @@ async function prepareInstalledHelp(work: string, envelope: ReleaseEnvelope): Pr
   const prepared = await prepareServerBinary(binary, { home, expectPackageId: info.packageId });
 
   try {
-    const raw = await readContainedText(prepared.root, 'server/help/help.json', 1024 * 1024);
-    const published = await readContainedText(prepared.root, 'server/help/site/help.json', 1024 * 1024);
+    for (const locale of HELP_LOCALES) {
+      const file = helpResourceFile(locale);
+      const raw = await readContainedText(prepared.root, `server/help/${file}`, 1024 * 1024);
+      const published = await readContainedText(prepared.root, `server/help/site/${file}`, 1024 * 1024);
 
-    if (!raw || raw !== published) {
-      throw new Error('help_site_mismatch');
-    }
+      if (!raw || raw !== published) {
+        throw new Error('help_site_mismatch');
+      }
 
-    const bundle = verifyHelpBundle(JSON.parse(raw));
+      const bundle = verifyHelpBundle(JSON.parse(raw));
 
-    if (bundle.version !== envelope.payload.version || bundle.commit !== envelope.payload.commit) {
-      throw new Error('help_release_mismatch');
+      if (bundle.locale !== locale || bundle.version !== envelope.payload.version
+        || bundle.commit !== envelope.payload.commit) {
+        throw new Error('help_release_mismatch');
+      }
     }
 
     const site = path.join(work, 'help-site');
@@ -111,6 +116,7 @@ function installedPublicationCommand(input: {
   channel: string;
   deb?: string;
 }): string {
+  const helpFiles = HELP_LOCALES.map(helpResourceFile).map(shellQuote).join(' ');
   const deb = input.deb ? `
 if test -e "$stage/${input.deb}"; then
   if test -e "$root/releases/$version/${input.deb}"; then
@@ -136,7 +142,9 @@ trap 'exit 143' TERM
 mkdir -p "$root/releases" "$root/help" "$root/api/releases/v1" "$stage/help"
 tar -xzf "$stage/help-site.tar.gz" -C "$stage/help"
 test -f "$stage/help/index.html"
-test -f "$stage/help/help.json"
+for file in ${helpFiles}; do
+  test -f "$stage/help/$file"
+done
 if test -e "$root/releases/$version"; then
   cmp "$stage/$channel.json" "$root/releases/$version/$channel.json"
   cmp "$stage/grigdesk-install.sha256" "$root/releases/$version/grigdesk-install.sha256"
@@ -149,7 +157,9 @@ else
   mv "$stage/release" "$root/releases/$version"
 fi${deb}
 if test -e "$root/help/$version"; then
-  cmp "$stage/help/help.json" "$root/help/$version/help.json"
+  for file in ${helpFiles}; do
+    cmp "$stage/help/$file" "$root/help/$version/$file"
+  done
 else
   mv "$stage/help" "$root/help/$version"
 fi

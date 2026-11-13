@@ -182,10 +182,10 @@ type StageState = 'done' | 'current' | 'warning' | 'failed' | 'pending';
 const STATUS_CHECK_PATH = 'M7.5 12.3l3 3 6-6.3';
 const STATUS_ALERT_PATH = 'M12 7.5v5.5M12 16.5v.01';
 const STAGE_ICONS: Readonly<Record<Exclude<StageState, 'current'>, string>> = {
-  done: 'M5 12.5l4.5 4.5L19 7.5',
-  warning: 'M12 6.5v7M12 17.5v.01',
-  failed: 'M12 6.5v7M12 17.5v.01',
-  pending: 'M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14',
+  done: "M5 12.5l4.5 4.5L19 7.5",
+  warning: "M12 6.5v7M12 17.5v.01",
+  failed: "M12 6.5v7M12 17.5v.01",
+  pending: "M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14",
 };
 const STAGES: readonly ProviderLifecyclePhase[] = ['download-install', 'version', 'terminal',
   'models'];
@@ -278,7 +278,10 @@ const heading = computed(() => {
       : 'settings.providerInstallationHeadingUpdate', { name });
   }
 
-  return `${t('settings.providerInstallationTitle')}${name ? ` · ${name}` : ''}`;
+  return t('core.coreProviderinstallationtitleNamename', {
+            providerInstallationTitle: t('settings.providerInstallationTitle'),
+            namename: name ? ` · ${name}` : '',
+          });
 });
 const tone = computed(() => {
   if (install.selectedRequest) {

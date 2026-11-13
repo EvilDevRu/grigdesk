@@ -7,7 +7,11 @@ import { readFile, readdir } from 'node:fs/promises';
 
 const ROOT = new URL('../../../', import.meta.url);
 
-const CANON_DIRS = ['docs/grigdesk/reference/', 'docs/grigdesk/guide/'];
+const CANON_DIRS = [
+  'docs/grigdesk/reference/',
+  'docs/grigdesk/guide/ru/',
+  'docs/grigdesk/guide/en/',
+];
 
 async function readMarkdown(relativeDir) {
   const dir = new URL(relativeDir, ROOT);

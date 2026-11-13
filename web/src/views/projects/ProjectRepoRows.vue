@@ -1,10 +1,10 @@
 <template>
   <div class="rows">
     <header class="repo-heading">
-      <h3>Репозитории <span class="repo-count">{{ draft.repos.length }}</span></h3>
+      <h3>{{ t('core.projectRepozitorii') }} <span class="repo-count">{{ draft.repos.length }}</span></h3>
       <UiButton
         data-role="project-repo-add"
-        aria-label="Добавить репозиторий"
+        :aria-label="t('core.projectDobavitRepozitoriy')"
         variant="ghost"
         tone="accent"
         data-context="workspace-toolbar"
@@ -15,11 +15,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
-        </template>
-        Добавить
-      </UiButton>
+        </template> {{ t('core.add') }} </UiButton>
     </header>
-    <div class="repo-columns" aria-hidden="true"><span>Метка</span><span>Путь к рабочей копии</span></div>
+    <div class="repo-columns" aria-hidden="true"><span>{{ t('core.projectMetka') }}</span><span>{{ t('core.projectPutKRabocheyKopii') }}</span></div>
     <div
       v-for="(repo, index) in draft.repos"
       :key="index"
@@ -29,7 +27,7 @@
     >
       <UiField
         class="key"
-        label="Метка"
+        :label="t('core.projectMetka')"
         data-context="workspace-repo"
         :data-label-repeat="index > 0"
         :error="errorOf(`repos.${index}.key`)"
@@ -39,14 +37,14 @@
           :model-value="repo.key"
           data-role="project-repo-key"
           :disabled="readonly"
-          placeholder="service"
+          :placeholder="'service'"
           @update:model-value="rename(index, $event)"
         />
       </UiField>
 
       <UiField
         class="dir"
-        label="Путь к рабочей копии"
+        :label="t('core.projectPutKRabocheyKopii')"
         data-context="workspace-repo"
         :data-label-repeat="index > 0"
         :error="errorOf(`repos.${index}.dir`)"
@@ -58,7 +56,7 @@
           data-context="workspace-path"
           :disabled="readonly"
           v-tooltip="repo.dir"
-          placeholder="/srv/project/service"
+          :placeholder="'/srv/project/service'"
           @update:model-value="setDir(index, $event)"
           @blur="emit('check', [repo.dir])"
         />
@@ -73,9 +71,7 @@
           data-role="project-repo-default"
           :data-repo-key="repo.key"
           @update:model-value="setDefault(index)"
-        >
-          Основной
-        </UiRadio>
+        > {{ t('core.projectOsnovnoy') }} </UiRadio>
       </div>
       <span v-if="stateText(repo.dir)" class="state" :data-state="stateOf(repo.dir)" role="status">
         {{ stateText(repo.dir) }}
@@ -86,8 +82,8 @@
           data-role="project-repo-up"
           data-context="project-repo-action"
           variant="ghost"
-          :aria-label="`Переместить ${repo.key || 'репозиторий'} выше`"
-          v-tooltip="'Переместить выше'"
+          :aria-label="t('core.projectPeremestitKeyVyshe', { key: repo.key || t('core.repositoryWord') })"
+          v-tooltip="t('core.projectPeremestitVyshe')"
           :disabled="readonly || index === 0"
           @click="move(index, -1)"
         >
@@ -99,8 +95,8 @@
           data-role="project-repo-down"
           data-context="project-repo-action"
           variant="ghost"
-          :aria-label="`Переместить ${repo.key || 'репозиторий'} ниже`"
-          v-tooltip="'Переместить ниже'"
+          :aria-label="t('core.projectPeremestitKeyNizhe', { key: repo.key || t('core.repositoryWord') })"
+          v-tooltip="t('core.projectPeremestitNizhe')"
           :disabled="readonly || index === draft.repos.length - 1"
           @click="move(index, 1)"
         >
@@ -112,9 +108,9 @@
           data-role="project-repo-remove"
           data-context="project-repo-action"
           variant="ghost"
-          :aria-label="`Убрать ${repo.key || 'репозиторий'}`"
+          :aria-label="t('core.projectUbratKey', { key: repo.key || t('core.repositoryWord') })"
           :disabled="readonly"
-          v-tooltip="'Убрать строку'"
+          v-tooltip="t('core.projectUbratStroku')"
           @click="remove(index)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -124,7 +120,7 @@
       </span>
     </div>
 
-    <p v-if="!draft.repos.length" class="empty">Добавьте рабочую копию, чтобы связать проект с кодом.</p>
+    <p v-if="!draft.repos.length" class="empty">{{ t('core.projectDobavteRabochuyuKopiyuChtoby') }}</p>
 
 
   </div>
@@ -138,13 +134,7 @@
 // копию этих правил. Состояние пути приходит снаружи: проверяет его сервер.
 import { computed, ref } from 'vue';
 
-import {
-  UiButton,
-  UiField,
-  UiInput,
-  UiRadio,
-  vTooltip,
-} from '../../ui';
+import { UiButton, UiField, UiInput, UiRadio, vTooltip, t } from '../../ui';
 import { moveRepo, removeRepo, renameRepoKey } from './projectDraft';
 import type { ProjectDraft } from './projectDraft';
 import type { UiTextValue } from '../../ui';

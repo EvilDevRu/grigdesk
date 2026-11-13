@@ -25,7 +25,7 @@
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Автономный установщик: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
-- [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
+- [Подписанный канал сайта: CI, публикация обеих редакций справки RU/EN и восстановление](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)
 - [Release workflow: ручной full/skip, этапы, логи, явные install-скрипты и проверенные загрузки](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, проверка пакетов и сверка Git-дерева](release-validation-reuse.md)

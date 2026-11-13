@@ -17,6 +17,9 @@ test('HELP-API1: настоящий auth, один load, безопасная о
   const corpus = await compileHelpSources(path.resolve(import.meta.dirname, '../..'), {
     version: '0.1.0', commit: 'source'
   });
+  const english = await compileHelpSources(path.resolve(import.meta.dirname, '../..'), {
+    version: '0.1.0', commit: 'source'
+  }, 'en');
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'help-auth-'));
   const authStore = new AuthStore({
     legacyAccountPath: path.join(temporary, 'account.json'),
@@ -29,14 +32,14 @@ test('HELP-API1: настоящий auth, один load, безопасная о
   const help = createHelpService({
     root: '/',
     kind: 'packaged',
-    read: async () => {
+    read: async (locale) => {
       calls += 1;
 
       if (fail) {
         throw new Error('PRIVATE-PATH-SENTINEL');
       }
 
-      return corpus;
+      return locale === 'en' ? english : corpus;
     }
   });
   const app = Fastify();
@@ -88,6 +91,18 @@ test('HELP-API1: настоящий auth, один load, безопасная о
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), corpus);
   assert.equal(response.headers['cache-control'], 'no-store');
+
+  const translated = await app.inject({ url: '/api/help?locale=en', headers: { cookie } });
+
+  assert.equal(translated.statusCode, 200);
+  assert.deepEqual(translated.json(), english);
+  assert.equal((await help.bundle()).locale, 'ru');
+  assert.equal((await help.bundle('en')).locale, 'en');
+  assert.equal(calls, 3);
+
+  const invalid = await app.inject({ url: '/api/help?locale=../../private', headers: { cookie } });
+
+  assert.equal(invalid.statusCode, 400);
   assert.deepEqual(await help.invoke({
     action: 'read', id: '../private'
   }), {

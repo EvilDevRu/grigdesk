@@ -2,12 +2,10 @@
   <div class="docker-cleanup">
     <header class="docker-cleanup__head">
       <div>
-        <h3>Место и очистка</h3>
-        <p>Выберите ресурсы, которые больше не нужны.</p>
-        <small v-if="store.usage">
-          Рассчитано {{ formatAge(store.usage.computedAt) }} назад
-          <template v-if="store.usage.cached"> · из кэша</template>
-          <template v-if="store.usage.source === 'computed'"> · приблизительная оценка</template>
+        <h3>{{ t('core.dockerMestoIOchistka') }}</h3>
+        <p>{{ t('core.dockerVyberiteResursyKotoryeBolshe') }}</p>
+        <small v-if="store.usage"> {{ t('core.dockerRasschitano') }} {{ formatAge(store.usage.computedAt) }} {{ t('core.dockerNazad') }} <template v-if="store.usage.cached"> {{ t('core.dockerIzKesha') }}</template>
+          <template v-if="store.usage.source === 'computed'"> {{ t('core.dockerPriblizitelnayaOtsenka') }}</template>
         </small>
       </div>
       <UiButton
@@ -15,9 +13,7 @@
         :loading="store.usageLoading"
         :disabled="cleaning"
         @click="store.loadUsage({ force: true })"
-      >
-        Пересчитать
-      </UiButton>
+      > {{ t('core.dockerPereschitat') }} </UiButton>
     </header>
 
     <UiInlineMessage v-if="store.usageError" tone="danger" class="docker-cleanup__message">
@@ -25,18 +21,16 @@
     </UiInlineMessage>
 
     <DockerLoading v-else-if="!store.usage && store.usageLoading"
-      label="Демон считает размеры слоёв, это занимает несколько секунд…"  area="usage" />
-    <p v-else-if="!store.usage" class="docker-cleanup__empty">
-      Нажмите «Пересчитать», чтобы узнать занятое место.
-    </p>
+      :label="t('core.dockerDemonSchitaetRazmerySloev')"  area="usage" />
+    <p v-else-if="!store.usage" class="docker-cleanup__empty"> {{ t('core.dockerNazhmitePereschitatChtobyUznat') }} </p>
 
-    <table v-else class="docker-usage" aria-label="Выбор ресурсов для очистки">
+    <table v-else class="docker-usage" :aria-label="t('core.dockerVyborResursovDlyaOchistki')">
       <thead>
         <tr>
-          <th class="docker-usage__pick" aria-label="Выбор"></th>
-          <th scope="col">Ресурсы</th>
-          <th scope="col" class="docker-usage__num">Занято</th>
-          <th scope="col" class="docker-usage__num">Можно освободить</th>
+          <th class="docker-usage__pick" :aria-label="t('core.dockerVybor')"></th>
+          <th scope="col">{{ t('core.dockerResursy') }}</th>
+          <th scope="col" class="docker-usage__num">{{ t('core.dockerZanyato') }}</th>
+          <th scope="col" class="docker-usage__num">{{ t('core.dockerMozhnoOsvobodit') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -49,7 +43,7 @@
             <UiCheckbox
               v-model="picked[row.key]"
               :disabled="row.disabled || cleaning"
-              :aria-label="`Чистить: ${row.label}`"
+              :aria-label="t('core.dockerChistitLabel', { label: row.label })"
             />
           </td>
           <td class="docker-usage__description">
@@ -57,11 +51,11 @@
             <small>{{ row.hint }}</small>
           </td>
           <td class="docker-usage__num">
-            <span class="docker-usage__mobile-label" aria-hidden="true">Занято</span>
+            <span class="docker-usage__mobile-label" aria-hidden="true">{{ t('core.dockerZanyato') }}</span>
             {{ formatSize(row.size) }}
           </td>
           <td class="docker-usage__num" :class="{ 'is-gain': row.reclaimable > 0 && !row.disabled }">
-            <span class="docker-usage__mobile-label" aria-hidden="true">Можно освободить</span>
+            <span class="docker-usage__mobile-label" aria-hidden="true">{{ t('core.dockerMozhnoOsvobodit') }}</span>
             {{ formatSize(row.reclaimable) }}
           </td>
         </tr>
@@ -69,18 +63,13 @@
     </table>
 
     <div v-if="store.usage" class="docker-cleanup__foot">
-      <UiCheckbox v-if="allowImagePruneAll" v-model="allImages" :disabled="cleaning">
-        Удалять все неиспользуемые образы, а не только без тегов
-      </UiCheckbox>
-      <p v-else class="docker-cleanup__note">
-        Образы чистятся только без тегов. Снос всех неиспользуемых включается
-        в «Настройки → Плагины → Докер».
-      </p>
+      <UiCheckbox v-if="allowImagePruneAll" v-model="allImages" :disabled="cleaning"> {{ t('core.dockerUdalyatVseNeispolzuemyeObrazy') }} </UiCheckbox>
+      <p v-else class="docker-cleanup__note"> {{ t('core.dockerObrazyChistyatsyaTolkoBez') }} </p>
 
       <div class="docker-cleanup__actions">
         <div class="docker-cleanup__summary">
-          <span class="docker-cleanup__selection">Выбрано категорий: {{ selectedTargets.length }}</span>
-          <span class="docker-cleanup__total">Вернётся примерно {{ formatSize(selectedGain) }}</span>
+          <span class="docker-cleanup__selection">{{ t('core.dockerVybranoKategoriy') }} {{ selectedTargets.length }}</span>
+          <span class="docker-cleanup__total">{{ t('core.dockerVernetsyaPrimerno') }} {{ formatSize(selectedGain) }}</span>
         </div>
         <UiButton
           variant="solid"
@@ -88,9 +77,7 @@
           :disabled="!selectedTargets.length || cleaning || store.usageLoading"
           :loading="cleaning"
           @click="clean"
-        >
-          Очистить выбранное
-        </UiButton>
+        > {{ t('core.dockerOchistitVybrannoe') }} </UiButton>
       </div>
     </div>
 
@@ -109,12 +96,7 @@ import type { DockerPruneTarget } from '../../../../shared/plugins/docker/docker
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.ts';
-import {
-  UiButton,
-  UiCheckbox,
-  UiInlineMessage,
-  confirmDialog,
-} from '../../ui';
+import { UiButton, UiCheckbox, UiInlineMessage, confirmDialog, t, messageRef } from '../../ui';
 import { formatAge, formatSize } from './format';
 import { dockerSettings } from './settings';
 
@@ -163,44 +145,47 @@ const rows = computed<CleanupRow[]>(() => {
   return [
     {
       key: 'containers',
-      label: 'Остановленные контейнеры',
-      hint: `${usage.containers.stopped} из ${usage.containers.total}`,
+      label: t('core.dockerOstanovlennyeKonteynery'),
+      hint: t('core.dockerStoppedIzTotal', {
+        stopped: usage.containers.stopped,
+        total: usage.containers.total,
+      }),
       size: usage.containers.size,
       reclaimable: usage.containers.reclaimable,
       disabled: usage.containers.stopped === 0,
     },
     {
       key: 'images',
-      label: 'Образы',
+      label: t('core.dockerObrazy'),
       hint: effectiveAllImages.value
-        ? `${usage.images.unused} неиспользуемых`
-        : `${usage.images.dangling.count} без тегов из ${usage.images.total}`,
+        ? t('core.dockerUnusedNeispolzuemyh', { unused: usage.images.unused })
+        : t('core.dockerCountBezTegovIz', { count: usage.images.dangling.count, total: usage.images.total }),
       size: usage.images.size,
       reclaimable: effectiveAllImages.value ? usage.images.reclaimable : usage.images.dangling.size,
       disabled: effectiveAllImages.value ? usage.images.unused === 0 : usage.images.dangling.count === 0,
     },
     {
       key: 'volumes',
-      label: 'Неиспользуемые тома',
+      label: t('core.dockerNeispolzuemyeToma'),
       hint: allowVolumeRemoval.value
-        ? `${usage.volumes.unused} из ${usage.volumes.total} — в них лежат данные стендов`
-        : 'удаление томов выключено в настройках плагина',
+        ? t('core.dockerUnusedIzTotalV', { unused: usage.volumes.unused, total: usage.volumes.total })
+        : t('core.dockerUdalenieTomovVyklyuchenoV'),
       size: usage.volumes.size,
       reclaimable: usage.volumes.reclaimable,
       disabled: !allowVolumeRemoval.value || usage.volumes.unused === 0,
     },
     {
       key: 'networks',
-      label: 'Пустые сети',
-      hint: `${usage.networks.unused} без контейнеров`,
+      label: t('core.dockerPustyeSeti'),
+      hint: t('core.dockerUnusedBezKonteynerov', { unused: usage.networks.unused }),
       size: 0,
       reclaimable: 0,
       disabled: usage.networks.unused === 0,
     },
     {
       key: 'buildCache',
-      label: 'Кэш сборки',
-      hint: `${usage.buildCache.total} записей — пересборка образов станет дольше`,
+      label: t('core.dockerKeshSborki'),
+      hint: t('core.dockerTotalZapiseyPeresborkaObrazov', { total: usage.buildCache.total }),
       size: usage.buildCache.size,
       reclaimable: usage.buildCache.reclaimable,
       disabled: usage.buildCache.reclaimable === 0,
@@ -230,10 +215,10 @@ async function clean(): Promise<void> {
   const chosen = rows.value.filter((row) => targets.includes(row.key));
   const lines = chosen.map((row) => `• ${row.label} (${row.hint})`).join('\n');
   const accepted = await confirmDialog(
-    `Будет удалено:\n\n${lines}\n\nВернётся примерно ${formatSize(selectedGain.value)}.`,
+    messageRef('core.dockerBudetUdalenoLinesVernetsya', { lines, value: formatSize(selectedGain.value) }),
     {
-      title: 'Очистка Docker',
-      okText: 'Очистить',
+      title: t('core.dockerOchistkaDocker'),
+      okText: t('core.clear'),
       danger: true,
     },
   );
@@ -249,7 +234,7 @@ async function clean(): Promise<void> {
     const outcome = await store.prune({ targets, allImages: pruneAllImages });
 
     if (!outcome.ok) {
-      result.value = { tone: 'danger', text: outcome.message || 'Уборка не выполнена' };
+      result.value = { tone: 'danger', text: outcome.message || t('core.dockerUborkaNeVypolnena') };
 
       return;
     }
@@ -261,8 +246,11 @@ async function clean(): Promise<void> {
 
     result.value = {
       tone: failures.length ? 'warning' : 'success',
-      text: `Удалено объектов: ${removed}, освобождено ${formatSize(freed)}.`
-        + (failures.length ? ` Не вышло — ${failures.join('; ')}` : ''),
+      text: t('core.dockerUdalenoObektovRemovedOsvobozhdeno', {
+  removed,
+  formatSizefreed: formatSize(freed),
+  join: (failures.length ? t('core.dockerNeVyshloJoin', { join: failures.join('; ') }) : ''),
+}),
     };
 
     for (const key of targets) {

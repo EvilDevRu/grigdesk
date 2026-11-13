@@ -49,7 +49,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ model: [value: string | null]; effort: [value: string | null] }>();
 const fieldId = `stage-executor-${useId()}`;
-const inheritValue = '\u0001inherit';
+const inheritValue = "\u0001inherit";
 const model = computed(() => runnerModelLabel(props.runner, props.provider));
 const effort = computed(() => runnerEffortLabel(props.runner, props.provider));
 const inheritedModel = computed(() => (

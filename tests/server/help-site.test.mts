@@ -13,6 +13,9 @@ test('HELP-W1: реальный static build содержит тот же кор
   const corpus = await compileHelpSources(root, {
     version: '0.1.0', commit: 'c'.repeat(40)
   });
+  const english = await compileHelpSources(root, {
+    version: '0.1.0', commit: 'c'.repeat(40)
+  }, 'en');
 
   t.after(() => rm(output, {
     recursive: true, force: true
@@ -21,7 +24,8 @@ test('HELP-W1: реальный static build содержит тот же кор
   const packages = await buildHelpSite({
     sourceRoot: root,
     output,
-    bundle: corpus
+    bundle: corpus,
+    translations: [english],
   });
   const licenseStage = path.join(output, 'license-fixture');
 
@@ -38,6 +42,7 @@ test('HELP-W1: реальный static build содержит тот же кор
   const html = await readFile(path.join(output, 'index.html'), 'utf8');
 
   assert.deepEqual(actual, corpus);
+  assert.deepEqual(JSON.parse(await readFile(path.join(output, 'help.en.json'), 'utf8')), english);
   assert.match(html, /\.\/assets\//u);
   assert.doesNotMatch(html, /\/api\/help|web\/src|localhost|\.state/u);
   assert.ok(packages.some((file) => file.endsWith('/node_modules/marked')));

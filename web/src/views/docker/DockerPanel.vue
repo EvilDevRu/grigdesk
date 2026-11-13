@@ -15,10 +15,8 @@
         <UiPaneHeader>
           <template #title>
             <div class="docker-panel__title">
-              <h2 id="docker-panel-title">Докер</h2>
-              <span class="ui-maturity-chip" data-product-maturity="beta" aria-label="Бета-версия">
-                бета
-              </span>
+              <h2 id="docker-panel-title">{{ t('core.docker') }}</h2>
+              <span class="ui-maturity-chip" data-product-maturity="beta" :aria-label="t('core.dockerBetaVersiya')"> {{ t('core.dockerBeta') }} </span>
             </div>
           </template>
           <template #meta>
@@ -30,8 +28,8 @@
             <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              label="Обновить состояние Docker"
-              v-tooltip="'Обновить состояние Docker'"
+              :label="t('core.dockerObnovitSostoyanieDocker')"
+              v-tooltip="t('core.dockerObnovitSostoyanieDocker')"
               :loading="store.loading"
               @click="refresh"
             >
@@ -49,41 +47,39 @@
         tone="warning"
         class="docker-panel__message"
       >
-        {{ store.health.message || 'Демон Docker недоступен' }} ({{ store.health.socketPath }})
+        {{ store.health.message || t('core.dockerDemonDockerNedostupen') }} ({{ store.health.socketPath }})
       </UiInlineMessage>
 
       <div class="docker-panel__navigation">
         <UiTabs
           :model-value="tab"
-          label="Разделы Docker"
+          :label="t('core.dockerRazdelyDocker')"
           data-ui-docker-tabs
           @update:model-value="selectTab"
         >
-          <UiTab id="docker-tab-containers" value="containers" controls="docker-content">
-            Контейнеры <span class="docker-tab__count">{{ store.containers.length }}</span>
+          <UiTab id="docker-tab-containers" value="containers" controls="docker-content"> {{ t('core.dockerKonteynery2') }} <span class="docker-tab__count">{{ store.containers.length }}</span>
           </UiTab>
-          <UiTab id="docker-tab-images" value="images" controls="docker-content">
-            Образы <span class="docker-tab__count">{{ store.images.length }}</span>
+          <UiTab id="docker-tab-images" value="images" controls="docker-content"> {{ t('core.dockerObrazy') }} <span class="docker-tab__count">{{ store.images.length }}</span>
           </UiTab>
-          <UiTab id="docker-tab-storage" value="storage" controls="docker-content">Тома и сети</UiTab>
-          <UiTab id="docker-tab-cleanup" value="cleanup" controls="docker-content">Уборка</UiTab>
+          <UiTab id="docker-tab-storage" value="storage" controls="docker-content">{{ t('core.dockerTomaISeti') }}</UiTab>
+          <UiTab id="docker-tab-cleanup" value="cleanup" controls="docker-content">{{ t('core.dockerUborka') }}</UiTab>
         </UiTabs>
 
-        <dl class="docker-panel__summary" aria-label="Сводка Docker">
+        <dl class="docker-panel__summary" :aria-label="t('core.dockerSvodkaDocker')">
           <div class="docker-summary-item is-running">
-            <dt>Работают</dt>
+            <dt>{{ t('core.dockerRabotayut2') }}</dt>
             <dd>{{ available ? store.counts.running : '—' }}</dd>
           </div>
           <div class="docker-summary-item">
-            <dt>Не запущены</dt>
+            <dt>{{ t('core.dockerNeZapuscheny') }}</dt>
             <dd>{{ available ? store.counts.containers - store.counts.running : '—' }}</dd>
           </div>
           <div class="docker-summary-item">
-            <dt>Проекты</dt>
+            <dt>{{ t('core.projects') }}</dt>
             <dd>{{ available ? store.projects.length : '—' }}</dd>
           </div>
           <div class="docker-summary-item">
-            <dt>Образы</dt>
+            <dt>{{ t('core.dockerObrazy') }}</dt>
             <dd>{{ available ? store.counts.images : '—' }}</dd>
           </div>
         </dl>
@@ -110,7 +106,7 @@
 
         <section v-if="viewer.container" class="docker-viewer" :class="`is-${viewer.kind}`">
           <UiPaneHeader>
-            <template #title><h3>{{ viewer.kind === 'logs' ? 'Логи' : 'Терминал' }}</h3></template>
+            <template #title><h3>{{ viewer.kind === 'logs' ? t('core.dockerLogi') : t('core.terminal') }}</h3></template>
             <template #meta>
               <span class="docker-viewer__name" v-tooltip="viewer.container.name">
                 {{ viewer.container.name }}
@@ -121,8 +117,8 @@
                 ref="viewerClose"
                 role="embedded"
                 data-context="workspace-toolbar"
-                label="Закрыть просмотр контейнера"
-                v-tooltip="'Закрыть просмотр контейнера'"
+                :label="t('core.dockerZakrytProsmotrKonteynera')"
+                v-tooltip="t('core.dockerZakrytProsmotrKonteynera')"
                 @click="closeViewer"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -145,7 +141,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import type { DockerContainer } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
-import { UiRefreshIcon } from '../../ui';
+import { UiRefreshIcon, t } from '../../ui';
 import { UiIconButton, UiInlineMessage, UiPaneHeader, UiTab, UiTabs, vTooltip } from '../../ui';
 import DockerCleanup from './DockerCleanup.vue';
 import DockerContainers from './DockerContainers.vue';
@@ -189,14 +185,14 @@ let pendingViewer: { kind: ViewerKind; container: DockerContainer } | null = nul
 const available = computed(() => Boolean(store.health?.available && !store.error));
 const connectionLabel = computed(() => {
   if (store.error) {
-    return 'Ошибка подключения';
+    return t('settings.connectionError');
   }
 
   if (available.value && store.health?.available) {
     return `Docker ${store.health.version}`;
   }
 
-  return store.loading ? 'Подключение…' : 'Нет подключения';
+  return store.loading ? t('core.connectionConnecting') : t('core.dockerNetPodklyucheniya');
 });
 
 function selectTab(value: string | number): void {

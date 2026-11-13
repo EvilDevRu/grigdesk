@@ -2,14 +2,14 @@
   <section class="film" aria-labelledby="showcase-film-title">
     <header class="film__head">
       <div class="film__crumbs">
-        <UiButton variant="ghost" @click="emit('close')">← Ролики</UiButton>
+        <UiButton variant="ghost" @click="emit('close')">{{ t('core.showcaseRoliki2') }}</UiButton>
       </div>
       <div class="film__heading">
         <div class="film__title-row">
           <h2 id="showcase-film-title">{{ project.title }}</h2>
           <UiIconButton
-            label="Переименовать ролик"
-            v-tooltip="'Переименовать'"
+            :label="t('core.showcasePereimenovatRolik')"
+            v-tooltip="t('core.machineRename')"
             variant="ghost"
             :disabled="busy"
             @click="emit('rename')"
@@ -26,12 +26,9 @@
           v-if="targetUrl"
           :href="targetUrl"
           variant="ghost"
-        >
-          Открыть стенд <span aria-hidden="true">↗</span>
+        > {{ t('core.showcaseOtkrytStend') }} <span aria-hidden="true">↗</span>
         </StandLink>
-        <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove-project')">
-          Удалить ролик
-        </UiButton>
+        <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove-project')"> {{ t('core.showcaseUdalitRolik') }} </UiButton>
       </div>
     </header>
 
@@ -57,25 +54,19 @@
     <section v-if="analyzing" class="film__analysis" role="status" aria-live="polite">
       <div class="film__analysis-head">
         <UiSpinner decorative role="standalone" />
-        <strong>Разбираю задачу</strong>
+        <strong>{{ t('core.showcaseRazbirayuZadachu') }}</strong>
       </div>
-      <p class="film__analysis-copy">
-        Читаю постановку из портала, изменения в репозиториях стенда и карту экранов
-        профиля. Модель предложит план и сцены — обычно это занимает несколько минут.
-      </p>
+      <p class="film__analysis-copy"> {{ t('core.showcaseChitayuPostanovkuIzPortala') }} </p>
     </section>
 
     <section v-else-if="!orderedScenes.length" class="film__empty" aria-labelledby="showcase-empty-title">
       <div class="film__empty-copy">
-        <strong id="showcase-empty-title">Сцен пока нет</strong>
-        <p>
-          Отметьте, о чём ролик, и снимите его. Разбор можно повторить с прежним
-          выбором или добавить сцены руками.
-        </p>
+        <strong id="showcase-empty-title">{{ t('core.showcaseStsenPokaNet') }}</strong>
+        <p> {{ t('core.showcaseOtmetteOChemRolik') }} </p>
       </div>
       <!-- У пустого ролика выбор открыт сразу: «Выбрать, о чём…» ведёт именно сюда. -->
       <div class="film__source-empty" aria-labelledby="showcase-source-empty-title" role="group">
-        <h3 id="showcase-source-empty-title">О чём ролик</h3>
+        <h3 id="showcase-source-empty-title">{{ t('core.showcaseOChemRolik') }}</h3>
         <ShowcaseSourcePanel
           :project="project"
           :options="sourceOptions"
@@ -86,9 +77,7 @@
           @reload="emit('reload-source')"
         />
       </div>
-      <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">
-        Разобрать заново
-      </UiButton>
+      <UiButton variant="ghost" :loading="busy" @click="emit('analyze')"> {{ t('core.showcaseRazobratZanovo') }} </UiButton>
       <ShowcaseScriptGaps :gaps="project.scriptGaps" />
       <ShowcaseSceneForm :screens="screens" :busy="busy" @add="emit('add-scene', $event)" />
     </section>
@@ -101,14 +90,14 @@
            записи, а не после просмотра ролика. -->
       <UiInlineMessage v-if="scriptOutdated" tone="warning">
         {{ SCRIPT_OUTDATED_TEXT }}
-        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">Разобрать заново</UiButton>
+        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
       </UiInlineMessage>
 
       <!-- Выбор «О чём ролик» сменили после разбора, а новый разбор не прошёл: сцены
            рассказывают о прежнем, и человек должен узнать это до сборки. -->
       <UiInlineMessage v-if="sourceOutdated" tone="warning" data-role="source-outdated">
         {{ SOURCE_OUTDATED_TEXT }}
-        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">Разобрать заново</UiButton>
+        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
       </UiInlineMessage>
 
       <div class="film__stage">
@@ -116,31 +105,27 @@
           <section v-if="project.latestFinal" class="film__final" aria-labelledby="showcase-final-title">
             <div class="film__block-head">
               <h3 id="showcase-final-title">
-                {{ rebuilding ? 'Предыдущая сборка' : 'Готовый ролик' }}
+                {{ rebuilding ? t('core.showcasePredyduschayaSborka') : t('core.showcaseGotovyyRolik') }}
               </h3>
               <span class="film__meta">
-                <span v-if="!project.latestFinal.current" class="film__stale">предыдущая сборка</span>
+                <span v-if="!project.latestFinal.current" class="film__stale">{{ t('core.showcasePredyduschayaSborka2') }}</span>
                 {{ finalText }}
               </span>
             </div>
-            <UiInlineMessage v-if="rebuilding" tone="neutral" data-role="previous-build">
-              Идёт пересборка. Здесь пока предыдущий ролик; новый появится после завершения сборки.
-            </UiInlineMessage>
+            <UiInlineMessage v-if="rebuilding" tone="neutral" data-role="previous-build"> {{ t('core.showcaseIdetPeresborkaZdesPoka') }} </UiInlineMessage>
             <UiVideo
               :key="project.latestFinal.video.id"
               ref="player"
               :src="finalUrl"
-              :label="rebuilding ? 'Предыдущая сборка' : 'Готовый ролик'"
+              :label="rebuilding ? t('core.showcasePredyduschayaSborka') : t('core.showcaseGotovyyRolik')"
             />
             <UiInlineMessage
               v-if="manifestUnavailable"
               tone="warning"
               data-role="manifest-unavailable"
-            >
-              Точная навигация по сценам и фразам недоступна: шкала ролика не прочиталась.
-            </UiInlineMessage>
-            <nav v-if="manifestPhrases.length" class="film__phrases" aria-label="Переход по фразе">
-              <span>Перейти к фразе</span>
+            > {{ t('core.showcaseTochnayaNavigatsiyaPoStsenam') }} </UiInlineMessage>
+            <nav v-if="manifestPhrases.length" class="film__phrases" :aria-label="t('core.showcasePerehodPoFraze')">
+              <span>{{ t('core.showcasePereytiKFraze') }}</span>
               <div class="film__phrase-list">
                 <UiButton
                   v-for="phrase in manifestPhrases"
@@ -153,17 +138,15 @@
               </div>
             </nav>
             <div class="film__downloads">
-              <UiActionLink :href="finalUrl" download="showcase.mp4">Скачать mp4</UiActionLink>
-              <UiActionLink v-if="subtitlesUrl" :href="subtitlesUrl" download="showcase.srt">
-                Скачать субтитры
-              </UiActionLink>
+              <UiActionLink :href="finalUrl" download="showcase.mp4">{{ t('core.showcaseSkachatMp4') }}</UiActionLink>
+              <UiActionLink v-if="subtitlesUrl" :href="subtitlesUrl" download="showcase.srt"> {{ t('core.showcaseSkachatSubtitry') }} </UiActionLink>
             </div>
           </section>
 
           <section class="film__scenes" aria-labelledby="showcase-scenes-title">
             <div class="film__block-head">
-              <h3 id="showcase-scenes-title">Сцены</h3>
-              <span class="film__meta">{{ orderedScenes.length }} из {{ maxScenes }}</span>
+              <h3 id="showcase-scenes-title">{{ t('core.showcaseStseny') }}</h3>
+              <span class="film__meta">{{ orderedScenes.length }} {{ t('settings.from') }} {{ maxScenes }}</span>
             </div>
 
             <ShowcaseStoryboard
@@ -176,7 +159,7 @@
             />
 
             <UiDisclosureButton v-model:open="addOpen" controls="showcase-add-scene" density="compact">
-              {{ addOpen ? 'Скрыть форму сцены' : 'Добавить сцену' }}
+              {{ addOpen ? t('core.showcaseSkrytFormuStseny') : t('core.showcaseDobavitStsenu') }}
             </UiDisclosureButton>
             <div v-show="addOpen" id="showcase-add-scene">
               <ShowcaseSceneForm :screens="screens" :busy="busy" @add="emit('add-scene', $event)" />
@@ -187,9 +170,9 @@
           <section class="film__source" aria-labelledby="showcase-source-title">
             <div class="film__block-head">
               <UiDisclosureButton v-model:open="sourceOpen" controls="showcase-source-body" density="compact">
-                <span id="showcase-source-title">О чём ролик</span>
+                <span id="showcase-source-title">{{ t('core.showcaseOChemRolik') }}</span>
               </UiDisclosureButton>
-              <span class="film__meta">{{ project.source ? 'свой выбор' : 'по умолчанию' }}</span>
+              <span class="film__meta">{{ project.source ? t('core.showcaseSvoyVybor') : t('settings.diagnosticSourceDefault') }}</span>
             </div>
             <div id="showcase-source-body">
               <ShowcaseSourcePanel
@@ -210,15 +193,13 @@
               <UiDisclosureButton v-model:open="briefOpen" controls="showcase-brief-body" density="compact">
                 <span id="showcase-brief-title">{{ briefTitle }}</span>
               </UiDisclosureButton>
-              <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">Разобрать заново</UiButton>
+              <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
             </div>
             <div v-show="briefOpen" id="showcase-brief-body">
               <ol v-if="project.brief.length" class="film__brief-list">
                 <li v-for="(point, index) in project.brief" :key="index">{{ point }}</li>
               </ol>
-              <p v-else class="film__note">
-                План собирается по тексту связанной задачи и изменениям в репозиториях стенда.
-              </p>
+              <p v-else class="film__note"> {{ t('core.showcasePlanSobiraetsyaPoTekstu') }} </p>
             </div>
             <!-- Чего карта экранов не дала показать — справка при плане, а не
                  предупреждение над роликом: решать это оператору не нужно. -->
@@ -274,14 +255,8 @@ import StandLink from '../../shared/browser/StandLink.vue';
 import { computed, reactive, ref, watch } from 'vue';
 
 import {
-  UiActionLink,
-  UiButton,
-  UiDisclosureButton,
-  UiIconButton,
-  UiInlineMessage,
-  UiSpinner,
-  UiVideo,
-  vTooltip,
+  UiActionLink, UiButton, UiDisclosureButton, UiIconButton, UiInlineMessage, UiSpinner, UiVideo,
+  vTooltip, t, uiLocale
 } from '../../ui';
 import { continuesPrevious } from '../../../../shared/plugins/showcase/showcaseChains';
 import type {
@@ -451,13 +426,18 @@ const manifestUnavailable = computed(() => (
 
 const targetText = computed(() => {
   if (props.project.target.status !== 'ready') {
-    return 'цель показа недоступна';
+    return t('core.showcaseTselPokazaNedostupna');
   }
 
   const scope = props.project.target.scope;
-  const environment = scope.environment === 'isolated-demo' ? 'демо-копия' : 'только чтение';
+  const environment = scope.environment === 'isolated-demo'
+                ? t('core.showcaseDemoKopiya')
+                : t('core.showcaseTolkoChtenie');
 
-  return `${scope.targetLabel} · ${environment}`;
+  return t('core.showcaseTargetlabelEnvironment', {
+    targetLabel: scope.targetLabel,
+    environment,
+  });
 });
 
 const blockedReason = computed(() => (
@@ -473,7 +453,9 @@ const scriptOutdated = computed(() => showcaseScriptOutdated(props.project));
 const sourceOutdated = computed(() => showcaseSourceOutdated(props.project));
 
 const briefTitle = computed(() => (
-  props.project.brief.length ? `План ролика · ${props.project.brief.length} п.` : 'План ролика'
+  props.project.brief.length
+    ? t('core.showcasePlanRolikaLengthP', { length: props.project.brief.length })
+    : t('core.showcasePlanRolika')
 ));
 
 const finalUrl = computed(() => (
@@ -497,7 +479,7 @@ const finalText = computed(() => {
     return '';
   }
 
-  const built = new Date(final.builtAt).toLocaleString('ru-RU', {
+  const built = new Date(final.builtAt).toLocaleString(uiLocale.value, {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -505,7 +487,7 @@ const finalText = computed(() => {
   });
   const duration = final.video.durationMs ? ` · ${timecode(final.video.durationMs)}` : '';
 
-  return `собран ${built}${duration}`;
+  return t('core.showcaseSobranBuiltDuration', { built, duration });
 });
 
 // Выбор следует за составом сцен: удалённая сцена уступает место соседней, новый

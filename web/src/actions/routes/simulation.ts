@@ -1,10 +1,16 @@
 import {
+
   ROUTES_EDITOR_LIMITS, ROUTES_LOOP_DEFAULT_MAX_ROUNDS, routeSimulationStepLimit,
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import type { RouteSimulationObservation } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /** Создаёт локальный курсор только от сохранённой ревизии полного каталога. */
 /**
@@ -22,7 +28,7 @@ export function startRouteSimulation(
 
   if (!store.opened?.draftId || !draft || store.dirty || store.saving || store.conflict
     || store.jsonBuffer?.dirty) {
-    store.simulationError = 'Сначала сохраните черновик и разрешите конфликт записи.';
+    store.simulationError = t('core.routeSnachalaSohraniteChernovikI');
 
     return;
   }
@@ -31,7 +37,7 @@ export function startRouteSimulation(
     : routeId ? draft.routes[routeId]?.route : null;
 
   if (!machine?.entry) {
-    store.simulationError = 'Выберите маршрут с начальным узлом.';
+    store.simulationError = t('core.routeVyberiteMarshrutSNachalnym');
 
     return;
   }
@@ -41,7 +47,8 @@ export function startRouteSimulation(
 
   if (rounds !== null && (!Number.isSafeInteger(rounds) || rounds < 1
     || rounds > ROUTES_EDITOR_LIMITS.loopMaxRounds)) {
-    store.simulationError = `Потолок кругов — целое от 1 до ${ROUTES_EDITOR_LIMITS.loopMaxRounds}.`;
+    store.simulationError =
+       t('core.routePotolokKrugovTseloeOt', { loopMaxRounds: ROUTES_EDITOR_LIMITS.loopMaxRounds });
 
     return;
   }
@@ -85,7 +92,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
     return;
   }
   if (state.cursor.terminal) {
-    state.error = 'Сценарий остановлен. Начните новый.';
+    state.error = t('core.routeStsenariyOstanovlenNachniteNovyy');
 
     return;
   }
@@ -93,7 +100,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
   const limit = routeSimulationStepLimit(state.loopMaxRounds);
 
   if (state.stepIndex > limit) {
-    state.error = `Достигнут предел ${limit} шагов. Начните новый сценарий.`;
+    state.error = t('core.routeDostignutPredelLimitShagov', { limit });
 
     return;
   }
@@ -101,7 +108,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
     || state.draftRevision !== store.serverSnapshot?.revision
     || store.dirty || store.saving || store.conflict || store.jsonBuffer?.dirty) {
     state.stale = true;
-    state.error = 'Черновик изменился. Начните сценарий заново после сохранения.';
+    state.error = t('core.routeChernovikIzmenilsyaNachniteStsenariy');
 
     return;
   }
@@ -137,7 +144,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
 
     if (!result.ok || !result.cursor || !result.counters) {
       state.error = result.issues.map((issue) => issue.message).join(' · ')
-        || 'Движок отклонил шаг сценария.';
+        || t('core.routeDvizhokOtklonilShagStsenariya');
 
       return;
     }
@@ -148,7 +155,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
     state.stepIndex += 1;
   } catch (error) {
     if (identity === runtime.openRequest && store.simulation === state) {
-      state.error = failureText(error, 'Не удалось выполнить пробный шаг.');
+      state.error = failureText(error, t('core.routeNeUdalosVypolnitProbnyy'));
     }
   } finally {
     if (identity === runtime.openRequest && store.simulation === state) {

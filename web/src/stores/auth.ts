@@ -5,6 +5,10 @@ import { api } from '../shared/apiClient.ts';
 import { useShellStore } from './shell.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const RELOAD_KEY = 'grigdesk-auth-reload-at';
 const RELOAD_INTERVAL_MS = 60_000;
@@ -44,7 +48,7 @@ export const useAuthStore = defineStore('auth', {
         if (!isRecord(s) || typeof s.configured !== 'boolean' || typeof s.authenticated !== 'boolean'
           || (s.clientScope != null && typeof s.clientScope !== 'string')
           || (s.login != null && typeof s.login !== 'string')) {
-          throw new Error('Сервер вернул некорректное состояние входа');
+          throw new Error(t('core.coreServerVernulNekorrektnoeSostoyanie'));
         }
 
         this.configured = s.configured;

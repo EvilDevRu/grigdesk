@@ -3,30 +3,30 @@
     <div class="editor-scroll">
       <div class="editor-body">
         <slot name="notices" />
-        <section class="basics" aria-label="Основное">
-          <UiField v-if="creating" label="Идентификатор" :error="errorOf('id')"
+        <section class="basics" :aria-label="t('core.projectOsnovnoe')">
+          <UiField v-if="creating" :label="t('core.projectIdentifikator')" :error="errorOf('id')"
             data-context="workspace-property"
-            hint="Латинские буквы, цифры, «-» и «_», начиная с буквы. После создания изменить нельзя.">
+            :hint="t('core.projectLatinskieBukvyTsifryI')">
             <UiInput :ref="(element) => setIdRef(element)" :model-value="draft.id"
-              data-role="project-id" placeholder="my-project" @update:model-value="setId" />
+              data-role="project-id" :placeholder="'my-project'" @update:model-value="setId" />
           </UiField>
-          <UiField label="Название" :error="errorOf('title')" data-context="workspace-property">
+          <UiField :label="t('core.taskTitle')" :error="errorOf('title')" data-context="workspace-property">
             <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title" :readonly="readonly"
-              data-role="project-title" placeholder="Название проекта" @update:model-value="set('title', $event)" />
+              data-role="project-title" :placeholder="t('core.projectNazvanieProekta')" @update:model-value="set('title', $event)" />
           </UiField>
           <div v-if="!creating" class="identity-row">
-            <span class="label">Идентификатор</span>
-            <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">Не меняется</span></div>
+            <span class="label">{{ t('core.projectIdentifikator') }}</span>
+            <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">{{ t('core.projectNeMenyaetsya') }}</span></div>
           </div>
-          <UiField label="Описание" :error="errorOf('description')" data-context="workspace-property">
+          <UiField :label="t('core.taskDescription')" :error="errorOf('description')" data-context="workspace-property">
             <UiTextarea :model-value="draft.description" :readonly="readonly" data-role="project-description"
-              data-context="workspace-note" :rows="2" placeholder="Чем занимается проект и что важно о нём знать"
+              data-context="workspace-note" :rows="2" :placeholder="t('core.projectChemZanimaetsyaProektI')"
               @update:model-value="set('description', $event)" />
           </UiField>
-          <UiField label="Метки" :error="errorOf('tags')" hint="Через запятую"
+          <UiField :label="t('core.projectMetki')" :error="errorOf('tags')" :hint="t('core.projectCherezZapyatuyu')"
             data-context="workspace-property" data-hint-inline="true">
             <UiInput :model-value="draft.tags.join(', ')" :readonly="readonly" data-role="project-tags"
-              placeholder="продукт, сайт, внутренний" @update:model-value="setTags" />
+              :placeholder="t('core.projectProduktSaytVnutrenniy')" @update:model-value="setTags" />
           </UiField>
         </section>
         <section class="editor-section">
@@ -34,23 +34,17 @@
             :checks="checks" :readonly="reposReadonly" @check="emit('check', $event)"
             @select-repo="emit('selectRepo', $event)" />
           <div class="source-row">
-            <span class="hint">{{ profilePaths ? 'Пути из профиля фабрики' : 'Пути из паспорта проекта' }}</span>
+            <span class="hint">{{ profilePaths ? t('core.projectPutiIzProfilyaFabriki') : t('core.projectPutiIzPasportaProekta') }}</span>
             <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
-              :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen">
-              Доступ к папкам {{ accessNoteOpen ? '↑' : '↓' }}
+              :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen"> {{ t('core.projectDostupKPapkam') }} {{ accessNoteOpen ? '↑' : '↓' }}
             </UiButton>
           </div>
-          <p v-if="profilePaths" class="hint">
-            Пути задаёт профиль фабрики; редактирование откроется после миграции
-          </p>
-          <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust">
-            Пути из паспорта расширяют область чтения триажа и обновления кода.
-            Права чатов и попыток фабрики они не расширяют.
-          </p>
+          <p v-if="profilePaths" class="hint"> {{ t('core.projectPutiZadaetProfilFabriki') }} </p>
+          <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust"> {{ t('core.projectPutiIzPasportaRasshiryayut') }} </p>
         </section>
         <section v-if="!creating" class="editor-section">
           <header class="editor-heading">
-            <h3>Фабрика и связи</h3>
+            <h3>{{ t('core.projectFabrikaISvyazi') }}</h3>
           </header>
 
           <ProjectProfileStatus
@@ -58,15 +52,13 @@
             :detail="detail"
             @open-routes="emit('openRoutes')"
           />
-          <p v-else class="hint">Связи появятся после создания проекта.</p>
+          <p v-else class="hint">{{ t('core.projectSvyaziPoyavyatsyaPosleSozdaniya') }}</p>
         </section>
 
         <section v-if="!creating" class="management" data-role="project-manage">
-          <h3 class="ui-visually-hidden">Управление</h3>
+          <h3 class="ui-visually-hidden">{{ t('core.pipelineControls') }}</h3>
 
-          <p v-if="archived" class="hint">
-            Проект в архиве: разделы его больше не предлагают, а связи и маршруты остались.
-          </p>
+          <p v-if="archived" class="hint"> {{ t('core.projectProektVArhiveRazdely') }} </p>
 
           <!--
             Связи показываются до архива: «нельзя» без списка того, что мешает, человеку
@@ -81,9 +73,7 @@
                 variant="text"
                 :data-role="`project-rule-link-${item.kind}`"
                 @click="emit('openRules', ruleRoute(item.kind))"
-              >
-                Настроить правило
-              </UiButton>
+              > {{ t('core.projectNastroitPravilo') }} </UiButton>
             </div>
           </div>
 
@@ -99,8 +89,7 @@
               :loading="busy"
               @click="emit('archive')"
             >
-              <template #leading><ProjectIcon name="archive" /></template>Архивировать
-            </UiButton>
+              <template #leading><ProjectIcon name="archive" /></template>{{ t('core.projectArhivirovat') }} </UiButton>
             <UiButton
               v-else
               data-role="project-restore"
@@ -108,9 +97,7 @@
               :disabled="busy"
               :loading="busy"
               @click="emit('restore')"
-            >
-              Восстановить
-            </UiButton>
+            > {{ t('core.projectVosstanovit') }} </UiButton>
             <UiButton
               v-if="archived"
               data-role="project-remove"
@@ -118,21 +105,13 @@
               :disabled="busy || saving || dirty"
               :loading="busy"
               @click="emit('remove')"
-            >
-              Удалить регистрацию
-            </UiButton>
-            <span v-if="dirty" class="hint">
-              Сначала сохраните или отмените изменения.
-            </span>
-            <span v-else-if="!archived && dependencies?.archivable === false" class="hint">
-              Архив недоступен: проверьте связи проекта выше.
-            </span>
+            > {{ t('core.projectUdalitRegistratsiyu') }} </UiButton>
+            <span v-if="dirty" class="hint"> {{ t('core.projectSnachalaSohraniteIliOtmenite') }} </span>
+            <span v-else-if="!archived && dependencies?.archivable === false" class="hint"> {{ t('core.projectArhivNedostupenProverteSvyazi') }} </span>
           </UiFormActions>
 
           <UiButton v-if="!dependencies && !readonly" variant="text"
-            :disabled="busy" @click="emit('retryDependencies')">
-            Повторить проверку
-          </UiButton>
+            :disabled="busy" @click="emit('retryDependencies')"> {{ t('core.trackerRefresh') }} </UiButton>
           <p v-if="lifecycleFailure" class="warn" data-role="project-manage-failure">
             {{ lifecycleFailure }}
           </p>
@@ -142,16 +121,14 @@
     </div>
     <footer class="editor-footer">
       <UiFormActions class="save-actions" align="between">
-        <span v-if="draft.defaultRepoRequired" class="save-status attention" role="status">
-          Выберите репозиторий по умолчанию.
-        </span>
+        <span v-if="draft.defaultRepoRequired" class="save-status attention" role="status"> {{ t('core.projectVyberiteRepozitoriyPoUmolchaniyu') }} </span>
         <span v-else class="save-status" :class="{ attention: dirty }" role="status">
           <span v-if="!creating" class="save-dot" aria-hidden="true" />
           {{ saveStatus }}
         </span>
         <div class="save-buttons">
           <UiButton v-if="dirty" variant="ghost" data-context="workspace-toolbar"
-            data-role="project-cancel" :disabled="saving" @click="cancel">Отменить</UiButton>
+            data-role="project-cancel" :disabled="saving" @click="cancel">{{ t('core.trackerCancel') }}</UiButton>
           <UiButton
             data-role="project-save"
             data-context="workspace-save"
@@ -159,10 +136,10 @@
             variant="outline"
             :disabled="!canSave"
             :loading="saving"
-            loading-label="Сохраняю"
+            :loading-label="t('core.projectSohranyayu')"
             type="submit"
           >
-            {{ creating ? 'Создать проект' : 'Сохранить' }}
+            {{ creating ? t('core.projectSozdatProekt') : t('core.save') }}
           </UiButton>
         </div>
       </UiFormActions>
@@ -178,13 +155,7 @@
 // в «Маршруты» делает страница.
 import { computed, nextTick, ref, useId } from 'vue';
 
-import {
-  UiButton,
-  UiField,
-  UiFormActions,
-  UiInput,
-  UiTextarea,
-} from '../../ui';
+import { UiButton, UiField, UiFormActions, UiInput, UiTextarea, t } from '../../ui';
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
 import { toInput } from './projectDraft';
 import ProjectIcon from './ProjectIcon.vue';
@@ -260,13 +231,13 @@ const canSave = computed(() => (
 
 const saveStatus = computed(() => {
   if (props.saving) {
-    return 'Сохраняем изменения…';
+    return t('core.projectSohranyaemIzmeneniya');
   }
   if (props.dirty) {
-    return 'Есть несохранённые изменения';
+    return t('core.taskEditUnsaved');
   }
 
-  return props.creating ? 'Заполните данные проекта' : 'Все изменения сохранены';
+  return props.creating ? t('core.projectZapolniteDannyeProekta') : t('core.projectVseIzmeneniyaSohraneny');
 });
 
 const archived = computed(() => Boolean(props.detail?.archivedAt));

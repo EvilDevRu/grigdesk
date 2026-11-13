@@ -1,6 +1,11 @@
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Запрашивает доступные черновики текущего профиля.
@@ -22,7 +27,7 @@ export async function loadDrafts(profile: string): Promise<void> {
     store.draftsProfile = profile;
   } catch (error) {
     if (request === runtime.listRequest) {
-      store.error = failureText(error, 'Не удалось прочитать список черновиков.');
+      store.error = failureText(error, translateUi('core.loadDraftsCouldNotReadTheDraftList'));
     }
   }
 }

@@ -2,29 +2,24 @@
   <div class="profile" data-role="project-profile">
     <dl class="facts">
       <div>
-        <dt>Профиль фабрики</dt>
+        <dt>{{ t('core.projectProfilFabriki') }}</dt>
         <dd><span class="profile-value" :class="{ found: detail.profile.present }">
-          {{ detail.profile.present ? 'Найден' : 'Нет' }}
+          {{ detail.profile.present ? t('core.projectNayden') : t('core.projectNet') }}
         </span></dd>
       </div>
       <div>
-        <dt>Маршруты</dt>
+        <dt>{{ t('core.routes') }}</dt>
         <dd>
           <span v-if="detail.routes.length">{{ detail.routes.join(', ') }}</span>
-          <span v-else class="hint">Опубликованных маршрутов нет</span>
+          <span v-else class="hint">{{ t('core.projectOpublikovannyhMarshrutovNet') }}</span>
           <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
-            data-role="project-routes" @click="emit('openRoutes')">
-            Открыть маршруты <template #trailing><ProjectIcon name="arrow" /></template>
+            data-role="project-routes" @click="emit('openRoutes')"> {{ t('core.projectOtkrytMarshruty') }} <template #trailing><ProjectIcon name="arrow" /></template>
           </UiButton>
         </dd>
       </div>
     </dl>
-    <p v-if="!detail.profile.present" class="hint">
-      Профиль появится, когда его заведут в каталоге профилей фабрики.
-    </p>
-    <p v-if="detail.profile.mismatch.length" class="warn">
-      Ключи {{ mismatchKeys }} объявлены в паспорте, но профиль их не называет.
-    </p>
+    <p v-if="!detail.profile.present" class="hint"> {{ t('core.projectProfilPoyavitsyaKogdaEgo') }} </p>
+    <p v-if="detail.profile.mismatch.length" class="warn"> {{ t('core.projectKlyuchi') }} {{ mismatchKeys }} {{ t('core.projectObyavlenyVPasporteNo') }} </p>
   </div>
 </template>
 
@@ -33,7 +28,7 @@
 // опубликовано в каталоге маршрутов. Править здесь нечего — это чтение.
 import { computed } from 'vue';
 
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 import ProjectIcon from './ProjectIcon.vue';
 import type { ProjectDetail } from '../../../../shared/runtime/projectsContracts';
 

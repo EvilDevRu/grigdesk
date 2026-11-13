@@ -1,9 +1,9 @@
 <template>
   <figure v-if="image && showDiagram" class="md-diagram">
     <img class="md-diagram__image" :src="image.src" :width="image.width" :height="image.height"
-         alt="Схема Mermaid" @error="imageFailed">
+         :alt="t('core.mdShemaMermaid')" @error="imageFailed" />
     <div class="md-fence__tools">
-      <UiIconButton role="embedded" label="Показать код" v-tooltip="'Показать код'"
+      <UiIconButton role="embedded" :label="t('core.mdPokazatKod')" v-tooltip="t('core.mdPokazatKod')"
                     data-context="md-diagram-code" @click="showDiagram = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -16,7 +16,7 @@
   <template v-else>
     <FenceCode :code="code" lang="mermaid" :closed="closed">
       <template v-if="image" #tools>
-        <UiIconButton role="embedded" label="Показать схему" v-tooltip="'Показать схему'"
+        <UiIconButton role="embedded" :label="t('core.mdPokazatShemu')" v-tooltip="t('core.mdPokazatShemu')"
                       data-context="md-diagram-show" @click="showDiagram = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -27,14 +27,14 @@
         </UiIconButton>
       </template>
     </FenceCode>
-    <p v-if="failed" class="md-diagram__error">Схему не удалось нарисовать, показан код.</p>
+    <p v-if="failed" class="md-diagram__error">{{ t('core.mdShemuNeUdalosNarisovat') }}</p>
   </template>
 </template>
 
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, watch } from 'vue';
 
-import { UiIconButton, vTooltip } from '../../ui';
+import { UiIconButton, vTooltip, t } from '../../ui';
 import FenceCode from './FenceCode.vue';
 import { renderMermaid } from './mermaidRender.ts';
 import type { MermaidImage } from './mermaidRender.ts';

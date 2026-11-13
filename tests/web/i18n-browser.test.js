@@ -151,7 +151,7 @@ test('I18N-B04: при EN русский чат и raw-контент не пу�
   assert.match(await page.locator('.cs-body').textContent(), /long_code_/);
   assert.equal(await page.locator('textarea[data-role="chat-composer"]').inputValue(),
     'Черновик без перевода');
-  assert.equal(await page.getByRole('button', { name: 'Приложить файл', exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole('button', { name: 'Attach file', exact: true }).isVisible(), true);
   assert.equal(await page.title(), 'GrigDesk');
 });
 

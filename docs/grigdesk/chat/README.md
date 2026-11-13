@@ -13,10 +13,10 @@
 - [Доступ агента к браузеру: owner, передача, отзыв, инструменты и отказы](browser-access.md)
 - [Вкладки без фиксированного лимита и закрытие после пяти минут простоя](browser-tab-limits.md)
 - [Пустой список: открытие своей вкладки и ограничения режима](browser-empty-list.md)
-- [Рабочая папка разговора: выбор проекта, пути и перенос памяти](../guide/chat-workdir.md)
-- [Контекст разговора и его индикатор](../guide/chat-context.md)
-- [DeepSeek Harness](../guide/deepseek.md)
-- [Прогноз лимитов](../guide/usage-forecast.md)
+- [Рабочая папка разговора: выбор проекта, пути и перенос памяти](../guide/ru/chat-workdir.md)
+- [Контекст разговора и его индикатор](../guide/ru/chat-context.md)
+- [DeepSeek Harness](../guide/ru/deepseek.md)
+- [Прогноз лимитов](../guide/ru/usage-forecast.md)
 
 ## Устройство
 

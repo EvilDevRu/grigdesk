@@ -1,6 +1,11 @@
 import { showcaseApi } from '../../shared/showcaseApi';
 import { runtimeOf } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /**
  * Загружает проверенную шкалу текущего v1 final. Ошибка производного JSON не
@@ -36,7 +41,7 @@ export function loadShowcaseManifest(store: ShowcaseStore): Promise<boolean> {
   const request = showcaseApi.finalManifest(projectId, manifestId)
     .then((manifest) => {
       if (manifest.projectId !== projectId || manifest.video.id !== videoId) {
-        throw new Error('Manifest относится к другому ролику или видео.');
+        throw new Error(t('core.showcaseManifestOtnositsyaKDrugomu'));
       }
 
       store.setManifest(projectId, manifestId, manifest);

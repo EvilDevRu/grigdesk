@@ -1,30 +1,26 @@
 <template>
   <div class="route-context-fields">
-    <label>Обязательный контекст
-      <UiInput data-test="required-context" :model-value="requiredContext.join(', ')"
+    <label>{{ t('core.routeObyazatelnyyKontekst') }} <UiInput data-test="required-context" :model-value="requiredContext.join(', ')"
                @update:model-value="changeRequired" />
     </label>
     <fieldset>
-      <legend>Условие блока</legend>
-      <label>Путь контекста
-        <UiInput data-test="when-context" :model-value="when?.context ?? ''"
+      <legend>{{ t('core.routeUslovieBloka') }}</legend>
+      <label>{{ t('core.routePutKonteksta') }} <UiInput data-test="when-context" :model-value="when?.context ?? ''"
                  @update:model-value="changeContext" />
       </label>
-      <label>Тип значения
-        <UiSelect data-test="when-type" :model-value="valueType"
+      <label>{{ t('core.routeTipZnacheniya') }} <UiSelect data-test="when-type" :model-value="valueType"
                   @update:model-value="changeType">
-          <option value="none">Без условия</option>
-          <option value="string">Строка</option>
-          <option value="number">Число</option>
-          <option value="boolean">Логическое</option>
-          <option value="null">null</option>
+          <option value="none">{{ t('core.routeBezUsloviya') }}</option>
+          <option value="string">{{ t('core.routeStroka') }}</option>
+          <option value="number">{{ t('core.routeChislo') }}</option>
+          <option value="boolean">{{ t('core.routeLogicheskoe') }}</option>
+          <option value="null">{{ 'null' }}</option>
         </UiSelect>
       </label>
-      <label v-if="valueType !== 'none' && valueType !== 'null'">Значение
-        <UiSelect v-if="valueType === 'boolean'" data-test="when-value"
+      <label v-if="valueType !== 'none' && valueType !== 'null'">{{ t('core.value') }} <UiSelect v-if="valueType === 'boolean'" data-test="when-value"
                   :model-value="String(when?.equals ?? false)"
                   @update:model-value="changeValue">
-          <option value="false">false</option><option value="true">true</option>
+          <option value="false">{{ 'false' }}</option><option value="true">{{ 'true' }}</option>
         </UiSelect>
         <UiInput v-else data-test="when-value" :model-value="String(when?.equals ?? '')"
                  @update:model-value="changeValue" />
@@ -36,7 +32,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { RouteWhen } from '../../../../shared/pipeline/routeDefinition.ts';
-import { UiInput, UiSelect } from '../../ui';
+import { UiInput, UiSelect, t } from '../../ui';
 
 const props = defineProps<{ requiredContext: string[]; when?: RouteWhen }>();
 const emit = defineEmits<{

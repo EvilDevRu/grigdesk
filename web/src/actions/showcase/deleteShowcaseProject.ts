@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { loadShowcase } from './loadShowcase';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Удаляет ролик вместе с его артефактами. Сервер сначала снимает задания и
@@ -21,7 +26,9 @@ export async function deleteShowcaseProject(store: ShowcaseStore, id: string): P
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось удалить ролик.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.deleteShowcaseProjectCouldNotDeleteTheVideo')),
+    );
 
     return false;
   } finally {

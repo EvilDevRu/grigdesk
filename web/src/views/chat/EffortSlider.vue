@@ -14,12 +14,12 @@
       <p class="eff-hint">{{ hint || selectedDescription }}</p>
     </template>
     <template v-else>
-      <span class="cap">эффорт</span>
+      <span class="cap">{{ t('core.chatEffort') }}</span>
       <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
                         :max="Math.max(0, levels.length - 1)" :step="1"
                         :labels="sliderLabels" :value-text="selectedDescription"
                         :unselected="idx < 0"
-                        thin ticks :disabled="disabled" label="Усилие рассуждения" />
+                        thin ticks :disabled="disabled" :label="t('core.chatOptionEffort')" />
       <span class="val">{{ model || '—' }}</span>
     </template>
   </div>
@@ -56,17 +56,19 @@ const selectedDescription = computed(() => {
 
   const description = props.hints[model.value];
 
-  return description ? `${model.value} — ${description}` : model.value;
+  return description
+    ? t('core.chatModelDescription', { model: model.value, description })
+    : model.value;
 });
 
 // Справка позволяет сравнить все доступные ступени до смены значения.
 // Список задаёт модель, поэтому чужие и неподдерживаемые уровни сюда не попадают.
 const effortTooltip = computed(() => {
   const heading = model.value
-    ? `Усилие рассуждения: ${model.value}`
-    : 'Усилие рассуждения: по умолчанию исполнителя';
+    ? t('core.chatUsilieRassuzhdeniyaModel', { model: model.value })
+    : t('core.chatUsilieRassuzhdeniyaPoUmolchaniyu');
   const descriptions = props.levels.map((level) => {
-    const description = props.hints[level] || 'Описание этого уровня пока недоступно.';
+    const description = props.hints[level] || t('core.chatOpisanieEtogoUrovnyaPoka');
 
     return `${level} — ${description}`;
   });

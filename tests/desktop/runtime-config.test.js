@@ -9,6 +9,7 @@ import {
   stopGraceMs,
 } from '../../shared/desktop/desktopRuntime.ts';
 import { buildServerEnv, loadServerRuntime } from '../../desktop/src/runtimeConfig.ts';
+import { desktopLocale, setDesktopLocale } from '../../desktop/src/locale.ts';
 
 const RUNTIME_DESCRIPTOR = {
   version: 1,
@@ -565,11 +566,23 @@ test('RC-DH-3 явные пути из файла и окружения силь
   }
 });
 
-test('RC-DH-4 настройки не переназначают папку и файл окружения', async () => {
-  for (const key of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
-    const result = await loadServerRuntime(runtimeFixture({ fileText: `${key}=/other` }));
+test('RC-DH-4: запрет корней в настройках сохраняется и следует языку окна', async (t) => {
+  const previous = desktopLocale();
 
-    assert.equal(result.problem, 'invalid');
-    assert.match(result.message, new RegExp(key));
+  t.after(() => setDesktopLocale(previous, previous));
+
+  for (const locale of ['ru', 'en']) {
+    setDesktopLocale(locale, locale);
+
+    for (const key of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
+      const result = await loadServerRuntime(runtimeFixture({ fileText: `${key}=/other` }));
+      const message = locale === 'en' ? `Key ${key} is not allowed in the settings file.`
+        : `Ключ ${key} запрещён в файле настроек.`;
+
+      assert.deepEqual(result, {
+        problem: 'invalid',
+        message,
+      });
+    }
   }
 });

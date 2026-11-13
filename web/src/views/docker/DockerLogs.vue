@@ -4,17 +4,17 @@
       <div class="docker-logs__filter">
         <UiSearchInput
           v-model="filter"
-          placeholder="Найти строку в логах"
-          aria-label="Фильтр строк лога"
+          :placeholder="t('core.dockerNaytiStrokuVLogah')"
+          :aria-label="t('core.dockerFiltrStrokLoga')"
         />
       </div>
-      <UiCheckbox v-model="follow">Автопрокрутка</UiCheckbox>
+      <UiCheckbox v-model="follow">{{ t('core.dockerAvtoprokrutka') }}</UiCheckbox>
       <span class="docker-logs__status" :class="status" role="status">{{ statusLabel }}</span>
     </div>
 
     <div ref="host" class="docker-logs__body" @scroll="onScroll">
       <p v-if="!visible.length" class="docker-logs__empty">
-        {{ lines.length ? 'По этому запросу строки не найдены.' : 'Логов пока нет.' }}
+        {{ lines.length ? t('core.dockerPoEtomuZaprosuStroki') : t('core.dockerLogovPokaNet') }}
       </p>
       <p
         v-for="line in visible"
@@ -36,7 +36,7 @@ import type {
   DockerLogMessage,
 } from '../../../../shared/plugins/docker/dockerContracts';
 import { api } from '../../shared/apiClient.ts';
-import { UiCheckbox, UiSearchInput } from '../../ui';
+import { UiCheckbox, UiSearchInput, t } from '../../ui';
 
 type LogStatus = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -60,10 +60,10 @@ let socket: WebSocket | null = null;
 let sequence = 0;
 
 const statusLabel = computed(() => ({
-  connecting: 'подключаюсь…',
-  open: 'поток открыт',
-  closed: 'поток закрыт',
-  error: 'ошибка',
+  connecting: t('core.dockerPodklyuchayus'),
+  open: t('core.dockerPotokOtkryt'),
+  closed: t('core.dockerPotokZakryt'),
+  error: t('settings.error'),
 }[status.value]));
 
 const visible = computed(() => {
@@ -167,7 +167,7 @@ function receive(event: MessageEvent<unknown>): void {
   }
   if (message.t === 'error') {
     status.value = 'error';
-    push([{ stream: 'stderr', text: message.message || 'поток логов оборвался' }]);
+    push([{ stream: 'stderr', text: message.message || t('core.dockerPotokLogovOborvalsya') }]);
   }
 }
 

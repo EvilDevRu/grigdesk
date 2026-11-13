@@ -367,6 +367,8 @@
                       v-for="entry in group.models"
                       :key="entry.id"
                       :value="modelId(group.id, entry.id)"
+                      :disabled="entry.nonChat"
+                      :title="entry.nonChat ? entry.nonChatReason : undefined"
                     >
                       {{ entry.name }}
                     </option>

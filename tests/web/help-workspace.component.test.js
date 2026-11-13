@@ -29,7 +29,7 @@ test('HELP-WORK1: Ask создаёт новый draft и не отправляе
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   try {
-    h.control.handlers['/api/help'] = () => Response.json(corpus);
+    h.control.handlers['/api/help?locale=ru'] = () => Response.json(corpus);
     chat.loaded = true;
 
     const previous = chat.newSession({
@@ -95,7 +95,7 @@ test('HELP-WORK2: F1 поверх незавершённых настроек н
   assert.equal(h.writes().length, 0);
 });
 
-test('HELP-WORK3: английские controls и явная русская статья', async (t) => {
+test('HELP-WORK3: старый сервер с русским корпусом явно сообщает о языке статьи', async (t) => {
   const h = await settingsHarness(t, 'interface.behavior', 'HelpBrowser', {
     props: {
       bundle: corpus,
@@ -110,4 +110,48 @@ test('HELP-WORK3: английские controls и явная русская с�
   assert.match(h.wrapper.text(), /The guide is currently available in Russian/u);
   assert.equal(h.wrapper.get('input[type="search"]').attributes('aria-label'), 'Search help');
   assert.match(h.wrapper.get('article').text(), /Начало/u);
+});
+
+test('HELP-WORK4: открытая справка меняет корпус вместе с языком и отбрасывает старый ответ', async (t) => {
+  const h = await settingsHarness(t, 'interface.behavior', 'HelpWorkspace');
+  const auth = h.module.useAuthStore();
+  const english = {
+    ...corpus,
+    locale: 'en',
+    articles: [{
+      ...corpus.articles[0],
+      title: 'Getting started',
+      section: 'Help',
+      markdown: '# Getting started\nRead the English guide.',
+    }],
+  };
+  let finishEnglish;
+
+  h.module.setUiLocale('ru');
+  t.after(() => h.module.setUiLocale('ru'));
+  h.control.handlers['/api/help?locale=ru'] = () => Response.json(corpus);
+  h.control.handlers['/api/help?locale=en'] = () => new Promise((resolve) => {
+    finishEnglish = () => resolve(Response.json(english));
+  });
+  auth.clientScope = 'fixture';
+  auth.authenticated = true;
+  await h.flushPromises();
+  assert.match(h.wrapper.get('article').text(), /Начало/u);
+
+  h.module.setUiLocale('en');
+  await h.flushPromises();
+  assert.equal(h.wrapper.find('article').exists(), false);
+  h.module.setUiLocale('ru');
+  await h.flushPromises();
+  finishEnglish();
+  await h.flushPromises();
+  assert.match(h.wrapper.get('article').text(), /Начало/u);
+
+  h.control.handlers['/api/help?locale=en'] = () => Response.json(english);
+  h.module.setUiLocale('en');
+  await h.flushPromises();
+  assert.match(h.wrapper.get('article').text(), /Read the English guide/u);
+  assert.doesNotMatch(h.wrapper.text(), /currently available in Russian/u);
+  assert.equal(h.wrapper.get('a[aria-current="page"]').text(), 'Getting started');
+  assert.match(h.wrapper.get('a[target="_blank"]').attributes('href'), /\?lang=en#\/help\/overview$/u);
 });

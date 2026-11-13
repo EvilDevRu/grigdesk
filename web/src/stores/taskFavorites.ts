@@ -2,6 +2,10 @@ import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from '../shared/trackerMutation.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+
 // Независимое серверное избранное трекера и GrigDesk. Строка фильтра меняется после подтверждения сервера.
 // Ошибка мутации сохраняет прежний список без локального rollback.
 import { defineStore } from 'pinia';
@@ -9,6 +13,8 @@ import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 function taskKey(value: unknown): string {
   return String(value ?? '').trim();
@@ -20,14 +26,14 @@ function taskKey(value: unknown): string {
  */
 function normalizedSnapshot(value: unknown) {
   if (!isRecord(value)) {
-    throw new Error('Сервер вернул некорректное избранное');
+    throw new Error(t('core.taskServerVernulNekorrektnoeIzbrannoe'));
   }
 
   const scope = String(value.scope || '');
   const revision = Number(value.revision);
 
   if (!scope || !Number.isSafeInteger(revision) || revision < 0 || !Array.isArray(value.taskIds)) {
-    throw new Error('Сервер вернул некорректное избранное');
+    throw new Error(t('core.taskServerVernulNekorrektnoeIzbrannoe'));
   }
 
   return {
@@ -164,7 +170,7 @@ const createTaskFavoritesStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorMessage(error, 'Избранное недоступно');
+          this.error = errorMessage(error, t('core.coreIzbrannoeNedostupno'));
         }
 
         return false;
@@ -187,7 +193,7 @@ const createTaskFavoritesStore = (
         return false;
       }
       if (!this.loaded) {
-        this.error = 'Избранное ещё не загружено';
+        this.error = t('core.taskIzbrannoeEscheNeZagruzheno');
 
         return false;
       }
@@ -215,7 +221,7 @@ const createTaskFavoritesStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorMessage(error, 'Не удалось изменить избранное');
+          this.error = errorMessage(error, t('core.coreNeUdalosIzmenitIzbrannoe'));
         }
 
         return false;

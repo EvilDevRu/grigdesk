@@ -7,6 +7,11 @@ import { loadDraft } from './loadDraft.ts';
 import { loadDrafts } from './loadDrafts.ts';
 import { loadEditor } from './loadEditor.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Останавливает запись при обнаружении другой ревизии черновика.
@@ -16,7 +21,7 @@ function markConflict(): void {
   const store = useRoutesStore();
 
   store.conflict = true;
-  store.saveError = 'Черновик изменился в другой вкладке.';
+  store.saveError = translateUi('core.saveTheDraftChangedInAnotherTab');
   cancelDraftSave();
 }
 

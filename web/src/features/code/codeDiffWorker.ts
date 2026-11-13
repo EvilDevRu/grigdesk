@@ -1,6 +1,7 @@
 import { computeCodeDiff } from './codeDiffModel';
 import type { DiffPreferences, DiffResult } from './codeDiffModel';
 
+
 export type DiffWorkerRequest = {
   generation: number;
   oldContent: string;

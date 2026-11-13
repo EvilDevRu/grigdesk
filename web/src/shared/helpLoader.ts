@@ -1,6 +1,7 @@
 import { decodeHelpBundle } from '../../../shared/help/helpContracts.ts';
 import type { HelpBundle } from '../../../shared/help/helpContracts.ts';
 
+
 export type HelpLoadError = 'helpUnavailable' | 'helpServerUpgradeRequired' | '';
 
 export type HelpLoadState = {

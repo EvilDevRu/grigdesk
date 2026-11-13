@@ -27,7 +27,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { UiIconButton, vTooltip } from '../../ui';
+import { UiIconButton, vTooltip, t } from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -37,11 +37,14 @@ const props = defineProps({
 
 const emit = defineEmits<{ toggle: [] }>();
 
-const subject = computed(() => props.taskTitle ? `задачу «${props.taskTitle}»` : 'эту задачу');
+const subject =
+  computed(() => props.taskTitle
+        ? t('core.taskZadachuTasktitle', { taskTitle: props.taskTitle })
+        : t('core.taskEtuZadachu'));
 const label = computed(() => (
   props.active
-    ? `Убрать ${subject.value} из избранного`
-    : `Добавить ${subject.value} в избранное`
+    ? t('core.taskUbratSubjectIzIzbrannogo', { subject: subject.value })
+    : t('core.taskDobavitSubjectVIzbrannoe', { subject: subject.value })
 ));
 </script>
 

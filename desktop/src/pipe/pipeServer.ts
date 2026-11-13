@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { desktopText } from '../locale.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { timingSafeEqual } from 'node:crypto';
@@ -86,14 +87,18 @@ export async function startPipe(options: PipeOptions) {
       if (options.shell) {
         void Promise.resolve(options.shell.handle(req, res)).catch(() => {
           if (!res.headersSent) {
-            json(res, 500, { error: 'shell_error', message: 'Не удалось выполнить действие.' });
+            json(
+              res,
+              500,
+              { error: 'shell_error', message: desktopText('settings.couldNotPerformTheAction') },
+            );
           }
         });
       } else {
         json(res, 200, {
           rev: 0,
           status: 'none',
-          detail: serve ? null : 'Установка повреждена',
+          detail: serve ? null : desktopText('settings.cliStateBroken'),
         });
       }
     } else if (pathname.startsWith('/api/') || pathname.startsWith('/shots/')) {
@@ -106,7 +111,7 @@ export async function startPipe(options: PipeOptions) {
       serve(req, res);
     } else {
       res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<h1>Установка повреждена</h1><p>Переустановите приложение.</p>');
+      res.end(desktopText('desktop.installCorruptedHtml'));
     }
   });
 

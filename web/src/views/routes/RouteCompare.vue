@@ -1,25 +1,24 @@
 <template>
   <section class="route-compare">
     <header>
-      <strong v-if="'draftRevision' in report">Сравнение черновика r{{ report.draftRevision }}</strong>
-      <strong v-else>Сравнение ревизий</strong>
-      <span v-if="'currentCatalogHash' in report">
-        current {{ report.currentCatalogHash?.slice(0, 12) ?? 'нет' }}
+      <strong v-if="'draftRevision' in report">{{ t('core.routeSravnenieChernovikaR') }}{{ report.draftRevision }}</strong>
+      <strong v-else>{{ t('core.routeSravnenieReviziy') }}</strong>
+      <span v-if="'currentCatalogHash' in report"> {{ 'current' }} {{ report.currentCatalogHash?.slice(0, 12) ?? t('core.routeNet') }}
       </span>
       <span v-else>{{ report.fromCatalogHash.slice(0, 12) }} →
         {{ report.toCatalogHash.slice(0, 12) }}</span>
-      <span v-if="'sourceRevision' in report">источник r{{ report.sourceRevision }}</span>
+      <span v-if="'sourceRevision' in report">{{ t('core.routeIstochnikR') }}{{ report.sourceRevision }}</span>
       <UiButton v-if="'draftRevision' in report" data-test="open-publish" :disabled="!canPublish"
-                @click="$emit('publish')">Опубликовать этот снимок</UiButton>
+                @click="$emit('publish')">{{ t('core.routeOpublikovatEtotSnimok') }}</UiButton>
     </header>
-    <p v-if="!report.changes.length">Исполняемый каталог не изменился.</p>
+    <p v-if="!report.changes.length">{{ t('core.routeIspolnyaemyyKatalogNeIzmenilsya') }}</p>
     <details v-for="(change, index) in report.changes" :key="`${change.scope}:${change.routeId}:${index}`" open>
-      <summary>{{ change.scope === 'bootstrap' ? 'Начальная разведка' : change.routeId }}:
-        {{ change.kind === 'added' ? 'добавлено' : change.kind === 'removed' ? 'удалено' : 'изменено' }}
+      <summary>{{ change.scope === 'bootstrap' ? t('core.routeNachalnayaRazvedka') : change.routeId }}:
+        {{ change.kind === 'added' ? t('core.routeDobavleno') : change.kind === 'removed' ? t('core.routeUdaleno') : t('core.routeIzmeneno') }}
       </summary>
       <div class="route-compare__sides">
-        <div><strong>До</strong><pre>{{ format(change.before) }}</pre></div>
-        <div><strong>После</strong><pre>{{ format(change.after) }}</pre></div>
+        <div><strong>{{ t('core.routeDo') }}</strong><pre>{{ format(change.before) }}</pre></div>
+        <div><strong>{{ t('core.routePosle') }}</strong><pre>{{ format(change.after) }}</pre></div>
       </div>
       <details v-for="field in change.fields ?? []" :key="field.path">
         <summary class="mono">{{ field.path }} — {{ field.kind }}</summary>
@@ -29,7 +28,7 @@
       </details>
     </details>
     <details v-if="report.presentationChanges?.length">
-      <summary>Расположение на холсте (не влияет на публикацию)</summary>
+      <summary>{{ t('core.routeRaspolozhenieNaHolsteNe') }}</summary>
       <div v-for="field in report.presentationChanges" :key="field.path" class="mono">
         {{ field.path }}: {{ format(field.before) }} → {{ format(field.after) }}
       </div>
@@ -41,7 +40,7 @@
 import type {
   RouteCompareReport, RouteRevisionCompareReport,
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 
 defineProps<{ report: RouteCompareReport | RouteRevisionCompareReport; canPublish: boolean }>();
 defineEmits<{ publish: [] }>();

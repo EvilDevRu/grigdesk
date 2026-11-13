@@ -13,6 +13,9 @@ import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 import type { SystemMetrics as Metrics } from '../../../shared/runtime/systemMetrics.ts';
 
+const translateUi = localeTranslator(uiLocalePort);
+
+
 interface Runtime {
   timer: ReturnType<typeof setTimeout> | null;
   inflight: Promise<void> | null;
@@ -111,7 +114,7 @@ export const useSystemStore = defineStore('system', {
         .catch((error) => {
           // Метрики не стираем: пустота в шапке хуже честной пометки «устарело».
           this.stale = true;
-          this.error = errorMessage(error, 'сервер не ответил');
+          this.error = errorMessage(error, translateUi('settings.providerNoResponse'));
         })
         .finally(() => {
           runtime.inflight = null;

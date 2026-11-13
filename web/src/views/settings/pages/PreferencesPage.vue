@@ -48,6 +48,8 @@
               v-for="model in provider.models || []"
               :key="model.id"
               :value="modelKey(provider.id, model.id)"
+              :disabled="model.nonChat"
+              :title="model.nonChat ? model.nonChatReason : undefined"
             >
               {{ model.name || model.id }}
             </option>

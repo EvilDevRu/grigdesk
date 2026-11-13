@@ -1,6 +1,11 @@
 import { useRoutesStore } from '../../stores/routes.ts';
 import { createDraft } from './createDraft.ts';
 import { loadDraft } from './loadDraft.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /** Копия получает собственный UUID; прежний черновик остаётся на сервере нетронутым. */
 /**
@@ -16,14 +21,14 @@ export async function saveConflictCopy(): Promise<void> {
     return;
   }
   if (store.jsonBuffer?.dirty) {
-    store.saveError = 'Сначала примените или скопируйте неприменённый JSON-текст.';
+    store.saveError = t('core.routeSnachalaPrimeniteIliSkopiruyte');
 
     return;
   }
 
   await createDraft(opened.profile, {
     kind: 'document',
-    title: `${local.title} (копия)`,
+    title: t('core.routeTitleKopiya', { title: local.title }),
     baseCatalogHash: local.baseCatalogHash,
     baseSourceRevision: local.baseSourceRevision,
     document: {

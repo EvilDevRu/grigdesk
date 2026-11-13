@@ -4,16 +4,14 @@
     tone="warning"
     v-tooltip="failure"
     data-context="plugin-slot-failure"
-  >
-    Плагин «{{ placement.pluginId }}» не отрисовался
-  </UiInlineMessage>
+  > {{ t('core.plugin') }}{{ placement.pluginId }}{{ t('core.coreNeOtrisovalsya') }} </UiInlineMessage>
   <component :is="placement.component" v-else v-bind="context" />
 </template>
 
 <script setup lang="ts">
 import { onErrorCaptured, ref, watch } from 'vue';
 
-import { UiInlineMessage, vTooltip } from '../ui';
+import { UiInlineMessage, vTooltip, t } from '../ui';
 import type { PluginPlacement } from './registry.ts';
 
 // Одно размещение в своей границе ошибок: упавший компонент плагина показывает
@@ -26,7 +24,7 @@ const props = defineProps<{
 const failure = ref('');
 
 onErrorCaptured((error) => {
-  failure.value = error instanceof Error && error.message ? error.message : 'ошибка плагина';
+  failure.value = error instanceof Error && error.message ? error.message : t('core.coreOshibkaPlagina');
 
   return false;
 });

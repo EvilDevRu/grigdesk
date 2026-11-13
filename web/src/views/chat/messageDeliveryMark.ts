@@ -1,3 +1,9 @@
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
+
 // Метка доставки описывает обычную реплику человека без привязки к состоянию компонента.
 // Неподтверждённая отправка важнее очереди, а уточнения сохраняют свой отдельный lifecycle.
 export type MessageDeliveryMark =
@@ -31,27 +37,27 @@ export function messageDeliveryMark(
     if (deliveryState === 'retrying') {
       return {
         kind: 'pending',
-        label: 'Нет связи с сервером — повторяю отправку…',
+        label: t('core.chatNetSvyaziSServerom'),
         icon: 'offline',
       };
     }
     if (deliveryState === 'lost') {
       return {
         kind: 'failed',
-        label: 'Не доставлено: сервер не подтвердил приём',
+        label: t('core.chatNeDostavlenoServerNe'),
       };
     }
 
     return {
       kind: 'pending',
-      label: deliveryState === 'posting' ? 'Отправляется' : 'Проверяю доставку',
+      label: deliveryState === 'posting' ? t('core.chatOtpravlyaetsya') : t('core.chatProveryayuDostavku'),
       icon: 'clock',
     };
   }
   if (message.queued) {
     return {
       kind: 'pending',
-      label: 'Ждёт очереди — уйдёт, когда агент закончит текущий ход',
+      label: t('core.chatZhdetOcherediUydetKogda'),
       icon: 'clock',
     };
   }

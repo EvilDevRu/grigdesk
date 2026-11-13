@@ -5,17 +5,16 @@
          выбрать, а тембр — единственное, что здесь важно. -->
     <template v-if="mode === 'choice'">
       <div class="voice__choice">
-        <UiField label="Голос ролика" class="voice__field">
+        <UiField :label="t('core.showcaseGolosRolika')" class="voice__field">
           <UiSelect
             data-testid="showcase-voice-select"
             :model-value="currentVoice"
             :disabled="busy || !availableVoiceRefs.length"
             @update:model-value="onVoice"
           >
-            <option v-if="!groups.length" value="">голос ещё не установлен</option>
+            <option v-if="!groups.length" value="">{{ t('core.showcaseGolosEscheNeUstanovlen') }}</option>
             <option v-if="missingCurrentVoice" :value="currentVoice" disabled>
-              {{ currentVoice }} — сохранённый голос недоступен
-            </option>
+              {{ currentVoice }} {{ t('core.showcaseSohranennyyGolosNedostupen') }} </option>
             <optgroup v-for="group in groups" :key="group.engineId" :label="group.name">
               <option
                 v-for="voice in group.voices"
@@ -23,7 +22,7 @@
                 :value="voice.ref"
                 :disabled="!voice.available"
               >
-                {{ voice.name }}{{ voice.available ? '' : ' — недоступен' }}
+                {{ voice.name }}{{ voice.available ? '' : t('core.showcaseNedostupen') }}
               </option>
             </optgroup>
           </UiSelect>
@@ -35,13 +34,11 @@
           :disabled="!currentVoiceAvailable || busy"
           :loading="previewing"
           @click="preview"
-        >
-          Прослушать
-        </UiButton>
+        > {{ t('core.showcaseProslushat') }} </UiButton>
         <!-- Пять ступеней вокруг обычного темпа на ползунке; в свою шкалу их
              переводит выбранный голос. Возможности берём у диктора, а старый
              ответ без них показываем как unknown, не как обещание поддержки. -->
-        <UiField class="voice__pace" :label="paceSupported ? `Темп речи — ${paceLabel}` : 'Темп речи'">
+        <UiField class="voice__pace" :label="paceSupported ? t('core.showcaseTempRechiPacelabel', { paceLabel }) : t('core.showcaseTempRechi')">
           <UiDiscreteSlider
             v-if="paceSupported"
             data-testid="showcase-voice-pace"
@@ -51,7 +48,7 @@
             :step="1"
             :labels="PACE_POINTS"
             :disabled="busy"
-            aria-label="Темп речи"
+            :aria-label="t('core.showcaseTempRechi')"
             @update:model-value="onPaceIndex"
           />
           <span v-else class="voice__pace-note" data-testid="showcase-voice-pace-note">
@@ -64,23 +61,17 @@
         v-if="currentVoice"
         class="voice__capabilities"
         data-testid="showcase-voice-capabilities"
-        aria-label="Возможности выбранного голоса"
+        :aria-label="t('core.showcaseVozmozhnostiVybrannogoGolosa')"
       >
-        <span :data-state="capabilityState(currentCapabilities?.pace)">
-          Темп: {{ capabilityLabel(currentCapabilities?.pace) }}
+        <span :data-state="capabilityState(currentCapabilities?.pace)"> {{ t('core.showcaseTemp') }} {{ capabilityLabel(currentCapabilities?.pace) }}
         </span>
-        <span :data-state="capabilityState(currentCapabilities?.pause)">
-          Паузы: {{ capabilityLabel(currentCapabilities?.pause) }}
+        <span :data-state="capabilityState(currentCapabilities?.pause)"> {{ t('core.showcasePauzy') }} {{ capabilityLabel(currentCapabilities?.pause) }}
         </span>
-        <span :data-state="capabilityState(currentCapabilities?.stress)">
-          Ударения: {{ capabilityLabel(currentCapabilities?.stress) }}
+        <span :data-state="capabilityState(currentCapabilities?.stress)"> {{ t('core.showcaseUdareniya') }} {{ capabilityLabel(currentCapabilities?.stress) }}
         </span>
       </p>
 
-      <p id="showcase-voice-title" class="voice__note">
-        Один голос на все сцены. После смены голоса или темпа звук устареет, и следующая
-        сборка переозвучит их.
-        <!-- Пока образец готовится, человек видит, чего ждёт: первый запрос синтезирует
+      <p id="showcase-voice-title" class="voice__note"> {{ t('core.showcaseOdinGolosNaVse') }} <!-- Пока образец готовится, человек видит, чего ждёт: первый запрос синтезирует
              фразу, и у тяжёлого движка это десятки секунд. -->
         <span v-if="previewing" class="voice__preview-note" role="status">{{ previewNote }}</span>
         <span v-if="previewError" class="voice__error" role="alert">{{ previewError }}</span>
@@ -88,23 +79,18 @@
 
       <div class="voice__more">
         <UiDisclosureButton v-model:open="setupOpen" controls="showcase-voice-setup" density="compact">
-          {{ setupOpen ? 'Скрыть установку голосов' : 'Установить другие голоса' }}
+          {{ setupOpen ? t('core.showcaseSkrytUstanovkuGolosov') : t('core.showcaseUstanovitDrugieGolosa') }}
         </UiDisclosureButton>
         <UiDisclosureButton v-model:open="stressOpen" controls="showcase-voice-stress" density="compact">
-          {{ stressOpen ? 'Скрыть словарь ударений' : 'Ударения и словарь' }}
+          {{ stressOpen ? t('core.showcaseSkrytSlovarUdareniy') : t('core.showcaseUdareniyaISlovar') }}
         </UiDisclosureButton>
       </div>
     </template>
 
     <header v-else class="voice__head">
-      <p class="voice__kicker">Озвучка</p>
-      <h3 id="showcase-voice-title">Голос для озвучки не установлен</h3>
-      <p class="voice__note">
-        Без голоса сборка не озвучит сцены; свой звук файлом загрузить можно. Установка —
-        одним нажатием, размер назван до него. Облако Microsoft говорит без ключа, как
-        только сервер видит сеть; облачный голос Яндекса включается ключом в корневом
-        .env сервера.
-      </p>
+      <p class="voice__kicker">{{ t('core.showcaseOzvuchka2') }}</p>
+      <h3 id="showcase-voice-title">{{ t('core.showcaseGolosDlyaOzvuchkiNe') }}</h3>
+      <p class="voice__note"> {{ t('core.showcaseBezGolosaSborkaNe') }} </p>
     </header>
 
     <div v-show="mode === 'setup' || setupOpen" id="showcase-voice-setup" class="voice__setup">
@@ -141,9 +127,7 @@
           variant="ghost"
           :loading="busy"
           @click="emit('cancel')"
-        >
-          Отменить
-        </UiButton>
+        > {{ t('core.trackerCancel') }} </UiButton>
       </div>
 
       <ul v-if="catalog?.install.available.length" class="voice__packages">
@@ -159,12 +143,9 @@
             :loading="busy"
             :disabled="installing"
             @click="emit('install', item.id)"
-          >
-            Установить
-          </UiButton>
+          > {{ t('core.trackerInstall') }} </UiButton>
           <span v-else class="voice__package-done">
-            <i aria-hidden="true"></i>Установлен
-          </span>
+            <i aria-hidden="true"></i>{{ t('settings.marketplaceInstalled') }} </span>
         </li>
       </ul>
     </div>
@@ -172,29 +153,23 @@
     <!-- Ударения: знак в тексте сцены и словарь установки. Словарь общий для всех
          роликов, и править его логично там же, где выбирают голос. -->
     <div v-show="mode === 'choice' && stressOpen" id="showcase-voice-stress" class="voice__stress">
-      <p class="voice__note">
-        Ударение в тексте сцены — знак «+» перед гласной: з+амок, зам+ок. Слова, в которых
-        движок ошибается всегда, лучше записать в словарь: одно слово со знаком на строку,
-        строки с «#» — комментарии. Словарь действует на все ролики; сцены с этими словами
-        переозвучатся при следующей сборке. Числа и латиницу пишите словами.
-        <strong class="voice__stress-support" :data-state="capabilityState(currentCapabilities?.stress)">
+      <p class="voice__note"> {{ t('core.showcaseUdarenieVTeksteStseny') }} <strong class="voice__stress-support" :data-state="capabilityState(currentCapabilities?.stress)">
           {{ stressSupportText }}
         </strong>
       </p>
 
-      <UiField label="Словарь ударений" :hint="dictionaryHint">
+      <UiField :label="t('core.showcaseSlovarUdareniy')" :hint="dictionaryHint">
         <UiTextarea
           v-model="dictionaryDraft"
           data-testid="showcase-voice-dictionary"
           :disabled="busy || !dictionary"
           rows="5"
-          placeholder="дин+амика"
+          :placeholder="t('core.showcaseDinAmika')"
         />
       </UiField>
 
       <ul v-if="dictionary?.errors.length" class="voice__dictionary-errors" role="alert">
-        <li v-for="error in dictionary.errors" :key="error.line">
-          Строка {{ error.line }}: «{{ error.text }}» — {{ error.reason }}.
+        <li v-for="error in dictionary.errors" :key="error.line"> {{ t('core.showcaseStroka') }} {{ error.line }}: «{{ error.text }}» — {{ error.reason }}.
         </li>
       </ul>
 
@@ -206,9 +181,7 @@
           :disabled="!dictionaryChanged || busy || !dictionary"
           :loading="busy"
           @click="emit('save-dictionary', dictionaryDraft)"
-        >
-          Сохранить словарь
-        </UiButton>
+        > {{ t('core.showcaseSohranitSlovar') }} </UiButton>
       </div>
     </div>
   </section>
@@ -217,14 +190,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import {
-  UiButton,
-  UiDisclosureButton,
-  UiDiscreteSlider,
-  UiField,
-  UiSelect,
-  UiTextarea,
-} from '../../ui';
+import { UiButton, UiDisclosureButton, UiDiscreteSlider, UiField, UiSelect, UiTextarea, t } from '../../ui';
 import type {
   ShowcasePace,
   ShowcaseVoiceCatalog,
@@ -263,23 +229,37 @@ const emit = defineEmits<{
 }>();
 
 const PACES: { value: Pace; label: string }[] = [
-  { value: 'slowest', label: 'Медленно' },
-  { value: 'slow', label: 'Помедленнее' },
-  { value: 'normal', label: 'Обычный' },
-  { value: 'fast', label: 'Побыстрее' },
-  { value: 'fastest', label: 'Быстро' },
+  { value: 'slowest', get label() {
+    return t('core.showcaseMedlenno');
+  } },
+  { value: 'slow', get label() {
+    return t('core.showcasePomedlennee');
+  } },
+  { value: 'normal', get label() {
+    return t('core.showcaseObychnyy');
+  } },
+  { value: 'fast', get label() {
+    return t('core.showcasePobystree');
+  } },
+  { value: 'fastest', get label() {
+    return t('core.showcaseBystro');
+  } },
 ];
 
 // Подписи под ползунком: только края и середина, остальные ступени читаются по
 // подписи поля — пять слов под коротким ползунком слипались бы.
 const PACE_POINTS: Record<number, string> = {
-  0: 'Медленно',
-  2: 'Обычный',
-  4: 'Быстро',
+  get 0() {
+    return t('core.showcaseMedlenno');
+  },
+  get 2() {
+    return t('core.showcaseObychnyy');
+  },
+  get 4() {
+    return t('core.showcaseBystro');
+  },
 };
 
-const PREVIEW_NOTE = 'Готовлю образец: первый раз голос синтезирует фразу, '
-  + 'у тяжёлого движка это занимает до минуты.';
 
 const previewing = ref(false);
 const previewNote = ref('');
@@ -362,19 +342,19 @@ const currentVoiceAvailable = computed(() => currentVoiceInfo.value?.available =
 const paceSupported = computed(() => currentCapabilities.value?.pace === true);
 
 const paceSupportText = computed(() => currentCapabilities.value?.pace === false
-  ? 'Этот голос темп не меняет — ускорить или замедлить речь можно другим голосом.'
-  : 'Поддержка изменения темпа для этого голоса неизвестна; темп не меняем.');
+  ? t('core.showcaseEtotGolosTempNe')
+  : t('core.showcasePodderzhkaIzmeneniyaTempaDlya'));
 
 const stressSupportText = computed(() => {
   if (currentCapabilities.value?.stress === true) {
-    return 'Выбранный голос применяет знаки и словарь ударений.';
+    return t('core.showcaseVybrannyyGolosPrimenyaetZnaki');
   }
 
   if (currentCapabilities.value?.stress === false) {
-    return 'Выбранный голос не применяет знаки и словарь ударений; используйте явную замену в сцене.';
+    return t('core.showcaseVybrannyyGolosNePrimenyaet');
   }
 
-  return 'Поддержка ударений у выбранного голоса неизвестна; проверьте реплику прослушиванием.';
+  return t('core.showcasePodderzhkaUdareniyUVybrannogo');
 });
 
 // Возможность старого backend отсутствует, а не равна запрету. Отдельное unknown
@@ -386,28 +366,48 @@ function capabilityState(value: boolean | undefined): 'yes' | 'no' | 'unknown' {
 // Текстовая подпись повторяет трёхзначное состояние значка без цветовой подсказки.
 // Это сохраняет различие «нет» и «неизвестно» для чтения вслух и без CSS.
 function capabilityLabel(value: boolean | undefined): string {
-  return value === true ? 'есть' : value === false ? 'нет' : 'неизвестно';
+  return value === true
+            ? t('core.showcaseEst')
+            : value === false ? t('core.routeNet') : t('core.showcaseNeizvestno');
 }
 
 const paceIndex = computed(() => Math.max(0, PACES.findIndex((item) => item.value === currentPace.value)));
 
-const paceLabel = computed(() => PACES[paceIndex.value]?.label ?? 'Обычный');
+const paceLabel = computed(() => PACES[paceIndex.value]?.label ?? t('core.showcaseObychnyy'));
 
 const JOB_TITLES: Record<string, string> = {
-  running: 'Идёт установка',
-  succeeded: 'Установка завершена',
-  failed: 'Установка не удалась',
-  cancelled: 'Установка отменена',
-  interrupted: 'Установка оборвалась',
+  get running() {
+    return t('core.showcaseIdetUstanovka');
+  },
+  get succeeded() {
+    return t('settings.installationComplete');
+  },
+  get failed() {
+    return t('core.showcaseUstanovkaNeUdalas');
+  },
+  get cancelled() {
+    return t('settings.installationCancelled2');
+  },
+  get interrupted() {
+    return t('core.showcaseUstanovkaOborvalas');
+  },
 };
 
-const jobTitle = computed(() => JOB_TITLES[job.value?.state ?? ''] ?? 'Установка');
+const jobTitle = computed(() => JOB_TITLES[job.value?.state ?? ''] ?? t('core.trackerJobApplying'));
 
 const ENGINE_STATES: Record<string, string> = {
-  ready: 'готов',
-  warning: 'есть ограничение',
-  blocked: 'нужна настройка',
-  unknown: 'не проверен',
+  get ready() {
+    return t('core.showcaseGotov');
+  },
+  get warning() {
+    return t('core.showcaseEstOgranichenie');
+  },
+  get blocked() {
+    return t('core.showcaseNuzhnaNastroyka');
+  },
+  get unknown() {
+    return t('core.showcaseNeProveren');
+  },
 };
 
 function engineState(status: string): string {
@@ -420,10 +420,10 @@ const GIGABYTE = 1024 * MEGABYTE;
 // Пакет на гигабайты называется гигабайтами: «8100 МБ» читается хуже, чем «7,9 ГБ».
 function sizeLabel(bytes: number): string {
   if (bytes >= GIGABYTE) {
-    return `${(bytes / GIGABYTE).toFixed(1).replace('.', ',')} ГБ`;
+    return t('core.showcaseValueGb', { value: (bytes / GIGABYTE).toFixed(1).replace('.', ',') });
   }
 
-  return `${Math.round(bytes / MEGABYTE)} МБ`;
+  return t('core.showcaseRoundbytesmegabyteMb', { roundbytesMEGABYTE: Math.round(bytes / MEGABYTE) });
 }
 
 /**
@@ -431,7 +431,9 @@ function sizeLabel(bytes: number): string {
  * перечислены по именам — модель на пять дикторов иначе выглядела бы одним.
  */
 function packageAbout(item: ShowcaseVoicePackage): string {
-  const voices = item.voices.length > 1 ? `голоса: ${item.voices.join(', ')}` : item.timbre;
+  const voices = item.voices.length > 1
+          ? t('core.showcaseGolosaJoin', { join: item.voices.join(', ') })
+          : item.timbre;
 
   return `${voices} · ${sizeLabel(item.byteSize)} · ${item.license}`;
 }
@@ -445,24 +447,26 @@ function wordsCount(count: number): string {
   const teen = count % 100 >= 11 && count % 100 <= 14;
 
   if (tail === 1 && !teen) {
-    return `${count} слово`;
+    return t('core.showcaseCountSlovo', { count: count });
   }
 
   if (tail >= 2 && tail <= 4 && !teen) {
-    return `${count} слова`;
+    return t('core.showcaseCountSlova', { count: count });
   }
 
-  return `${count} слов`;
+  return t('core.showcaseCountSlov', { count: count });
 }
 
 const dictionaryHint = computed(() => {
   if (!props.dictionary) {
-    return 'Словарь ещё не прочитан.';
+    return t('core.showcaseSlovarEscheNeProchitan');
   }
 
   const count = props.dictionary.entries.length;
 
-  return count > 0 ? `Действует: ${wordsCount(count)}.` : 'Словарь пуст.';
+  return count > 0
+    ? t('core.showcaseDeystvuetWordscountcount', { wordsCountcount: wordsCount(count) })
+    : t('core.showcaseSlovarPust');
 });
 
 // Смена голоса уходит наверх только когда выбор действительно изменился: сервер
@@ -498,7 +502,7 @@ async function preview(): Promise<void> {
   const generation = ++previewGeneration;
 
   previewing.value = true;
-  previewNote.value = PREVIEW_NOTE;
+  previewNote.value = t('core.showcaseGotovlyuObrazetsPervyyRaz');
   previewError.value = '';
 
   try {
@@ -513,7 +517,7 @@ async function preview(): Promise<void> {
     if (generation === previewGeneration) {
       previewError.value = error instanceof Error && error.message
         ? error.message
-        : 'Образец не воспроизвёлся: движок не ответил.';
+        : t('core.showcaseObrazetsNeVosproizvelsyaDvizhok');
     }
   } finally {
     if (generation === previewGeneration) {

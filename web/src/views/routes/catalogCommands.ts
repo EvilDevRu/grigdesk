@@ -1,6 +1,11 @@
 import { ROUTES_EDITOR_LIMITS } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { DraftNode, RouteTransitionDoc } from '../../../../shared/pipeline/routeDefinition.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export interface CatalogCommandIssue {
   code: string;
@@ -77,7 +82,7 @@ export function inspectRouteReferences(draft: RouteDraft, routeId: string): Cata
       references.push({
         code: 'route_reference',
         path,
-      message: `Ссылка на маршрут «${routeId}» требует решения.`
+      message: t('core.routeSsylkaNaMarshrutRouteid', { routeId })
       });
     }
   });
@@ -92,7 +97,7 @@ export function inspectRouteReferences(draft: RouteDraft, routeId: string): Cata
 export function createRoute(draft: RouteDraft, routeId: string,
   title = ''): CatalogCommandResult {
   if (!newIdAllowed(draft, routeId)) {
-    return rejected(draft, 'route_id_invalid', 'ID маршрута занят, недопустим или превышен лимит.');
+    return rejected(draft, 'route_id_invalid', t('core.routeIdMarshrutaZanyatNedopustim'));
   }
 
   const copy = structuredClone(draft);
@@ -121,10 +126,10 @@ export function cloneRoute(draft: RouteDraft, sourceId: string,
   const source = draft.routes[sourceId];
 
   if (!source) {
-    return rejected(draft, 'route_missing', 'Маршрут для копирования не найден.');
+    return rejected(draft, 'route_missing', t('core.routeMarshrutDlyaKopirovaniyaNe'));
   }
   if (!newIdAllowed(draft, newId)) {
-    return rejected(draft, 'route_id_invalid', 'ID маршрута занят, недопустим или превышен лимит.');
+    return rejected(draft, 'route_id_invalid', t('core.routeIdMarshrutaZanyatNedopustim'));
   }
 
   const copy = structuredClone(draft);
@@ -142,10 +147,10 @@ export function cloneRoute(draft: RouteDraft, sourceId: string,
 export function renameRoute(draft: RouteDraft, from: string,
   to: string): CatalogCommandResult {
   if (!draft.routes[from]) {
-    return rejected(draft, 'route_missing', 'Маршрут не найден.');
+    return rejected(draft, 'route_missing', t('core.routeMarshrutNeNayden'));
   }
   if (!newIdAllowed(draft, to, false)) {
-    return rejected(draft, 'route_id_invalid', 'Новый ID занят или недопустим.');
+    return rejected(draft, 'route_id_invalid', t('core.routeNovyyIdZanyatIli'));
   }
 
   const copy = structuredClone(draft);
@@ -175,7 +180,7 @@ export function renameRoute(draft: RouteDraft, from: string,
  */
 export function removeRoute(draft: RouteDraft, routeId: string): CatalogCommandResult {
   if (!draft.routes[routeId]) {
-    return rejected(draft, 'route_missing', 'Маршрут не найден.');
+    return rejected(draft, 'route_missing', t('core.routeMarshrutNeNayden'));
   }
 
   const copy = structuredClone(draft);
@@ -202,17 +207,17 @@ export function copyNodesFromRoute(draft: RouteDraft, sourceId: string,
   const destination = draft.routes[targetId];
 
   if (!source || !destination || sourceId === targetId) {
-    return rejected(draft, 'route_missing', 'Выберите два разных существующих маршрута.');
+    return rejected(draft, 'route_missing', t('core.routeVyberiteDvaRaznyhSuschestvuyuschih'));
   }
 
   const selected = new Set(nodeIds);
 
   if (!selected.size || selected.size !== nodeIds.length
     || nodeIds.some((id) => !source.route.nodes.some((node) => node.id === id))) {
-    return rejected(draft, 'node_missing', 'Выбранные этапы не найдены или повторены.');
+    return rejected(draft, 'node_missing', t('core.routeVybrannyeEtapyNeNaydeny'));
   }
   if (destination.route.nodes.length + nodeIds.length > ROUTES_EDITOR_LIMITS.nodes) {
-    return rejected(draft, 'node_limit', 'Превышен лимит этапов маршрута.');
+    return rejected(draft, 'node_limit', t('core.routePrevyshenLimitEtapovMarshruta'));
   }
 
   const usedKeys = new Set(destination.route.nodes.map((node) => node.runKey ?? node.key ?? ''));
@@ -223,7 +228,7 @@ export function copyNodesFromRoute(draft: RouteDraft, sourceId: string,
     const node = source.route.nodes.find((item) => item.id === id)!;
 
     if (node.executor === 'status' && !selected.has(node.owner ?? '')) {
-      return rejected(draft, 'owner_external', 'Для статуса выберите и его владельца.');
+      return rejected(draft, 'owner_external', t('core.routeDlyaStatusaVyberiteI'));
     }
 
     const key = allocateRunKey(node.runKey ?? node.key ?? id.toUpperCase(), usedKeys);
@@ -231,7 +236,7 @@ export function copyNodesFromRoute(draft: RouteDraft, sourceId: string,
 
     if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key) || !ROUTE_ID.test(nextId)
       || usedKeys.has(key) || usedIds.has(nextId)) {
-      return rejected(draft, 'node_id_conflict', 'Ключ копии уже занят или недопустим.');
+      return rejected(draft, 'node_id_conflict', t('core.routeKlyuchKopiiUzheZanyat'));
     }
 
     usedKeys.add(key);
@@ -248,7 +253,7 @@ export function copyNodesFromRoute(draft: RouteDraft, sourceId: string,
     issues.push({
       code: 'external_reference',
       path,
-      message: `Связь с этапом «${value}» вне копируемой группы оставлена незаполненной.`
+      message: t('core.routeSvyazSEtapomValue', { value })
     });
   };
 
@@ -376,7 +381,7 @@ export function copyNodesFromRoute(draft: RouteDraft, sourceId: string,
         issues.push({
           code: 'external_route_reference',
           path: `escalation.${next.from}.allowedRoutes`,
-          message: `Копия зависит от другого маршрута «${routeId}».`
+          message: t('core.routeKopiyaZavisitOtDrugogo', { routeId })
         });
       }
     }
@@ -398,11 +403,11 @@ export function setRouteProperties(draft: RouteDraft, routeId: string,
   const bundle = draft.routes[routeId];
 
   if (!bundle) {
-    return rejected(draft, 'route_missing', 'Маршрут не найден.');
+    return rejected(draft, 'route_missing', t('core.routeMarshrutNeNayden'));
   }
   if (options.title.length > 500 || (options.entry && !bundle.route.nodes.some((node) =>
     node.id === options.entry && node.executor !== 'status'))) {
-    return rejected(draft, 'route_properties_invalid', 'Название или начальный этап недопустимы.');
+    return rejected(draft, 'route_properties_invalid', t('core.routeNazvanieIliNachalnyyEtap'));
   }
 
   const copy = structuredClone(draft);

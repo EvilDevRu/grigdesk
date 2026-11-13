@@ -1,55 +1,45 @@
 <template>
   <fieldset class="route-policy-fields">
-    <legend>Права и исполнение</legend>
-    <label>Файловая политика
-      <UiSelect data-test="policy-filesystem" :model-value="policy.filesystem"
+    <legend>{{ t('core.routePravaIIspolnenie') }}</legend>
+    <label>{{ t('core.routeFaylovayaPolitika') }} <UiSelect data-test="policy-filesystem" :model-value="policy.filesystem"
                 @update:model-value="changePolicy('filesystem', String($event ?? ''))">
         <option v-if="!filesystems.includes(policy.filesystem)" :value="policy.filesystem">
-          {{ policy.filesystem }} (недоступно)
-        </option>
+          {{ policy.filesystem }} {{ t('core.routeNedostupno') }} </option>
         <option v-for="value in filesystems" :key="value" :value="value">{{ value }}</option>
       </UiSelect>
     </label>
-    <label>Браузер
-      <UiSelect data-test="policy-browser" :model-value="policy.browser ?? 'forbid'"
+    <label>{{ t('core.browserTitle') }} <UiSelect data-test="policy-browser" :model-value="policy.browser ?? 'forbid'"
                 @update:model-value="changePolicy('browser', String($event ?? ''))">
-        <option value="forbid">Запрещён</option>
-        <option value="allow">Разрешён</option>
+        <option value="forbid">{{ t('core.routeZapreschen') }}</option>
+        <option value="allow">{{ t('core.routeRazreshen') }}</option>
       </UiSelect>
     </label>
-    <label>Класс времени
-      <UiSelect data-test="policy-timeout-class" :model-value="policy.timeoutClass ?? ''"
+    <label>{{ t('core.routeKlassVremeni') }} <UiSelect data-test="policy-timeout-class" :model-value="policy.timeoutClass ?? ''"
                 @update:model-value="changePolicy('timeoutClass', String($event ?? ''))">
         <option v-if="policy.timeoutClass && !timeouts.includes(policy.timeoutClass)"
-                :value="policy.timeoutClass">{{ policy.timeoutClass }} (недоступно)</option>
+                :value="policy.timeoutClass">{{ policy.timeoutClass }} {{ t('core.routeNedostupno') }}</option>
         <option v-for="value in timeouts" :key="value" :value="value">{{ value }}</option>
       </UiSelect>
     </label>
-    <label>Класс бюджета
-      <UiInput data-test="policy-budget-class" :model-value="policy.budgetClass ?? ''"
+    <label>{{ t('core.routeKlassByudzheta') }} <UiInput data-test="policy-budget-class" :model-value="policy.budgetClass ?? ''"
                @update:model-value="changePolicy('budgetClass', String($event ?? ''))" />
     </label>
-    <label>Режим параллелизма
-      <UiSelect data-test="fanout-mode" :model-value="fanout.mode"
+    <label>{{ t('core.routeRezhimParallelizma') }} <UiSelect data-test="fanout-mode" :model-value="fanout.mode"
                 @update:model-value="changeFanout('mode', String($event ?? ''))">
-        <option value="single">Один исполнитель</option>
-        <option value="parallel">Параллельно</option>
+        <option value="single">{{ t('core.routeOdinIspolnitel') }}</option>
+        <option value="parallel">{{ t('core.routeParallelno') }}</option>
       </UiSelect>
     </label>
-    <label>Максимум исполнителей
-      <UiNumberInput data-test="fanout-max" :min="1" :model-value="fanout.maxExecutors"
+    <label>{{ t('core.routeMaksimumIspolniteley') }} <UiNumberInput data-test="fanout-max" :min="1" :model-value="fanout.maxExecutors"
                      @update:model-value="changeFanout('maxExecutors', Number($event))" />
     </label>
-    <label>При отказе параллелизма
-      <UiSelect data-test="fanout-degrade" :model-value="fanout.degrade"
+    <label>{{ t('core.routePriOtkazeParallelizma') }} <UiSelect data-test="fanout-degrade" :model-value="fanout.degrade"
                 @update:model-value="changeFanout('degrade', String($event ?? ''))">
-        <option value="forbid">Запретить</option>
-        <option value="allow-single">Разрешить один исполнитель</option>
+        <option value="forbid">{{ t('core.routeZapretit') }}</option>
+        <option value="allow-single">{{ t('core.routeRazreshitOdinIspolnitel') }}</option>
       </UiSelect>
     </label>
-    <p v-if="fanout.mode === 'parallel' && policy.filesystem !== 'state-only'" class="bad">
-      parallel поддерживается только с state-only. Выберите один исполнитель или смените файловую политику.
-    </p>
+    <p v-if="fanout.mode === 'parallel' && policy.filesystem !== 'state-only'" class="bad"> {{ t('core.routeParallelPodderzhivaetsyaTolkoS') }} </p>
   </fieldset>
 </template>
 
@@ -57,7 +47,7 @@
 import { computed } from 'vue';
 import type { RouteFanout, RoutePolicy } from '../../../../shared/pipeline/routeDefinition.ts';
 import type { RouteEditorInfo } from '../../../../shared/pipeline/routesEditorContracts.ts';
-import { UiInput, UiNumberInput, UiSelect } from '../../ui';
+import { UiInput, UiNumberInput, UiSelect, t } from '../../ui';
 
 const props = defineProps<{
   policy: RoutePolicy;

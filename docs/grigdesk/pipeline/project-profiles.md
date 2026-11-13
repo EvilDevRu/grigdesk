@@ -380,7 +380,7 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <PROFILE> --host-preflight
 
 Полная семантика bundle, каталога, контекста и переходов — в
 [документации движка](../../engine/ENGINE.md#бандлы-маршрутов-v2), работа с черновиком —
-в [руководстве редактора](../guide/routes.md).
+в [руководстве редактора](../guide/ru/routes.md).
 
 ### `routes/editor-capabilities.json`
 

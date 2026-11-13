@@ -78,7 +78,7 @@
         ref="projectStrip"
         class="project-strip"
         role="group"
-        aria-label="Проекты"
+        :aria-label="translate('core.projects')"
       >
         <span
           v-for="option in visibleProjectOptions"
@@ -93,8 +93,8 @@
             tone="accent"
             variant="ghost"
             :pressed="activeProject === option.id"
-            :aria-label="`${option.label}: ${option.count}`"
-            v-tooltip="`${option.label} · ${option.count}`"
+            :aria-label="translate('core.boardPageLabel', { label: option.label, count: option.count })"
+            v-tooltip="translate('core.pipelineLabelCount', { label: option.label, count: option.count })"
             @click="setProject(option.id)"
           >
             <span class="project-option-copy">
@@ -109,7 +109,7 @@
           class="project-overflow-popover"
           has-popup="menu"
           placement="bottom-end"
-          aria-label="Остальные проекты"
+          :aria-label="translate('core.pipelineOstalnyeProekty')"
           :style="{ width: 'min(320px, calc(100vw - 20px))' }"
         >
           <template #trigger>
@@ -118,8 +118,8 @@
               data-role="pipeline-project-overflow"
               data-context="pipeline-toolbar-more"
               variant="ghost"
-              :aria-label="`Ещё проектов: ${hiddenProjectOptions.length}`"
-              v-tooltip="`Ещё проектов: ${hiddenProjectOptions.length}`"
+              :aria-label="translate('core.pipelineEscheProektovLength', { length: hiddenProjectOptions.length })"
+              v-tooltip="translate('core.pipelineEscheProektovLength', { length: hiddenProjectOptions.length })"
             >
               <span class="mono">+{{ hiddenProjectOptions.length }}</span>
               <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -191,7 +191,7 @@
       <!-- Правый кластер: вторичные состояния вплотную к двум кнопкам вида. -->
       <div class="toolbar-secondary">
         <div class="status-scroll">
-          <div class="secondary-status-filters" role="group" aria-label="Состояние">
+          <div class="secondary-status-filters" role="group" :aria-label="translate('core.pipelineSostoyanie')">
             <UiButton
               v-for="option in statusOptions"
               :key="option.id"
@@ -203,7 +203,7 @@
               :tone="option.tone"
               variant="text"
               :pressed="activeStatus === option.id"
-              :aria-label="`${option.label}: ${option.count}`"
+              :aria-label="translate('core.boardPageLabel', { label: option.label, count: option.count })"
               v-tooltip="option.hint"
               @click="setStatus(option.id)"
             >
@@ -227,7 +227,7 @@
           <UiPopover
             has-popup="menu"
             placement="bottom-end"
-            aria-label="Состояние"
+            :aria-label="translate('core.pipelineSostoyanie')"
             :style="{ width: 'min(280px, calc(100vw - 20px))' }"
           >
             <template #trigger>
@@ -237,11 +237,11 @@
                 data-context="pipeline-status-trigger"
                 :tone="currentStatusOption.tone"
                 variant="text"
-                :aria-label="`Состояние: ${currentStatusOption.label}, ${currentStatusOption.count}`"
+                :aria-label="translate('core.pipelineSostoyanieLabelCount', { label: currentStatusOption.label, count: currentStatusOption.count })"
                 v-tooltip="currentStatusOption.label"
               >
                 <span class="status-menu-trigger-copy">
-                  <span class="status-menu-label">Состояние:</span>
+                  <span class="status-menu-label">{{ translate('core.pipelineSostoyanie2') }}</span>
                   <span
                     v-if="activeStatus !== 'all'"
                     class="status-dot"
@@ -284,7 +284,7 @@
           </UiPopover>
         </div>
 
-        <div class="compact-view-controls" role="group" aria-label="Вид карточек">
+        <div class="compact-view-controls" role="group" :aria-label="translate('core.pipelineCardView')">
           <UiIconButton
             data-option="loops"
             data-context="pipeline-view"
@@ -293,10 +293,10 @@
             variant="ghost"
             :pressed="loopsOn"
             :disabled="compact"
-            label="Показывать все возвраты"
+            :label="translate('core.pipelinePokazyvatVseVozvraty')"
             v-tooltip="compact
-              ? 'Возвраты доступны в подробном виде'
-              : 'Показывать все возможные возвратные связи на схемах'"
+              ? translate('core.pipelineVozvratyDostupnyVPodrobnom')
+              : translate('core.pipelinePokazyvatVseVozmozhnyeVozvratnye')"
             @click="toggleLoops(!loopsOn)"
           >
             <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -310,8 +310,8 @@
             tone="accent"
             variant="ghost"
             :pressed="compact"
-            label="Компактный вид"
-            v-tooltip="'Сворачивать все карточки до краткой сводки'"
+            :label="translate('core.pipelineCompactView')"
+            v-tooltip="translate('core.pipelineSvorachivatVseKartochkiDo')"
             @click="toggleCompact(!compact)"
           >
             <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -324,14 +324,12 @@
 
     </UiPaneHeader>
     <div class="pipeline-content ui-workspace-page__body">
-    <PipelineLoading v-if="!loaded && !error" label="Загрузка…" :compact="compact" :loops-on="loopsOn" />
-    <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
-    <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
+    <PipelineLoading v-if="!loaded && !error" :label="translate('core.browserLoading')" :compact="compact" :loops-on="loopsOn" />
+    <p v-else-if="error" class="err">{{ translate('core.pipelineOshibka') }} {{ error }}</p>
+    <p v-else-if="!tasks.length" class="muted">{{ translate('core.pipelineZadachVSostoyaniiFabriki') }}</p>
     <div v-else-if="!filteredTasks.length" class="filter-empty">
-      <span>По выбранным фильтрам задач нет.</span>
-      <UiButton tone="accent" variant="text" @click="resetStatusFilter">
-        Показать все состояния
-      </UiButton>
+      <span>{{ translate('core.pipelinePoVybrannymFiltramZadach') }}</span>
+      <UiButton tone="accent" variant="text" @click="resetStatusFilter"> {{ translate('core.pipelinePokazatVseSostoyaniya') }} </UiButton>
     </div>
 
     <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[t.readOnly ? 'readonly' : cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
@@ -340,8 +338,8 @@
           v-if="!compact"
           class="chev"
           role="rail"
-          :label="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
-          v-tooltip="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
+          :label="isCollapsed(t.task) ? translate('core.pipelineRazvernut') : translate('core.pipelineSvernut')"
+          v-tooltip="isCollapsed(t.task) ? translate('core.pipelineRazvernut') : translate('core.pipelineSvernut')"
           @click="toggleCard(t.task)"
         >
           {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
@@ -349,7 +347,7 @@
         <UiButton
           class="task mono"
           data-role="pipeline-task-id"
-          v-tooltip="'Свернуть/развернуть'"
+          v-tooltip="translate('core.pipelineSvernutRazvernut')"
           variant="text"
           @click="toggleCard(t.task)"
         >
@@ -374,10 +372,9 @@
           {{ title(t) }}
         </span>
         <span v-else class="ctitle pipeline-title-static muted">
-          <UiSpinner decorative /> загрузка названия…
-        </span>
+          <UiSpinner decorative /> {{ translate('core.pipelineZagruzkaNazvaniya') }} </span>
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
-          {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
+          {{ t.readOnly ? translate('core.pipelineTolkoChtenie') : t.stall ? (t.stall.kind === 'crashed' ? translate('core.pipelineOborvalas') : translate('core.pipelineVstala')) : (t.daemonAlive ? translate('core.pipelineIdet') : translate('core.pipelineStoit')) }}
         </span>
         <span
           v-if="trackerTimerState(t)"
@@ -385,7 +382,7 @@
           :class="trackerTimerState(t)"
           data-role="pipeline-tracker-timer"
           :data-state="trackerTimerState(t)"
-          v-tooltip="'Таймер Битрикс24 по этой задаче'"
+          v-tooltip="translate('core.pipelineTaymerBitriks24PoEtoy')"
         >
           {{ trackerTimerLabel(t) }}
         </span>
@@ -405,9 +402,8 @@
       <LoopStatus v-if="!t.stall || !isCollapsed(t.task)" :graph="t.graph" />
 
       <!-- Ждёт тебя (видно и в свёрнутом виде) -->
-      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph)!.premature }">
-        ⏳ ждёт тебя: {{ waitingReason(t.graph)!.text }}
-        <span v-if="waitingReason(t.graph)!.premature" class="pm">(преждевременно — хвост не доделан)</span>
+      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph)!.premature }"> {{ translate('core.pipelineZhdetTebya') }} {{ waitingReason(t.graph)!.text }}
+        <span v-if="waitingReason(t.graph)!.premature" class="pm">{{ translate('core.pipelinePrezhdevremennoHvostNeDodelan') }}</span>
       </div>
 
       <PipelineStopPanel
@@ -439,30 +435,23 @@
         <div v-if="!isCollapsed(t.task)" class="strip__context">
           <div v-if="t.graph.fePort" class="strip__stand">
             <span class="chunk">
-              <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'" aria-hidden="true"></span>
-              стенд
-            </span>
+              <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'" aria-hidden="true"></span> {{ translate('core.pipelineStend') }} </span>
             <div class="strip__links">
               <StandLink size="compact" data-context="pipeline-stand-link"
-                         :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
-                фронт :{{ t.graph.fePort }}
+                         :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''"> {{ translate('core.pipelineFront') }}{{ t.graph.fePort }}
               </StandLink>
               <StandLink v-if="t.graph.apiPort" size="compact" data-context="pipeline-stand-link"
-                         :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''">
-                API :{{ t.graph.apiPort }}
+                         :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''"> {{ translate('core.pipelineApi') }}{{ t.graph.apiPort }}
               </StandLink>
             </div>
           </div>
           <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
           <span v-else-if="t.graph.sandbox" class="chunk building">
-            <UiSpinner decorative />
-            стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
+            <UiSpinner decorative /> {{ translate('core.pipelineStendStroitsya') }} {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
           </span>
-          <span v-if="loopList(t.graph).length" class="chunk warn">
-            ↻ возвраты: {{ loopList(t.graph).join(', ') }}
+          <span v-if="loopList(t.graph).length" class="chunk warn"> {{ translate('core.pipelineVozvraty') }} {{ loopList(t.graph).join(', ') }}
           </span>
-          <span v-if="t.graph.halted && !t.stall" class="chunk halted">
-            ⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}
+          <span v-if="t.graph.halted && !t.stall" class="chunk halted"> {{ translate('core.pipelineZastryalaNa') }} {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}
           </span>
         </div>
         <PipelineCardActions
@@ -476,7 +465,7 @@
 
     <!-- Таймеры вне фабрики: активные задачи B24, которых нет на конвейере -->
     <section v-if="outsideTimers.length" class="outside">
-      <h3 class="ttl">Таймер идёт вне фабрики</h3>
+      <h3 class="ttl">{{ translate('core.pipelineTaymerIdetVneFabriki') }}</h3>
       <div v-for="t in outsideTimers" :key="t.id" class="orow">
         <span class="oid mono">#{{ t.id }}</span>
         <UiButton
@@ -498,7 +487,7 @@
       data-role="pipeline-stage"
       data-ui-workspace
       size="workspace"
-      :label="stage?.label || 'Этап конвейера'"
+      :label="stage?.label || translate('core.pipelineEtapKonveyera')"
       initial-focus="#stage-modal-title"
       :body-inset="false"
       fade-only
@@ -512,8 +501,8 @@
             <template #actions>
               <UiIconButton
                 data-context="pipeline-stage-close"
-                label="Закрыть этап"
-                v-tooltip="'Закрыть (Esc)'"
+                :label="translate('core.pipelineZakrytEtap')"
+                v-tooltip="translate('core.pipelineZakrytEsc')"
                 @click="closeStage()"
               >
                 ✕
@@ -530,7 +519,7 @@
         <div id="stage-task-context" class="stage-context">
           <div class="shead-state">
             <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
-              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
+              stageArbitrating ? translate('core.pipelineArbitrRazbiraet') : stageStatusHint(stage!)
             }}</span>
             <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
               agentActivityLabel(stageActivity)
@@ -541,25 +530,23 @@
             </span>
           </div>
           <div class="stage-task-context">
-            <span class="stage-context-label">Задача <b class="mono">#{{ stage!.task }}</b></span>
+            <span class="stage-context-label">{{ translate('core.chatOptionTask') }} <b class="mono">#{{ stage!.task }}</b></span>
             <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
-            <span v-else class="stage-task-title muted">Название загружается…</span>
+            <span v-else class="stage-task-title muted">{{ translate('core.pipelineNazvanieZagruzhaetsya') }}</span>
           </div>
           <div class="stage-stand-context">
-            <span class="stage-context-label">Стенд</span>
+            <span class="stage-context-label">{{ translate('core.pipelineStend2') }}</span>
             <template v-if="stageGraph?.fePort">
-              <StandLink class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort, stageGraph.serviceHost) || ''">
-                Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
+              <StandLink class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort, stageGraph.serviceHost) || ''"> {{ translate('core.pipelineFront2') }} <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
               </StandLink>
               <StandLink v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort, stageGraph.serviceHost) || ''">
                 API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
               </StandLink>
             </template>
             <span v-else-if="stageGraph?.sandbox" class="stage-stand-state building">
-              <UiSpinner decorative />
-              строится · {{ stageGraph.sandbox.step }}/{{ stageGraph.sandbox.total }} · {{ stageGraph.sandbox.label }}
+              <UiSpinner decorative /> {{ translate('core.pipelineStroitsya') }} {{ stageGraph.sandbox.step }}/{{ stageGraph.sandbox.total }} · {{ stageGraph.sandbox.label }}
             </span>
-            <span v-else class="stage-stand-state">не поднят</span>
+            <span v-else class="stage-stand-state">{{ translate('core.pipelineNePodnyat') }}</span>
           </div>
         </div>
 
@@ -568,7 +555,7 @@
         <div v-if="stageArbitrating && stageTab !== 'arbiter'"
              class="sarbrun sarbnode">
           <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
+          <span class="sarbtxt">{{ translate('core.pipelineArbitrRazbiraetEtuOstanovku') }}</span>
           <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
         </div>
 
@@ -635,12 +622,10 @@
                   variant="text"
                   tone="warning"
                   @click="openArbiterFromStage()"
-                >
-                  разбор и решение
-                </UiButton>
+                > {{ translate('core.pipelineRazborIReshenie') }} </UiButton>
               </div>
               <div v-if="stage!.meta.stall" class="scomment failed">
-                <span class="sclbl">Почему этап остановился</span>
+                <span class="sclbl">{{ translate('core.pipelinePochemuEtapOstanovilsya') }}</span>
                 <b>{{ stage!.meta.stall.title }}</b>
                 <div>{{ stage!.meta.stall.hint }}</div>
               </div>
@@ -667,9 +652,7 @@
                     <span class="svsum">{{ f.summary }}</span>
                   </li>
                 </ul>
-                <div v-if="stage!.meta.verdict!.omitted" class="svmore">
-                  …и ещё {{ stage!.meta.verdict!.omitted }} — остальные в журнале попытки
-                </div>
+                <div v-if="stage!.meta.verdict!.omitted" class="svmore"> {{ translate('core.pipelineIEsche') }} {{ stage!.meta.verdict!.omitted }} {{ translate('core.pipelineOstalnyeVZhurnalePopytki') }} </div>
               </div>
               <div v-if="stage!.meta.comment" class="snotices">
                 <div
@@ -702,32 +685,31 @@
             <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
                  раскрывается по кнопке: при принятии текст никуда не уходит. -->
             <div v-if="gateDecidable" class="sect gate-sect">
-              <div class="secth">Ворота — твоё решение</div>
+              <div class="secth">{{ translate('core.pipelineVorotaTvoeReshenie') }}</div>
               <!-- Что арбитр решил за человека по дороге. Ворота — единственная точка его
                    контроля, а карточка разбора живёт в плашке ОСТАНОВКИ, которой здесь нет.
                    Без этой сводки он принимал бы план и результат, не зная, какие развилки
                    закрыли без него. Первым идёт решение о границе задачи: оно требует
                    проверки сильнее, чем снятый технический тупик. -->
               <div v-if="gateArbiterLog.length" class="gwal">
-                <div class="gwalh">Решено арбитром, пока тебя не звали</div>
+                <div class="gwalh">{{ translate('core.pipelineReshenoArbitromPokaTebya') }}</div>
                 <div v-for="(row, i) in gateArbiterLog" :key="i" class="gwrow" :class="row.verdict">
-                  <span class="gwtag">{{ row.verdict === 'deferred' ? 'за тебя' : 'тупик' }}</span>
+                  <span class="gwtag">{{ row.verdict === 'deferred' ? translate('core.pipelineZaTebya') : translate('core.pipelineTupik') }}</span>
                   <span class="gwwhat">{{ row.card!.what }}</span>
                 </div>
-                <p class="gate-hint">Не согласен — отклони ворота либо верни конвейер
-                  на нужный узел: решение арбитра отменяется тем же возвратом.</p>
+                <p class="gate-hint">{{ translate('core.pipelineNeSoglasenOtkloniVorota') }}</p>
               </div>
               <template v-if="gateRejecting">
-                <label class="gate-lbl" for="gate-note">Что доработать</label>
+                <label class="gate-lbl" for="gate-note">{{ translate('core.pipelineChtoDorabotat') }}</label>
                 <UiTextarea
                   id="gate-note"
                   ref="gateNoteEl"
                   v-model="gateComment"
                   data-role="pipeline-stage-note"
                   rows="6"
-                  placeholder="Что не так и что сделать иначе"
+                  :placeholder="translate('core.pipelineChtoNeTakI')"
                 />
-                <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
+                <p class="gate-hint">{{ translate('core.pipelineTekstStanetZadaniemAgentu') }}</p>
                 <div class="gbtns">
                   <UiButton
                     class="btn bad"
@@ -735,22 +717,18 @@
                     variant="solid"
                     :loading="stageBusy === 'gate'"
                     :disabled="Boolean(stageBusy)"
-                    loading-label="Отправляю на доработку"
+                    :loading-label="translate('core.pipelineOtpravlyayuNaDorabotku')"
                     @click="gateDecide('reject')"
-                  >
-                    ✗ Отправить на доработку
-                  </UiButton>
+                  > {{ translate('core.pipelineOtpravitNaDorabotku') }} </UiButton>
                   <UiButton
                     class="btn"
                     :disabled="Boolean(stageBusy)"
                     @click="cancelGateReject()"
-                  >
-                    Отмена
-                  </UiButton>
+                  > {{ translate('core.cancel') }} </UiButton>
                 </div>
               </template>
               <template v-else>
-                <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
+                <p class="gate-hint">{{ translate('core.pipelinePrinyatMarshrutPoydetDalshe') }}</p>
                 <div class="gbtns">
                   <UiButton
                     class="btn good"
@@ -758,20 +736,16 @@
                     variant="solid"
                     :loading="stageBusy === 'gate'"
                     :disabled="Boolean(stageBusy) || (stage!.id === 'gate_accept' && !stageFindingsReady)"
-                    loading-label="Принимаю решение"
+                    :loading-label="translate('core.pipelinePrinimayuReshenie')"
                     @click="gateDecide('approve')"
-                  >
-                    ✓ Принять
-                  </UiButton>
+                  > {{ translate('core.pipelinePrinyat') }} </UiButton>
                   <UiButton
                     class="btn bad"
                     tone="danger"
                     variant="solid"
                     :disabled="Boolean(stageBusy)"
                     @click="startGateReject()"
-                  >
-                    ✗ Отклонить
-                  </UiButton>
+                  > {{ translate('core.pipelineOtklonit') }} </UiButton>
                 </div>
               </template>
             </div>
@@ -792,7 +766,7 @@
                    привязанного к его же вопросу. Поля появляются только у блокирующих
                    находок: отложенные вопросом к человеку не являются. -->
               <div v-if="rewindQuestions.length" class="rwq">
-                <div class="rwqhead">Ответы на вопросы узла</div>
+                <div class="rwqhead">{{ translate('core.pipelineOtvetyNaVoprosyUzla') }}</div>
                 <div v-for="(q, i) in rewindQuestions" :key="q.id" class="rwqitem">
                   <label class="rwqlbl" :for="`rwq-${i}`">
                     <span class="rwqnum">{{ i + 1 }}</span>
@@ -808,21 +782,19 @@
                     v-model="rewindAnswers[q.id]"
                     data-role="pipeline-stage-note"
                     rows="2"
-                    placeholder="Ответ на этот вопрос"
+                    :placeholder="translate('core.pipelineOtvetNaEtotVopros')"
                   />
                 </div>
               </div>
-              <label v-if="rewindQuestions.length" class="rwqlbl rwqfree" for="rewind-free">
-                Что ещё сказать агенту
-              </label>
+              <label v-if="rewindQuestions.length" class="rwqlbl rwqfree" for="rewind-free"> {{ translate('core.pipelineChtoEscheSkazatAgentu') }} </label>
               <UiTextarea
                 id="rewind-free"
                 v-model="rewindComment"
                 data-role="pipeline-stage-note"
                 :rows="rewindQuestions.length ? 4 : 5"
                 :placeholder="rewindQuestions.length
-                  ? 'Необязательно: остальное по задаче'
-                  : 'Указание агенту — что сделать иначе (необязательно)'"
+                  ? translate('core.pipelineNeobyazatelnoOstalnoePoZadache')
+                  : translate('core.pipelineUkazanieAgentuChtoSdelat')"
               />
               <UiButton
                 class="btn play"
@@ -831,7 +803,7 @@
                 block
                 :loading="stageBusy === 'force'"
                 :disabled="Boolean(stageBusy)"
-                loading-label="Возвращаю конвейер"
+                :loading-label="translate('core.pipelineVozvraschayuKonveyer')"
                 @click="forceStatus('running')"
               >
                 {{ translate('core.stageRestartAction') }}
@@ -845,15 +817,10 @@
                 block
                 :loading="rebindBusy"
                 :disabled="Boolean(stageBusy)"
-                loading-label="Снимаю закрепление"
+                :loading-label="translate('core.pipelineSnimayuZakreplenie')"
                 @click="rebindRuntime"
-              >
-                Перепривязать рантайм
-              </UiButton>
-              <p class="gate-hint">
-                Попытка закреплена за поставкой сервера. Снятие закрепления
-                включает обновлённый инструмент этапа на следующем запуске.
-              </p>
+              > {{ translate('core.pipelinePereprivyazatRantaym') }} </UiButton>
+              <p class="gate-hint"> {{ translate('core.pipelinePopytkaZakreplenaZaPostavkoy') }} </p>
             </div>
           </aside>
 
@@ -866,32 +833,31 @@
               <!-- Телеметрия захода: время, длительность, расход. Живёт рядом с исполнителем,
                    которому принадлежит, а не полосой в шапке — вопрос «что от меня хотят»
                    она не решает, а место занимала всегда, даже когда сообщать было нечего. -->
-              <div v-if="stageHasMeta" class="smeta" aria-label="Показатели этапа">
+              <div v-if="stageHasMeta" class="smeta" :aria-label="translate('core.pipelinePokazateliEtapa')">
                 <span v-if="stage!.meta.at" class="smchip mono">{{ stage!.meta.at.slice(11, 16) || stage!.meta.at }}</span>
-                <span v-if="stage!.meta.dur != null" class="smchip">{{ stage!.meta.dur }} мин</span>
+                <span v-if="stage!.meta.dur != null" class="smchip">{{ stage!.meta.dur }} {{ translate('settings.min') }}</span>
                 <!-- Ноль субагентов не сообщает ничего: заход без них — обычное дело, а чип
                      ради нуля занимал всю полосу метаданных. То же правило, что у отказов прав. -->
-                <span v-if="stage!.meta.fanout" class="smchip">{{ stage!.meta.fanout }} субаг.</span>
+                <span v-if="stage!.meta.fanout" class="smchip">{{ stage!.meta.fanout }} {{ translate('core.pipelineSubag') }}</span>
                 <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
                      одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
                      обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
                      запретили нужный запуск, склонен подобрать похожий и выдать его результат за
                      доказательство. -->
                 <span v-if="stage!.meta.denials" class="smchip failed"
-                  v-tooltip="'Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.'">
-                  {{ stage!.meta.denials }} отказ. прав</span>
-                <span v-if="stage!.meta.tokens" class="smchip mono">{{ stage!.meta.tokens.toLocaleString('ru') }} ток.</span>
-                <span v-if="stage!.meta.fails" class="smchip failed">{{ stage!.meta.fails }} возвр.</span>
+                  v-tooltip="translate('core.pipelineOtkazovPolitikiPravVnutri')">
+                  {{ stage!.meta.denials }} {{ translate('core.pipelineOtkazPrav') }}</span>
+                <span v-if="stage!.meta.tokens" class="smchip mono">{{ stage!.meta.tokens.toLocaleString(uiLocale) }} {{ translate('core.pipelineTok') }}</span>
+                <span v-if="stage!.meta.fails" class="smchip failed">{{ stage!.meta.fails }} {{ translate('core.pipelineVozvr') }}</span>
                 <span v-if="stage!.sub" class="smchip">{{ stage!.sub }}</span>
                 <span v-if="stage!.meta.verdict?.reviewed?.length" class="smchip"
-                  v-tooltip="stage!.meta.verdict!.reviewed.join('\n')">
-                  просм. файлов: {{ stage!.meta.verdict!.reviewed.length }}</span>
+                  v-tooltip="stage!.meta.verdict!.reviewed.join('\n')"> {{ translate('core.pipelineProsmFaylov') }} {{ stage!.meta.verdict!.reviewed.length }}</span>
               </div>
 
               <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
               <div v-if="stageDocLoading" class="sect content-sect">
-                <div class="secth">Документ этапа</div>
-                <UiLoadingState label="Документ этапа" variant="document">
+                <div class="secth">{{ translate('core.stageDocument') }}</div>
+                <UiLoadingState :label="translate('core.stageDocument')" variant="document">
                   <UiSkeletonLayout layout="text" :header="false" />
                 </UiLoadingState>
               </div>
@@ -925,9 +891,7 @@
                       tone="warning"
                       :disabled="Boolean(stageBusy)"
                       @click="setStageRunner('')"
-                    >
-                      Сбросить
-                    </UiButton>
+                    > {{ translate('settings.reset') }} </UiButton>
                   </div>
                   <span id="stage-executor-preview" class="ui-visually-hidden">
                     {{ translate('core.stageSettingsScope') }}
@@ -1001,9 +965,7 @@
                   <p v-if="runnerSettings?.receipt?.reason" role="alert">
                     {{ translate('core.stageSettingsSaved') }}: {{ runnerSettings.receipt.reason }}
                   </p>
-                  <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint">
-                    Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
-                  </p>
+                  <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint"> {{ translate('core.pipelineProgonOstanovlenVybrannyyIspolnitel') }} </p>
                 </div>
                 <!-- Цепочка остаётся одной справочной строкой под выбором исполнителя. -->
                 <div class="runner-chain">
@@ -1013,16 +975,15 @@
                     <span class="runner-hop"
                           :class="{ actual: id === stage!.meta.runner.actual, reserve: i > 0 }"
                           v-tooltip="i
-                            ? 'резерв: подхватит этап, если основной отпадёт'
-                            : 'основной исполнитель'">
+                            ? translate('core.pipelineRezervPodhvatitEtapEsli')
+                            : translate('core.pipelineOsnovnoyIspolnitel')">
                       {{ providerLabel(id) }}
                       <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
                     </span>
                   </template>
                 </div>
                 <div v-if="stage!.meta.runner.actual" class="runner-current"
-                     :class="{ switched: stage!.meta.runner.switched }">
-                  Сейчас: <b>{{ runnerNodeLabel(stage!.meta.runner) }}</b>
+                     :class="{ switched: stage!.meta.runner.switched }"> {{ translate('core.pipelineSeychas') }} <b>{{ runnerNodeLabel(stage!.meta.runner) }}</b>
                   <span v-if="stage!.meta.runner.reason"> · {{ runnerReasonLabel(stage!.meta.runner.reason) }}</span>
                 </div>
                 <div v-if="!stage!.readOnly && stageRunnerLive && !runnerSettings && !runnerSettingsLoading"
@@ -1035,10 +996,9 @@
                     variant="outline"
                     :loading="stageBusy === 'runner-switch'"
                     :disabled="Boolean(stageBusy)"
-                    :loading-label="`Переключаю на ${providerLabel(id)}`"
+                    :loading-label="translate('core.pipelinePereklyuchayuNaProviderlabelid', { providerLabelid: providerLabel(id) })"
                     @click="switchRunner(id)"
-                  >
-                    Переключить сейчас на {{ providerLabel(id) }}
+                  > {{ translate('core.pipelinePereklyuchitSeychasNa') }} {{ providerLabel(id) }}
                   </UiButton>
                 </div>
               </div>
@@ -1057,7 +1017,7 @@
                 <p>{{ translate('core.stageNoActivityHint') }}</p>
               </div>
               <div v-if="stage!.meta.runner?.attempts?.length" class="runner-attempts">
-                <div class="runner-attempt-title">Попытки запуска</div>
+                <div class="runner-attempt-title">{{ translate('core.pipelinePopytkiZapuska') }}</div>
                 <div v-for="a in stage!.meta.runner!.attempts" :key="a.id" class="runner-attempt">
                   <span class="mono">#{{ a.epoch ?? '—' }}</span>
                   <b>{{ providerLabel(a.runner) }}</b>
@@ -1076,7 +1036,7 @@
               </div>
               <!-- Живая лента действий агента (для идущего этапа) -->
               <div v-if="stage!.status === 'run' && stageActivity?.live" class="sect content-sect">
-                <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
+                <div class="secth"><span class="live-dot"></span> {{ translate('core.pipelineAgentSeychas') }}</div>
                 <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
                   <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
                     <span class="lf-icon">{{ liveIcon(a) }}</span>
@@ -1084,7 +1044,7 @@
                       <template v-if="a.type === 'tool' || a.type === 'subagent'">
                         <span class="lf-name">{{ a.name }}</span>
                         <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
-                        <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
+                        <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}{{ translate('core.pipelineKTok') }} {{ a.tools }} {{ translate('core.pipelineInstr') }}{{ a.lastTool ? translate('core.pipelineLasttool', { lastTool: a.lastTool }) : '' }}</span>
                       </template>
                       <template v-else>
                         <span class="lf-text">{{ a.text }}</span>
@@ -1093,7 +1053,7 @@
                     <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
                   </div>
                 </div>
-                <p v-else class="muted small">Ожидание действий агента…</p>
+                <p v-else class="muted small">{{ translate('core.pipelineOzhidanieDeystviyAgenta') }}</p>
                 <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
               </div>
 
@@ -1106,9 +1066,7 @@
                   density="compact"
                   :open="stageLogOpen"
                   @update:open="stageLogOpen = $event"
-                >
-                  Журнал этапов
-                  <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+                > {{ translate('core.pipelineZhurnalEtapov') }} <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
                 </UiDisclosureButton>
                 <div v-if="stageLogOpen" id="pipeline-stage-log" class="log">
                   <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
@@ -1134,9 +1092,7 @@
               data-role="pipeline-stage-task-open"
               variant="text"
               @click="ui.openTask(stage!.task)"
-            >
-              Открыть задачу
-            </UiButton>
+            > {{ translate('core.openTask') }} </UiButton>
             <OpenDiffButton :task-id="stage!.task" />
           </div>
         </footer>
@@ -1237,6 +1193,8 @@ import {
   UiLoadingState,
   UiSkeletonLayout,
   t as translate,
+  messageRef,
+  uiLocale,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
@@ -1290,7 +1248,7 @@ const silenceWindow = ref(0);
  */
 function collapsedCards(value: unknown): TaskId[] {
   if (!Array.isArray(value) || !value.every((id) => typeof id === 'string' || typeof id === 'number')) {
-    throw new TypeError('Неверный список свёрнутых карточек');
+    throw new TypeError(translate('core.coreNevernyySpisokSvernutyhKartochek'));
   }
 
   return value;
@@ -1367,8 +1325,8 @@ function trackerTimerLabel(t: PipelineViewTask) {
   }
 
   return task.timerRunning
-    ? `B24-таймер идёт · ${secToHMS(liveTimerSec(task, now.value))}`
-    : 'B24-таймер стоит';
+    ? translate('core.coreB24TaymerIdetValue', { value: secToHMS(liveTimerSec(task, now.value)) })
+    : translate('core.coreB24TaymerStoit');
 }
 
 // Таймеры, идущие ВНЕ фабрики: активные задачи доски, которых нет на конвейере.
@@ -1419,12 +1377,11 @@ function elapsedLabel(t: PipelineViewTask) {
  */
 function elapsedTitle(t: PipelineViewTask) {
   if (t.graph?.timing?.source === 'runner-telemetry') {
-    return 'фактическое время запущенных агентов текущей попытки: '
-      + 'паузы между запусками и ожидание человека на воротах не входят';
+    return translate('core.coreFakticheskoeVremyaZapuschennyhAgentov');
   }
 
   return t.graph?.timing
-    ? 'оценка по журналу маршрута: ожидание человека на воротах не входит'
+    ? translate('core.coreOtsenkaPoZhurnaluMarshruta')
     : '';
 }
 
@@ -1487,7 +1444,7 @@ const projectCounts = computed(() => {
 const projectOptions = computed(() => [
   {
     id: 'all',
-    label: 'Все',
+    label: translate('core.selectAllGroups'),
     count: tasks.value.length,
   },
   ...projects.value.map((project) => ({
@@ -1691,7 +1648,7 @@ const pipelineState = computed(() => {
       state.stalled.push({
         task: taskId,
         taskTitle,
-        title: task.stall.title || task.stall.hint || 'Конвейер встал',
+        title: task.stall.title || task.stall.hint || translate('core.pipelineKonveyerVstal'),
       });
     }
     if (!task.readOnly && silence) {
@@ -1745,7 +1702,7 @@ function statusHint(kind: string, emptyText: string) {
       .map((task) => ({
         task: String(task.task),
         title: title(task) || '',
-        detail: task.result ? `результат: ${task.result}` : '',
+        detail: task.result ? translate('core.coreRezultatResult', { result: task.result }) : '',
       }))
     : statusItems.value.filter((item) => item.kind === kind);
 
@@ -1763,40 +1720,40 @@ function statusHint(kind: string, emptyText: string) {
 const statusOptions = computed(() => [
   {
     id: 'all',
-    label: 'Все',
+    label: translate('core.selectAllGroups'),
     count: projectTasks.value.length,
     tone: 'neutral' as const,
-    hint: 'Все задачи выбранного проекта',
+    hint: translate('core.pipelineVseZadachiVybrannogoProekta'),
   },
   {
     id: 'running',
-    label: 'В работе',
+    label: translate('core.running'),
     count: statusSummary.value.runningCount,
     tone: 'accent' as const,
-    hint: statusHint('running', 'Сейчас нет задач в обычной работе'),
+    hint: statusHint('running', translate('core.coreSeychasNetZadachV')),
   },
   {
     id: 'waiting',
-    label: 'Ждут решения',
+    label: translate('core.awaitingDecision'),
     count: statusSummary.value.waitingCount,
     tone: 'warning' as const,
-    hint: statusHint('waiting', 'Сейчас никто не ждёт твоего решения'),
+    hint: statusHint('waiting', translate('core.coreSeychasNiktoNeZhdet')),
   },
   {
     id: 'error',
-    label: 'Проблемы',
+    label: translate('core.issues2'),
     count: statusSummary.value.errorCount,
     tone: 'danger' as const,
-    hint: statusHint('error', 'Сейчас нет вставших или молчащих прогонов'),
+    hint: statusHint('error', translate('core.coreSeychasNetVstavshihIli')),
   },
   {
     id: 'inactive',
-    label: 'Неактивные',
+    label: translate('core.pipelineNeaktivnye'),
     count: projectTasks.value.length - statusSummary.value.totalCount,
     tone: 'neutral' as const,
     hint: statusHint(
       'inactive',
-      'Нет завершённых, остановленных или доступных только для чтения прогонов',
+      translate('core.coreNetZavershennyhOstanovlennyhIli'),
     ),
   },
 ]);
@@ -1973,7 +1930,7 @@ function pipelineContextDetails() {
 }
 
 const pipelineContextIdentity = computed(() => (
-  stage.value ? `${stage.value!.task}:${stage.value!.id}` : ''
+  stage.value ? translate('core.pipelineTaskId', { task: stage.value!.task, id: stage.value!.id }) : ''
 ));
 
 watch(pipelineContextIdentity, (identity, previous) => {
@@ -2007,16 +1964,36 @@ watch(
 );
 
 const STAGE_HINT: Record<string, string> = {
-  done: 'пройден',
-  run: 'выполняется сейчас',
-  wait: 'ждёт твоего решения',
-  pending: 'ещё не начинался',
-  skip: 'пропущен осознанно',
-  idle: 'нет данных (прогон по прежней схеме)',
-  stall: 'завис — агент молчит',
-  skipbad: 'пропущен без причины — аномалия',
-  premature: 'преждевременно: хвост не доделан',
-  fail: 'провалился — стенд не поднялся',
+  get done() {
+    return translate('core.pipelineProyden');
+  },
+  get run() {
+    return translate('core.pipelineVypolnyaetsyaSeychas');
+  },
+  get wait() {
+    return translate('core.pipelineZhdetTvoegoResheniya');
+  },
+  get pending() {
+    return translate('core.pipelineEscheNeNachinalsya');
+  },
+  get skip() {
+    return translate('core.pipelinePropuschenOsoznanno');
+  },
+  get idle() {
+    return translate('core.pipelineNetDannyhProgonPo');
+  },
+  get stall() {
+    return translate('core.pipelineZavisAgentMolchit');
+  },
+  get skipbad() {
+    return translate('core.pipelinePropuschenBezPrichinyAnomaliya');
+  },
+  get premature() {
+    return translate('core.pipelinePrezhdevremennoHvostNeDodelan2');
+  },
+  get fail() {
+    return translate('core.pipelineProvalilsyaStendNePodnyalsya');
+  },
 };
 // Подпись статуса узла. Обычно берётся из карты, но у остановки есть два случая, когда карта
 // врёт: узел со `stall` подписан «завис — агент молчит», а он не молчал — он отработал и
@@ -2029,10 +2006,10 @@ const STAGE_HINT: Record<string, string> = {
 // «исчерпан бюджет повторов».
 function stageStatusHint(s: Stage) {
   if (s.status === 'stall' && s.meta?.stall?.outcome === 'exhausted') {
-    return 'раннер не получил результат';
+    return translate('core.coreRannerNePoluchilRezultat');
   }
   if (s.status === 'stall' && s.meta?.verdict?.stop === 'human') {
-    return 'вернул решение человеку';
+    return translate('core.coreVernulReshenieCheloveku');
   }
 
   return STAGE_HINT[s.status] || s.status;
@@ -2219,7 +2196,8 @@ async function warnIfNotResumed(res: PipelineReply | null) {
   }
 
   await alertDialog(
-    `Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`,
+    messageRef('core.pipelineZapisanoNoProgonNe', { resumeError: res.resumeError
+                  || translate('core.corePrichinaVZhurnaleEtapov') }),
   );
 }
 // Ворота — состояние, в котором решение вообще принимают. Отдельным computed, потому что
@@ -2367,11 +2345,13 @@ function cancelGateReject() {
 // Движок отказывает, когда rejected-пояснение некому доставить: возврат ведёт в узел,
 // который исполняет не агент. Голое «Ошибка: …» тут ничего не подсказывает, а выход есть.
 function gateErrorText(e: unknown) {
-  const base = `Решение не принято: ${errorMessage(e, '')}`;
+  const base = translate('core.coreReshenieNePrinyatoErrormessagee', { errorMessagee: errorMessage(e, '') });
 
   return /нельзя доставить/.test(errorMessage(e, '') || '')
-    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «${translate('core.stageRestartAction')}» `
-      + 'на тот узел, чей агент должен прочитать указание.'
+    ? translate('core.coreBaseOtkloniBezTeksta', {
+                base: base,
+                stageRestartAction: translate('core.stageRestartAction'),
+              })
     : base;
 }
 
@@ -2424,10 +2404,9 @@ async function forceStatus(status: string) {
   const comment = buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value);
   // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
   // Возврат с приёмки на план сносит результаты всего, что между.
-  const question = `Вернуть конвейер на «${opened.label}»? `
-    + 'Результаты этого узла и всех следующих за ним будут сброшены.';
+  const question = translate('core.pipelineVernutKonveyerNaLabel', { label: opened.label });
 
-  if (!await confirmDialog(question, { okText: 'Вернуть' })) {
+  if (!await confirmDialog(question, { okText: translate('core.taskDisapprove') })) {
     return;
   }
 
@@ -2447,7 +2426,7 @@ async function forceStatus(status: string) {
     await warnIfNotResumed(res);
   }
   catch (e) {
-    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineOshibkaErrormessagee', { errorMessagee: errorMessage(e, '') }));
   } finally {
     finishStageAction(opened);
   }
@@ -2465,9 +2444,8 @@ async function rebindRuntime() {
   }
 
   if (!await confirmDialog(
-    'Снять закрепление рантайма этой попытки? '
-      + 'Следующий запуск продолжит попытку на текущей поставке сервера.',
-    { okText: 'Перепривязать' },
+    messageRef('core.pipelineSnyatZakreplenieRantaymaEtoy'),
+    { okText: translate('core.pipelinePereprivyazat') },
   )) {
     return;
   }
@@ -2480,11 +2458,11 @@ async function rebindRuntime() {
       {},
     ));
 
-    alertDialog(res.note || 'Готово.');
+    alertDialog(res.note || messageRef('core.pipelineGotovo'));
     await load();
   }
   catch (e) {
-    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineOshibkaErrormessagee', { errorMessagee: errorMessage(e, '') }));
   }
   finally {
     rebindBusy.value = false;
@@ -2502,9 +2480,11 @@ async function switchRunner(target: string) {
   }
 
   if (!await confirmDialog(
-    `Остановить текущий запуск ${providerLabel(opened.meta.runner!.actual)} `
-      + `и продолжить этап через ${providerLabel(target)}?`,
-    { okText: 'Переключить' },
+    messageRef('core.pipelineOstanovitTekuschiyZapuskActual', {
+      actual: providerLabel(opened.meta.runner!.actual),
+      providerLabeltarget: providerLabel(target),
+    }),
+    { okText: translate('core.pipelinePereklyuchit') },
   )) {
     return;
   }
@@ -2520,7 +2500,9 @@ async function switchRunner(target: string) {
     });
     await load();
   } catch (e) {
-    alertDialog(`Не удалось переключить исполнителя: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineNeUdalosPereklyuchitIspolnitelya', {
+      errorMessagee: errorMessage(e, ''),
+    }));
   } finally {
     finishStageAction(opened);
   }
@@ -2980,15 +2962,15 @@ async function persistRunnerSettings(
 // значит соврать про доставку (старые прогоны такие записи ещё содержат).
 function stageCommentLabel(s: Stage) {
   if (['skip', 'skipbad'].includes(s.status)) {
-    return 'Почему пропущен';
+    return translate('core.corePochemuPropuschen');
   }
   if (!s.isGate) {
-    return 'Замечание';
+    return translate('core.coreZamechanie');
   }
 
   return s.status === 'done'
-    ? 'Комментарий при принятии — агенту он не уходил'
-    : 'Отправлено агенту на доработку';
+    ? translate('core.coreKommentariyPriPrinyatiiAgentu')
+    : translate('core.coreOtpravlenoAgentuNaDorabotku');
 }
 
 // Заголовок блока находок. Он обязан отвечать на «что мне с этим делать», а не
@@ -3001,16 +2983,16 @@ function stageCommentLabel(s: Stage) {
 // остановку косметике: решение вернули из-за вопроса, который теперь стоит ниже полем.
 function verdictLabel(v: NodeVerdict, deferredOnly = false) {
   if (deferredOnly) {
-    return 'Замечания на будущее';
+    return translate('core.pipelineZamechaniyaNaBuduschee');
   }
   if (v.stop === 'human') {
-    return 'Узел вернул решение человеку';
+    return translate('core.coreUzelVernulReshenieCheloveku');
   }
   if (v.rewind) {
-    return `Замечания — маршрут вернулся на ${v.rewind}`;
+    return translate('core.coreZamechaniyaMarshrutVernulsyaNa', { rewind: v.rewind });
   }
 
-  return 'Замечания узла';
+  return translate('core.coreZamechaniyaUzla');
 }
 
 // Якорь находки — путь внутри репозитория. Целиком он съедает строку и обрезается
@@ -3035,10 +3017,8 @@ async function sandboxDown(task: TaskId) {
     return;
   }
   if (!await confirmDialog(
-    `Снести стенд задачи #${task}? Текущий прогон уйдёт в архив, `
-      + 'после чего задачу можно будет отправить на конвейер заново. '
-      + 'Ветка и незакоммиченные изменения сохранятся.',
-    { danger: true, okText: 'Снести' },
+    messageRef('core.pipelineSnestiStendZadachiTask', { task }),
+    { danger: true, okText: translate('core.pipelineSnesti') },
   )) {
     return;
   }
@@ -3051,8 +3031,8 @@ async function sandboxDown(task: TaskId) {
   }
   catch (e) {
     alertDialog(isRecord(e) && e.status === 501
-      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
-      : `Ошибка: ${errorMessage(e, '')}`);
+      ? messageRef('core.pipelineSnosStendaNeNastroen')
+      : messageRef('core.pipelineOshibkaErrormessagee', { errorMessagee: errorMessage(e, '') }));
   }
 
   finally {
@@ -3080,20 +3060,25 @@ async function closeTask(t: PipelineViewTask) {
   // там, где терялась работа. Живой случай: закрытая по ошибке задача на планировании.
   // Узел называем поимённо: «прогон будет прерван» без места читается абстракцией.
   const runNote = t.daemonAlive
-    ? `Прогон ИДЁТ — узел «${currentLabel(t.graph)}». Закрытие прервёт его: попытка `
-      + 'закроется как оборванная, продолжить её будет нельзя, задачу придётся '
-      + 'запускать заново.\n\n'
+    ? translate('core.coreProgonIdetUzelGraph', { graph: currentLabel(t.graph) })
     : '';
 
   // Про ветки говорим только там, где GrigDesk их правда трогает: в shared-режиме
   // основное рабочее дерево не наше, и никакой branch lifecycle к нему не применяется.
   const branchNote = canDestroySandbox(t)
-    ? ' Пустая ветка будет удалена (ветка с коммитами останется).'
-    : ' Общий checkout и его ветки не затрагиваются.';
+    ? translate('core.pipelineEmptyBranchRemoved')
+    : translate('core.pipelineSharedCheckoutUntouched');
 
   if (!await confirmDialog(
-    `${runNote}Закрыть задачу #${task}? Реестр уйдёт в архив.${branchNote}`,
-    { danger: true, okText: t.daemonAlive ? 'Прервать и закрыть' : 'Закрыть' },
+    messageRef('core.pipelineRunnoteZakrytZadachuTask', {
+      runNote,
+      task,
+      branchNote,
+    }),
+    {
+      danger: true,
+      okText: t.daemonAlive ? translate('core.pipelinePrervatIZakryt') : translate('core.codeBranchClose'),
+    },
   )) {
     return;
   }
@@ -3104,10 +3089,13 @@ async function closeTask(t: PipelineViewTask) {
     const r = decodePipelineReply(await api.post(`/api/tasks/${task}/close`));
     const branches = (r.branches || []).map((b) => `${b.repo}: ${b.state}`).join('; ');
 
-    await alertDialog(`Задача #${task} закрыта.${branches ? ` Ветки — ${branches}.` : ''}`);
+    await alertDialog(messageRef('core.pipelineZadachaTaskZakrytaValue', {
+      task,
+      value: branches ? translate('core.coreVetkiBranches', { branches: branches }) : '',
+    }));
     await load();
   } catch (e) {
-    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineOshibkaErrormessagee', { errorMessagee: errorMessage(e, '') }));
   }
 
   finally {
@@ -3127,9 +3115,8 @@ async function sandboxRetry(task: TaskId) {
     return;
   }
   if (!await confirmDialog(
-    `Перезапустить стенд задачи #${task}? Остатки упавшей песочницы будут снесены, `
-      + 'конвейер продолжит с того места, где встал.',
-    { okText: 'Перезапустить' },
+    messageRef('core.pipelinePerezapustitStendZadachiTask', { task }),
+    { okText: translate('settings.restart') },
   )) {
     return;
   }
@@ -3146,15 +3133,15 @@ async function sandboxRetry(task: TaskId) {
     const warn = (r.downOutput || '').split('\n').filter((s) => s.includes('ВНИМАНИЕ')).join('\n');
 
     if (warn) {
-      alertDialog(`Конвейер перезапущен, но снос сообщил:\n${warn}`);
+      alertDialog(messageRef('core.pipelineKonveyerPerezapuschenNoSnos', { warn }));
     }
     else if (r.note) {
       alertDialog(r.note);
     }
   } catch (e) {
     alertDialog(isRecord(e) && e.status === 501
-      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
-      : `Не удалось перезапустить: ${errorMessage(e, '')}`);
+      ? messageRef('core.pipelineSnosStendaNeNastroen')
+      : messageRef('core.pipelineNeUdalosPerezapustitErrormessagee', { errorMessagee: errorMessage(e, '') }));
 
   } finally {
     const s = new Map(pendingCardActions.value);
@@ -3201,13 +3188,13 @@ function arbiterAsksHuman(t: PipelineViewTask) {
  */
 function arbiterCardLabel(card: ArbiterCard | null | undefined) {
   if (card?.verdict === 'human') {
-    return 'Арбитр разобрал: решать тебе';
+    return translate('core.coreArbitrRazobralReshatTebe');
   }
   if (card?.verdict === 'deferred') {
-    return 'Арбитр решил за тебя — проверишь на воротах';
+    return translate('core.coreArbitrReshilZaTebya');
   }
 
-  return 'Арбитр снял тупик';
+  return translate('core.coreArbitrSnyalTupik');
 }
 /**
  * След арбитра по узлам попытки для схемы: узел → вердикт последнего разбора.
@@ -3384,7 +3371,9 @@ async function arbitrate(task: TaskId) {
       openStallStage(current);
     }
   } catch (error) {
-    await alertDialog(`Разбор не удалось начать: ${errorMessage(error, '')}`);
+    await alertDialog(messageRef('core.pipelineRazborNeUdalosNachat', {
+      errorMessageerror: errorMessage(error, ''),
+    }));
   } finally {
     const remaining = new Map(pendingCardActions.value);
 
@@ -3484,20 +3473,20 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
       && Boolean(t.stall?.arbitrable || t.stall?.conversation || arbiterAsksHuman(t));
 
     add(
-      'answer', dialogEntry ? translate('core.arbiterDialogTitle') : '✍ ответить и продолжить',
+      'answer', dialogEntry ? translate('core.arbiterDialogTitle') : translate('core.coreOtvetitIProdolzhit'),
       dialogEntry ? translate('core.arbiterEntryHint')
-        : t.stall?.phase === 'bootstrap' ? 'Откроет вопрос разведки и поле ответа следующему SCOUT.'
-          : 'Откроет узел: там указание агенту и возврат конвейера на него.',
-      'Открываю решение', 'sbretry',
+        : t.stall?.phase === 'bootstrap' ? translate('core.coreOtkroetVoprosRazvedkiI')
+          : translate('core.coreOtkroetUzelTamUkazanie'),
+      translate('core.coreOtkryvayuReshenie'), 'sbretry',
     );
   }
 
   if (canArbitrate(t)) {
     add(
       'arbitrate', `⚖ ${translate('core.arbiterAnalyzeStop')}`,
-      arbiterAsksHuman(t) ? 'Арбитр уже отдал решение тебе; повтор нужен, только если условия изменились.'
-        : 'Арбитр изучит остановку и предложит следующий шаг. Исправление выбираете вы.',
-      'Арбитр разбирает', 'sbretry',
+      arbiterAsksHuman(t) ? translate('core.coreArbitrUzheOtdalReshenie')
+        : translate('core.coreArbitrIzuchitOstanovkuI'),
+      translate('core.coreArbitrRazbiraet'), 'sbretry',
     );
   }
 
@@ -3508,31 +3497,37 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
 
   if (canRetrySandbox(t)) {
     add(
-      'retry', '↻ перезапустить стенд',
-      'Снесёт остатки песочницы и продолжит конвейер с этого места.',
-      'Перезапускаю стенд', 'sbretry',
+      'retry', translate('core.corePerezapustitStend'),
+      translate('core.coreSnesetOstatkiPesochnitsyI'),
+      translate('core.corePerezapuskayuStend'), 'sbretry',
     );
   }
 
   if (canResume(t)) {
     add(
-      'resume', '▶ продолжить прогон', 'Та же попытка поедет дальше с узла, на котором оборвалась.',
-      'Продолжаю прогон', 'sbresume',
+      'resume', translate('core.coreProdolzhitProgon'), translate('core.coreTaZhePopytkaPoedet'),
+      translate('core.coreProdolzhayuProgon'), 'sbresume',
     );
   }
 
   if (canStop(t)) {
-    add('stop', '■ остановить', 'Остановит прогон; попытку можно будет продолжить.',
-      'Останавливаю прогон', 'sbstop');
+    add('stop', translate('core.coreOstanovit'), translate('core.coreOstanovitProgonPopytkuMozhno'),
+      translate('core.coreOstanavlivayuProgon'), 'sbstop');
   }
 
   if (t.graph.fePort && canDestroySandbox(t)) {
-    add('down', '⏏ снести стенд', 'Снесёт стенд задачи после подтверждения.', 'Сношу стенд', 'sbdown');
+    add(
+      'down',
+      translate('core.coreSnestiStend'),
+      translate('core.coreSnesetStendZadachiPosle'),
+      translate('core.taskSnoshuStend'),
+      'sbdown',
+    );
   }
 
   if (canCloseTask(t)) {
-    add('close', '✓ закрыть задачу', 'Уберёт прогон с экрана в архив после подтверждения.',
-      'Закрываю задачу', 'sbdown sbclose');
+    add('close', translate('core.coreZakrytZadachu'), translate('core.coreUberetProgonSEkrana'),
+      translate('core.coreZakryvayuZadachu'), 'sbdown sbclose');
   }
 
   const human = t.stall?.stop === 'human' || (!t.stall?.stop && t.stall?.kind === 'human');
@@ -3574,8 +3569,8 @@ async function resumeRun(task: TaskId) {
     return;
   }
   if (!await confirmDialog(
-    `Продолжить прогон задачи #${task}? Конвейер поедет с того узла, на котором оборвался.`,
-    { okText: 'Продолжить' },
+    messageRef('core.pipelineProdolzhitProgonZadachiTask', { task }),
+    { okText: translate('core.browserResume') },
   )) {
     return;
   }
@@ -3587,7 +3582,9 @@ async function resumeRun(task: TaskId) {
     await load();
   }
   catch (e) {
-    alertDialog(`Не удалось продолжить: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineNeUdalosProdolzhitErrormessagee', {
+      errorMessagee: errorMessage(e, ''),
+    }));
   }
 
   finally {
@@ -3712,9 +3709,8 @@ async function stopRun(task: TaskId) {
     return;
   }
   if (!await confirmDialog(
-    `Остановить конвейер задачи #${task}? Текущий этап будет прерван, `
-      + 'прогон встанет — продолжить его можно будет кнопкой «продолжить прогон».',
-    { danger: true, okText: 'Остановить' },
+    messageRef('core.pipelineOstanovitKonveyerZadachiTask', { task }),
+    { danger: true, okText: translate('core.pipelineOstanovit') },
   )) {
     return;
   }
@@ -3726,7 +3722,9 @@ async function stopRun(task: TaskId) {
     await load();
   }
   catch (e) {
-    alertDialog(`Не удалось остановить: ${errorMessage(e, '')}`);
+    alertDialog(messageRef('core.pipelineNeUdalosOstanovitErrormessagee', {
+      errorMessagee: errorMessage(e, ''),
+    }));
   }
 
   finally {
@@ -3858,7 +3856,7 @@ function progressClass(g: PipelineViewGraph) {
 function currentLabel(g: PipelineViewGraph) {
   const cur = g.progress.current;
 
-  return cur ? stripEmoji(g.nodes[cur]?.[1]) : 'готово';
+  return cur ? stripEmoji(g.nodes[cur]?.[1]) : translate('settings.done2');
 }
 
 function loopList(g: PipelineViewGraph) {

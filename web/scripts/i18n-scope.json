@@ -1,91 +1,10 @@
 {
   "version": 1,
   "include": [
-    "web/src/views/settings",
-    "web/src/views/ext/PluginModulePanel.vue",
-    "web/src/pluginRuntime",
-    "web/src/features/settings",
-    "web/src/shared/layout/AppShell.vue",
-    "web/src/shared/layout/DesktopWindowControls.vue",
-    "web/src/shared/layout/ToolsGrid.vue",
-    "web/src/shared/layout/ToolDock.vue",
-    "web/src/shared/layout/ToolHost.vue",
-    "web/src/shared/layout/ConnectionButton.vue",
-    "web/src/shared/layout/ConnectionStatus.vue",
-    "web/src/shared/layout/AddMachineDialog.vue",
-    "web/src/shared/layout/LockOverlay.vue",
-    "web/src/views/ConnectionsView.vue",
-    "web/src/views/NoAccessView.vue",
-    "web/src/App.vue",
-    "desktop/src/menu.ts",
-    "desktop/src/locale.ts",
-    "web/src/components/composites/UiFilePicker.vue",
-    "web/src/components/composites/UiInlineConfirm.vue",
-    "web/src/components/composites/UiNumberField.vue",
-    "web/src/components/composites/UiPasswordInput.vue",
-    "web/src/components/composites/UiSearchInput.vue",
-    "web/src/components/feedback/UiToastHost.vue",
-    "web/src/components/feedback/UiLoadingState.vue",
-    "web/src/components/overlays/UiDialog.vue",
-    "web/src/components/overlays/UiDialogHost.vue",
-    "web/src/components/overlays/UiFloatingDialog.vue",
-    "web/src/components/overlays/UiPopover.vue",
-    "web/src/components/overlays/UiTooltip.vue",
-    "web/src/components/primitives/UiActionLink.vue",
-    "web/src/components/primitives/UiButton.vue",
-    "web/src/components/primitives/UiSpinner.vue",
-    "web/src/features/providers/ProviderUsageForecast.vue",
-    "web/src/features/providers/ProviderUsageResources.vue",
-    "web/src/features/analysis/AttentionAlerts.vue",
-    "web/src/features/alerts/AlertHistoryPopover.vue",
-    "web/src/features/board/BoardTimerPopover.vue",
-    "web/src/features/pipeline/PipelineTopbarPopover.vue",
-    "web/src/shared/factoryDebug.ts",
-    "web/src/shared/grigdeskUpdate.ts",
-    "web/src/shared/hotkeys/combo.ts",
-    "web/src/shared/tools/catalog.ts",
-    "web/src/shared/tools/registry.ts",
-    "web/src/shared/navBadges.ts",
-    "web/src/shared/pipelineNavBadge.ts",
-    "web/src/shared/pluginInstall.ts",
-    "web/src/shared/pluginInstallView.ts",
-    "web/src/shared/sectionLoadFailure.ts",
-    "web/src/shared/alerts.ts",
-    "web/src/shared/notify.ts",
-    "web/src/features/providers/providerUsage.ts",
-    "web/src/features/providers/providerUsageSummary.ts",
-    "web/src/features/providers/usageForecastText.ts",
-    "web/src/features/providers/providerUsageActions.ts",
-    "desktop/src/connection.ts",
-    "desktop/src/pairing.ts",
-    "desktop/src/profiles.ts",
-    "desktop/src/runtimeConfig.ts",
-    "desktop/src/serverSupervisor.ts",
-    "desktop/src/uiRelease.ts",
-    "desktop/src/startupController.ts",
-    "desktop/src/windowDocuments.ts",
-    "web/src/stores/device.ts",
-    "web/src/stores/hotkeys.ts",
-    "web/src/stores/plugins.ts",
-    "web/src/stores/providers.ts",
-    "web/src/stores/providerSettings.ts",
-    "web/src/shared/shellClient.ts",
-    "web/src/shared/uiLocale.ts",
-    "desktop/src/main.ts",
-    "desktop/src/clientRuntime.ts",
-    "desktop/src/settings.ts",
-    "web/src/stores/settings.ts",
-    "web/src/features/providers/usageResourceText.ts",
-    "web/src/views/ToolsView.vue",
-    "web/src/features/providers/providerLocale.ts",
-    "web/src/shared/desktopExit.ts",
-    "web/src/shared/desktopExitActivity.ts",
-    "web/src/shared/layout/DesktopExitHost.vue"
+    "web/src",
+    "desktop/src"
   ],
-  "fragments": [
-    "web/src/stores/chat.ts",
-    "web/src/stores/notifyWatch.ts"
-  ],
+  "fragments": [],
   "dynamicKeys": {},
   "technicalTokens": [
     {
@@ -369,6 +288,2626 @@
       "text": "medium",
       "file": "web/src/views/settings/pages/SpeechPage.vue",
       "reason": "ID модели распознавания в значениях запроса и технической сводке"
+    },
+    {
+      "text": "https://grigdesk.com/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Технический адрес справки, не подпись интерфейса"
+    },
+    {
+      "text": "/index.html?lang=",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "#/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpServerUpgradeRequired",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpUnavailable",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "htmlLabels",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeVariables",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeCSS",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "fontFamily",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "dompurifyConfig",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "render_failed",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "ExitPlanMode",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "/home/user/project",
+      "file": "web/src/views/chat/ChatWorkdir.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_failed",
+      "file": "web/src/features/code/codeDiffWorker.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_timeout",
+      "file": "web/src/features/code/monacoDiffAdapter.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "clear",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "claude login",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "claude --version",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "https://github.com/owner/tracker",
+      "file": "web/src/views/board/TrackerInstallDialog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "functional",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "performance",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "data",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "integration",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "service:src/path/file.ext",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Точный пример формата scope, не подпись интерфейса"
+    },
+    {
+      "text": "all",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фильтра статуса, не подпись"
+    },
+    {
+      "text": "bootstrap",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фазы конвейера, не подпись"
+    },
+    {
+      "text": "exhausted",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор исхода, не подпись"
+    },
+    {
+      "text": "M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "\u0001inherit",
+      "file": "web/src/views/pipeline/StageExecutorFields.vue",
+      "reason": "Служебный маркер наследования, не подпись"
+    },
+    {
+      "text": "r",
+      "file": "web/src/views/routes/RouteCatalog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteCompare.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteRevisionHistory.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "routes/publish.mjs",
+      "file": "web/src/views/RoutesView.vue",
+      "reason": "Точный путь скрипта профиля, не подпись"
+    },
+    {
+      "text": "null",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "false",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "true",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "reader",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "deploy",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "db.internal",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "is-danger",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "server.example.org",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "SELECT …",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/changeLifecycle.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/saveProject.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/SandboxesView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/sandboxes/SandboxListRow.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "my-project",
+      "file": "web/src/views/projects/ProjectForm.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "/srv/project/service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "#/sandboxes?",
+      "file": "web/src/views/sandboxes/SandboxCard.vue",
+      "reason": "Технический адрес раздела, не подпись"
+    },
+    {
+      "text": "project-default-",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический префикс ID группы, не подпись"
+    },
+    {
+      "text": "id",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "8123456789:AA…",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/revoke",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "state/telegram-account-creds.json",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/newbot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/setprivacy",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "grigdesk",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sync_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_apps_invalid",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_deployments",
+      "file": "web/src/stores/relayDeployment.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "api_retry_exhausted",
+      "file": "web/src/shared/apiClient.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_mismatch",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_execution_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_lease_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_ack_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_response_invalid",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_owners_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_mode_ack_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_snapshot_invalid",
+      "file": "web/src/shared/browser/browserUi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "unclassified",
+      "file": "web/src/shared/webDiagnostics.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "oversized_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bad_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M5 12.5l4.5 4.5L19 7.5",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 6.5v7M12 17.5v.01",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "example-org",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "github_pat_…",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола ошибки захвата; UI переводит по коду"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола отказа браузера; UI переводит по коду"
+    },
+    {
+      "text": "release_state_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_check_required",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/installedApplication.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_recovery_not_available",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_action_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "outcome_unknown",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_busy",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_layout_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserIpc.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_catalog_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_registration_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_invalid",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_limit",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_fill",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_frame_missing",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_navigation_pending",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_origin_forbidden",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_load_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_renderer_gone",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_debugger_unavailable",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_image_too_large",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_missing",
+      "file": "desktop/src/browser/externalBrowser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "store_corrupt",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "secure_store_unavailable",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_launcher_request",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_exit_preference",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "pipe_forbidden",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_error",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "no_machine",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_window_action",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_surface",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_action_failed",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "timeout",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "identityMismatch",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_missing",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_rejected",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "session_expired",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "https://grigdesk.com/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Технический адрес справки, не подпись интерфейса"
+    },
+    {
+      "text": "/index.html?lang=",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "#/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpServerUpgradeRequired",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpUnavailable",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "htmlLabels",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeVariables",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeCSS",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "fontFamily",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "dompurifyConfig",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "render_failed",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "ExitPlanMode",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "/home/user/project",
+      "file": "web/src/views/chat/ChatWorkdir.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_failed",
+      "file": "web/src/features/code/codeDiffWorker.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_timeout",
+      "file": "web/src/features/code/monacoDiffAdapter.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "clear",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "claude login",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "claude --version",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "https://github.com/owner/tracker",
+      "file": "web/src/views/board/TrackerInstallDialog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "functional",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "performance",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "data",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "integration",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "service:src/path/file.ext",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Точный пример формата scope, не подпись интерфейса"
+    },
+    {
+      "text": "all",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фильтра статуса, не подпись"
+    },
+    {
+      "text": "bootstrap",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фазы конвейера, не подпись"
+    },
+    {
+      "text": "exhausted",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор исхода, не подпись"
+    },
+    {
+      "text": "M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "\u0001inherit",
+      "file": "web/src/views/pipeline/StageExecutorFields.vue",
+      "reason": "Служебный маркер наследования, не подпись"
+    },
+    {
+      "text": "r",
+      "file": "web/src/views/routes/RouteCatalog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteCompare.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteRevisionHistory.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "routes/publish.mjs",
+      "file": "web/src/views/RoutesView.vue",
+      "reason": "Точный путь скрипта профиля, не подпись"
+    },
+    {
+      "text": "null",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "false",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "true",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "reader",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "deploy",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "db.internal",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "is-danger",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "server.example.org",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "SELECT …",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/changeLifecycle.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/saveProject.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/SandboxesView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/sandboxes/SandboxListRow.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "my-project",
+      "file": "web/src/views/projects/ProjectForm.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "/srv/project/service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "#/sandboxes?",
+      "file": "web/src/views/sandboxes/SandboxCard.vue",
+      "reason": "Технический адрес раздела, не подпись"
+    },
+    {
+      "text": "project-default-",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический префикс ID группы, не подпись"
+    },
+    {
+      "text": "id",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "8123456789:AA…",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/revoke",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "state/telegram-account-creds.json",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/newbot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/setprivacy",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "grigdesk",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sync_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_apps_invalid",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_deployments",
+      "file": "web/src/stores/relayDeployment.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "api_retry_exhausted",
+      "file": "web/src/shared/apiClient.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_mismatch",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_execution_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_lease_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_ack_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_response_invalid",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_owners_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_mode_ack_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_snapshot_invalid",
+      "file": "web/src/shared/browser/browserUi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "unclassified",
+      "file": "web/src/shared/webDiagnostics.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "oversized_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bad_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M5 12.5l4.5 4.5L19 7.5",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 6.5v7M12 17.5v.01",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "example-org",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "github_pat_…",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола ошибки захвата; UI переводит по коду"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола отказа браузера; UI переводит по коду"
+    },
+    {
+      "text": "release_state_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_check_required",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/installedApplication.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_recovery_not_available",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_action_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "outcome_unknown",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_busy",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_layout_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserIpc.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_catalog_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_registration_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_invalid",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_limit",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_fill",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_frame_missing",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_navigation_pending",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_origin_forbidden",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_load_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_renderer_gone",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_debugger_unavailable",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_image_too_large",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_missing",
+      "file": "desktop/src/browser/externalBrowser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "store_corrupt",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "secure_store_unavailable",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_launcher_request",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_exit_preference",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "pipe_forbidden",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_error",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "no_machine",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_window_action",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_surface",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_action_failed",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "timeout",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "identityMismatch",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_missing",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_rejected",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "session_expired",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "https://grigdesk.com/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Технический адрес справки, не подпись интерфейса"
+    },
+    {
+      "text": "/index.html?lang=",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "#/help/",
+      "file": "web/src/features/help/HelpBrowser.vue",
+      "reason": "Техническая часть адреса справки"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/diff/DiffPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpServerUpgradeRequired",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "helpUnavailable",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "htmlLabels",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeVariables",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "themeCSS",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "fontFamily",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "dompurifyConfig",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "render_failed",
+      "file": "web/src/shared/markdown/mermaidSandboxEntry.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "ExitPlanMode",
+      "file": "web/src/views/chat/ChatPermission.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "/home/user/project",
+      "file": "web/src/views/chat/ChatWorkdir.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
+      "file": "web/src/views/chat/StepList.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "A",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "D",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "R",
+      "file": "web/src/views/code/CodePanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_failed",
+      "file": "web/src/features/code/codeDiffWorker.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "diff_timeout",
+      "file": "web/src/features/code/monacoDiffAdapter.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "clear",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "claude login",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "claude --version",
+      "file": "web/src/views/terminal/TerminalPanel.vue",
+      "reason": "Точная команда CLI, не подпись интерфейса"
+    },
+    {
+      "text": "https://github.com/owner/tracker",
+      "file": "web/src/views/board/TrackerInstallDialog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "functional",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "performance",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "data",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "integration",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "service:src/path/file.ext",
+      "file": "web/src/views/TaskModal.vue",
+      "reason": "Точный пример формата scope, не подпись интерфейса"
+    },
+    {
+      "text": "all",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фильтра статуса, не подпись"
+    },
+    {
+      "text": "bootstrap",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор фазы конвейера, не подпись"
+    },
+    {
+      "text": "exhausted",
+      "file": "web/src/views/PipelineView.vue",
+      "reason": "Идентификатор исхода, не подпись"
+    },
+    {
+      "text": "M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2",
+      "file": "web/src/views/pipeline/FactoryGraph.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "\u0001inherit",
+      "file": "web/src/views/pipeline/StageExecutorFields.vue",
+      "reason": "Служебный маркер наследования, не подпись"
+    },
+    {
+      "text": "r",
+      "file": "web/src/views/routes/RouteCatalog.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteCompare.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "current",
+      "file": "web/src/views/routes/RouteRevisionHistory.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "routes/publish.mjs",
+      "file": "web/src/views/RoutesView.vue",
+      "reason": "Точный путь скрипта профиля, не подпись"
+    },
+    {
+      "text": "null",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "false",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "true",
+      "file": "web/src/views/routes/RouteContextFields.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerContainers.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/docker/DockerStorage.vue",
+      "reason": "SVG viewBox, технические данные"
+    },
+    {
+      "text": "reader",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "deploy",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "root",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "sudo",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "db.internal",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "is-danger",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "server.example.org",
+      "file": "web/src/views/ssh/SshPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "SELECT …",
+      "file": "web/src/views/db/DbPanel.vue",
+      "reason": "Технический пример/класс/SQL, не подпись интерфейса"
+    },
+    {
+      "text": "service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/changeLifecycle.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "selection_changed",
+      "file": "web/src/actions/projects/saveProject.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/SandboxesView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "t",
+      "file": "web/src/views/sandboxes/SandboxListRow.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "my-project",
+      "file": "web/src/views/projects/ProjectForm.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "/srv/project/service",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Точный пример идентификатора/пути, не подпись"
+    },
+    {
+      "text": "#/sandboxes?",
+      "file": "web/src/views/sandboxes/SandboxCard.vue",
+      "reason": "Технический адрес раздела, не подпись"
+    },
+    {
+      "text": "project-default-",
+      "file": "web/src/views/projects/ProjectRepoRows.vue",
+      "reason": "Технический префикс ID группы, не подпись"
+    },
+    {
+      "text": "id",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "8123456789:AA…",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/revoke",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "state/telegram-account-creds.json",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/newbot",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "/setprivacy",
+      "file": "web/src/views/TelegramView.vue",
+      "reason": "Точная команда/путь/пример токена, не подпись интерфейса"
+    },
+    {
+      "text": "grigdesk",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "currentColor",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sync_failed",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_apps_invalid",
+      "file": "web/src/stores/browser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_deployments",
+      "file": "web/src/stores/relayDeployment.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "api_retry_exhausted",
+      "file": "web/src/shared/apiClient.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_mismatch",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_command_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_execution_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_lease_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_ack_failed",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_invalid",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHost.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_host_conflict",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_response_invalid",
+      "file": "web/src/shared/browser/browserHostHttp.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_owners_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_mode_ack_invalid",
+      "file": "web/src/shared/browser/browserHostRuntime.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_snapshot_invalid",
+      "file": "web/src/shared/browser/browserUi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "unclassified",
+      "file": "web/src/shared/webDiagnostics.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "oversized_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "bad_storage",
+      "file": "web/src/shared/webLogTransport.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "M5 12.5l4.5 4.5L19 7.5",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 6.5v7M12 17.5v.01",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14",
+      "file": "web/src/shared/ProviderInstallDialog.vue",
+      "reason": "Технические данные (SVG-путь, пример пути, имя инструмента), не подпись"
+    },
+    {
+      "text": "example-org",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "github_pat_…",
+      "file": "web/src/views/GitHubView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "0 0 24 24",
+      "file": "web/src/views/BrowserView.vue",
+      "reason": "Технический пример/SVG-данные, не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола ошибки захвата; UI переводит по коду"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Код протокола отказа браузера; UI переводит по коду"
+    },
+    {
+      "text": "release_state_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_check_required",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_return_to_confirmed_profile",
+      "file": "desktop/src/installedApplication.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_recovery_not_available",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "release_action_invalid",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_capture_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "outcome_unknown",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "access_revoked",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_request_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_missing",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_tab_busy",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_layout_invalid",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_sender_forbidden",
+      "file": "desktop/src/browser/browserIpc.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_catalog_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_registration_unavailable",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_invalid",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_limit",
+      "file": "desktop/src/browser/browserApps.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_page",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "stale_element",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_fill",
+      "file": "desktop/src/browser/browserDriver.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_frame_missing",
+      "file": "desktop/src/browser/browserProtocol.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_navigation_pending",
+      "file": "desktop/src/browser/browserTabs.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_origin_forbidden",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_load_failed",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_renderer_gone",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_debugger_unavailable",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_image_too_large",
+      "file": "desktop/src/browser/browserView.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "browser_app_missing",
+      "file": "desktop/src/browser/externalBrowser.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "store_corrupt",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "secure_store_unavailable",
+      "file": "desktop/src/identity.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "not_found",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_launcher_request",
+      "file": "desktop/src/pipe/applicationLauncherApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_exit_preference",
+      "file": "desktop/src/pipe/desktopExitApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "pipe_forbidden",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_error",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "no_machine",
+      "file": "desktop/src/pipe/pipeServer.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_window_action",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "invalid_surface",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "shell_action_failed",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "timeout",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "identityMismatch",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_missing",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "window_key_rejected",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "session_expired",
+      "file": "desktop/src/pipe/upstream.ts",
+      "reason": "Технический идентификатор или код протокола; не подпись интерфейса"
+    },
+    {
+      "text": "… сокращено …",
+      "file": "web/src/shared/diff.ts",
+      "reason": "Маркер обрезки серверного patch; распознаётся до локализации подписи разрыва"
+    },
+    {
+      "text": "Этот компьютер",
+      "file": "desktop/src/pipe/shellApi.ts",
+      "reason": "Стабильное заводское имя локального профиля в данных; интерфейс проецирует его по виду профиля"
     }
   ],
   "dynamicKeyTables": {
@@ -387,6 +2926,17 @@
     ],
     "web/src/shared/factoryDebug.ts": [
       "MESSAGES"
+    ],
+    "web/src/views/code/CodeBranchControl.vue": [
+      "kinds",
+      "fields",
+      "stepLabels"
+    ],
+    "web/src/views/PipelineView.vue": [
+      "bulkActions"
+    ],
+    "web/src/views/BrowserView.vue": [
+      "hostMessages"
     ]
   },
   "dynamicExpressions": {
@@ -629,6 +3179,422 @@
         "settings.marketplaceExternal",
         "settings.marketplaceUnverifiedSource",
         "settings.marketplaceManual"
+      ]
+    },
+    "web/src/features/help/HelpBrowser.vue": {
+      "errorKey": [
+        "core.helpServerUpgradeRequired",
+        "core.helpUnavailable"
+      ]
+    },
+    "web/src/views/chat/ChatList.vue": {
+      "chat.loadError ? 'core.chatListLoadFailed' : 'core.chatListLoading'": [
+        "core.chatListLoadFailed",
+        "core.chatListLoading"
+      ],
+      "paging.error ? 'core.chatPageRetry' : 'core.chatPageMore'": [
+        "core.chatPageRetry",
+        "core.chatPageMore"
+      ]
+    },
+    "web/src/views/chat/ChatPermission.vue": {
+      "isExternalUrl.value ? 'core.interventionExternalTitle' : 'core.interventionPermissionTitle'": [
+        "core.interventionExternalTitle",
+        "core.interventionPermissionTitle"
+      ]
+    },
+    "web/src/views/chat/ChatSession.vue": {
+      "messageLoad?.state === 'error' ? 'core.chatMessagesLoadFailed' : 'core.chatMessagesLoading'": [
+        "core.chatMessagesLoadFailed",
+        "core.chatMessagesLoading"
+      ],
+      "historyPage?.loading ? 'core.chatHistoryOlderLoading' : historyPage?.error\n              ? 'core.chatPageRetry' : 'core.chatHistoryOlder'": [
+        "core.chatHistoryOlderLoading",
+        "core.chatPageRetry",
+        "core.chatHistoryOlder"
+      ]
+    },
+    "web/src/views/chat/ChatSleepBadge.vue": {
+      "category.key": [
+        "core.chatSleepSubagents",
+        "core.chatSleepMonitors",
+        "core.chatSleepCommands",
+        "core.chatSleepOther"
+      ]
+    },
+    "web/src/views/code/CodeBranchControl.vue": {
+      "kind.label": [
+        "core.codeBranchLocal",
+        "core.codeBranchRemote"
+      ],
+      "field.label": [
+        "core.codeBranchBase",
+        "core.codeBranchStopCommand",
+        "core.codeBranchPrepareCommand",
+        "core.codeBranchBuildCommand",
+        "core.codeBranchStartCommand",
+        "core.codeBranchCheckCommand",
+        "core.codeBranchUrl"
+      ],
+      "stepLabels[job?.step || 'checking']": [
+        "core.codeBranchStepChecking",
+        "core.codeBranchStepStop",
+        "core.codeBranchStepSwitch",
+        "core.codeBranchStepPrepare",
+        "core.codeBranchStepBuild",
+        "core.codeBranchStepStart",
+        "core.codeBranchStepCheck",
+        "core.codeBranchSucceeded"
+      ]
+    },
+    "web/src/views/code/CodeGitMenu.vue": {
+      "actionLabel(action)": [
+        "core.codeReviewMenu*"
+      ]
+    },
+    "web/src/views/code/CodePanel.vue": {
+      "`core.codeReviewStatus${status}`": [
+        "core.codeReviewStatus*"
+      ],
+      "`core.codeReviewAction${action}`": [
+        "core.codeReviewAction*"
+      ],
+      "shownEntry.group.id === 'staged'\n                        ? 'core.codeReviewPartialUnstage' : 'core.codeReviewPartialStage'": [
+        "core.codeReviewPartialUnstage",
+        "core.codeReviewPartialStage"
+      ],
+      "shownEntry.group.id === 'staged'\n                        ? 'core.codeReviewPartialUnstageHunk' : 'core.codeReviewPartialStageHunk'": [
+        "core.codeReviewPartialUnstageHunk",
+        "core.codeReviewPartialStageHunk"
+      ],
+      "`core.codeReviewConflict${name}`": [
+        "core.codeReviewConflict*"
+      ],
+      "`core.codeReviewConflict${conflictPair.value}`": [
+        "core.codeReviewConflict*"
+      ],
+      "`core.codeReviewAction${options.action}`": [
+        "core.codeReviewAction*"
+      ],
+      "target === 'shared' ? 'core.codeReviewMenuignore-shared' : 'core.codeReviewMenuignore-local'": [
+        "core.codeReviewMenuignore-shared",
+        "core.codeReviewMenuignore-local"
+      ],
+      "failed ? 'core.codeGitErrorTitle' : 'core.codeGitSuccessTitle'": [
+        "core.codeGitErrorTitle",
+        "core.codeGitSuccessTitle"
+      ],
+      "result.published ? 'core.codeGitPublished' : 'core.codeGitPushed'": [
+        "core.codeGitPublished",
+        "core.codeGitPushed"
+      ],
+      "result.updated ? 'core.codeGitPulled' : 'core.codeGitUpToDate'": [
+        "core.codeGitPulled",
+        "core.codeGitUpToDate"
+      ]
+    },
+    "web/src/views/TaskModal.vue": {
+      "entry.depth === 0\n                                         ? 'core.taskChecklistListTitle' : 'core.taskChecklistTitle'": [
+        "core.taskChecklistListTitle",
+        "core.taskChecklistTitle"
+      ],
+      "entry.depth === 0\n                                              ? 'core.taskChecklistListRename' : 'core.taskChecklistRename'": [
+        "core.taskChecklistListRename",
+        "core.taskChecklistRename"
+      ],
+      "entry.depth === 0\n                                              ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete'": [
+        "core.taskChecklistListDelete",
+        "core.taskChecklistDelete"
+      ],
+      "confirmation": [
+        "core.taskChecklistListDeleteConfirmation",
+        "core.taskChecklistDeleteConfirmation"
+      ],
+      "item.depth === 0 ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete'": [
+        "core.taskChecklistListDelete",
+        "core.taskChecklistDelete"
+      ]
+    },
+    "web/src/views/board/NewGrigdeskTaskDialog.vue": {
+      "hasConnections ? 'core.newTaskUnavailable' : 'core.trackerSetupBanner'": [
+        "core.newTaskUnavailable",
+        "core.trackerSetupBanner"
+      ],
+      "needsProject.value ? 'core.taskFormRequiredFields' : 'core.newTaskRequiredTitle'": [
+        "core.taskFormRequiredFields",
+        "core.newTaskRequiredTitle"
+      ]
+    },
+    "web/src/views/board/TrackerInstallDialog.vue": {
+      "store.flow === 'rollback' ? 'core.trackerRollbackDone'\n                : store.flow === 'update' ? 'core.trackerUpdateDoneHint' : 'core.trackerInstalledHint'": [
+        "core.trackerRollbackDone",
+        "core.trackerUpdateDoneHint",
+        "core.trackerInstalledHint"
+      ],
+      "store.flow === 'update' ? 'core.trackerUpdate' : 'core.trackerInstall'": [
+        "core.trackerUpdate",
+        "core.trackerInstall"
+      ],
+      "completed.value ? store.flow === 'rollback' ? 'core.trackerRollbackDoneTitle'\n    : store.flow === 'update' ? 'core.trackerUpdateDoneTitle' : 'core.trackerInstallDoneTitle'\n  : displayFlow.value === 'rollback' ? 'core.trackerRollbackTitle'\n  : displayFlow.value === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'": [
+        "core.trackerRollbackDoneTitle",
+        "core.trackerUpdateDoneTitle",
+        "core.trackerInstallDoneTitle",
+        "core.trackerRollbackTitle",
+        "core.trackerUpdateTitle",
+        "core.trackerInstallTitle"
+      ],
+      "displayScreen.value === 'source' ? 'core.trackerChooseSourceHint'\n  : displayScreen.value === 'version' ? 'core.trackerChooseVersionHint'\n  : displayScreen.value === 'rollback' ? 'core.trackerRollbackHint'\n  : 'core.trackerReviewHint'": [
+        "core.trackerChooseSourceHint",
+        "core.trackerChooseVersionHint",
+        "core.trackerRollbackHint",
+        "core.trackerReviewHint"
+      ],
+      "({\n  running: 'core.trackerJobRunning',\n  ready: 'core.trackerJobReady',\n  awaiting_restart: 'settings.waitingForRestart',\n  applying: 'core.trackerJobApplying',\n  done: 'core.trackerJobDone',\n  failed: 'core.trackerJobFailed',\n  cancelled: 'core.trackerJobCancelled',\n  interrupted: 'core.trackerJobInterrupted',\n  recovery_required: 'core.trackerRecovery',\n} as const)[store.job.status]": [
+        "core.trackerJobRunning",
+        "core.trackerJobReady",
+        "settings.waitingForRestart",
+        "core.trackerJobApplying",
+        "core.trackerJobDone",
+        "core.trackerJobFailed",
+        "core.trackerJobCancelled",
+        "core.trackerJobInterrupted",
+        "core.trackerRecovery"
+      ],
+      "({\n  fetching: 'core.trackerStageFetching',\n  validating: 'core.trackerStageValidating',\n  dependencies: 'core.trackerStageDependencies',\n} as const)[store.job.stage]": [
+        "core.trackerStageFetching",
+        "core.trackerStageValidating",
+        "core.trackerStageDependencies"
+      ]
+    },
+    "web/src/views/board/TrackerSettingsDialog.vue": {
+      "value.key": [
+        "core.tracker*"
+      ]
+    },
+    "web/src/views/board/TrackerWidgets.vue": {
+      "value.key": [
+        "core.tracker*"
+      ]
+    },
+    "web/src/views/PipelineView.vue": {
+      "action.label": [
+        "core.startPipelines",
+        "core.stopPipelines"
+      ],
+      "action.loading": [
+        "core.startingPipelines",
+        "core.stoppingPipelines"
+      ],
+      "action[scope]": [
+        "core.startAllPipelines",
+        "core.startTabPipelines",
+        "core.stopAllPipelines",
+        "core.stopTabPipelines"
+      ],
+      "NODE_DOC[stage!.id] === 'plan'\n                    ? 'core.stagePlanDocument' : 'core.stageDocument'": [
+        "core.stagePlanDocument",
+        "core.stageDocument"
+      ],
+      "id === stageRunnerActive\n                            ? 'core.stageSelectedExecutor' : 'core.stageChooseExecutor'": [
+        "core.stageSelectedExecutor",
+        "core.stageChooseExecutor"
+      ]
+    },
+    "web/src/views/pipeline/PipelinePhoneToolbar.vue": {
+      "bulkBusy === 'stop' ? 'core.stoppingPipelines' : 'core.startingPipelines'": [
+        "core.stoppingPipelines",
+        "core.startingPipelines"
+      ],
+      "action.label": [
+        "core.startPipelines",
+        "core.stopPipelines"
+      ],
+      "action[scope]": [
+        "core.startAllPipelines",
+        "core.startTabPipelines",
+        "core.stopAllPipelines",
+        "core.stopTabPipelines"
+      ]
+    },
+    "web/src/views/pipeline/StageExecutorFields.vue": {
+      "props.draft?.model != null\n        ? 'core.stageSourceLocal' : 'core.stageSourceProfile'": [
+        "core.stageSourceLocal",
+        "core.stageSourceProfile"
+      ],
+      "props.draft?.effort != null\n        ? 'core.stageSourceLocal' : 'core.stageSourceProfile'": [
+        "core.stageSourceLocal",
+        "core.stageSourceProfile"
+      ]
+    },
+    "web/src/views/routes/RouteStageWizard.vue": {
+      "`core.stageWizardRole_${role.id}`": [
+        "core.stageWizardRole_*"
+      ],
+      "`core.stageWizardHint_${role.id}`": [
+        "core.stageWizardHint_*"
+      ],
+      "`core.stageWizardRole_${selectedRole.id}`": [
+        "core.stageWizardRole_*"
+      ],
+      "key": [
+        "core.stageWizardRead",
+        "core.stageWizardTemporaryWrite",
+        "core.stageWizardWrite",
+        "core.stageWizardVerify",
+        "core.stageWizardRecheck"
+      ],
+      "reasonKeys[code as keyof typeof reasonKeys] ?? reasonKeys.role_invalid": [
+        "core.stageWizardReason_*"
+      ]
+    },
+    "web/src/features/providers/ProviderCliInventory.vue": {
+      "copy.state === 'missing' || copy.state === 'broken'\n            ? 'settings.cliSelectedMissing' : 'settings.cliSelected'": [
+        "settings.cliSelectedMissing",
+        "settings.cliSelected"
+      ],
+      "sourceLabels[copy.source]": [
+        "settings.cliSourceNpm",
+        "settings.cliSourceNative",
+        "settings.cliSourceUnknown"
+      ],
+      "stateLabels[copy.state]": [
+        "settings.cliStateReady",
+        "settings.cliStateBroken",
+        "settings.cliStateMissing",
+        "settings.cliStateUnverified"
+      ]
+    },
+    "web/src/shared/AccessProfileDialog.vue": {
+      "accessProfileErrorKey(attempt.error.code)": [
+        "settings.accessProfiles*"
+      ]
+    },
+    "web/src/shared/AccessProfilePanel.vue": {
+      "method.kind === 'cli' ? 'settings.accessProfilesCli' : 'settings.accessProfilesApiKey'": [
+        "settings.accessProfilesCli",
+        "settings.accessProfilesApiKey"
+      ]
+    },
+    "web/src/shared/ApplicationUpdateDialog.vue": {
+      "snapshot.scope === 'pair' ? 'settings.appUpdatePair' : 'settings.appUpdateDesktop'": [
+        "settings.appUpdatePair",
+        "settings.appUpdateDesktop"
+      ],
+      "`settings.appUpdateCheck_${snapshot.checkState}`": [
+        "settings.appUpdateCheck_*"
+      ],
+      "`settings.appUpdateStage_${snapshot.job.stage}`": [
+        "settings.appUpdateStage_*"
+      ],
+      "snapshot.job.nextAction === 'check-updates'\n          ? 'settings.appUpdateNextActionCheck' : 'settings.appUpdateNextAction'": [
+        "settings.appUpdateNextActionCheck",
+        "settings.appUpdateNextAction"
+      ]
+    },
+    "web/src/shared/ProviderInstallDialog.vue": {
+      "PREPARE_FAILURE_LABELS[failure.operation]": [
+        "settings.providerInstallationNotStarted",
+        "settings.providerInstallationUpdateNotStarted",
+        "settings.providerLifecycleReinstallNotStarted",
+        "settings.providerLifecycleUninstallNotStarted",
+        "settings.providerLifecycleMigrationNotStarted"
+      ],
+      "operation === 'install'\n      ? 'settings.providerInstallationHeadingInstall'\n      : 'settings.providerInstallationHeadingUpdate'": [
+        "settings.providerInstallationHeadingInstall",
+        "settings.providerInstallationHeadingUpdate"
+      ],
+      "STAGE_LABELS[stage]": [
+        "settings.providerInstallationDownloadInstall",
+        "settings.providerInstallationVersion",
+        "settings.providerInstallationTerminalStage",
+        "settings.providerInstallationModels",
+        "settings.providerLifecyclePreparing",
+        "settings.providerLifecycleBackup",
+        "settings.providerLifecycleActivation",
+        "settings.providerLifecycleCleanup"
+      ],
+      "install.selectedRequest.phase === 'confirming'\n      ? 'settings.providerLifecycleConfirming' : 'settings.providerLifecyclePreparing'": [
+        "settings.providerLifecycleConfirming",
+        "settings.providerLifecyclePreparing"
+      ],
+      "STAGE_LABELS[job.value?.stage || 'download-install']": [
+        "settings.providerInstallationDownloadInstall",
+        "settings.providerInstallationVersion",
+        "settings.providerInstallationTerminalStage",
+        "settings.providerInstallationModels",
+        "settings.providerLifecyclePreparing",
+        "settings.providerLifecycleBackup",
+        "settings.providerLifecycleActivation",
+        "settings.providerLifecycleCleanup"
+      ]
+    },
+    "web/src/shared/alertTargets.ts": {
+      "keys[target.kind]": [
+        "core.openPluginPanel",
+        "core.openChat",
+        "core.openTask",
+        "core.openPipeline"
+      ]
+    },
+    "web/src/shared/layout/MachineWelcome.vue": {
+      "canScan ? 'core.machineWelcomeScan' : 'core.machineWelcomePaste'": [
+        "core.machineWelcomeScan",
+        "core.machineWelcomePaste"
+      ]
+    },
+    "web/src/stores/phoneAccess.ts": {
+      "applied ? 'settings.phoneStatusUnavailable'\n          : enabled ? 'settings.phoneEnableFailed' : 'settings.phoneDisableFailed'": [
+        "settings.phoneStatusUnavailable",
+        "settings.phoneEnableFailed",
+        "settings.phoneDisableFailed"
+      ]
+    },
+    "web/src/stores/providerInstall.ts": {
+      "key": [
+        "settings.providerInstallation*",
+        "settings.providerCli*"
+      ],
+      "actionKeys[operation]": [
+        "settings.providerInstallationInstall",
+        "settings.providerInstallationUpdate",
+        "settings.providerLifecycleReinstall",
+        "settings.providerLifecycleUninstall"
+      ],
+      "`settings.providerLifecycleSummary_${operation}`": [
+        "settings.providerLifecycleSummary_*"
+      ],
+      "`settings.providerLifecycleEffect_${item.action}`": [
+        "settings.providerLifecycleEffect_*"
+      ],
+      "operation === 'install'\n        ? 'settings.providerInstallationInstall' : 'settings.providerInstallationUpdate'": [
+        "settings.providerInstallationInstall",
+        "settings.providerInstallationUpdate"
+      ]
+    },
+    "web/src/views/BrowserView.vue": {
+      "tab.owner !== null ? 'core.browserOwner' : 'core.browserController'": [
+        "core.browserOwner",
+        "core.browserController"
+      ],
+      "active.paused ? 'core.browserResume' : 'core.browserPause'": [
+        "core.browserResume",
+        "core.browserPause"
+      ],
+      "scope.kind === 'chat' ? 'core.browserChatScope' : 'core.browserTaskScope'": [
+        "core.browserChatScope",
+        "core.browserTaskScope"
+      ],
+      "hostMessages[browser.hostStatus.phase]": [
+        "core.browserHostOff",
+        "core.browserHostStarting",
+        "core.browserHostOnline",
+        "core.browserHostConflict",
+        "core.browserHostError"
+      ]
+    },
+    "web/src/services/locale.ts": {
+      "key": [
+        "*"
       ]
     }
   },

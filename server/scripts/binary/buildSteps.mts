@@ -5,6 +5,7 @@ import { withWorkDirectory, syncDirectory } from '../../../shared/node/files.ts'
 import { sha256File } from '../../../shared/node/hash.ts';
 import { assertUntracked, readNodeRuntime, type NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
 import { nodeArchive, seaConfig } from '../../../shared/node/seaBuild.ts';
+import { HELP_LOCALES } from '../../../shared/help/helpContracts.ts';
 import { decodeServerManifest, serverManifestBytes,
   type ServerPackageManifest } from '../../src/binary/metadata.ts';
 
@@ -37,8 +38,15 @@ export async function readBuildInputs(sourceRoot: string): Promise<Record<string
     }
   }
 
-  for (const directory of ['docs/grigdesk/guide', 'shared/help', 'web/help', 'server/scripts/help']) {
+  for (const directory of ['docs/grigdesk/guide',
+    ...HELP_LOCALES.map((locale) => `docs/grigdesk/guide/${locale}`),
+    'shared/help', 'web/help', 'server/scripts/help']) {
     for (const entry of await readdir(path.join(sourceRoot, directory), { withFileTypes: true })) {
+      if (directory === 'docs/grigdesk/guide' && entry.isDirectory()
+        && HELP_LOCALES.some((locale) => locale === entry.name)) {
+        continue;
+      }
+
       if (!entry.isFile()) {
         throw new Error(`Недопустимый вход справки: ${directory}/${entry.name}`);
       }

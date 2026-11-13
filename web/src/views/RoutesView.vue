@@ -2,20 +2,18 @@
   <div class="routes-page ui-workspace"
     :data-perf-pending="loading ? '' : undefined" data-ui-workspace :data-pane="mobilePane">
     <div class="route-pane-nav">
-    <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" label="Область маршрута">
-      <UiTab value="catalog" controls="route-catalog-pane">Каталог</UiTab>
-      <UiTab value="work" controls="route-work-pane">Маршрут</UiTab>
-      <UiTab value="inspector" controls="route-work-pane" :disabled="!editingDraft || !selectedRoute">
-        Свойства
-      </UiTab>
+    <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" :label="t('core.routeOblastMarshruta')">
+      <UiTab value="catalog" controls="route-catalog-pane">{{ t('settings.marketplaceCatalog') }}</UiTab>
+      <UiTab value="work" controls="route-work-pane">{{ t('core.routeMarshrut') }}</UiTab>
+      <UiTab value="inspector" controls="route-work-pane" :disabled="!editingDraft || !selectedRoute"> {{ t('core.routeSvoystva') }} </UiTab>
     </UiTabs>
     </div>
     <aside id="route-catalog-pane" class="list">
       <UiPaneHeader>
-        <template #title><h1>Маршруты</h1></template>
+        <template #title><h1>{{ t('core.routes') }}</h1></template>
         <template #actions>
           <UiCreateButton v-if="profile" data-test="create-draft" :disabled="!pageReady"
-                          :label="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
+                          :label="currentHash ? t('core.routeSozdatChernovikIzCurrent') : t('core.routeSozdatChernovik')"
                           @click="createEditorDraft" />
         </template>
       </UiPaneHeader>
@@ -23,17 +21,17 @@
         <ProjectSwitcher compact :profiles="profiles" :model-value="profile"
                          @update:model-value="switchProfile" @create="openProjectCreate" @manage="manageProject" />
         <div class="catalog-heading">
-          <h2>{{ editingDraft ? 'В черновике' : 'Опубликованные' }}</h2>
+          <h2>{{ editingDraft ? t('core.routeVChernovike') : t('core.routeOpublikovannye') }}</h2>
           <span>{{ displayRouteList.length }}</span>
           <UiTooltip :text="helpPanel" />
         </div>
-        <UiLoadingState v-if="loading && !revisions.length" label="Загружаю…" >
+        <UiLoadingState v-if="loading && !revisions.length" :label="t('core.routeZagruzhayu')" >
           <UiSkeletonLayout layout="list" :header="false" />
         </UiLoadingState>
         <div v-else-if="error" class="pad bad" role="alert"
     :data-perf-error="!loading && error && !revisions.length ? '' : undefined">{{ error }}</div>
         <p v-else-if="!displayRouteList.length" class="pad muted">
-          {{ editingDraft ? 'В черновике пока нет маршрутов' : 'Каталог не опубликован' }}
+          {{ editingDraft ? t('core.routeVChernovikePokaNet') : t('core.routeKatalogNeOpublikovan') }}
         </p>
         <UiSelectableRow v-for="r in displayRouteList" :key="r.id" class="item"
                          data-context="workspace-catalog" :selected="r.id === selectedRoute"
@@ -45,7 +43,7 @@
         </UiSelectableRow>
         <UiButton v-if="editingDraft" variant="ghost" data-context="workspace-toolbar"
                   data-test="catalog-bootstrap" :pressed="route.query.scope === 'bootstrap'"
-                  @click="selectBootstrap">Начальная разведка</UiButton>
+                  @click="selectBootstrap">{{ t('core.routeNachalnayaRazvedka') }}</UiButton>
         <RouteCatalog mode="drafts"
                       :drafts="routesStore.draftsProfile === profile ? routesStore.drafts : []"
                       :selected-draft-id="routesStore.opened?.draftId ?? null" @select="openDraft" />
@@ -60,44 +58,34 @@
       <UiPaneHeader v-else inset="content">
         <template #title><h2>{{ workTitle }}</h2></template>
         <template #meta>
-          <span v-if="published || routesStore.opened?.catalogHash" class="catalog-state">
-            Опубликован <span class="route-hash" v-tooltip="routesStore.opened?.catalogHash ?? currentHash ?? ''">
+          <span v-if="published || routesStore.opened?.catalogHash" class="catalog-state"> {{ t('core.routeOpublikovan') }} <span class="route-hash" v-tooltip="routesStore.opened?.catalogHash ?? currentHash ?? ''">
               {{ shortHash(routesStore.opened?.catalogHash ?? currentHash) }}
             </span>
           </span>
-          <span v-else>Нет публикации</span>
+          <span v-else>{{ t('core.routeNetPublikatsii') }}</span>
         </template>
         <template #actions>
           <UiButton v-if="canEditPublishedRoute" data-test="edit-route" data-context="workspace-toolbar"
                     tone="accent" variant="solid" :disabled="!pageReady || editEntryBusy"
-                    @click="editPublishedRoute">Редактировать</UiButton>
+                    @click="editPublishedRoute">{{ t('core.routeRedaktirovat') }}</UiButton>
         </template>
       </UiPaneHeader>
       <div class="panel-scroll" :class="{ 'panel-scroll--route-editor': routeWorkspaceActive }">
-        <UiInlineMessage v-if="registrationDeleted" tone="warning">
-          Регистрация проекта удалена. Несохранённые изменения сохранить нельзя — скопируйте нужное.
-        </UiInlineMessage>
-        <aside class="route-workflow-hint ui-workspace-guide" aria-label="О разделе «Маршруты»">
+        <UiInlineMessage v-if="registrationDeleted" tone="warning"> {{ t('core.routeRegistratsiyaProektaUdalenaNesohranennye') }} </UiInlineMessage>
+        <aside class="route-workflow-hint ui-workspace-guide" :aria-label="t('core.routeORazdeleMarshruty')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" aria-hidden="true">
             <circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" />
           </svg>
           <div>
-            <strong>Как устроен маршрут</strong>
-            <p>Маршрут задаёт порядок работы: какие этапы выполнять и куда переходить после каждого результата.</p>
-            <p v-if="editingDraft">
-              Сейчас вы редактируете черновик. Для публикации: проверьте → сравните с опубликованным
-              → подтвердите публикацию.
-            </p>
+            <strong>{{ t('core.routeKakUstroenMarshrut') }}</strong>
+            <p>{{ t('core.routeMarshrutZadaetPoryadokRaboty') }}</p>
+            <p v-if="editingDraft"> {{ t('core.routeSeychasVyRedaktirueteChernovik') }} </p>
           </div>
         </aside>
-        <p v-if="!editingDraft && (published || routesStore.opened?.catalogHash)" class="publication-info">
-          Только просмотр
-          <span v-if="routesStore.editorInfo?.source.mode === 'editor'">
-            · источник маршрутов — редактор
-          </span>
+        <p v-if="!editingDraft && (published || routesStore.opened?.catalogHash)" class="publication-info"> {{ t('core.stageReadOnly') }} <span v-if="routesStore.editorInfo?.source.mode === 'editor'"> {{ t('core.routeIstochnikMarshrutovRedaktor') }} </span>
         </p>
-        <p v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }" role="status">
+        <p v-if="notice" class="notice" :class="{ bad: noticeBad }" role="status">
           {{ notice }}
         </p>
       <div v-if="editorQueryError || routesStore.error || error" class="bad" role="alert">
@@ -107,23 +95,23 @@
       <div v-if="routesStore.publicationError" class="bad" role="alert">
         {{ routesStore.publicationError }}
         <UiButton v-if="routesStore.publicationOutcome === 'unknown'"
-                  @click="checkEditorPublication">Проверить результат</UiButton>
+                  @click="checkEditorPublication">{{ t('core.routeProveritRezultat') }}</UiButton>
       </div>
       <RouteConflictPanel v-if="routesStore.conflict" @copy="copyConflictedDraft"
                           @reload="reloadConflictedDraft" />
 
       <template v-if="editingDraft && routesStore.localDocument">
-        <div class="route-editor-actions" role="group" aria-label="Действия черновика">
-          <UiIconButton data-context="workspace-toolbar" label="Отменить"
-                        v-tooltip="'Отменить последнее изменение'"
+        <div class="route-editor-actions" role="group" :aria-label="t('core.routeDeystviyaChernovika')">
+          <UiIconButton data-context="workspace-toolbar" :label="t('core.trackerCancel')"
+                        v-tooltip="t('core.routeOtmenitPosledneeIzmenenie')"
                         :disabled="!routesStore.historyPast.length" @click="undoDraft">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m9 5-5 5 5 5M4 10h10a6 6 0 0 1 6 6v2" />
             </svg>
           </UiIconButton>
-          <UiIconButton data-context="workspace-toolbar" label="Повторить"
-                        v-tooltip="'Повторить отменённое изменение'"
+          <UiIconButton data-context="workspace-toolbar" :label="t('core.pluginNotificationsRetry')"
+                        v-tooltip="t('core.routePovtoritOtmenennoeIzmenenie')"
                         :disabled="!routesStore.historyFuture.length" @click="redoDraft">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -132,32 +120,26 @@
           </UiIconButton>
           <UiButton data-context="workspace-toolbar" variant="ghost" :disabled="routesStore.saving || routesStore.conflict
                     || Boolean(routesStore.jsonBuffer?.dirty)"
-                    aria-label="Проверить черновик"
-                    v-tooltip="'Проверить этапы, переходы и инструкции перед публикацией'"
-                    @click="validateDraft">Проверить</UiButton>
+                    :aria-label="t('core.routeProveritChernovik')"
+                    v-tooltip="t('core.routeProveritEtapyPerehodyI')"
+                    @click="validateDraft">{{ t('settings.test') }}</UiButton>
           <UiButton data-context="workspace-toolbar" variant="ghost" v-if="selectedTab !== 'json'" data-test="route-json-tab"
-                    @click="openJsonTab">JSON-режим</UiButton>
-          <UiButton data-context="workspace-toolbar" variant="ghost" v-else data-test="route-form-tab" @click="openFormsTab">
-            Вернуться к формам
-          </UiButton>
+                    @click="openJsonTab">{{ t('core.routeJsonRezhim') }}</UiButton>
+          <UiButton data-context="workspace-toolbar" variant="ghost" v-else data-test="route-form-tab" @click="openFormsTab"> {{ t('core.routeVernutsyaKFormam') }} </UiButton>
           <UiButton data-context="workspace-toolbar" variant="ghost" v-tooltip="routesStore.canPublish
-                      ? 'Посмотреть изменения перед подтверждением публикации'
-                      : 'Сначала проверьте черновик и исправьте найденные ошибки'"
-                    :disabled="!routesStore.canPublish" @click="compareDraft">
-            Сравнить с опубликованным
-          </UiButton>
+                      ? t('core.routePosmotretIzmeneniyaPeredPodtverzhdeniem')
+                      : t('core.routeSnachalaProverteChernovikI')"
+                    :disabled="!routesStore.canPublish" @click="compareDraft"> {{ t('core.routeSravnitSOpublikovannym') }} </UiButton>
           <UiButton data-context="workspace-toolbar" variant="ghost" v-if="currentHash && routesStore.serverSnapshot?.baseCatalogHash !== currentHash"
                     data-test="preview-rebase"
-                    v-tooltip="'Учесть новую опубликованную версию и выбрать, как объединить изменения'"
+                    v-tooltip="t('core.routeUchestNovuyuOpublikovannuyuVersiyu')"
                     :disabled="routesStore.dirty || routesStore.saving || routesStore.conflict
                       || Boolean(routesStore.jsonBuffer?.dirty)
-                      || routesStore.rebaseBusy" @click="previewDraftRebase">
-            Обновить основу черновика
-          </UiButton>
+                      || routesStore.rebaseBusy" @click="previewDraftRebase"> {{ t('core.routeObnovitOsnovuChernovika') }} </UiButton>
 
         </div>
         <details class="ui-workspace-disclosure route-disclosure route-catalog-properties" :open="!displayRouteList.length">
-          <summary>Свойства маршрута и каталог</summary>
+          <summary>{{ t('core.routeSvoystvaMarshrutaIKatalog') }}</summary>
           <div class="ui-workspace-section__body">
             <RouteCatalog mode="manage" :drafts="[]" :selected-draft-id="routesStore.opened?.draftId ?? null"
                           :document="routesStore.opened?.readOnly ? null : routesStore.localDocument"
@@ -199,10 +181,10 @@
                                @select-node="selectCanvasNode" @change="replaceEditorDocument" />
           <div class="route-editor-inspectors">
             <template v-if="selectedNode">
-              <UiTabs :model-value="selectedTab" data-ui-workspace-tabs size="compact" label="Редактор этапа"
+              <UiTabs :model-value="selectedTab" data-ui-workspace-tabs size="compact" :label="t('core.routeRedaktorEtapa')"
                       @update:model-value="selectNodeTab">
-                <UiTab value="graph" controls="route-node-properties">Свойства и переходы</UiTab>
-                <UiTab value="prompt" controls="route-node-prompt">Инструкция</UiTab>
+                <UiTab value="graph" controls="route-node-properties">{{ t('core.routeSvoystvaIPerehody') }}</UiTab>
+                <UiTab value="prompt" controls="route-node-prompt">{{ t('core.routeInstruktsiya') }}</UiTab>
               </UiTabs>
               <div id="route-node-properties" v-show="selectedTab !== 'prompt'"
                    class="route-editor-inspectors__content">
@@ -227,15 +209,15 @@
                                    @end-history-group="endHistoryGroup" />
               </div>
             </template>
-            <p v-else class="muted">Выберите этап на схеме или в списке.</p>
+            <p v-else class="muted">{{ t('core.routeVyberiteEtapNaSheme') }}</p>
           </div>
         </div>
-        <p v-else class="muted">Публикация недоступна: сначала добавьте маршрут и его инструкции.</p>
+        <p v-else class="muted">{{ t('core.routePublikatsiyaNedostupnaSnachalaDobavte') }}</p>
         <p v-if="routesStore.promptPreviewError" class="bad" role="alert">
           {{ routesStore.promptPreviewError }}
         </p>
         <details class="ui-workspace-disclosure route-disclosure" v-if="selectedAgentNode">
-          <summary>Предпросмотр инструкции</summary>
+          <summary>{{ t('core.routePredprosmotrInstruktsii') }}</summary>
           <div class="ui-workspace-section__body">
             <RoutePromptPreview
                               :result="selectedPromptPreview?.result ?? null"
@@ -248,7 +230,7 @@
           {{ routesStore.simulationError }}
         </p>
         <details class="ui-workspace-disclosure route-disclosure" v-if="routesStore.serverSnapshot">
-          <summary>Пробный сценарий</summary>
+          <summary>{{ t('core.routeProbnyyStsenariy') }}</summary>
           <div class="ui-workspace-section__body">
             <RouteSimulation
                            :document="routesStore.serverSnapshot"
@@ -258,7 +240,7 @@
           </div>
         </details>
         <details class="ui-workspace-disclosure route-disclosure" v-if="routesStore.serverSnapshot">
-          <summary>Экспорт и импорт</summary>
+          <summary>{{ t('core.routeEksportIImport') }}</summary>
           <div class="ui-workspace-section__body">
             <RouteTransferDialog
                                :document="routesStore.serverSnapshot"
@@ -270,7 +252,7 @@
         <template v-if="routesStore.compareReport
           && routesStore.compareGeneration === routesStore.editGeneration">
           <UiButton v-if="routesStore.compareReport.sourceMode === 'profile-script'"
-                    @click="switchToEditorSource">Сделать редактор источником маршрутов</UiButton>
+                    @click="switchToEditorSource">{{ t('core.routeSdelatRedaktorIstochnikomMarshrutov') }}</UiButton>
           <RouteCompare :report="routesStore.compareReport"
                         :can-publish="routesStore.canConfirmPublish"
                         @publish="publishDialogOpen = true" />
@@ -284,11 +266,11 @@
 
       </template>
       <template v-else-if="routesStore.opened?.catalogHash && routesStore.publishedSnapshot && !editorQueryError">
-        <RouteLoading v-if="graphLoading" label="Схема…"  />
+        <RouteLoading v-if="graphLoading" :label="t('core.routeShema')"  />
         <div v-else-if="graphError" class="mid bad" role="alert">{{ graphError }}</div>
         <div v-else-if="graph" class="published-canvas"><FactoryGraph :graph="graph" reference /></div>
         <details v-if="selectedRoute" class="ui-workspace-disclosure route-disclosure">
-          <summary>Инструкции этапов</summary>
+          <summary>{{ t('core.routeInstruktsiiEtapov') }}</summary>
           <div class="ui-workspace-section__body">
             <RouteDraftPanel :document="routesStore.publishedSnapshot"
                            :route-id="selectedRoute" />
@@ -299,25 +281,22 @@
       <template v-else>
       <!-- Каталог ещё не опубликован: подсказываем доступный способ публикации -->
       <div v-if="!published && !loading && !error" class="hint">
-        <p>У проекта нет опубликованного каталога маршрутов.</p>
-        <p v-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted">
-          Создайте черновик, заполните маршрут и инструкции, проверьте и опубликуйте его здесь.
-        </p>
-        <p v-else class="muted">Каталог можно подготовить через скрипт профиля
-          <span class="mono">routes/publish.mjs</span> или создать черновик в редакторе.</p>
+        <p>{{ t('core.routeUProektaNetOpublikovannogo') }}</p>
+        <p v-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted"> {{ t('core.routeSozdayteChernovikZapolniteMarshrut') }} </p>
+        <p v-else class="muted">{{ t('core.routeKatalogMozhnoPodgotovitCherez') }} <span class="mono">{{ 'routes/publish.mjs' }}</span> {{ t('core.routeIliSozdatChernovikV') }}</p>
       </div>
 
       <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
       <div v-else class="published-canvas">
-        <RouteLoading v-if="graphLoading" label="Схема…"  />
+        <RouteLoading v-if="graphLoading" :label="t('core.routeShema')"  />
         <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
         <FactoryGraph v-else-if="graph" :graph="graph" reference />
-        <div v-else class="mid muted">Выбери маршрут слева</div>
+        <div v-else class="mid muted">{{ t('core.routeVyberiMarshrutSleva') }}</div>
       </div>
 
       <!-- Ответ публикатора: показываем как есть, формат — его дело -->
       <details v-if="report" class="report">
-        <summary>Отчёт публикатора</summary>
+        <summary>{{ t('core.routeOtchetPublikatora') }}</summary>
         <pre class="mono">{{ JSON.stringify(report, null, 2) }}</pre>
       </details>
 
@@ -325,20 +304,18 @@
       <details v-if="!editingDraft && !routesStore.opened?.catalogHash && publishSupported
                  && routesStore.editorInfo?.source.mode !== 'editor'"
                class="ui-workspace-disclosure route-disclosure">
-        <summary>Пересборка каталога из файлов профиля</summary>
+        <summary>{{ t('core.routePeresborkaKatalogaIzFaylov') }}</summary>
         <div class="ui-workspace-section__body">
           <UiButton data-context="workspace-toolbar" variant="ghost" :loading="busy === 'validate'"
-                    :disabled="!!busy && busy !== 'validate'" loading-label="Проверяю"
-                    @click="run('validate')">Проверить каталог из файлов профиля</UiButton>
+                    :disabled="!!busy && busy !== 'validate'" :loading-label="t('core.checking')"
+                    @click="run('validate')">{{ t('core.routeProveritKatalogIzFaylov') }}</UiButton>
           <UiButton data-context="workspace-toolbar" tone="accent" variant="outline"
                     :loading="busy === 'publish'" :disabled="!!busy && busy !== 'publish'"
-                    loading-label="Публикую" @click="run('publish')">
-            Опубликовать каталог из файлов профиля
-          </UiButton>
+                    :loading-label="t('core.routePublikuyu')" @click="run('publish')"> {{ t('core.routeOpublikovatKatalogIzFaylov') }} </UiButton>
         </div>
       </details>
       <details v-if="revisions.length" class="ui-workspace-disclosure route-disclosure route-history" :open="!editingDraft">
-        <summary>Ревизии каталога <span class="muted">{{ revisions.length }}</span></summary>
+        <summary>{{ t('core.routeReviziiKataloga') }} <span class="muted">{{ revisions.length }}</span></summary>
         <div class="ui-workspace-section__body">
           <RouteRevisionHistory :revisions="revisions" :busy="!!busy || !pageReady"
                                 v-tooltip="helpRevisions" @view="viewRevision"
@@ -352,7 +329,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
+import { UiSkeletonLayout, t, messageRef, uiLocale } from '../ui';
 
 import RouteLoading from './routes/RouteLoading.vue';
 
@@ -518,16 +495,13 @@ const graphError = ref('');
 const graphLoading = ref(false);
 const busy = ref<BusyMode>('');
 const notice = ref('');
+const noticeBad = ref(false);
 // Сырой ответ публикатора — его показывают в «подробностях» как есть: формат
 // принадлежит скрипту профиля, и толковать его GrigDesk не вправе.
 const report = ref<Record<string, unknown> | null>(null);
 
-const helpPanel = 'Черновик можно редактировать и проверять до публикации.'
-  + ' Опубликованный каталог неизменяем: попытка закрепляет его хеш и идёт по нему'
-  + ' до конца. Публикация добавляет ревизию для новых попыток.';
-const helpRevisions = 'Ревизия — слепок каталога, адресуемый хешем его содержимого.'
-  + ' Откат переводит указатель current на выбранную ревизию: новые попытки пойдут'
-  + ' по ней, уже бегущие останутся на своей.';
+const helpPanel = computed(() => t('core.routeChernovikMozhnoRedaktirovatI'));
+const helpRevisions = computed(() => t('core.routeReviziyaSlepokKatalogaAdresuemyy'));
 
 const router = useRouter();
 const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
@@ -591,13 +565,13 @@ const canvasFocusedProblem = computed(() => focusedProblem.value?.path.includes(
   ? null : focusedProblem.value);
 const workTitle = computed(() => {
   if (route.query.scope === 'bootstrap' && editingDraft.value) {
-    return 'Начальная разведка';
+    return t('core.routeNachalnayaRazvedka');
   }
 
   const document = routesStore.localDocument ?? routesStore.publishedSnapshot;
 
   return document?.routes[selectedRoute.value]?.route.title
-    || selectedRoute.value || profile.value || 'Маршруты';
+    || selectedRoute.value || profile.value || t('core.routes');
 });
 
 function shortHash(hash: string | null | undefined): string {
@@ -608,7 +582,7 @@ function shortHash(hash: string | null | undefined): string {
 function fmtWhen(iso: string): string {
   const date = new Date(iso);
 
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU', {
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(uiLocale.value, {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -621,7 +595,8 @@ function fmtWhen(iso: string): string {
  * старый таймер стёр бы уже другое, более свежее сообщение.
  */
 function say(text: string, bad = false): void {
-  notice.value = bad ? `Ошибка: ${text}` : text;
+  noticeBad.value = bad;
+  notice.value = bad ? t('core.coreOshibkaText', { text: text }) : text;
   setTimeout(() => {
     if (notice.value.includes(text)) {
       notice.value = '';
@@ -681,7 +656,7 @@ async function load(): Promise<void> {
 
       if (typeof route.query.profile === 'string'
         && !profiles.value.includes(route.query.profile)) {
-        throw new Error(`Проект «${route.query.profile}» не найден.`);
+        throw new Error(t('core.routeProektProfileNeNayden', { profile: route.query.profile }));
       }
       if (first && !profiles.value.includes(profile.value)) {
         profile.value = first;
@@ -796,37 +771,37 @@ async function openFromQuery(): Promise<void> {
   const requestedScope = route.query.scope;
 
   if (draft !== undefined && catalog !== undefined) {
-    editorQueryError.value = 'Адрес должен указывать либо черновик, либо опубликованный каталог.';
+    editorQueryError.value = t('core.coreAdresDolzhenUkazyvatLibo');
     closeDraft();
 
     return;
   }
   if (draft !== undefined && (typeof draft !== 'string' || !DRAFT_ID_RE.test(draft))) {
-    editorQueryError.value = 'Некорректный ID черновика в адресе.';
+    editorQueryError.value = t('core.coreNekorrektnyyIdChernovikaV');
     closeDraft();
 
     return;
   }
   if (catalog !== undefined && (typeof catalog !== 'string'
     || !CATALOG_HASH_RE.test(catalog))) {
-    editorQueryError.value = 'Некорректный хеш каталога в адресе.';
+    editorQueryError.value = t('core.coreNekorrektnyyHeshKatalogaV');
     closeDraft();
 
     return;
   }
   if (requestedRoute !== undefined && (typeof requestedRoute !== 'string' || !requestedRoute)) {
-    editorQueryError.value = 'Некорректный маршрут в адресе.';
+    editorQueryError.value = t('core.coreNekorrektnyyMarshrutVAdrese');
     closeDraft();
 
     return;
   }
   if (requestedNode !== undefined && (typeof requestedNode !== 'string' || !requestedNode)) {
-    editorQueryError.value = 'Некорректный этап в адресе.';
+    editorQueryError.value = t('core.coreNekorrektnyyEtapVAdrese');
 
     return;
   }
   if (requestedScope !== undefined && requestedScope !== 'bootstrap') {
-    editorQueryError.value = 'Некорректная область маршрутов в адресе.';
+    editorQueryError.value = t('core.coreNekorrektnayaOblastMarshrutovV');
 
     return;
   }
@@ -842,7 +817,7 @@ async function openFromQuery(): Promise<void> {
     }
     if (routesStore.error || !routesStore.localDocument
       || routesStore.opened?.draftId !== draft) {
-      editorQueryError.value = routesStore.error || 'Черновик не найден.';
+      editorQueryError.value = routesStore.error || t('core.coreChernovikNeNayden');
       selectedRoute.value = '';
       closeDraft();
 
@@ -853,7 +828,7 @@ async function openFromQuery(): Promise<void> {
 
     if (requestedScope === 'bootstrap') {
       if (requestedRoute) {
-        editorQueryError.value = 'Для начальной разведки не нужен ID маршрута.';
+        editorQueryError.value = t('core.coreDlyaNachalnoyRazvedkiNe');
 
         return;
       }
@@ -863,7 +838,8 @@ async function openFromQuery(): Promise<void> {
       const nodes = routesStore.localDocument.bootstrap.nodes;
 
       if (requestedNode && !nodes.some((node) => node.id === requestedNode)) {
-        editorQueryError.value = `Этап «${requestedNode}» отсутствует в начальной разведке.`;
+        editorQueryError.value =
+             t('core.coreEtapRequestednodeOtsutstvuetV', { requestedNode: requestedNode });
 
         return;
       }
@@ -874,7 +850,8 @@ async function openFromQuery(): Promise<void> {
       return;
     }
     if (requestedRoute && !ids.includes(requestedRoute)) {
-      editorQueryError.value = `Маршрут «${requestedRoute}» отсутствует в черновике.`;
+      editorQueryError.value =
+                       t('core.coreMarshrutRequestedrouteOtsutstvuetV', { requestedRoute: requestedRoute });
       selectedRoute.value = '';
 
       return;
@@ -885,7 +862,7 @@ async function openFromQuery(): Promise<void> {
     const nodes = routesStore.localDocument.routes[selectedRoute.value]?.route.nodes ?? [];
 
     if (requestedNode && !nodes.some((node) => node.id === requestedNode)) {
-      editorQueryError.value = `Этап «${requestedNode}» отсутствует в маршруте.`;
+      editorQueryError.value = t('core.coreEtapRequestednodeOtsutstvuetV2', { requestedNode: requestedNode });
       selectedNode.value = '';
 
       return;
@@ -905,7 +882,7 @@ async function openFromQuery(): Promise<void> {
     }
     if (routesStore.error || !routesStore.publishedSnapshot
       || routesStore.opened?.catalogHash !== catalog) {
-      editorQueryError.value = routesStore.error || 'Каталог не найден.';
+      editorQueryError.value = routesStore.error || t('core.coreKatalogNeNayden');
       selectedRoute.value = '';
       closeDraft();
 
@@ -915,7 +892,8 @@ async function openFromQuery(): Promise<void> {
     const ids = Object.keys(routesStore.publishedSnapshot.routes);
 
     if (requestedRoute && !ids.includes(requestedRoute)) {
-      editorQueryError.value = `Маршрут «${requestedRoute}» отсутствует в каталоге.`;
+      editorQueryError.value =
+     t('core.coreMarshrutRequestedrouteOtsutstvuetV2', { requestedRoute: requestedRoute });
       selectedRoute.value = '';
 
       return;
@@ -1094,10 +1072,10 @@ async function createEditorDraft(): Promise<void> {
   const input = currentHash.value
     ? {
       kind: 'catalog' as const,
-      title: 'Новый черновик',
+      title: t('core.routeNovyyChernovik'),
       catalogHash: currentHash.value
     }
-    : { kind: 'empty' as const, title: 'Новый черновик' };
+    : { kind: 'empty' as const, title: t('core.routeNovyyChernovik') };
 
   await createAndOpenDraft(input);
 }
@@ -1156,7 +1134,7 @@ async function editPublishedRoute(): Promise<void> {
     if (!draftId) {
       const document = await routesApi.createDraft(entryProfile, {
         kind: 'catalog',
-        title: 'Новый черновик',
+        title: t('core.routeNovyyChernovik'),
         catalogHash,
       });
 
@@ -1222,7 +1200,7 @@ async function viewRevision(catalogHash: string): Promise<void> {
 async function createFromRevision(catalogHash: string): Promise<void> {
   await createAndOpenDraft({
     kind: 'catalog',
-    title: `Черновик из ${shortHash(catalogHash)}`,
+    title: t('core.routeChernovikIzShorthashcataloghash', { shortHashcatalogHash: shortHash(catalogHash) }),
     catalogHash,
   });
 }
@@ -1275,8 +1253,8 @@ async function copyConflictedDraft(): Promise<void> {
 
 async function reloadConflictedDraft(): Promise<void> {
   await reloadConflict(() => confirmDialog(
-    'Заменить локальные правки версией сервера? Несохранённый JSON-текст тоже будет потерян.',
-    { okText: 'Перечитать' },
+    messageRef('core.routeZamenitLokalnyePravkiVersiey'),
+    { okText: t('core.routePerechitat') },
   ));
 }
 
@@ -1320,9 +1298,8 @@ function focusProblem(issue: RouteEditorIssue): void {
 
 async function switchToEditorSource(): Promise<void> {
   await enableEditorSource(() => confirmDialog(
-    'Сделать редактор источником маршрутов этого проекта? Профильный скрипт больше не сможет '
-    + 'активировать каталог, пока источник не переключат обратно.',
-    { okText: 'Переключить источник' },
+    messageRef('core.routeSdelatRedaktorIstochnikomMarshrutov2'),
+    { okText: t('core.routePereklyuchitIstochnik') },
   ));
 }
 
@@ -1451,9 +1428,8 @@ async function run(mode: 'validate' | 'publish'): Promise<void> {
   }
   if (mode === 'publish') {
     const confirmed = await confirmDialog(
-      `Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии;`
-      + ' уже бегущие останутся на своей.',
-      { okText: 'Опубликовать' },
+      messageRef('core.routeOpublikovatKatalogProfileNovye', { profile: profile.value }),
+      { okText: t('core.routeOpublikovat') },
     );
 
     if (!confirmed) {
@@ -1475,10 +1451,10 @@ async function run(mode: 'validate' | 'publish'): Promise<void> {
 
       await load();
       say(summary.catalogCreated === false
-        ? 'Ревизия не изменилась — публиковать было нечего'
-        : `Опубликовано: ${shortHash(summary.catalogHash)}`);
+        ? t('core.coreReviziyaNeIzmenilasPublikovat')
+        : t('core.coreOpublikovanoCataloghash', { catalogHash: shortHash(summary.catalogHash) }));
     } else {
-      say('Проверка прошла');
+      say(t('core.coreProverkaProshla'));
     }
   } catch (failure) {
     say(failureText(failure), true);
@@ -1498,9 +1474,11 @@ async function rollback(revision: RouteRevision): Promise<void> {
   }
 
   const confirmed = await confirmDialog(
-    `Перевести current на ревизию ${shortHash(revision.catalogHash)}`
-    + ` от ${fmtWhen(revision.createdAt)}?`,
-    { okText: 'Откатить' },
+    messageRef('core.routePerevestiCurrentNaReviziyu', {
+      catalogHash: shortHash(revision.catalogHash),
+      createdAt: fmtWhen(revision.createdAt),
+    }),
+    { okText: t('core.trackerRollback') },
   );
 
   if (!confirmed) {
@@ -1519,7 +1497,7 @@ async function rollback(revision: RouteRevision): Promise<void> {
       tab: 'graph',
       ...(selectedRoute.value ? { route: selectedRoute.value } : {}),
     } });
-    say(`Текущая ревизия — ${shortHash(revision.catalogHash)}`);
+    say(t('core.coreTekuschayaReviziyaCataloghash', { catalogHash: shortHash(revision.catalogHash) }));
   } catch (failure) {
     say(failureText(failure), true);
     await load();
@@ -1597,8 +1575,8 @@ async function syncQuery(query: typeof route.query): Promise<void> {
 }
 
 const confirmLeave = () => confirmDialog(
-  'Уйти с несохранёнными правками маршрута? Неприменённый JSON-текст будет потерян.',
-  { okText: 'Уйти' },
+  messageRef('core.routeUytiSNesohranennymiPravkami'),
+  { okText: t('core.routeUyti') },
 );
 
 onBeforeRouteLeave(() => confirmDirtyRouteExit(

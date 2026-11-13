@@ -2,6 +2,7 @@ import { computed, h, markRaw, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { messageRef } from '../ui.ts';
 import {
   decodeProviderInstallPreparation,
   decodeProviderInstallSnapshot,
@@ -25,10 +26,11 @@ import ProviderIcon from '../shared/ProviderIcon.vue';
 import { useAuthStore } from './auth.ts';
 import { connectProviderCliUpdate, useProvidersStore } from './providers.ts';
 
+const t = localeTranslator(uiLocalePort);
+
 type ProviderInstallJob = ProviderInstallJobV1 | ProviderLifecycleJob;
 type ProviderInstallSnapshot = ProviderInstallSnapshotV1 | ProviderLifecycleSnapshot;
 
-const t = localeTranslator(uiLocalePort);
 
 const noticeKeys: Readonly<Record<string, string>> = {
   busy: 'settings.providerInstallationBusy',
@@ -581,7 +583,10 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
           : t('settings.providerSessionHoldersProcessLine',
             { pid: String(holder.ownerPid), minutes: minutesOf(holder.ageSeconds) }));
         const closeConfirmed = await confirmDialog(
-          `${t('settings.providerSessionHoldersBody')}\n${holderLines.join('\n')}`, {
+          messageRef('core.coreProvidersessionholdersbodyJoinn', {
+            providerSessionHoldersBody: t('settings.providerSessionHoldersBody'),
+            joinn: holderLines.join('\n'),
+          }), {
             title: t('settings.providerSessionHoldersTitle', { name: provider.name }),
             okText: t('settings.providerSessionHoldersAction'),
             danger: true,
@@ -759,8 +764,10 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
 
       const confirmed = await confirmDialog(legacy
         ? t('settings.providerInstallationLegacyConfirm', { name: provider.name })
-        : `${t(`settings.providerLifecycleSummary_${operation}`, { program: provider.name })} `
-          + t('settings.providerLifecyclePreserveData'), {
+        : messageRef('core.coreNameProviderlifecyclepreservedata', {
+          name: t(`settings.providerLifecycleSummary_${operation}`, { program: provider.name }),
+          providerLifecyclePreserveData: t('settings.providerLifecyclePreserveData'),
+        }), {
         title: t('settings.providerInstallationConfirmTitle', { action, name: provider.name }),
         icon: markRaw(() => h(ProviderIcon, { provider: mark, size: 20 })),
         iconColor: provider.color,

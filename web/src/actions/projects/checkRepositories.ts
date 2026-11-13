@@ -2,6 +2,11 @@ import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { runtimeOf } from './projectsRuntime';
 import type { ProjectsRuntime, ProjectsStore } from './projectsRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Проверка путей без сохранения. Это подсказка форме, а не действие: человек правит
@@ -64,6 +69,8 @@ async function runCheck(
       return;
     }
 
-    store.setError(projectsFailureText(error, 'Не удалось проверить пути репозиториев.'));
+    store.setError(
+      projectsFailureText(error, translateUi('core.checkRepositoriesCouldNotCheckRepositoryPaths')),
+    );
   }
 }

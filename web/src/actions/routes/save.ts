@@ -3,6 +3,11 @@ import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { endHistoryGroup as clearHistoryGroup, recordHistory, travelHistory } from './history.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 const AUTOSAVE_DELAY_MS = 800;
 
@@ -228,7 +233,7 @@ export async function saveDraft(): Promise<void> {
     return;
   }
   if (store.jsonBuffer?.dirty) {
-    store.saveError = 'Сначала примените или отмените несохранённый JSON-текст.';
+    store.saveError = translateUi('core.saveApplyOrDiscardTheUnsavedJSONText');
 
     return;
   }
@@ -286,7 +291,7 @@ export async function saveDraft(): Promise<void> {
       if (runtime.pendingDraftRevision !== null) {
         if (runtime.pendingDraftRevision > response.revision && store.dirty) {
           store.conflict = true;
-          store.saveError = 'Черновик изменился в другой вкладке.';
+          store.saveError = translateUi('core.saveTheDraftChangedInAnotherTab');
           cancelDraftSave();
         }
 
@@ -294,7 +299,7 @@ export async function saveDraft(): Promise<void> {
       }
     } catch (error) {
       if (requestIdentity === runtime.openRequest) {
-        store.saveError = failureText(error, 'Не удалось сохранить черновик.');
+        store.saveError = failureText(error, translateUi('core.saveCouldNotSaveTheDraft'));
         store.dirty = true;
 
         if ((error as { status?: unknown } | null)?.status === 409) {

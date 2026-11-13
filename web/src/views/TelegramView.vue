@@ -1,27 +1,22 @@
 <template>
   <UiWorkspacePage
     :data-perf-pending="loading ? '' : undefined">
-      <template #title><h1>Телеграм</h1></template>
+      <template #title><h1>{{ translate('core.pluginTelegram') }}</h1></template>
       <template #actions>
-        <UiActionLink v-if="!pluginOff && connected" href="#/inbox" size="compact">
-          Общая очередь
-        </UiActionLink>
+        <UiActionLink v-if="!pluginOff && connected" href="#/inbox" size="compact"> {{ translate('core.telegramObschayaOchered') }} </UiActionLink>
       </template>
     <div class="tg">
     <section v-if="pluginOff" class="card disabled-card">
-      <div class="disabled-mark">TG</div>
+      <div class="disabled-mark">{{ translate('core.telegramTg') }}</div>
       <div>
-        <h2 class="ttl">Телеграм пока выключен</h2>
-        <p class="muted lead">
-          Включи плагин «Телеграм» в разделе «Настройки → Плагины»,
-          затем вернись сюда — появится пошаговое подключение.
-        </p>
+        <h2 class="ttl">{{ translate('core.telegramTelegramPokaVyklyuchen') }}</h2>
+        <p class="muted lead"> {{ translate('core.telegramVklyuchiPlaginTelegramV') }} </p>
       </div>
     </section>
 
     <template v-else>
       <p v-if="!loading" class="ui-workspace-intro">
-        {{ connected ? `Подключён @${bot?.username}` : 'Подключите бота токеном от @BotFather.' }}
+        {{ connected ? translate('core.telegramPodklyuchenUsername', { username: bot?.username ?? '' }) : translate('core.telegramPodklyuchiteBotaTokenomOt') }}
       </p>
 
       <div v-if="error || note" class="feedback" role="status" aria-live="polite">
@@ -31,31 +26,31 @@
       </div>
 
       <!-- Подключённый бот: native provider lifecycle и его account-scoped настройки. -->
-      <TelegramLoading v-if="loading" label="Загружаю состояние бота…"
+      <TelegramLoading v-if="loading" :label="translate('core.telegramZagruzhayuSostoyanieBota')"
                        :failed="Boolean(error)" :connected="connected" />
       <template v-else-if="connected">
-        <nav class="setup-path" aria-label="Настройка Телеграма">
+        <nav class="setup-path" :aria-label="translate('core.telegramNastroykaTelegrama')">
           <a class="path-step done" href="#tg-bot">
             <span class="path-mark">1</span>
             <span class="path-copy">
-              <b>Бот подключён</b>
-              <small v-if="privacyKnown && bot?.canReadAllGroupMessages">Группы доступны целиком</small>
-              <small v-else>Проверь режим приватности</small>
+              <b>{{ translate('core.telegramBotPodklyuchen') }}</b>
+              <small v-if="privacyKnown && bot?.canReadAllGroupMessages">{{ translate('core.telegramGruppyDostupnyTselikom') }}</small>
+              <small v-else>{{ translate('core.telegramProverRezhimPrivatnosti') }}</small>
             </span>
           </a>
           <a class="path-step" :class="{ done: chats.length }" href="#tg-chats">
             <span class="path-mark">2</span>
             <span class="path-copy">
-              <b>Получи сообщение</b>
-              <small>{{ chats.length ? 'Бот уже слышит чаты' : 'Добавь бота в рабочий чат' }}</small>
+              <b>{{ translate('core.telegramPoluchiSoobschenie') }}</b>
+              <small>{{ chats.length ? translate('core.telegramBotUzheSlyshitChaty') : translate('core.telegramDobavBotaVRabochiy') }}</small>
             </span>
           </a>
           <a class="path-step" :class="{ done: rules.length, attention: dirty }" href="#tg-rules">
             <span class="path-mark">3</span>
             <span class="path-copy">
-              <b>Разреши чат</b>
-              <small v-if="dirty">Есть несохранённые изменения</small>
-              <small v-else>{{ rules.length ? 'Привязка к проекту настроена' : 'Выбери проект для чата' }}</small>
+              <b>{{ translate('core.telegramRazreshiChat') }}</b>
+              <small v-if="dirty">{{ translate('core.taskEditUnsaved') }}</small>
+              <small v-else>{{ rules.length ? translate('core.telegramPrivyazkaKProektuNastroena') : translate('core.telegramVyberiProektDlyaChata') }}</small>
             </span>
           </a>
         </nav>
@@ -67,121 +62,98 @@
               <div class="bot-name">
                 <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
                 <div>
-                  <div class="section-kicker">Подключённый бот</div>
+                  <div class="section-kicker">{{ translate('core.telegramPodklyuchennyyBot') }}</div>
                   <div class="name">@{{ bot?.username }}</div>
                 </div>
               </div>
             </div>
 
-            <div v-if="privacyKnown && bot?.canReadAllGroupMessages" class="state good">
-              ✓ Режим приватности выключен — в группах бот видит переписку целиком.
-            </div>
+            <div v-if="privacyKnown && bot?.canReadAllGroupMessages" class="state good"> {{ translate('core.telegramRezhimPrivatnostiVyklyuchenV') }} </div>
             <div v-else-if="privacyKnown" class="state warn">
-              <b>Бот пока не видит переписку в группах.</b>
-              {{ bot?.privacyHint }}
-              Выключи режим у @BotFather и нажми «Проверить».
-            </div>
-            <div v-else class="state">
-              Состояние режима приватности неизвестно — нажми «Проверить».
-            </div>
+              <b>{{ translate('core.telegramBotPokaNeVidit') }}</b>
+              {{ bot?.privacyHint }} {{ translate('core.telegramVyklyuchiRezhimUBotfather') }} </div>
+            <div v-else class="state"> {{ translate('core.telegramSostoyanieRezhimaPrivatnostiNeizvestno') }} </div>
 
             <div v-if="pollState" class="state" :class="pollState.kind">{{ pollState.text }}</div>
-            <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
+            <div v-if="providerReason" class="state warn">{{ translate('core.telegramPrichinaProvider') }} {{ providerReason }}</div>
 
-            <p class="muted sub">
-              Следующий шаг: добавь @{{ bot?.username }} в рабочий чат обычным
-              «Добавить участника» и отправь тестовое сообщение.
-            </p>
+            <p class="muted sub"> {{ translate('core.telegramSleduyuschiyShagDobav') }}{{ bot?.username }} {{ translate('core.telegramVRabochiyChatObychnym') }} </p>
 
             <div class="bot-actions">
               <UiButton
                 class="btn"
                 :disabled="Boolean(busy)"
                 :loading="busy === 'recheck'"
-                loading-label="Проверяю Telegram"
+                :loading-label="translate('core.telegramProveryayuTelegram')"
                 @click="recheck"
               >
-                {{ busy === 'recheck' ? 'Проверяю…' : 'Проверить' }}
+                {{ busy === 'recheck' ? translate('core.telegramProveryayu') : translate('settings.test') }}
               </UiButton>
               <UiButton
                 class="btn danger disconnect"
                 tone="danger"
                 :disabled="Boolean(busy)"
                 @click="disconnect"
-              >
-                Отключить
-              </UiButton>
+              > {{ translate('core.telegramOtklyuchit') }} </UiButton>
             </div>
 
             <details class="technical">
-              <summary>Данные подключения</summary>
-              <div class="muted sub technical-data">
-                id {{ bot?.botId }} · токен {{ bot?.tokenHint }}
-                <template v-if="bot?.connectedAt"> · подключён {{ fmtMs(bot?.connectedAt) }}</template>
+              <summary>{{ translate('core.telegramDannyePodklyucheniya') }}</summary>
+              <div class="muted sub technical-data"> {{ 'id' }} {{ bot?.botId }} {{ translate('core.telegramToken') }} {{ bot?.tokenHint }}
+                <template v-if="bot?.connectedAt"> {{ translate('core.telegramPodklyuchen') }} {{ fmtMs(bot?.connectedAt) }}</template>
               </div>
             </details>
           </section>
 
-          <aside class="side-stack" aria-label="Вспомогательные настройки канала">
+          <aside class="side-stack" :aria-label="translate('core.telegramVspomogatelnyeNastroykiKanala')">
             <!-- Единственный источник имён для привязки «чат/тема → проект». -->
             <section id="tg-chats" class="card chats-card">
               <div class="head compact-head">
                 <div>
-                  <div class="section-kicker">Источник сообщений</div>
+                  <div class="section-kicker">{{ translate('core.telegramIstochnikSoobscheniy') }}</div>
                   <div class="section-title">
-                    <span class="h">Что слышит бот</span>
+                    <span class="h">{{ translate('core.telegramChtoSlyshitBot') }}</span>
                     <span v-if="chats.length" class="count subtle">{{ chats.length }}</span>
                   </div>
                 </div>
-                <UiButton class="btn compact" :disabled="loading" @click="loadChats">
-                  Обновить
-                </UiButton>
+                <UiButton class="btn compact" :disabled="loading" @click="loadChats"> {{ translate('core.trackerUpdate') }} </UiButton>
               </div>
 
               <div v-if="!chats.length" class="mini-empty">
-                <b>Сообщений пока не было</b>
-                <p class="muted sub">
-                  Добавь бота в рабочий чат и напиши туда что-нибудь — чат появится здесь.
-                </p>
+                <b>{{ translate('core.telegramSoobscheniyPokaNeBylo') }}</b>
+                <p class="muted sub"> {{ translate('core.telegramDobavBotaVRabochiy2') }} </p>
               </div>
               <ul v-else class="chats">
                 <li v-for="c in chats" :key="c.id" class="chat">
-                  <div class="cname">{{ c.title || `чат ${c.id}` }}</div>
+                  <div class="cname">{{ c.title || translate('core.telegramChatId', { id: String(c.id) }) }}</div>
                   <div class="muted sub">
                     {{ chatKind(c) }} ·
-                    {{ c.messages }} {{ plural(c.messages, ['сообщение', 'сообщения', 'сообщений']) }}
+                    {{ translate('core.telegramMessageCount', { count: c.messages || 0 }) }}
                   </div>
-                  <div class="muted chat-meta">
-                    id {{ c.id }}<template v-if="c.lastAt"> · последнее {{ fmtSec(c.lastAt) }}</template>
+                  <div class="muted chat-meta"> {{ 'id' }} {{ c.id }}<template v-if="c.lastAt"> {{ translate('core.telegramPoslednee') }} {{ fmtSec(c.lastAt) }}</template>
                   </div>
                 </li>
               </ul>
 
-              <p class="muted sub card-foot">
-                Этот список только показывает, откуда уже пришли сообщения. Чтобы использовать
-                их в задачах, настрой привязку «чат или тема → проект» ниже.
-              </p>
+              <p class="muted sub card-foot"> {{ translate('core.telegramEtotSpisokTolkoPokazyvaet') }} </p>
             </section>
 
             <!-- Необязательный фолбэк для сообщений, которых ещё нет в архиве. -->
             <section class="card service-card">
               <div class="head compact-head">
                 <div>
-                  <div class="section-kicker">Для старых ссылок · необязательно</div>
-                  <div class="h">Служебный чат</div>
+                  <div class="section-kicker">{{ translate('core.telegramDlyaStaryhSsylokNeobyazatelno') }}</div>
+                  <div class="h">{{ translate('core.telegramSluzhebnyyChat') }}</div>
                 </div>
-                <span class="optional-chip">Опционально</span>
+                <span class="optional-chip">{{ translate('core.telegramOptsionalno') }}</span>
               </div>
 
-              <p class="muted sub">
-                Выбери свою личку с ботом. Через неё GrigDesk сможет достать сообщение,
-                которое было отправлено до подключения бота.
-              </p>
+              <p class="muted sub"> {{ translate('core.telegramVyberiSvoyuLichkuS') }} </p>
 
               <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
                 <div class="service-control">
                   <UiSelect v-model="serviceChoice" class="sel">
-                    <option value="">не выбран — пересылки не будет</option>
+                    <option value="">{{ translate('core.telegramNeVybranPeresylkiNe') }}</option>
                     <option v-for="o in serviceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </UiSelect>
                   <UiButton
@@ -190,28 +162,20 @@
                     variant="solid"
                     tone="success"
                     :loading="busy === 'service'"
-                    loading-label="Сохраняю служебный чат"
+                    :loading-label="translate('core.telegramSohranyayuSluzhebnyyChat')"
                     @click="saveService"
                   >
-                    {{ busy === 'service' ? 'Сохраняю…' : 'Сохранить' }}
+                    {{ busy === 'service' ? translate('core.telegramSohranyayu') : translate('core.save') }}
                   </UiButton>
                 </div>
               </fieldset>
 
-              <p v-if="!serviceOptions.length" class="muted sub">
-                Выбирать пока не из чего: напиши боту в личку что угодно, и чат появится здесь.
-              </p>
-              <p v-else-if="!serviceSaved" class="muted sub">
-                Пока чат не выбран, старые ссылки останутся неразвёрнутыми — новые сообщения
-                продолжат работать как обычно.
-              </p>
+              <p v-if="!serviceOptions.length" class="muted sub"> {{ translate('core.telegramVybiratPokaNeIz') }} </p>
+              <p v-else-if="!serviceSaved" class="muted sub"> {{ translate('core.telegramPokaChatNeVybran') }} </p>
 
               <details class="explain compact-explain">
-                <summary>Зачем нужна именно личка?</summary>
-                <p class="muted sub">
-                  Бот на секунду пересылает туда исходное сообщение и сразу удаляет копию.
-                  Групповой чат не подходит: служебную копию успеют увидеть его участники.
-                </p>
+                <summary>{{ translate('core.telegramZachemNuzhnaImennoLichka') }}</summary>
+                <p class="muted sub"> {{ translate('core.telegramBotNaSekunduPeresylaet') }} </p>
               </details>
             </section>
 
@@ -220,23 +184,17 @@
             <section id="tg-pult" class="card pult-card">
               <div class="head compact-head">
                 <div>
-                  <div class="section-kicker">Удалённые решения · без VPS</div>
-                  <div class="h">Пульт</div>
+                  <div class="section-kicker">{{ translate('core.telegramUdalennyeResheniyaBezVps') }}</div>
+                  <div class="h">{{ translate('core.telegramPult') }}</div>
                 </div>
-                <span v-if="pult?.confirmed" class="count">включён</span>
-                <span v-else class="optional-chip">Выключен</span>
+                <span v-if="pult?.confirmed" class="count">{{ translate('core.telegramVklyuchen') }}</span>
+                <span v-else class="optional-chip">{{ translate('settings.disabled') }}</span>
               </div>
 
-              <p class="muted sub">
-                Бот держит в твоей личке живую карточку каждого прогона — узел, прогресс и
-                чем занят агент, — звонит, когда маршрут доехал или работа встала на тебе
-                (ворота, вопрос агента, запрос разрешения, затык), и принимает решения
-                кнопками. Команды: /status и /status &lt;номер&gt;.
-              </p>
+              <p class="muted sub"> {{ translate('core.telegramBotDerzhitVTvoey') }} </p>
 
               <template v-if="pult?.confirmed">
-                <div class="state good" data-state="pult-on">
-                  ✓ Пульт слушает личку {{ pult.chatTitle || pult.chatHint }}.
+                <div class="state good" data-state="pult-on"> {{ translate('core.telegramPultSlushaetLichku') }} {{ pult.chatTitle || pult.chatHint }}.
                 </div>
                 <div class="row">
                   <UiButton
@@ -244,16 +202,14 @@
                     tone="danger"
                     :disabled="Boolean(busy)"
                     @click="pultDisable"
-                  >
-                    Выключить пульт
-                  </UiButton>
+                  > {{ translate('core.telegramVyklyuchitPult') }} </UiButton>
                 </div>
               </template>
               <template v-else>
                 <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
                   <div class="service-control">
                     <UiSelect v-model="pultChoice" class="sel">
-                      <option value="">выбери свою личку с ботом</option>
+                      <option value="">{{ translate('core.telegramVyberiSvoyuLichkuS2') }}</option>
                       <option v-for="o in pultOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                     </UiSelect>
                     <UiButton
@@ -262,10 +218,10 @@
                       tone="success"
                       :disabled="!pultChoice"
                       :loading="busy === 'pult'"
-                      loading-label="Отправляю код"
+                      :loading-label="translate('core.telegramOtpravlyayuKod')"
                       @click="pultRequest"
                     >
-                      {{ busy === 'pult' ? 'Отправляю…' : 'Получить код' }}
+                      {{ busy === 'pult' ? translate('core.telegramOtpravlyayu') : translate('settings.getCode') }}
                     </UiButton>
                   </div>
                   <div v-if="pult?.pending" class="service-control pult-code" data-state="pult-pending">
@@ -275,7 +231,7 @@
                       data-role="verification-code"
                       inputmode="numeric"
                       maxlength="6"
-                      placeholder="код из лички"
+                      :placeholder="translate('core.telegramKodIzLichki')"
                       @keyup.enter="pultConfirm"
                     />
                     <UiButton
@@ -284,75 +240,49 @@
                       tone="success"
                       :disabled="!pultCode.trim()"
                       :loading="busy === 'pult'"
-                      loading-label="Включаю пульт"
+                      :loading-label="translate('core.telegramVklyuchayuPult')"
                       @click="pultConfirm"
-                    >
-                      Включить
-                    </UiButton>
+                    > {{ translate('core.usageConfirmOn') }} </UiButton>
                   </div>
                 </fieldset>
-                <p v-if="!pultOptions.length" class="muted sub">
-                  Выбирать пока не из чего: напиши боту в личку /start — она появится здесь.
-                </p>
-                <p v-else-if="pult?.configured" class="muted sub">
-                  Прежний выбор ({{ pult.chatTitle || pult.chatHint }}) сохранён; для включения
-                  запроси новый код.
-                </p>
+                <p v-if="!pultOptions.length" class="muted sub"> {{ translate('core.telegramVybiratPokaNeIz2') }} </p>
+                <p v-else-if="pult?.configured" class="muted sub"> {{ translate('core.telegramPrezhniyVybor') }}{{ pult.chatTitle || pult.chatHint }}{{ translate('core.telegramSohranenDlyaVklyucheniyaZaprosi') }} </p>
               </template>
 
               <details class="explain compact-explain">
-                <summary>Границы и безопасность</summary>
-                <p class="muted sub">
-                  У ботов нет сквозного шифрования: содержимое карточек (названия задач,
-                  вопросы агента, превью команд) видит Telegram. По явному нажатию туда же
-                  отправляются ограниченные plain-text страницы плана задачи. Дифы,
-                  произвольные файлы, полные команды и деньги в пульт не выносятся никогда;
-                  всё, что стоит времени или денег, переспрашивается вторым тапом.
-                  Чужие сообщения и нажатия бот молча
-                  игнорирует. Личку пульта не привязывай правилом к проекту — команды
-                  не должны становиться обращениями Входящих.
-                </p>
+                <summary>{{ translate('core.telegramGranitsyIBezopasnost') }}</summary>
+                <p class="muted sub"> {{ translate('core.telegramUBotovNetSkvoznogo') }} </p>
               </details>
             </section>
           </aside>
 
           <!-- Allowlist: широкая карточка и явная последовательность «откуда → куда → автомат». -->
           <section id="tg-rules" class="card rules-card">
-            <div v-if="!providerWritable" class="state warn" data-state="provider-read-only">
-              Provider не подключён для записи. Правила и архив показаны только для чтения;
-              переподключение не возобновит приём Inbox автоматически.
-            </div>
+            <div v-if="!providerWritable" class="state warn" data-state="provider-read-only"> {{ translate('core.telegramProviderNePodklyuchenDlya') }} </div>
             <fieldset class="native-editor rules-editor" :disabled="!providerWritable || !!busy">
             <div class="head rules-head">
               <div>
-                <div class="section-kicker">Доступ и маршрутизация</div>
+                <div class="section-kicker">{{ translate('core.telegramDostupIMarshrutizatsiya') }}</div>
                 <div class="section-title">
-                  <span class="h">Разрешённые чаты</span>
+                  <span class="h">{{ translate('core.telegramRazreshennyeChaty') }}</span>
                   <span v-if="rules.length" class="count subtle">{{ rules.length }}</span>
                 </div>
               </div>
-              <UiButton class="btn" :disabled="Boolean(busy)" @click="addRule">
-                Добавить чат
-              </UiButton>
+              <UiButton class="btn" :disabled="Boolean(busy)" @click="addRule"> {{ translate('core.telegramDobavitChat') }} </UiButton>
             </div>
 
             <div class="rules-callout">
               <span class="callout-mark">!</span>
               <div>
-                <b>Бот слышит чат, но GrigDesk не использует его без правила.</b>
-                <p class="muted sub">
-                  Правило одновременно разрешает читать переписку и объясняет, в какой проект
-                  создавать задачу. Всё, чего нет в списке, остаётся закрытым.
-                </p>
+                <b>{{ translate('core.telegramBotSlyshitChatNo') }}</b>
+                <p class="muted sub"> {{ translate('core.telegramPraviloOdnovremennoRazreshaetChitat') }} </p>
               </div>
             </div>
 
             <div v-if="!rules.length" class="empty-rules">
               <div>
-                <b>Ни один чат не разрешён</b>
-                <p class="muted sub">
-                  Добавь первое правило, выбери услышанный чат и проект GrigDesk.
-                </p>
+                <b>{{ translate('core.telegramNiOdinChatNe') }}</b>
+                <p class="muted sub"> {{ translate('core.telegramDobavPervoePraviloVyberi') }} </p>
               </div>
               <UiButton
                 class="btn primary"
@@ -360,24 +290,22 @@
                 tone="success"
                 :disabled="Boolean(busy)"
                 @click="addRule"
-              >
-                Добавить первое правило
-              </UiButton>
+              > {{ translate('core.telegramDobavitPervoePravilo') }} </UiButton>
             </div>
 
             <ol v-else class="rules">
               <li v-for="(r, i) in rules" :key="i" class="rule">
                 <div class="rule-head">
                   <div>
-                    <span class="rule-number">Правило {{ i + 1 }}</span>
-                    <b>{{ r.title || r.username || 'Новый чат' }}</b>
+                    <span class="rule-number">{{ translate('core.telegramPravilo') }} {{ i + 1 }}</span>
+                    <b>{{ r.title || r.username || translate('core.telegramNovyyChat') }}</b>
                   </div>
                   <UiIconButton
                     class="icon-btn danger x"
                     role="embedded"
                     tone="danger"
-                    label="Убрать правило"
-                    v-tooltip="'Убрать правило'"
+                    :label="translate('core.telegramUbratPravilo')"
+                    v-tooltip="translate('core.telegramUbratPravilo')"
                     @click="rules.splice(i, 1)"
                   >
                     ×
@@ -389,37 +317,37 @@
                     <div class="part-head">
                       <span class="part-number">1</span>
                       <div>
-                        <b>Откуда читать</b>
-                        <small>Рабочий чат целиком или одна тема</small>
+                        <b>{{ translate('core.telegramOtkudaChitat') }}</b>
+                        <small>{{ translate('core.telegramRabochiyChatTselikomIli') }}</small>
                       </div>
                     </div>
 
                     <div class="field-grid source-fields">
                       <label class="control full">
-                        <span class="field-label">Чат</span>
+                        <span class="field-label">{{ translate('core.telegramChat') }}</span>
                         <UiSelect
                           class="sel chat-select"
                           :model-value="chatMode(r)"
                           @update:model-value="setChat(r, $event)"
                         >
-                          <option value="">чат не выбран</option>
+                          <option value="">{{ translate('core.telegramChatNeVybran') }}</option>
                           <option v-for="o in chatOptions" :key="o.value" :value="o.value">
                             {{ o.label }}
                           </option>
-                          <option value="name">публичный чат по имени…</option>
+                          <option value="name">{{ translate('core.telegramPublichnyyChatPoImeni') }}</option>
                         </UiSelect>
                       </label>
                       <label v-if="chatMode(r) === 'name'" class="control">
-                        <span class="field-label">Имя публичного чата</span>
+                        <span class="field-label">{{ translate('core.telegramImyaPublichnogoChata') }}</span>
                         <UiInput
                           v-model="r.username"
                           class="inp thin"
                           spellcheck="false"
-                          placeholder="имя_чата"
+                          :placeholder="translate('core.telegramImyaChata')"
                         />
                       </label>
                       <div class="control topic-control">
-                        <span class="field-label">Тема <em>необязательно</em></span>
+                        <span class="field-label">{{ translate('core.telegramTema') }} <em>{{ translate('core.telegramNeobyazatelno') }}</em></span>
                         <UiSelect
                           class="sel thin topic-select"
                           compact
@@ -428,35 +356,26 @@
                           @focus="loadTopicsForRule(r, true)"
                           @update:model-value="setThread(r, $event)"
                         >
-                          <option value="">Вся переписка — все темы</option>
+                          <option value="">{{ translate('core.telegramVsyaPerepiskaVseTemy') }}</option>
                           <option v-for="topic in topicsOf(r)" :key="topic.id" :value="String(topic.id)">
                             {{ topicLabel(topic) }}
                           </option>
                           <option
                             v-if="topicChoice(r) && !topicKnown(r)"
                             :value="topicChoice(r)"
-                          >
-                            Тема {{ topicChoice(r) }} · сохранена вручную
-                          </option>
+                          > {{ translate('core.telegramTema') }} {{ topicChoice(r) }} {{ translate('core.telegramSohranenaVruchnuyu') }} </option>
                         </UiSelect>
 
                         <div class="topic-status muted">
-                          <span v-if="!ruleChatId(r)">Сначала выбери услышанный чат.</span>
+                          <span v-if="!ruleChatId(r)">{{ translate('core.telegramSnachalaVyberiUslyshannyyChat') }}</span>
                           <span v-else-if="topicsBusy(r)">
-                            <UiSpinner decorative />
-                            Загружаю темы…
-                          </span>
+                            <UiSpinner decorative /> {{ translate('core.telegramZagruzhayuTemy') }} </span>
                           <span v-else-if="topicsError(r)">{{ topicsError(r) }}</span>
-                          <span v-else-if="topicsOf(r).length">
-                            Найдено: {{ topicsOf(r).length }}.
-                            <template v-if="topicsOf(r).some((topic) => !topic.title)">
-                              Названия появятся после нового сообщения в теме.
-                            </template>
-                            <template v-else>Список обновляется по сообщениям бота.</template>
+                          <span v-else-if="topicsOf(r).length"> {{ translate('core.telegramNaydeno') }} {{ topicsOf(r).length }}.
+                            <template v-if="topicsOf(r).some((topic) => !topic.title)"> {{ translate('core.telegramNazvaniyaPoyavyatsyaPosleNovogo') }} </template>
+                            <template v-else>{{ translate('core.telegramSpisokObnovlyaetsyaPoSoobscheniyam') }}</template>
                           </span>
-                          <span v-else-if="topicsLoaded(r)">
-                            Тем пока не слышно — отправь сообщение в нужную тему.
-                          </span>
+                          <span v-else-if="topicsLoaded(r)"> {{ translate('core.telegramTemPokaNeSlyshno') }} </span>
                           <UiButton
                             v-if="ruleChatId(r)"
                             class="link-btn"
@@ -464,38 +383,31 @@
                             tone="accent"
                             :disabled="topicsBusy(r)"
                             @click="loadTopicsForRule(r, true)"
-                          >
-                            Обновить
-                          </UiButton>
+                          > {{ translate('core.trackerUpdate') }} </UiButton>
                           <a
                             v-if="topicLink(r)"
                             :href="topicLink(r)"
                             target="_blank"
                             rel="noopener"
-                          >
-                            Открыть выбранную тему
-                          </a>
+                          > {{ translate('core.telegramOtkrytVybrannuyuTemu') }} </a>
                         </div>
 
                         <details class="manual-topic">
-                          <summary>Темы нет в списке — ввести номер вручную</summary>
+                          <summary>{{ translate('core.telegramTemyNetVSpiske') }}</summary>
                           <label class="manual-topic-field">
-                            <span class="field-label">Номер из ссылки на тему</span>
+                            <span class="field-label">{{ translate('core.telegramNomerIzSsylkiNa') }}</span>
                             <UiInput
                               v-model="r.threadId"
                               class="inp thin"
                               inputmode="numeric"
-                              placeholder="тема: например 42"
+                              :placeholder="translate('core.telegramTemaNaprimer42')"
                             />
                           </label>
                         </details>
                       </div>
                     </div>
 
-                    <p class="muted sub part-hint">
-                      GrigDesk показывает темы, в которых бот уже видел сообщения.
-                      «Вся переписка» разрешает весь чат; одна выбранная тема не открывает соседние.
-                    </p>
+                    <p class="muted sub part-hint"> {{ translate('core.telegramGrigdeskPokazyvaetTemyV') }} </p>
 
                     <div class="agent-search-option">
                       <UiCheckbox
@@ -504,15 +416,9 @@
                         @change="setAgentSearch(r, $event)"
                       >
                         <span class="task-option-copy">
-                          <b>Разрешить агентам искать эту переписку</b>
-                          <small v-if="!agentSearchStateKnown" data-state="agent-search-unknown">
-                            Состояние доступа не подтверждено (неизвестно). Обновите правила.
-                          </small>
-                          <small v-else>
-                            Opt-in для будущего внешнего корпуса переписки. Локальную базу
-                            знаний он не открывает; обычный поиск человека и разворот ссылок
-                            работают по правилу независимо от этого тумблера.
-                          </small>
+                          <b>{{ translate('core.telegramRazreshitAgentamIskatEtu') }}</b>
+                          <small v-if="!agentSearchStateKnown" data-state="agent-search-unknown"> {{ translate('core.telegramSostoyanieDostupaNePodtverzhdeno') }} </small>
+                          <small v-else> {{ translate('core.telegramOptInDlyaBuduschego') }} </small>
                         </span>
                       </UiCheckbox>
                     </div>
@@ -522,35 +428,35 @@
                     <div class="part-head">
                       <span class="part-number">2</span>
                       <div>
-                        <b>Куда создать задачу</b>
-                        <small>Проект GrigDesk и параметры Битрикс24</small>
+                        <b>{{ translate('core.telegramKudaSozdatZadachu') }}</b>
+                        <small>{{ translate('core.telegramProektGrigdeskIParametry') }}</small>
                       </div>
                     </div>
 
                     <div class="field-grid destination-fields">
                       <label class="control project-control">
-                        <span class="field-label">Проект GrigDesk <em>обязательно</em></span>
+                        <span class="field-label">{{ translate('core.telegramProektGrigdesk') }} <em>{{ translate('core.telegramObyazatelno') }}</em></span>
                         <UiSelect v-model="r.project" class="sel project-select">
-                          <option value="">проект GrigDesk не выбран</option>
+                          <option value="">{{ translate('core.telegramProektGrigdeskNeVybran') }}</option>
                           <option v-for="p in projectOptions" :key="p" :value="p">{{ p }}</option>
                         </UiSelect>
                       </label>
                       <label class="control">
-                        <span class="field-label">Тип</span>
+                        <span class="field-label">{{ translate('core.telegramTip') }}</span>
                         <UiSelect v-model="r.kind" class="sel thin" compact>
-                          <option value="bug">Баг</option>
-                          <option value="wish">Идея</option>
+                          <option value="bug">{{ translate('core.telegramBag') }}</option>
+                          <option value="wish">{{ translate('core.telegramIdeya') }}</option>
                         </UiSelect>
                       </label>
                       <label class="control">
-                        <span class="field-label">Проект Битрикс24 <em>необязательно</em></span>
+                        <span class="field-label">{{ translate('core.telegramProektBitriks24') }} <em>{{ translate('core.telegramNeobyazatelno') }}</em></span>
                         <UiSelect
                           v-model="r.b24.groupId"
                           class="sel thin tracker-group-select"
                           compact
                         >
                           <option :value="null">
-                            {{ trackerGroupsFailed ? 'без проекта — список сейчас недоступен' : 'без проекта Битрикс24' }}
+                            {{ trackerGroupsFailed ? translate('core.telegramBezProektaSpisokSeychas') : translate('core.telegramBezProektaBitriks24') }}
                           </option>
                           <option v-for="group in trackerGroupOptions" :key="group.id" :value="group.id">
                             {{ group.name }}
@@ -558,35 +464,29 @@
                         </UiSelect>
                       </label>
                       <label class="control responsible-control">
-                        <span class="field-label">Ответственный</span>
+                        <span class="field-label">{{ translate('core.telegramOtvetstvennyy') }}</span>
                         <UiSelect v-model="r.b24.responsibleId" class="sel">
-                          <option :value="null">ответственный — я</option>
+                          <option :value="null">{{ translate('core.telegramOtvetstvennyyYa') }}</option>
                           <option v-for="u in trackerUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
                         </UiSelect>
                       </label>
                       <label class="control">
-                        <span class="field-label">Приоритет</span>
+                        <span class="field-label">{{ translate('core.taskEditPriority') }}</span>
                         <UiSelect v-model.number="r.b24.priority" class="sel thin" compact>
-                          <option :value="0">низкий</option>
-                          <option :value="1">средний</option>
-                          <option :value="2">высокий</option>
+                          <option :value="0">{{ translate('core.telegramNizkiy') }}</option>
+                          <option :value="1">{{ translate('core.telegramSredniy') }}</option>
+                          <option :value="2">{{ translate('core.telegramVysokiy') }}</option>
                         </UiSelect>
                       </label>
                     </div>
 
-                    <p class="muted sub part-hint">
-                      Проект GrigDesk определяет, к какому коду относится переписка. Проект
-                      Битрикс24 выбирает раздел, в котором появится задача на портале.
-                    </p>
+                    <p class="muted sub part-hint"> {{ translate('core.telegramProektGrigdeskOpredelyaetK') }} </p>
 
                     <div class="task-reply-option">
                       <UiCheckbox v-model="r.notifyTaskCreated">
                         <span class="task-option-copy">
-                          <b>Сообщать в Telegram о создании задачи</b>
-                          <small>
-                            После ручной или автоматической постановки бот ответит в этот
-                            чат или тему номером задачи, её названием и ссылкой на Битрикс24.
-                          </small>
+                          <b>{{ translate('core.telegramSoobschatVTelegramO') }}</b>
+                          <small> {{ translate('core.telegramPosleRuchnoyIliAvtomaticheskoy') }} </small>
                         </span>
                       </UiCheckbox>
                     </div>
@@ -595,23 +495,19 @@
 
                 <!-- Класс rrow и подпись lbl сохранены как явный контракт тестов формы. -->
                 <div class="rrow auto-panel" :class="{ enabled: autoOf(r).enabled }">
-                  <span class="lbl">автомат</span>
+                  <span class="lbl">{{ translate('core.telegramAvtomat') }}</span>
                   <div class="auto-copy">
-                    <b>Автоматизация</b>
-                    <span class="muted sub">Необязательно — сначала можно разбирать всё вручную</span>
+                    <b>{{ translate('core.telegramAvtomatizatsiya') }}</b>
+                    <span class="muted sub">{{ translate('core.telegramNeobyazatelnoSnachalaMozhnoRazbirat') }}</span>
                   </div>
                   <div class="chk">
                     <UiCheckbox
                       :checked="autoOf(r).enabled"
                       @update:checked="setAuto(r, 'enabled', $event)"
-                    >
-                      заводить задачи без меня
-                    </UiCheckbox>
+                    > {{ translate('core.telegramZavoditZadachiBezMenya') }} </UiCheckbox>
                   </div>
                   <template v-if="autoOf(r).enabled">
-                    <label class="num">
-                      уверенность от
-                      <UiNumberInput
+                    <label class="num"> {{ translate('core.telegramUverennostOt') }} <UiNumberInput
                         class="inp num-f"
                         :model-value="pctOf(r)"
                         min="0"
@@ -620,34 +516,25 @@
                       />
                       %
                     </label>
-                    <label class="num">
-                      не больше
-                      <UiNumberInput
+                    <label class="num"> {{ translate('core.telegramNeBolshe') }} <UiNumberInput
                         class="inp num-f"
                         :model-value="autoOf(r).maxPerDay"
                         min="0"
                         max="100"
                         @update:model-value="setCap(r, $event)"
-                      />
-                      задач в сутки
-                    </label>
+                      /> {{ translate('core.telegramZadachVSutki') }} </label>
                   </template>
                 </div>
               </li>
             </ol>
 
             <details v-if="rules.length" class="explain rules-explain">
-              <summary>Как безопасно включать автомат</summary>
-              <p class="muted sub">
-                Включай его только для чатов, где почти каждое сообщение — постановка.
-                GrigDesk передаст обращение общей модели из «Настройки → Плагины → Входящие».
-                Если уверенности не хватит, задача не создастся: обращение останется в общей очереди.
-                Суточный лимит защищает портал от случайного потока задач.
-              </p>
+              <summary>{{ translate('core.telegramKakBezopasnoVklyuchatAvtomat') }}</summary>
+              <p class="muted sub"> {{ translate('core.telegramVklyuchayEgoTolkoDlya') }} </p>
             </details>
 
             <div v-if="dirty" class="savebar">
-              <span>Изменения ещё не применены</span>
+              <span>{{ translate('core.telegramIzmeneniyaEscheNePrimeneny') }}</span>
               <div class="row">
                 <UiButton
                   class="btn primary"
@@ -655,14 +542,12 @@
                   tone="success"
                   :disabled="Boolean(busy)"
                   :loading="busy === 'rules'"
-                  loading-label="Сохраняю правила"
+                  :loading-label="translate('core.telegramSohranyayuPravila')"
                   @click="saveRules"
                 >
-                  {{ busy === 'rules' ? 'Сохраняю…' : 'Сохранить' }}
+                  {{ busy === 'rules' ? translate('core.telegramSohranyayu') : translate('core.save') }}
                 </UiButton>
-                <UiButton class="btn" :disabled="Boolean(busy)" @click="loadRules">
-                  Отменить
-                </UiButton>
+                <UiButton class="btn" :disabled="Boolean(busy)" @click="loadRules"> {{ translate('core.trackerCancel') }} </UiButton>
               </div>
             </div>
             </fieldset>
@@ -677,18 +562,15 @@
             <div class="setup-card-head">
 
               <div>
-                <div class="section-kicker">В GrigDesk</div>
-                <div class="h">Вставь токен и подключи</div>
+                <div class="section-kicker">{{ translate('core.telegramVGrigdesk') }}</div>
+                <div class="h">{{ translate('core.telegramVstavTokenIPodklyuchi') }}</div>
               </div>
             </div>
 
-            <p class="muted">
-              GrigDesk сначала проверит токен у Телеграма. Если всё в порядке, покажет имя
-              бота и начнёт слушать новые сообщения.
-            </p>
+            <p class="muted"> {{ translate('core.telegramGrigdeskSnachalaProveritToken') }} </p>
 
             <label class="control token-control">
-              <span class="field-label">Токен от @BotFather</span>
+              <span class="field-label">{{ translate('core.telegramTokenOtBotfather') }}</span>
               <UiInput
                 v-model="token"
                 class="inp"
@@ -696,7 +578,7 @@
                 data-role="secret-token"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="8123456789:AA…"
+                :placeholder="'8123456789:AA…'"
                 @keydown.enter="connect"
               />
             </label>
@@ -706,91 +588,79 @@
               tone="success"
               :disabled="!canConnect || !token.trim() || Boolean(busy)"
               :loading="busy === 'connect'"
-              loading-label="Проверяю токен"
+              :loading-label="translate('core.telegramProveryayuToken')"
               @click="connect"
             >
-              {{ busy === 'connect' ? 'Проверяю токен…' : 'Подключить' }}
+              {{ busy === 'connect' ? translate('core.telegramProveryayuToken2') : translate('core.telegramPodklyuchit') }}
             </UiButton>
 
             <div class="state" :class="providerConnection === 'degraded' ? 'warn' : ''"
-                 data-state="provider-disconnected">
-              Telegram не подключён: новые сообщения не принимаются. Ранее принятые обращения,
-              если они есть, остаются в общем Inbox только для чтения.
-              <template v-if="providerReason"> Причина: {{ providerReason }}.</template>
+                 data-state="provider-disconnected"> {{ translate('core.telegramTelegramNePodklyuchenNovye') }} <template v-if="providerReason"> {{ translate('core.telegramPrichina') }} {{ providerReason }}.</template>
             </div>
 
             <div class="security-note">
-              <b>Токен останется на сервере.</b>
-              <span>
-                В браузер вернутся только последние четыре знака. Если токен утечёт,
-                отзови его у @BotFather командой <code>/revoke</code>.
+              <b>{{ translate('core.telegramTokenOstanetsyaNaServere') }}</b>
+              <span> {{ translate('core.telegramVBrauzerVernutsyaTolko') }} <code>{{ '/revoke' }}</code>.
               </span>
             </div>
 
             <details class="technical">
-              <summary>Где хранится токен</summary>
-              <div class="muted sub technical-data">
-                В файле <code>state/telegram-account-creds.json</code> в папке данных,
-                доступном только владельцу.
-              </div>
+              <summary>{{ translate('core.telegramGdeHranitsyaToken') }}</summary>
+              <div class="muted sub technical-data"> {{ translate('core.telegramVFayle') }} <code>{{ 'state/telegram-account-creds.json' }}</code> {{ translate('core.telegramVPapkeDannyhDostupnom') }} </div>
             </details>
           </section>
           <details class="card setup-card setup-guide">
             <summary class="setup-card-head">
 
               <div>
-                <div class="section-kicker">В Телеграме</div>
-                <div class="h">Создай отдельного бота</div>
+                <div class="section-kicker">{{ translate('core.telegramVTelegrame') }}</div>
+                <div class="h">{{ translate('core.telegramSozdayOtdelnogoBota') }}</div>
               </div>
             </summary>
 
             <ol class="steps">
               <li>
                 <span class="step-mark">1</span>
-                <span>Найди <b>@BotFather</b> с синей галочкой и отправь <code>/newbot</code>.</span>
+                <span>{{ translate('core.telegramNaydi') }} <b>{{ translate('core.telegramBotfather') }}</b> {{ translate('core.telegramSSineyGalochkoyI') }} <code>{{ '/newbot' }}</code>.</span>
               </li>
               <li>
                 <span class="step-mark">2</span>
-                <span>Задай видимое людям имя, например «GrigDesk · входящие».</span>
+                <span>{{ translate('core.telegramZadayVidimoeLyudyamImya') }}</span>
               </li>
               <li>
                 <span class="step-mark">3</span>
-                <span>Задай имя пользователя латиницей с окончанием <code>bot</code>.</span>
+                <span>{{ translate('core.telegramZadayImyaPolzovatelyaLatinitsey') }} <code>{{ 'bot' }}</code>.</span>
               </li>
               <li>
                 <span class="step-mark">4</span>
-                <span>Скопируй присланный токен вида <code>8123456789:AA…</code>.</span>
+                <span>{{ translate('core.telegramSkopiruyPrislannyyTokenVida') }} <code>{{ '8123456789:AA…' }}</code>.</span>
               </li>
               <li>
                 <span class="step-mark">5</span>
-                <span>Отправь <code>/setprivacy</code>, выбери бота и нажми <b>Disable</b>,
-                  чтобы он видел обычные сообщения в группах.</span>
+                <span>{{ translate('core.telegramOtprav') }} <code>{{ '/setprivacy' }}</code>{{ translate('core.telegramVyberiBotaINazhmi') }} <b>{{ translate('core.telegramDisable') }}</b>{{ translate('core.telegramChtobyOnVidelObychnye') }}</span>
               </li>
             </ol>
 
-            <div class="info-note">
-              Бота нельзя создать кнопкой на сайте: Телеграм разрешает делать это только
-              в переписке с @BotFather. После выдачи токена всё остальное настроит GrigDesk.
-            </div>
+            <div class="info-note"> {{ translate('core.telegramBotaNelzyaSozdatKnopkoy') }} </div>
           </details>
 
 
         </div>
 
         <section class="after-connect">
-          <div class="after-title">Что произойдёт после подключения</div>
+          <div class="after-title">{{ translate('core.telegramChtoProizoydetPoslePodklyucheniya') }}</div>
           <div class="after-grid">
             <div class="after-step">
               <span>1</span>
-              <div><b>Добавишь бота в чат</b><small>Как обычного участника группы</small></div>
+              <div><b>{{ translate('core.telegramDobavishBotaVChat') }}</b><small>{{ translate('core.telegramKakObychnogoUchastnikaGruppy') }}</small></div>
             </div>
             <div class="after-step">
               <span>2</span>
-              <div><b>Выберешь проект</b><small>GrigDesk не откроет чат без разрешения</small></div>
+              <div><b>{{ translate('core.telegramVybereshProekt') }}</b><small>{{ translate('core.telegramGrigdeskNeOtkroetChat') }}</small></div>
             </div>
             <div class="after-step">
               <span>3</span>
-              <div><b>Включишь приём в Inbox</b><small>Старая история не станет backlog</small></div>
+              <div><b>{{ translate('core.telegramVklyuchishPriemVInbox') }}</b><small>{{ translate('core.telegramStarayaIstoriyaNeStanet') }}</small></div>
             </div>
           </div>
         </section>
@@ -825,17 +695,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 
 import {
-  confirmDialog,
-  UiActionLink,
-  UiButton,
-  UiCheckbox,
-  UiIconButton,
-  UiInput,
-  UiNumberInput,
-  UiWorkspacePage,
-  UiSelect,
-  UiSpinner,
-  vTooltip,
+  confirmDialog, UiActionLink, UiButton, UiCheckbox, UiIconButton, UiInput, UiNumberInput,
+  UiWorkspacePage, UiSelect, UiSpinner, vTooltip, t as translate, messageRef, uiLocale
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import { telegramApi, telegramPluginDisabled } from '../shared/telegramApi.ts';
@@ -957,7 +818,7 @@ function fmtMs(ms: number | null | undefined): string {
     return '';
   }
 
-  return new Date(ms).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
+  return new Date(ms).toLocaleString(uiLocale.value, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function fmtSec(sec: number | null | undefined): string {
@@ -981,15 +842,23 @@ function plural(n: number | null | undefined, forms: readonly [string, string, s
 }
 
 const CHAT_KIND: Record<string, string> = {
-  private: 'личный чат',
-  group: 'группа',
-  supergroup: 'супергруппа',
-  channel: 'канал',
+  get private() {
+    return translate('core.telegramLichnyyChat');
+  },
+  get group() {
+    return translate('core.telegramGruppa');
+  },
+  get supergroup() {
+    return translate('core.telegramSupergruppa');
+  },
+  get channel() {
+    return translate('core.telegramKanal');
+  },
 };
 
 const chatKind = (c: TelegramChat) => [
-  CHAT_KIND[c.type ?? ''] || c.type || 'чат',
-  c.isForum ? 'с темами' : '',
+  CHAT_KIND[c.type ?? ''] || c.type || translate('core.telegramChatWord'),
+  c.isForum ? translate('core.coreSTemami') : '',
 ].filter(Boolean).join(', ');
 
 // Что написать про опрос. Отдельно от «бот подключён»: токен может быть цел, а
@@ -999,7 +868,7 @@ const pollState = computed<PollNote | null>(() => {
   if (connected.value && !providerWritable.value) {
     return {
       kind: 'warn',
-      text: 'Provider сейчас не готов к записи. Архив и ранее принятые обращения доступны только для чтения.',
+      text: translate('core.telegramProviderSeychasNeGotov'),
     };
   }
 
@@ -1014,17 +883,18 @@ const pollState = computed<PollNote | null>(() => {
   if (!p.running) {
     return {
       kind: 'warn',
-      text: 'Опрос не идёт: сервер поднялся раньше, чем появился токен. Нажми «Проверить» — '
-        + 'или перезапусти сервер, тогда опрос заведётся сам.',
+      text: translate('core.telegramOprosNeIdetServer'),
     };
   }
 
-  const parts = ['✓ Бот слушает Телеграм.'];
+  const parts = [translate('core.coreBotSlushaetTelegram')];
 
   if (p.lastMessageAt) {
-    parts.push(`Последнее сообщение — ${fmtMs(p.lastMessageAt)}.`);
+    parts.push(
+      translate('core.corePosledneeSoobschenieLastmessageat', { lastMessageAt: fmtMs(p.lastMessageAt) }),
+    );
   } else if (p.lastPollAt) {
-    parts.push(`Сообщений пока не было, последний ответ Телеграма — ${fmtMs(p.lastPollAt)}.`);
+    parts.push(translate('core.coreSoobscheniyPokaNeBylo', { lastPollAt: fmtMs(p.lastPollAt) }));
   }
 
   return { kind: 'good', text: parts.join(' ') };
@@ -1038,7 +908,7 @@ async function loadChats(): Promise<void> {
   } catch (e) {
     // Список чатов вторичен: из-за него не должно пропадать подключение бота.
     if (!telegramPluginDisabled(e)) {
-      error.value = errorMessage(e, 'Не удалось загрузить список чатов.');
+      error.value = errorMessage(e, translate('core.coreNeUdalosZagruzitSpisok'));
     }
   }
 }
@@ -1055,7 +925,7 @@ const serviceOptions = computed(() => {
 
   for (const c of chats.value) {
     if (c.type === 'private') {
-      out.set(String(c.id), c.title || `чат ${c.id}`);
+      out.set(String(c.id), c.title || translate('core.telegramChatId', { id: String(c.id) }));
     }
   }
 
@@ -1064,7 +934,10 @@ const serviceOptions = computed(() => {
   const cur = bot.value?.serviceChatId;
 
   if (cur && !out.has(String(cur))) {
-    out.set(String(cur), bot.value?.serviceChatTitle || `чат ${cur}`);
+    out.set(
+      String(cur),
+      bot.value?.serviceChatTitle || translate('core.telegramChatId', { id: String(cur) }),
+    );
   }
 
   return [...out].map(([value, label]) => ({ value, label }));
@@ -1101,10 +974,11 @@ async function saveService(): Promise<void> {
 
     bot.value = res.bot;
     note.value = bot.value.serviceChatId
-      ? `Служебный чат — ${bot.value.serviceChatTitle || bot.value.serviceChatId}.`
-      : 'Служебный чат снят: пересылать сообщения бот больше не будет.';
+      ? translate('core.coreSluzhebnyyChatServicechatid', { serviceChatId: bot.value.serviceChatTitle
+                      || bot.value.serviceChatId })
+      : translate('core.coreSluzhebnyyChatSnyatPeresylat');
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось сохранить служебный чат.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosSohranitSluzhebnyy'));
     // Отказ сервера не должен оставлять в селекте то, чего сервер не принял.
     serviceChoice.value = serviceSaved.value;
   } finally {
@@ -1123,7 +997,9 @@ const pultCode = ref('');
 
 const pultOptions = computed(() => chats.value
   .filter((c) => c.type === 'private')
-  .map((c) => ({ value: String(c.id), label: c.title || `чат ${c.id}` })));
+  .map((c) => ({ value: String(
+    c.id,
+  ), label: c.title || translate('core.telegramChatId', { id: String(c.id) }) })));
 
 // Запрос кода: сервер шлёт его в саму личку, и это первая половина доказательства
 // владения — вторая приходит обратно введённым кодом.
@@ -1140,9 +1016,9 @@ async function pultRequest(): Promise<void> {
     const res = await telegramApi.requestPult(bot.value?.botId, Number(pultChoice.value));
 
     pult.value = res.pult;
-    note.value = 'Код отправлен в личку — введи его ниже, он действует 10 минут.';
+    note.value = translate('core.coreKodOtpravlenVLichku');
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось отправить код.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosOtpravitKod'));
   } finally {
     busy.value = '';
   }
@@ -1164,10 +1040,12 @@ async function pultConfirm(): Promise<void> {
 
     pult.value = res.pult;
     pultCode.value = '';
-    note.value = `Пульт включён: бот слушает личку ${pult.value?.chatTitle || pult.value?.chatHint || ''}.`;
+    note.value = translate('core.corePultVklyuchenBotSlushaet', {
+      chatHint: pult.value?.chatTitle || pult.value?.chatHint || '',
+    });
   } catch (e) {
     // Текст сервера уже человеческий (код не совпал / протух) — показываем как есть.
-    error.value = errorMessage(e, 'Не удалось включить пульт.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosVklyuchitPult'));
   } finally {
     busy.value = '';
   }
@@ -1177,9 +1055,11 @@ async function pultConfirm(): Promise<void> {
 // код придётся получать заново, и молча терять его нельзя.
 async function pultDisable(): Promise<void> {
   const ok = await confirmDialog(
-    'Выключить пульт? Бот перестанет присылать карточки и принимать команды. '
-      + 'Выбор чата сохранится, но для включения понадобится новый код.',
-    { danger: true, okText: 'Выключить' },
+    messageRef('core.telegramVyklyuchitPultBotPerestanet'),
+    {
+      danger: true,
+      okText: translate('core.usageConfirmOff'),
+    },
   );
 
   if (!ok || busy.value) {
@@ -1194,9 +1074,9 @@ async function pultDisable(): Promise<void> {
     const res = await telegramApi.disablePult(bot.value?.botId);
 
     pult.value = res.pult;
-    note.value = 'Пульт выключен.';
+    note.value = translate('core.corePultVyklyuchen');
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось выключить пульт.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosVyklyuchitPult'));
   } finally {
     busy.value = '';
   }
@@ -1276,7 +1156,7 @@ const trackerGroupOptions = computed<TrackerGroupOption[]>(() => {
     if (id && !out.has(id)) {
       out.set(id, {
         id,
-        name: `Проект #${id} (сохранён, но сейчас недоступен)`,
+        name: translate('core.coreProektIdSohranenNo', { id: id }),
         missing: true,
       });
     }
@@ -1395,12 +1275,12 @@ const chatOptions = computed(() => {
   const out = new Map<number, string>();
 
   for (const c of chats.value) {
-    out.set(c.id, c.title || `чат ${c.id}`);
+    out.set(c.id, c.title || translate('core.telegramChatId', { id: String(c.id) }));
   }
 
   for (const r of rules.value) {
     if (r.chatId !== null && r.chatId !== undefined && !out.has(Number(r.chatId))) {
-      out.set(Number(r.chatId), r.title || `чат ${r.chatId}`);
+      out.set(Number(r.chatId), r.title || translate('core.telegramChatId', { id: String(r.chatId) }));
     }
   }
 
@@ -1444,12 +1324,16 @@ const topicKnown = (r: RuleForm) => topicsOf(r).some((t) => t.id === toId(r.thre
 
 const topicLabel = (t: TelegramTopic) => {
   if (t.title) {
-    return `${t.title} · тема ${t.id}`;
+    return translate('core.coreTitleTemaId', { title: t.title, id: t.id });
   }
 
   const count = Number(t.messages || 0);
 
-  return `Тема ${t.id} · ${count} ${plural(count, ['сообщение', 'сообщения', 'сообщений'])}`;
+  return translate('core.coreTemaIdCountPluralcount', {
+                          id: t.id,
+                          count: count,
+                          pluralcount: translate('core.telegramMessageWord', { count }),
+                        });
 };
 
 /**
@@ -1502,7 +1386,7 @@ async function loadTopics(chatId: unknown, { force = false }: { force?: boolean 
   } catch (e) {
     // Ручной ввод остаётся рабочим даже со старым сервером или временной ошибкой
     // архива; общей красной плашкой вторичный справочник страницу не перекрывает.
-    topicErrors.value[key] = errorMessage(e, 'Не удалось загрузить темы.');
+    topicErrors.value[key] = errorMessage(e, translate('core.coreNeUdalosZagruzitTemy'));
   } finally {
     topicLoading.value[key] = false;
   }
@@ -1615,7 +1499,7 @@ async function loadRules(): Promise<void> {
     await loadRuleTopics();
   } catch (e) {
     if (!telegramPluginDisabled(e)) {
-      error.value = errorMessage(e, 'Не удалось загрузить правила.');
+      error.value = errorMessage(e, translate('core.coreNeUdalosZagruzitPravila'));
     }
   }
 }
@@ -1640,7 +1524,7 @@ async function readRulesSnapshot({ requireFingerprint = false }: {
   applyRulesSnapshot(res);
 
   if (requireFingerprint && !agentSearchStateKnown.value) {
-    throw new Error('Сервер не вернул достоверный policy fingerprint.');
+    throw new Error(translate('core.telegramServerNeVernulDostovernyy'));
   }
 
   return res;
@@ -1654,7 +1538,7 @@ async function saveRules(): Promise<void> {
     return;
   }
   if (!isTelegramPolicyFingerprint(rulesPolicyFingerprint.value)) {
-    error.value = 'Не получен отпечаток правил. Перечитайте список перед сохранением.';
+    error.value = translate('core.coreNePoluchenOtpechatokPravil');
 
     return;
   }
@@ -1675,11 +1559,14 @@ async function saveRules(): Promise<void> {
     agentSearchStateKnown.value = true;
     savedRules.value = JSON.stringify(payload());
     note.value = rules.value.length
-      ? `Сохранено: ${rules.value.length} ${plural(rules.value.length, ['правило', 'правила', 'правил'])}.`
-      : 'Правил не осталось — чаты снова закрыты.';
+      ? translate('core.coreSohranenoLengthLength2', {
+    length: rules.value.length,
+    length2: translate('core.telegramRuleWord', { count: rules.value.length }),
+  })
+      : translate('core.corePravilNeOstalosChaty');
   } catch (e) {
     // Текст валидатора уже человеческий и с номером правила — показываем как есть.
-    error.value = errorMessage(e, 'Не удалось сохранить правила.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosSohranitPravila'));
   } finally {
     busy.value = '';
   }
@@ -1719,7 +1606,11 @@ async function confirmAgentSearch(
 
   if (!current) {
     note.value = '';
-    error.value = `${mutationMessage} Повторная проверка подтвердила: правило больше не существует.`;
+    error.value =
+             translate(
+               'core.coreMutationmessagePovtornayaProverkaPodtverdila',
+               { mutationMessage: mutationMessage },
+             );
 
     return;
   }
@@ -1728,15 +1619,19 @@ async function confirmAgentSearch(
 
   if (actual === enabled) {
     error.value = '';
-    note.value = `Повторная проверка подтвердила: агентский поиск ${actual ? 'разрешён' : 'закрыт'}.`;
+    note.value = translate('core.corePovtornayaProverkaPodtverdilaAgentskiy', {
+      actual: actual ? translate('core.coreRazreshen') : translate('core.routeZakryt'),
+    });
 
     return;
   }
 
   note.value = '';
-  error.value = `${mutationMessage} Повторная проверка подтвердила: `
-    + `агентский поиск ${actual ? 'разрешён' : 'закрыт'}, `
-    + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+  error.value = translate('core.coreMutationmessagePovtornayaProverkaPodtverdila2', {
+    mutationMessage: mutationMessage,
+    actual: actual ? translate('core.coreRazreshen') : translate('core.routeZakryt'),
+    enabled: enabled ? translate('core.coreVklyuchenie') : translate('core.coreVyklyuchenie'),
+  });
 }
 
 /**
@@ -1758,20 +1653,19 @@ async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
     return;
   }
   if (dirty.value) {
-    error.value = 'Сначала сохраните обычные изменения правила, затем меняйте доступ агентов.';
+    error.value = translate('core.coreSnachalaSohraniteObychnyeIzmeneniya');
 
     return;
   }
   if (!agentSearchStateKnown.value || !isTelegramPolicyFingerprint(rulesPolicyFingerprint.value)) {
-    error.value = 'Не получен отпечаток правил. Перечитайте список перед изменением доступа.';
+    error.value = translate('core.coreNePoluchenOtpechatokPravil2');
 
     return;
   }
   if (enabled) {
     const confirmed = await confirmDialog(
-      'Разрешить агентам искать сообщения этого Telegram-чата или темы? '
-        + 'Право относится только к этому правилу и по умолчанию всегда выключено.',
-      { okText: 'Разрешить' },
+      messageRef('core.telegramRazreshitAgentamIskatSoobscheniya'),
+      { okText: translate('core.allow') },
     );
 
     if (!confirmed) {
@@ -1796,10 +1690,10 @@ async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
     agentSearchStateKnown.value = true;
     savedRules.value = JSON.stringify(payload());
     note.value = enabled
-      ? 'Агентский поиск разрешён для выбранного правила.'
-      : 'Агентский поиск для выбранного правила запрещён.';
+      ? translate('core.coreAgentskiyPoiskRazreshenDlya')
+      : translate('core.coreAgentskiyPoiskDlyaVybrannogo');
   } catch (e) {
-    const mutationMessage = errorMessage(e, 'Ответ изменения доступа не получен.');
+    const mutationMessage = errorMessage(e, translate('core.coreOtvetIzmeneniyaDostupaNe'));
 
     try {
       await confirmAgentSearch(requestedRule, enabled, mutationMessage);
@@ -1807,8 +1701,10 @@ async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
       rulesPolicyFingerprint.value = '';
       agentSearchStateKnown.value = false;
       note.value = '';
-      error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-        + `${errorMessage(refreshError, 'правила не удалось перечитать')}`;
+      error.value = translate('core.coreMutationmessageSostoyanieDostupaNe', {
+        mutationMessage: mutationMessage,
+        errorMessagerefreshError: errorMessage(refreshError, translate('core.corePravilaNeUdalosPerechitat')),
+      });
     }
   } finally {
     busy.value = '';
@@ -1840,7 +1736,7 @@ async function load(): Promise<void> {
   } catch (e) {
     // Выключенный плагин — не ошибка: заглушку покажет pluginOff.
     if (!telegramPluginDisabled(e)) {
-      error.value = errorMessage(e, 'Не удалось загрузить раздел.');
+      error.value = errorMessage(e, translate('core.coreNeUdalosZagruzitRazdel'));
     }
   } finally {
     loading.value = false;
@@ -1868,13 +1764,13 @@ async function connect(): Promise<void> {
     providerConnection.value = 'connected';
     providerReason.value = '';
     token.value = '';   // проверенный токен уже на сервере, в поле ему делать нечего
-    note.value = `Бот @${bot.value.username} подключён.`;
+    note.value = translate('core.coreBotUsernamePodklyuchen', { username: bot.value.username ?? '' });
     await loadChats();
     // И правила тоже: до подключения карточки «Разрешённые чаты» не было, значит
     // не было и списка проектов — без этого селект проекта пустой до F5.
     await Promise.all([loadRules(), loadUsers(), loadGroups()]);
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось подключить бота.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosPodklyuchitBota'));
   } finally {
     busy.value = '';
   }
@@ -1899,11 +1795,11 @@ async function recheck(): Promise<void> {
     providerConnection.value = 'connected';
     providerReason.value = '';
     note.value = bot.value.canReadAllGroupMessages
-      ? 'Проверено: бот читает переписку в группах целиком.'
-      : 'Проверено. Режим приватности всё ещё включён.';
+      ? translate('core.coreProverenoBotChitaetPerepisku')
+      : translate('core.coreProverenoRezhimPrivatnostiVse');
     await loadChats();
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось перепроверить бота.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosPereproveritBota'));
   } finally {
     busy.value = '';
   }
@@ -1913,10 +1809,8 @@ async function recheck(): Promise<void> {
 // обращения останутся, но вернуть бота без нового токена будет нечем.
 async function disconnect(): Promise<void> {
   const ok = await confirmDialog(
-    `Отключить бота @${bot.value?.username || ''}? Токен будет стёрт, приём в Inbox остановится. `
-      + 'Ранее принятые обращения останутся только для чтения; для возврата понадобится '
-      + 'вставить токен и отдельно возобновить приём.',
-    { danger: true, okText: 'Отключить' },
+    messageRef('core.telegramOtklyuchitBotaUsernameToken', { username: bot.value?.username || '' }),
+    { danger: true, okText: translate('core.telegramOtklyuchit') },
   );
 
   if (!ok || busy.value) {
@@ -1941,10 +1835,9 @@ async function disconnect(): Promise<void> {
     // Настройка пульта живёт в namespace бота и переживёт возврат того же бота,
     // но без подключения показывать её нечем.
     pult.value = null;
-    note.value = 'Бот отключён, токен стёрт. Ранее принятые обращения остаются в общем Inbox '
-      + 'только для чтения.';
+    note.value = translate('core.coreBotOtklyuchenTokenStert');
   } catch (e) {
-    error.value = errorMessage(e, 'Не удалось отключить бота.');
+    error.value = errorMessage(e, translate('core.coreNeUdalosOtklyuchitBota'));
   } finally {
     busy.value = '';
   }

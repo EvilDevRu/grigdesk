@@ -1,6 +1,11 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeInstallChecks, decodeInstallJob, PluginInstallProtocolError } from './pluginInstallApi.ts';
 import type { PluginInstallInfo, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export type DriverInstallJob = Omit<PluginInstallJob, 'pluginId'> & {
   driverId: string | null;
@@ -49,7 +54,7 @@ export function decodeDriverInstallResponse(raw: unknown): {
   recoveryError: string;
 } {
   if (!isRecord(raw) || !Object.hasOwn(raw, 'job')) {
-    throw new Error('Некорректный ответ установки драйвера');
+    throw new Error(t('core.coreNekorrektnyyOtvetUstanovkiDrayvera'));
   }
 
   if (raw.job === null) {
@@ -61,7 +66,7 @@ export function decodeDriverInstallResponse(raw: unknown): {
   }
 
   if (!isRecord(raw.job)) {
-    throw new Error('Некорректное задание установки');
+    throw new Error(t('core.coreNekorrektnoeZadanieUstanovki'));
   }
 
   const { driverId, ...fields } = raw.job;
@@ -70,7 +75,7 @@ export function decodeDriverInstallResponse(raw: unknown): {
   const digest = isRecord(fields.preview) ? fields.preview.payloadDigest : null;
 
   if (digest != null && (typeof digest !== 'string' || !/^[a-f0-9]{64}$/u.test(digest))) {
-    throw new Error('Некорректный digest драйвера');
+    throw new Error(t('core.coreNekorrektnyyDigestDrayvera'));
   }
 
   return {
@@ -90,7 +95,7 @@ export function decodeDriverInstallResponse(raw: unknown): {
  */
 export function decodeDriverInstallChecks(raw: unknown): Record<string, PluginInstallInfo> {
   if (!isRecord(raw)) {
-    throw new Error('Некорректный каталог установленных драйверов');
+    throw new Error(t('core.coreNekorrektnyyKatalogUstanovlennyhDrayverov'));
   }
 
   const records = decodeInstallChecks({ plugins: raw.drivers });

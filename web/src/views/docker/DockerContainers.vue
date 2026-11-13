@@ -4,15 +4,15 @@
       <div class="docker-containers__search">
         <UiSearchInput
           v-model="query"
-          placeholder="Имя, образ, порт или проект"
-          aria-label="Поиск контейнера"
+          :placeholder="t('core.dockerImyaObrazPortIli')"
+          :aria-label="t('core.dockerPoiskKonteynera')"
         />
       </div>
       <div class="docker-containers__filter-options">
-        <UiCheckbox v-model="showStopped">Показывать незапущенные</UiCheckbox>
+        <UiCheckbox v-model="showStopped">{{ t('core.dockerPokazyvatNezapuschennye') }}</UiCheckbox>
         <span class="docker-containers__caption" aria-live="polite"
-              :aria-label="`Показано контейнеров: ${visible.length} из ${store.containers.length}`">
-          {{ visible.length }} из {{ store.containers.length }}
+              :aria-label="t('core.dockerPokazanoKonteynerovLengthIz', { length: visible.length, length2: store.containers.length })">
+          {{ visible.length }} {{ t('settings.from') }} {{ store.containers.length }}
         </span>
       </div>
     </div>
@@ -22,20 +22,20 @@
     </UiInlineMessage>
 
     <DockerLoading v-if="store.loading && !store.containers.length"
-      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов."
+      :label="t('core.dockerPoluchaemKonteynery')" :description="t('core.dockerZdesPoyavyatsyaProektyI')"
       area="containers" :failed="Boolean(store.error)" />
     <div v-else-if="!groups.length" class="docker-containers__empty">
-      <strong>{{ store.containers.length ? 'Контейнеры не найдены' : 'Контейнеров пока нет' }}</strong>
-      <p v-if="store.containers.length">Измените запрос или включите показ незапущенных контейнеров.</p>
-      <p v-else>Созданные на этом хосте контейнеры появятся здесь после обновления.</p>
+      <strong>{{ store.containers.length ? t('core.dockerKonteyneryNeNaydeny') : t('core.dockerKonteynerovPokaNet') }}</strong>
+      <p v-if="store.containers.length">{{ t('core.dockerIzmeniteZaprosIliVklyuchite') }}</p>
+      <p v-else>{{ t('core.dockerSozdannyeNaEtomHoste') }}</p>
     </div>
 
     <div v-if="groups.length" class="docker-containers__columns" aria-hidden="true">
-      <span>Контейнер / образ</span>
-      <span>Порты</span>
+      <span>{{ t('core.dockerKonteynerObraz') }}</span>
+      <span>{{ t('core.dockerPorty') }}</span>
       <span>CPU</span>
-      <span>Память</span>
-      <span>Действия</span>
+      <span>{{ t('core.resourceMemory') }}</span>
+      <span>{{ t('core.dockerDeystviya') }}</span>
     </div>
 
     <article v-for="group in groups" :key="group.key" class="docker-group">
@@ -43,8 +43,8 @@
         <UiIconButton
           role="embedded"
           data-context="workspace-toolbar"
-          :label="`${collapsed.has(group.key) ? 'Развернуть' : 'Свернуть'} проект ${group.title}`"
-          v-tooltip="collapsed.has(group.key) ? 'Развернуть проект' : 'Свернуть проект'"
+          :label="t('core.dockerKeyProektTitle', { key: collapsed.has(group.key) ? t('core.pipelineRazvernut') : t('core.pipelineSvernut'), title: group.title })"
+          v-tooltip="collapsed.has(group.key) ? t('core.dockerRazvernutProekt') : t('core.dockerSvernutProekt')"
           :aria-expanded="!collapsed.has(group.key)"
           :aria-controls="groupId(group)"
           @click="toggleGroup(group.key)"
@@ -56,25 +56,24 @@
         <div class="docker-group__title">
           <strong v-tooltip="group.title">{{ group.title }}</strong>
           <small v-if="group.workingDir" v-tooltip="group.workingDir">{{ group.workingDir }}</small>
-          <small v-else>Отдельные контейнеры</small>
+          <small v-else>{{ t('core.dockerOtdelnyeKonteynery') }}</small>
         </div>
         <span class="docker-group__count" :class="{ 'is-running': group.running > 0 }">
-          <i aria-hidden="true"></i>{{ group.running }} / {{ group.total }} работают
-        </span>
+          <i aria-hidden="true"></i>{{ group.running }} / {{ group.total }} {{ t('core.dockerRabotayut') }} </span>
         <div v-if="group.project" class="docker-group__actions">
           <UiButton
             size="compact"
             :disabled="projectBusy(group)"
             @click="runProject(group, group.running ? 'restart' : 'start')"
           >
-            {{ group.running ? 'Перезапустить' : 'Поднять' }}
+            {{ group.running ? t('settings.restart') : t('core.dockerPodnyat') }}
           </UiButton>
           <UiIconButton
             v-if="group.running"
             role="embedded"
             data-context="workspace-toolbar"
-            :label="`Остановить проект ${group.title}`"
-            v-tooltip="'Остановить весь проект'"
+            :label="t('core.dockerOstanovitProektTitle', { title: group.title })"
+            v-tooltip="t('core.dockerOstanovitVesProekt')"
             :disabled="projectBusy(group)"
             @click="runProject(group, 'stop')"
           >
@@ -116,11 +115,11 @@
                   v-if="port.published"
                   class="docker-port"
                   :href="sandboxUrl(port.published) || ''"
-                  v-tooltip="`Открыть ${formatPort(port)}`"
+                  v-tooltip="t('core.dockerOtkrytFormatportport', { formatPortport: formatPort(port) })"
                 >{{ formatPort(port) }}<span aria-hidden="true"> ↗</span></StandLink>
                 <span v-else class="docker-port is-internal">{{ formatPort(port) }}</span>
               </template>
-              <span v-if="!container.ports.length" class="docker-row__placeholder">Нет портов</span>
+              <span v-if="!container.ports.length" class="docker-row__placeholder">{{ t('core.dockerNetPortov') }}</span>
             </div>
 
             <div class="docker-row__cpu">
@@ -128,7 +127,7 @@
               {{ formatCpu(container) }}
             </div>
             <div class="docker-row__memory">
-              <span class="docker-row__metric-label">Память</span>
+              <span class="docker-row__metric-label">{{ t('core.resourceMemory') }}</span>
               {{ formatMemory(container) }}
             </div>
 
@@ -136,8 +135,8 @@
               <UiIconButton
                 role="embedded"
                 data-context="workspace-toolbar"
-                :label="`Логи ${container.name}`"
-                v-tooltip="'Логи'"
+                :label="t('core.dockerLogiName', { name: container.name })"
+                v-tooltip="t('core.dockerLogi')"
                 @click="emit('logs', container)"
               >
                 <svg v-bind="ICON" aria-hidden="true">
@@ -147,8 +146,8 @@
               <UiIconButton
                 role="embedded"
                 data-context="workspace-toolbar"
-                :label="`Терминал в контейнере ${container.name}`"
-                v-tooltip="allowExec ? 'Терминал' : 'Терминал выключен в настройках плагина'"
+                :label="t('core.dockerTerminalVKonteynereName', { name: container.name })"
+                v-tooltip="allowExec ? t('core.terminal') : t('core.dockerTerminalVyklyuchenVNastroykah')"
                 :disabled="container.state !== 'running' || !allowExec"
                 @click="emit('exec', container)"
               >
@@ -160,8 +159,8 @@
                 class="docker-row__lifecycle"
                 role="embedded"
                 data-context="workspace-toolbar"
-                :label="`${container.state === 'running' ? 'Перезапустить' : 'Запустить'} ${container.name}`"
-                v-tooltip="container.state === 'running' ? 'Перезапустить' : 'Запустить'"
+                :label="t('core.dockerStaterunningName', { staterunning: container.state === 'running' ? t('settings.restart') : t('core.dockerZapustit'), name: container.name })"
+                v-tooltip="container.state === 'running' ? t('settings.restart') : t('core.dockerZapustit')"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
                 @click="run(container, container.state === 'running' ? 'restart' : 'start')"
@@ -175,8 +174,8 @@
                 v-if="container.state === 'running'"
                 role="embedded"
                 data-context="workspace-toolbar"
-                :label="`Остановить ${container.name}`"
-                v-tooltip="'Остановить'"
+                :label="t('core.dockerOstanovitName', { name: container.name })"
+                v-tooltip="t('core.dockerOstanovit')"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
                 @click="run(container, 'stop')"
@@ -186,8 +185,8 @@
               <UiIconButton
                 role="embedded"
                 data-context="workspace-toolbar"
-                :label="`Удалить контейнер ${container.name}`"
-                v-tooltip="'Удалить контейнер'"
+                :label="t('core.dockerUdalitKonteynerName', { name: container.name })"
+                v-tooltip="t('core.dockerUdalitKonteyner')"
                 tone="danger"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
@@ -225,14 +224,8 @@ import { sandboxUrl } from '../../shared/sandbox.ts';
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import {
-  UiRefreshIcon,
-  UiButton,
-  UiCheckbox,
-  UiIconButton,
-  UiInlineMessage,
-  UiSearchInput,
-  confirmDialog,
-  vTooltip,
+  UiRefreshIcon, UiButton, UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput,
+  confirmDialog, vTooltip, t, messageRef,
 } from '../../ui';
 import { formatContainerImage, formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';
@@ -269,9 +262,15 @@ const ICON: SVGAttributes = {
   'stroke-linejoin': 'round',
 };
 const HEALTH_LABELS: Record<string, string> = {
-  healthy: 'исправен',
-  unhealthy: 'ошибка проверки',
-  starting: 'проверяется',
+  get healthy() {
+    return t('core.dockerIspraven');
+  },
+  get unhealthy() {
+    return t('core.dockerOshibkaProverki');
+  },
+  get starting() {
+    return t('settings.checking');
+  },
 };
 
 const store = useDockerStore();
@@ -342,7 +341,7 @@ const groups = computed(() => {
     const group = byProject.get(key) || {
       key,
       project,
-      title: project || 'Без проекта',
+      title: project || t('core.taskEditNoProject'),
       workingDir: container.compose?.workingDir || '',
       items: [],
       total: 0,
@@ -388,7 +387,7 @@ function report(result: DockerActionResult | DockerProjectActionResponse, okText
 
   message.value = result.ok
     ? { tone: 'success', text: okText }
-    : { tone: 'danger', text: failure || 'Демон отклонил действие' };
+    : { tone: 'danger', text: failure || t('core.dockerDemonOtklonilDeystvie') };
   messageTimer = setTimeout(() => {
     message.value = null;
   }, 6000);
@@ -397,7 +396,7 @@ function report(result: DockerActionResult | DockerProjectActionResponse, okText
 async function run(container: DockerContainer, action: DockerContainerAction): Promise<void> {
   const result = await store.containerAction(container.id, action);
 
-  report(result, `${container.name}: готово`);
+  report(result, t('core.dockerNameGotovo', { name: container.name }));
 }
 
 /**
@@ -415,9 +414,9 @@ function projectBusy(group: ContainerGroup): boolean {
  */
 async function runProject(group: ContainerGroup, action: DockerProjectAction): Promise<void> {
   const labels = {
-    start: 'поднят',
-    stop: 'остановлен',
-    restart: 'перезапущен',
+    start: t('core.dockerPodnyat2'),
+    stop: t('core.dockerOstanovlen'),
+    restart: t('core.dockerPerezapuschen'),
   };
 
   if (projectBusy(group)) {
@@ -425,10 +424,10 @@ async function runProject(group: ContainerGroup, action: DockerProjectAction): P
   }
 
   if (action === 'stop' && !await confirmDialog(
-    `Остановить весь проект «${group.project}» — ${group.total} контейнер(ов)?`,
+    messageRef('core.dockerOstanovitVesProektProject', { project: group.project, total: group.total }),
     {
-      title: 'Остановка проекта',
-      okText: 'Остановить',
+      title: t('core.dockerOstanovkaProekta'),
+      okText: t('core.dockerOstanovit'),
       danger: true,
     },
   )) {
@@ -451,11 +450,13 @@ async function runProject(group: ContainerGroup, action: DockerProjectAction): P
 async function removeOne(container: DockerContainer): Promise<void> {
   const running = container.state === 'running';
   const accepted = await confirmDialog(
-    `Удалить контейнер «${container.name}»?`
-      + (running ? '\n\nОн сейчас работает и будет остановлен принудительно.' : ''),
+    messageRef('core.dockerUdalitKonteynerNameValue', {
+      name: container.name,
+      value: (running ? t('core.dockerOnSeychasRabotaetI') : ''),
+    }),
     {
-      title: 'Удаление контейнера',
-      okText: 'Удалить',
+      title: t('core.dockerUdalenieKonteynera'),
+      okText: t('core.taskDelete'),
       danger: true,
     },
   );
@@ -466,7 +467,7 @@ async function removeOne(container: DockerContainer): Promise<void> {
 
   const result = await store.removeContainer(container.id, { force: running });
 
-  report(result, `${container.name} удалён`);
+  report(result, t('core.dockerNameUdalen', { name: container.name }));
 }
 
 onBeforeUnmount(() => {

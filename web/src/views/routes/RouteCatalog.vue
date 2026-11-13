@@ -1,106 +1,97 @@
 <template>
   <section class="route-catalog" :data-mode="mode">
     <template v-if="mode !== 'manage'">
-    <h2 class="route-catalog__title">Черновики</h2>
-    <p v-if="!drafts.length" class="muted">Черновиков пока нет</p>
+    <h2 class="route-catalog__title">{{ t('core.routeChernoviki') }}</h2>
+    <p v-if="!drafts.length" class="muted">{{ t('core.routeChernovikovPokaNet') }}</p>
     <UiSelectableRow v-for="draft in drafts" :key="draft.id" data-context="workspace-catalog"
                      :selected="draft.id === selectedDraftId"
                      @select="$emit('select', draft.id)">
       <span>{{ draft.title }}</span>
-      <small>r{{ draft.revision }} · {{ draft.state === 'editing' ? 'редактируется' : 'закрыт' }}</small>
+      <small>{{ 'r' }}{{ draft.revision }} · {{ draft.state === 'editing' ? t('core.routeRedaktiruetsya') : t('core.routeZakryt') }}</small>
     </UiSelectableRow>
     </template>
     <div v-if="document && mode !== 'drafts'" class="route-catalog__editor">
       <details class="route-catalog__operation ui-workspace-disclosure">
-        <summary>Добавить или скопировать маршрут</summary>
+        <summary>{{ t('core.routeDobavitIliSkopirovatMarshrut') }}</summary>
         <div class="route-catalog__fields ui-workspace-section__body">
-          <strong>Состав каталога</strong>
-          <UiButton data-context="workspace-form" variant="ghost" v-if="mode === 'all'" data-test="catalog-bootstrap" @click="emit('select-bootstrap')">
-            Начальная разведка
-          </UiButton>
-          <UiField label="ID нового маршрута"
-                   help="Уникальное техническое имя маршрута, например review. Оно используется в ссылках и JSON. Понятное человеку название указывается ниже.">
+          <strong>{{ t('core.routeSostavKataloga') }}</strong>
+          <UiButton data-context="workspace-form" variant="ghost" v-if="mode === 'all'" data-test="catalog-bootstrap" @click="emit('select-bootstrap')"> {{ t('core.routeNachalnayaRazvedka') }} </UiButton>
+          <UiField :label="t('core.routeIdNovogoMarshruta')"
+                   :help="t('core.routeCatalogAUniqueRouteIDSuchAs')">
             <UiInput data-test="route-new-id" :model-value="newId"
                      @update:model-value="newId = String($event ?? '')" />
           </UiField>
-          <label>Название
-            <UiInput data-test="route-new-title" :model-value="newTitle"
+          <label>{{ t('core.taskTitle') }} <UiInput data-test="route-new-title" :model-value="newTitle"
                      @update:model-value="newTitle = String($event ?? '')" />
           </label>
-          <UiButton data-context="workspace-form" variant="ghost" data-test="route-create" @click="create">Создать маршрут</UiButton>
-          <label>Скопировать маршрут
-            <UiSelect data-test="route-copy-source" :model-value="copySource"
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-create" @click="create">{{ t('core.routeSozdatMarshrut') }}</UiButton>
+          <label>{{ t('core.routeSkopirovatMarshrut') }} <UiSelect data-test="route-copy-source" :model-value="copySource"
                       @update:model-value="copySource = String($event ?? '')">
-              <option value="">Выберите маршрут</option>
+              <option value="">{{ t('core.routeVyberiteMarshrut') }}</option>
               <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
             </UiSelect>
           </label>
-          <label>ID копии
-            <UiInput data-test="route-copy-id" :model-value="copyId"
+          <label>{{ t('core.routeIdKopii') }} <UiInput data-test="route-copy-id" :model-value="copyId"
                      @update:model-value="copyId = String($event ?? '')" />
           </label>
-          <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy" :disabled="!copySource" @click="copyRoute">
-            Копировать маршрут
-          </UiButton>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy" :disabled="!copySource" @click="copyRoute"> {{ t('core.routeKopirovatMarshrut') }} </UiButton>
         </div>
       </details>
       <template v-if="selectedBundle">
-        <strong>Маршрут {{ selectedRouteId }}</strong>
-        <UiField label="Название маршрута"
-               help="Название помогает отличать маршруты в каталоге. Например: «Разработка функции» или «Исправление ошибки».">
+        <strong>{{ t('core.routeMarshrut') }} {{ selectedRouteId }}</strong>
+        <UiField :label="t('core.routeNazvanieMarshruta')"
+               :help="t('core.routeCatalogTheNameDistinguishesRoutesInThe')">
           <UiInput data-test="route-title" :model-value="routeTitle"
                    @update:model-value="routeTitle = String($event ?? '')" />
         </UiField>
-        <UiField label="Начальная разведка перед маршрутом"
-               help="Разведка предварительно изучает задачу и помогает выбрать маршрут. «Обязательна» запускает её перед этим маршрутом, «Пропустить» сразу начинает маршрут, «По умолчанию» оставляет общее правило.">
+        <UiField :label="t('core.routeNachalnayaRazvedkaPeredMarshrutom')"
+               :help="t('core.routeCatalogTriageStudiesTheTaskAndHelps')">
           <UiSelect data-test="route-bootstrap-mode" :model-value="bootstrapMode"
                     @update:model-value="bootstrapMode = String($event ?? '') as BootstrapMode">
-            <option value="">По умолчанию</option>
-            <option value="required">Обязательна</option>
-            <option value="skip">Пропустить</option>
+            <option value="">{{ t('core.trackerInUse') }}</option>
+            <option value="required">{{ t('core.routeObyazatelna') }}</option>
+            <option value="skip">{{ t('core.routePropustit') }}</option>
           </UiSelect>
         </UiField>
-        <UiField label="Начальный этап"
-               help="Этап, с которого начинается выполнение маршрута. Например, «Разработка». Дальнейший путь задают переходы между этапами.">
+        <UiField :label="t('core.routeNachalnyyEtap')"
+               :help="t('core.routeCatalogTheStartingStageOfTheRoute')">
           <UiSelect data-test="route-entry" :model-value="entryId"
                     @update:model-value="entryId = String($event ?? '')">
-            <option value="">Не выбран</option>
+            <option value="">{{ t('core.routeNeVybran') }}</option>
             <option v-for="node in selectedBundle.route.nodes.filter((item) => item.executor !== 'status')"
                     :key="node.id" :value="node.id">{{ node.label || node.id }}</option>
           </UiSelect>
         </UiField>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="route-save-properties" @click="saveProperties">Сохранить поля маршрута</UiButton>
-        <UiField label="Новый ID маршрута"
-               help="Техническое имя маршрута в ссылках и JSON. При переименовании редактор проверяет связанные ссылки. Для изменения видимого названия используйте «Название маршрута».">
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-save-properties" @click="saveProperties">{{ t('core.routeSohranitPolyaMarshruta') }}</UiButton>
+        <UiField :label="t('core.routeNovyyIdMarshruta')"
+               :help="t('core.routeCatalogTheRouteIDUsedInLinks')">
           <UiInput data-test="route-rename-id" :model-value="renameId"
                    @update:model-value="renameId = String($event ?? '')" />
         </UiField>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="route-rename" @click="rename">Переименовать ID</UiButton>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="route-remove" @click="previewRemove">Удалить маршрут</UiButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-rename" @click="rename">{{ t('core.routePereimenovatId') }}</UiButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-remove" @click="previewRemove">{{ t('core.routeUdalitMarshrut') }}</UiButton>
         <div v-if="removePreview" data-test="route-remove-preview" class="route-catalog__preview">
-          <strong>Удаление «{{ removePreview.routeId }}»</strong>
-          <p>Ссылки останутся проблемами черновика до явного исправления.</p>
+          <strong>{{ t('core.routeUdalenie') }}{{ removePreview.routeId }}»</strong>
+          <p>{{ t('core.routeSsylkiOstanutsyaProblemamiChernovika') }}</p>
           <ul><li v-for="reference in removePreview.references" :key="reference.path">
             {{ reference.path }}
           </li></ul>
-          <UiButton data-context="workspace-form" variant="ghost" data-test="route-confirm-remove" @click="remove">Удалить с показанными ссылками</UiButton>
-          <UiButton data-context="workspace-form" variant="ghost" data-test="route-cancel-remove" @click="removePreview = null">Отмена</UiButton>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-confirm-remove" @click="remove">{{ t('core.routeUdalitSPokazannymiSsylkami') }}</UiButton>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-cancel-remove" @click="removePreview = null">{{ t('core.cancel') }}</UiButton>
         </div>
       </template>
       <details v-if="routeIds.length > 1" class="ui-workspace-disclosure">
-        <summary>Копировать этапы из другого маршрута</summary>
+        <summary>{{ t('core.routeKopirovatEtapyIzDrugogo') }}</summary>
         <div class="ui-workspace-section__body">
-          <label>Источник
-            <UiSelect data-test="route-node-source" :model-value="nodeSource"
+          <label>{{ t('core.trackerSource') }} <UiSelect data-test="route-node-source" :model-value="nodeSource"
                       @update:model-value="changeNodeSource(String($event ?? ''))">
-              <option value="">Выберите маршрут</option>
+              <option value="">{{ t('core.routeVyberiteMarshrut') }}</option>
               <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
             </UiSelect>
           </label>
-          <label>Цель
-            <UiSelect data-test="route-node-target" :model-value="nodeTarget"
+          <label>{{ t('core.routeTsel') }} <UiSelect data-test="route-node-target" :model-value="nodeTarget"
                       @update:model-value="nodeTarget = String($event ?? '')">
-              <option value="">Выберите маршрут</option>
+              <option value="">{{ t('core.routeVyberiteMarshrut') }}</option>
               <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
             </UiSelect>
           </label>
@@ -112,7 +103,7 @@
             </UiButton>
           </div>
           <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy-nodes" :disabled="!copyNodeIds.length || !nodeTarget"
-                    @click="copyNodes">Копировать выбранные этапы</UiButton>
+                    @click="copyNodes">{{ t('core.routeKopirovatVybrannyeEtapy') }}</UiButton>
         </div>
       </details>
       <ul v-if="issues.length" data-test="route-catalog-issues" role="alert">
@@ -128,7 +119,7 @@ import type { RouteDraft, RouteDraftSummary } from '../../../../shared/pipeline/
 import type { CatalogCommandIssue, CatalogCommandResult } from './catalogCommands.ts';
 import { createRoute, cloneRoute, renameRoute, removeRoute, inspectRouteReferences,
   copyNodesFromRoute, setRouteProperties } from './catalogCommands.ts';
-import { UiButton, UiField, UiInput, UiSelect, UiSelectableRow } from '../../ui.ts';
+import { UiButton, UiField, UiInput, UiSelect, UiSelectableRow, t } from '../../ui.ts';
 
 type BootstrapMode = '' | 'required' | 'skip';
 

@@ -68,6 +68,10 @@ export async function localeMain(t, { preference, systemLanguage = 'en-US' } = {
   Object.assign(app, {
     setName() {},
     setPath() {},
+    commandLine: {
+      getSwitchValue: () => '',
+      appendSwitch() {},
+    },
     enableSandbox() {},
     getPath: () => directory,
     getPreferredSystemLanguages: () => [systemLanguage],
@@ -108,7 +112,9 @@ export async function localeMain(t, { preference, systemLanguage = 'en-US' } = {
       const f = globalThis.__localeMain;
       export const app = f.app;
       export const BrowserWindow = f.BrowserWindow;
+      export const BaseWindow = f.BrowserWindow;
       export class WebContentsView {}
+      export const nativeImage = { createFromBuffer: () => ({ isEmpty: () => true }) };
       export const ipcMain = {
         handle() {}, on() {}, removeHandler() {}, removeListener() {},
       };

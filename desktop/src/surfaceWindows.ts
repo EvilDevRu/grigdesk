@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { desktopText } from './locale.ts';
 
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 import { surfaceUrl } from '../../shared/desktop/surfaceContract.ts';
@@ -106,7 +107,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
 
       const timeout = new Promise<never>((_resolve, reject) => {
         cancelTimeout = (adapters.schedule ?? schedule)(
-          () => reject(new Error('Открытие окна превысило срок.')),
+          () => reject(new Error(desktopText('desktop.desktopOtkrytieOknaPrevysiloSrok'))),
           OPEN_TIMEOUT_MS,
         );
       });
@@ -114,7 +115,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
       await Promise.race([window.loadURL(url), timeout]);
 
       if (epoch !== generation || origin !== adapters.allowedOrigin() || window.isDestroyed()) {
-        throw new Error('Открытие отменено.');
+        throw new Error(desktopText('desktop.desktopOtkrytieOtmeneno'));
       }
 
       adapters.beforeShow?.(window);

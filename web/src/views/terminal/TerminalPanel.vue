@@ -5,30 +5,24 @@
       <template #meta>
       <span class="st" :class="status">
         <span class="dot"></span>
-        {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
+        {{ status === 'open' ? t('core.codePodklyucheno') : status === 'connecting' ? t('core.codePodklyuchenie') : t('core.disconnected2') }}
       </span>
       </template>
       <template #actions>
-      <UiPopover has-popup="menu" placement="bottom-start" aria-label="Быстрые команды терминала">
-        <template #trigger><UiButton variant="text">Команды</UiButton></template>
+      <UiPopover has-popup="menu" placement="bottom-start" :aria-label="t('core.codeBystryeKomandyTerminala')">
+        <template #trigger><UiButton variant="text">{{ t('core.codeKomandy') }}</UiButton></template>
         <template #default="{ close }">
           <div class="ui-action-menu">
-            <UiCommandButton role="menuitem" @click="insert('claude\n'); close('action')">
-              claude login
-            </UiCommandButton>
-            <UiCommandButton role="menuitem" @click="insert('claude --version\n'); close('action')">
-              claude --version
-            </UiCommandButton>
-            <UiCommandButton role="menuitem" @click="insert('clear\n'); close('action')">
-              clear
-            </UiCommandButton>
+            <UiCommandButton role="menuitem" @click="insert('claude\n'); close('action')"> {{ 'claude login' }} </UiCommandButton>
+            <UiCommandButton role="menuitem" @click="insert('claude --version\n'); close('action')"> {{ 'claude --version' }} </UiCommandButton>
+            <UiCommandButton role="menuitem" @click="insert('clear\n'); close('action')"> {{ 'clear' }} </UiCommandButton>
           </div>
         </template>
       </UiPopover>
       <UiButton v-if="status === 'closed'" class="reconnect" variant="solid" tone="accent"
-                @click="reconnect">Переподключить</UiButton>
+                @click="reconnect">{{ t('core.codePerepodklyuchit') }}</UiButton>
       <UiButton v-else class="end" tone="danger"
-                @click="closeSession({ announce: true })" aria-label="Завершить сессию">Завершить</UiButton>
+                @click="closeSession({ announce: true })" :aria-label="t('core.codeZavershitSessiyu')">{{ t('core.codeZavershit') }}</UiButton>
       </template>
     </UiPaneHeader>
     <div ref="host" class="term-host" data-escape-owner="terminal"></div>
@@ -266,7 +260,7 @@ async function connect() {
     status.value = 'closed';
 
     if (!disposed) {
-      term?.write('\r\n\x1b[90m— сессия завершена. Кнопка «Переподключить» —\x1b[0m\r\n');
+      term?.write(t('core.termSessionEnded'));
     }
   };
   socket.onerror = () => {
@@ -297,7 +291,7 @@ function closeSession({ announce = false } = {}) {
   } catch { /* уже закрыт */ }
 
   if (announce && term && !disposed) {
-    term.write('\r\n\x1b[90m— сессия завершена вручную —\x1b[0m\r\n');
+    term.write(t('core.termSessionEndedManual'));
   }
 }
 

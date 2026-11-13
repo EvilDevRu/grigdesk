@@ -52,7 +52,7 @@
     <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/glm-light.svg">
     <img src="docs/images/integrations/glm.svg" width="164" height="48" alt="Z.ai (GLM)">
   </picture>
-  <a href="docs/grigdesk/guide/qwen.md">
+  <a href="docs/grigdesk/guide/en/qwen.md">
     <picture>
       <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/qwen-light.svg">
       <img src="docs/images/integrations/qwen.svg" width="164" height="48" alt="Qwen Code">
@@ -61,7 +61,7 @@
 </p>
 
 Qwen Code supports chats and pipeline stages, with models discovered from your configured API service.
-[Set up Qwen Code](docs/grigdesk/guide/qwen.md).
+[Set up Qwen Code](docs/grigdesk/guide/en/qwen.md).
 
 <p>
   <strong>Task boards</strong><br>
@@ -127,26 +127,26 @@ A `.deb` package is also available in [releases](https://github.com/EvilDevRu/gr
 
 </details>
 
-[Installation guide](docs/grigdesk/guide/installation.md) ·
-[First launch](docs/grigdesk/guide/getting-started.md)
+[Installation guide](docs/grigdesk/guide/en/installation.md) ·
+[First launch](docs/grigdesk/guide/en/getting-started.md)
 
 ## Plugins
 
 Make the workspace your own with extra tools and panels. Open **Settings → Plugins** to browse the catalog, or install a specific release from Git.
 
-[Install a plugin](docs/grigdesk/guide/plugins.md) · [Build your own](docs/grigdesk/plugins/author-contract.md) · [Example plugin](packages/plugin-types/example/README.md)
+[Install a plugin](docs/grigdesk/guide/en/plugins.md) · [Build your own](docs/grigdesk/plugins/author-contract.md) · [Example plugin](packages/plugin-types/example/README.md)
 
 ## Documentation
 
-Open **Help** or press **F1** in the app to read the user guide included with your server version. The [source guide](docs/grigdesk/guide/README.md) covers setup, everyday work, and recovery.
+Open **Help** or press **F1** in the app to read the user guide included with your server version. The [source guide](docs/grigdesk/guide/en/README.md) covers setup, everyday work, and recovery.
 
 | Get started | Build and review |
 | :--- | :--- |
-| [Installation](docs/grigdesk/guide/installation.md) — set up GrigDesk | [Agent chats](docs/grigdesk/guide/chats.md) — choose models and work with agents |
-| [Projects](docs/grigdesk/guide/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/pipelines.md) — move a task through its stages |
-| [Tasks](docs/grigdesk/guide/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/gates.md) — inspect results and decide |
+| [Installation](docs/grigdesk/guide/en/installation.md) — set up GrigDesk | [Agent chats](docs/grigdesk/guide/en/chats.md) — choose models and work with agents |
+| [Projects](docs/grigdesk/guide/en/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/en/pipelines.md) — move a task through its stages |
+| [Tasks](docs/grigdesk/guide/en/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/en/gates.md) — inspect results and decide |
 
-Help navigation follows the active interface language; article content is currently available in Russian. For help, see [troubleshooting](docs/grigdesk/guide/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
+Help navigation, search and articles follow the active interface language, in English or Russian. For help, see [troubleshooting](docs/grigdesk/guide/en/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
 
 ## Contributing
 

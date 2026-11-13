@@ -2,6 +2,11 @@ import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { saveDraft } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Проверяет сохранённую ревизию черновика перед публикацией.
@@ -40,7 +45,7 @@ export async function validateDraft(): Promise<void> {
     store.validatedCapabilitiesHash = report.capabilitiesHash;
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.saveError = failureText(error, 'Не удалось проверить черновик.');
+      store.saveError = failureText(error, translateUi('core.validateCouldNotValidateTheDraft'));
     }
   }
 }

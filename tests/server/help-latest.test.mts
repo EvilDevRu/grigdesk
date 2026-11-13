@@ -8,7 +8,7 @@ import { latestScript } from '../../server/scripts/help/buildHelpSite.mts';
  * Настоящий опубликованный скрипт получает управляемый HTTP-ответ и location.
  * Проверяется результат перехода и ошибки, а не наличие строки channel.json в исходнике.
  */
-async function runLatest(response: unknown, fail = false, pathname = '/help/latest.html') {
+async function runLatest(response: unknown, fail = false, pathname = '/help/latest.html', search = '') {
   let redirected = '';
   const message = { textContent: '' };
   const requests: Array<{ url: string; credentials: unknown }> = [];
@@ -18,6 +18,7 @@ async function runLatest(response: unknown, fail = false, pathname = '/help/late
     AbortSignal,
     location: {
       pathname,
+      search,
       hash: '#/help/chats',
       replace: (url: string) => {
         redirected = url;
@@ -60,6 +61,16 @@ test('HELP-L1: latest следует версии канала и сохраня
       credentials: 'omit',
     }]);
   }
+});
+
+test('HELP-L3: latest сохраняет явно выбранный язык вместе со статьёй', async () => {
+  const result = await runLatest({
+    format: 2,
+    channel: 'release',
+    latest: { payload: { version: '0.2.0' } },
+  }, false, '/help/latest.html', '?lang=en');
+
+  assert.equal(result.redirected, './0.2.0/index.html?lang=en#/help/chats');
 });
 
 test('HELP-L2: отсутствующий/невалидный канал и сеть показывают ошибку без перехода', async () => {

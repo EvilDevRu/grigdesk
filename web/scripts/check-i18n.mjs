@@ -14,11 +14,12 @@ const LABELS = new Set([
   'label', 'title', 'description', 'hint', 'placeholder', 'aria-label', 'loading-label',
   'empty-text', 'emptyText', 'loadingLabel', 'confirmLabel', 'cancelLabel', 'message', 'body', 'text',
   'error', 'question', 'heading', 'confirm-text', 'cancel-text', 'okText', 'cancelText',
-  'summary', 'note', 'authHint', 'alt',
+  'summary', 'note', 'authHint', 'alt', 'help', 'aria-description', 'clear-label', 'clearLabel',
 ]);
 const MESSAGE_CALL = new Set([
   'showToast', 'toast', 'alertUser', 'confirmDialog', 'promptDialog', 'alertDialog',
   'notify', 'Error', 'showErrorBox',
+  'setError', 'setWarning', 'setCancelNotice',
 ]);
 
 /**
@@ -563,6 +564,13 @@ export function checkI18n({ repoRoot = DEFAULT_ROOT } = {}) {
         if (node.arguments[0]) {
           inspect(node.arguments[0]);
         }
+      } else if (ts.isCallExpression(node)
+          && /(?:failureText|errorMessage|FailureText|ErrorMessage)$/.test(
+            node.expression.getText(origin.tree),
+          )) {
+        if (node.arguments[1]) {
+          inspect(node.arguments[1]);
+        }
       } else if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
         if (ts.isBlock(node.body)) {
           for (const statement of node.body.statements) {
@@ -595,6 +603,17 @@ export function checkI18n({ repoRoot = DEFAULT_ROOT } = {}) {
         ? binding.node.expression.getText(binding.tree).split('.').at(-1) : '';
       const isTranslation = ['t', 'translate', 'messageRef', 'desktopText', 'messageText'].includes(name)
         || ['localeTranslator', 'localeMessage'].includes(factory);
+
+      if (call && name === 'messageList' && node.arguments?.[0]
+          && ts.isArrayLiteralExpression(node.arguments[0])) {
+        for (const key of node.arguments[0].elements) {
+          if (literal(key)) {
+            keyUsed(file, line(key), key.text);
+          } else {
+            report(file, line(key), 'Список переводов требует статические ключи');
+          }
+        }
+      }
 
       if (isTranslation) {
         const args = node.arguments ?? [];

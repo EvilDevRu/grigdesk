@@ -10,10 +10,10 @@
 
 ## Контракты продукта
 
-- [Схема конвейера](../guide/pipelines.md)
-- [Редактор маршрутов](../guide/routes.md)
-- [Где конвейер спрашивает человека](../guide/gates.md)
-- [Задача: постановка и триаж](../guide/tasks.md)
+- [Схема конвейера](../guide/ru/pipelines.md)
+- [Редактор маршрутов](../guide/ru/routes.md)
+- [Где конвейер спрашивает человека](../guide/ru/gates.md)
+- [Задача: постановка и триаж](../guide/ru/tasks.md)
 
 - [Восстановление сохранённого перехода](pending-transition-recovery.md) — host receipt, runtime gap, exact human projection и журнал для карточки.
 

@@ -1,6 +1,11 @@
 import { sandboxApi, sandboxErrorMessage } from '../../shared/sandboxApi';
 import { useSandboxesStore } from '../../stores/sandboxes';
 import { loadSandboxes } from './loadSandboxes';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Действие профиля на стенде идёт скриптом минутами, поэтому кнопки карточки
@@ -25,7 +30,7 @@ export async function runSandboxAction(
 
     return true;
   } catch (error) {
-    store.setError(sandboxErrorMessage(error, 'Запустить действие не удалось.'));
+    store.setError(sandboxErrorMessage(error, translateUi('core.runSandboxActionCouldNotStartTheAction')));
 
     return false;
   } finally {

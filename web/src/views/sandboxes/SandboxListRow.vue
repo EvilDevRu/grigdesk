@@ -3,15 +3,15 @@
             data-context="workspace-catalog-row" :data-task="row.task" :pressed="selected"
             @click="emit('select', row.task)">
     <span class="sandbox-row__line">
-      <strong>t{{ row.task }}</strong>
+      <strong>{{ 't' }}{{ row.task }}</strong>
       <span class="sandbox-row__title" v-tooltip="row.title">{{ row.title }}</span>
-      <span v-if="row.entry?.slot != null" class="sandbox-row__slot">Слот {{ row.entry.slot }}</span>
+      <span v-if="row.entry?.slot != null" class="sandbox-row__slot">{{ t('core.sandboxSlot') }} {{ row.entry.slot }}</span>
     </span>
     <span class="sandbox-row__line sandbox-row__meta">
       <span v-tooltip="row.detail || undefined">{{ row.stateLabel }}</span>
       <span v-if="row.entry?.fePort">:{{ row.entry.fePort }}</span>
       <span v-tooltip="row.age.hint">
-        <span v-if="row.age.old" aria-label="Давно стоит">⚠ </span>{{ row.age.label }}
+        <span v-if="row.age.old" :aria-label="t('core.sandboxDavnoStoit')">⚠ </span>{{ row.age.label }}
       </span>
     </span>
     <span v-if="row.step" class="sandbox-row__step" v-tooltip="row.step">{{ row.step }}</span>
@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiButton, vTooltip } from '../../ui';
+import { UiButton, vTooltip, t } from '../../ui';
 import type { SandboxRow } from '../../shared/sandboxPresentation.ts';
 
 defineProps<{

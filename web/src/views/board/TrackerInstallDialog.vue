@@ -84,7 +84,7 @@
           <UiField v-if="store.selectedSource === null" id="driver-install-url"
                    :label="t('core.trackerRepository')" :hint="t('core.trackerRepositoryHint')">
             <UiInput v-model="store.url" name="url" :disabled="store.busy"
-                     placeholder="https://github.com/owner/tracker" autocomplete="off" :spellcheck="false" />
+                     :placeholder="'https://github.com/owner/tracker'" autocomplete="off" :spellcheck="false" />
           </UiField>
         </section>
 
@@ -106,7 +106,7 @@
                    :hint="t('core.trackerStableVersions')">
             <UiSelect v-model="store.tag" :disabled="store.busy">
               <option v-for="(version, index) in store.versions" :key="version.tag" :value="version.tag">
-                {{ version.tag }}{{ index === 0 ? ` · ${t('core.trackerLatestVersion')}` : '' }}
+                {{ version.tag }}{{ index === 0 ? t('core.taskTrackerlatestversion', { trackerLatestVersion: t('core.trackerLatestVersion') }) : '' }}
               </option>
             </UiSelect>
           </UiField>

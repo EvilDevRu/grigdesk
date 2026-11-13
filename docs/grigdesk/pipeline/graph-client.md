@@ -1,6 +1,6 @@
 # Клиент (web/src/shared/graphGeom.ts)
 
-**Актуальное представление** описано в `docs/grigdesk/guide/pipelines.md`.
+**Актуальное представление** описано в `docs/grigdesk/guide/ru/pipelines.md`.
 Геометрия `web/src/shared/graphGeom.ts` больше не копирует старый dashboard.py:
 `layoutGraphPositions` уплотняет серверные координаты, сохраняя порядок основного маршрута и ветку стенда.
 Одиночная параллельная ветка занимает свободный левый край следующего ряда, если там

@@ -190,7 +190,7 @@ test('индикация записи — красная пульсация кн
   assert.match(actions, /data-context='chat-microphone'\]\.rec::before\s*\{/);
   assert.match(actions, /animation:\s*ui-chat-mic-pulse\b/);
   assert.match(actions, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
-  assert.match(source, /:label="recording \? 'Остановить диктовку'/);
+  assert.match(source, /:label="recording \? t\('core\.chatOstanovitDiktovku'\)/);
 });
 
 test('consent перед start, prefixed API, interim/final и generation после Stop', async (t) => {

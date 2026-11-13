@@ -8,6 +8,8 @@
 // localStorage переживает и F5. Расшифровка в снимок НЕ входит: она уже лежит на
 // сервере и перечитывается по jobId, а её копия в браузере копила бы мегабайты.
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 import { textOr } from '../../../shared/lib/text.ts';
 import { objectOrEmpty } from '../../../shared/lib/objects.ts';
@@ -22,6 +24,8 @@ import type {
   MediaTranscriptSegment,
 } from '../../../shared/media/mediaContracts.ts';
 import { usePluginsStore } from './plugins.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 // Окно фрагмента: 15 секунд до и после места задачи, шаг расширения тот же, потолок
 // минута с каждой стороны. Дальше это уже не «нужный кусок», а пересказ соседних тем.
@@ -40,16 +44,33 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_FAILURES_MAX = 5;
 
 const PLAN_ERRORS: Record<string, string> = {
-  no_model: 'Модель для разбора не выбрана — «Настройки → Плагины → Видео → задачи».',
-  unknown_model: 'Выбранной модели нет в реестре исполнителей: проверь настройку плагина.',
-  unsafe_model_provider: 'У выбранного исполнителя нет безопасного режима для чужого текста.'
-    + ' Подходят Claude и GPT через Codex.',
-  registry_failed: 'Не удалось прочитать реестр моделей.',
-  executor_unavailable: 'Исполнитель выбранной модели недоступен.',
-  run_failed: 'Модель не ответила. Можно повторить или собрать задачи вручную.',
-  bad_plan: 'Модель ответила не по формату — задачи не разобраны. Можно повторить.',
-  empty_transcript: 'В расшифровке нет ни одной реплики.',
-  not_ready: 'Расшифровка ещё не готова.',
+  get no_model() {
+    return t('core.videoModelDlyaRazboraNe');
+  },
+  get unknown_model() {
+    return t('core.videoVybrannoyModeliNetV');
+  },
+  get unsafe_model_provider() {
+    return t('core.coreUVybrannogoIspolnitelyaNet');
+  },
+  get registry_failed() {
+    return t('core.videoNeUdalosProchitatReestr');
+  },
+  get executor_unavailable() {
+    return t('core.videoIspolnitelVybrannoyModeliNedostupen');
+  },
+  get run_failed() {
+    return t('core.videoModelNeOtvetilaMozhno');
+  },
+  get bad_plan() {
+    return t('core.videoModelOtvetilaNePo');
+  },
+  get empty_transcript() {
+    return t('core.videoVRasshifrovkeNetNi');
+  },
+  get not_ready() {
+    return t('core.videoRasshifrovkaEscheNeGotova');
+  },
 };
 
 export interface VideoPart {
@@ -650,8 +671,7 @@ export const useVideoSessionStore = defineStore('video-session', {
           // переезжал mediaDir), и ждать его возвращения бессмысленно.
           if (objectOrEmpty(err).status === 404) {
             part.gone = true;
-            this.error = `Разбор части «${part.name}» больше не найден на сервере`
-              + ' — запись придётся загрузить заново.';
+            this.error = t('core.videoRazborChastiNameBolshe', { name: part.name });
             continue;
           }
 
@@ -664,7 +684,7 @@ export const useVideoSessionStore = defineStore('video-session', {
 
         if (this.pollFailures >= POLL_FAILURES_MAX) {
           this.stopPoll();
-          this.error = 'Сервер не отвечает — статус разбора не обновляется. Перезапусти приложение.';
+          this.error = t('core.videoServerNeOtvechaetStatus');
         }
 
         return;
@@ -676,7 +696,7 @@ export const useVideoSessionStore = defineStore('video-session', {
 
       if (failed) {
         this.stopPoll();
-        this.error = failed.job?.error || 'распознавание не удалось';
+        this.error = failed.job?.error || t('core.videoRaspoznavanieNeUdalos');
 
         return;
       }
@@ -784,7 +804,8 @@ export const useVideoSessionStore = defineStore('video-session', {
         // сервер отдаёт только код — у «модель не выбрана» и «модель не ответила» разные выходы.
         const code = textOr(objectOrEmpty(objectOrEmpty(err).data).error);
 
-        this.planError = PLAN_ERRORS[code] || textOr(objectOrEmpty(err).message) || 'Разбор не удался.';
+        this.planError =
+           PLAN_ERRORS[code] || textOr(objectOrEmpty(err).message) || t('core.coreRazborNeUdalsya');
       } finally {
         this.planning = false;
       }
@@ -816,7 +837,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         draft.clipWindow = window;
       } catch (err) {
         draft.clipError = textOr(objectOrEmpty(objectOrEmpty(err).data).message)
-          || 'Фрагмент записи не вырезан.';
+          || t('core.coreFragmentZapisiNeVyrezan');
       } finally {
         draft.clipBusy = false;
       }
@@ -863,7 +884,11 @@ export const useVideoSessionStore = defineStore('video-session', {
 
       const line = `[${mmss(segment.start)}] ${segment.text.trim()}`;
 
-      draft.description = (draft.description ? `${draft.description}\n` : '') + line;
+      draft.description =
+        t('core.videoDescriptionnLine', {
+          descriptionn: (draft.description ? `${draft.description}\n` : ''),
+          line,
+        });
     },
 
     useFullText(value: string) {

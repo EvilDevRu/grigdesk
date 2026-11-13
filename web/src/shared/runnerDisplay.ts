@@ -1,10 +1,14 @@
-import { translate } from '../../../shared/i18n/catalogs.ts';
 
 import {
   formatExactDecimal,
   formatExactInteger,
   formatExactUsd,
 } from './exactNumberFormat.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 // Точный расход попытки: строки, а не числа, — величины превышают 2^53, и `Number`
 // молча терял бы точность (см. exactNumberFormat).
@@ -78,7 +82,7 @@ export function providerLabel(id: unknown): string {
   const value = String(id || '');
 
   if (!value) {
-    return 'не назначен';
+    return translateUi('core.runnerDisplayUnassigned');
   }
 
   if (PROVIDER_LABELS[value]) {
@@ -108,7 +112,9 @@ export function runnerNodeLabel(runner: RunnerState | null | undefined): string 
   }
 
   if (runner.actual) {
-    return `${providerLabel(runner.actual)}${runner.switched ? ' · резерв' : ''}`;
+    return `${providerLabel(
+      runner.actual,
+    )}${runner.switched ? translateUi('core.runnerDisplayFallback') : ''}`;
   }
 
   return providerLabel(runner.primary);
@@ -186,7 +192,7 @@ export function runnerModelEffortLabel(
   const effort = runnerEffortLabel(runner, provider);
   const latest = runner?.attempts?.findLast((attempt) => attempt.runner === provider);
   const effortLabel = latest?.effort === ''
-    ? translate('core.stageNoEffort') : effort ? `effort ${effort}` : '';
+    ? translateUi('core.stageNoEffort') : effort ? `effort ${effort}` : '';
 
   return [model, effortLabel].filter(Boolean).join(' · ');
 }
@@ -199,7 +205,7 @@ export function runnerAttemptModelLabel(attempt: RunnerAttempt | null | undefine
   const model = String(attempt?.model || '');
   const effort = String(attempt?.effort || '');
   const effortLabel = attempt?.effort === ''
-    ? translate('core.stageNoEffort') : effort ? `effort ${effort}` : '';
+    ? translateUi('core.stageNoEffort') : effort ? `effort ${effort}` : '';
 
   return [model, effortLabel].filter(Boolean).join(' · ');
 }
@@ -214,11 +220,11 @@ function compactTokens(value: number): string {
   }
 
   if (value >= 1e6) {
-    return `${(value / 1e6).toFixed(value >= 1e7 ? 0 : 1)}М`;
+    return translateUi('core.runnerDisplayM', { value: (value / 1e6).toFixed(value >= 1e7 ? 0 : 1) });
   }
 
   if (value >= 1e3) {
-    return `${(value / 1e3).toFixed(value >= 1e4 ? 0 : 1)}к`;
+    return translateUi('core.runnerDisplayK', { value: (value / 1e3).toFixed(value >= 1e4 ? 0 : 1) });
   }
 
   return String(value);
@@ -274,14 +280,14 @@ function compactExactTokens(value: string): string {
   const amount = BigInt(value);
 
   if (amount >= 1_000_000n) {
-    return `${formatExactDecimal(decimalRatio(value, 1_000_000n), {
+    return translateUi('core.runnerDisplayM', { value: formatExactDecimal(decimalRatio(value, 1_000_000n), {
       maximumFractionDigits: amount >= 10_000_000n ? 0 : 1,
-    })}М`;
+    }) });
   }
   if (amount >= 1_000n) {
-    return `${formatExactDecimal(decimalRatio(value, 1_000n), {
+    return translateUi('core.runnerDisplayK', { value: formatExactDecimal(decimalRatio(value, 1_000n), {
       maximumFractionDigits: amount >= 10_000n ? 0 : 1,
-    })}к`;
+    }) });
   }
 
   return value;
@@ -327,7 +333,10 @@ export function attemptCostLabel(attempt: RunnerAttempt | null | undefined): str
     const total = exactTotal(exact);
 
     if (total !== '0' || exact.completeness === 'complete') {
-      return `${partial ? '≥' : ''}${compactExactTokens(total)} ток.`;
+      return translateUi(
+        'core.runnerDisplayTokens',
+        { value: partial ? '≥' : '', value2: compactExactTokens(total) },
+      );
     }
 
     return '';
@@ -343,7 +352,7 @@ export function attemptCostLabel(attempt: RunnerAttempt | null | undefined): str
     .map((key) => (Number.isFinite(tokens[key]) ? Number(tokens[key]) : 0))
     .reduce((sum, value) => sum + value, 0);
 
-  return total > 0 ? `${compactTokens(total)} ток.` : '';
+  return total > 0 ? translateUi('core.runnerDisplayTokensc4c9f1', { value: compactTokens(total) }) : '';
 }
 
 /**
@@ -362,27 +371,27 @@ export function attemptCostTitle(attempt: RunnerAttempt | null | undefined): str
 
   if (exact) {
     const parts = [
-      ['вход', exact.in],
-      ['выход', exact.out],
-      ['из кэша', exact.cacheRead],
-      ['в кэш', exact.cacheWrite],
+      [translateUi('core.runnerDisplayInput'), exact.in],
+      [translateUi('core.runnerDisplayOutput'), exact.out],
+      [translateUi('core.runnerDisplayCacheRead'), exact.cacheRead],
+      [translateUi('core.runnerDisplayCacheWrite'), exact.cacheWrite],
     ].map(([label, value]) => `${label} ${formatExactInteger(value, {
       groupSeparator: '\u00a0',
     })}`);
 
     if (exact.costUsd !== null && exact.costUsd !== undefined) {
-      parts.push(`стоимость ${formatExactUsd(exact.costUsd, {
+      parts.push(translateUi('core.runnerDisplayCost', { value: formatExactUsd(exact.costUsd, {
         minimumFractionDigits: 4,
         maximumFractionDigits: 4,
-      })}`);
+      }) }));
     }
 
     if (exact.completeness === 'partial') {
-      parts.push('учтённая часть');
+      parts.push(translateUi('core.runnerDisplayRecordedPortion'));
     }
 
     if (exact.provenance === 'approximate') {
-      parts.push('историческая оценка');
+      parts.push(translateUi('core.runnerDisplayHistoricalEstimate'));
     }
 
     return parts.join(' · ');
@@ -390,33 +399,55 @@ export function attemptCostTitle(attempt: RunnerAttempt | null | undefined): str
 
   const legacyCost = tokens.costUsd as number;
   const parts = ([
-    ['вход', tokens.in],
-    ['выход', tokens.out],
-    ['из кэша', tokens.cacheRead],
-    ['в кэш', tokens.cacheWrite],
+    [translateUi('core.runnerDisplayInput'), tokens.in],
+    [translateUi('core.runnerDisplayOutput'), tokens.out],
+    [translateUi('core.runnerDisplayCacheRead'), tokens.cacheRead],
+    [translateUi('core.runnerDisplayCacheWrite'), tokens.cacheWrite],
   ] as Array<[string, unknown]>)
     .filter(([, value]) => Number.isFinite(value))
-    .map(([label, value]) => `${label} ${Number(value).toLocaleString('ru-RU')}`);
+    .map(([label, value]) => `${label} ${Number(value).toLocaleString(uiLocalePort.value)}`);
 
   if (Number.isFinite(legacyCost) && legacyCost > 0) {
-    parts.push(`стоимость $${legacyCost.toFixed(4)}`);
+    parts.push(translateUi('core.runnerDisplayCosta46729', { value: legacyCost.toFixed(4) }));
   }
 
   return parts.join(' · ');
 }
 
 const REASONS: Record<string, string> = {
-  primary: 'основной исполнитель',
-  fallback_limit: 'закончился лимит',
-  unavailable: 'исполнитель недоступен',
-  unavailable_preflight: 'исполнитель недоступен до запуска',
-  route_unavailable: 'нет совместимого маршрута',
-  manual_switch: 'переключено вручную',
-  coverage_unavailable: 'не пройдена проверка окружения',
-  invalid_config: 'ошибка конфигурации',
-  context_overflow: 'переполнен контекст',
-  denied: 'действие запрещено политикой',
-  manual_switch_conflict: 'конфликт ручного переключения',
+  get primary() {
+    return translateUi('core.pipelineOsnovnoyIspolnitel');
+  },
+  get fallback_limit() {
+    return translateUi('core.runnerDisplayQuotaExhausted');
+  },
+  get unavailable() {
+    return translateUi('core.runnerDisplayExecutorUnavailable');
+  },
+  get unavailable_preflight() {
+    return translateUi('core.runnerDisplayExecutorUnavailableBeforeLaunch');
+  },
+  get route_unavailable() {
+    return translateUi('core.runnerDisplayNoCompatibleRoute');
+  },
+  get manual_switch() {
+    return translateUi('core.runnerDisplaySwitchedManually');
+  },
+  get coverage_unavailable() {
+    return translateUi('core.runnerDisplayEnvironmentCheckFailed');
+  },
+  get invalid_config() {
+    return translateUi('core.runnerDisplayConfigurationError');
+  },
+  get context_overflow() {
+    return translateUi('core.runnerDisplayContextOverflow');
+  },
+  get denied() {
+    return translateUi('core.runnerDisplayActionDeniedByPolicy');
+  },
+  get manual_switch_conflict() {
+    return translateUi('core.runnerDisplayManualSwitchConflict');
+  },
 };
 
 /**
@@ -426,7 +457,7 @@ const REASONS: Record<string, string> = {
 export function runnerReasonLabel(reason: unknown): string {
   const key = String(reason || '');
 
-  return REASONS[key] || key.replace(/_/g, ' ') || 'причина не записана';
+  return REASONS[key] || key.replace(/_/g, ' ') || translateUi('core.runnerDisplayReasonNotRecorded');
 }
 
 /**
@@ -435,24 +466,24 @@ export function runnerReasonLabel(reason: unknown): string {
  */
 export function attemptResultLabel(result: unknown, rc?: number | null): string {
   const fallback = Number.isInteger(rc)
-    ? translate('core.runnerExitReasonMissing', { code: rc! })
-    : translate('core.runnerFailureReasonMissing');
+    ? translateUi('core.runnerExitReasonMissing', { code: rc! })
+    : translateUi('core.runnerFailureReasonMissing');
   const labels: Record<string, string> = {
-    ok: 'успешно',
-    limited: translate('core.runnerQuotaExhausted'),
-    unavailable_preflight: 'недоступен',
-    provider_unavailable: 'провайдер недоступен',
-    route_unavailable: 'несовместим',
-    manual_switch: 'переключён вручную',
-    denied: 'запрещено',
-    timeout: 'таймаут',
-    transient: 'временный сбой',
-    invalid_config: 'ошибка настройки',
-    context_overflow: 'контекст переполнен',
-    crashed: 'процесс упал',
+    ok: translateUi('core.dbUspeshno'),
+    limited: translateUi('core.runnerQuotaExhausted'),
+    unavailable_preflight: translateUi('core.unavailable'),
+    provider_unavailable: translateUi('core.runnerDisplayProviderUnavailable'),
+    route_unavailable: translateUi('core.runnerDisplayIncompatible'),
+    manual_switch: translateUi('core.runnerDisplayManuallySwitched'),
+    denied: translateUi('core.runnerDisplayDenied'),
+    timeout: translateUi('core.runnerDisplayTimeout'),
+    transient: translateUi('core.runnerDisplayTemporaryFailure'),
+    invalid_config: translateUi('core.runnerDisplaySetupError'),
+    context_overflow: translateUi('core.runnerDisplayContextIsFull'),
+    crashed: translateUi('core.runnerDisplayProcessCrashed'),
     unknown: fallback,
   };
   const key = String(result || '');
 
-  return labels[key] || (key ? fallback : 'идёт');
+  return labels[key] || (key ? fallback : translateUi('core.showcaseIdet'));
 }

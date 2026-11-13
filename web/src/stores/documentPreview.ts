@@ -1,4 +1,9 @@
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 // Глобальный viewer нужен, чтобы ссылка из любого чата открывалась поверх текущего
 // экрана и не разрушала навигационный контекст страницы. Он же показывает картинки и
@@ -56,7 +61,7 @@ function galleryOf(current: PreviewMedia, items: PreviewMediaInput[]): PreviewMe
     if (src && !gallery.some((entry) => sameSource(entry.src, src))) {
       gallery.push({
         src,
-        name: String(item.name || 'Изображение'),
+        name: String(item.name || translateUi('core.chatIzobrazhenie')),
         mime: String(item.mime || ''),
       });
     }
@@ -105,7 +110,7 @@ export const useDocumentPreviewStore = defineStore('document-preview', {
 
       this.image = {
         src: safeSrc,
-        name: String(name || 'Изображение'),
+        name: String(name || translateUi('core.chatIzobrazhenie')),
         mime: String(mime || ''),
       };
       this.gallery = galleryOf(this.image, gallery);
@@ -138,7 +143,7 @@ export const useDocumentPreviewStore = defineStore('document-preview', {
 
       this.video = {
         src: safeSrc,
-        name: String(name || 'Видео'),
+        name: String(name || translateUi('core.navVideo')),
         mime: String(mime || ''),
       };
       this.href = '';

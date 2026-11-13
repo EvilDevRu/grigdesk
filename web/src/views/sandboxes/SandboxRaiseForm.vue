@@ -1,18 +1,18 @@
 <template>
   <form class="sandbox-raise" @submit.prevent="submit">
     <div class="sandbox-raise__row">
-      <UiField label="Профиль" :error="profileError"
-               help="Профиль определяет проект и способ подготовки стенда: код, контейнеры и базы данных.">
+      <UiField :label="t('core.sandboxProfil2')" :error="profileError"
+               :help="t('core.sandboxRaiseFormTheProfileDefinesTheProjectAnd')">
         <UiSelect v-model="profile" :disabled="!options.length || busy">
-          <option v-if="!options.length" value="">нет профилей с песочницей</option>
+          <option v-if="!options.length" value="">{{ t('core.sandboxNetProfileySPesochnitsey') }}</option>
           <option v-for="item in options" :key="item.id" :value="item.id">{{ item.id }}</option>
         </UiSelect>
       </UiField>
 
       <UiField
-        label="Номер задачи"
+        :label="t('core.sandboxNomerZadachi')"
         :error="taskError"
-        help="Укажите номер задачи из портала. Позже её можно запустить по конвейеру на этом же стенде."
+        :help="t('core.sandboxRaiseFormEnterTheTaskNumberFromThe')"
       >
         <UiInput
           v-model.trim="task"
@@ -23,13 +23,11 @@
       </UiField>
     </div>
 
-    <UiSwitch v-model="withoutTask" :disabled="busy">Без привязки к задаче</UiSwitch>
+    <UiSwitch v-model="withoutTask" :disabled="busy">{{ t('core.sandboxBezPrivyazkiKZadache') }}</UiSwitch>
     <p class="sandbox-raise__note">{{ taskHint }}</p>
 
     <div class="sandbox-raise__footer">
-      <p class="sandbox-raise__note">
-        Подготовка занимает 12–15 минут и один слот стенда. Вкладку можно закрыть.
-      </p>
+      <p class="sandbox-raise__note"> {{ t('core.sandboxPodgotovkaZanimaet1215') }} </p>
       <UiButton
         type="submit"
         variant="solid"
@@ -37,22 +35,14 @@
         data-context="workspace-form"
         :loading="busy"
         :aria-disabled="!canSubmit"
-      >
-        Поднять стенд
-      </UiButton>
+      > {{ t('core.sandboxPodnyatStend2') }} </UiButton>
     </div>
   </form>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import {
-  UiButton,
-  UiField,
-  UiInput,
-  UiSelect,
-  UiSwitch,
-} from '../../ui';
+import { UiButton, UiField, UiInput, UiSelect, UiSwitch, t } from '../../ui';
 import { SANDBOX_TASK_RE } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 import type { SandboxProfile } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 
@@ -78,16 +68,17 @@ const withoutTask = ref(true);
 const taskError = ref('');
 
 const taskHint = computed(() => (withoutTask.value
-  ? `GrigDesk выберет свободный служебный номер: ${props.range.from}–${props.range.to}.`
-  : 'Стенд получит имя этой задачи, и позже её можно пустить по конвейеру на готовый стенд.'));
+  ? t('core.sandboxGrigdeskVyberetSvobodnyySluzhebnyy', { from: props.range.from, to: props.range.to })
+  : t('core.sandboxStendPoluchitImyaEtoy')));
 
 // Выключенное поле не должно звать вводить номер: подсказка внутри него говорит,
 // что номер сейчас выдаёт сам GrigDesk.
-const taskPlaceholder = computed(() => (withoutTask.value ? 'выдаст GrigDesk' : 'например 1234'));
+const taskPlaceholder =
+  computed(() => (withoutTask.value ? t('core.sandboxVydastGrigdesk') : t('core.sandboxNaprimer1234')));
 
 const profileError = computed(() => (props.options.length
   ? ''
-  : 'Нет профилей для создания песочницы. В профиле нужны скрипты up.sh и down.sh.'));
+  : t('core.sandboxNetProfileyDlyaSozdaniya')));
 
 const canSubmit = computed(() => props.options.some((option) => option.id === profile.value) && !props.busy);
 
@@ -128,7 +119,7 @@ function submit() {
   }
 
   if (!SANDBOX_TASK_RE.test(task.value)) {
-    taskError.value = 'Нужен номер задачи — целое число.';
+    taskError.value = t('core.sandboxNuzhenNomerZadachiTseloe');
 
     return;
   }

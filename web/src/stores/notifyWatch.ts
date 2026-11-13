@@ -1,6 +1,9 @@
 import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import { messageRef } from '../ui.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+
+
 // Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут
 // системные оповещения, сводка топбара и счётчик внимания в сайдбаре.
 // Оповещение — только на переходе
@@ -23,6 +26,8 @@ import {
   publishSandboxPipelineSnapshot,
   markSandboxPipelineSnapshotError,
 } from '../shared/sandboxPipelineSnapshot.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 let started = false;
 let checking = false;
@@ -60,15 +65,15 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
       const lines = [];
 
       if (s.waiting.length) {
-        lines.push(`⏳ ждут твоего решения: ${s.waiting.length}`);
+        lines.push(t('core.coreZhdutTvoegoResheniyaLength', { length: s.waiting.length }));
         lines.push(...s.waiting.map((w) => `#${w.task}: ${w.text}`));
       }
       if (s.stalled.length) {
-        lines.push(`🛑 встали: ${s.stalled.length}`);
+        lines.push(t('core.coreVstaliLength', { length: s.stalled.length }));
         lines.push(...s.stalled.map((x) => `#${x.task}: ${x.title}`));
       }
       if (s.silent.length) {
-        lines.push(`💤 молчат: ${s.silent.length}`);
+        lines.push(t('core.coreMolchatLength', { length: s.silent.length }));
         lines.push(...s.silent.map((x) => `#${x.task}: ${x.text}`));
       }
 
@@ -78,7 +83,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         const attention = new Set([...s.waiting, ...s.stalled, ...s.silent].map((x) => x.task));
         const running = s.running.filter((x) => !attention.has(x.task));
 
-        lines.push(`🔵 в работе: ${summary.runningCount}`);
+        lines.push(t('core.coreVRaboteRunningcount', { runningCount: summary.runningCount }));
         lines.push(...running.map((x) => `#${x.task}`));
       }
 
@@ -305,7 +310,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         });
       } catch (error) {
         // Сервер недоступен — оставляем прошлую картину и помечаем источник неизвестным.
-        this.error = failureText(error) || 'Конвейер недоступен';
+        this.error = failureText(error) || t('core.coreKonveyerNedostupen');
         markSandboxPipelineSnapshotError(this.error);
       }
       finally { checking = false; }

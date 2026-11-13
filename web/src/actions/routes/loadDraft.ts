@@ -3,6 +3,11 @@ import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { cancelDraftSave } from './save.ts';
 import { publicationDraftKey } from './publish.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Загружает черновик и устанавливает серверный и локальный снимки.
@@ -63,10 +68,10 @@ export async function loadDraft(profile: string, draftId: string): Promise<void>
     store.receipt = null;
     store.publicationOutcome = store.pendingOperationId ? 'unknown' : 'idle';
     store.publicationError = store.pendingOperationId
-      ? 'Итог публикации пока неизвестен. Проверьте операцию снова.' : '';
+      ? translateUi('core.loadDraftThePublicationOutcomeIsStillUnknownCheck') : '';
   } catch (error) {
     if (request === runtime.openRequest) {
-      store.error = failureText(error, 'Не удалось открыть черновик маршрутов.');
+      store.error = failureText(error, translateUi('core.loadDraftCouldNotOpenTheRouteDraft'));
     }
   } finally {
     if (request === runtime.openRequest) {

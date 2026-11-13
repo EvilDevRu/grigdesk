@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import { canonicalJson } from '../lib/canonicalJson.ts';
 import { decodeHelpBundle, HELP_MAX_BYTES, helpInvalid } from '../help/helpContracts.ts';
-import type { HelpBundle } from '../help/helpContracts.ts';
+import type { HelpBundle, HelpLocale } from '../help/helpContracts.ts';
 import { HELP_CONTEXT_ARTICLES, helpHref } from '../help/helpLinks.ts';
 import { readContainedText } from './readContainedText.ts';
 import { sha256 } from './hash.ts';
@@ -21,15 +21,20 @@ export function verifyHelpBundle(raw: unknown): HelpBundle {
   return bundle;
 }
 /**
- * Только каталог guide и его явные обычные файлы образуют корпус.
+ * Только каталог выбранного языка guide и его явные обычные файлы образуют корпус.
  * Локальные заметки, планы и внешние каталоги не становятся транзитивными ресурсами.
  */
 export async function compileHelpSources(sourceRoot: string, identity: {
   version: string;
   commit: string;
-}): Promise<HelpBundle> {
-  const root = path.join(sourceRoot, 'docs/grigdesk/guide');
-  const catalogText = await readContainedText(sourceRoot, 'docs/grigdesk/guide/catalog.json', 64000);
+}, locale: HelpLocale = 'ru'): Promise<HelpBundle> {
+  if (locale !== 'ru' && locale !== 'en') {
+    helpInvalid();
+  }
+
+  const relativeRoot = `docs/grigdesk/guide/${locale}`;
+  const root = path.join(sourceRoot, relativeRoot);
+  const catalogText = await readContainedText(sourceRoot, `${relativeRoot}/catalog.json`, 64000);
 
   if (!catalogText || catalogText.length > 64000) {
     helpInvalid();
@@ -51,7 +56,7 @@ export async function compileHelpSources(sourceRoot: string, identity: {
       helpInvalid();
     }
 
-    const markdown = await readContainedText(sourceRoot, `docs/grigdesk/guide/${raw.file}`, 128000);
+    const markdown = await readContainedText(sourceRoot, `${relativeRoot}/${raw.file}`, 128000);
 
     if (!markdown || markdown.length > 128000) {
       helpInvalid();
@@ -70,7 +75,7 @@ export async function compileHelpSources(sourceRoot: string, identity: {
   const content = {
     format: 1,
     ...identity,
-    locale: 'ru',
+    locale,
     articles
   };
   const result = decodeHelpBundle({
@@ -82,6 +87,18 @@ export async function compileHelpSources(sourceRoot: string, identity: {
   if (entries.some((entry) => !entry.isFile() || !expectedFiles.has(entry.name))
     || entries.length !== expectedFiles.size) {
     helpInvalid();
+  }
+
+  if (locale !== 'ru') {
+    const original = await compileHelpSources(sourceRoot, identity);
+    const identities = (value: HelpBundle) => value.articles.map(({ id, file }) => ({
+      id,
+      file,
+    }));
+
+    if (canonicalJson(identities(original)) !== canonicalJson(identities(result))) {
+      helpInvalid();
+    }
   }
 
   for (const entry of result.articles) {

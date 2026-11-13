@@ -17,7 +17,7 @@
             <span v-if="layout.kind && shortModelKind" class="chat-status__kind" aria-hidden="true">
               {{ shortModelKind }}
             </span>
-            <span class="chat-status__value">{{ status.modelLabel || 'Модель не выбрана' }}</span>
+            <span class="chat-status__value">{{ status.modelLabel || t('core.chatModelNeVybrana') }}</span>
           </span>
           <template v-if="layout.cwd">
             <span class="chat-status__sep" aria-hidden="true">·</span>
@@ -33,16 +33,16 @@
                   <span>{{ item.value }}</span>
                 </span>
               </template>
-              <span v-if="usage.stale" class="chat-status__stale">устарели</span>
+              <span v-if="usage.stale" class="chat-status__stale">{{ t('core.chatUstareli') }}</span>
             </span>
           </template>
           <!-- «+N» — сколько сведений не поместилось; по нажатию общая всплывашка
                показывает именно их, с подписями и полным путём. -->
-          <UiPopover v-if="overflow.length" placement="top-end" aria-label="Не поместилось в строку"
+          <UiPopover v-if="overflow.length" placement="top-end" :aria-label="t('core.chatNePomestilosVStroku')"
                      :style="{ width: 'min(320px, calc(100vw - 20px))' }">
             <template #trigger>
               <UiPressable data-context="chat-status-more" data-role="chat-status-more"
-                           :aria-label="`Ещё ${overflow.length}: показать, что не поместилось`">
+                           :aria-label="t('core.chatEscheLengthPokazatChto', { length: overflow.length })">
                 +{{ overflow.length }}
               </UiPressable>
             </template>
@@ -52,9 +52,7 @@
                 <dt>{{ entry.label }}</dt>
                 <dd>{{ entry.value }}</dd>
               </div>
-              <p v-if="usage.stale && usageItems.length" class="chat-status__overflow-note">
-                Данные лимитов устарели
-              </p>
+              <p v-if="usage.stale && usageItems.length" class="chat-status__overflow-note"> {{ t('core.limitDataIsStale') }} </p>
             </dl>
           </UiPopover>
         </span>
@@ -66,7 +64,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
-import { UiPopover, UiPressable, UiSpinner, vTooltip } from '../../ui';
+import { UiPopover, UiPressable, UiSpinner, vTooltip, t } from '../../ui';
 import { clockOf, resetIn } from '../../features/providers/providerUsage.ts';
 import type { UsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import type { ChatStatus } from './chatStatus.ts';
@@ -89,13 +87,13 @@ const props = withDefaults(defineProps<{
 });
 
 const shortModelKind = computed(() => ({
-  выбрана: 'выбр.',
-  запрошена: 'запр.',
+  выбрана: t('core.chatVybr'),
+  запрошена: t('core.chatZapr'),
   сообщена: '',
 } as Record<string, string>)[props.status.modelKind] || '');
 const usageItems = computed(() => props.usage.label
   ? []
-  : props.usage.items.filter((item) => item.value !== 'нет данных'));
+  : props.usage.items.filter((item) => item.value !== t('core.noData')));
 
 // Ширина блока сведений; пока не измерена — бесконечность, то есть «видно всё».
 const summaryEl = ref<HTMLElement | null>(null);
@@ -111,7 +109,7 @@ const layout = computed(() => statusSummaryLayout(summaryWidth.value, usageItems
 const shownUsage = computed(() => usageItems.value.slice(0, layout.value.windows));
 const overflow = computed(() => statusOverflow(layout.value, {
   modelKind: props.status.modelKind,
-  modelLabel: props.status.modelLabel || 'Модель не выбрана',
+  modelLabel: props.status.modelLabel || t('core.chatModelNeVybrana'),
   cwd: props.status.cwd || props.status.cwdLabel,
   extraDirs: props.status.extraDirs,
   usageItems: usageItems.value,
@@ -120,15 +118,17 @@ const overflow = computed(() => statusOverflow(layout.value, {
 const fullSummary = computed(() => [
   `${props.status.modelKind} ${props.status.modelLabel}`.trim(),
   props.status.cwd || props.status.cwdLabel,
-  props.status.extraDirs.length ? `Дополнительные каталоги: ${props.status.extraDirs.join(', ')}` : '',
-  usageItems.value.length ? `Осталось по аккаунту: ${usageItems.value.map((item) => {
+  props.status.extraDirs.length
+                ? t('core.chatDopolnitelnyeKatalogiJoin', { join: props.status.extraDirs.join(', ') })
+                : '',
+  usageItems.value.length ? t('core.chatOstalosPoAkkauntuJoin', { join: usageItems.value.map((item) => {
     const reset = resetIn(item.resetsAt);
 
     return `${item.label}: ${item.value}${reset ? ` (${reset})` : ''}`;
-  }).join(' · ')}` : '',
+  }).join(' · ') }) : '',
   usageItems.value.length && props.usage.measuredAt
-    ? `замер ${clockOf(new Date(props.usage.measuredAt))}` : '',
-  usageItems.value.length && props.usage.stale ? 'Данные устарели' : '',
+    ? t('core.chatZamerMeasuredat', { measuredAt: clockOf(new Date(props.usage.measuredAt)) }) : '',
+  usageItems.value.length && props.usage.stale ? t('core.chatDannyeUstareli') : '',
 ].filter(Boolean).join(' · '));
 
 function truncated(selector: string): boolean {

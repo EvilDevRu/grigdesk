@@ -1,6 +1,9 @@
 import { isTaskSourceId, parseTaskReference } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
 
 import { parseSurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { currentDesktopMode } from '../shared/desktopSettings.ts';
@@ -8,6 +11,8 @@ import { resolveSurfaceOpening } from '../shared/surfaceLauncher.ts';
 import { shellAction } from '../shared/shellClient.ts';
 import { showToast } from '../ui';
 import { useShellStore } from './shell.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const generations = new WeakMap<object, number>();
 
@@ -42,7 +47,7 @@ function sendSurface(path: string, body: unknown) {
 function showOpeningFailure() {
   showToast({
     id: 'task-window-opening',
-    title: 'Не удалось подтвердить открытие окна. Нажмите задачу ещё раз.',
+    title: t('core.coreNeUdalosPodtverditOtkrytie'),
     tone: 'warning',
   });
 }

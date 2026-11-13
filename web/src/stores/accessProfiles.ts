@@ -8,6 +8,8 @@ import { api, ApiError, failureText } from '../shared/apiClient.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
+const t = localeTranslator(uiLocalePort);
+
 interface UnresolvedMutation {
   id: string;
   route: string;
@@ -15,7 +17,7 @@ interface UnresolvedMutation {
   target: string;
 }
 
-const t = localeTranslator(uiLocalePort);
+
 const OPERATIONS_STORAGE = 'grigdesk.access-profile-operations';
 
 /**
@@ -47,7 +49,7 @@ function readUnresolved(): Record<string, UnresolvedMutation> {
 function publicList(value: unknown): AccessProfileList {
   if (!isRecord(value) || !Array.isArray(value.profiles) || !Array.isArray(value.methods)
     || typeof value.revision !== 'number') {
-    throw new Error('Некорректный список профилей');
+    throw new Error(t('core.coreNekorrektnyySpisokProfiley'));
   }
 
   return {
@@ -56,7 +58,7 @@ function publicList(value: unknown): AccessProfileList {
     switchAllowed: value.switchAllowed === true,
     profiles: value.profiles.map((item) => {
       if (!isRecord(item) || typeof item.id !== 'string' || typeof item.name !== 'string') {
-        throw new Error('Некорректный профиль');
+        throw new Error(t('core.coreNekorrektnyyProfil'));
       }
 
       return {
@@ -81,7 +83,7 @@ function publicList(value: unknown): AccessProfileList {
 function publicAttempt(value: unknown): AccessAttempt {
   if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.step)
     || typeof value.step.kind !== 'string' || typeof value.revision !== 'number') {
-    throw new Error('Некорректное состояние входа');
+    throw new Error(t('core.coreNekorrektnoeSostoyanieVhoda'));
   }
 
   return value as unknown as AccessAttempt;
