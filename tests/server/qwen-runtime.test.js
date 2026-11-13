@@ -659,3 +659,66 @@ test('qwen-cli-lease', async (t) => {
     await exclusive.release();
   }
 });
+
+test('Qwen: контекст и выход из usage-событий, субагент не меняет метрики', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const progress = [];
+  const lifecycle = (executionId, phase, subagentId) => ({
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: '' },
+    _meta: {
+      executionLifecycle: {
+        kind: 'request', executionId, phase,
+        ...(subagentId ? { subagentId } : {}),
+      },
+    },
+  });
+  const usageChunk = (usage) => ({
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: '' },
+    _meta: { usage },
+  });
+
+  await fixture.fake({
+    stream: [
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Думаю' } },
+      lifecycle('req-1', 'started'),
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Новый ответ' } },
+      lifecycle('req-1', 'ended'),
+      usageChunk({ inputTokens: 120, outputTokens: 8, totalTokens: 128, cachedReadTokens: 40 }),
+      { sessionUpdate: 'usage_update', used: 120, size: 32768 },
+      lifecycle('req-2', 'started'),
+      lifecycle('req-2', 'ended'),
+      usageChunk({ inputTokens: 140, outputTokens: 5, totalTokens: 145, cachedReadTokens: 120 }),
+      { sessionUpdate: 'usage_update', used: 140, size: 32768 },
+      usageChunk({ inputTokens: 1.5, outputTokens: -7 }),
+      { sessionUpdate: 'usage_update', used: 'много', size: 0 },
+      lifecycle('sub-1', 'started', 'extractor'),
+      usageChunk({ inputTokens: 900, outputTokens: 90, cachedReadTokens: 0 }),
+      { sessionUpdate: 'usage_update', used: 900, size: 32768 },
+      lifecycle('sub-1', 'ended', 'extractor'),
+    ],
+  });
+
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    onProgress: (tokens, info) => progress.push({ tokens, info }),
+  }));
+
+  assert.equal(successful(result), true, JSON.stringify(result));
+  assert.ok(progress.some((entry) => entry.info.contextTokens === 120), 'живой замер по ходу');
+
+  const last = progress.at(-1);
+
+  assert.equal(last.tokens, 13, 'выход — сумма обращений основного агента');
+  assert.equal(last.info.tokensIsEstimate, false);
+  assert.equal(last.info.contextTokens, 140);
+  assert.equal(last.info.contextWindow, 32768);
+  assert.deepEqual(last.info.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 120, uncachedTokens: 20,
+  });
+  assert.equal(result.contextTokens, 140);
+  assert.equal(result.contextWindow, 32768);
+  assert.equal(result.contextMetric, 'qwen-acp-usage-update');
+  assert.deepEqual(result.contextCache, last.info.contextCache);
+});

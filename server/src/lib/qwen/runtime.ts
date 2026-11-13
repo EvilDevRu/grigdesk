@@ -11,6 +11,7 @@ import { resolveQwenSnapshot } from './discovery.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
 import { createQwenTextSteps } from './steps.ts';
+import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { qwenToolAllowed } from './policy.ts';
 import { qwenPermissionResponse } from './permissions.ts';
@@ -86,6 +87,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   const readonlyRoots = Array.isArray(input.readonlyRoots) ? input.readonlyRoots.map(String) : [];
   const sink = createStepSink(input.onStep);
   const textSteps = createQwenTextSteps();
+  const usage = createQwenUsage((tokens, info) => input.onProgress?.(tokens, info));
   const promptId = randomUUID();
   const settings = record(input.providerSettings);
   let sessionId = '';
@@ -198,6 +200,9 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
       }
 
       const update = record(params.update);
+
+      usage.observe(update);
+
       const kind = update.sessionUpdate;
       const text = String(record(update.content).text || '');
       const id = String(update.toolCallId || '');
@@ -447,6 +452,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
       reply: input.onAssistantMessage ? lastResponse || reply : reply,
       sessionId,
       steps: sink.steps,
+      ...usage.result(),
       ...(input.onAssistantMessage && lastAssistantMessageId
         ? { assistantMessageId: lastAssistantMessageId } : {}),
       ...(actualModel ? { actualModel } : {}),

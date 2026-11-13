@@ -62,9 +62,11 @@ test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 },
 
   const steps = [];
   const metadata = [];
+  const progress = [];
   const result = await adapter.run(runInput(fixture, catalog[0].id, {
     onStep: (step) => steps.push(step),
     onRunMetadata: (value) => metadata.push(value),
+    onProgress: (tokens, info) => progress.push({ tokens, info }),
   }));
 
   assert.equal(successful(result), true, JSON.stringify(result));
@@ -76,6 +78,16 @@ test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 },
   assert.equal(result.actualModel, catalog[0].id);
   assert.ok(metadata.some((value) => value.actualModelId === catalog[0].id
     && value.modelSource === 'session'));
+  assert.equal(result.contextTokens, 20, 'Контекст приходит из usage_update настоящего CLI');
+  assert.ok(Number.isSafeInteger(result.contextWindow) && result.contextWindow > 0,
+    'Окно объявляет сам CLI, а не каталог');
+  assert.equal(result.contextMetric, 'qwen-acp-usage-update');
+  assert.deepEqual(result.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 0, uncachedTokens: 20,
+  });
+  assert.ok(progress.some((entry) => entry.info?.contextTokens === 20
+    && entry.info?.contextWindow === result.contextWindow), 'Живой замер контекста по ходу');
+  assert.equal(progress.at(-1).tokens, 8, 'Выход основного обращения без субагента');
   fixture.catalog.push({ id: 'new-model-without-release' });
 
   const refreshed = await adapter.catalog(fixture.config, {
