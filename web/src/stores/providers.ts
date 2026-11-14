@@ -140,11 +140,13 @@ export const useProvidersStore = defineStore('providers', {
     },
     /**
      * Модели исполнителя, которые видно в выборе. Правило одно на весь GrigDesk: краткий
-     * список = только свежие версии, `extra` (старые версии) — под настройкой; выбранную
-     * сейчас модель показываем всегда, иначе селект потеряет значение.
+     * список = только свежие версии, `extra` (старые версии) — под настройкой; нечат-модели
+     * не выводятся вовсе. Выбранную сейчас модель показываем всегда, иначе селект потеряет
+     * значение: сохранённый нечат-выбор остаётся запрещённым вариантом с причиной.
      */
     visibleModels: (state) => (provider: RegistryProvider | null, selectedId: string | null = null) =>
-      (provider?.models || []).filter((m) => state.showAllModels || !m.extra || m.id === selectedId),
+      (provider?.models || []).filter((m) => m.id === selectedId
+        || ((state.showAllModels || !m.extra) && !m.nonChat)),
     /**
      * Сохранённый выбор → реальная модель. Алиас CLI (`opus`, `sonnet`, `haiku`) отдельным
      * пунктом не показывается: он привязан к модели, в которую резолвится (`aliases`).

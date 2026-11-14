@@ -46,7 +46,8 @@ export interface ProviderCredentialEntry {
 }
 
 // Модель реестра в том объёме, в каком её читают соседние разделы при выборе.
-// `extra` — старая версия семейства или нечат-модель: в кратком списке её не показывают.
+// `extra` — старая версия семейства или нечат-модель: в кратком списке её не показывают,
+// а нечат-модель (`nonChat`) скрыта и под «все модели».
 export interface ProviderModelEntry {
   chatSpeedModes?: ChatSpeed[];
   id: string;

@@ -162,7 +162,10 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
         ? { ...resolved, provider: { ...resolved.provider, sessionBinding: true } }
         : resolved;
     },
-    visibleModels(provider) { return provider.models; },
+    // Как настоящий стор: нечат-модель не выводится, сохранённый выбор остаётся.
+    visibleModels(provider, selectedId) {
+      return provider.models.filter((m) => m.id === selectedId || !m.nonChat);
+    },
     modesOf() { return []; },
   });
 
@@ -209,39 +212,61 @@ test('модели доступного исполнителя доступны 
   assert.equal(option.element.disabled, false);
 });
 
-test('нечат-модель видна только как запрещённый вариант с причиной', async (t) => {
-  const provider = {
-    id: 'qwen',
-    name: 'Qwen Code',
-    available: true,
-    models: [
-      {
-        id: 'qwen3.8-max',
-        name: 'Qwen3.8 Max',
-        efforts: [],
-      },
-      {
-        id: 'wan3.0-video',
-        name: 'Wan3.0 Video',
-        efforts: [],
-        extra: true,
-        nonChat: true,
-        nonChatReason: 'Генерация видео, не текстовый чат',
-      },
-    ],
-  };
+// Нечат-модель каталога: реестр помечает её extra/nonChat с причиной запрета запуска.
+const NON_CHAT_PROVIDER = {
+  id: 'qwen',
+  name: 'Qwen Code',
+  available: true,
+  models: [
+    {
+      id: 'qwen3.8-max',
+      name: 'Qwen3.8 Max',
+      efforts: [],
+    },
+    {
+      id: 'wan3.0-video',
+      name: 'Wan3.0 Video',
+      efforts: [],
+      extra: true,
+      nonChat: true,
+      nonChatReason: 'Генерация видео, не текстовый чат',
+    },
+  ],
+};
 
-  PROVIDERS.push(provider);
-  t.after(() => PROVIDERS.splice(PROVIDERS.indexOf(provider), 1));
+/**
+ * Подключает нечат-модель к общему реестру теста и убирает её после проверки.
+ * Оба сценария — скрытие и сохранённый выбор — читают один и тот же каталог.
+ */
+function mountWithNonChat(t) {
+  PROVIDERS.push(NON_CHAT_PROVIDER);
+  t.after(() => PROVIDERS.splice(PROVIDERS.indexOf(NON_CHAT_PROVIDER), 1));
+}
+
+test('нечат-модель не выводится в выборе', async (t) => {
+  mountWithNonChat(t);
 
   const { wrapper } = await mountChat(t);
+
+  assert.equal(modelOption(wrapper, 'wan3.0-video'), undefined);
+  assert.equal(modelOption(wrapper, 'qwen3.8-max').element.disabled, false);
+});
+
+test('сохранённый нечат-выбор остаётся видимым запрещённым вариантом', async (t) => {
+  mountWithNonChat(t);
+
+  const { wrapper } = await mountChat(t, {
+    initial: {
+      model: 'wan3.0-video',
+      modelRef: { provider: 'qwen', model: 'wan3.0-video' },
+    },
+  });
   const option = modelOption(wrapper, 'wan3.0-video');
 
-  assert.ok(option, 'нечат-модель остаётся видимой под «все модели»');
+  assert.ok(option, 'селект теряет сохранённое значение без этого варианта');
   assert.equal(option.element.disabled, true);
   assert.match(option.text(), /не для чата/u);
   assert.match(option.attributes('title'), /Генерация видео/u);
-  assert.equal(modelOption(wrapper, 'qwen3.8-max').element.disabled, false);
 });
 
 test('каталог доступных исполнителей не содержит пометок недоступности', async (t) => {

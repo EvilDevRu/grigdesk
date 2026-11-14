@@ -28,9 +28,9 @@ do not re-enter the saved key. Unsaved access shows Save connection and Apply;
 rechecking before saving uses the old connection.
 The short model list keeps confirmed new and third-party models distinct.
 Chat shows only models usable for text conversation, newer ones first.
-Video, speech and other non-chat service models stay hidden with a reason
-until the full list is enabled, and cannot be selected for chat.
-Enable the full list in Settings → AI executors → Models.
+Video, speech and other non-chat service models are not listed at all
+and cannot be selected for chat. Older versions of chat models can be
+enabled in Settings → AI executors → Models.
 
 If you already configured `modelProviders` in Qwen CLI, GrigDesk uses it without modifying it.
 Service selection is hidden and access uses the configured `envKey` names.

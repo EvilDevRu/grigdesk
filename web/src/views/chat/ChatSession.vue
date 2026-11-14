@@ -139,7 +139,8 @@
                        Сохранённый выбор недоступного исполнителя остаётся скрытым native option. -->
                   <optgroup v-for="p in provGroups" :key="p.id" :label="p.name">
                     <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает);
-                         «не для чата» — нечат-модель каталога, выбор запрещён -->
+                         «не для чата» — сохранённый нечат-выбор: прочие нечат-модели
+                         список не выводит, правило живёт в сторе провайдеров -->
                     <option v-for="m in p.models" :key="m.id" :value="m.id"
                             :disabled="m.nonChat"
                             :data-description="modelOptionDescription(m)"
