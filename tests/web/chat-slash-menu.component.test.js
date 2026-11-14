@@ -278,7 +278,7 @@ test('Enter на Codex skill шлёт $skill без slashCommand', async (t) => 
   assert.equal(sendCalls[0][3]?.slashCommand, undefined);
 });
 
-for (const id of ['glm', 'deepseek']) {
+for (const id of ['glm', 'deepseek', 'qwen']) {
   test(`${id}: /навык виден в меню и уносит вложения обычным ходом`, async (t) => {
     const provider = {
       id,

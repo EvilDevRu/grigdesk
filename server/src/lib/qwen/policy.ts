@@ -160,6 +160,12 @@ export async function qwenToolAllowed(value: unknown, context: {
       return false;
     }
 
+    // Навыки и другие read-only ресурсы не становятся writable при выборе их предка
+    // рабочей папкой. Тот же приоритет доступа обеспечивает mount в bwrap.
+    if (write && await contained(path.resolve(context.cwd, file), context.readonlyRoots)) {
+      return false;
+    }
+
     return contained(path.resolve(context.cwd, file),
       write ? context.writableRoots : [...context.writableRoots, ...context.readonlyRoots]);
   }

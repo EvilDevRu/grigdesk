@@ -41,7 +41,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Conversations with agents](chats.md)
 - [Conversation memory and context](chat-context.md)
 - [Conversation working folder](chat-workdir.md)
-- [Connecting Qwen Code](qwen.md) — access, models, images, Host mode and clarifications.
+- [Connecting Qwen Code](qwen.md) — access, models, shared skills in chat and sandbox, images, Host mode and clarifications.
 - [DeepSeek and GLM](deepseek.md)
 - [Usage forecasts](usage-forecast.md)
 - [Executor access profiles](access-profiles.md)

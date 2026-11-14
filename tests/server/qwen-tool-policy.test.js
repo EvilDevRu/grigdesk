@@ -84,6 +84,23 @@ test('Qwen: обсуждённые native tools допущены во всех �
   assert.equal(await qwenToolAllowed(call('todo_write'), { ...context, signal: controller.signal }), false);
 });
 
+test('Qwen: read-only ресурс сильнее пересекающейся writable рабочей папки', async (t) => {
+  const { cwd, context, call } = await policyFixture(t);
+  const skills = path.join(cwd, 'skills');
+
+  await mkdir(skills);
+  context.readonlyRoots = [skills];
+
+  const file = path.join(skills, 'new-resource.md');
+
+  assert.equal(await qwenToolAllowed(call('read_file', { file_path: file }), context), true);
+  assert.equal(await qwenToolAllowed(call('write_file', { file_path: file }), context), false);
+  assert.equal(await qwenToolAllowed(call('edit', { file_path: file }), context), false);
+  assert.equal(await qwenToolAllowed(call('write_file', {
+    file_path: path.join(cwd, 'result'),
+  }), context), true);
+});
+
 test('Qwen: расширение tools сохраняет границы файлов, план и SSH', async (t) => {
   const { cwd, outside, context, call } = await policyFixture(t);
 

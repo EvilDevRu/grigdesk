@@ -11,6 +11,7 @@ import { projectQwenModels, qwenCatalog, qwenCatalogError } from '../qwen/catalo
 import { openQwenLiveSession, qwenLiveFingerprint } from '../qwen/live.ts';
 import { runQwenTurn } from '../qwen/runtime.ts';
 import { qwenDiscoveryError } from '../qwen/discovery.ts';
+import { readUserSkillCommands } from '../skills/userSkillCommands.ts';
 
 const execute = promisify(execFile);
 const binding = {
@@ -106,6 +107,7 @@ const adapter: ExecutorAdapter = {
     }
   },
   workToolsTransport: 'mcp',
+  commands: () => readUserSkillCommands({ bundlesOnly: true }),
   workdir: { switch: 'reseed', roots: 'multi' },
   /**
    * Дополнительные корни становятся workspace CLI и writable mounts одной песочницы.

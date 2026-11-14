@@ -16,6 +16,7 @@ import { createQwenTextSteps } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { resolveQwenSessionHome } from './session.ts';
+import { resolveQwenSkills } from './skills.ts';
 import { qwenToolAllowed } from './policy.ts';
 import { qwenPermissionResponse } from './permissions.ts';
 import { createQwenInTurn } from './inTurn.ts';
@@ -111,9 +112,11 @@ async function runQwenSession(
   }
 
   const mcpServers = (Array.isArray(input.mcpServers) ? input.mcpServers : []) as QwenMcpServer[];
+  const skills = input.factory || hostAccess ? { directories: [], roots: [] } : await resolveQwenSkills();
   const readDirectories = [
     ...(Array.isArray(input.readonlyRoots) ? input.readonlyRoots.map(String) : []),
     ...(input.pluginDocsDirs || []),
+    ...skills.roots,
   ];
   const readonlyRoots = [...new Set(await Promise.all(
     readDirectories.map((directory) => validateWorkdirPath(directory)),
@@ -197,6 +200,7 @@ async function runQwenSession(
     mode,
     mcpServers,
     readonlyRoots,
+    skillDirectories: skills.directories,
     hostAccess,
   }, {
     /**

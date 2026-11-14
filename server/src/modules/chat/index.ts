@@ -3425,6 +3425,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Служебному ходу титул-хук не приклеиваем: склейка превратила бы точную команду
     // в обычный промпт (kimi матчит ACP-команды побуквенно — гейт §3.2).
     const wantsTitle = requestTitle === true && !slash;
+    // Native CLI раскрывает /навык только в начале prompt. Каталог отличает навык
+    // от обычного текста; контекст и служебные подсказки остаются частью того же хода.
+    const skillName = !compact && !slash ? String(message || '').trim().match(/^\/\S+/)?.[0] : null;
+    const readCommands = executor?.commands;
+    const skillCommands = skillName && typeof readCommands === 'function'
+      ? await Promise.resolve().then(() => readCommands.call(executor, config)).catch(() => []) : [];
+    const skill = Array.isArray(skillCommands) && skillCommands.some((entry) =>
+      entry?.cmd === skillName && entry.kind === 'skill' && entry.run === 'prompt');
 
     // Сжатие контекста (кнопка на кольце) — служебный ход, а не сообщение человека: ни
     // контекст страницы, ни вложения, ни хук заголовка ему не нужны. План берём у
@@ -3450,13 +3458,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const copiesBlock = workspace.copies.length > 1
       ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
       : '';
+    const messageContext = contextPrefix(context, pageHint(context?.path))
+      + ticket + attachBlock + copiesBlock
+      + (stoppedBrief ? `${stoppedBrief}\n\n` : '');
+    const promptMessage = skill ? `${String(message).trim()}\n\n${messageContext}`
+      : messageContext + (message || 'Посмотри вложения.');
     let fullMessage = slash ? String(message || '').trim() : plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
         withChatImageHint(
           withPluginDocsHint(
-            contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock + copiesBlock
-            + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
+            promptMessage,
             pluginDocs,
           ),
           artifactsDir,
@@ -3940,8 +3952,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         );
 
         if (seed) {
-          fullMessage = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}`
-            + `\n[/Выжимка]\n\n${fullMessage}`;
+          const summary = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]`;
+
+          fullMessage = skill ? `${fullMessage}\n\n${summary}` : `${summary}\n\n${fullMessage}`;
         }
       }
       if (rotationNote) {

@@ -494,6 +494,7 @@ async function chatFixture(t, { executor }) {
     modelsRegistry: async () => ({
       claude: [{ id: 'claude-test', efforts: [] }],
       kimi: [{ id: 'kimi-test', efforts: [] }],
+      qwen: [{ id: 'qwen-test', efforts: [] }],
     }),
     executorResolver: async () => executor,
   });
@@ -573,6 +574,67 @@ test('slashCommand из списка провайдера проходит, те
   assert.equal(executor.calls.length, 1);
   assert.equal(executor.calls[0].message, '/status');
   assert.doesNotMatch(executor.calls[0].message, /GRIGDESK_CHAT_TITLE/);
+});
+
+test('Qwen /навык начинает обычный prompt и сохраняет UI-контекст и титул-хук', async (t) => {
+  const executor = slashExecutor('qwen', async () => ({
+    reply: 'ok',
+    sessionId: 's1',
+    steps: [],
+  }));
+  const { app } = await chatFixture(t, { executor });
+
+  await saveChat(app, 'qwen-skill', 'qwen', 'qwen-test');
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'qwen-skill',
+      message: '/debug проверь сценарий',
+      requestTitle: true,
+      context: { page: 'Чаты', path: '/chats' },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(executor.calls.length, 1);
+  assert.match(executor.calls[0].message, /^\/debug проверь сценарий\n/);
+  assert.match(executor.calls[0].message, /Контекст GrigDesk/);
+  assert.match(executor.calls[0].message, /GRIGDESK_CHAT_TITLE/);
+});
+
+test('неизвестный /текст и отказ каталога навыков сохраняют обычный ход', async (t) => {
+  const executor = slashExecutor('qwen', async () => ({ reply: 'ok' }));
+  const { app } = await chatFixture(t, { executor });
+
+  await saveChat(app, 'qwen-unknown-skill', 'qwen', 'qwen-test');
+
+  const catalogs = [
+    () => SLASH_COMMANDS,
+    () => null,
+    () => {
+      throw new Error('Каталог временно недоступен');
+    },
+  ];
+
+  for (const commands of catalogs) {
+    executor.commands = commands;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: {
+        chatKey: 'qwen-unknown-skill',
+        message: '/unknown проверь сценарий',
+        context: { page: 'Чаты', path: '/chats' },
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(executor.calls.at(-1).message, /^\[Контекст GrigDesk\]/);
+    assert.match(executor.calls.at(-1).message, /\/unknown проверь сценарий/);
+  }
 });
 
 test('slashCommand валидация: чужая команда, none-команда и подмена текста → 400', async (t) => {

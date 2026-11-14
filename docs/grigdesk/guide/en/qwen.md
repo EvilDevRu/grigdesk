@@ -90,6 +90,22 @@ Limits are 10 images, 10 MB each and 32 MiB total. Put other file types in the w
 Reattach missing images and update an incompatible CLI in executor settings.
 GrigDesk does not yet support Qwen quota retrieval; this is an integration limitation, not a service response.
 
+## Shared skills in chat
+
+Select Qwen and type `/` in the message field to see shared skills from
+`~/.agents/skills/<name>/SKILL.md`, such as `/split-commit` or `/grigdesk-connect-project`
+when installed. Type part of a name to filter the menu, then select a skill or send
+`/name` with arguments. Page context and attachments are preserved.
+
+Skills work in the ordinary sandbox without Host mode. Qwen receives read-only access
+to their instructions and supporting files. Running a skill preserves the chat's chosen
+permission mode and working folders. Symlinked skill directories are supported;
+flat `.md` files and skills with `user-invocable: false` are not listed in the menu.
+
+The list is reread when the executor catalog refreshes. If your GrigDesk version lacks
+this support, apply the update, restart the server manually and reload the page. Chat memory does
+not need to be reset.
+
 ## Native tools
 
 GrigDesk permits search and page reading, todos, memory, subagents and agent commands, skills, LSP,

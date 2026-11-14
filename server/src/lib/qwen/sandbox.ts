@@ -28,6 +28,7 @@ export interface QwenLaunchOptions {
   authType: string;
   mode: string;
   readonlyRoots?: string[];
+  skillDirectories?: string[];
   mcpServers?: QwenMcpServer[];
   hostAccess?: boolean;
   onOwnedProcess?: (resource: QwenOwnedProcess) => void;
@@ -137,6 +138,7 @@ export async function startQwenSandbox(
 
     const settings = {
       ...snapshot.settings,
+      skills: { directories: options.skillDirectories || [] },
       context: { includeDirectories: [...options.extraDirs || [], ...options.readonlyRoots || []] },
     };
 
@@ -175,11 +177,11 @@ export async function startQwenSandbox(
     const cliRoot = await packageRoot(bin);
     const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-ipc',
       '--unshare-uts', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
-    const mounted = new Set<string>();
-    // Повторный mount того же назначения не расширяет область записи.
+    const mounted = new Map<string, boolean>();
+    // Повторный mount может только сузить доступ: read-only сильнее прежнего writable.
     // Отсутствующие необязательные системные пути пропускаются до запуска.
     const bind = async (source: string, target = source, write = false) => {
-      if (mounted.has(target)) {
+      if (mounted.has(target) && (write || mounted.get(target) === false)) {
         return;
       }
 
@@ -190,7 +192,7 @@ export async function startQwenSandbox(
       }
 
       args.push(write ? '--bind' : '--ro-bind', source, target);
-      mounted.add(target);
+      mounted.set(target, write);
     };
 
     // Системные alternatives и кэш загрузчика нужны зависимостям ffmpeg/ffprobe.
@@ -204,16 +206,17 @@ export async function startQwenSandbox(
     await bind(path.dirname(node));
     await bind(cliRoot);
 
-    for (const root of options.readonlyRoots || []) {
-      await bind(root);
-    }
-
     for (const root of [...workspaceRoots].sort((left, right) => left.length - right.length)) {
       await bind(root, root, true);
     }
 
     await bind(options.home, options.home, true);
     await bind(privateDir);
+    // Read-only ресурсы накладываются после writable workspace: общий каталог навыков
+    // не становится изменяемым, даже когда выбранная рабочая папка содержит его родителя.
+    for (const root of options.readonlyRoots || []) {
+      await bind(root);
+    }
     // Bind mount следует за ссылкой назначения: её цель тоже должна существовать
     // внутри пустой ФС. Подготавливаем пустую цель, не монтируя секретный исходный файл.
     for (const root of workspaceRoots) {
