@@ -42,6 +42,13 @@ When GLM reports an exhausted Coding Plan quota, GrigDesk ends the turn without 
 Check the reset time in GLM limits and resume after recovery. The Z.ai response code identifies this failure
 even if Harness labels it a rate limit. Harness may perform its own retries before returning the final error.
 
+If GLM reports that its mandatory policy check failed while writing a long document,
+an older GrigDesk version may have mishandled non-ASCII text. After installing a version
+with the fix, send a new message in the same conversation: "Continue where you stopped;
+check the saved files first." There is no need to clear history or reset memory.
+The operation is not repeated automatically. This general policy-check error can also
+have other causes that need diagnosis.
+
 ## Related articles
 
 [Conversations](chats.md) · [Working folder](chat-workdir.md) · [Settings](settings.md)
