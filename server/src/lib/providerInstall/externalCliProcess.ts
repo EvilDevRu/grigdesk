@@ -125,6 +125,23 @@ function launchArguments(file: string, rest: unknown[], mode: 'spawn' | 'execFil
 }
 
 /**
+ * OS-владелец получает ту же команду helper/lease, что обычный spawn выбранного CLI.
+ * Выбор executable, access overlay, identity и метка чата остаются в одном контракте.
+ */
+export function externalCliSpawnSpec(file: string, args: string[], options: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}) {
+  const prepared = launchArguments(file, [args, options]);
+
+  return {
+    command: String(prepared[0]),
+    args: prepared[1] as string[],
+    options: prepared[2] as { cwd: string; env: NodeJS.ProcessEnv },
+  };
+}
+
+/**
  * Отмена относится ко всей собственной группе helper-а, включая SIGKILL без signal handler.
  * Без этого timeout убивал бы только посредника, оставляя CLI и reader живыми навсегда.
  */

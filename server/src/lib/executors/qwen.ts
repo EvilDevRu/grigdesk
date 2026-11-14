@@ -6,8 +6,9 @@ import { npmInstallCommand } from '../providerInstall/commands.ts';
 import { npmLatest } from './_npmLatest.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { resolveQwenWorkspace } from '../qwen/workspace.ts';
-import { qwenBin, readQwenSnapshot, qwenCredentials } from '../qwen/settings.ts';
+import { qwenBin, readQwenSnapshot, qwenCredentials, qwenHostEnabled } from '../qwen/settings.ts';
 import { projectQwenModels, qwenCatalog, qwenCatalogError } from '../qwen/catalog.ts';
+import { openQwenLiveSession, qwenLiveFingerprint } from '../qwen/live.ts';
 import { runQwenTurn } from '../qwen/runtime.ts';
 import { qwenDiscoveryError } from '../qwen/discovery.ts';
 
@@ -116,7 +117,26 @@ const adapter: ExecutorAdapter = {
     return { extraDirs: workspace.extraDirs };
   },
   directSshPolicy: () => ({ enforcement: 'command-hook', note: 'Проверка перед исполнением инструмента.' }),
-  settings: () => [directSshSetting()],
+  settings: () => [
+    directSshSetting(),
+    {
+      id: 'allowHostAccess',
+      kind: 'toggle',
+      label: 'Режим «Хост»',
+      hint: 'Docker, процессы и файлы пользователя сервера. '
+        + 'Нужны живые сессии чата и user systemd приложения.',
+      value: false,
+      confirm: {
+        on: {
+          text: 'Qwen получит доступ к Docker, процессам и файлам с правами пользователя сервера. '
+            + 'Подтверждения и запрет прямого SSH сохраняются. '
+            + 'Изменение применяется к следующему ходу; текущий процесс закрывается отдельно.',
+          label: 'Включить режим «Хост»',
+          danger: true,
+        },
+      },
+    },
+  ],
   modes: () => [
     {
       id: 'default',
@@ -141,10 +161,19 @@ const adapter: ExecutorAdapter = {
   ],
   sessionBinding: {
     authProfileId: (config) => readQwenSnapshot(config).fingerprint,
-    securityProfile: () => 'qwen-bwrap-private-guard-v1',
+    securityProfile: (_config, providerSettings) => qwenHostEnabled(providerSettings)
+      ? 'qwen-host-builtin-guard-v1' : 'qwen-bwrap-private-guard-v1',
   },
   mcpStatus: () => ({ servers: [], note: 'MCP выдаётся сервером для каждого хода.' }),
   compaction: { kind: 'summary' },
+  session: {
+    mode: 'persistent',
+    unsolicited: true,
+    keepAlive: true,
+    enabled: (spec: Record<string, unknown>) => !spec.factory && qwenHostEnabled(spec.providerSettings),
+    fingerprint: qwenLiveFingerprint,
+    open: openQwenLiveSession,
+  },
   run: runQwenTurn,
 };
 

@@ -147,3 +147,105 @@ test('qwen-quota-message-describes-integration-support-in-both-languages', () =>
   assert.deepEqual(view.bars, []);
   assert.doesNotMatch(view.message, /CLI/);
 });
+
+test('Qwen Host: ручное подтверждение, Apply, отказ и повтор на английском', async (t) => {
+  const entry = qwenEntry();
+  const writes = [];
+  let refusing = true;
+
+  entry.settings.push({
+    id: 'allowHostAccess',
+    kind: 'toggle',
+    value: false,
+    label: 'Режим «Хост»',
+    confirm: { on: {
+      text: 'Доступ к хосту',
+      label: 'Включить',
+      danger: true,
+    } },
+  });
+
+  const h = await i18nComponent(t, {
+    fetch: async (url, init = {}) => {
+      if (String(url) === '/api/providers/qwen/settings' && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+
+        writes.push(body);
+
+        if (refusing) {
+          return new Response(JSON.stringify({ error: 'fixture Host refusal' }), { status: 500 });
+        }
+
+        entry.settings.at(-1).value = true;
+
+        // Серверный контракт saveSetting: ответ несёт обновлённый массив settings,
+        // иначе сессия не получает подтверждённое значение и сохраняет dirty.
+        return new Response(JSON.stringify({ ok: true, settings: entry.settings }));
+      }
+
+      return new Response(JSON.stringify(String(url) === '/api/providers' ? { providers: [entry] } : {}));
+    },
+  });
+  const providers = h.module.useProvidersStore(h.pinia);
+
+  providers.providers = [entry];
+  providers.loaded = true;
+  h.settings.setAuthenticated(true);
+  h.settings.requestOpen({ pageId: 'agents.providers', entityId: 'qwen' });
+
+  const page = h.mount(h.module.ProviderPage, {
+    attachTo: h.win.document.querySelector('#mount'),
+    props: { active: true },
+    global: { plugins: [h.pinia] },
+  });
+  const dialog = h.mount(h.module.UiDialogHost, {
+    attachTo: h.win.document.body,
+    global: { plugins: [h.pinia] },
+  });
+
+  t.after(() => {
+    dialog.unmount();
+    page.unmount();
+  });
+  await h.flushPromises();
+  h.settings.selectPage('agents.providers', 'qwen', 'parameters');
+  await h.flushPromises();
+
+  const toggle = page.get('[data-ordinary="allowHostAccess"] [role="switch"]');
+
+  await toggle.setValue(true);
+  await h.flushPromises();
+  assert.match(h.win.document.body.textContent, /Docker/);
+
+  const cancel = [...h.win.document.querySelectorAll('.ui-dialog-host__actions button')][0];
+
+  cancel.click();
+  await h.flushPromises();
+  assert.equal(h.settings.getIntent('providerSettings:qwen', 'allowHostAccess'), undefined);
+  assert.equal(writes.length, 0);
+  await h.module.localeAdapter.setUiLanguage('en');
+  await h.flushPromises();
+  assert.match(page.text(), /Host mode/);
+  await toggle.setValue(true);
+  await h.flushPromises();
+  assert.match(h.win.document.body.textContent, /Enable Host mode/);
+
+  const accept = [...h.win.document.querySelectorAll('.ui-dialog-host__actions button')].at(-1);
+
+  accept.click();
+  await h.flushPromises();
+  assert.equal(writes.length, 0, 'Подтверждение изменяет draft, не сохраняет преждевременно');
+  await h.settings.apply();
+  assert.match(page.text(), /fixture Host refusal/);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0], {
+    settingId: 'allowHostAccess',
+    value: true,
+    confirmed: true,
+  });
+  refusing = false;
+  await h.settings.apply();
+  await h.flushPromises();
+  assert.equal(writes.length, 2);
+  assert.equal(h.settings.snapshot.dirtyCount, 0);
+});

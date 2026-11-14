@@ -39,6 +39,14 @@ export const qwenBin = (value: unknown): string =>
   qwenConfig(value).qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen';
 
 /**
+ * Только сохранённый boolean включает доверенный доступ к хосту.
+ * Строки из старых prefs и обычный текст запроса не меняют режим запуска.
+ */
+export function qwenHostEnabled(value: unknown): boolean {
+  return isRecord(value) && value.allowHostAccess === true;
+}
+
+/**
  * Omni требует обе утилиты ещё до ACP handshake, иначе CLI не запускает даже чат.
  * Проверяются только каталоги PATH, которые действительно выдаются песочнице.
  */

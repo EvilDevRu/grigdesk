@@ -115,13 +115,51 @@ There is no need to reset memory or create a new chat: saved sessions with the p
 
 Sandbox and direct-SSH restrictions also apply to subagents and these tools.
 Plan mode blocks shell, edits, media processing and workflow. Native page reading permits localhost and private addresses.
-In CLI 0.27.2, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
+In CLI 0.27.2 and 0.27.3, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
 Allowing subagents does not fix it; a compatible external CLI fix is needed. GrigDesk does not disable protection.
+Updating from 0.27.2 to 0.27.3 alone does not resolve this issue.
 
 Media tools require executable `ffmpeg` and `ffprobe`; otherwise chat and other tools remain available.
 LSP needs a configured language server and external processing services need their own access.
-Qwen's process lasts for one turn. Native schedules and background tasks do not survive its exit;
-permitting those tools does not create a permanent GrigDesk worker.
+In the sandbox, Qwen's process lasts for one turn. Native schedules and background tasks do not survive its exit;
+permitting those tools does not create a permanent GrigDesk worker. In Host mode the process lives between turns (below).
+
+## Host mode
+
+Qwen runs in the sandbox by default. Host mode is enabled manually:
+Settings → Executors → Qwen Code → Parameters → Host mode. Enabling requires confirmation
+in the shared dialog: Qwen will access Docker, processes and files with the server user's permissions.
+This is not a new isolation — the agent runs outside the sandbox with the same rights as the GrigDesk server.
+There is no automatic sudo; the chosen approval modes and the direct SSH restriction remain active.
+
+Host mode supports ordinary and background subagents, monitors, schedules and the other native tools
+of a compatible CLI. Web search, LSP, skills and media processing use the programs, configuration and access
+already configured in Qwen: new subscriptions, keys and programs are not purchased or installed automatically;
+a missing dependency shows its reason. Enabled plugin documentation is available in both modes.
+
+Requirements: the enabled Settings → Runs → Keep the chat agent alive between turns toggle,
+a working user systemd and a separate GrigDesk application unit. If the environment is unavailable,
+the turn gets a visible refusal reason; there is no unprotected launch and no sandbox fallback.
+The mode is unavailable without Linux user systemd.
+
+The process lives between messages: a background task or schedule finishes and publishes its reply
+to the feed without a new message. If a schedule manages to finish while the reply to your message
+is being prepared, its result is still published to the feed exactly once with the full text
+and is not mixed into the reply to your message. Stop interrupts the current turn, not the process.
+Closing the live process in Settings → Runs → Live agent processes, resetting memory, deleting the chat
+and exiting GrigDesk terminate it; there is no autostart after an OS reboot.
+Live processes are not evicted automatically: when slots are full, a new Host gets a refusal
+suggesting to close an unneeded process.
+The bulk “Stop idle processes” action on that page shows an explicit message with the number
+of failures when processes did not confirm shutdown: such processes remain in the list
+until a repeated close confirms their termination.
+
+Enabling and disabling applies to the next turn; already running work is stopped immediately
+by closing the live process in the list. Switching profiles separates Qwen's native memory;
+the GrigDesk conversation is preserved. History after attachments does not break.
+If process preparation was interrupted (for example a guard protocol refusal), the process stays
+in the live list until explicitly closed, and a repeated message gets the explicit error
+“unfinished preparation requires a confirmed close”.
 
 ## Verification limits
 
@@ -136,3 +174,10 @@ They verify exact image bytes in ordinary turns and clarification, additional wo
 native Auto, refused automatic assessment and fallback to manual confirmation.
 Live-model clarification, actual image recognition, installation from the card and browser acceptance are separate checks.
 Paid smoke testing requires a real key entered by its owner through Access settings after a manual server restart.
+
+Host mode is covered by automated checks without paid calls: one process across two turns, the mandatory guard
+protocol, background replies and schedules, Stop, repeated close after a refusal, and manual enabling
+with confirmation and setting persistence. Acceptance with a live user systemd (host process and socket access,
+subagents, configured LSP/media/search, server-owned MCP tools, background command close) is performed
+by the owner on the host after a manual server restart; in an environment without user systemd these checks
+give a visible refusal and are not considered passed.

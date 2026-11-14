@@ -204,6 +204,24 @@ launcher и host-status MCP в обоих файловых режимах, с п
 Установка через карточку, браузерная приёмка и оплаченный smoke остаются отдельными
 проверками на стенде. Настоящий ключ предоставляет человек через окно доступа.
 
+## Режим «Хост»
+
+Рубеж песочницы объявляется как `qwen-bwrap-private-guard-v1`. Отдельный вручную
+включаемый режим «Хост» (`providerSettings.qwen.allowHostAccess`, строгое `=== true`,
+подтверждение `confirm.on`, сервер требует `confirmed === true`) объявляет
+`qwen-host-builtin-guard-v1` и запускает выбранную копию CLI без bwrap, с обязательным
+builtin guard `required-v1` и private-parent nonce, но без attached-provider маркера.
+Factory и недоверенные/model-only ходы Host не получают; разовый запуск Host без живой
+сессии отклоняется (`host_persistent_required`). Sandbox fallback при отказе Host запрещён.
+
+Host требует работающего user systemd и отдельного unit приложения; процесс принадлежит
+уникальному transient user scope (`KillMode=control-group`, `BindsTo`+`After` к app unit).
+Нет manager/unit — видимый `qwen_host_scope_unavailable` до prompt. Native-память Host
+живёт в отдельном namespace `host-builtin-v1`; sessionId между профилями не переносится,
+переписка GrigDesk сохраняется. Живой процесс, фон, keepAlive и слоты —
+[живая сессия исполнителя](persistent-executor-session.md); набор инструментов и guard —
+[штатные инструменты Qwen](qwen-native-tools.md#режим-хост).
+
 ## Окружение native-проверки
 
 `tests/server/qwen-cli-contract.test.js` требует заранее подготовленный настоящий

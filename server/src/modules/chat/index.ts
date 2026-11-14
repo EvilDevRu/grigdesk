@@ -67,7 +67,7 @@ import type { MobileTurnOwner } from '../../lib/chat/turnLedger.ts';
 import { writeDurableFile } from '../../lib/durableFile.ts';
 import { InTurnMessages } from '../../lib/chat/inTurnMessages.ts';
 import { ChatBackgroundRuns, visibleExtraDirs } from '../../lib/chat/backgroundRuns.ts';
-import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
+import { ChatLiveSessions, liveSessionEnabled } from '../../lib/chat/liveSessions.ts';
 import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import { mayRetryEmptyRun } from '../../lib/chat/retryContract.ts';
@@ -1149,10 +1149,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
      * Занятые, фоновые и спящие сессии остаются под защитой admission.
      */
     async closeIdle(provider: string) {
+      let failure: unknown;
+
       for (const session of liveSessions.stats()) {
         if (session.executor === provider && !session.busy && !session.sleeping) {
-          await liveSessions.close(session.chatKey, 'смена профиля доступа');
+          try {
+            await liveSessions.close(session.chatKey, 'смена профиля доступа');
+          } catch (error) {
+            failure = failure ?? error;
+            fastify.log.warn({ err: (error as Error).message, chatKey: session.chatKey },
+              'чат: живой процесс не подтвердил закрытие');
+          }
         }
+      }
+
+      if (failure) {
+        throw failure;
       }
     },
   };
@@ -1759,6 +1771,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.delete<ChatRoute>('/api/chat/sessions', async () => {
     let closed = 0;
     let skipped = 0;
+    let failed = 0;
     for (const session of liveSessions.stats()) {
       const busy = session.busy
         || activeRuns.has(session.chatKey)
@@ -1767,11 +1780,29 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         skipped += 1;
         continue;
       }
-      await liveSessions.close(session.chatKey, 'погашены свободные сессии');
-      closed += 1;
+
+      try {
+        await liveSessions.close(session.chatKey, 'погашены свободные сессии');
+        closed += 1;
+      } catch (error) {
+        failed += 1;
+        fastify.log.warn({ err: (error as Error).message, chatKey: session.chatKey },
+          'чат: живой процесс не подтвердил гашение');
+      }
     }
-    fastify.log.info({ closed, skipped }, 'чат: живые сессии погашены человеком');
-    return { ok: true, closed, skipped };
+
+    fastify.log.info({
+      closed,
+      skipped,
+      failed,
+    }, 'чат: живые сессии погашены человеком');
+
+    return {
+      ok: true,
+      closed,
+      skipped,
+      failed,
+    };
   });
 
   /**
@@ -3851,9 +3882,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // выполнить было физически нечем. Умеет ли исполнитель жить между ходами, объявляет
       // он сам (executor.session), а тумблер prefs оставлен для отката: живой процесс
       // держит память и свои MCP-серверы.
-      const liveTurn = currentPrefs.chatLiveSessions !== false
-        && executor.session?.mode === 'persistent'
-        && !!chatKey;
+      const liveTurn = currentPrefs.chatLiveSessions !== false && !!chatKey
+        && liveSessionEnabled(executor, { config, providerSettings });
+
+      if (!liveTurn && chatKey && liveSessions.has(chatKey)) {
+        await liveSessions.close(chatKey, 'живой профиль отключён');
+      }
+
       if (liveTurn) {
         // Кнопка «стоп» остаётся прежней ручкой: она дёргает abort, а мы превращаем его
         // в прерывание ХОДА. Убивать процесс больше нельзя — вместе с ним умрёт разговор.
@@ -4173,12 +4208,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           : runArgs;
 
         return liveTurn
-          ? liveSessions.run({ ...attemptArgs, executor }, {
+          ? liveSessions.run({
+            ...attemptArgs,
+            executor,
+            sessionIdAuthoritative: !!executor.sessionBinding,
+          }, {
             permissionMode: attemptArgs.permissionMode,
             modeSelection: attemptArgs.modeSelection,
             preparedRuntime: attemptArgs.preparedRuntime,
             runtimeProfileFingerprint: attemptArgs.runtimeProfileFingerprint,
             message: attemptArgs.message,
+            signal: attemptArgs.signal,
+            attachmentPaths: attemptArgs.attachmentPaths,
+            attachmentsDir: attemptArgs.attachmentsDir,
             onStep: attemptArgs.onStep,
             onProgress: attemptArgs.onProgress,
             onPermission: attemptArgs.onPermission,

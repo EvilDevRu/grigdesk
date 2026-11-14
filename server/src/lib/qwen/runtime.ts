@@ -5,9 +5,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import type { ExecutorRunInput, ExecutorRunResult } from '../executors/index.ts';
 import { createStepSink, type ChatStep } from '../chat/streamSteps.ts';
+import { validateWorkdirPath } from '../chat/workdir.ts';
 import { redactRunnerError } from '../factoryProviderRunner.ts';
 import { AcpRpcError } from '../acp/client.ts';
-import { qwenConfig } from './settings.ts';
+import { qwenConfig, qwenHostEnabled } from './settings.ts';
 import { resolveQwenSnapshot } from './discovery.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
@@ -21,13 +22,25 @@ import { createQwenInTurn } from './inTurn.ts';
 import { qwenPromptContent, readQwenImages } from './images.ts';
 import type { QwenMcpServer } from './sandbox.ts';
 
+export interface QwenRuntimeDependencies {
+  openTransport?: typeof openQwenTransport;
+}
+
 /**
  * Отмена на любой стадии подготовки сохраняет общий контракт остановки чата.
  * Ошибки CLI без отмены остаются ошибками и сохраняют исходную причину.
  */
-export async function runQwenTurn(input: ExecutorRunInput): Promise<ExecutorRunResult> {
+export async function runQwenTurn(
+  input: ExecutorRunInput, dependencies: QwenRuntimeDependencies = {},
+): Promise<ExecutorRunResult> {
   try {
-    return await runQwenSession(input);
+    if (!input.factory && qwenHostEnabled(input.providerSettings) && !dependencies.openTransport) {
+      throw Object.assign(new Error('Qwen: режим «Хост» требует живых сессий чата.'), {
+        code: 'host_persistent_required',
+      });
+    }
+
+    return await runQwenSession(input, dependencies.openTransport || openQwenTransport);
   } catch (error) {
     if (input.signal?.aborted) {
       throw Object.assign(new Error('Qwen: ход отменён'), {
@@ -45,7 +58,9 @@ export async function runQwenTurn(input: ExecutorRunInput): Promise<ExecutorRunR
  * Сессия принадлежит конкретным cwd, чату и снимку авторизации.
  * Внешний sessionId не назначает путь к durable home и проверяется до запуска CLI.
  */
-async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResult> {
+async function runQwenSession(
+  input: ExecutorRunInput, openTransport: typeof openQwenTransport,
+): Promise<ExecutorRunResult> {
   input.signal?.throwIfAborted();
 
   const attachmentsDir = typeof input.attachmentsDir === 'string' ? input.attachmentsDir : undefined;
@@ -54,6 +69,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   );
 
   const config = qwenConfig(input.config);
+  const hostAccess = !input.factory && qwenHostEnabled(input.providerSettings);
   const snapshot = await resolveQwenSnapshot(config, { signal: input.signal });
   const model = snapshot.models.find((entry) => entry.id === input.model);
 
@@ -78,7 +94,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   const roots = [cwd, ...extraDirs];
   const runtimeRoot = config.qwenRuntimeHome || path.join(config.dataHome || cwd, 'qwen-runtime');
   const home = await resolveQwenSessionHome({
-    runtimeRoot,
+    runtimeRoot: hostAccess ? path.join(runtimeRoot, 'host-builtin-v1') : runtimeRoot,
     chatKey: input.chatKey,
     cwd,
     fingerprint: snapshot.fingerprint,
@@ -95,7 +111,13 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
   }
 
   const mcpServers = (Array.isArray(input.mcpServers) ? input.mcpServers : []) as QwenMcpServer[];
-  const readonlyRoots = Array.isArray(input.readonlyRoots) ? input.readonlyRoots.map(String) : [];
+  const readDirectories = [
+    ...(Array.isArray(input.readonlyRoots) ? input.readonlyRoots.map(String) : []),
+    ...(input.pluginDocsDirs || []),
+  ];
+  const readonlyRoots = [...new Set(await Promise.all(
+    readDirectories.map((directory) => validateWorkdirPath(directory)),
+  ))];
   const sink = createStepSink(input.onStep);
   const textSteps = createQwenTextSteps();
   const usage = createQwenUsage((tokens, info) => input.onProgress?.(tokens, info));
@@ -167,7 +189,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
     }
   }
 
-  const transport = await openQwenTransport(config, snapshot, {
+  const transport = await openTransport(config, snapshot, {
     cwd,
     extraDirs,
     home,
@@ -175,6 +197,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
     mode,
     mcpServers,
     readonlyRoots,
+    hostAccess,
   }, {
     /**
      * Replay загрузки остаётся невидимым до начала нового prompt.
@@ -266,7 +289,8 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
       if (method === 'qwen/control/external_tool_guard/prepare') {
         emitSteps(textSteps.flush());
 
-        const allowed = active && await qwenToolAllowed(value, {
+        // Host живёт между ходами: фоновые вызовы проверяет live actor, не локальный active.
+        const allowed = (hostAccess || active) && await qwenToolAllowed(value, {
           sessionId,
           promptId,
           cwd,
@@ -275,6 +299,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
           readonlyRoots,
           mcpServers,
           blockDirectSsh: settings.blockDirectSsh !== false,
+          hostAccess,
           signal: input.signal,
         });
 
@@ -396,6 +421,10 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
       modelOptions = selected.configOptions;
       reportModel(qwenSelectedModel(modelOptions));
     } else {
+      if (hostAccess) {
+        throw new Error('Qwen: Host требует native model configOptions');
+      }
+
       await request('session/set_model', { sessionId, modelId: model.id });
     }
 

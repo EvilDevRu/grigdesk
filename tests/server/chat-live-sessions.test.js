@@ -428,6 +428,7 @@ async function apiFixture(t, {
   taskId = null,
   root: givenRoot = '',
   prepareRuntime = null,
+  keepAlive = false,
 } = {}) {
   const root = givenRoot || await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
 
@@ -451,6 +452,7 @@ async function apiFixture(t, {
     session: {
       mode: 'persistent',
       unsolicited: true,
+      ...(keepAlive ? { keepAlive: true } : {}),
       restartOn: ['model', 'effort', 'permissionMode', 'cwd', 'extraDirs'],
       open(spec) {
         const handle = {
@@ -695,10 +697,76 @@ test('массовое гашение не обрывает работу мол�
   assert.equal(result.statusCode, 200, result.body);
   assert.equal(result.json().closed, 1);
   assert.equal(result.json().skipped, 1, 'занятая ходом сессия гасится только по одной и осознанно');
+  assert.equal(result.json().failed, 0, 'успешное закрытие не считает отказов');
   assert.equal(busyHandle.closed, false);
 
   release();
   await running;
+});
+
+test('массовое гашение: смешанный результат считает failed и удерживает отказавший процесс', async (t) => {
+  const fixture = await apiFixture(t, { keepAlive: true });
+  const first = await fixture.chat('free-one');
+  const second = await fixture.chat('free-two');
+
+  await fixture.turn(first);
+  await fixture.turn(second);
+
+  const refusing = fixture.handles[1];
+
+  refusing.close = async () => {
+    throw new Error('scope completion unknown');
+  };
+
+  const result = await fixture.app.inject({ method: 'DELETE', url: '/api/chat/sessions' });
+
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(result.json().closed, 1, 'отказ одного процесса не прерывает закрытие остальных');
+  assert.equal(result.json().failed, 1);
+  assert.equal(result.json().skipped, 0);
+  assert.equal(fixture.handles[0].closed, true);
+
+  const list = (await fixture.app.inject({ method: 'GET', url: '/api/chat/sessions' })).json();
+
+  assert.deepEqual(list.sessions.map((session) => session.chatKey), ['free-two'],
+    'неподтверждённое закрытие не освобождает запись и слот');
+
+  refusing.close = async () => {
+    refusing.alive = false;
+    refusing.closed = true;
+  };
+
+  const retry = await fixture.app.inject({ method: 'DELETE', url: '/api/chat/sessions' });
+
+  assert.equal(retry.json().closed, 1, 'повтор подтверждает закрытие удержанной записи');
+  assert.equal(retry.json().failed, 0);
+  assert.equal(refusing.closed, true);
+});
+
+test('массовое гашение: полный отказ виден в ответе и не освобождает слоты', async (t) => {
+  const fixture = await apiFixture(t, { keepAlive: true });
+  const first = await fixture.chat('free-one');
+  const second = await fixture.chat('free-two');
+
+  await fixture.turn(first);
+  await fixture.turn(second);
+
+  for (const handle of fixture.handles) {
+    handle.close = async () => {
+      throw new Error('scope completion unknown');
+    };
+  }
+
+  const result = await fixture.app.inject({ method: 'DELETE', url: '/api/chat/sessions' });
+
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(result.json().closed, 0);
+  assert.equal(result.json().failed, 2);
+
+  const list = (await fixture.app.inject({ method: 'GET', url: '/api/chat/sessions' })).json();
+
+  assert.deepEqual(list.sessions.map((session) => session.chatKey).sort(), ['free-one', 'free-two'],
+    'ни одна неподтверждённая запись не освобождена');
 });
 
 test('id сессии сообщается с первого события хода, а не по его итогу', async () => {
@@ -2166,6 +2234,280 @@ test('SPEED-LIVE: смена снимка переоткрывает агент 
     assert.equal(opened[0].closed, true);
     assert.equal(opened[1].spec.sessionId, 'sid-1');
   } finally {
+    await pool.closeAll();
+  }
+});
+
+test('пул: выключенная capability не открывает процесс', async () => {
+  let opens = 0;
+  const pool = new ChatLiveSessions();
+  const executor = {
+    id: 'test-profile',
+    session: {
+      mode: 'persistent',
+      enabled: () => false,
+      open: async () => {
+        opens += 1;
+
+        return {
+          alive: true,
+          send: async () => ({}),
+          interrupt: async () => {},
+          close: async () => {},
+        };
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(pool.run({ chatKey: 'disabled', executor }, {}), /не умеет жить|отключ/);
+    assert.equal(opens, 0);
+  } finally {
+    await pool.closeAll();
+  }
+});
+
+test('пул: keepAlive не выдаёт сон, не истекает и не вытесняет защищённый процесс', async (t) => {
+  let closes = 0;
+  const pool = new ChatLiveSessions({ maxSessions: 1, idleMs: 100 });
+  const executor = {
+    id: 'test-retained',
+    session: {
+      mode: 'persistent',
+      keepAlive: true,
+      open: async () => ({
+        alive: true,
+        send: async () => ({ sessionId: 'one' }),
+        interrupt: async () => {},
+        close: async () => {
+          closes += 1;
+        },
+      }),
+    },
+  };
+
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+
+  try {
+    await pool.run({ chatKey: 'retained', executor }, {});
+    t.mock.timers.tick(120000);
+    assert.equal(pool.stats().length, 1);
+    assert.equal(pool.stats()[0].sleeping, false);
+    assert.equal(pool.stats()[0].idleAtMs, null);
+    await assert.rejects(pool.run({ chatKey: 'second', executor }, {}), /живых сессий|слот|процесс/);
+    assert.equal(closes, 0);
+  } finally {
+    t.mock.timers.reset();
+    await pool.closeAll();
+  }
+
+  assert.equal(closes, 1);
+});
+
+for (const changed of ['auth', 'model', 'securityProfile']) {
+  test(`пул: trusted reset ${changed} не наследует прежний ID, stale client наследует`, async () => {
+    const received = [];
+    const pool = new ChatLiveSessions();
+    const executor = {
+      id: 'bound-profile',
+      session: {
+        mode: 'persistent',
+        fingerprint: (spec) => String(spec.bindingRevision),
+        open: async (spec) => {
+          received.push(spec.sessionId);
+
+          return {
+            alive: true,
+            send: async () => ({ sessionId: 'native-one' }),
+            interrupt: async () => {},
+            close: async () => {},
+          };
+        },
+      },
+    };
+
+    try {
+      await pool.run({
+        chatKey: changed,
+        executor,
+        bindingRevision: 'one',
+      }, {});
+      await pool.run({
+        chatKey: changed,
+        executor,
+        bindingRevision: 'one',
+        sessionId: null,
+      }, {});
+      assert.equal(received.length, 1, 'Отставшее окно не сбрасывает память');
+      await pool.run({
+        chatKey: changed,
+        executor,
+        bindingRevision: changed,
+        sessionId: null,
+        sessionIdAuthoritative: true,
+      }, {});
+      assert.equal(received.length, 2);
+      assert.equal(received[1], null, 'Серверный reset не подменён наследованием');
+    } finally {
+      await pool.closeAll();
+    }
+  });
+}
+
+test('пул: параллельные Host opens делят один слот и снимают резерв после ошибки', {
+  timeout: 12000,
+}, async () => {
+  const pool = new ChatLiveSessions({ maxSessions: 1 });
+  let release;
+  let entered;
+  let enteredSecond;
+  let opens = 0;
+  const barrier = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const secondEntered = new Promise((resolve) => {
+    enteredSecond = resolve;
+  });
+  const executor = {
+    id: 'strict-open',
+    session: {
+      mode: 'persistent',
+      keepAlive: true,
+      open: async () => {
+        const attempt = ++opens;
+
+        if (attempt === 1) {
+          entered();
+        } else {
+          enteredSecond();
+        }
+
+        await barrier;
+
+        if (attempt === 1) {
+          throw new Error('fixture open failure');
+        }
+
+        return {
+          alive: true,
+          send: async () => ({}),
+          interrupt: async () => {},
+          close: async () => {},
+        };
+      },
+    },
+  };
+  const first = pool.run({ chatKey: 'one', executor }, {});
+  const failed = assert.rejects(first, /fixture open failure/);
+  let second;
+
+  try {
+    await started;
+    second = pool.run({ chatKey: 'two', executor }, {}).then(
+      () => ({ error: null }), (error) => ({ error }),
+    );
+
+    const observed = await Promise.race([
+      secondEntered.then(() => 'entered'),
+      second.then(() => 'settled'),
+    ]);
+
+    assert.equal(observed, 'settled', 'База фактически допустила лишний open');
+    assert.match(String((await second).error?.message), /слот/);
+    assert.equal(opens, 1);
+    release();
+    await failed;
+    await pool.run({ chatKey: 'three', executor }, {});
+    assert.equal(opens, 2, 'Резерв снят после отказа первого open');
+  } finally {
+    release();
+    await failed;
+    await second;
+    await pool.closeAll();
+  }
+});
+
+test('пул: отказ close keepAlive сохраняет слот до подтверждённого повтора', async () => {
+  let refusing = true;
+  const pool = new ChatLiveSessions({ maxSessions: 1 });
+  const handle = {
+    alive: true,
+    send: async () => ({ sessionId: 'owned-scope' }),
+    interrupt: async () => {},
+    close: async () => {
+      handle.alive = false;
+
+      if (refusing) {
+        throw new Error('scope completion unknown');
+      }
+    },
+  };
+  const executor = {
+    id: 'owned-scope',
+    session: {
+      mode: 'persistent',
+      keepAlive: true,
+      open: async () => handle,
+    },
+  };
+
+  try {
+    await pool.run({ chatKey: 'one', executor }, {});
+    await assert.rejects(pool.close('one'), /scope completion unknown/);
+    assert.equal(pool.stats().length, 1);
+    assert.equal(pool.has('one'), true, 'Неизвестный scope нужно закрыть перед сменой профиля');
+    await assert.rejects(pool.run({ chatKey: 'two', executor }, {}), /слот/);
+    refusing = false;
+    await pool.close('one');
+    assert.equal(pool.stats().length, 0);
+  } finally {
+    refusing = false;
+    await pool.closeAll();
+  }
+});
+
+test('пул: страховочный closeGeneration не бросает и держит запись scope', async (t) => {
+  let specRef = null;
+  let identity = null;
+  const handle = {
+    alive: true,
+    send: async () => ({}),
+    interrupt: async () => {},
+    close: async () => {
+      throw new Error('scope completion unknown');
+    },
+  };
+  const pool = new ChatLiveSessions({
+    maxSessions: 1,
+    onBackgroundStart: (event) => {
+      identity = event.identity;
+    },
+  });
+  const executor = {
+    id: 'owned-scope',
+    session: {
+      mode: 'persistent',
+      keepAlive: true,
+      open: async (spec) => {
+        specRef = spec;
+
+        return handle;
+      },
+    },
+  };
+
+  try {
+    await pool.run({ chatKey: 'one', executor }, {});
+    specRef.hooks.onBackgroundStart();
+    assert.ok(identity, 'пул выдал поколение фона');
+    await assert.doesNotReject(pool.closeGeneration(identity, 'фоновый ход не ответил на стоп'));
+    assert.equal(pool.stats().length, 1, 'запись неподтверждённого scope удержана');
+    assert.equal(pool.has('one'), true);
+  } finally {
+    handle.close = async () => {};
     await pool.closeAll();
   }
 });

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { currentExternalCliProcess } from '../providerInstall/externalCliProcess.ts';
 import { acquireCliLease } from '../providerInstall/leases.ts';
 import { redactRunnerError } from '../factoryProviderRunner.ts';
+import { startQwenHost } from './host.ts';
 import { qwenConfig, type QwenSnapshot } from './settings.ts';
 
 export interface QwenMcpServer {
@@ -13,6 +14,23 @@ export interface QwenMcpServer {
   command: string;
   args: string[];
   env?: Array<{ name: string; value: string }>;
+}
+
+export interface QwenOwnedProcess {
+  child: ChildProcess;
+  close: () => Promise<void>;
+}
+
+export interface QwenLaunchOptions {
+  cwd: string;
+  extraDirs?: readonly string[];
+  home: string;
+  authType: string;
+  mode: string;
+  readonlyRoots?: string[];
+  mcpServers?: QwenMcpServer[];
+  hostAccess?: boolean;
+  onOwnedProcess?: (resource: QwenOwnedProcess) => void;
 }
 
 /**
@@ -39,17 +57,16 @@ async function packageRoot(file: string): Promise<string> {
  * Пустая файловая система даёт процессу выбранные writable корни и свой durable home.
  * Ambient settings, hooks и .env проекта перекрываются server-owned снимком до запуска CLI.
  */
-export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnapshot, options: {
-  cwd: string;
-  extraDirs?: readonly string[];
-  home: string;
-  authType: string;
-  mode: string;
-  readonlyRoots?: string[];
-  mcpServers?: QwenMcpServer[];
-}) {
+export async function startQwenSandbox(
+  configValue: unknown, snapshot: QwenSnapshot, options: QwenLaunchOptions,
+) {
   const config = qwenConfig(configValue);
   const context = currentExternalCliProcess();
+
+  if (options.hostAccess) {
+    return startQwenHost(configValue, snapshot, options);
+  }
+
   const bwrap = process.env.GRIGDESK_QWEN_BWRAP_BIN || '/usr/bin/bwrap';
   const workspaceRoots = [options.cwd, ...options.extraDirs || []];
 
@@ -120,7 +137,7 @@ export async function startQwenSandbox(configValue: unknown, snapshot: QwenSnaps
 
     const settings = {
       ...snapshot.settings,
-      context: { includeDirectories: options.extraDirs || [] },
+      context: { includeDirectories: [...options.extraDirs || [], ...options.readonlyRoots || []] },
     };
 
     await fs.writeFile(safeSettings, JSON.stringify(settings), { mode: 0o400 });

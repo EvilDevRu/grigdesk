@@ -105,8 +105,27 @@ export async function qwenToolAllowed(value: unknown, context: {
   readonlyRoots: string[];
   mcpServers: QwenMcpServer[];
   blockDirectSsh: boolean;
+  hostAccess?: boolean;
   signal?: AbortSignal;
 }): Promise<boolean> {
+  if (context.hostAccess === true) {
+    if (!isRecord(value) || context.signal?.aborted || value.sessionId !== context.sessionId
+      || typeof value.toolCallId !== 'string' || !value.toolCallId || !isRecord(value.arguments)) {
+      return false;
+    }
+
+    const cwd = value.invocationCwd;
+    const command = value.arguments.command;
+    const shell = value.toolName === 'run_shell_command' || value.toolName === 'monitor';
+
+    if (!shell || context.mode === 'plan' || typeof command !== 'string' || !command
+      || (cwd !== undefined && (typeof cwd !== 'string' || !path.isAbsolute(cwd)))) {
+      return false;
+    }
+
+    return evaluateDirectCommand(command, { blockDirectSsh: context.blockDirectSsh }).verdict === 'allow';
+  }
+
   if (!isRecord(value) || context.signal?.aborted || value.sessionId !== context.sessionId
     || value.promptId !== context.promptId || value.invocationCwd !== context.cwd
     || typeof value.toolCallId !== 'string' || !isRecord(value.arguments)) {

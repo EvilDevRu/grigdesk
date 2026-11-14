@@ -33,6 +33,16 @@ export function providerSettingConfirmation(
 } | undefined {
   const confirmation = value ? field.confirm?.on : field.confirm?.off;
 
+  if (providerId === 'qwen' && field.id === 'allowHostAccess' && value === true && confirmation) {
+    const message = localeMessage(locale);
+
+    return {
+      ...confirmation,
+      text: message('settings.qwenHostAccessConfirm'),
+      label: message('settings.qwenEnableHostAccess'),
+    };
+  }
+
   if (!confirmation || !BUILTIN_PROVIDERS.has(providerId) || field.id !== 'blockDirectSsh' || value) {
     return confirmation;
   }

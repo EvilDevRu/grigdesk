@@ -6,6 +6,9 @@ import type { QwenSnapshot } from './settings.ts';
 
 export const record = (value: unknown): Record<string, unknown> => isRecord(value) ? value : {};
 
+const ACTIVE_WORK_KEY = 'qwen.daemon.activeWorkHeartbeat';
+const ACTIVE_WORK_CATEGORIES = ['agent', 'notification', 'shell', 'session', 'workflow', 'tool'];
+
 /**
  * Один reader обслуживает handshake, reverse RPC и шаги; парсер ACP не дублируется.
  * Без подтверждённого private guard процесс завершается до пользовательского prompt.
@@ -25,7 +28,16 @@ export async function openQwenTransport(
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
       clientInfo: { name: 'GrigDesk', version: '1' },
-      _meta: { 'qwen-code/private-parent-capability': sandbox.nonce },
+      _meta: {
+        'qwen-code/private-parent-capability': sandbox.nonce,
+        ...(options.hostAccess ? {
+          [ACTIVE_WORK_KEY]: {
+            v: 1,
+            intervalMs: 5000,
+            categories: ACTIVE_WORK_CATEGORIES,
+          },
+        } : {}),
+      },
     }, 15000));
 
     if (initialized.protocolVersion !== 1
@@ -33,8 +45,18 @@ export async function openQwenTransport(
       throw new Error('Qwen: несовместимый протокол обязательного guard');
     }
 
+    const heartbeat = record(record(initialized._meta)[ACTIVE_WORK_KEY]);
+
+    if (options.hostAccess && (heartbeat.v !== 1 || !Array.isArray(heartbeat.categories)
+      || !ACTIVE_WORK_CATEGORIES.every((category) => (heartbeat.categories as unknown[]).includes(category))
+      || typeof heartbeat.intervalMs !== 'number'
+      || heartbeat.intervalMs < 5000 || heartbeat.intervalMs > 60000)) {
+      throw new Error('Qwen: несовместимый active-work heartbeat');
+    }
+
     return {
       client,
+      child: sandbox.child,
       images: record(record(initialized.agentCapabilities).promptCapabilities).image === true,
       stderr: sandbox.stderr,
       async close() {
@@ -44,7 +66,10 @@ export async function openQwenTransport(
     };
   } catch (error) {
     client.close();
-    await sandbox.close();
+
+    if (!options.onOwnedProcess) {
+      await sandbox.close();
+    }
 
     const reason = `${String((error as Error).message)} ${sandbox.stderr()}`.trim();
 

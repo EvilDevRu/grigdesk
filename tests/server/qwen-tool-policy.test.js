@@ -116,6 +116,32 @@ test('Qwen: расширение tools сохраняет границы фай�
   assert.equal(await qwenToolAllowed(ssh, context), false);
 });
 
+test('Qwen Host: builtin guard проверяет shell без подделки prompt ребёнка', async (t) => {
+  const { context, call, cwd } = await policyFixture(t);
+  const host = { ...context, hostAccess: true };
+  const child = {
+    ...call('run_shell_command', { command: 'printf host' }),
+    promptId: undefined,
+    invocationCwd: cwd,
+  };
+
+  assert.equal(await qwenToolAllowed(child, host), true);
+  assert.equal(await qwenToolAllowed({ ...child, toolName: 'monitor' }, host), true);
+  assert.equal(await qwenToolAllowed({ ...child, sessionId: 'foreign' }, host), false);
+  assert.equal(await qwenToolAllowed({
+    ...child,
+    arguments: { command: 'ssh example.invalid' },
+  }, host), false);
+  assert.equal(await qwenToolAllowed({
+    ...child,
+    toolName: 'monitor',
+    arguments: { command: 'ssh example.invalid' },
+  }, host), false);
+  assert.equal(await qwenToolAllowed(child, { ...host, mode: 'plan' }), false);
+  assert.equal(await qwenToolAllowed({ ...child, toolName: 'new_shell_tool' }, host), false);
+  assert.equal(await qwenToolAllowed(child, context), false);
+});
+
 /**
  * Форма запроса совпадает с ACP настоящего CLI, включая metadata интерактивного вопроса.
  * Обычный permission не получает текстовые ответы от карточки вопроса по совпадению title.

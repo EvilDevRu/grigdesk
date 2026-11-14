@@ -722,3 +722,33 @@ test('Qwen: контекст и выход из usage-событий, субаг
   assert.equal(result.contextMetric, 'qwen-acp-usage-update');
   assert.deepEqual(result.contextCache, last.info.contextCache);
 });
+
+test('Qwen: документация плагина доступна только для чтения без открытия пакета', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const plugin = path.join(fixture.root, 'plugin');
+  const docs = path.join(plugin, 'docs');
+  const index = path.join(docs, 'README.md');
+  const outside = path.join(plugin, 'private.txt');
+  const attempt = path.join(docs, 'forbidden');
+
+  await mkdir(docs, { recursive: true });
+  await writeFile(index, 'PLUGIN_DOC_SENTINEL');
+  await writeFile(outside, 'PLUGIN_PRIVATE_SENTINEL');
+  await fixture.fake({
+    readMasks: [index, outside],
+    bounds: { allowed: [], denied: [attempt] },
+    tool: { name: 'read_file', args: { file_path: index } },
+  });
+  await adapter.run(runInput(fixture, 'shared-model(openai)', { pluginDocsDirs: [docs, docs] }));
+
+  const entries = await fixture.records();
+  const masks = entries.filter((entry) => entry.event === 'mask');
+
+  assert.equal(masks[0].text, 'PLUGIN_DOC_SENTINEL');
+  assert.equal(masks[1].code, 'ENOENT');
+  assert.ok(entries.some((entry) => entry.event === 'bounds' && entry.denied === true));
+  assert.equal(entries.find((entry) => entry.event === 'guard').allowed, true);
+  assert.equal(await readFile(index, 'utf8'), 'PLUGIN_DOC_SENTINEL');
+  await assert.rejects(access(attempt), { code: 'ENOENT' });
+});

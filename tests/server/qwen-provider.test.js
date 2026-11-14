@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import { declaredCredentials } from '../../server/src/lib/executorCredentials.ts';
 import { mergeCatalog } from '../../server/src/lib/modelsRegistry.ts';
+import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/providerSettings.ts';
 import { markSupersededModels } from '../../shared/chat/modelFamily.ts';
 import providersModule from '../../server/src/modules/providers/index.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
@@ -374,4 +375,37 @@ test('qwen-catalog-cli-failure-is-visible-safe-and-recovers', async (t) => {
   await mergeCatalog(registry, 'qwen', adapter, fixture.config);
   assert.equal(adapter.auth(fixture.config).available, false);
   assert.match(adapter.auth(fixture.config).label, /не вернул модели.*Доступ/);
+});
+
+test('Qwen: Host требует явного согласия и отдельной identity', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter();
+  const list = await resolveProviderSettings(adapter, {}, fixture.config);
+  const host = list.find((entry) => entry.id === 'allowHostAccess');
+
+  assert.equal(host?.value, false);
+
+  const denied = await applyProviderSetting(adapter, {}, {
+    settingId: 'allowHostAccess', value: true,
+  }, fixture.config);
+
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'confirmation_required');
+
+  const accepted = await applyProviderSetting(adapter, {}, {
+    settingId: 'allowHostAccess',
+    value: true,
+    confirmed: true,
+  }, fixture.config);
+
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.providerSettings.qwen.allowHostAccess, true);
+  assert.notEqual(
+    await adapter.sessionBinding.securityProfile(fixture.config, {}),
+    await adapter.sessionBinding.securityProfile(fixture.config, { allowHostAccess: true }),
+  );
+  assert.equal(
+    await adapter.sessionBinding.securityProfile(fixture.config, { allowHostAccess: 'true' }),
+    await adapter.sessionBinding.securityProfile(fixture.config, {}),
+  );
 });

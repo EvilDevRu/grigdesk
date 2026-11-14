@@ -366,6 +366,8 @@
   "processFactLimit": "Лимит пула",
   "processFactLimitValue": "{count}, автогашение через {minutes} мин простоя",
   "stoppedBusyProcessesSkipped": "Погашено: {resultClosed}. Занятых пропущено: {value2}.",
+  "processesClosePartialFailed": "Погашено: {resultClosed}. Не удалось погасить: {failedCount}. Эти процессы не подтвердили завершение и остались в списке.",
+  "processesCloseAllFailed": "Не удалось погасить процессы: {failedCount}. Они не подтвердили завершение и остались в списке.",
   "processActionsTakeEffectImmediately": "Операции с процессами выполняются сразу.",
   "loadingProcesses": "Загружаем процессы…",
   "inPool": "В пуле:",
@@ -842,6 +844,8 @@
   "blockDirectSshHint": "Закрывает прямой SSH для кооперативного агента; это не same-uid изоляция.",
   "allowDirectSsh": "Разрешить прямой SSH",
   "allowDirectSshConfirm": "Агент сможет запускать прямые SSH-клиенты с правами процесса GrigDesk. Режим прав Bash не заменяет этот запрет. Подтверждений и журнала SSH-инструмента не будет.",
+  "qwenHostAccessConfirm": "Qwen получит доступ к Docker, процессам и файлам с правами пользователя сервера. Подтверждения и запрет прямого SSH сохраняются. Изменение применяется к следующему ходу; текущий процесс закрывается отдельно.",
+  "qwenEnableHostAccess": "Включить режим «Хост»",
   "installStage": {
     "fetching": "Скачивание из источника",
     "validating": "Проверка пакета",
@@ -1281,6 +1285,12 @@
         "DASHSCOPE_API_KEY": {
           "label": "Ключ API",
           "hint": "Ключ API сервиса модели."
+        }
+      },
+      "settings": {
+        "allowHostAccess": {
+          "label": "Режим «Хост»",
+          "hint": "Docker, процессы и файлы пользователя сервера. Нужны живые сессии чата и user systemd приложения."
         }
       }
     }

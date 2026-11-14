@@ -362,6 +362,25 @@ const configOptions = () => {
 const instance = randomUUID();
 log({ event: 'spawn', instance, argv: process.argv.slice(2), cwd: process.cwd() });
 const lines = readline.createInterface({ input: process.stdin });
+let controlSeen = 0;
+
+if (options.control) {
+  setInterval(() => {
+    const frames = readFileSync(options.control, 'utf8').split('\\n').filter(Boolean);
+
+    for (const line of frames.slice(controlSeen)) {
+      const frame = JSON.parse(line.replaceAll('$session', sessionId));
+
+      if (frame.fixtureExit) {
+        process.exit(7);
+      }
+
+      send(frame);
+    }
+
+    controlSeen = frames.length;
+  }, 10);
+}
 lines.on('line', (line) => {
   const frame = JSON.parse(line);
   log({ event: 'frame', instance, frame });
@@ -373,10 +392,32 @@ lines.on('line', (line) => {
       guard: process.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD,
       provider: process.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD_PROVIDER,
     });
-    reply(frame.id, { protocolVersion: 1, agentCapabilities: { loadSession: true,
+    const respond = () => reply(frame.id, { protocolVersion: 1, agentCapabilities: { loadSession: true,
       promptCapabilities: { image: options.images !== false } },
       agentInfo: { name: 'qwen-code', version: '0.27.2' },
-      _meta: options.noAck ? {} : { 'qwen-code/external-tool-guard-ready': 'required-v1' } });
+      _meta: {
+        ...(options.noAck ? {} : { 'qwen-code/external-tool-guard-ready': 'required-v1' }),
+        ...(!options.noHeartbeat && frame.params._meta?.['qwen.daemon.activeWorkHeartbeat'] ? {
+          'qwen.daemon.activeWorkHeartbeat': frame.params._meta['qwen.daemon.activeWorkHeartbeat'],
+        } : {}),
+      } });
+
+    if (options.holdInitialize) {
+      const wait = setInterval(() => {
+        try {
+          readFileSync(options.holdInitialize);
+        } catch {
+          return;
+        }
+
+        clearInterval(wait);
+        respond();
+      }, 20);
+
+      return;
+    }
+
+    respond();
   } else if (frame.method === 'craft/midTurnSendNow') {
     if (options.midTurnError) {
       send({ id: frame.id, error: { code: -32601, message: 'synthetic unsupported send-now' } });
@@ -398,7 +439,31 @@ lines.on('line', (line) => {
     sessionId = frame.params.sessionId || sessionId;
     statusServer = frame.params.mcpServers?.find((server) => server.name === 'factory-status');
     if (frame.method === 'session/load') {
+      // Native порядок: история воспроизводится до запуска cron-планировщика
+      // (startCronScheduler после replayHistory), поэтому replay идёт раньше
+      // живого автономного цикла, а не после него.
       notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'OLD_REPLAY' } });
+      if (options.replayCron) {
+        notify({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'старый cron' },
+          _meta: { source: 'cron' } });
+        notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'HISTORICAL_CRON' } });
+      }
+      if (options.cronDuringLoad) {
+        notify({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'cron' },
+          _meta: { source: 'cron' } });
+        // Настоящий cron не несёт backgroundTurn: эту метку ставит только
+        // background_notification-цикл (Session.sendUpdate внутри активного
+        // backgroundTurnContext); cron выполняется вне его.
+        notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'CRON_WINDOW' } });
+        send({ method: 'qwen/notify/channel/active-work', params: { v: 1, seq: 1, sessions: [{
+          sessionId, holds: [{ category: 'session', id: 'session:active-turn' }],
+        }] } });
+        if (options.cronReleaseDuringLoad) {
+          send({ method: 'qwen/notify/channel/active-work', params: { v: 1, seq: 2, sessions: [{
+            sessionId, holds: [],
+          }] } });
+        }
+      }
     }
     reply(frame.id, { sessionId, models, modes, configOptions: configOptions() });
   } else if (frame.method === 'session/set_config_option') {
@@ -452,7 +517,7 @@ lines.on('line', (line) => {
     if (options.eof) {
       process.exit(7);
     }
-    if (options.hold) {
+    if (options.hold || (options.holdFirst && count === 1)) {
       notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Начало' } });
       return;
     }
@@ -490,6 +555,16 @@ lines.on('line', (line) => {
       } else {
         reply(prompt.id, { stopReason: 'cancelled' });
       }
+    }
+  } else if (frame.id === 'background-start') {
+    if (frame.result?.accepted === true) {
+      notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'BG_SENTINEL' },
+        _meta: { backgroundTurn: { turnId: 'bg-one' } } });
+      const end = { method: '_qwencode/end_turn', params: {
+        sessionId, source: 'background_notification', turnId: 'bg-one', reason: 'end_turn',
+      } };
+      send(end);
+      send(end);
     }
   } else if (frame.id === reverse) {
     const allowed = frame.result?.allowed === true;
@@ -534,6 +609,26 @@ async function finish() {
     return;
   }
   reply(prompt.id, { stopReason: 'end_turn' });
+  if (options.backgroundAfterPrompt) {
+    setTimeout(() => {
+      send({ id: 'background-start', method: '_qwencode/start_turn', params: {
+        sessionId, source: 'background_notification', turnId: 'bg-one',
+      } });
+    }, 20);
+  }
+  if (options.cronAfterPrompt) {
+    setTimeout(() => {
+      notify({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'cron' },
+        _meta: { source: 'cron' } });
+      notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'CRON_SENTINEL' } });
+      send({ method: 'qwen/notify/channel/active-work', params: { v: 1, seq: 1, sessions: [{
+        sessionId, holds: [{ category: 'session', id: 'session:active-turn' }],
+      }] } });
+      setTimeout(() => send({ method: 'qwen/notify/channel/active-work', params: {
+        v: 1, seq: 2, sessions: [{ sessionId, holds: [] }],
+      } }), 20);
+    }, 20);
+  }
 }
 async function publishStatus() {
   if (!statusServer) throw new Error('wrapper did not provide factory-status MCP');

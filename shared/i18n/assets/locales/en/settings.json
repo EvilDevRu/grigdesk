@@ -366,6 +366,8 @@
   "processFactLimit": "Pool limit",
   "processFactLimitValue": "{count}, auto stop after {minutes} min idle",
   "stoppedBusyProcessesSkipped": "Stopped: {resultClosed}. Busy processes skipped: {value2}.",
+  "processesClosePartialFailed": "Stopped: {resultClosed}. Failed to stop: {failedCount}. These processes did not confirm shutdown and remain in the list.",
+  "processesCloseAllFailed": "Failed to stop processes: {failedCount}. They did not confirm shutdown and remain in the list.",
   "processActionsTakeEffectImmediately": "Process actions take effect immediately.",
   "loadingProcesses": "Loading processes…",
   "inPool": "In pool:",
@@ -842,6 +844,8 @@
   "blockDirectSshHint": "Blocks direct SSH for a cooperative agent; this does not isolate processes with the same user ID.",
   "allowDirectSsh": "Allow direct SSH",
   "allowDirectSshConfirm": "The agent will be able to run direct SSH clients with GrigDesk process permissions. Bash permission mode does not replace this restriction. SSH tool confirmations and logging will not apply.",
+  "qwenHostAccessConfirm": "Qwen will access Docker, processes and files with the server user's permissions. Approval modes and the direct SSH restriction remain active. The change applies to the next turn; close the current process separately.",
+  "qwenEnableHostAccess": "Enable Host mode",
   "installStage": {
     "fetching": "Downloading from source",
     "validating": "Verifying package",
@@ -1281,6 +1285,12 @@
         "DASHSCOPE_API_KEY": {
           "label": "API key",
           "hint": "API key for the model service."
+        }
+      },
+      "settings": {
+        "allowHostAccess": {
+          "label": "Host mode",
+          "hint": "Docker, processes and files of the server user. Live chat sessions and the application user systemd unit are required."
         }
       }
     }
