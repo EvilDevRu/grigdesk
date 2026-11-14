@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import type { ExecutorRunInput, ExecutorRunResult } from '../executors/index.ts';
 import { createStepSink, type ChatStep } from '../chat/streamSteps.ts';
@@ -13,6 +14,7 @@ import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
 import { createQwenTextSteps } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
+import { resolveQwenSessionHome } from './session.ts';
 import { qwenToolAllowed } from './policy.ts';
 import { qwenPermissionResponse } from './permissions.ts';
 import { createQwenInTurn } from './inTurn.ts';
@@ -59,23 +61,32 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
     throw new Error('Qwen: модель недоступна в конфигурации modelProviders');
   }
 
-  const { cwd, extraDirs, roots } = await resolveQwenWorkspace(
+  const workspace = await resolveQwenWorkspace(
     input.cwd || config.rootDir || process.cwd(), input.extraDirs,
   );
-  const binding = createHash('sha256').update(JSON.stringify([
-    input.chatKey, cwd, snapshot.fingerprint,
-    ...(extraDirs.length ? [extraDirs] : []),
-  ])).digest('hex');
-  const runtimeRoot = config.qwenRuntimeHome || path.join(config.dataHome || cwd, 'qwen-runtime');
-  const home = path.join(runtimeRoot, binding);
-  const saved = path.join(home, 'session.json');
-
-  if (input.sessionId) {
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.sessionId)
-      || await fs.readFile(saved, 'utf8').catch(() => '') !== input.sessionId) {
-      throw new Error('Qwen: чужая или неверная identity сессии');
+  const attachmentRoot = attachmentsDir ? await fs.realpath(attachmentsDir).catch((error) => {
+    if (error.code === 'ENOENT') {
+      return undefined;
     }
-  }
+
+    throw error;
+  }) : undefined;
+  // Каталог доставки картинок добавляется общим чатом только в ход с вложением.
+  // ACP получает байты, поэтому этот каталог не меняет workspace и не монтируется.
+  const { cwd } = workspace;
+  const extraDirs = workspace.extraDirs.filter((directory) => directory !== attachmentRoot);
+  const roots = [cwd, ...extraDirs];
+  const runtimeRoot = config.qwenRuntimeHome || path.join(config.dataHome || cwd, 'qwen-runtime');
+  const home = await resolveQwenSessionHome({
+    runtimeRoot,
+    chatKey: input.chatKey,
+    cwd,
+    fingerprint: snapshot.fingerprint,
+    extraDirs,
+    attachmentRoot,
+    sessionId: input.sessionId,
+  });
+  const saved = path.join(home, 'session.json');
 
   const mode = input.permissionMode || 'default';
 
@@ -309,6 +320,7 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
     },
   });
   let abort: (() => void) | undefined;
+  let promptSettled: Promise<void> | undefined;
 
   try {
     if (imageContent.length && !transport.images) {
@@ -331,12 +343,22 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
         abort();
       }
     });
+    /**
+     * Отмена прекращает ожидание RPC, сохраняя короткие сроки настройки и длинный prompt.
+     * Исходный promise prompt остаётся доступен для ограниченного завершения native-записи.
+     */
     const request = (method: string, params: unknown, timeoutMs?: number) => {
       if (input.signal?.aborted) {
         return aborted;
       }
 
-      return Promise.race([transport.client.request(method, params, timeoutMs), aborted]);
+      const pending = transport.client.request(method, params, timeoutMs);
+
+      if (method === 'session/prompt') {
+        promptSettled = pending.then(() => undefined, () => undefined);
+      }
+
+      return Promise.race([pending, aborted]);
     };
     const session = record(await request(input.sessionId ? 'session/load' : 'session/new', {
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -481,6 +503,16 @@ async function runQwenSession(input: ExecutorRunInput): Promise<ExecutorRunResul
 
     if (abort) {
       input.signal?.removeEventListener('abort', abort);
+    }
+
+    // ACK отменённого prompt позволяет CLI дописать native-память первого хода.
+    // Инструменты уже закрыты через active/signal; зависший CLI получает не больше секунды.
+    if (input.signal?.aborted && promptSettled) {
+      const grace = new AbortController();
+      const expired = delay(1000, undefined, { signal: grace.signal }).catch(() => undefined);
+
+      await Promise.race([promptSettled, expired]);
+      grace.abort();
     }
 
     await transport.close();

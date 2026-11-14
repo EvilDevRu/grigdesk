@@ -6,8 +6,69 @@ import test from 'node:test';
 import { createWorkIpc } from '../../server/src/lib/executors/workIpc.ts';
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import {
-  QWEN_KEY, qwenAdapter, rejectedTurn, runInput, selectedModel, successful,
+  QWEN_KEY, QWEN_TEST_PNG, qwenAdapter, qwenImage, rejectedTurn, runInput, selectedModel, successful,
 } from '../helpers/qwenFixture.mjs';
+
+for (const legacy of [false, true]) {
+  test(`Qwen native: продолжение после остановки с вложением, legacy=${legacy}`, {
+    timeout: 60000,
+  }, async (t) => {
+    const fixture = await qwenNativeFixture(t);
+    const adapter = await qwenAdapter({ runnable: true });
+    const image = await qwenImage(fixture);
+    const controller = new AbortController();
+    const original = 'ATTACHMENT_RESUME_ORIGINAL: запомни исходный запрос.';
+    const followup = 'ATTACHMENT_RESUME_FOLLOWUP: продолжи тот же разговор.';
+    let sessionId;
+
+    fixture.settings.modelProviders.openai[0].generationConfig.modalities = { image: true };
+    await fixture.writeSettings(fixture.settings);
+    fixture.actions.push({ hold: true });
+    t.after(() => controller.abort());
+
+    // Прежняя формула получается без attachmentsDir: каталог доставки остаётся рабочим корнем.
+    // Новый путь дополнительно проверяет настоящую картинку в первом остановленном ходе.
+    const running = adapter.run(runInput(fixture, 'shared-model(openai)', {
+      attachmentsDir: legacy ? undefined : image.root,
+      attachmentPaths: legacy ? [] : [image.file],
+      extraDirs: [image.root],
+      message: original,
+      signal: controller.signal,
+      onSessionCreated(value) {
+        sessionId = value;
+      },
+    }));
+    const outcome = running.then((value) => ({ value }), (error) => ({ error }));
+
+    assert.equal(await Promise.race([fixture.held.then(() => 'held'), outcome]), 'held');
+    controller.abort();
+
+    const stopped = await outcome;
+
+    assert.equal(stopped.error?.stopped, true);
+    assert.equal(stopped.error.sessionId, sessionId);
+
+    const beforeResume = fixture.requests.length;
+    const resumed = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+      attachmentsDir: image.root,
+      sessionId,
+      message: followup,
+      signal: AbortSignal.timeout(25000),
+    }));
+    const resumedContext = JSON.stringify(fixture.requests.slice(beforeResume)
+      .map((entry) => entry.messages));
+
+    assert.equal(resumed.sessionId, sessionId);
+    assert.match(resumed.reply, /Ответ настоящего CLI/);
+    assert.ok(resumedContext.includes(original), 'Native resume сохранил исходный запрос');
+    assert.ok(resumedContext.includes(followup), 'Продолжение отправлено в ту же память');
+
+    if (!legacy) {
+      assert.ok(JSON.stringify(fixture.requests[0].messages).includes(QWEN_TEST_PNG.toString('base64')),
+        'Картинка первого хода передана настоящему CLI до остановки');
+    }
+  });
+}
 
 test('qwen-native-model-specific-efforts-and-dashscope-wire', { timeout: 60000 }, async (t) => {
   const fixture = await qwenNativeFixture(t, { dashscope: true });

@@ -107,6 +107,12 @@ While a question card awaits an answer, composer messages wait for the next turn
 
 Stop shows “⏹ Turn stopped.” without a red error card. Completed actions and available session memory remain;
 the next message continues the conversation. File changes are not rolled back.
+
+Messages with and without images continue the same session, including after Stop.
+If an older version reported a foreign or invalid Qwen session identity after an attachment,
+apply the GrigDesk fix, restart the server manually and retry in the same conversation.
+There is no need to reset memory or create a new chat: saved sessions with the previous binding remain supported.
+
 Sandbox and direct-SSH restrictions also apply to subagents and these tools.
 Plan mode blocks shell, edits, media processing and workflow. Native page reading permits localhost and private addresses.
 In CLI 0.27.2, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.

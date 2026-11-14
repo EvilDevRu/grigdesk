@@ -469,8 +469,17 @@ lines.on('line', (line) => {
       finish();
     }
   } else if (frame.method === 'session/cancel') {
-    if (prompt) {
-      reply(prompt.id, { stopReason: 'cancelled' });
+    if (prompt && !options.ignoreCancel) {
+      const finishCancel = () => {
+        log({ event: 'cancel-flushed' });
+        reply(prompt.id, { stopReason: 'cancelled' });
+      };
+
+      if (options.cancelDelayMs) {
+        setTimeout(finishCancel, options.cancelDelayMs);
+      } else {
+        finishCancel();
+      }
     }
   } else if (frame.id === 'permission-1') {
     if (frame.result?.outcome?.optionId === 'allow_once') {
