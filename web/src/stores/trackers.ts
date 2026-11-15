@@ -1,3 +1,4 @@
+import { isTransientTrackerReadFailure } from '../shared/trackerReadRecovery.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 import { setTrackerMutationGeneration, setTrackerDriverGenerations } from '../shared/trackerMutation.ts';
@@ -11,6 +12,8 @@ import { api, ApiError } from '../shared/apiClient.ts';
 import { LEGACY_TRACKER_CAPABILITIES, trackerCapabilities } from '../shared/trackerCapabilities.ts';
 
 const t = localeTranslator(uiLocalePort);
+
+const catalogFailures = new WeakMap<object, unknown>();
 
 const catalogJobs = new WeakMap<object, Promise<void>>();
 
@@ -38,6 +41,13 @@ export const useTrackersStore = defineStore('trackers', {
     },
   },
   actions: {
+    /**
+     * Причина отказа сохраняет тип вне сериализуемого состояния Pinia.
+     * Канал карточки использует её для решения о следующем чтении.
+     */
+    readFailure() {
+      return catalogFailures.get(this);
+    },
     /**
      * Запись настроек закрывает старые снимки до отправки POST и любого его исхода.
      * Пауза принадлежит своей эпохе; SSE или более новая запись не разблокируются поздним finally.
@@ -128,11 +138,19 @@ export const useTrackersStore = defineStore('trackers', {
         setTrackerDriverGenerations(this.catalog.drivers);
         this.legacy = false;
         this.error = '';
+        catalogFailures.delete(this);
       } catch (error) {
         if (epoch === this.epoch) {
-          this.catalog = null;
-          this.legacy = error instanceof ApiError && error.status === 404;
-          this.error = this.legacy ? '' : String((error as Error).message);
+          catalogFailures.set(this, error);
+
+          if (!isTransientTrackerReadFailure(error)) {
+            this.catalog = null;
+            this.legacy = error instanceof ApiError && error.status === 404;
+          }
+
+          const legacyMissing = this.legacy && error instanceof ApiError && error.status === 404;
+
+          this.error = legacyMissing ? '' : String((error as Error).message);
         }
       } finally {
         if (epoch === this.epoch) {
@@ -145,6 +163,7 @@ export const useTrackersStore = defineStore('trackers', {
      * Поздний ответ предыдущего запроса не возвращает их после смены поколения.
      */
     invalidate() {
+      catalogFailures.delete(this);
       setTrackerMutationGeneration(null);
       this.epoch += 1;
       this.catalog = null;

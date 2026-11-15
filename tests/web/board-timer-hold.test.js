@@ -197,7 +197,7 @@ test('HOLD-CATALOG: общий отказ виден при сохранённо
       if (url === '/api/trackers' && failures > 0) {
         failures -= 1;
 
-        throw new Error('catalog unavailable');
+        throw new TypeError('catalog unavailable');
       }
     },
   });
@@ -213,12 +213,12 @@ test('HOLD-CATALOG: общий отказ виден при сохранённо
   assert.equal(fixture.board.staleSinceMs, success);
 });
 
-test('HOLD-OFFLINE: каталог без dashboard не выдаётся за восстановление', async (t) => {
+test('HOLD-OFFLINE: обрыв сохраняет last-good, каталог не считается успехом dashboard', async (t) => {
   let offline = false;
   const fixture = await webMultiFixture(t, {
     intercept: ({ url }) => {
       if (offline && url === '/api/trackers') {
-        throw new Error('server offline');
+        throw new TypeError('server offline');
       }
     },
   });
@@ -234,40 +234,37 @@ test('HOLD-OFFLINE: каталог без dashboard не выдаётся за �
   await fixture.board.load(true);
 
   const successB = fixture.board.branches['fixture-b'].lastOkAt;
+  const refs = fixture.board.data.tasks.map((task) => [task.source, task.id]);
 
-  assert.equal(successB - successA, 60000);
   offline = true;
   now += 120000;
   await fixture.board.load(true);
-  assert.equal(fixture.board.data, null);
-  assert.equal(Object.keys(fixture.board.branches).length, 0);
+  assert.deepEqual(fixture.board.data?.tasks.map((task) => [task.source, task.id]), refs);
   assert.match(fixture.board.refreshProblem, /server offline/u);
   assert.equal(fixture.board.staleSinceMs, successA);
   now += 120000;
   await fixture.board.load(true);
-  assert.equal(fixture.board.staleSinceMs, successA);
   assert.equal(fixture.board.lastRefreshAttemptAt - successA, 300000);
+  assert.equal(fixture.board.branches['fixture-b'].lastOkAt, successB);
+
   await controlDriver(fixture, 'fixture-b', { dashboardError: 'B unavailable' });
   offline = false;
   await fixture.board.load(true);
+  assert.deepEqual(fixture.board.data.tasks.map((task) => [task.source, task.id]), refs);
   assert.match(fixture.board.refreshProblem, /unavailable/u);
   assert.equal(fixture.board.staleSinceMs, successA);
-  assert.equal(fixture.board.branches['fixture-b'].lastOkAt, successB);
-  assert.equal((fixture.board.data?.tasks ?? []).length, 0);
-  now += 60000;
-  await fixture.board.load(true);
-  assert.equal(fixture.board.lastRefreshAttemptAt - fixture.board.staleSinceMs, 360000);
+
   await controlDriver(fixture, 'fixture-a', { dashboardError: null });
   await fixture.board.load(true);
   assert.match(fixture.board.refreshProblem, /B unavailable/u);
   assert.equal(fixture.board.staleSinceMs, successB);
-  assert.deepEqual(fixture.board.data.tasks.map((task) => task.source), [fixture.sourceA]);
   await controlDriver(fixture, 'fixture-b', { dashboardError: null });
   await fixture.board.load(true);
   assert.equal(fixture.board.refreshProblem, '');
   assert.equal(fixture.board.staleSinceMs, 0);
   assert.equal(fixture.board.data.tasks.length, 2);
   fixture.board.clearSource();
+  assert.equal(fixture.board.data, null);
   assert.equal(fixture.board.failedSnapshotAt, 0);
   assert.deepEqual(fixture.board.failedBranchTimes, {});
 });
@@ -281,3 +278,53 @@ test('HOLD-COLD: первая ошибка A видна, успех B не пр�
   assert.equal(fixture.board.staleSinceMs, 0);
   assert.deepEqual(fixture.board.data.tasks.map((task) => task.source), [fixture.sourceB]);
 });
+
+for (const failure of [new Error('invalid metadata'), { name: 'ApiError', status: 403 }]) {
+  test(`RES-BOARD-TERMINAL: ${failure.message ?? failure.status} не получает fallback`, async (t) => {
+    let broken = false;
+    const fixture = await webMultiFixture(t, {
+      intercept: ({ url }) => {
+        if (broken && url === '/api/trackers') {
+          throw failure;
+        }
+      },
+    });
+
+    await fixture.board.load(true);
+    broken = true;
+    await fixture.board.load(true);
+    assert.equal(fixture.board.data, null);
+    assert.ok(fixture.board.refreshProblem);
+  });
+}
+
+for (const first of ['403', 'invalid']) {
+  test(`RES-BOARD-MIXED: ${first} не перекрывается вторым сетевым отказом`, async (t) => {
+    let phase = 'ready';
+    let probes = 0;
+    const fixture = await webMultiFixture(t, {
+      intercept: ({ url }) => {
+        if (phase !== 'ready' && url === '/api/trackers') {
+          probes += 1;
+
+          if (probes === 1) {
+            if (first === '403') {
+              throw Object.assign(new Error('forbidden'), { name: 'ApiError', status: 403 });
+            }
+
+            throw new Error('invalid metadata');
+          }
+
+          throw new DOMException('probe timeout', 'TimeoutError');
+        }
+      },
+    });
+
+    await fixture.board.load(true);
+    phase = 'failed';
+    await fixture.board.load(true);
+    assert.equal(probes, 1);
+    assert.equal(fixture.board.data, null);
+    assert.equal(Object.keys(fixture.board.branches).length, 0);
+  });
+}

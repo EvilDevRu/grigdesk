@@ -500,6 +500,8 @@ export async function compileBoundary(relative, expose, additional = {}) {
     taskSeen: 'useTaskSeenStore',
     taskShelf: 'useTaskShelfStore',
     trackers: 'useTrackersStore',
+    auth: 'useAuthStore',
+    shell: 'useShellStore',
   })) {
     for (const extension of ['js', 'ts']) {
       stubs[`../stores/${file}.${extension}`] = `${viewPrelude}

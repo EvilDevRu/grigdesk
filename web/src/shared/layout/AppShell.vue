@@ -151,14 +151,16 @@
       <div class="status">
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <BoardTimerPopover
-          v-if="topbarTimerTasks.length || boardStaleNotice"
+          v-if="topbarTimerTasks.length || boardStaleNotice || timerActionError"
           :tasks="topbarTimerTasks"
           :stale-notice="boardStaleNotice"
+          :refreshing="boardStore.loading"
           :worked-today-hours="workedTodayHours"
           :busy-task-id="timerActionTaskId ?? undefined"
           :error="timerActionError"
           @open-task="openBoardTask"
           @open-board="openBoard"
+          @retry="boardStore.load(true)"
           @toggle-timer="toggleBoardTimer"
         />
         </PhoneShellPortal>
@@ -479,6 +481,7 @@ import { uiLocale } from '../../ui.ts';
 import { t } from '../../ui.ts';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { isTransientTrackerReadFailure } from '../trackerReadRecovery.ts';
 import { failureText } from '../apiClient.ts';
 import type { BoardTask } from '../boardContracts.ts';
 
@@ -869,6 +872,12 @@ async function toggleBoardTimer(task: BoardTask) {
     return;
   }
 
+  if (useTrackersStore().error) {
+    timerActionError.value = t('core.taskReadOnly');
+
+    return;
+  }
+
   const taskId = taskReferenceKey(task);
   const action = task.timerRunning ? 'pause' : 'start';
   const wasRemembered = recentPausedTimerIds.value.includes(taskId);
@@ -891,7 +900,12 @@ async function toggleBoardTimer(task: BoardTask) {
       recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
     }
 
-    timerActionError.value = failureText(error, t('core.couldNotToggleTheTimer'));
+    if (isTransientTrackerReadFailure(error)) {
+      timerActionError.value = t('core.trackerActionUnknown', { reason: failureText(error) });
+      void boardStore.load(true);
+    } else {
+      timerActionError.value = failureText(error, t('core.couldNotToggleTheTimer'));
+    }
   } finally {
     timerActionTaskId.value = null;
   }

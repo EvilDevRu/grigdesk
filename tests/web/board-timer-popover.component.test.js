@@ -167,3 +167,33 @@ test('BOARD-TIMERS-06: общий отказ виден без строк, во�
   await nextTick();
   assert.equal(wrapper.find('[data-context="board-timers-topbar"]').exists(), false);
 });
+
+test('POP-RETRY: повтор не закрывает панель и недоступен во время чтения', async (t) => {
+  const [{ nextTick }, { mount }, component] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/features/board/BoardTimerPopover.vue')),
+  ]);
+  const wrapper = mount(component, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { tasks: [], staleNotice: 'Нет связи' },
+  });
+
+  t.after(() => wrapper.unmount());
+  await wrapper.get('[data-context="board-timers-topbar"]').trigger('mouseenter');
+  await nextTick();
+
+  const retry = () => browser.document.querySelector('[data-context="topbar-timers-retry"]');
+
+  assert.ok(retry(), 'Ошибка предлагает ручное чтение');
+  retry().dispatchEvent(new browser.MouseEvent('click', { bubbles: true }));
+  await nextTick();
+  assert.equal(wrapper.emitted('retry')?.length, 1);
+  assert.ok(browser.document.querySelector('.board-timers-popover'));
+  await wrapper.setProps({ refreshing: true });
+  await nextTick();
+  assert.equal(retry().disabled, true);
+  retry().click();
+  await nextTick();
+  assert.equal(wrapper.emitted('retry')?.length, 1);
+});

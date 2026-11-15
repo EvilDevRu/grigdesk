@@ -102,6 +102,11 @@ function favoriteButtonStub(prefix) {
 export function compileTaskModal(prefix, { stubDialog = false, compilerStubs = {} } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
+      '../stores/auth.ts': `export const useAuthStore = globalThis.${prefix}AuthStore
+        || (() => ({ authenticated: true }));`,
+      '../stores/shell.ts': `export const useShellStore = globalThis.${prefix}ShellStore
+        || (() => ({ present: false, status: 'none' }));`,
+
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
       '../shared/shellClient.ts': [
         'export const isShellState = () => false;',

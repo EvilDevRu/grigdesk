@@ -47,7 +47,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Usage forecasts](usage-forecast.md)
 - [Executor access profiles](access-profiles.md)
 - [Projects and repositories](projects.md)
-- [Tasks and triage](tasks.md)
+- [Tasks and triage: stale data, recovery and unknown action outcomes](tasks.md)
 - [Inbox, Telegram and GitHub](incoming.md)
 - [Starting and running pipelines](pipelines.md)
 - [Human decisions and stops](gates.md)

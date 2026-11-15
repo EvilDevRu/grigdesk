@@ -61,6 +61,34 @@
         </div>
       </div>
 
+      <div v-if="detailReadError || metadataReadError || commentsReadError" class="malerts" aria-live="polite">
+        <p v-if="detailReadError" data-role="task-read-status" class="err">
+          {{ detail ? t('core.taskReadStale') : t('core.taskReadFailed') }}
+          <time v-if="detailReadAt" :datetime="new Date(detailReadAt).toISOString()">
+            {{ t('core.taskReadReceived', { time: formatDateTime(new Date(detailReadAt).toISOString()) }) }}
+          </time>
+          {{ detailReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+        <p v-if="metadataReadError" data-role="task-metadata-status" class="err">
+          {{ metadataReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+        <p v-if="commentsReadError" data-role="task-page-status" class="err" aria-live="polite">
+          {{ commentsReadAt ? t('core.taskPageStale') : t('core.taskPageFailed') }}
+          <time v-if="commentsReadAt" :datetime="new Date(commentsReadAt).toISOString()">
+            {{ t('core.taskReadReceived', { time: formatDateTime(new Date(commentsReadAt).toISOString()) }) }}
+          </time>
+          {{ commentsReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+      </div>
       <div v-if="err || (canUsePersonal && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err"
     :data-perf-error="!detail && !loading ? '' : undefined">{{ err }}</p>
@@ -1278,6 +1306,11 @@ import { taskAvatar, taskPeopleNames, taskPeopleIds, taskChecklist } from '../sh
 import { decodeChatAttachment } from '../shared/chatContracts.ts';
 import { decodeLiveGraph, decodePipelineTasks } from '../shared/pipelineContracts.ts';
 
+import { useAuthStore } from '../stores/auth.ts';
+import { useShellStore } from '../stores/shell.ts';
+import {
+  createTrackerReadRecovery, isTransientTrackerReadFailure, isTrackerReadAccessFailure,
+} from '../shared/trackerReadRecovery.ts';
 import { ref, computed, watch, onUnmounted, nextTick, type PropType } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
@@ -1331,7 +1364,12 @@ const router = useRouter();
 const ui = useUiStore();
 const tasks = useTasksStore();
 const trackers = useTrackersStore();
+const readBlocked = ref(false);
 const trackerCaps = computed(() => {
+  if (readBlocked.value) {
+    return trackerCapabilities(undefined);
+  }
+
   if (!taskSource.value || !trackers.catalog?.enabledIds) {
     return trackers.capabilities;
   }
@@ -1382,7 +1420,7 @@ let ticker: ReturnType<typeof setInterval> | null = null;
 const boardTask = computed(() => {
   const d = board.data;
 
-  if (!d || !taskId.value || ui.taskUnavailable) {
+  if (!d || !taskId.value || ui.taskUnavailable || readBlocked.value) {
     return null;
   }
 
@@ -2142,38 +2180,177 @@ function loadPersonalState() {
 let detailAbort: AbortController | null = null;
 let commentsAbort: AbortController | null = null;
 
+const readAuth = useAuthStore();
+const readShell = useShellStore();
+const detailReadError = ref('');
+const metadataReadError = ref('');
+const detailReadAt = ref(0);
+const commentsReadError = ref('');
+const commentsReadAt = ref(0);
+let metadataRequest = 0;
+let readDisposed = false;
+let pendingCardDriver: {
+  id: string;
+  dataRevision?: number;
+  generation?: number;
+} | null = null;
+
+const allowMetadataRecovery = () => !readDisposed && !!taskId.value && !ui.taskUnavailable
+  && readAuth.authenticated && (!readShell.present || readShell.status === 'online');
+const allowReadRecovery = () => allowMetadataRecovery() && !readBlocked.value
+  && detailTrackerRevision.value === null;
+const detailRecovery = createTrackerReadRecovery(() => loadDetail(true), allowReadRecovery);
+const metadataRecovery = createTrackerReadRecovery(() => loadMetadata(true), allowMetadataRecovery);
+const commentsRecovery = createTrackerReadRecovery(() => loadComments(true), allowReadRecovery);
+
 /**
- * Загружает карточку через общий кеш задач с прежним принудительным обновлением.
- * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
+ * Терминальная граница убирает серверные данные и поздние ответы текущей карточки.
+ * Свой текст комментария остаётся в ref для того же владельца; заблокированный UI его не публикует.
  */
-async function loadDetail(force = false) {
-  if (!taskId.value || ui.taskUnavailable) {
+function clearCardReadContent(block = true): void {
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailAbort?.abort();
+  commentsAbort?.abort();
+  detailRequest += 1;
+  commentsRequest += 1;
+  metadataRequest += 1;
+  detail.value = null;
+  comments.value = null;
+  taskTags.value = [];
+  taskTagsLoaded.value = false;
+  taskSubtasks.value = [];
+  detailReadAt.value = 0;
+  commentsReadAt.value = 0;
+  detailReadError.value = '';
+  commentsReadError.value = '';
+  loading.value = false;
+  comLoading.value = false;
+  readBlocked.value = block;
+  tasks.invalidate();
+  cancelTaskEdit();
+  closeLaunch();
+}
+
+/**
+ * Metadata может восстанавливаться при ожидаемой ревизии; зависимые чтения пока закрыты.
+ * Успех явно возобновляет уже прочитанное обсуждение, не объявляя старый page свежим.
+ */
+async function loadMetadata(force = false, resume = true): Promise<boolean> {
+  if (!allowMetadataRecovery()) {
+    return false;
+  }
+
+  const reference = currentTaskKey.value;
+  const request = ++metadataRequest;
+  const hadFailure = !!metadataReadError.value;
+
+  metadataRecovery.cancel();
+  await trackers.load(force);
+
+  if (request !== metadataRequest || reference !== currentTaskKey.value) {
+    return false;
+  }
+
+  const error = trackers.readFailure();
+
+  if (error && trackers.error) {
+    if (!isTransientTrackerReadFailure(error)) {
+      clearCardReadContent();
+    }
+
+    metadataReadError.value = failureText(error);
+
+    if (commentsReadAt.value) {
+      commentsReadError.value = t('core.taskPageStale');
+    }
+
+    metadataRecovery.schedule(error);
+
+    return false;
+  }
+
+  const waiting = detailTrackerRevision.value !== null;
+  const catalog = trackers.catalog;
+
+  if (waiting && (!catalog || catalog.revision < detailTrackerRevision.value!)) {
+    metadataReadError.value = t('core.taskReadAwaitingSource');
+    metadataRecovery.schedule(undefined, true);
+
+    return false;
+  }
+
+  if (waiting && pendingCardDriver) {
+    const next = catalog?.drivers.find((driver) => driver.id === pendingCardDriver!.id);
+
+    if (next?.dataRevision !== pendingCardDriver.dataRevision
+      || next?.generation !== pendingCardDriver.generation) {
+      clearCardReadContent(false);
+    }
+  }
+
+  pendingCardDriver = null;
+  detailTrackerRevision.value = null;
+  readBlocked.value = false;
+  metadataReadError.value = '';
+  metadataRecovery.reset();
+
+  if (resume && waiting && allowReadRecovery()) {
+    void loadDetail(true).then(() => {
+      if (allowReadRecovery() && comments.value !== null && !comLoading.value) {
+        void loadComments(true);
+      }
+    });
+  } else if (resume && hadFailure && allowReadRecovery() && commentsReadAt.value && !comLoading.value) {
+    void loadComments(true);
+  }
+
+  return true;
+}
+
+
+/**
+ * Неуспешное чтение сохраняет прежние детали и черновики, не скрывая ошибку команды.
+ * Повтор относится только к той же открытой карточке и не переживает отмену consumer.
+ */
+async function loadDetail(force = false): Promise<void> {
+  detailRecovery.cancel();
+
+  if (!taskId.value || ui.taskUnavailable || !allowReadRecovery()) {
     return;
   }
 
   const id = taskId.value;
   const reference = currentTaskKey.value;
   const request = ++detailRequest;
+  const controller = new AbortController();
 
   detailAbort?.abort();
-  detailAbort = new AbortController();
+  detailAbort = controller;
   loading.value = true;
-  err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force, detailAbort.signal, taskSource.value);
+    const loaded = await tasks.load(id, force, controller.signal, taskSource.value);
 
-    if (request !== detailRequest || currentTaskKey.value !== reference) {
+    if (controller.signal.aborted || request !== detailRequest || currentTaskKey.value !== reference) {
       return;
     }
 
     detail.value = loaded;
+    detailReadAt.value = Date.now();
+    detailReadError.value = '';
+    detailRecovery.reset();
     void loadConveyor();
-
     loadPersonalState();
-  } catch (e) {
-    if (request === detailRequest && currentTaskKey.value === reference) {
-      err.value = failureText(e);
+  } catch (error) {
+    if (!controller.signal.aborted && request === detailRequest && currentTaskKey.value === reference) {
+      if (isTrackerReadAccessFailure(error)) {
+        clearCardReadContent();
+      }
+
+      detailReadError.value = failureText(error);
+      detailRecovery.schedule(error);
     }
   } finally {
     if (request === detailRequest) {
@@ -2690,47 +2867,56 @@ function selectTaskSection(section: 'description' | 'triage' | 'comments') {
 }
 
 /**
- * Один page-ответ наполняет описание тегами и подзадачами, а обсуждение — комментариями.
- * Неверные необязательные расширения скрываются без отказа прежнего обсуждения.
+ * Весь page-снимок принимается вместе, а временный отказ сохраняет его последнюю версию.
+ * Первое неудачное чтение остаётся ошибкой, не выдавая неизвестное обсуждение за пустое.
  */
-async function loadComments(force = false) {
-  if (!taskId.value || !isB24Task.value || (!trackerCaps.value.comments && !trackerCaps.value.tags)
-    || (comLoading.value && !force)) {
+async function loadComments(force = false): Promise<void> {
+  commentsRecovery.cancel();
+
+  if (!taskId.value || !isB24Task.value || !allowReadRecovery()
+    || (!trackerCaps.value.comments && !trackerCaps.value.tags) || (comLoading.value && !force)) {
     return;
   }
 
   const id = taskId.value;
   const reference = currentTaskKey.value;
   const request = ++commentsRequest;
+  const controller = new AbortController();
 
   commentsAbort?.abort();
-  commentsAbort = new AbortController();
+  commentsAbort = controller;
   comLoading.value = true;
 
   try {
-    const target = await resolveTrackerTarget(taskSource.value, api);
+    const target = await resolveTrackerTarget(taskSource.value, api, undefined, {
+      signal: controller.signal,
+    });
     const page = await api.get(`${target.prefix}/task/${id}/comments`, {
       ...target.options,
-      signal: commentsAbort.signal,
+      signal: controller.signal,
     });
     const result = decodeTaskComments(page);
+    const tags = decodeTaskTags(page);
+    const subtasks = decodeTaskSubtasks(page);
 
-    if (currentTaskKey.value === reference && request === commentsRequest && isB24Task.value) {
+    if (!controller.signal.aborted && currentTaskKey.value === reference
+      && request === commentsRequest && isB24Task.value) {
       comments.value = result;
-      taskTags.value = decodeTaskTags(page);
+      taskTags.value = tags;
       taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
-      taskSubtasks.value = decodeTaskSubtasks(page);
+      taskSubtasks.value = subtasks;
+      commentsReadAt.value = Date.now();
+      commentsReadError.value = '';
+      commentsRecovery.reset();
     }
   } catch (error) {
-    if (currentTaskKey.value === reference && request === commentsRequest) {
-      if (trackerCaps.value.tags) {
-        err.value = failureText(error);
+    if (!controller.signal.aborted && currentTaskKey.value === reference && request === commentsRequest) {
+      if (isTrackerReadAccessFailure(error)) {
+        clearCardReadContent();
       }
 
-      comments.value = [];
-      taskTags.value = [];
-      taskTagsLoaded.value = false;
-      taskSubtasks.value = [];
+      commentsReadError.value = failureText(error);
+      commentsRecovery.schedule(error);
     }
   } finally {
     if (currentTaskKey.value === reference && request === commentsRequest) {
@@ -2857,20 +3043,36 @@ async function sandboxDown() {
 }
 
 /**
- * Одна выполняемая команда задаёт индикатор и сообщение отказа карточки.
- * Снятие busy происходит при любом исходе без повторной мутации сервера.
+ * Ошибка доставки команды не позволяет автоматически отправить её повторно.
+ * Только чтения сверяют текущее состояние, сохраняя сообщение и набранный черновик.
  */
 async function act(name: string, fn: () => Promise<unknown>) {
   const reference = currentTaskKey.value;
+
+  if (busy.value) {
+    return;
+  }
+  if (readBlocked.value || metadataReadError.value || detailTrackerRevision.value !== null) {
+    err.value = t('core.taskReadOnly');
+
+    return;
+  }
 
   busy.value = name;
   err.value = null;
 
   try {
     await fn();
-  } catch (e) {
+  } catch (error) {
     if (reference === currentTaskKey.value) {
-      err.value = failureText(e);
+      if (isTransientTrackerReadFailure(error)) {
+        err.value = t('core.trackerActionUnknown', { reason: failureText(error) });
+        void loadDetail(true);
+        void loadComments(true);
+        void board.load(true);
+      } else {
+        err.value = failureText(error);
+      }
     }
   } finally {
     if (reference === currentTaskKey.value) {
@@ -3077,43 +3279,37 @@ async function refreshLaunchOptions() {
 
 const stopLaunchEvents = sseSubscribe((name, payload) => {
   if (name === 'trackers-changed') {
-    if (taskSource.value && trackers.catalog?.enabledIds) {
-      const id = taskSource.value.split('@')[0];
-      const previous = trackers.catalog.drivers.find((entry) => entry.id === id);
+    const ownId = taskSource.value?.split('@')[0];
+    const previous = trackers.catalog?.enabledIds
+      ? trackers.catalog.drivers.find((driver) => driver.id === ownId) : undefined;
 
-      void trackers.load(true).then(() => {
-        const next = trackers.catalog?.drivers.find((entry) => entry.id === id);
-
-        if (previous?.dataRevision !== next?.dataRevision || previous?.generation !== next?.generation) {
-          detailAbort?.abort();
-          commentsAbort?.abort();
-          detail.value = null;
-          void loadDetail(true);
-        }
-      });
-
-      return;
-    }
-
-    detailRequest += 1;
-    commentsRequest += 1;
+    pendingCardDriver = previous ? {
+      id: previous.id,
+      dataRevision: previous.dataRevision,
+      generation: previous.generation,
+    } : null;
+    detailRecovery.reset();
+    metadataRecovery.reset();
+    commentsRecovery.reset();
     detailAbort?.abort();
     commentsAbort?.abort();
-    detail.value = null;
-    comments.value = null;
-    taskTags.value = [];
-    taskTagsLoaded.value = false;
-    taskSubtasks.value = [];
-    commentText.value = '';
-    tasks.invalidate?.();
-    trackers.invalidate();
-    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
-      ? Number(payload.revision) : 0;
+    detailRequest += 1;
+    commentsRequest += 1;
+    metadataRequest += 1;
     loading.value = false;
     comLoading.value = false;
-    void trackers.load(true);
+    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
+      ? Number(payload.revision) : 0;
+
+    if (!pendingCardDriver) {
+      clearCardReadContent(false);
+      trackers.invalidate();
+      commentText.value = '';
+    }
+
+    metadataReadError.value = t('core.taskReadAwaitingSource');
     closeLaunch();
-    cancelTaskEdit();
+    void loadMetadata(true);
 
     return;
   }
@@ -3135,19 +3331,6 @@ const stopLaunchEvents = sseSubscribe((name, payload) => {
   void refreshLaunchOptions();
 });
 
-// Новое поколение metadata подтверждает, что детали читаются уже из текущего подключения.
-// Ожидание переживает замену запроса metadata другим подписчиком или диалогом настроек.
-watch(
-  () => [trackers.catalog, detailTrackerRevision.value] as const,
-  ([catalog, revision]) => {
-    if (!catalog || revision === null || catalog.revision < revision) {
-      return;
-    }
-
-    detailTrackerRevision.value = null;
-    void loadDetail(true);
-  },
-);
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts: TaskLaunchOptions) {
@@ -3528,17 +3711,26 @@ const sendComment = () => act('comment', async () => {
   loadComments(true);
 });
 /**
- * Принудительное чтение сохраняет выбранную пару карточки.
- * Обсуждение не переходит к другому источнику после ожидания деталей.
+ * Ручной повтор сначала заново подтверждает metadata и только затем снимает read-block.
+ * Каждое продолжение проверяет lifetime и полную ссылку, не повторяя команды записи.
  */
 const refresh = async () => {
-  const id = taskId.value;
   const reference = currentTaskKey.value;
+  const confirmed = await loadMetadata(true, false);
+
+  if (!confirmed || !allowReadRecovery() || currentTaskKey.value !== reference) {
+    return;
+  }
 
   await loadDetail(true);
 
-  if (currentTaskKey.value === reference && isB24Task.value) {
-    board.load(true);
+  if (!allowReadRecovery() || currentTaskKey.value !== reference) {
+    return;
+  }
+
+  void board.load(true);
+
+  if (!comLoading.value) {
     void loadComments(true);
   }
 };
@@ -3572,8 +3764,70 @@ function onTaskDialogOpenChange(open: boolean) {
   }
 }
 
+// Временный offline сохраняет текст, terminal снимает серверный снимок даже после offline.
+// Возврат доступа сначала подтверждает metadata и только затем возобновляет task/page.
+watch([
+  () => readAuth.authenticated,
+  () => readAuth.logReason,
+  () => readShell.status,
+  () => trackers.epoch,
+], () => {
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailAbort?.abort();
+  commentsAbort?.abort();
+  detailRequest += 1;
+  commentsRequest += 1;
+  metadataRequest += 1;
+  loading.value = false;
+  comLoading.value = false;
+
+  const terminal = readAuth.logReason === '401' || (readShell.present
+    && ['revoked', 'unpaired', 'identityMismatch', 'incompatible'].includes(readShell.status));
+
+  if (terminal) {
+    clearCardReadContent();
+    detailReadError.value = t('core.taskReadDenied');
+
+    return;
+  }
+  if (allowMetadataRecovery()) {
+    void loadMetadata(true, false).then(async (confirmed) => {
+      if (!confirmed || !allowReadRecovery()) {
+        return;
+      }
+
+      await loadDetail(true);
+
+      if (allowReadRecovery() && !comLoading.value
+        && (comments.value !== null || mtab.value === 'comments' || trackerCaps.value.tags)) {
+        void loadComments(true);
+      }
+    });
+  } else if (detail.value) {
+    detailReadError.value = t('core.taskReadStale');
+
+    if (commentsReadAt.value) {
+      commentsReadError.value = t('core.taskPageStale');
+    }
+  }
+});
+
 // Открытие/закрытие модалки по taskId.
 watch(() => [taskId.value, taskSource.value, ui.taskUnavailable], ([id]) => {
+  readBlocked.value = false;
+  pendingCardDriver = null;
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailReadError.value = '';
+  metadataReadError.value = '';
+  commentsReadError.value = '';
+  detailReadAt.value = 0;
+  commentsReadAt.value = 0;
+  metadataRequest += 1;
+
   checklistEditing.value = null;
   checklistAdding.value = null;
   checklistCreating.value = false;
@@ -3622,7 +3876,7 @@ watch(() => [taskId.value, taskSource.value, ui.taskUnavailable], ([id]) => {
 
   if (id) {
     err.value = null;
-    void trackers.load();
+    void loadMetadata();
     detail.value = null;
     launchMsg.value = null;
     sandboxMsg.value = null;
@@ -3712,6 +3966,11 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  readDisposed = true;
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  metadataRequest += 1;
   detailAbort?.abort();
   commentsAbort?.abort();
   detailRequest += 1;

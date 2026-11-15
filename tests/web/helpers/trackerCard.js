@@ -53,6 +53,8 @@ export async function mountTrackerCard(t, {
   boardFields = {},
   users = [],
   mutation = null,
+  read = null,
+  beforeMount = null,
   catalog = null,
   taskSource,
   boardSource,
@@ -60,10 +62,13 @@ export async function mountTrackerCard(t, {
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/board');
   const prefix = `__trackerCard${nonce += 1}`;
-  const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([
+  const [{ mount, flushPromises }, { createPinia, defineStore }, { reactive }] = await Promise.all([
     import('../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../../web/node_modules/pinia/dist/pinia.mjs'),
+    import('../../../web/node_modules/vue/index.mjs'),
   ]);
+  const auth = reactive({ authenticated: true, logReason: 'load' });
+  const shell = reactive({ present: false, status: 'none' });
   const calls = [];
   const listeners = new Set();
   const heldDetail = Promise.withResolvers();
@@ -132,8 +137,23 @@ export async function mountTrackerCard(t, {
      * Ответы details и metadata удерживаются раздельно.
      * Это позволяет проверить действие до details и запрет при неизвестной metadata.
      */
-    async get(url) {
+    async get(url, options) {
       calls.push({ method: 'GET', url });
+
+      if (read) {
+        const result = await read({
+          url,
+          options,
+          task,
+          pageData,
+          metadata,
+        });
+
+        if (result !== undefined) {
+          return result;
+        }
+      }
+
 
       if (url === '/api/trackers' || url === '/api/trackers/settings') {
         if (metadataMode === 'held') {
@@ -281,6 +301,8 @@ export async function mountTrackerCard(t, {
     },
   };
   const globals = {
+    AuthStore: () => auth,
+    ShellStore: () => shell,
     Api: api,
     ConfirmDialog: confirm,
     ApiError: migrationHarness.ApiError,
@@ -417,6 +439,9 @@ export async function mountTrackerCard(t, {
   }
 
   const component = await compileTaskModal(prefix);
+
+  beforeMount?.();
+
   const wrapper = mount(component, {
     props: { presentation },
     attachTo: browser.document.querySelector('#mount'),
@@ -437,6 +462,9 @@ export async function mountTrackerCard(t, {
   await flushPromises();
 
   return {
+    auth,
+    shell,
+    pinia,
     wrapper,
     calls,
     flushPromises,

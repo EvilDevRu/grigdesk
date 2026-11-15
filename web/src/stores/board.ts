@@ -1,3 +1,4 @@
+import { isTransientTrackerReadFailure } from '../shared/trackerReadRecovery.ts';
 import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
 import { useTrackersStore } from './trackers.ts';
 import { useTaskFavoritesStore } from './taskFavorites.ts';
@@ -114,6 +115,22 @@ const loadingJobs = new WeakMap<object, Promise<number | undefined>>();
 const forcedJobs = new WeakMap<object, Promise<number | undefined>>();
 
 /**
+ * Сетевой отказ не подтверждает нового владельца и не уничтожает RAM-кэш прежнего.
+ * Локальная машина и auth scope обязаны совпадать даже без ответа каталога.
+ */
+function sameLocalBoardOwner(sourceKey: string): boolean {
+  try {
+    const previous: unknown = JSON.parse(sourceKey);
+
+    return Array.isArray(previous)
+      && previous[0] === useAuthStore().clientScope
+      && previous[1] === (useShellStore().profile?.id ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Владелец снимка проверяется по локальному API, независимо от доступности портала.
  * Ни секреты, ни ключ источника не передаются в диагностику или наружный запрос.
  */
@@ -219,6 +236,19 @@ export const useBoardStore = defineStore('board', {
      * Смена трекера снимает чтения и снимки предыдущего поколения.
      * Общая очистка также отсекает ожидающие принудительные обновления.
      */
+    /**
+     * Разрыв транспорта останавливает опрос отдельно и сохраняет только уже видимый снимок.
+     * Метка успеха не меняется, поэтому возраст данных продолжает расти после reconnect.
+     */
+    markTransportUnavailable() {
+      if (!this.data) {
+        return;
+      }
+
+      this.error = translateUi('core.boardTrackerUnavailable');
+      this.lastRefreshAttemptAt = Date.now();
+    },
+
     invalidate() {
       this.clearSource();
     },
@@ -374,11 +404,20 @@ export const useBoardStore = defineStore('board', {
         }
 
         await this.markBaselineSeen();
+        await useTrackersStore().load(true);
 
         return readAt;
       } catch (error) {
         if (!controller.signal.aborted && epoch === this.sourceEpoch
           && !this.sourceSuspended && readAt >= this.readAt) {
+          if (!isTransientTrackerReadFailure(error)) {
+            this.clearSource();
+            this.error = errorMessage(error, translateUi('core.boardBoardUnavailable'));
+            this.lastRefreshAttemptAt = Date.now();
+
+            return;
+          }
+
           const failedSnapshotAt = this.staleSinceMs || this.failedSnapshotAt || this.loadedAt;
           const failedBranchTimes = { ...this.failedBranchTimes };
 
@@ -400,15 +439,21 @@ export const useBoardStore = defineStore('board', {
               this.clearSource();
               this.sourceKey = confirmed;
             }
-          } catch {
+          } catch (validationError) {
             if (controller.signal.aborted || epoch !== this.sourceEpoch
               || this.sourceSuspended || readAt < this.readAt) {
               return;
             }
 
-            this.clearSource();
-            this.failedSnapshotAt = failedSnapshotAt;
-            this.failedBranchTimes = failedBranchTimes;
+            const retain = isTransientTrackerReadFailure(validationError)
+              && isTransientTrackerReadFailure(error)
+              && !!this.data && sameLocalBoardOwner(this.sourceKey);
+
+            if (!retain) {
+              this.clearSource();
+              this.failedSnapshotAt = failedSnapshotAt;
+              this.failedBranchTimes = failedBranchTimes;
+            }
           }
 
           this.error = errorMessage(error, translateUi('core.boardBoardUnavailable'));

@@ -61,7 +61,7 @@ export const useTasksStore = defineStore('tasks', {
         prefix: '/api/tracker',
         source,
         options: useTrackersStore().mutationOptions(),
-      } : await resolveTrackerTarget(source, api, catalog ?? undefined);
+      } : await resolveTrackerTarget(source, api, catalog ?? undefined, { signal });
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
         return cached.data;

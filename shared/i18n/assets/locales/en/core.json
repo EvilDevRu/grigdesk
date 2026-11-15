@@ -1,4 +1,13 @@
 {
+  "trackerActionUnknown": "The action outcome is unknown. Checking the current state; before sending it again, make sure it has not already completed. {reason}",
+  "taskReadOnly": "The connection is not confirmed. Retry reading before changing the task.",
+  "taskPageStale": "Could not refresh the discussion. Showing the last received data.",
+  "taskPageFailed": "Could not load the discussion.",
+  "taskReadStale": "Could not refresh the task. Showing the last received data.",
+  "taskReadFailed": "Could not load the task.",
+  "taskReadReceived": "Received: {time}",
+  "taskReadAwaitingSource": "Checking the current tracker connection…",
+  "taskReadDenied": "Access to the task data was revoked. Retry after access is restored.",
   "newTaskUnavailable": "Task creation is unavailable on the connected boards",
   "taskNotFound": "Task not found",
   "newTaskChooseBoard": "Choose a board",

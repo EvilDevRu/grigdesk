@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -112,8 +113,17 @@ async function mountTriage(t, {
   let releases = 0;
   let cancels = 0;
   let resumePost = null;
+
   globalThis[`${prefix}Api`] = {
+    /**
+     * Каталог подтверждает возможности настоящей карточки независимо от оценки.
+     * Остальные ответы обслуживают только синтетические уточнения этого сценария.
+     */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) {
         return clarifications;
       }

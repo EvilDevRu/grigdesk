@@ -244,6 +244,7 @@ async function sourceCard(t, {
   });
   globalThis[`${prefix}Trackers`] = {
     catalog: multiCatalog(),
+    readFailure: () => undefined,
     epoch: 1,
     async load() {},
     invalidate() {},

@@ -62,6 +62,24 @@ Triage takes the first 8,000 description characters and last 15 comments of up t
 Unopened links reduce confidence. The selected cloud model receives task materials.
 Triage reads code without starting an environment, running tests or changing source files.
 
+
+During a temporary connection failure, the board and timers keep the last received data with
+an age warning. Age belongs to the failed source; another tracker's success does not refresh it.
+If no data has been received, an error appears rather than a loaded empty board.
+Reading resumes automatically after recovery. Use Retry on the board, in the timer panel or
+in the card's error message for a manual refresh; it is unavailable while reading.
+
+An open card keeps its description, comments, tags and subtasks. An initial discussion failure
+does not mean there are no comments. Your comment draft survives a retry. When the connection
+has not been confirmed, task changes wait for a new check. If an action's outcome is unknown,
+the interface reads the current state and keeps the warning. This readback does not prove that
+a particular command was delivered: check whether it already happened before sending it again.
+Writes are never retried automatically.
+
+Last received data lives only in the current document's memory for the same session and machine.
+Reloading offline cannot restore it. Changing account, machine or credentials, or confirmed
+revocation of access, clears previous server data.
+
 ## Create through an agent or tracker
 
 Ask an agent to create a task in the named tracker with a title, description, project and materials.

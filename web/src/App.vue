@@ -444,7 +444,14 @@ watch(() => auth.authenticated, (on, was) => {
     settings.dispose('auth-lost');
     pollingStarted = false;
     useBoardStore().stopPolling();
-    useBoardStore().clearSource();
+
+    if (shell.present && auth.logReason !== '401'
+      && (shell.status === 'offline' || shell.status === 'connecting')) {
+      useBoardStore().markTransportUnavailable();
+    } else {
+      useBoardStore().clearSource();
+    }
+
     useSystemStore().stopPolling();
     useTaskShelfStore().stop();
     dismissAllAlerts();
@@ -458,6 +465,15 @@ watch(() => auth.authenticated, (on, was) => {
     // Разбор встречи набран человеком и потому переживает потерю сессии, а вот его поллинг —
     // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.
     useVideoSessionStore().stopPoll();
+  }
+});
+// Терминальный отказ может прийти уже после offline, когда authenticated и так false.
+// Такое событие обязано снять сохранённую доску без нового перехода true → false.
+watch([() => shell.status, () => auth.logReason], ([status, reason]) => {
+  const terminal = ['locked', 'unpaired', 'revoked', 'identityMismatch', 'incompatible'].includes(status);
+
+  if (shell.present && !auth.authenticated && (reason === '401' || terminal)) {
+    useBoardStore().clearSource();
   }
 });
 </script>

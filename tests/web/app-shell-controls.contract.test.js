@@ -252,7 +252,10 @@ test('поповер получает срок отказа источника �
   const source = await readFile(APP_SHELL_PATH, 'utf8');
 
   assert.match(source, /:stale-notice="boardStaleNotice"/u);
-  assert.match(source, /<BoardTimerPopover\s+v-if="topbarTimerTasks\.length \|\| boardStaleNotice"/u);
+  assert.match(
+    source,
+    /<BoardTimerPopover\s+v-if="topbarTimerTasks\.length \|\| boardStaleNotice \|\| timerActionError"/u,
+  );
   assert.match(source, /return t\('core\.boardTrackerUnavailable'\);/u);
   assert.match(source, /const since = boardStore\.staleSinceMs;/u);
   assert.match(source, /boardStore\.lastRefreshAttemptAt/u);

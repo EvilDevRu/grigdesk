@@ -1,12 +1,12 @@
 <template>
-  <span v-if="tasks.length || staleNotice" class="board-timers-topbar">
+  <span v-if="tasks.length || staleNotice || error" class="board-timers-topbar">
     <UiTopbarPanel :title="t('core.taskTimers')">
       <template #trigger>
         <UiButton
           data-context="board-timers-topbar"
           variant="ghost"
-          :aria-label="staleNotice && !tasks.length
-            ? staleNotice : t('core.taskTimersActiveWorkedToday', { activeCount, workedToday })"
+          :aria-label="!tasks.length
+            ? staleNotice || error : t('core.taskTimersActiveWorkedToday', { activeCount, workedToday })"
         >
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
@@ -92,6 +92,16 @@
           <UiInlineMessage v-if="error" tone="danger">
             {{ error }}
           </UiInlineMessage>
+          <UiButton
+            v-if="staleNotice || error"
+            data-context="topbar-timers-retry"
+            variant="text"
+            :loading="refreshing"
+            :disabled="refreshing"
+            @click="emit('retry')"
+          >
+            {{ t('core.boardRetry') }}
+          </UiButton>
         </section>
       </template>
       <template #footer="{ close }">
@@ -134,6 +144,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  refreshing: {
+    type: Boolean,
+    default: false,
+  },
   staleNotice: {
     type: String,
     default: '',
@@ -144,7 +158,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['openTask', 'openBoard', 'toggleTimer']);
+const emit = defineEmits(['openTask', 'openBoard', 'toggleTimer', 'retry']);
 const now = ref(Date.now());
 const activeCount = computed(() => props.tasks.filter((task) => task.timerRunning).length);
 const workedToday = computed(() => hoursToHM(props.workedTodayHours));

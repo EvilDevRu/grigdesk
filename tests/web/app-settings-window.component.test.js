@@ -58,6 +58,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     ...h.store,
     load: async () => h.calls.push('board.load'),
     clearSource: () => h.calls.push('board.clear'),
+    markTransportUnavailable: () => h.calls.push('board.stale'),
   };
   h.store.$onAction = () => () => {};
   h.store.setMirror = () => {};
@@ -374,3 +375,57 @@ test('SOURCE-APP: смена машины, auth scope и потеря входа
   await flushPromises();
   assert.equal(h.calls.filter((call) => call === 'board.clear').length, before + 3);
 });
+
+test('RES-SHELL: offline сохраняет снимок, повторный вход возвращает polling', async (t) => {
+  const { h } = await fixture(t, 'main', true, true);
+  const snapshot = { tasks: [{ id: 42, title: 'Последняя задача' }] };
+
+  h.auth.logReason = 'load';
+  h.boardStore.data = snapshot;
+  h.boardStore.clearSource = () => {
+    h.calls.push('board.clear');
+    h.boardStore.data = null;
+  };
+  h.boardStore.markTransportUnavailable = () => {
+    h.calls.push('board.stale');
+    h.boardStore.error = 'Нет связи';
+  };
+
+  const polls = h.calls.filter((call) => call === 'poll').length;
+
+  h.shell.status = 'offline';
+  await flushPromises();
+  assert.equal(h.boardStore.data, snapshot);
+  assert.equal(h.boardStore.error, 'Нет связи');
+  h.shell.status = 'connecting';
+  await flushPromises();
+  assert.equal(h.boardStore.data, snapshot);
+  h.shell.status = 'online';
+  await flushPromises();
+  h.auth.authenticated = true;
+  await flushPromises();
+  assert.ok(h.calls.filter((call) => call === 'poll').length > polls);
+});
+
+for (const terminal of ['401', 'locked', 'revoked', 'identityMismatch', 'unpaired', 'incompatible']) {
+  test(`SHELL-TERMINAL: ${terminal} после offline очищает сохранённую доску`, async (t) => {
+    const { h } = await fixture(t, 'main', true, true);
+
+    h.boardStore.data = { tasks: [{ id: 42 }] };
+    h.boardStore.clearSource = () => {
+      h.boardStore.data = null;
+    };
+    h.boardStore.markTransportUnavailable = () => {};
+    h.shell.status = 'offline';
+    await flushPromises();
+
+    if (terminal === '401') {
+      h.auth.logReason = '401';
+    } else {
+      h.shell.status = terminal;
+    }
+
+    await flushPromises();
+    assert.equal(h.boardStore.data, null);
+  });
+}

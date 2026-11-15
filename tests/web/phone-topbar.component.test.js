@@ -540,3 +540,167 @@ test('PHONE-TOPBAR: запуск без машины восстанавлива�
   await flushPromises();
   assert.equal(wrapper.get('.topbar [data-context="connection-trigger"]').element === machine.element, true);
 });
+
+test('SHELL-RETRY: кнопка панели перечитывает настоящий store доски', async (t) => {
+  const { wrapper, pinia } = await mountAppShell(t);
+  const board = pinia._s.get('board');
+  const pending = Promise.withResolvers();
+  const calls = [];
+
+  board.error = 'network lost';
+  board.load = async (force) => {
+    calls.push(force);
+    board.loading = true;
+    await pending.promise;
+    board.loading = false;
+  };
+
+  try {
+    await flushPromises();
+    await wrapper.get('[data-context="board-timers-topbar"]').trigger('mouseenter');
+    await nextTick();
+
+    const retry = browser.document.querySelector('[data-context="topbar-timers-retry"]');
+
+    assert.ok(retry);
+    retry.click();
+    await flushPromises();
+    assert.deepEqual(calls, [true]);
+    assert.equal(retry.disabled, true);
+  } finally {
+    pending.resolve();
+    await flushPromises();
+  }
+});
+
+test('SHELL-UNKNOWN: потеря ответа таймера вызывает чтение, а не повтор команды', async (t) => {
+  const { wrapper, pinia } = await mountAppShell(t);
+  const board = pinia._s.get('board');
+  const tasks = pinia._s.get('tasks');
+  let writes = 0;
+  let reads = 0;
+
+  board.data = { tasks: [{
+      id: 42,
+      title: 'Таймер',
+      timerRunning: true,
+      timerElapsed: 12,
+    }] };
+  tasks.timer = async () => {
+    writes += 1;
+
+    throw new TypeError('response lost');
+  };
+  board.load = async (force) => {
+    assert.equal(force, true);
+    reads += 1;
+    board.data = { tasks: [{
+      id: 42,
+      title: 'Таймер',
+      timerRunning: false,
+      timerElapsed: 12,
+    }] };
+  };
+
+  await flushPromises();
+  await wrapper.get('[data-context="board-timers-topbar"]').trigger('mouseenter');
+  await nextTick();
+  browser.document.querySelector('[data-context="topbar-timer-toggle"]').click();
+  await flushPromises();
+  assert.equal(writes, 1);
+  assert.equal(reads, 1);
+  assert.equal(browser.document.querySelectorAll('[data-context="topbar-timer-task"]').length, 0);
+  assert.ok(wrapper.find('[data-context="board-timers-topbar"]').exists());
+  assert.match(browser.document.querySelector('.board-timers-popover')?.textContent ?? '', /неизвестен/u);
+  board.data = { tasks: [] };
+  await flushPromises();
+  assert.ok(wrapper.find('[data-context="board-timers-topbar"]').exists());
+  assert.match(browser.document.querySelector('.board-timers-popover')?.textContent ?? '', /неизвестен/u);
+});
+
+test('SHELL-LEGACY-RECOVERY: каталог восстанавливается после закрытия consumer, timer явный', async (t) => {
+  let metadataBroken = false;
+  let running = true;
+  const writes = [];
+  const metadata = {
+    revision: 1,
+    externalId: 'fixture',
+    activeIds: ['fixture'],
+    drivers: [{
+      id: 'fixture',
+      status: 'active',
+      capabilities: { timer: true },
+    }],
+  };
+
+  t.mock.method(globalThis, 'fetch', async (path, options = {}) => {
+    const route = String(path);
+    const method = options.method ?? 'GET';
+    let body = {};
+    let status = 200;
+
+    if (route === '/api/trackers') {
+      body = metadataBroken ? { error: 'temporary metadata failure' } : metadata;
+      status = metadataBroken ? 503 : 200;
+    } else if (route === '/api/tracker/dashboard') {
+      body = { tasks: [{
+        id: 42,
+        title: 'Живой таймер',
+        timerRunning: running,
+        timerElapsed: 12,
+      }] };
+    } else if (route === '/api/tracker/task-seen') {
+      body = {
+        scope: 'fixture',
+        revision: 1,
+        initialized: true,
+        taskIds: [],
+      };
+    } else if (method === 'POST' && route.endsWith('/timer/pause')) {
+      writes.push(route);
+      running = false;
+      body = { ok: true };
+    }
+
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  const { wrapper, pinia } = await mountAppShell(t);
+  const board = pinia._s.get('board');
+
+  await board.load(true);
+
+  const trackers = pinia._s.get('trackers');
+  const ui = pinia._s.get('ui');
+
+  ui.taskId = '42';
+  metadataBroken = true;
+  await trackers.load(true);
+  assert.ok(trackers.error);
+  ui.close();
+  await flushPromises();
+  await wrapper.get('[data-context="board-timers-topbar"]').trigger('mouseenter');
+  await nextTick();
+  browser.document.querySelector('[data-context="topbar-timer-toggle"]').click();
+  await flushPromises();
+  assert.equal(writes.length, 0);
+
+  const retry = browser.document.querySelector('[data-context="topbar-timers-retry"]');
+
+  assert.ok(retry, 'Ошибка каталога предлагает чтение, даже когда board snapshot свежий');
+  metadataBroken = false;
+  retry.click();
+  await flushPromises();
+  await flushPromises();
+  assert.equal(trackers.error, '');
+  assert.equal(board.loading, false);
+  assert.equal(writes.length, 0, 'Подтверждение metadata не повторяет прежнюю команду');
+  browser.document.querySelector('[data-context="topbar-timer-toggle"]').click();
+  await flushPromises();
+  await flushPromises();
+  assert.deepEqual(writes, ['/api/tracker/task/42/timer/pause']);
+  assert.equal(board.data.tasks[0].timerRunning, false);
+});
