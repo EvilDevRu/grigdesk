@@ -18,6 +18,11 @@
       "reason": "Код отказа native browser IPC при отсутствии окна; часть протокола"
     },
     {
+      "text": "help_unavailable",
+      "file": "web/src/shared/helpLoader.ts",
+      "reason": "Внутренний код отказа загрузки справки; окно показывает локализованное сообщение"
+    },
+    {
       "text": "invalid-api-path",
       "file": "web/src/pluginRuntime/context.ts",
       "reason": "Внутренний код отказа API; панель показывает локализованное сообщение вместо исключения"
