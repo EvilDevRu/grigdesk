@@ -383,11 +383,22 @@
           <UiButton v-if="historyPage?.newer" @click="showLatestHistory">
             {{ t('core.chatHistoryLatest') }}
           </UiButton>
-          <UiButton v-if="sess?.historyWindow?.hasOlder" :disabled="historyPage?.loading || prepending"
-                    @click="loadOlderHistory">
-            {{ t(historyPage?.loading ? 'core.chatHistoryOlderLoading' : historyPage?.error
-              ? 'core.chatPageRetry' : 'core.chatHistoryOlder') }}
-          </UiButton>
+          <div v-if="sess?.historyWindow?.hasOlder" class="history-page-divider">
+            <UiButton variant="ghost" size="compact" data-role="chat-history-older"
+                      :loading="historyPage?.loading || prepending"
+                      :loading-label="t('core.chatHistoryOlderLoading')"
+                      :disabled="historyPage?.loading || prepending" @click="loadOlderHistory">
+              <template #leading>
+                <UiRefreshIcon v-if="historyPage?.error" />
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true">
+                  <path d="m7 14 5-5 5 5m-10-5 5-5 5 5" />
+                </svg>
+              </template>
+              {{ historyPage?.error ? t('core.chatPageRetry') : t('core.chatHistoryOlder') }}
+            </UiButton>
+          </div>
         </div>
         <div v-if="messagesReady && !sess.messages?.length" class="empty">
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : t('core.chatSprosiAgenta') }}</div>
@@ -2947,7 +2958,27 @@ function skipQuestion() {
 </script>
 
 <style scoped>
-.history-page-notice { display: grid; justify-items: center; gap: 8px; padding: 8px 0; }
+.history-page-notice {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.history-page-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 440px);
+}
+
+.history-page-divider::before,
+.history-page-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
 
 /* min-width: 0 обязателен: без него флекс-элемент не сжимается ниже min-content своего
    содержимого — одна длинная команда в ленте или во всплывашке раздувала всю колонку

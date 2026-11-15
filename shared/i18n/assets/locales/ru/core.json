@@ -1633,7 +1633,7 @@
   "chatPageRefresh": "Обновить список",
   "chatPageMore": "Показать ещё",
   "chatHistoryOlderLoading": "Загружаем старые сообщения…",
-  "chatHistoryOlder": "Показать более ранние сообщения",
+  "chatHistoryOlder": "Ранние сообщения",
   "chatHistoryLatest": "К новым сообщениям",
   "chatPagingUnsupported": "Сервер не поддерживает порционную загрузку чатов",
   "chatPageInvalid": "Слишком большая страница чатов",

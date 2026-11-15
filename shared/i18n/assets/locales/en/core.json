@@ -1613,7 +1613,7 @@
   "chatPageRefresh": "Refresh list",
   "chatPageMore": "Load more",
   "chatHistoryOlderLoading": "Loading older messages…",
-  "chatHistoryOlder": "Show earlier messages",
+  "chatHistoryOlder": "Earlier messages",
   "chatHistoryLatest": "Go to new messages",
   "chatPagingUnsupported": "The server does not support paged chat loading",
   "chatPageInvalid": "The chat page is too large",
