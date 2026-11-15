@@ -338,6 +338,24 @@
     ]
   },
   {
+    "file": "voice.md",
+    "id": "voice",
+    "title": "Speaking text with voice",
+    "section": "Settings",
+    "keywords": [
+      "speech synthesis",
+      "voice",
+      "tts",
+      "qwen",
+      "qwencloud token plan",
+      "pronunciation instruction",
+      "piper",
+      "silero",
+      "stress",
+      "narration"
+    ]
+  },
+  {
     "file": "web-log.md",
     "id": "web-log",
     "title": "Window log and diagnostics",

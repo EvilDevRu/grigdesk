@@ -60,6 +60,7 @@ An older server that only provides Russian articles displays a language notice i
 - [GrigDesk settings](settings.md)
 - [Machines and connections](connections.md)
 - [Dictation and meetings](speech.md)
+- [Speaking text with voice: Model Studio, QwenCloud Token Plan and stress marks](voice.md)
 - [Window log and diagnostics](web-log.md)
 - [Troubleshooting: connection, startup settings and build errors](troubleshooting.md)
 - [Glossary](glossary.md)

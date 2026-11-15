@@ -8,6 +8,9 @@
 
 ## Устройство
 
+- [Ядро voice: Model Studio, QwenCloud Token Plan и локальные движки](voice-core.md)
+- [Qwen Token Plan в voice: инструкция, экспериментальные ударения и потоковый WAV](voice-qwen-token-plan.md)
+
 - [Ссылки установки системных зависимостей речи](speech-dependency-links.md)
 - [Установка, обновление и удаление окружения Whisper через настройки](speech-installation.md)
 - [Встреча из нескольких файлов](multi-file-meetings.md)

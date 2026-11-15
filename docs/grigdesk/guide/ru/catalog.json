@@ -341,6 +341,25 @@
     ]
   },
   {
+    "file": "voice.md",
+    "id": "voice",
+    "title": "Озвучка текста командой voice",
+    "section": "Настройки",
+    "keywords": [
+      "озвучка",
+      "голос",
+      "tts",
+      "voice",
+      "синтез речи",
+      "qwen",
+      "qwencloud token plan",
+      "инструкция произношения",
+      "piper",
+      "silero",
+      "ударения"
+    ]
+  },
+  {
     "file": "web-log.md",
     "id": "web-log",
     "title": "Журнал окна и диагностика",
