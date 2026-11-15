@@ -5281,5 +5281,27 @@
     "other": "{count} сообщения"
   },
   "factoryLoopRoundOf": "Круг {round} из {maxRounds}",
-  "codeNotCommittedLine": "не в коммите"
+  "codeNotCommittedLine": "не в коммите",
+  "projectKonfiguratsiyaFabriki": "Конфигурация фабрики",
+  "projectPrimenitIzmeneniya": "Применить изменения",
+  "projectChtoIzmenitsya": "Что изменится",
+  "projectPodtverditZapisi": "Записать в профиль",
+  "projectConfigCapabilities": "Возможности профиля",
+  "projectConfigActual": "Последнее прочитанное значение",
+  "projectConfigAbsent": "не задано",
+  "projectConfigEmpty": "пусто",
+  "projectConfigReload": "Перечитать, сохранив ввод",
+  "projectConfigDiscard": "Отменить неприменённый ввод",
+  "projectConfigConflict": "Значение изменилось. Ввод сохранён; проверьте свежие значения перед повтором.",
+  "projectConfigPartial": "Применено операций исполнителей: {count}. Неприменённый ввод сохранён.",
+  "projectConfigUnknown": "Исход записи требует проверки. Перед повтором дождитесь успешного перечитывания.",
+  "projectConfigInterrupted": "Последующие записи остановлены после смены проекта или режима доступа.",
+  "projectConfigSaved": "Запись выполнена.",
+  "projectConfigPendingUnavailable": "Поле больше недоступно для правки; ввод сохранён. Проверьте профиль или отмените этот ввод.",
+  "projectConfigRunnerReadonly": "только чтение: ключ или граница роли и исполнителя не представлены однозначно",
+  "projectConfigFileReadonly": "только чтение: файл отсутствует",
+  "projectConfigVariableReadonly": "только чтение: присваивание не поддерживает безопасную точечную правку",
+  "projectConfigReadError": "Не удалось прочитать конфигурацию",
+  "projectConfigWriteError": "Не удалось записать конфигурацию",
+  "projectConfigInvalidResponse": "Сервер вернул неподходящую конфигурацию профиля"
 }

@@ -53,6 +53,8 @@
             @open-routes="emit('openRoutes')"
           />
           <p v-else class="hint">{{ t('core.projectSvyaziPoyavyatsyaPosleSozdaniya') }}</p>
+          <ProjectFactoryConfig v-if="detail?.profile.present" :detail="detail"
+                                :readonly="readonly || saving || busy" />
         </section>
 
         <section v-if="!creating" class="management" data-role="project-manage">
@@ -160,6 +162,7 @@ import { validateProjectInput } from '../../../../shared/runtime/projectsContrac
 import { toInput } from './projectDraft';
 import ProjectIcon from './ProjectIcon.vue';
 import ProjectProfileStatus from './ProjectProfileStatus.vue';
+import ProjectFactoryConfig from './ProjectFactoryConfig.vue';
 import ProjectRepoRows from './ProjectRepoRows.vue';
 import type {
   ProjectDependencies,

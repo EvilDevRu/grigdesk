@@ -152,6 +152,7 @@ import { SESSION_ONLY_PREFIXES } from './modules/plugins/installRoutes.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
 import projectsModule from './modules/projects/index.ts';
+import profileConfigModule from './modules/profileConfig/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
 import {
   countGitHubRules,
@@ -1356,6 +1357,7 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
+  await fastify.register(profileConfigModule, { config });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService, installs: dbEngineInstalls });
   await fastify.register(dockerModule, { service: dockerService });

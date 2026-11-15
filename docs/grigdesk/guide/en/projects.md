@@ -27,6 +27,23 @@ Reload the page if the old menu remains. The agent reads code, proposes intervie
 one package confirmation applies them. Existing profiles show a diff first.
 You do not need to send tokens; registering a project alone does not install the skill.
 
+## Factory configuration
+
+For an existing project with a factory profile, expand Factory configuration. It shows capabilities,
+variables, runners and models. Edit an available field, choose Apply changes, review the complete
+summary and confirm Write to profile. Failover and unchanged model fields appear when their group
+is sent. Last value read shows the server fact separately from your input. Profile metadata are
+read without executing Bash.
+
+After a conflict or partial failure, wait for reload, compare actual values and confirm the remaining
+changes again. An unknown write outcome is never retried automatically. Reload and keep input retains
+unapplied intent. Discard unapplied input removes intent; completed writes remain applied.
+
+Apply necessary changes before leaving: navigation to another project and page reload discard local
+panel input. Read-only fields explain the restriction; edit complex assignments manually in the trusted
+profile according to its contract. The form does not create a profile. Manual acceptance of writes
+through the live engine after restarting the server is still required.
+
 ## Result
 
 The saved project's repositories appear in Code and new selectors.

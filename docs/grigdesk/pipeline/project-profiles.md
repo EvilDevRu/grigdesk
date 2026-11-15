@@ -58,6 +58,41 @@ profiles/<PROFILE>/
 форме нужен опубликованный каталог. Подробнее —
 [выбор профиля по триажу](launch-profile-consistency.md).
 
+## Конфигурация через GrigDesk
+
+`GET /api/profiles/:profile/config` возвращает variables.profileSh/dashboard, runners и capabilities.
+Это исходные литеральные metadata, не effective окружение Bash. Сервер читает обычные UTF-8
+файлы без исполнения shell. DTO переменной содержит name/value/literal/editable/present/reason;
+непроверяемые и неизвестные значения — null, raw shell не передаётся. UI переводит известные причины.
+
+Разрешён непрерывный префикс комментариев, пустых строк и однострочных NAME=literal.
+Первая сложная строка закрывает префикс; повторные упоминания и динамические writers
+консервативно делают поле readonly. Whitelist profile.sh: PROFILE_CTX, PROFILE_SERVICE_HOST,
+PROFILE_LOOP_MAX_ROUNDS, PROFILE_TRIAGE_REPOS/MARKERS/ROUTES/RULES. У dashboard.env:
+FACTORY_STAND_URL/CONTAINER/FE_CONTAINER, FACTORY_TASK_BASE_URL и FACTORY_TIMER_CMD.
+Отсутствующий разрешённый ключ создаётся только при editable=true; dashboard-файл не создаётся.
+
+`PATCH /api/profiles/:profile/variables` принимает `{file,changes:[{name,from,to}]}`.
+Весь batch проверяется до эффекта, все from — до замены. null в to удаляет строку;
+null в from означает отсутствие metadata. Новый литерал вставляется перед shell-хвостом.
+Общий process-lock, уникальный temp, fsync и повторная проверка полного файла сохраняют
+mode и соседние байты. Несовпадение даёт 409 без своей записи. Внешний редактор, не соблюдающий
+lock, может попасть между recheck и rename: совместная транзакция с ним не обещается.
+
+`PATCH /api/profiles/:profile/runners` принимает `{operations:[...]}`. Весь DTO декодируется
+до первого spawn; выбранные config.factoryBin/factoryHome вызываются последовательно без shell.
+Операция runner: `{kind:'runner',role?,primary,failover?}`. Пропущенный failover сохраняет
+свою PROJECT/STAGE пару, явный пустой очищает. UI всегда показывает и передаёт полную пару.
+Model: `{kind:'model',role,provider,family?,familyFailover?,version?,variant?,effort?,exact?}`;
+familyFailover соответствует FAMILY_FAILOVER и `family_failover=` CLI. Пустое поле снимает значение.
+502 сообщает appliedOperations подтверждённых операций и currentOperationUnknown; отката batch нет.
+
+Панель редактирует существующие однозначные группы. Provider берётся из текущих валидных
+primary/failover и нормализуется uppercase с `-` → `_`. Все разбиения role/provider проверяются;
+неизвестный provider, коллизия или несколько разборов MODEL_* остаются readonly. Длиннейший
+суффикс не выбирается автоматически. Новые модели или произвольные Bash-скрипты форма не создаёт.
+Ручная проверка на живом профиле после перезапуска сервера ещё требуется.
+
 ## `profile.sh`: переменные
 
 Это исполняемый доверенный Bash-файл. Он может содержать собственные переменные проекта,

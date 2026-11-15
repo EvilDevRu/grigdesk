@@ -5259,5 +5259,27 @@
     "other": "{count} messages"
   },
   "factoryLoopRoundOf": "Round {round} of {maxRounds}",
-  "codeNotCommittedLine": "not committed"
+  "codeNotCommittedLine": "not committed",
+  "projectKonfiguratsiyaFabriki": "Factory configuration",
+  "projectPrimenitIzmeneniya": "Apply changes",
+  "projectChtoIzmenitsya": "Changes to apply",
+  "projectPodtverditZapisi": "Write to profile",
+  "projectConfigCapabilities": "Profile capabilities",
+  "projectConfigActual": "Last value read",
+  "projectConfigAbsent": "not set",
+  "projectConfigEmpty": "empty",
+  "projectConfigReload": "Reload and keep input",
+  "projectConfigDiscard": "Discard unapplied input",
+  "projectConfigConflict": "A value changed. Your input is preserved; review the current values before retrying.",
+  "projectConfigPartial": "Runner operations applied: {count}. Unapplied input preserved.",
+  "projectConfigUnknown": "The write outcome needs checking. Wait for a successful reload before retrying.",
+  "projectConfigInterrupted": "Further writes stopped after the project or access mode changed.",
+  "projectConfigSaved": "Write completed.",
+  "projectConfigPendingUnavailable": "This field can no longer be edited; input is preserved. Check the profile or discard the input.",
+  "projectConfigRunnerReadonly": "read-only: the key or role/provider boundary is not unambiguous",
+  "projectConfigFileReadonly": "read-only: file is missing",
+  "projectConfigVariableReadonly": "read-only: this assignment does not support safe targeted editing",
+  "projectConfigReadError": "Could not read configuration",
+  "projectConfigWriteError": "Could not write configuration",
+  "projectConfigInvalidResponse": "The server returned an invalid profile configuration"
 }
