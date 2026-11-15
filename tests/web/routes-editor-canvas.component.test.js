@@ -43,14 +43,20 @@ async function fixture(t, initial = makeDraft(), scope = { kind: 'route', routeI
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  let document = initial;
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+  let document = reactive(initial);
   const selected = [];
   const focused = [];
   const wrapper = mount(Component, { attachTo: browser.document.querySelector('#mount'),
-    props: { document, scope,
+    props: {
+      document,
+      scope,
       onSelectNode: (value) => selected.push(value),
       onFocusField: (value) => focused.push(value),
-      onChange: (next) => { document = next; void wrapper.setProps({ document }); },
+      onChange: (next) => {
+        document = reactive(next);
+        void wrapper.setProps({ document });
+      },
     } });
   t.after(() => wrapper.unmount());
   return { wrapper, selected, focused, flushPromises, getDocument: () => document };
@@ -120,7 +126,7 @@ test('RE-F5-02: холст рисует схему конвейера — эта
     assert.equal(wrapper.find('[data-node="check"]').classes().includes('selected'), true);
     assert.equal(wrapper.find('[data-node="check"]').attributes('aria-current'), 'true');
     assert.equal(wrapper.find('[data-node="build"]').classes().includes('selected'), false);
-    assert.deepEqual(toRuntimeCatalogInput(getDocument()), before);
+    assert.deepEqual(toRuntimeCatalogInput(JSON.parse(JSON.stringify(getDocument()))), before);
   });
 
 test('RE-F5-03: соединение исхода вызывает один setTransition; оба исхода видны на линии',
@@ -159,7 +165,7 @@ test('RE-F5-04: масштаб и поиск берегут выбор и runtim
   await wrapper.find('[data-test="search-nodes"]').setValue('check');
   await wrapper.find('[data-test="search-nodes"]').trigger('keydown', { key: 'Enter' });
   assert.equal(selected.at(-1).nodeId, 'check');
-  assert.deepEqual(toRuntimeCatalogInput(getDocument()), before);
+  assert.deepEqual(toRuntimeCatalogInput(JSON.parse(JSON.stringify(getDocument()))), before);
 });
 
 test('RE-F5-06: разведка на холсте показывает маршруты, из которых выбирает', async (t) => {
@@ -179,6 +185,7 @@ test('RE-F5-07: незаконченный черновик с удалённы�
   const draft = makeDraft();
   draft.routes.quick.route.entry = 'ghost';
   draft.routes.quick.route.sequence.main.unshift('ghost');
+
   const { wrapper } = await fixture(t, draft);
   const drawn = wrapper.findAll('[data-node]').map((node) => node.attributes('data-node'));
 
@@ -230,3 +237,14 @@ function browserTextArea(document) {
   element.className = 'monaco-editor';
   return element;
 }
+
+test('RE-G3-01: ручная точка рисуется как есть, сосед без точки остаётся на змейке', async (t) => {
+  const draft = makeDraft();
+
+  draft.presentation['r:quick:build'] = { x: 900, y: 60 };
+
+  const { wrapper } = await fixture(t, draft);
+
+  assert.equal(wrapper.find('[data-node="build"] circle.node-shape').attributes('cx'), '900');
+  assert.equal(wrapper.find('[data-node="check"] .node-shape').exists(), true);
+});

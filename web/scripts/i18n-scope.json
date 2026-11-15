@@ -3596,6 +3596,27 @@
       "key": [
         "*"
       ]
+    },
+    "web/src/views/routes/RouteAddNodeDialog.vue": {
+      "`core.stageWizardRole_${role.id}`": [
+        "core.stageWizardRole_*"
+      ],
+      "`core.stageWizardHint_${role.id}`": [
+        "core.stageWizardHint_*"
+      ]
+    },
+    "web/src/views/routes/RouteStageWorkspace.vue": {
+      "key": [
+        "core.stageWizardReason_after_delivery",
+        "core.stageWizardReason_loop_pair",
+        "core.stageWizardReason_success_required",
+        "core.stageWizardReason_role_duplicate",
+        "core.stageWizardReason_recheck_unavailable",
+        "core.stageWizardReason_role_invalid",
+        "core.stageWizardReason_route_missing",
+        "core.stageWizardReason_prompt_missing",
+        "core.stageWizardReason_prompt_limit_exceeded"
+      ]
     }
   },
   "metadataCoverage": [

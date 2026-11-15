@@ -54,3 +54,10 @@
 Геометрия находится в `web/src/shared/graphGeom.ts`, представление — в
 `web/src/views/pipeline/FactoryGraph.vue`. Проверки:
 `tests/web/graph-geometry.test.js` и `tests/web/factory-graph.component.test.js`.
+
+## Позиции редактора
+
+Общий `buildRouteGraph` принимает `positions`: ID узла машины → `[x,y]`.
+Известные исполняемые узлы получают точки поверх змейки; неизвестные ID игнорируются.
+`canvasGraph` сводит сохранённые точки и временный перенос в одну показанную схему,
+которую использует также выбор ближайшего левого соседа при вставке роли.

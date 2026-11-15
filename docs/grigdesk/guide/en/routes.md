@@ -23,6 +23,22 @@ Model and effort belong to launch policy outside the route catalog; the inspecto
 The add-stage wizard asks for role, environment/permission needs and position, previewing transitions before application.
 Ctrl+S saves applied changes. Apply a field's local input with its own button first.
 
+## Visual editor
+
+Click empty canvas space or Add stage, then choose a role. Custom asks for an instruction.
+An empty route receives the complete role package. Otherwise it connects after the nearest
+stage center strictly to the left. A missing predecessor or forbidden position keeps the dialog
+and your text; choose another point or use the existing wizard.
+
+Drag nodes to move them; Escape cancels. Moving changes layout only; use the stage list to
+change execution order. Drag an outcome of the selected stage onto another node to connect it.
+Dropping outside nodes or onto the source changes nothing. Connections remains available for
+keyboard input. Auto-arrange restores the snake layout in one undoable action.
+
+Coordinates remain in the original draft after publication. A new copy of a published catalog
+starts with automatic layout. Saving and publishing keep their usual confirmations. Full manual
+acceptance of gestures after updating the server is still required; component checks do not replace it.
+
 ## From the terminal
 
 `routes` ships as a standalone SEA executable and needs no system Node.

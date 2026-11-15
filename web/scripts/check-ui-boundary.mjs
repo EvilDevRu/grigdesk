@@ -50,6 +50,10 @@ const SVG_PRESSABLE_CONSUMERS = new Set([
 ]);
 
 const NON_ACTIVATION_HANDLERS = new Set([
+  // Фон сцены открывает роль; для клавиатуры рядом есть UiButton добавления.
+  'web/src/views/routes/RouteCanvas.vue|div|click|addAtEmpty',
+  // Capture подавляет ложный click дочернего control после переноса узла.
+  'web/src/views/routes/RouteCanvas.vue|div|click|guardCanvasClick',
   // Делегирование кликов по настоящим ссылкам внутри v-html/markdown.
   'web/src/views/DocumentModal.vue|section|click|onDocumentClick',
   'web/src/views/chat/ChatSession.vue|div|click|onMarkdownClick',

@@ -174,7 +174,7 @@
                               @prompt-change="changeBootstrapPrompt"
                               @end-history-group="endHistoryGroup" @save="saveDraft" />
         <div v-else-if="selectedRoute" class="route-editor-workspace">
-          <RouteStageWorkspace :document="routesStore.localDocument"
+          <RouteStageWorkspace :profile="profile" :document="routesStore.localDocument"
                                :scope="{ kind: 'route', routeId: selectedRoute }"
                                :selected-node-id="selectedNode" :focused-issue="canvasFocusedProblem"
                                :capabilities="routesStore.editorInfo?.capabilities ?? null"
@@ -1862,8 +1862,8 @@ onUnmounted(() => {
   }
 
   .panel-scroll--route-editor > .route-editor-workspace {
-    flex: 1 0 400px;
-    min-height: 400px;
+    flex: 1 0 520px;
+    min-height: 520px;
     grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
   }
 

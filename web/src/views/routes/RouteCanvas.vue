@@ -2,6 +2,10 @@
   <section class="route-canvas">
     <div class="route-canvas__toolbar">
       <strong>{{ t('core.routeShema2') }}</strong>
+      <UiButton data-context="workspace-form" variant="ghost" data-test="auto-layout"
+          v-tooltip="t('core.routeVernutAvtoraskladkuPodskazka')"
+          @click="autoLayout">{{ t('core.routeUporyadochitAvtomaticheski') }}</UiButton>
+
       <div class="route-canvas__zoom" role="group" :aria-label="t('core.routeMasshtabShemy')">
         <UiIconButton data-context="workspace-form" :label="t('core.routeUmenshitMasshtab')"
                       v-tooltip="t('core.routeUmenshitMasshtab')" data-test="zoom-out"
@@ -30,6 +34,10 @@
                  @update:model-value="searchTerm = String($event ?? '')"
                  @keydown.enter="searchNode" />
       </label>
+    <UiButton data-context="workspace-form" data-test="canvas-add-stage"
+              :disabled="scope.kind !== 'route'" @click="emit('add-at', defaultAddPoint())">
+      {{ t('core.routeDobavitEtap') }}
+    </UiButton>
       <details v-if="!chooseMode" class="route-canvas__connections">
         <summary>{{ t('core.routeSoedineniya') }}</summary>
         <div class="route-canvas__connection-fields">
@@ -53,8 +61,27 @@
       <span v-if="connecting" class="muted">{{ t('core.routeVyberiteTselNaSheme') }}</span>
       <span v-if="connectError" class="bad">{{ connectError }}</span>
     </div>
-    <div ref="viewport" class="route-canvas__graph">
-      <FactoryGraph v-if="graph" :graph="graph" reference interactive
+
+
+    <div v-if="selectedOutcomes.length" class="route-canvas__outcomes" data-test="outcome-chips">
+      <span>{{ t('core.routeIshodyVybrannogoEtapa') }}</span>
+      <UiButton v-for="outcome in selectedOutcomes" :key="outcome"
+                data-context="workspace-form" :data-test="`outcome-chip-${outcome}`"
+                v-tooltip="t('core.routePeretashiteEtapDlyaPerehoda')"
+                @pointerdown="beginOutcomeDrag($event, outcome)">
+        {{ outcome }}
+      </UiButton>
+    </div>
+    <Teleport to="body">
+      <span v-if="gesture?.kind === 'outcome' && gesture.moved" :style="outcomeGhostStyle"
+            aria-hidden="true" data-test="outcome-ghost">{{ gesture.outcome }}</span>
+    </Teleport>
+
+    <div ref="viewport" class="route-canvas__graph"
+         @pointerdown="beginNodeDrag" @click.capture="guardCanvasClick"
+         @lostpointercapture="cancelGesture" @click="addAtEmpty">
+      <FactoryGraph v-if="graph" :graph="graph" reference interactive keep-positions
+                    :fixed-view-box="gesture?.viewBox ?? null"
                     :selected-node="selectedNodeId || null" :scale="scale"
                     :highlight-selected-edges="highlightSelectedEdges" @node="activateNode" />
     </div>
@@ -62,15 +89,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import type { CSSProperties } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 
-import { buildRouteGraph } from '../../../../shared/pipeline/routeGraphView.ts';
-import type { RouteGraphDef, RouteMachine } from '../../../../shared/pipeline/routeGraphView.ts';
-import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.ts';
 import type { RouteDraft, RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteGraphDef } from '../../../../shared/pipeline/routeGraphView.ts';
+import { canvasNodeAt, captureCanvasTransform, canvasPoint, plainRouteValue } from './routeCanvasGeometry.ts';
+import type { CanvasTransform } from './routeCanvasGeometry.ts';
 import FactoryGraph from '../pipeline/FactoryGraph.vue';
-import type { RouteCommandScope } from './routeCommands.ts';
-import { setTransition } from './routeCommands.ts';
+import type { NodeCanvasPoint, RouteCommandScope } from './routeCommands.ts';
+import { canvasGraph, moveNodePosition, resetScopeLayout, setTransition } from './routeCommands.ts';
 import { UiButton, UiIconButton, UiInput, UiSelect, vTooltip, t } from '../../ui';
 
 // Узел, который схема отдаёт по активации: ID на схеме и ID в машине.
@@ -96,6 +124,7 @@ const emit = defineEmits<{
   }];
   change: [document: RouteDraft];
   'choose-place': [nodeId: string];
+  'add-at': [point: NodeCanvasPoint];
 }>();
 
 // Шаг и пределы масштаба: ниже половины натурального размера текст узлов не читается.
@@ -114,46 +143,293 @@ const machine = computed(() => props.scope.kind === 'bootstrap'
   ? props.document.bootstrap : props.document.routes[props.scope.routeId]?.route);
 // Та же схема, что у конвейера и опубликованного маршрута. Стенд зависит от профиля,
 // а не от машины, поэтому холст его не рисует; разведка показывает, из чего выбирает.
-const graph = computed<RouteGraphDef | null>(() => {
-  const current = machine.value;
+interface CanvasGesture {
+  kind: 'node' | 'outcome';
+  pointerId: number;
+  nodeId: string;
+  outcome?: string;
+  startX: number;
+  startY: number;
+  base: [number, number];
+  startGraph: NodeCanvasPoint;
+  transform: CanvasTransform;
+  viewBox: string | null;
+  graph: RouteGraphDef;
+  document: RouteDraft;
+  moved: boolean;
+  ghost: [number, number] | null;
+  client: NodeCanvasPoint;
+}
 
-  if (!current) {
-    return null;
+const gesture = ref<CanvasGesture | null>(null);
+const suppressClick = ref(false);
+let captureElement: Element | null = null;
+
+const graph = computed(() => {
+  const state = gesture.value;
+  const preview: Record<string, [number, number]> = {};
+
+  if (state?.kind === 'node' && state.ghost) {
+    preview[state.nodeId] = state.ghost;
   }
 
-  const bootstrap = props.scope.kind === 'bootstrap';
-  const routeId = props.scope.kind === 'route' ? props.scope.routeId : 'bootstrap';
-
-  // У маршрута линия перечисляет все свои исходы; у выбора маршрута исход всегда `done`,
-  // и одинаковая подпись на каждой линии разведки только шумела бы.
-  return buildRouteGraph(graphMachine(current, bootstrap), routeId, {
-    workspaceMode: 'shared',
-    outcomeLabels: bootstrap ? 'minimal' : 'all',
-    routeChoices: bootstrap,
-    nodeIds: true,
-  });
+  return canvasGraph(props.document, props.scope, preview);
 });
+
+function svgElement(): SVGSVGElement | null {
+  return viewport.value?.querySelector<SVGSVGElement>('svg.graph') ?? null;
+}
+
+/**
+ * Создаёт снимок систем координат и документа до изменения ghost.
+ * Перестройка viewBox во время жеста не влияет на последующие pointermove.
+ */
+function startGesture(
+  event: PointerEvent,
+  kind: CanvasGesture['kind'],
+  nodeId: string,
+  base: [number, number],
+  outcome?: string,
+): void {
+  if (!graph.value || gesture.value) {
+    return;
+  }
+
+  const svg = svgElement();
+  const transform = captureCanvasTransform(svg);
+
+  suppressClick.value = false;
+  gesture.value = {
+    kind,
+    pointerId: event.pointerId,
+    nodeId,
+    outcome,
+    startX: event.clientX,
+    startY: event.clientY,
+    base: [...base],
+    startGraph: canvasPoint(event, transform),
+    transform,
+    viewBox: svg?.getAttribute('viewBox') ?? null,
+    graph: plainRouteValue(graph.value),
+    document: props.document,
+    moved: false,
+    ghost: null,
+    client: { x: event.clientX, y: event.clientY },
+  };
+}
+
+/**
+ * Нажатие на этапе лишь вооружает drag; capture включится после порога 4 px.
+ * Поэтому обычный браузерный click остаётся на прежнем UiSvgPressable.
+ */
+function beginNodeDrag(event: PointerEvent): void {
+  if (event.button !== 0 || gesture.value) {
+    return;
+  }
+
+  suppressClick.value = false;
+
+  if (props.chooseMode || connecting.value || !graph.value) {
+    return;
+  }
+
+  const target = (event.target as Element | null)?.closest('[data-node]');
+  const displayId = target?.getAttribute('data-node');
+  const origin = displayId ? graph.value.nodeOrigins[displayId] : null;
+  const base = displayId ? graph.value.pos[displayId] : null;
+
+  if (origin?.executable && origin.originId && base) {
+    startGesture(event, 'node', origin.originId, [base[0], base[1]]);
+  }
+}
+
+/**
+ * Сопровождает только свой pointerId. После порога захватывает указатель на viewport,
+ * а не на вложенном узле; финальный синтетический click отдельно подавляется.
+ */
+function movePointer(event: PointerEvent): void {
+  const state = gesture.value;
+
+  if (!state || event.pointerId !== state.pointerId) {
+    return;
+  }
+  if (state.document !== props.document) {
+    cancelGesture();
+
+    return;
+  }
+  if (!state.moved && Math.hypot(event.clientX - state.startX, event.clientY - state.startY) < 4) {
+    return;
+  }
+
+  if (!state.moved) {
+    state.moved = true;
+    captureElement = viewport.value;
+
+    try {
+      captureElement?.setPointerCapture?.(state.pointerId);
+    } catch {
+      // Window listeners сохраняют жест, если браузер уже отменил захват указателя.
+    }
+  }
+
+  event.preventDefault();
+  state.client = { x: event.clientX, y: event.clientY };
+
+  if (state.kind === 'node') {
+    const point = canvasPoint(event, state.transform);
+
+    state.ghost = [
+      Math.min(100000, Math.max(0, state.base[0] + point.x - state.startGraph.x)),
+      Math.min(100000, Math.max(0, state.base[1] + point.y - state.startGraph.y)),
+    ];
+  }
+}
+
+/**
+ * Снимает capture после удаления состояния: lostpointercapture уже не отменяет новый жест.
+ * Ошибки освобождения не мешают очистке после pointercancel или размонтирования.
+ */
+function releaseGesture(state: CanvasGesture): void {
+  gesture.value = null;
+
+  try {
+    captureElement?.releasePointerCapture?.(state.pointerId);
+  } catch {
+    // Захват мог быть снят браузером автоматически.
+  }
+
+  captureElement = null;
+}
+
+/**
+ * Отпускание своего указателя фиксирует последнюю точку ровно одной командой.
+ * Сравнивается plain snapshot; Vue proxy никогда не передаётся structuredClone.
+ */
+function endPointer(event: PointerEvent): void {
+  const state = gesture.value;
+
+  if (!state || event.pointerId !== state.pointerId) {
+    return;
+  }
+
+  movePointer(event);
+
+  if (gesture.value !== state) {
+    return;
+  }
+
+  suppressClick.value = state.moved;
+
+  if (state.document !== props.document || !state.moved) {
+    releaseGesture(state);
+
+    return;
+  }
+
+  if (state.kind === 'outcome') {
+    finishOutcome(state, event);
+  } else if (state.ghost) {
+    const input = plainRouteValue(props.document);
+    const result = moveNodePosition(input, props.scope, state.nodeId,
+      { x: state.ghost[0], y: state.ghost[1] });
+
+    if (result.draft !== input) {
+      emit('change', result.draft);
+    }
+  }
+
+  releaseGesture(state);
+}
+
+/**
+ * Находит попадание по сохранённой показанной схеме, исключая source до очистки state.
+ * Команда получает plain snapshot; пустое пространство и отмена не создают запись.
+ */
+function finishOutcome(state: CanvasGesture, event: PointerEvent): void {
+  const target = canvasNodeAt(state.graph, canvasPoint(event, state.transform), state.nodeId);
+
+  if (!target || !state.outcome) {
+    return;
+  }
+
+  const input = plainRouteValue(props.document);
+  const result = setTransition(input, props.scope, state.nodeId, state.outcome, { next: target });
+
+  if (result.draft === input) {
+    connectError.value = result.issues[0]?.message ?? t('core.routePerehodNeIzmenen');
+
+    return;
+  }
+
+  emit('change', result.draft);
+}
+
+/**
+ * Отмена не вызывает команды и не меняет историю. Чужой pointercancel игнорируется.
+ * Следующий pointerdown снимет подавление возможного click после отменённого drag.
+ */
+function cancelGesture(event?: Event): void {
+  const state = gesture.value;
+
+  if (!state || (event && 'pointerId' in event && event.pointerId !== state.pointerId)) {
+    return;
+  }
+
+  suppressClick.value = state.moved;
+  releaseGesture(state);
+}
+
+function cancelOnEscape(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && gesture.value) {
+    event.preventDefault();
+    cancelGesture();
+  }
+}
+
+/**
+ * Capture-фаза гасит click после переноса до выбора узла и добавления этапа.
+ * Нажатие без движения флаг не ставит, поэтому прежняя активация работает.
+ */
+function guardCanvasClick(event: MouseEvent): void {
+  if (suppressClick.value) {
+    suppressClick.value = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('pointermove', movePointer, { passive: false });
+  window.addEventListener('pointerup', endPointer);
+  window.addEventListener('pointercancel', cancelGesture);
+  window.addEventListener('blur', cancelGesture);
+  window.addEventListener('resize', cancelGesture);
+  window.addEventListener('scroll', cancelGesture, true);
+  window.addEventListener('keydown', cancelOnEscape);
+});
+
+onBeforeUnmount(() => {
+  cancelGesture();
+  window.removeEventListener('pointermove', movePointer);
+  window.removeEventListener('pointerup', endPointer);
+  window.removeEventListener('pointercancel', cancelGesture);
+  window.removeEventListener('blur', cancelGesture);
+  window.removeEventListener('resize', cancelGesture);
+  window.removeEventListener('scroll', cancelGesture, true);
+  window.removeEventListener('keydown', cancelOnEscape);
+});
+
+watch(() => `${props.document.id}|${props.scope.kind}|${
+  props.scope.kind === 'route' ? props.scope.routeId : ''
+}`, () => cancelGesture());
+
 const executableNodes = computed(() => machine.value?.nodes.filter((node) =>
   node.executor !== 'status') ?? []);
 const connectSource = computed(() => executableNodes.value.find((node) =>
   node.id === connectSourceId.value) ?? null);
 const connectOutcomes = computed(() => Object.keys(connectSource.value?.on ?? {}));
 
-/**
- * Машина черновика в форме построителя схемы: пустой entry и неполный sequence допустимы,
- * черновик бывает незаконченным. Разведка рисуется по собственному sequence.
- */
-function graphMachine(source: DraftMachine, bootstrap: boolean): RouteMachine {
-  return {
-    entry: source.entry ?? undefined,
-    loop: bootstrap ? undefined : source.loop,
-    sequence: {
-      main: (bootstrap ? source.sequence.bootstrap : source.sequence.main) ?? [],
-      tail: bootstrap ? [] : source.sequence.tail ?? [],
-    },
-    nodes: source.nodes,
-  };
-}
 
 function clampScale(value: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(value * 100) / 100));
@@ -288,6 +564,78 @@ watch(() => props.focusedIssue, (issue) => {
     path: issue.path,
   });
 }, { immediate: true });
+/**
+ * Клик по свободному фону открывает роль в точке SVG, включая масштаб и letterboxing.
+ * Клик узла и штатные режимы выбора цели не превращаются в добавление.
+ */
+function addAtEmpty(event: MouseEvent): void {
+  if (event.defaultPrevented || props.chooseMode || connecting.value || gesture.value
+    || props.scope.kind !== 'route'
+    || (event.target as Element | null)?.closest('[data-node]')) {
+    return;
+  }
+
+  emit('add-at', canvasPoint(event, captureCanvasTransform(svgElement())));
+}
+
+/**
+ * Клавиатурная кнопка предлагает точку правее самого правого показанного этапа.
+ * Берутся эффективные координаты graph.pos, включая автоматические узлы.
+ */
+function defaultAddPoint(): NodeCanvasPoint {
+  let last: [number, number] | null = null;
+
+  for (const [displayId, origin] of Object.entries(graph.value?.nodeOrigins ?? {})) {
+    const point = graph.value?.pos[displayId];
+
+    if (origin.executable && point && (!last || point[0] > last[0])) {
+      last = [point[0], point[1]];
+    }
+  }
+
+  return last ? { x: last[0] + 340, y: last[1] } : { x: 140, y: 50 };
+}
+
+const selectedOutcomes = computed(() => {
+  const selected = machine.value?.nodes.find((node) => node.id === props.selectedNodeId);
+
+  return selected && selected.executor !== 'status' ? Object.keys(selected.on ?? {}) : [];
+});
+const outcomeGhostStyle = computed<CSSProperties>(() => ({
+  position: 'fixed',
+  pointerEvents: 'none',
+  left: `${(gesture.value?.client.x ?? 0) + 12}px`,
+  top: `${(gesture.value?.client.y ?? 0) + 12}px`,
+}));
+
+/**
+ * Исход использует тот же pointer lifecycle и зафиксированный SVG transform, что узел.
+ * Захват не начинается до движения; второй pointer не перезаписывает первый жест.
+ */
+function beginOutcomeDrag(event: PointerEvent, outcome: string): void {
+  if (event.button !== 0 || gesture.value || !props.selectedNodeId || !graph.value
+    || !selectedOutcomes.value.includes(outcome) || props.chooseMode || connecting.value) {
+    return;
+  }
+
+  connectError.value = '';
+  startGesture(event, 'outcome', props.selectedNodeId, [0, 0], outcome);
+}
+
+
+/**
+ * Возвращает автоматическую змейку: ручные координаты области снимаются одной
+ * командой, отменяется штатной историей.
+ */
+function autoLayout(): void {
+  const input = plainRouteValue(props.document);
+  const result = resetScopeLayout(input, props.scope);
+
+  if (result.draft !== input) {
+    emit('change', result.draft);
+  }
+}
+
 </script>
 
 <style scoped>
@@ -347,5 +695,13 @@ watch(() => props.focusedIssue, (issue) => {
   min-width: 0;
   padding: 12px 8px;
   overflow: auto;
+}
+
+.route-canvas__outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
 }
 </style>

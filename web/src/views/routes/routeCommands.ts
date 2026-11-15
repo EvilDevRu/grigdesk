@@ -1,5 +1,10 @@
+import { leftCanvasNeighbour } from './routeCanvasGeometry.ts';
+import type { StageRoleTemplate, StageRoleAnswers }
+  from '../../../../shared/pipeline/routeStageWizardContracts.ts';
+import { buildRouteGraph } from '../../../../shared/pipeline/routeGraphView.ts';
+import type { RouteGraphDef, RouteMachine } from '../../../../shared/pipeline/routeGraphView.ts';
 import type { PreparedStageRole, WizardCapabilities } from './routeWizardTemplates.ts';
-import { stageCommandIdentity } from './routeWizardTemplates.ts';
+import { prepareStageRole, stageCommandIdentity } from './routeWizardTemplates.ts';
 import type {
 
   DraftMachine,
@@ -1290,7 +1295,7 @@ export function listStageInsertionPlaces(draft: RouteDraft, scope: RouteCommandS
  * Вставляет весь пакет одним независимым снимком и сшивает успешное продолжение.
  * Полный пересчёт возвратов использует ту же семантику, что перестановка этапа.
  */
-export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, afterId: string,
+export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, afterId: string | null,
   prepared: PreparedStageRole, capabilities: WizardCapabilities): RouteCommandResult {
   if (scope.kind !== 'route' || prepared.issues.length || !prepared.nodes.length) {
     return unchanged(draft, 'role_invalid', prepared.issues[0]?.message ?? 'role_invalid');
@@ -1304,22 +1309,33 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   }
 
   const machine = bundle.route;
-  const reason = stagePlaceReason(machine, afterId, prepared, capabilities);
+  const empty = afterId === null && machine.nodes.length === 0;
+
+  if (afterId === null && (!empty || machine.loop
+    || (machine.sequence.main?.length ?? 0) > 0 || (machine.sequence.tail?.length ?? 0) > 0)) {
+    return unchanged(draft, 'empty_scope_invalid', t('core.routePustoyMarshrutNekorrekten'));
+  }
+
+  const reason = empty ? '' : stagePlaceReason(machine, afterId!, prepared, capabilities);
 
   if (reason) {
     return unchanged(draft, reason, reason);
   }
 
-  const after = machine.nodes.find((node) => node.id === afterId)!;
-  const outcome = after.executor === 'gate' ? 'approved' : 'done';
-  const successor = structuredClone(after.on![outcome]!);
-  const phase = after.phase as 'main' | 'tail';
-  const sequence = machine.sequence[phase]!;
-  const position = sequence.indexOf(afterId) + 1;
+  const after = empty ? null : machine.nodes.find((node) => node.id === afterId)!;
+  const outcome = after?.executor === 'gate' ? 'approved' : 'done';
+  const successor = empty ? { stop: 'done' } : structuredClone(after!.on![outcome]!);
+  const phase = empty ? 'main' : after!.phase as 'main' | 'tail';
+  const sequence = machine.sequence[phase] ?? (machine.sequence[phase] = []);
+  const position = empty ? 0 : sequence.indexOf(afterId!) + 1;
   const nodes = structuredClone(prepared.nodes);
   const prompts = { ...prepared.prompts };
   const check = prepared.roleId === 'review'
-    ? findStageReviewCheck(machine, afterId, prepared, capabilities) : null;
+    ? findStageReviewCheck(machine, afterId ?? '', prepared, capabilities) : null;
+
+  if (prepared.roleId === 'review' && !check) {
+    return unchanged(draft, 'recheck_unavailable', 'recheck_unavailable');
+  }
 
   if (check && !machine.nodes.includes(check)) {
     nodes.push(check);
@@ -1372,7 +1388,13 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   const ids = nodes.map((node) => node.id);
 
   sequence.splice(position, 0, ...ids);
-  after.on![outcome] = { next: ids[0]! };
+
+
+  if (empty) {
+    machine.entry = ids[0]!;
+  } else {
+    after!.on![outcome] = { next: ids[0]! };
+  }
 
   for (const [index, node] of nodes.entries()) {
     const done = index + 1 < nodes.length ? { next: ids[index + 1] } : successor;
@@ -1416,4 +1438,224 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   }
 
   return { ...recalculated, createdNodeIds: ids };
+}
+
+
+// Точка холста в натуральных координатах схемы. Хранится в представлении черновика,
+// а не в машине: на исполняемый маршрут, проверку и публикацию она не влияет.
+export interface NodeCanvasPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Ключ координат узла в presentation черновика. Формат ключей уже переносится
+ * командами переименования узла и маршрута, поэтому новый формат не заводится.
+ */
+export function nodePositionKey(scope: RouteCommandScope, nodeId: string): string {
+  return scope.kind === 'bootstrap' ? `b:${nodeId}` : `r:${scope.routeId}:${nodeId}`;
+}
+
+/**
+ * Переносит узел холста в новую точку. Отказывает для неизвестного и status-узла:
+ * у служебных узлов нет своего места на схеме. Повторная запись той же точки
+ * не меняет черновик и не занимает шаг истории.
+ */
+export function moveNodePosition(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  nodeId: string,
+  point: NodeCanvasPoint,
+): RouteCommandResult {
+  const machine = documentAt(draft, scope)?.machine;
+  const node = machine?.nodes.find((candidate) => candidate.id === nodeId);
+
+  if (!machine || !node || node.executor === 'status') {
+    return unchanged(draft, 'node_missing', t('core.routeEtapNeNayden'));
+  }
+
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+    || point.x < 0 || point.y < 0 || point.x > 100000 || point.y > 100000) {
+    return unchanged(draft, 'position_invalid', t('core.routeNedopustimayaTochkaShemy'));
+  }
+
+  const key = nodePositionKey(scope, nodeId);
+  const rounded = { x: Math.round(point.x), y: Math.round(point.y) };
+  const current = draft.presentation[key];
+
+  if (current && typeof current === 'object' && !Array.isArray(current)
+    && (current as NodeCanvasPoint).x === rounded.x
+    && (current as NodeCanvasPoint).y === rounded.y) {
+    return unchanged(draft, 'position_same', t('core.routePozitsiyaNeIzmenilas'));
+  }
+
+  const copy = structuredClone(draft);
+
+  copy.presentation[key] = rounded;
+
+  return {
+    draft: copy,
+    issues: [],
+    createdNodeIds: [],
+  };
+}
+
+/**
+ * Снимает ручные координаты одной области (маршрута или разведки): схема
+ * возвращается к автоматической змейке. Остальные области не затрагиваются.
+ */
+export function resetScopeLayout(draft: RouteDraft, scope: RouteCommandScope): RouteCommandResult {
+  const prefix = scope.kind === 'bootstrap' ? 'b:' : `r:${scope.routeId}:`;
+  const keys = Object.keys(draft.presentation).filter((candidate) => candidate.startsWith(prefix));
+
+  if (!keys.length) {
+    return unchanged(draft, 'layout_auto', t('core.routeRaskladkaUzheAvtomaticheskaya'));
+  }
+
+  const copy = structuredClone(draft);
+
+  for (const key of keys) {
+    delete copy.presentation[key];
+  }
+
+  return {
+    draft: copy,
+    issues: [],
+    createdNodeIds: [],
+  };
+}
+
+/**
+ * Читает координаты существующих исполняемых узлов одной области.
+ * Неполный или повреждённый presentation не меняет автоматическую раскладку.
+ */
+export function readNodePositions(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+): Record<string, [number, number]> {
+  const result: Record<string, [number, number]> = {};
+  const machine = documentAt(draft, scope)?.machine;
+
+  for (const node of machine?.nodes ?? []) {
+    const raw = draft.presentation[nodePositionKey(scope, node.id)];
+
+    if (node.executor === 'status' || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      continue;
+    }
+
+    const point = raw as Partial<NodeCanvasPoint>;
+
+    if (typeof point.x === 'number' && typeof point.y === 'number'
+      && Number.isFinite(point.x) && Number.isFinite(point.y)
+      && point.x >= 0 && point.y >= 0 && point.x <= 100000 && point.y <= 100000) {
+      result[node.id] = [point.x, point.y];
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Единственная проекция черновика в показанную схему редактора.
+ * Временная точка drag перекрывает сохранённую; порядок runtime не меняется.
+ */
+export function canvasGraph(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  preview: Record<string, [number, number]> = {},
+): RouteGraphDef | null {
+  const source = documentAt(draft, scope)?.machine;
+
+  if (!source) {
+    return null;
+  }
+
+  const bootstrap = scope.kind === 'bootstrap';
+  const machine: RouteMachine = {
+    entry: source.entry ?? undefined,
+    loop: bootstrap ? undefined : source.loop,
+    sequence: {
+      main: (bootstrap ? source.sequence.bootstrap : source.sequence.main) ?? [],
+      tail: bootstrap ? [] : source.sequence.tail ?? [],
+    },
+    nodes: source.nodes,
+  };
+
+  return buildRouteGraph(machine, scope.kind === 'route' ? scope.routeId : 'bootstrap', {
+    workspaceMode: 'shared',
+    outcomeLabels: bootstrap ? 'minimal' : 'all',
+    routeChoices: bootstrap,
+    nodeIds: true,
+    positions: { ...readNodePositions(draft, scope), ...preview },
+  });
+}
+
+/**
+ * Добавляет полный подготовленный пакет в показанную точку, сохраняя роль и инструкции.
+ * Любой отказ пакета или координаты возвращает исходный документ без частичной вставки.
+ */
+export function addNodeAtPoint(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  point: NodeCanvasPoint,
+  template: StageRoleTemplate,
+  answers: StageRoleAnswers,
+  capabilities: WizardCapabilities,
+): RouteCommandResult {
+  if (scope.kind !== 'route') {
+    return unchanged(draft, 'scope_unsupported', t('core.routeRazvedkaDobavlyaetsyaSpiskom'));
+  }
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+    || point.x < 0 || point.y < 0 || point.x > 100000 || point.y > 100000) {
+    return unchanged(draft, 'position_invalid', t('core.routeNedopustimayaTochkaShemy'));
+  }
+
+  const bundle = draft.routes[scope.routeId];
+
+  if (!bundle) {
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutNeNayden'));
+  }
+
+  const prepared = prepareStageRole(template, answers, capabilities);
+
+  if (prepared.issues.length || !prepared.nodes.length) {
+    return unchanged(draft, 'role_invalid', prepared.issues[0]?.message ?? 'role_invalid');
+  }
+
+  const graph = canvasGraph(draft, scope);
+  const empty = bundle.route.nodes.length === 0;
+  const afterId = empty || !graph ? null : leftCanvasNeighbour(graph, point);
+
+  if (!empty && !afterId) {
+    return unchanged(draft, 'left_neighbor_missing', t('core.routeNetEtapaSleva'));
+  }
+
+  const inserted = insertStageRole(draft, scope, afterId, prepared, capabilities);
+
+  if (inserted.issues.length || !inserted.createdNodeIds.length) {
+    return inserted;
+  }
+
+  let current = inserted.draft;
+
+  for (const [index, nodeId] of inserted.createdNodeIds.entries()) {
+    const placed = moveNodePosition(current, scope, nodeId,
+      { x: point.x + index * 340, y: point.y });
+
+    if (placed.issues.length && placed.issues[0]?.code !== 'position_same') {
+      return {
+        draft,
+        issues: placed.issues,
+        createdNodeIds: []
+      };
+    }
+
+    current = placed.draft;
+  }
+
+  return {
+    draft: current,
+    issues: [],
+    createdNodeIds: inserted.createdNodeIds
+  };
 }

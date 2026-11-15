@@ -358,6 +358,8 @@ const props = withDefaults(
     loopsOn?: boolean;
     showStopBanner?: boolean;
     reference?: boolean;
+    keepPositions?: boolean;
+    fixedViewBox?: string | null;
     interactive?: boolean;
     // Идущий разбор — не свойство графа, а отдельный живой факт (`arbitrating` задачи в
     // `GET /api/tasks`). Данные движка он не подменяет: меняется только представление.
@@ -376,6 +378,8 @@ const props = withDefaults(
     loopsOn: false,
     showStopBanner: true,
     reference: false,
+    keepPositions: false,
+    fixedViewBox: null,
     interactive: false,
     arbitrating: null,
     arbitrated: null,
@@ -621,14 +625,19 @@ const activeReturnNodes = computed(() => new Set(props.graph.edges
 const parallelNodes = computed(() => props.graph.edges
   .filter(([, , , , routing]) => routing === 'to_sandbox')
   .map(([, destination]) => destination));
-const positions = computed<Record<string, GraphPosition>>(() => layoutGraphPositions(
-  props.graph.pos,
-  props.graph.nodes,
-  props.graph.edges.some(([source, , , kind]) => (
-    kind === 'fail'
-      && (loop.value || props.reference || props.loopsOn || (props.graph.loops?.[source] ?? 0) > 0)
-  )),
-  parallelNodes.value,
+const positions = computed<Record<string, GraphPosition>>(() => (
+  props.keepPositions
+    ? props.graph.pos
+    : layoutGraphPositions(
+      props.graph.pos,
+      props.graph.nodes,
+      props.graph.edges.some(([source, , , kind]) => (
+        kind === 'fail'
+          && (loop.value || props.reference || props.loopsOn
+            || (props.graph.loops?.[source] ?? 0) > 0)
+      )),
+      parallelNodes.value,
+    )
 ));
 
 /**
@@ -741,7 +750,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
   return elements;
 });
 
-const viewBox = computed(() => computeViewBox(
+const viewBox = computed(() => props.fixedViewBox ?? computeViewBox(
   positions.value,
   props.graph.nodes,
   edgeElements.value.filter((edge) => edge.visible).map((edge) => ({
