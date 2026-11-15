@@ -1,4 +1,8 @@
-import { chatPageKey } from '../../../shared/chat/chatPaging.ts';
+import {
+  chatFiltersQuery, chatPageKey, EMPTY_CHAT_FILTERS, hasChatFilters, normalizeChatFilters,
+} from '../../../shared/chat/chatPaging.ts';
+
+import type { ChatListFilters } from '../../../shared/chat/chatPaging.ts';
 import type { ChatCatalogPage } from '../../../shared/chat/chatPaging.ts';
 import { messageKey } from '../../../shared/chat/chatMessageIdentity.ts';
 
@@ -319,7 +323,11 @@ let needSnapshot = false;
 interface ChatLoadRuntime {
   pageUsage?: Map<string, boolean>;
   pageJobs: Map<string, Promise<void>>;
+  searchRefreshJob: Promise<void> | null;
+
+  searchRefreshPending: boolean;
   pageEpochs: Map<string, number>;
+  filtersEpoch: number;
   rebuildingPages?: Set<string>;
   pullQueue: Map<string, {
     archived: boolean;
@@ -407,7 +415,10 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
 
   const runtime: ChatLoadRuntime = {
     pageJobs: new Map(),
+    searchRefreshJob: null,
+    searchRefreshPending: false,
     pageEpochs: new Map(),
+    filtersEpoch: 0,
     pullQueue: new Map(),
     olderJobs: new Map(),
     windowJobs: new Map(),
@@ -1423,6 +1434,7 @@ export const useChatStore = defineStore('chat', {
   state: (): ChatState => ({
     ...pickStore(null),
     pagingEnabled: false,
+    filtersProtocol: 0,
     catalogMutationVersion: 0,
     catalogPages: {},
     catalogSummary: {
@@ -1439,6 +1451,7 @@ export const useChatStore = defineStore('chat', {
     search: {
       query: '',
       archived: false,
+      filters: { ...EMPTY_CHAT_FILTERS },
       loading: false,
       error: '',
       matches: {},
@@ -1564,7 +1577,8 @@ export const useChatStore = defineStore('chat', {
     // Список чатов для телеграм-сайдбара: обычный режим показывает открытые чаты,
     // режим архива — только архивные. Без запроса показываем сниппет последнего
     // сообщения; с запросом фильтруем по названию и тексту переписки.
-    list(s): (q: string, showArchived?: boolean) => ChatListRow[] { return (q, showArchived = false) => {
+    list(s): (q: string, showArchived?: boolean, filters?: ChatListFilters) => ChatListRow[] {
+      return (q, showArchived = false, filters = EMPTY_CHAT_FILTERS) => {
       const finish = startChatPerformance('chat.list', () => ({ chats: source.length }));
 
       historyPersistenceFor(this);
@@ -1647,7 +1661,7 @@ export const useChatStore = defineStore('chat', {
       };
       const out: ChatListRow[] = [];
       const all = showArchived ? (s.archived || []) : s.sessions;
-      const page = s.catalogPages[chatPageKey(q, showArchived)];
+      const page = s.catalogPages[chatPageKey(q, showArchived, filters)];
       const ids = new Set([...(page?.ids || []), ...(page?.overlayIds || [])]);
       const source = s.pagingEnabled ? all.filter((chat) => ids.has(chat.id)) : all;
 
@@ -1672,15 +1686,24 @@ export const useChatStore = defineStore('chat', {
      * Scope списка создаётся без запроса и живёт дольше его компонента.
      * Непросмотренный архив не считается пустым подтверждённым каталогом.
      */
-    pageFor(query = '', archived = false): ChatCatalogPage {
-      const key = chatPageKey(query, archived);
+    pageFor(
+      query = '',
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): ChatCatalogPage {
+      const key = chatPageKey(query, archived, filters);
       const runtime = chatLoadRuntimeFor(this);
 
       runtime.pageUsage ||= new Map();
       runtime.pageUsage.delete(key);
       runtime.pageUsage.set(key, true);
 
-      const searches = [...runtime.pageUsage.keys()].filter((entry) => JSON.parse(entry)[1]);
+      // Фильтрованная страница стареет как поисковая: иначе наборы фильтров копятся без предела.
+      const searches = [...runtime.pageUsage.keys()].filter((entry) => {
+        const [, scopeQuery, scopeFilters] = JSON.parse(entry) as [boolean, string, ChatListFilters?];
+
+        return scopeQuery || (scopeFilters && hasChatFilters(scopeFilters));
+      });
 
       for (const oldest of searches.slice(0, Math.max(0, searches.length - 8))) {
         if (!runtime.pageJobs.has(oldest)) {
@@ -1712,21 +1735,33 @@ export const useChatStore = defineStore('chat', {
      * Первая активная порция принадлежит только _load и его promise.
      * Mount списка и родителя присоединяются к тому же началу загрузки.
      */
-    async ensureChatPage(query = '', archived = false): Promise<void> {
+    async ensureChatPage(
+      query = '',
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): Promise<void> {
       if (!this.loaded) {
         await this.ensure();
       }
-      if (!this.loaded || !this.pagingEnabled || this.pageFor(query, archived).loaded) {
+
+      const activeFilters = this.filtersProtocol === 1 ? filters : EMPTY_CHAT_FILTERS;
+
+      if (!this.loaded || !this.pagingEnabled || this.pageFor(query, archived, activeFilters).loaded) {
         return;
       }
 
-      await this.loadChatPage(query, archived);
+      await this.loadChatPage(query, archived, false, activeFilters);
     },
     /**
      * Следующая порция объединяется по scope, не скрывая уже показанные карточки.
      * Cursor меняется только после принятого ответа текущего поколения.
      */
-    async loadChatPage(query = '', archived = false, replace = false): Promise<void> {
+    async loadChatPage(
+      query = '',
+      archived = false,
+      replace = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): Promise<void> {
       if (!this.loaded) {
         await this.ensure();
       }
@@ -1735,8 +1770,11 @@ export const useChatStore = defineStore('chat', {
       }
 
       const runtime = chatLoadRuntimeFor(this);
-      const key = chatPageKey(query, archived);
-      const page = this.pageFor(query, archived);
+      const filtersEpoch = runtime.filtersEpoch;
+      const activeFilters = this.filtersProtocol === 1
+        ? normalizeChatFilters(filters) : EMPTY_CHAT_FILTERS;
+      const key = chatPageKey(query, archived, activeFilters);
+      const page = this.pageFor(query, archived, activeFilters);
       const active = runtime.pageJobs.get(key);
 
       if (active) {
@@ -1759,6 +1797,11 @@ export const useChatStore = defineStore('chat', {
       if (query.trim()) {
         params.set('q', query.trim());
       }
+
+      for (const [name, value] of Object.entries(chatFiltersQuery(activeFilters))) {
+        params.set(name, value);
+      }
+
       if (!replace && page.nextCursor) {
         params.set('cursor', page.nextCursor);
       }
@@ -1776,7 +1819,8 @@ export const useChatStore = defineStore('chat', {
             idleTimeoutMs: 30000,
           }));
 
-          if (runtime.disposed || runtime.pageEpochs.get(key) !== epoch) {
+          if (runtime.disposed || runtime.pageEpochs.get(key) !== epoch
+            || runtime.filtersEpoch !== filtersEpoch) {
             return;
           }
 
@@ -1809,11 +1853,22 @@ export const useChatStore = defineStore('chat', {
           page.nextCursor = data.page.nextCursor;
           page.hasMore = data.page.hasMore;
           page.loaded = true;
+
           page.needsRefresh = false;
+
+          const protocol = Number(data.filtersProtocol) === 1 ? 1 : 0;
+
+          if (this.filtersProtocol === 1 && protocol === 0) {
+            runtime.filtersEpoch += 1;
+          }
+
+          this.filtersProtocol = protocol;
+
           this._acceptCatalogSummary(data.summary, mutation);
 
           if (this.search.query.trim().toLowerCase() === query.trim().toLowerCase()
-            && this.search.archived === archived) {
+            && this.search.archived === archived
+            && chatPageKey('', false, this.search.filters) === chatPageKey('', false, activeFilters)) {
             const matches = replace ? Object.fromEntries(retained.map((id) => [
               id, this.search.matches[id] || '',
             ])) : this.search.matches;
@@ -1828,16 +1883,77 @@ export const useChatStore = defineStore('chat', {
             };
           }
         } catch (caught) {
-          if (!runtime.disposed && runtime.pageEpochs.get(key) === epoch) {
+          if (!runtime.disposed && runtime.pageEpochs.get(key) === epoch
+            && runtime.filtersEpoch === filtersEpoch) {
             const failure = chatFailure(caught);
 
             page.error = failure.message;
+
+            if (replace && page.loaded) {
+              page.needsRefresh = true;
+            }
+
+            if (failure.status === 400 && hasChatFilters(activeFilters)) {
+              const probeParams = new URLSearchParams({
+                page: '1',
+                archived: archived ? '1' : '0',
+                limit: '40',
+              });
+
+              if (query.trim()) {
+                probeParams.set('q', query.trim());
+              }
+
+              let rolledBack = false;
+
+              try {
+                const probe = decodeChatPage(await api.get(`/api/chat/store/list?${probeParams}`, {
+                  signal: controller.signal,
+                  retry: false,
+                  idleTimeoutMs: 30000,
+                }));
+
+                rolledBack = probe.filtersProtocol !== 1;
+              } catch {
+                // Недоступная проба не доказывает откат: ошибка фильтрованной
+                // страницы остаётся доступной человеку вместе с повтором.
+              }
+
+              if (rolledBack && !runtime.disposed && runtime.filtersEpoch === filtersEpoch
+                && runtime.pageEpochs.get(key) === epoch) {
+                runtime.filtersEpoch += 1;
+
+                this.filtersProtocol = 0;
+
+                page.error = '';
+
+                const currentQuery = this.search.query;
+
+                const currentArchived = this.search.archived;
+
+                const plainKey = chatPageKey(currentQuery, currentArchived);
+
+                // beginChatSearch гасит право старого поиска принять результат;
+                // в шаге 5 его пустой filters по умолчанию также очищает scope.
+
+                this.beginChatSearch(currentQuery, currentArchived);
+
+                await runtime.pageJobs.get(plainKey);
+
+                if (!runtime.disposed && this.loaded) {
+                  await this.refreshChatPage(currentQuery, currentArchived, EMPTY_CHAT_FILTERS);
+                }
+
+                return;
+              }
+            }
 
             if (failure.status === 410) {
               // Истёкший снимок курсора — обычная жизнь долго открытой вкладки, а не
               // ошибка человека: список перечитывается сам, без ручной кнопки.
               page.needsRefresh = true;
-              void this._rebuildExpiredChatPage(query, archived);
+
+              void this._rebuildExpiredChatPage(query, archived, activeFilters);
             }
           }
         } finally {
@@ -1855,8 +1971,27 @@ export const useChatStore = defineStore('chat', {
      * Истёкший снимок заменяется новой первой страницей только после успеха.
      * До этого прежние строки и их cursor остаются доступными для чтения.
      */
-    refreshChatPage(query = '', archived = false): Promise<void> {
-      return this.loadChatPage(query, archived, true);
+    refreshChatPage(
+      query = '',
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): Promise<void> {
+      return this.loadChatPage(query, archived, true, filters);
+    },
+    /**
+     * Повтор различает отказ первой страницы и обычного продолжения.
+     * Пересбор сохраняет уже показанную глубину и тот же набор фильтров.
+     */
+    retryChatPage(
+      query = '',
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): Promise<void> {
+      const page = this.pageFor(query, archived, filters);
+
+      return page.needsRefresh
+        ? this._rebuildExpiredChatPage(query, archived, filters)
+        : this.loadChatPage(query, archived, false, filters);
     },
     /**
      * Автовосстановление после 410: сервер забыл cursor страницы, и без этого прохода
@@ -1865,15 +2000,19 @@ export const useChatStore = defineStore('chat', {
      * карточек — человек листал туда не зря. Очередь pageJobs сериализует проход, поэтому
      * параллельные запросы продолжения не соревнуются с восстановлением.
      */
-    async _rebuildExpiredChatPage(query = '', archived = false): Promise<void> {
+    async _rebuildExpiredChatPage(
+      query = '',
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ): Promise<void> {
       const runtime = chatLoadRuntimeFor(this);
 
       if (runtime.disposed || !this.loaded) {
         return;
       }
 
-      const key = chatPageKey(query, archived);
-      const page = this.pageFor(query, archived);
+      const key = chatPageKey(query, archived, filters);
+      const page = this.pageFor(query, archived, filters);
 
       if (runtime.rebuildingPages?.has(key)) {
         return;
@@ -1889,7 +2028,7 @@ export const useChatStore = defineStore('chat', {
 
         const target = page.ids.length + page.overlayIds.length;
 
-        await this.refreshChatPage(query, archived);
+        await this.refreshChatPage(query, archived, filters);
 
         // Перечитанная первая страница короче прежней глубины: догружаем прежний объём
         // обычными продолжениями. Останов — конец выдачи, прежняя глубина или повторный
@@ -1901,7 +2040,7 @@ export const useChatStore = defineStore('chat', {
 
           const before = page.ids.length;
 
-          await this.loadChatPage(query, archived, false);
+          await this.loadChatPage(query, archived, false, filters);
 
           if (runtime.disposed || page.ids.length <= before) {
             break;
@@ -1940,9 +2079,9 @@ export const useChatStore = defineStore('chat', {
       }
 
       for (const [key, page] of Object.entries(this.catalogPages)) {
-        const [scope, query] = JSON.parse(key) as [boolean, string];
+        const [scope, query, scopeFilters] = JSON.parse(key) as [boolean, string, ChatListFilters?];
 
-        if (scope !== archived || query) {
+        if (scope !== archived || query || (scopeFilters && hasChatFilters(scopeFilters))) {
           page.ids = page.ids.filter((entry) => entry !== id);
           page.overlayIds = page.overlayIds.filter((entry) => entry !== id);
         }
@@ -2557,6 +2696,7 @@ export const useChatStore = defineStore('chat', {
         }
 
         runtime.epochs.set(id, (runtime.epochs.get(id) || 0) + 1);
+        this._refreshChatSearch();
 
         if (response.stale) {
           const rawHead = await api.get(`/api/chat/store/head/${id}`, { retry: false });
@@ -2755,6 +2895,8 @@ export const useChatStore = defineStore('chat', {
 
           historyPersistenceFor(this).markSent(snapshot, fingerprintOf(snapshot));
         }
+
+        this._refreshChatSearch();
 
         return true;
       }
@@ -3237,11 +3379,12 @@ export const useChatStore = defineStore('chat', {
      * Смена поля сразу отменяет право старого поиска обновить текущую выдачу.
      * Сам запрос может ждать debounce компонента, не сохраняя прошлое поколение.
      */
-    beginChatSearch(query: string, archived = false) {
+    beginChatSearch(query: string, archived = false, filters: ChatListFilters = EMPTY_CHAT_FILTERS) {
       chatLoadRuntimeFor(this).searchEpoch += 1;
       this.search = {
         query: query.trim(),
         archived,
+        filters: normalizeChatFilters(filters),
         loading: !!query.trim(),
         error: '',
         matches: {}
@@ -3251,30 +3394,38 @@ export const useChatStore = defineStore('chat', {
      * Поисковая порция имеет собственный cursor и поколение запроса.
      * Поздний ответ прежнего scope не подменяет текущие совпадения.
      */
-    async searchChats(query: string, archived = false) {
+    async searchChats(
+      query: string,
+      archived = false,
+      filters: ChatListFilters = EMPTY_CHAT_FILTERS,
+    ) {
+      const runtime = chatLoadRuntimeFor(this);
+      const epoch = ++runtime.searchEpoch;
+
       if (!this.loaded) {
         await this.ensure();
       }
-      if (!this.loaded) {
+      if (!this.loaded || runtime.disposed || epoch !== runtime.searchEpoch) {
         return;
       }
 
-      const runtime = chatLoadRuntimeFor(this);
-      const epoch = ++runtime.searchEpoch;
       const value = query.trim();
+      const activeFilters = this.filtersProtocol === 1
+        ? normalizeChatFilters(filters) : { ...EMPTY_CHAT_FILTERS };
 
       this.search = {
         query: value,
         archived,
+        filters: activeFilters,
         loading: !!value,
         error: '',
         matches: {},
       };
 
       if (this.pagingEnabled) {
-        await this.ensureChatPage(value, archived);
+        await this.ensureChatPage(value, archived, activeFilters);
 
-        const page = this.pageFor(value, archived);
+        const page = this.pageFor(value, archived, activeFilters);
 
         if (epoch === runtime.searchEpoch) {
           this.search.loading = page.loading;
@@ -3318,13 +3469,74 @@ export const useChatStore = defineStore('chat', {
      * Принятое изменение каталога обновляет действующий серверный поиск.
      * Пустой запрос не создаёт фоновых чтений истории.
      */
-    _refreshChatSearch() {
-      if (chatLoadRuntimeFor(this).applyingPage) {
+    async _refreshChatSearch(): Promise<void> {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.applyingPage || runtime.disposed || !this.loaded
+        || (!this.search.query && !hasChatFilters(this.search.filters))) {
         return;
       }
-      if (this.search.query) {
-        void this.searchChats(this.search.query, this.search.archived);
+      if (!this.pagingEnabled) {
+        await this.searchChats(this.search.query, this.search.archived);
+
+        return;
       }
+
+      runtime.searchRefreshPending = true;
+
+      if (runtime.searchRefreshJob) {
+        return runtime.searchRefreshJob;
+      }
+
+      // Запись job выполняется до первого запроса; события во время запроса
+      // ставят pending и объединяются в один следующий проход.
+      const job = (async () => {
+        await Promise.resolve();
+
+        try {
+          while (runtime.searchRefreshPending && !runtime.disposed && this.loaded) {
+            runtime.searchRefreshPending = false;
+
+            const { query, archived, filters } = this.search;
+            const epoch = runtime.searchEpoch;
+            const key = chatPageKey(query, archived, filters);
+            const current = () => !runtime.disposed && this.loaded
+              && runtime.searchEpoch === epoch;
+
+            if (!query && !hasChatFilters(filters)) {
+              break;
+            }
+
+            await runtime.pageJobs.get(key);
+
+            if (!current()) {
+              continue;
+            }
+
+            const page = this.pageFor(query, archived, filters);
+            const target = page.ids.length + page.overlayIds.length;
+
+            await this.refreshChatPage(query, archived, filters);
+
+            while (current() && !page.error && !page.needsRefresh
+              && page.hasMore && page.ids.length < target) {
+              const before = page.ids.length;
+
+              await this.loadChatPage(query, archived, false, filters);
+
+              if (page.ids.length <= before) {
+                break;
+              }
+            }
+          }
+        } finally {
+          runtime.searchRefreshJob = null;
+        }
+      })();
+
+      runtime.searchRefreshJob = job;
+
+      return job;
     },
 
     /**
@@ -3625,6 +3837,7 @@ export const useChatStore = defineStore('chat', {
         }
 
         this.pagingEnabled = true;
+        this.filtersProtocol = Number(j.filtersProtocol) === 1 ? 1 : 0;
         Object.assign(this.pageFor('', false), j.page, {
 
           ids: j.sessions.map((head) => head.id),
@@ -5020,6 +5233,18 @@ export const useChatStore = defineStore('chat', {
         if (!d && name !== 'chat-orphan') {
           return;
         }
+
+        const waitingChanged = this.search.filters.waiting
+          && ['chat-question', 'chat-permission', 'chat-permission-done',
+            'ssh-permission', 'db-permission'].includes(name);
+
+        const workingChanged = this.search.filters.working
+          && ['chat-turn-start', 'chat-done'].includes(name);
+
+        if (waitingChanged || workingChanged) {
+          void this._refreshChatSearch();
+        }
+
         if (name === 'chat-permission') {
           // «Разрешать до конца сессии»: инструмент уже одобрен — отвечаем сами, без всплывашки.
           if (canRememberPermission(d) && d.chatKey && permAutoAllow[d.chatKey]?.has(d.tool || '')) {
@@ -6083,9 +6308,14 @@ export const useChatStore = defineStore('chat', {
       const runtime = chatLoadRuntimeFor(this);
       const mutation = runtime.catalogEpoch;
       const query = this.search.query;
+
       const archived = this.search.archived;
+
+      const filters = this.search.filters;
+
       const searchEpoch = runtime.searchEpoch;
-      const page = this.pageFor(query, archived);
+
+      const page = this.pageFor(query, archived, filters);
       const controller = new AbortController();
 
       // Сверка после обрыва нужна показанным строкам и открытым лентам: шапки вне экрана
@@ -6120,7 +6350,11 @@ export const useChatStore = defineStore('chat', {
           const raw = await api.post('/api/chat/store/changes', {
             known: Object.fromEntries(entries.slice(offset, offset + 40)),
             onlyKnown: true,
-            ...(offset === 0 ? { top: { q: query, archived } } : {}),
+            ...(offset === 0 ? { top: {
+              q: query,
+              archived,
+              ...chatFiltersQuery(filters),
+            } } : {}),
           }, {
             signal: controller.signal,
             retry: false,
@@ -6229,6 +6463,21 @@ export const useChatStore = defineStore('chat', {
         }
 
         runtime.resyncedAt = Date.now();
+      } catch (caught) {
+        const failure = chatFailure(caught);
+
+        if (runtime.disposed || failure.status !== 400 || !hasChatFilters(filters)) {
+          throw caught;
+        }
+
+        // Старый top может отказать раньше любого page GET. Проверка страницы
+        // использует ту же ограниченную пробу и актуальный пользовательский scope.
+        await this.refreshChatPage(this.search.query, this.search.archived, this.search.filters);
+
+        if (this.filtersProtocol === 1) {
+          // Новый сервер или недоступная проба: исходный отказ не превращаем в успех.
+          throw caught;
+        }
       } finally {
         runtime.resyncControllers.delete(controller);
       }

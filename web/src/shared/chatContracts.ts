@@ -1,5 +1,5 @@
 import type {
-  ChatCatalogPage, ChatCatalogSummary, ChatHistoryWindow,
+  ChatCatalogPage, ChatCatalogSummary, ChatHistoryWindow, ChatListFilters,
 } from '../../../shared/chat/chatPaging.ts';
 
 import { isChatSpeed } from '../../../shared/chat/chatSpeed.ts';
@@ -428,6 +428,9 @@ export type ChatLoadError = 'network' | 'timeout' | 'server' | 'access';
 
 export interface ChatState {
   pagingEnabled: boolean;
+
+  filtersProtocol: number;
+
   catalogMutationVersion: number;
   catalogPages: Record<string, ChatCatalogPage>;
   catalogSummary: ChatCatalogSummary;
@@ -440,9 +443,15 @@ export interface ChatState {
   messageLoads: Record<string, { state: 'loading' | 'loaded' | 'error'; error: string }>;
   search: {
     query: string;
+
     archived: boolean;
+
+    filters: ChatListFilters;
+
     loading: boolean;
+
     error: string;
+
     matches: Record<string, string>;
   };
   sessions: ChatSession[];
@@ -875,6 +884,7 @@ export function decodeChatPage(value: unknown) {
     ...result,
     page: value.page as { nextCursor: string | null; hasMore: boolean },
     summary: value.summary as unknown as ChatCatalogSummary,
+    filtersProtocol: value.filtersProtocol === 1 ? 1 : 0,
   };
 }
 

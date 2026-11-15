@@ -95,7 +95,13 @@ async function fixture(t, { fail = false } = {}) {
 
   const wrapper = mount(ChatList, { attachTo: document.body });
 
-  t.after(() => wrapper.unmount());
+  t.after(() => {
+    wrapper.unmount();
+
+    localStorage.removeItem('chat.list.scope');
+
+    localStorage.removeItem('chat.list.filters');
+  });
   await drain();
 
   return {
@@ -148,7 +154,8 @@ test('SEARCH-RACE: старый запрос и старый архивный sc
   }] });
   await drain();
   assert.equal(state.wrapper.text().includes('первое устаревшее'), false);
-  await state.wrapper.find('[role="switch"]').trigger('click');
+  await state.wrapper.find('[data-option-value="archived"]').trigger('click');
+
   await waitFor(() => state.requests.length === 3);
   assert.equal(state.requests[2].params.get('archived'), '1');
   state.requests[2].gate.resolve({ matches: [{

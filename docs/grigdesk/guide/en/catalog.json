@@ -100,6 +100,19 @@
     ]
   },
   {
+    "file": "chat-list-filters.md",
+    "id": "chat-list-filters",
+    "title": "Chat list filters",
+    "section": "Conversations",
+    "keywords": [
+      "filters",
+      "chat list",
+      "archive",
+      "unread",
+      "freshness"
+    ]
+  },
+  {
     "file": "deepseek.md",
     "id": "deepseek",
     "title": "DeepSeek and GLM",

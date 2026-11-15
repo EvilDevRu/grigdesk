@@ -96,6 +96,8 @@ import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.
 import { decodeHistoryStepReuseRequest, HISTORY_STEP_REUSE_ROUTE }
   from '../../../../shared/chat/chatHistoryStepReuse.ts';
 import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import { chatFilterQueryError } from '../../../../shared/chat/chatPaging.ts';
+
 import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
@@ -241,7 +243,16 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   reuseSteps?: unknown;
   known?: Record<string, unknown>;
   onlyKnown?: boolean;
-  top?: { archived?: boolean; q?: string };
+  top?: {
+    archived?: boolean;
+    q?: string;
+    unread?: string;
+    waiting?: string;
+    working?: string;
+    task?: string;
+    provider?: string;
+    fresh?: string;
+  };
   window?: unknown;
   clearHistory?: boolean;
   patch?: Record<string, unknown>;
@@ -5477,9 +5488,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Каталог и дельта имеют одну оболочку и возвращают только короткие проекции.
    * Отсутствующие known id передаются явно, без привязки к времени или процессу.
    */
+  // «Работают» — живые ходы и фоновые запуски: каталог не читает ленты ради признака.
   const catalogPaging = new ChatCatalogPaging(history, () => new Set(
     [...pendingPerms.values()].map((entry) => String(entry.chatKey || '')).filter(Boolean),
-  ));
+  ), () => new Set([
+    ...[...activeRuns.keys()].map((key) => String(key || '')),
+    ...backgroundRuns.list().map((run) => String(run.chatKey || '')),
+  ].filter(Boolean)));
 
   /**
    * Общая дельта оставляет прежний формат метаданных и версий голов.
@@ -5540,16 +5555,27 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const top = request.body.top;
 
     if (top !== undefined && (!top || typeof top !== 'object' || Array.isArray(top)
-      || Object.keys(top).some((key) => !['q', 'archived'].includes(key))
+      || Object.keys(top).some((key) => !['q', 'archived', 'unread', 'waiting', 'working',
+        'task', 'provider', 'fresh'].includes(key))
       || (top.q !== undefined && (typeof top.q !== 'string' || top.q.length > 256))
-      || (top.archived !== undefined && typeof top.archived !== 'boolean'))) {
+      || (top.archived !== undefined && typeof top.archived !== 'boolean')
+      || chatFilterQueryError(top))) {
       return reply.code(400).send({ error: 'bad_chat_page' });
     }
 
     const result = await listStore(known, request.body.onlyKnown === true);
 
     if (top && request.body.onlyKnown) {
-      const page = await catalogPaging.page({ archived: top.archived ? '1' : '0', q: top.q || '' }, true);
+      const page = await catalogPaging.page({
+        archived: top.archived ? '1' : '0',
+        q: top.q || '',
+        unread: typeof top.unread === 'string' ? top.unread : undefined,
+        waiting: typeof top.waiting === 'string' ? top.waiting : undefined,
+        working: typeof top.working === 'string' ? top.working : undefined,
+        task: typeof top.task === 'string' ? top.task : undefined,
+        provider: typeof top.provider === 'string' ? top.provider : undefined,
+        fresh: typeof top.fresh === 'string' ? top.fresh : undefined,
+      }, true);
 
       return {
         ...result,
