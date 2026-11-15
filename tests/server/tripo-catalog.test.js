@@ -8,6 +8,7 @@ import {
   MODEL_P2,
   RIG_V1,
   RIG_V2,
+  TEXTURE_V3,
   TEXTURE_V35,
   nativeAccepts,
   parseTripoTask,
@@ -92,7 +93,7 @@ test('TO-02 цена генерации складывается из базы �
   assert.equal(extras.quote.usd, 0.65);
 });
 
-test('TO-03 проверки генерации: грани по модели, части, быстрая текстура, вид спереди', () => {
+test('TO-03 проверки генерации: грани, части, быстрая текстура, умолчания v3.5, вид спереди', () => {
   const p1 = tripoValidate('image-to-model', {
     model: MODEL_P1,
     face_limit: 30,
@@ -103,11 +104,16 @@ test('TO-03 проверки генерации: грани по модели, �
     generate_parts: true,
     smart_low_poly: true
   }, context());
-  const fast = tripoValidate('image-to-model', { texture_quality: 'fast' }, context());
+  const fast = tripoValidate('image-to-model', {
+    texture_quality: 'fast',
+    texture_version: TEXTURE_V3
+  }, context());
   const fastOk = tripoValidate('image-to-model', {
     texture_quality: 'fast',
     texture_version: TEXTURE_V35
   }, context());
+  const defaults = tripoValidate('image-to-model', {}, context());
+  const retexture = tripoValidate('retexture', {}, context({ kind: 'model' }));
   const views = tripoValidate('views-to-model', {}, context({ views: ['back', 'left'] }));
 
   assert.deepEqual(p1.errors.map((issue) => issue.field), ['face_limit']);
@@ -118,6 +124,10 @@ test('TO-03 проверки генерации: грани по модели, �
   assert.ok(conflict.errors.some((issue) => issue.field === 'generate_parts'));
   assert.ok(fast.errors.some((issue) => issue.field === 'texture_quality'));
   assert.deepEqual(fastOk.errors, []);
+  assert.equal(defaults.values.texture_version, TEXTURE_V35);
+  assert.equal(defaults.values.delight, true);
+  assert.equal(retexture.values.model, TEXTURE_V35);
+  assert.equal(retexture.values.delight, true);
   assert.equal(views.errors[0].message, 'Нужен вид спереди и хотя бы ещё один вид.');
 });
 
@@ -283,6 +293,8 @@ test('TO-09 тела запросов: пустое и скрытое не ух�
   assert.equal(text.body.compress, 'geometry');
   assert.equal('face_limit' in text.body, false);
   assert.equal(text.body.model, MODEL_H);
+  assert.equal(text.body.texture_version, TEXTURE_V35);
+  assert.equal(text.body.delight, true);
   assert.deepEqual(views.body.inputs, [{ front: 'file_f' }, { back: 'file_b' }]);
   assert.deepEqual(fromTask.body.inputs, [{ task_id: TASK }]);
   assert.equal(segment.body.seg_type, 'model');
