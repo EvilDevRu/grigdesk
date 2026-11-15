@@ -162,8 +162,15 @@ export async function qwenNativeFixture(t, { dashscope = false } = {}) {
       }] }));
       emit(chunk({}, 'tool_calls'));
     } else {
-      emit(chunk({ role: 'assistant', reasoning_content: 'Проверка локального контракта.' }));
-      emit(chunk({ content: 'Ответ настоящего CLI.' }));
+      const deltas = action?.deltas ?? [
+        { role: 'assistant', reasoning_content: 'Проверка локального контракта.' },
+        { content: 'Ответ настоящего CLI.' },
+      ];
+
+      for (const delta of deltas) {
+        emit(chunk(delta));
+      }
+
       emit({ ...chunk({}, 'stop'), usage: {
         prompt_tokens: 20,
         completion_tokens: 8,

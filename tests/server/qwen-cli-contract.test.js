@@ -160,6 +160,58 @@ test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 },
   assert.equal(JSON.stringify(result).includes(QWEN_KEY), false);
 });
 
+test('Qwen native: токеновые размышление и ответ сохраняют цельность', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const thought = 'Проверяю installUiBrowser: компоненты настоящие, импорты есть.';
+  const reply = 'Проверка завершена. Компоненты настоящие.';
+  const steps = [];
+
+  fixture.actions.push({ deltas: [
+    ...Array.from(thought, (text) => ({ reasoning_content: text })),
+    ...Array.from(reply, (content) => ({ content })),
+  ] });
+
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    onStep: (step) => steps.push(step),
+  }));
+
+  assert.deepEqual(steps.filter((step) => step.k === 'think').map((step) => step.text), [thought]);
+  assert.deepEqual(steps.filter((step) => step.k === 'text').map((step) => step.text), [reply]);
+  assert.equal(result.reply, reply);
+});
+
+test('Qwen native: чередующиеся каналы не разрезают слова', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const steps = [];
+  const messages = [];
+
+  fixture.actions.push({ deltas: [
+    { reasoning_content: 'Проверяю ' },
+    { content: 'Компоненты настоя' },
+    { reasoning_content: 'компоненты ' },
+    { content: 'щие, импорты ' },
+    { reasoning_content: 'и импорты.' },
+    { content: 'есть.' },
+  ] });
+
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    onStep: (step) => steps.push(step),
+    onAssistantMessage: (message) => messages.push(message),
+  }));
+  const textSteps = steps.filter((step) => ['think', 'text'].includes(step.k));
+
+  assert.deepEqual(textSteps.filter((step) => step.k === 'think').map((step) => step.text), [
+    'Проверяю компоненты и импорты.',
+  ]);
+  assert.deepEqual(textSteps.filter((step) => step.k === 'text').map((step) => step.text), [
+    'Компоненты настоящие, импорты есть.',
+  ]);
+  assert.deepEqual(messages.map((message) => message.text), ['Компоненты настоящие, импорты есть.']);
+  assert.equal(result.reply, 'Компоненты настоящие, импорты есть.');
+});
+
 test('qwen-native-prompt-survives-30-seconds', { timeout: 60000 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });

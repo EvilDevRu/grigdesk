@@ -197,7 +197,7 @@
 - [Правило Qwen Code: подключение без ручного JSON, живой каталог, внешний npm-CLI](qwen-integration-policy.md)
 - [Источники квот QwenCloud: месячный Individual, отдельный вход, ограничения CLI и API кабинета](qwen-token-plan-usage.md)
 - [Qwen Code: discovery, усилие, подтверждённая модель сессии, native-окно и символические ссылки](qwen-integration-boundaries.md)
-- [Qwen: цельные блоки, отдельные реплики в ходе и отображение старых токеновых шагов](qwen-stream-blocks.md)
+- [Qwen: цельные блоки чередующихся каналов, отдельные реплики и старые токеновые шаги](qwen-stream-blocks.md)
 - [Qwen: полный ход дольше 30 секунд, остановка, память после вложений и прежние привязки](qwen-prompt-lifetime.md)
 - [Qwen: уточнение в активный ход, native send-now, подтверждение передачи и отдельные ответы](qwen-in-turn.md)
 - [Qwen: изображения в обычном ходе и уточнении, ACP-байты, границы файлов и лимиты](qwen-image-input.md)

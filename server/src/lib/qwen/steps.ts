@@ -6,38 +6,40 @@ import {
 
 /**
  * ACP передаёт дельты текста, а лента хранит законченные смысловые блоки.
- * Смена рода текста или явная граница закрывает блок; пустые chunks его не разрывают.
+ * Каналы могут чередоваться внутри слова, поэтому только явная граница закрывает блоки.
  */
 export function createQwenTextSteps(now: () => number = Date.now) {
   const prefix = randomUUID();
   let sequence = 0;
-  let kind: 'think' | 'text' | null = null;
-  let pending = '';
-  let at = 0;
+  const pending = new Map<'think' | 'text', { text: string; at: number }>();
 
   /**
    * Хвост выпускается один раз, включая завершение с ошибкой или отменой.
-   * Время первой дельты сохраняет место блока перед следующим действием.
+   * Порядок первых дельт сохраняет место каждого канала перед следующим действием.
    */
   function flush(): ChatStep[] {
-    const text = pending.trim();
-    const current = kind;
-    const startedAt = at;
+    const steps: ChatStep[] = [];
 
-    kind = null;
-    pending = '';
-    at = 0;
+    for (const [kind, block] of pending) {
+      const text = block.text.trim();
 
-    return text && current ? [{
-      k: current,
-      id: `${prefix}-${++sequence}`,
-      text: cut(text, current === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT),
-      at: startedAt,
-    }] : [];
+      if (text) {
+        steps.push({
+          k: kind,
+          id: `${prefix}-${++sequence}`,
+          text: cut(text, kind === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT),
+          at: block.at,
+        });
+      }
+    }
+
+    pending.clear();
+
+    return steps;
   }
 
   /**
-   * Пробелы между дельтами сохраняются, память ограничена лимитом предпросмотра.
+   * Пробелы между дельтами сохраняются, каждый канал ограничен лимитом предпросмотра.
    * Полный ответ отдельно собирает runtime; этот буфер не определяет его длину.
    */
   function append(next: 'think' | 'text', text: string): ChatStep[] {
@@ -45,18 +47,18 @@ export function createQwenTextSteps(now: () => number = Date.now) {
       return [];
     }
 
-    const out = kind && kind !== next ? flush() : [];
+    let block = pending.get(next);
 
-    if (!kind) {
-      kind = next;
-      at = now();
+    if (!block) {
+      block = { text: '', at: now() };
+      pending.set(next, block);
     }
 
-    const limit = kind === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT;
+    const limit = next === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT;
 
-    pending = (pending + text).slice(0, limit + 1);
+    block.text = (block.text + text).slice(0, limit + 1);
 
-    return out;
+    return [];
   }
 
   return { append, flush };

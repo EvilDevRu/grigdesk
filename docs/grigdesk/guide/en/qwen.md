@@ -57,8 +57,10 @@ continuation uses the saved session. Successful tools show ✓ and failed tools 
 The requested-model marker in turn status means the CLI has not confirmed session selection.
 After confirmation it disappears and the model is stored with the reply.
 It remains if the CLI does not report the current model.
-Reasoning and replies form continuous blocks rather than one card per streamed fragment.
-Previously saved fragments are also combined when displayed without changing messages or memory.
+Reasoning and replies form continuous blocks even when their streamed fragments alternate.
+If words are split between Reasoning rows, apply the GrigDesk fix and manually restart the server;
+it takes effect for new turns. Previously published separate replies are not rebuilt.
+Older token steps without their own IDs are combined when displayed without changing messages or memory.
 
 Long reasoning, tools and approval waits do not stop after 30 seconds. Stop works during each state.
 If an installed version reports `ACP timeout: session/prompt` around 30 seconds, update the server,
