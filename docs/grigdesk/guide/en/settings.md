@@ -43,6 +43,34 @@ Success notifications with a title or close control use a plain green check mark
 Confirmation/installation header icons have no coloured tile. Red identifies dangerous actions;
 read the text and button before confirming.
 
+## Codex Host mode
+
+By default Codex runs in the workspace sandbox. The shared "Host mode" switch lives in
+Settings → Executors → GPT (Codex) → Parameters and applies to every ordinary Codex chat,
+new and existing. There is no per-chat switch and no repeated consent. Enabling requires
+explicit confirmation in the shared dialog; without it the server does not save the
+setting. Disabling returns the sandbox and needs no confirmation.
+
+In Host mode Codex runs without the sandbox's filesystem and network restrictions, within
+the server user's permissions. There is no automatic sudo. A prompt before every write
+outside the workspace and automatic action review are not guaranteed: without the sandbox
+boundary the former extension requests do not arise. GrigDesk's mandatory supervisory tool
+confirmations (SSH and databases) and the direct SSH restriction remain.
+
+The change applies to the next turn. A running turn keeps its permissions and is not
+stopped by saving the setting. Before the next turn the previous Codex process and its
+background work are closed with confirmed completion; if cleanup is not confirmed, the new
+profile does not start and the reason is visible in Settings → Runs → Live agent processes
+with a retry. The conversation, model and effort are preserved; external actions the agent
+already performed are not undone by closing. "Stop" interrupts only the turn, while closing
+the live process also ends its background work — these are different actions.
+
+In chat with Host enabled, a read-only "Host" label with an honest hint replaces the mode
+select; the current turn's permissions and the next turn's setting are distinguished.
+Host mode requires a working application user systemd and a separate unit; without them the
+run gets an explicit refusal reason. The selected Codex installation, version and managed
+policy are checked at admission; incompatibility refuses without a silent switch.
+
 ## Configure quota refresh
 
 Executors has one Automatic quota refresh switch above card selection.

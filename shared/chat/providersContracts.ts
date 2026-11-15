@@ -81,6 +81,14 @@ export interface ProviderEntry {
   defaultPermissionMode?: string;
   permissionModeSelectionPolicy?: 'preserve-explicit';
   permissionModesRequiringExplicitSelection?: readonly string[];
+  // Фиксированный профиль следующего хода из общей настройки исполнителя:
+  // презентация для окон, а не допуск; per-chat выбор при нём не требуется.
+  fixedPermissionProfile?: {
+    id: string;
+    labelKey: string;
+    hintKey: string;
+    requestMode: string;
+  };
   installation?: ProviderInstallationMetadata;
   usagePresentation?: { freshness: boolean; spentLabel: boolean };
   sessionBinding?: boolean;

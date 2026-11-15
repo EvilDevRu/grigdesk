@@ -2511,3 +2511,177 @@ test('пул: страховочный closeGeneration не бросает и д
     await pool.closeAll();
   }
 });
+
+/**
+ * Обычная сессия не получает keepAlive: проверяется новый контракт confirmed-close.
+ * Мёртвый CLI оставляет живой owner; ошибка снимается только успешным повтором close.
+ */
+function confirmedCloseFixture(t, maxSessions = 1) {
+  let refusing = true;
+  let closes = 0;
+  const opened = [];
+  const changes = [];
+  const pool = new ChatLiveSessions({
+    maxSessions,
+    idleMs: 60_000,
+    onChange: (event) => changes.push(event),
+  });
+  const executor = {
+    id: 'confirmed-codex',
+    session: {
+      mode: 'persistent',
+      restartOn: ['runtimeProfileFingerprint'],
+      open: async (spec) => {
+        const handle = {
+          spec,
+          requiresConfirmedClose: true,
+          alive: true,
+          send: async () => ({ sessionId: 'retained-thread' }),
+          interrupt: async () => { },
+          close: async () => {
+            closes += 1;
+            handle.alive = false;
+
+            if (refusing) {
+              throw new Error('scope completion unknown');
+            }
+          },
+        };
+
+        opened.push(handle);
+
+        return handle;
+      },
+    },
+  };
+  const run = (chatKey = 'one', fingerprint = 'sandbox') => pool.run({
+    chatKey,
+    executor,
+    runtimeProfileFingerprint: fingerprint,
+  }, {});
+
+  t.after(async () => {
+    refusing = false;
+    await pool.closeAll();
+  });
+
+  return {
+    pool,
+    executor,
+    opened,
+    changes,
+    run,
+    heal: () => {
+      refusing = false;
+    },
+    closes: () => closes,
+  };
+}
+
+for (const initiator of ['explicit', 'transition', 'idle', 'LRU', 'onExit', 'closeAll']) {
+  test(`Confirmed close обычной сессии удерживает entry до повтора: ${initiator}`, async (t) => {
+    const f = confirmedCloseFixture(t);
+
+    if (initiator === 'idle') {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+    }
+
+    await f.run();
+
+    if (initiator === 'explicit') {
+      await assert.rejects(f.pool.close('one'), /scope completion unknown/u);
+    } else if (initiator === 'transition') {
+      await assert.rejects(f.run('one', 'host'), /scope completion unknown/u);
+    } else if (initiator === 'LRU') {
+      await assert.rejects(f.run('two'), /scope completion unknown|слот/u);
+    } else if (initiator === 'closeAll') {
+      await f.pool.closeAll().catch(() => { });
+    } else if (initiator === 'onExit') {
+      f.opened[0].alive = false;
+      f.opened[0].spec.hooks.onExit({ reason: 'CLI завершён, scope ещё неизвестен' });
+    } else {
+      t.mock.timers.tick(60_001);
+    }
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(f.pool.has('one'), true, 'AC10: exit CLI не освобождает owned resource');
+    assert.equal(f.pool.stats().length, 1);
+    assert.equal(f.pool.limits().live, 1);
+    assert.equal(f.changes.some((entry) => entry.chatKey === 'one' && entry.event === 'closed'), false);
+
+    if (initiator !== 'closeAll') {
+      await assert.rejects(f.run('one', 'host'), /scope completion unknown/u);
+    } else {
+      await assert.rejects(f.run('two'), /останавливается/u);
+    }
+
+    assert.equal(f.opened.length, 1, 'Другой fingerprint не запускается до подтверждения close');
+    f.heal();
+    await f.pool.close('one');
+    assert.equal(f.pool.has('one'), false);
+    assert.equal(f.pool.limits().live, 0);
+    assert.equal(f.changes.filter((entry) => entry.chatKey === 'one' && entry.event === 'closed').length, 1);
+  });
+}
+
+test('Confirmed close: конкурентные close делят одну попытку, после отказа возможен retry', async (t) => {
+  const f = confirmedCloseFixture(t);
+
+  await f.run();
+
+  let release;
+  let closes = 0;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  f.opened[0].close = async () => {
+    closes += 1;
+    await gate;
+
+    throw new Error('scope completion unknown');
+  };
+
+  const first = f.pool.close('one');
+  const second = f.pool.close('one');
+  const outcomes = Promise.allSettled([first, second]);
+
+  release();
+
+  const results = await outcomes;
+
+  assert.deepEqual(results.map((entry) => entry.status), ['rejected', 'rejected']);
+  assert.equal(closes, 1);
+  assert.equal(f.pool.has('one'), true);
+  f.opened[0].close = async () => { };
+  await f.pool.close('one');
+  assert.equal(f.pool.limits().live, 0);
+});
+
+test('Confirmed close: stale onExit старого поколения не удаляет новый owner', async (t) => {
+  const f = confirmedCloseFixture(t);
+
+  f.heal();
+  await f.run();
+  await f.pool.close('one');
+  await f.run('one', 'host');
+  f.opened[0].spec.hooks.onExit({ reason: 'поздний exit старого CLI' });
+  assert.equal(f.pool.has('one'), true);
+  assert.equal(f.pool.stats()[0].sessionId, 'retained-thread');
+  assert.equal(f.opened.length, 2);
+});
+
+test('Confirmed closeAll продолжает остальные cleanup и удерживает только отказавший owner', async (t) => {
+  const f = confirmedCloseFixture(t, 2);
+
+  await f.run('one');
+  await f.run('two');
+  f.opened[1].close = async () => { };
+  await f.pool.closeAll().catch(() => { });
+  assert.deepEqual(f.pool.stats().map((entry) => entry.chatKey), ['one']);
+  assert.equal(f.pool.limits().live, 1);
+  await assert.rejects(f.run('three'), /останавливается/u);
+  f.heal();
+  await f.pool.close('one');
+  assert.equal(f.pool.limits().live, 0);
+});

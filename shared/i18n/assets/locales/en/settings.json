@@ -846,6 +846,8 @@
   "allowDirectSshConfirm": "The agent will be able to run direct SSH clients with GrigDesk process permissions. Bash permission mode does not replace this restriction. SSH tool confirmations and logging will not apply.",
   "qwenHostAccessConfirm": "Qwen will access Docker, processes and files with the server user's permissions. Approval modes and the direct SSH restriction remain active. The change applies to the next turn; close the current process separately.",
   "qwenEnableHostAccess": "Enable Host mode",
+  "codexHostAccessConfirm": "Codex will access the filesystem and network without the sandbox's restrictions, within the server user's permissions. There is no automatic sudo; a prompt before every write and automatic action review are not guaranteed. Approval modes and the direct SSH restriction remain active. The change applies to the next turn; the current turn is not stopped, and the previous process is closed separately with confirmation.",
+  "codexEnableHostAccess": "Enable Host mode",
   "installStage": {
     "fetching": "Downloading from source",
     "validating": "Verifying package",
@@ -1152,6 +1154,12 @@
       "auth": {
         "cli": "Host CLI (codex login)",
         "none": "Not signed in (codex login)"
+      },
+      "settings": {
+        "allowHostAccess": {
+          "label": "Host mode",
+          "hint": "Codex runs without the sandbox's filesystem and network restrictions, within the server user's permissions and without automatic sudo. GrigDesk's mandatory supervisory tool confirmations remain."
+        }
       }
     },
     "kimi": {
@@ -1757,6 +1765,7 @@
   "applyConnectionChangesFirst": "Apply connection changes first.",
   "liveProcesses": "Live processes",
   "processStatusIdle": "Idle",
+  "processCleanupPending": "Awaiting confirmed cleanup",
   "processOpenedAgo": "Opened {minutes} min ago",
   "processStopsIn": "Auto stop in {minutes} min",
   "processCanSpeak": "May send messages on its own",

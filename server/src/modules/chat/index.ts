@@ -96,7 +96,8 @@ import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.
 import { decodeHistoryStepReuseRequest, HISTORY_STEP_REUSE_ROUTE }
   from '../../../../shared/chat/chatHistoryStepReuse.ts';
 import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
-import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
+import { normalizeChatRunPermissionProfile, type ChatRunSnapshot }
+  from '../../../../shared/chat/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
   IN_TURN_ATTACHMENT_LIMIT,
@@ -324,6 +325,7 @@ interface ChatExecutor {
   nativeSettings?: ExecutorAdapter['nativeSettings'];
   prepareRuntime?: ExecutorAdapter['prepareRuntime'];
   runtimeProfileFingerprint?: ExecutorAdapter['runtimeProfileFingerprint'];
+  runtimePermissionProfile?: ExecutorAdapter['runtimePermissionProfile'];
   workToolPolicy?: ExecutorAdapter['workToolPolicy'];
   // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
   inTurnInput?: ExecutorAdapter['inTurnInput'];
@@ -1481,6 +1483,23 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     });
   }
 
+  /**
+   * Отказ подтверждённого закрытия процесса — отдельный typed исход: запись и
+   * слот остаются занятыми, история не сбрасывается и не удаляется, повтор допустим.
+   */
+  function isProcessCleanupFailure(error: unknown): boolean {
+    return !!(error && typeof error === 'object'
+      && (error as { processCleanupFailed?: boolean }).processCleanupFailed === true);
+  }
+
+  function processCleanupFailure(reply: FastifyReply, error: unknown) {
+    return reply.code(503).send({
+      error: 'process_cleanup_failed',
+      message: String((error as Error)?.message || 'Завершение процесса агента не подтверждено.')
+        .slice(0, 300),
+    });
+  }
+
   fastify.post<ChatRoute>('/api/chat/workdir/preview', async (request, reply) => {
     try {
       const body = request.body || {};
@@ -1759,7 +1778,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       dropPending(chatKey, 'Сессия агента погашена');
       activeRuns.get(chatKey)?.ac?.abort();
     }
-    await liveSessions.close(chatKey, force ? 'погашена человеком вместе с ходом' : 'погашена человеком');
+
+    try {
+      await liveSessions.close(chatKey, force ? 'погашена человеком вместе с ходом' : 'погашена человеком');
+    } catch (error) {
+      if (isProcessCleanupFailure(error)) {
+        return processCleanupFailure(reply, error);
+      }
+
+      throw error;
+    }
+
     fastify.log.info({ chatKey, forced: busy }, 'чат: живая сессия погашена человеком');
     return { ok: true, forced: busy };
   });
@@ -1834,7 +1863,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         return reply.code(409).send({ error: 'stale_chat_model', message: 'Модель изменена в другом окне.' });
       }
 
-      await resetWorkspaceMemory(record);
+      try {
+        await resetWorkspaceMemory(record);
+      } catch (error) {
+        if (isProcessCleanupFailure(error)) {
+          return processCleanupFailure(reply, error);
+        }
+
+        throw error;
+      }
 
       const binding = await bindingStore.read(chatKey);
 
@@ -3608,6 +3645,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             providerSettings,
             settingsRevision: savedSettings,
             workToolPolicy,
+            // Потребитель создаётся сервером обычного чата; тело HTTP его не
+            // выбирает. Служебные запуски этот контекст не получают.
+            consumer: 'ordinary-chat',
           },
         });
 
@@ -3782,6 +3822,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     let finishRun!: () => void;
     const finished = new Promise<void>((resolve) => { finishRun = () => resolve(); });
     const runId = `run-${randomUUID()}`;
+    // Эффективный профиль подготовленного runtime описывает права текущего хода;
+    // подтверждение придёт после readback живого процесса, а не из настройки.
+    const initialPermissionProfile = executor.runtimePermissionProfile?.(preparedRuntime) || undefined;
     const runRec: RunningTurn = {
       runId,
       snapshot: {
@@ -3791,6 +3834,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         providerId: executor.id,
         requestedModelId: model,
         permissionMode,
+        ...(initialPermissionProfile ? { permissionProfile: initialPermissionProfile } : {}),
         cwd,
         extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir, ...artifactsDirs]),
       },
@@ -3896,12 +3940,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // держит память и свои MCP-серверы.
       const liveTurn = currentPrefs.chatLiveSessions !== false && !!chatKey
         && liveSessionEnabled(executor, { config, providerSettings });
+      // Разовый ход исполнителя с owned resource тоже учитывается пулом: процесс
+      // закрывается после хода подтверждённо, а не забывается вместе с ответом.
+      const pooledPerTurn = !liveTurn && !!chatKey
+        && executor.session?.pooledPerTurn === true
+        && liveSessionEnabled(executor, { config, providerSettings });
 
-      if (!liveTurn && chatKey && liveSessions.has(chatKey)) {
+      if (!liveTurn && !pooledPerTurn && chatKey && liveSessions.has(chatKey)) {
         await liveSessions.close(chatKey, 'живой профиль отключён');
       }
 
-      if (liveTurn) {
+      if (liveTurn || pooledPerTurn) {
         // Кнопка «стоп» остаётся прежней ручкой: она дёргает abort, а мы превращаем его
         // в прерывание ХОДА. Убивать процесс больше нельзя — вместе с ним умрёт разговор.
         ac.signal.addEventListener('abort', () => {
@@ -4026,19 +4075,29 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           if (activeRuns.get(chatKey)?.runId !== runId) {
             return;
           }
-          if (!metadata.actualModelId
-            || (metadata.modelSource !== 'session' && metadata.modelSource !== 'response')) {
-            return;
+
+          // Профиль прав принимается независимо от подтверждения модели: readback
+          // живого runtime подтверждает права, даже если модель ещё не названа.
+          const profile = normalizeChatRunPermissionProfile(metadata.permissionProfile);
+          let next = profile ? { ...runRec.snapshot, permissionProfile: profile } : runRec.snapshot;
+
+          if (metadata.actualModelId
+            && (metadata.modelSource === 'session' || metadata.modelSource === 'response')
+            && !(runRec.snapshot.modelSource === 'response' && metadata.modelSource === 'session')
+            && !(runRec.snapshot.actualModelId === metadata.actualModelId
+              && runRec.snapshot.modelSource === metadata.modelSource)) {
+            next = {
+              ...next,
+              actualModelId: metadata.actualModelId,
+              modelSource: metadata.modelSource,
+            };
           }
-          if (runRec.snapshot.modelSource === 'response' && metadata.modelSource === 'session') {
-            return;
-          }
-          if (runRec.snapshot.actualModelId === metadata.actualModelId
-            && runRec.snapshot.modelSource === metadata.modelSource) {
+
+          if (next === runRec.snapshot) {
             return;
           }
 
-          runRec.snapshot = { ...runRec.snapshot, ...metadata };
+          runRec.snapshot = next;
           fastify.sse.broadcast('chat-run-metadata', {
             chatKey,
             runId,
@@ -4220,11 +4279,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           }
           : runArgs;
 
-        return liveTurn
+        return liveTurn || pooledPerTurn
           ? liveSessions.run({
             ...attemptArgs,
             executor,
             sessionIdAuthoritative: !!executor.sessionBinding,
+            perTurn: pooledPerTurn,
           }, {
             permissionMode: attemptArgs.permissionMode,
             modeSelection: attemptArgs.modeSelection,
@@ -4374,7 +4434,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // lastSession и через pending. Родному компакту всё это не нужно: сессия та же.
         if (plan.kind === 'summary' && !summaryWorkspace) {
           lastSession.delete(chatKey);
-          if (liveTurn) await liveSessions.close(chatKey, 'контекст сжат выжимкой');
+
+          // Отказ подтверждённого закрытия не теряет готовую выжимку: owned resource
+          // остаётся в пуле с видимой причиной, следующий ход не откроется до повтора.
+          if (liveTurn) {
+            await liveSessions.close(chatKey, 'контекст сжат выжимкой').catch((error) => {
+              fastify.log.warn({ err: (error as Error).message, chatKey },
+                'чат: выжимка сохранена, но процесс не подтвердил закрытие');
+            });
+          }
           // У исполнителей с server-owned binding (DeepSeek, Kimi) id сессии живёт не в
           // чате, а в sidecar: без ротации следующий ход резюмировал бы прежнюю сессию и
           // клеил выжимку поверх полного контекста — 580 К токенов после «сжатия»
@@ -4509,6 +4577,16 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
       return { ...out, model: model || null, effort: runEffort || null };
     } catch (errValue) {
+      // Отказ подтверждённого закрытия прежнего процесса не является ошибкой хода:
+      // новый профиль не запускался, запись удержана, человеку виден typed-отказ.
+      if (isProcessCleanupFailure(errValue)) {
+        return channel.refuse(503, {
+          error: 'process_cleanup_failed',
+          message: String((errValue as Error)?.message || 'Завершение процесса агента не подтверждено.')
+            .slice(0, 300),
+        });
+      }
+
       const err = errValue as ChatFailure;
       let seedReset = false;
 
@@ -6027,10 +6105,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
     deletingChats.add(id);
     storeBroadcasts.delete(id);
+
+    // Живой процесс агента удалённого чата держать не за чем: разговора больше нет,
+    // а он занимает память и свои MCP-серверы. Отказ cleanup не удаляет историю.
     try {
-      // Живой процесс агента удалённого чата держать не за чем: разговора больше нет,
-      // а он занимает память и свои MCP-серверы.
-      await liveSessions.close(id, 'чат удалён');
+      try {
+        await liveSessions.close(id, 'чат удалён');
+      } catch (error) {
+        if (isProcessCleanupFailure(error)) {
+          return processCleanupFailure(reply, error);
+        }
+
+        throw error;
+      }
 
       const removed = await mobileHistory.remove(id, () => history.remove(id));
       // origin в query: DELETE у нас без тела (см. shared/api-client.js).

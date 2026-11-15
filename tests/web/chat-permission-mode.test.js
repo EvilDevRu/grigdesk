@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { effectivePermissionMode, permissionModeRequest } from '../../web/src/shared/chatPermissionMode.ts';
-import { chatStoreFixture, setChatProviders } from './helpers/chat-store.js';
+import { apiHarness, chatStoreFixture, setChatProviders } from './helpers/chat-store.js';
 
 const modes = [{ id: 'default' }, { id: 'auto' }, { id: 'read-only' }];
 
@@ -129,3 +129,110 @@ test('store хранит bypass только в выбранном чате, н�
     assert.equal(created.modeSelection, undefined);
     chat.$dispose();
   });
+
+const fixedHost = {
+  id: 'host',
+  labelKey: 'core.codexModeHostLabel',
+  hintKey: 'core.codexModeHostHint',
+  requestMode: 'auto',
+};
+
+test('Fixed Host не требует chat выбора и сохраняет sandbox preference для Off', () => {
+  const fixed = {
+    ...provider,
+    fixedPermissionProfile: fixedHost,
+  };
+
+  for (const mode of ['auto', 'dontAsk', 'plan', 'manual', 'acceptEdits', 'bypassPermissions']) {
+    const chat = {
+      id: 'host-chat',
+      mode,
+    };
+
+    assert.deepEqual(permissionModeRequest(chat, fixed), { mode: 'auto' });
+    assert.equal(chat.mode, mode, 'Общая настройка не перезаписывает старый выбор чата');
+  }
+
+  assert.equal(permissionModeRequest({
+    id: 'host-chat',
+    mode: 'dontAsk',
+  }, provider).mode, 'dontAsk');
+  assert.throws(() => permissionModeRequest({
+    id: 'host-chat',
+    mode: 'plan',
+  }, provider), /недоступен/u);
+});
+
+for (const path of ['send', 'compact', 'outbox']) {
+  test(`Fixed Host проходит общий resolver без marker: ${path}`, async (t) => {
+    const chat = await chatStoreFixture({
+      sessions: [{
+        id: 'host-wire',
+        model: 'fixture-model',
+        modelRef: {
+          provider: 'codex',
+          model: 'fixture-model',
+        },
+        mode: 'plan',
+        messages: [],
+        sessionId: 'fixture-thread',
+        contextTokens: 100,
+      }]
+    });
+    const fixed = {
+      ...provider,
+      fixedPermissionProfile: fixedHost,
+    };
+    const calls = [];
+
+    t.after(() => {
+      chat.$dispose();
+      setChatProviders(null);
+    });
+    setChatProviders({
+      modelOf: () => ({
+        id: 'fixture-model',
+        model: { id: 'fixture-model' },
+        provider: fixed,
+      })
+    });
+    chat._saveChatNow = async () => { };
+    chat.prepareWorkdirSend = async () => { };
+    apiHarness.post = async (url, body) => {
+      if (url === '/api/chat' || url === '/api/chat/compact') {
+        calls.push({
+          url,
+          body,
+        });
+      }
+
+      return {
+        reply: 'Готово',
+        sessionId: 'fixture-thread',
+        steps: [],
+      };
+    };
+
+    const current = chat.sessions[0];
+
+    if (path === 'send') {
+      await chat.send(current.id, 'Сообщение без отдельного согласия Host');
+    } else if (path === 'compact') {
+      await chat.compact(current.id);
+    } else {
+      const request = chat._turnRequest(current, {
+        role: 'user',
+        text: 'Повтор доставки',
+        turnId: 'turn-host',
+        outbox: { mode: 'dontAsk' },
+      });
+
+      calls.push(request);
+    }
+
+    assert.equal(calls.length, 1, `AC2: ${path} не блокируется старым sandbox preference`);
+    assert.equal(calls[0].body.mode, 'auto');
+    assert.equal(calls[0].body.modeSelection, undefined);
+    assert.equal(current.mode, 'plan');
+  });
+}

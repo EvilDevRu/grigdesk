@@ -30,7 +30,7 @@
 - [Preflight допуска GLM: условный вопрос о smoke и предупреждение об отложенной установке](glm-admission-preflight.md)
 - [Длинный resume GLM: собственный предел RPC 32 МиБ и отмена чтения страницы истории](glm-resume-page-limit.md)
 - [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
-- [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
+- [Режимы Codex: admission, общий тумблер «Хост», владение scope, native-вопросы и предел проверки](codex-permission-modes.md)
 - [Асинхронные вопросы Codex: карточка, ответ через steer и отмена вместе с ходом](codex-async-questions.md)
 - [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
 - [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)

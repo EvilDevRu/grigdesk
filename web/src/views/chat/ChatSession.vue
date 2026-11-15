@@ -53,6 +53,13 @@
               </UiIconButton>
             </template>
           </div>
+          <!-- Фиксированный профиль виден в строке и при открытом диалоге опций:
+               содержимое диалога телепортируется, а подпись прав остаётся на месте. -->
+          <span v-if="phoneLayout && fixedProfile" class="fixed-mode-rail" role="status"
+                :aria-label="fixedProfileLabel"
+                v-tooltip="fixedModeHint" :aria-description="fixedModeHint">
+            {{ fixedProfileLabel }}
+          </span>
           <UiIconButton class="phone-options" role="rail" :label="t('core.conversationOptions')"
                         :pressed="optionsOpen" :aria-expanded="optionsOpen" aria-haspopup="dialog"
                         @click="optionsOpen = !optionsOpen">
@@ -109,6 +116,9 @@
           <span v-if="modelUnknown" class="fb warn"
                 v-tooltip="t('core.chatUstanovlennyyCliNeZnaet')"> {{ t('core.chatUstanovlennyyCliNeZnaet') }} </span>
         </div>
+        <p v-if="rightsNoteStandalone" class="rights-note" role="status">
+          {{ currentRightsNote.trim() }}
+        </p>
         <div class="spacer"></div>
         <Teleport :to="controlOptionsHost || 'body'"
                   :disabled="!phoneLayout || !optionsOpen || !controlOptionsHost">
@@ -176,8 +186,19 @@
                 </option>
               </UiSelect>
             </div>
-            <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-            <div v-if="modes.length || modeUnavailable" class="sel mode">
+            <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план).
+                 Фиксированный профиль общей настройки показывается readonly в прежнем месте:
+                 per-chat выбор и повторное согласие не требуются. -->
+            <div v-if="fixedProfile" class="sel mode">
+              <span class="lbl">{{ t('core.chatOptionMode') }}</span>
+              <span class="fixed-mode-value" role="status"
+                    :aria-label="fixedProfileLabel"
+                    v-tooltip="fixedModeHint" :aria-description="fixedModeHint">
+                {{ fixedProfileLabel }}
+              </span>
+              <p v-if="phoneLayout" class="option-help">{{ fixedModeHint }}</p>
+            </div>
+            <div v-else-if="modes.length || modeUnavailable" class="sel mode">
               <span class="lbl">{{ t('core.chatOptionMode') }}</span>
               <UiSelect
                 compact
@@ -865,6 +886,7 @@ import {
   UiInlineMessage, UiInput, UiProgress, UiSelect, UiSpinner, UiTextarea, UiTooltip, vTooltip,
   type UiActionTone, messageRef, uiLocale
 } from '../../ui';
+import { translator } from '../../../../shared/i18n/catalogs.ts';
 import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.ts';
 import { codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
@@ -1216,24 +1238,61 @@ const speedHint = computed(() => speedModes.value.some((mode) => mode !== 'stand
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
+const modeProvider = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model).provider);
 const modeState = computed(() => resolvePermissionMode(sess.value?.mode, modes.value,
-  prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
-    || { permissionModeSelectionPolicy: 'preserve-explicit' },
+  modeProvider.value || { permissionModeSelectionPolicy: 'preserve-explicit' },
   sess.value?.modeSelection, sess.value?.id));
 const currentMode = computed(() => modeState.value.mode);
-const modeUnavailable = computed(() => !modeState.value.available
-  && prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
-    ?.permissionModeSelectionPolicy === 'preserve-explicit');
-const activeModeLabel = computed(() => (
-  modes.value.find((mode) => mode.id === runtime.value?.snapshot?.permissionMode)?.label
-    || runtime.value?.snapshot?.permissionMode || '…'
+// Фиксированный профиль общей настройки показывает следующий ход без per-chat
+// выбора. Пустой реестр не даёт профиля; права текущего хода берутся только из
+// снимка запуска и настройкой следующего хода не подменяются.
+const fixedProfile = computed(() => modeProvider.value?.fixedPermissionProfile || null);
+const modeUnavailable = computed(() => !fixedProfile.value && !modeState.value.available
+  && modeProvider.value?.permissionModeSelectionPolicy === 'preserve-explicit');
+// Права текущего хода берутся только из снимка запуска: настройка следующего
+// хода их не подменяет, а отсутствие подтверждения не выдаётся за факт.
+const currentProfile = computed(() => runtime.value?.snapshot?.permissionProfile || null);
+const currentProfileLabel = computed(() => {
+  const profile = currentProfile.value;
+
+  if (!profile) {
+    return modes.value.find((mode) => mode.id === runtime.value?.snapshot?.permissionMode)?.label
+      || runtime.value?.snapshot?.permissionMode || '…';
+  }
+
+  return profile.id === 'host'
+    ? t('core.codexModeHostLabel')
+    : modes.value.find((mode) => mode.id === profile.id)?.label || profile.id;
+});
+const activeModeLabel = currentProfileLabel;
+const currentRightsNote = computed(() => {
+  if (!sess.value?.sending) {
+    return '';
+  }
+
+  return currentProfile.value?.confirmed
+    ? ` ${t('core.chatModeCurrent', { mode: currentProfileLabel.value })}`
+    : ` ${t('core.chatModeCurrentUnconfirmed')}`;
+});
+// Ключи презентации приходят из реестра строкой: перевод читается по каталогу
+// с явным fallback, а не подставляется в t() как литеральный MessageKey.
+const fixedProfileLabel = computed(() => (fixedProfile.value
+  ? translator.t(uiLocale.value, fixedProfile.value.labelKey, {}, fixedProfile.value.id)
+  : ''));
+const fixedProfileHint = computed(() => (fixedProfile.value
+  ? translator.t(uiLocale.value, fixedProfile.value.hintKey, {}, t('core.chatAgentRightsMode'))
+  : t('core.chatAgentRightsMode')));
+const fixedModeHint = computed(() => `${fixedProfileHint.value}${currentRightsNote.value}`);
+// Когда блок режима не рендерится (пустой реестр), заметка о неподтверждённых
+// правах текущего хода остаётся видимой отдельно и не выдаёт настройку за факт.
+const rightsNoteStandalone = computed(() => (
+  !!currentRightsNote.value && !fixedProfile.value && !modes.value.length && !modeUnavailable.value
 ));
 const modeHint = computed(() => (
   !modeState.value.available ? t('core.chatModeUnavailable')
     : t('core.chatHintChatmodenextturn', { hint: modes.value.find((m) => m.id === currentMode.value)?.hint
           || t('core.chatAgentRightsMode'), chatModeNextTurn: sess.value?.sending
-        ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
-        t('core.chatModeNextTurn')}`
+        ? `${currentRightsNote.value} ${t('core.chatModeNextTurn')}`
         : '' })
 ));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
@@ -3026,6 +3085,35 @@ function skipQuestion() {
   letter-spacing: .05em;
   color: var(--ink-mid);
   opacity: .75;
+}
+/* Фиксированный профиль общей настройки — readonly значение в прежнем месте селекта:
+   без шеврона и интерактивности, чтобы не обещать per-chat выбор. */
+.cs .sel.mode .fixed-mode-value {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: default;
+}
+/* Телефонная строка: подпись фиксированного профиля остаётся видимой и при открытом
+   диалоге опций, чьё содержимое телепортируется в body. */
+.cs .fixed-mode-rail {
+  flex: none;
+  align-self: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+}
+/* Заметка о неподтверждённых правах текущего хода вне блока режима. */
+.cs .rights-note {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.5;
 }
 /* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, а слайдеру
    усилия своего disabled не заводили — гасим его отдельно. Композер не трогаем: печатать

@@ -128,3 +128,63 @@ test('фоновый запуск со снимком показывает мо�
   assert.equal(view.modelId, snapshot.requestedModelId);
   assert.equal(view.cwd, snapshot.cwd);
 });
+
+const hostProfile = {
+  id: 'host',
+  sandbox: 'danger-full-access',
+  approvalPolicy: 'never',
+  approvalsReviewer: 'user',
+  confirmed: true,
+};
+
+test('снимок сохраняет optional effective профиль независимо от подтверждения модели', () => {
+  for (const confirmed of [false, true]) {
+    const permissionProfile = {
+      ...hostProfile,
+      confirmed,
+    };
+    const normalized = normalizeChatRunSnapshot({
+      ...snapshot,
+      permissionProfile,
+    });
+
+    assert.deepEqual(normalized.permissionProfile, permissionProfile);
+    assert.equal(normalized.actualModelId, undefined);
+  }
+});
+
+test('старое или повреждённое событие не создаёт подтверждённые права', () => {
+  for (const permissionProfile of [
+    undefined,
+    null,
+    {},
+    {
+      ...hostProfile,
+      confirmed: 'true',
+    },
+    {
+      ...hostProfile,
+      sandbox: 1,
+    },
+    {
+      ...hostProfile,
+      approvalPolicy: null,
+    },
+    {
+      ...hostProfile,
+      approvalsReviewer: [],
+    },
+    {
+      ...hostProfile,
+      id: '',
+    },
+  ]) {
+    const normalized = normalizeChatRunSnapshot({
+      ...snapshot,
+      permissionProfile,
+    });
+
+    assert.equal(normalized.permissionProfile, undefined);
+    assert.equal(normalized.runId, snapshot.runId);
+  }
+});

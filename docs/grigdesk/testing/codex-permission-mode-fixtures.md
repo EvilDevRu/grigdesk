@@ -31,3 +31,34 @@ Node-теста не закрывает ресурсы фикстуры и мо�
 fixtures и не заменяют native acceptance. Fake clock проверяет суточный deadline без
 реального ожидания. Native-пробы не доказывают качество настоящего Auto-review или
 работу модели с живой авторизацией.
+
+## Native-допуск режима «Хост»
+
+`tests/server/codex-host-native.test.js` проверяет общий тумблер `allowHostAccess`
+настоящим CLI через `externalCliAdapter`, настоящий `ChatLiveSessions` и owned scope.
+Модель подменяет loopback Responses, shell/patch исполняет native CLI. Каждый прогон
+живёт в отдельном synthetic app **service** (`grigdesk-codex-host-test-<uuid>.service`)
+со своим HOME/CODEX_HOME/data/workspace; данные и журналы только в state/tmp, глобальная
+среда и службы не меняются. `GRIGDESK_CODEX_NATIVE_ARTIFACTS` (или `GRIGDESK_ARTIFACTS_DIR`)
+задаёт каталог synthetic fixtures вне неявно writable `/tmp`; иначе пропуск считается
+препятствием среды, а не native admission.
+
+Набор доказывает: sandbox dontAsk создаёт внутренний marker и не создаёт sibling вне
+roots без approvals, Host never/user создаёт sibling; два send в одном Host scope;
+close/reopen с реальным persisted rollout и resume того же thread; переходы off→on→off
+через пул с пустым прежним scope до нового turn и прежним ответом в следующем model
+request; fingerprints, model/effort и отсутствие второго CLI на тот же чат. Detached
+(normal/setsid/double-fork) переживают exit породившей оболочки и гаснут после close:
+пустая captured cgroup, смерть своих PID, отсутствие позднего marker после release;
+foreign sentinel вне scope жив. Graceful stop и авария (kill main) synthetic owner
+освобождают только его scopes через BindsTo. Недоступный user bus даёт видимый отказ до
+рабочего turn. Lifecycle входы explicit/force close, reset, delete и остановка synthetic
+приложения подтверждают тот же cleanup; совершённый sibling сохраняется.
+
+Проведено на `codex-cli 0.167.1` (Linux, user systemd): все 16 cases набора
+(`codex-host-native`, `codex-permission-mode-native`, `codex-installed-app-server-contract`)
+завершены успешно, 0 skipped. Схема девяти SCHEMA_FILES установленной установки совпала
+с admission fingerprint `ae89726268e386a2c43092158c9876e240ae256601f5fe7717f4714e197a747e`.
+Это доказательство выбранной установки и эффектов ОС; качество живого Auto-review и
+работа модели с живой авторизацией им не подтверждаются. В среде без user bus/CLI набор
+честно останавливается как `failed/environment`, а не объявляется пройденным.

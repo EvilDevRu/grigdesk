@@ -3212,6 +3212,12 @@
         "core.chatHistoryOlderLoading",
         "core.chatPageRetry",
         "core.chatHistoryOlder"
+      ],
+      "fixedProfile.value.labelKey": [
+        "core.codexModeHostLabel"
+      ],
+      "fixedProfile.value.hintKey": [
+        "core.codexModeHostHint"
       ]
     },
     "web/src/views/chat/ChatSleepBadge.vue": {

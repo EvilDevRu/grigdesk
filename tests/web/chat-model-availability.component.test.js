@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 import { createUiBrowser } from './helpers/ui-components.js';
+import { translator } from '../../shared/i18n/catalogs.ts';
 
 globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 
@@ -78,8 +79,14 @@ function modelOf(value) {
  * Монтирует настоящий селект с управляемым ответом на сброс памяти.
  * Сохранённое состояние задаётся до загрузки реестра и не исправляется фикстурой.
  */
-async function mountChat(t, { initial = {}, reset = async () => true, binding = false } = {}) {
+async function mountChat(t, {
+  initial = {}, reset = async () => true, binding = false, runtime = null, width = 1280, locale = 'ru',
+  registry = {},
+} = {}) {
   const browser = await installBrowser();
+
+  browser.happyDOM.setWindowSize({ width, height: width < 600 ? 844 : 900 });
+
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
     id: 'model-availability-chat',
@@ -111,6 +118,7 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
   };
   globalThis.__modelAvailChatStore = () => ({
     sessions: [session],
+    runtimeFor: () => runtime,
     compactWindow: 0,
     loadConveyor() {},
     markRead() {},
@@ -154,8 +162,24 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
   globalThis.__modelAvailRouter = { async push() {} };
   globalThis.__modelAvailProvidersStore = () => ({
     providers: PROVIDERS,
+    loaded: true,
+    loading: false,
+    error: '',
+    ...registry,
     load() {},
+    /**
+     * Пустой реестр не подтверждает ни модель, ни следующий профиль исполнителя.
+     * Retry возвращает тот же saved choice через обычный reactive registry.
+     */
     modelOf(value) {
+      if (Array.isArray(registry.providers) && registry.providers.length === 0) {
+        return {
+          id: 'gpt-5.6-sol',
+          model: null,
+          provider: null,
+        };
+      }
+
       const resolved = modelOf(value);
 
       return binding && resolved.provider
@@ -166,13 +190,18 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
     visibleModels(provider, selectedId) {
       return provider.models.filter((m) => m.id === selectedId || !m.nonChat);
     },
-    modesOf() { return []; },
+    modesOf(value) {
+      return this.modelOf(value).provider?.modes || [];
+    },
   });
 
   const [{ mount, flushPromises }, ChatSession] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileChatSession(),
   ]);
+
+  globalThis.__modelAvailSetUiLocale(locale);
+
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
     props: { sid: session.id },
@@ -180,6 +209,7 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
 
   t.after(() => {
     wrapper.unmount();
+    globalThis.__modelAvailSetUiLocale('ru');
     delete globalThis.__modelAvailApi;
     delete globalThis.__modelAvailChatStore;
     delete globalThis.__modelAvailTasksStore;
@@ -733,3 +763,212 @@ test('SPEED-UI-CLAUDE: capability не объявляет лишнюю плат�
 
   assert.equal(wrapper.find('[data-role="chat-speed"] option[value="ultrafast"]').exists(), false);
 });
+
+const fixedHostProfile = {
+  id: 'host',
+  labelKey: 'core.codexModeHostLabel',
+  hintKey: 'core.codexModeHostHint',
+  requestMode: 'auto',
+};
+const sandboxProfile = {
+  id: 'auto',
+  sandbox: 'workspace-write',
+  approvalPolicy: 'on-request',
+  approvalsReviewer: 'auto_review',
+  confirmed: true,
+};
+const hostProfile = {
+  id: 'host',
+  sandbox: 'danger-full-access',
+  approvalPolicy: 'never',
+  approvalsReviewer: 'user',
+  confirmed: true,
+};
+
+/**
+ * Права следующего хода приходят через общий реестр, текущего — через отдельный snapshot.
+ * Синтетический descriptor не добавляет новый chat control и не меняет сохранённый mode.
+ */
+function installHostPresentation(t, host = true, locale = 'ru') {
+  const index = PROVIDERS.findIndex((entry) => entry.id === 'codex');
+  const previous = PROVIDERS[index];
+
+  PROVIDERS[index] = {
+    ...previous,
+    defaultPermissionMode: 'auto',
+    permissionModeSelectionPolicy: 'preserve-explicit',
+    modes: [
+      {
+        id: 'auto',
+        label: translator.t(locale, 'core.codexModeAutoLabel'),
+        hint: translator.t(locale, 'core.codexModeAutoHint'),
+      },
+      {
+        id: 'dontAsk',
+        label: translator.t(locale, 'core.codexModeDontAskLabel'),
+        hint: translator.t(locale, 'core.codexModeDontAskHint'),
+      },
+    ],
+    ...(host ? { fixedPermissionProfile: fixedHostProfile } : {}),
+  };
+  t.after(() => {
+    PROVIDERS[index] = previous;
+  });
+
+  return PROVIDERS[index];
+}
+
+for (const locale of ['ru', 'en']) {
+  for (const width of [1280, 390]) {
+    test(`Current sandbox/next Host без chat выбора: ${locale}, ${width}`, async (t) => {
+      installHostPresentation(t, true, locale);
+
+      const runtime = {
+        runId: 'held-run',
+        active: true,
+        snapshot: {
+          chatKey: 'model-availability-chat',
+          runId: 'held-run',
+          providerId: 'codex',
+          requestedModelId: 'gpt-5.6-sol',
+          cwd: '/fixture',
+          extraDirs: [],
+          permissionMode: 'auto',
+          permissionProfile: sandboxProfile,
+        },
+      };
+      const h = await mountChat(t, {
+        locale,
+        width,
+        runtime,
+        initial: {
+          model: 'gpt-5.6-sol',
+          modelRef: {
+            provider: 'codex',
+            model: 'gpt-5.6-sol',
+          },
+          mode: 'dontAsk',
+          sending: true,
+        },
+      });
+
+      if (width < 600) {
+        await h.wrapper.get('.phone-options').trigger('click');
+        await h.flushPromises();
+      }
+
+      const controls = h.wrapper.findAll('.sel.mode select');
+
+      assert.equal(controls.length, 0, 'AC2/6: fixed Host показывается readonly в прежнем месте');
+      assert.equal(h.wrapper.find('.sel.mode input[role="switch"]').exists(), false);
+      assert.equal(h.session.mode, 'dontAsk');
+
+      const details = h.wrapper.text() + h.wrapper.findAll('[aria-description]')
+        .map((item) => item.attributes('aria-description')).join(' ');
+      const label = translator.t(locale, fixedHostProfile.labelKey);
+
+      assert.ok(details.includes(label));
+      assert.match(details, locale === 'ru' ? /Сейчас.*Авто|текущ.*Авто/iu : /current.*Auto|now.*Auto/iu);
+      assert.doesNotMatch(details, /Host.*Auto-review checks every|Хост.*проверяет кажд/iu);
+    });
+
+    test(`Current Host/next sandbox показывает действующие права: ${locale}, ${width}`, async (t) => {
+      installHostPresentation(t, false, locale);
+
+      const h = await mountChat(t, {
+        locale,
+        width,
+        initial: {
+          model: 'gpt-5.6-sol',
+          modelRef: {
+            provider: 'codex',
+            model: 'gpt-5.6-sol',
+          },
+          mode: 'auto',
+          sending: true,
+        },
+        runtime: {
+          runId: 'held-host',
+          active: true,
+          snapshot: {
+            chatKey: 'model-availability-chat',
+            runId: 'held-host',
+            providerId: 'codex',
+            requestedModelId: 'gpt-5.6-sol',
+            cwd: '/fixture',
+            extraDirs: [],
+            permissionMode: 'auto',
+            permissionProfile: hostProfile,
+          },
+        },
+      });
+      const descriptions = h.wrapper.findAll('[aria-description]')
+        .map((item) => item.attributes('aria-description')).join(' ');
+
+      assert.match(h.wrapper.text() + descriptions, locale === 'ru' ? /Хост/u : /Host/u);
+      assert.equal(h.wrapper.find('.sel.mode select').exists(), true,
+        'Off возвращает прежний sandbox select');
+      assert.equal(h.wrapper.findAll('.sel.mode option').some((item) => item.attributes('value') === 'host'),
+        false);
+    });
+  }
+}
+
+for (const state of ['unconfirmed', 'old-snapshot', 'loading', 'empty', 'error']) {
+  test(`Host не угадывает effective права: ${state}, retry сохраняет fixed profile`, async (t) => {
+    installHostPresentation(t);
+
+    const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+    const registry = reactive({
+      loaded: state !== 'loading',
+      loading: state === 'loading',
+      error: state === 'error' ? 'Синтетический отказ реестра' : '',
+      ...(state === 'empty' ? { providers: [] } : {}),
+    });
+    const h = await mountChat(t, {
+      initial: {
+        model: 'gpt-5.6-sol',
+        modelRef: {
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+        },
+        mode: 'auto',
+        sending: true,
+      },
+      registry,
+      runtime: {
+        runId: 'unknown-profile',
+        active: true,
+        snapshot: {
+          chatKey: 'model-availability-chat',
+          runId: 'unknown-profile',
+          providerId: 'codex',
+          requestedModelId: 'gpt-5.6-sol',
+          cwd: '/fixture',
+          extraDirs: [],
+          permissionMode: 'auto',
+          ...(state === 'old-snapshot' ? {} : {
+            permissionProfile: {
+              ...hostProfile,
+              confirmed: false,
+            }
+          }),
+        },
+      },
+    });
+    const descriptions = h.wrapper.findAll('[aria-description]')
+      .map((item) => item.attributes('aria-description')).join(' ');
+
+    assert.match(h.wrapper.text() + descriptions, /не подтвержден|не подтверждён|ожида.*подтвержден/iu);
+    assert.equal(h.session.mode, 'auto');
+    Object.assign(registry, {
+      loaded: true,
+      loading: false,
+      error: '',
+      providers: PROVIDERS,
+    });
+    await h.flushPromises();
+    assert.equal(h.wrapper.find('.sel.mode select').exists(), false);
+    assert.ok(h.wrapper.text().includes(translator.t('ru', fixedHostProfile.labelKey)));
+  });
+}

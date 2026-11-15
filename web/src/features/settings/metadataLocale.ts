@@ -43,6 +43,16 @@ export function providerSettingConfirmation(
     };
   }
 
+  if (providerId === 'codex' && field.id === 'allowHostAccess' && value === true && confirmation) {
+    const message = localeMessage(locale);
+
+    return {
+      ...confirmation,
+      text: message('settings.codexHostAccessConfirm'),
+      label: message('settings.codexEnableHostAccess'),
+    };
+  }
+
   if (!confirmation || !BUILTIN_PROVIDERS.has(providerId) || field.id !== 'blockDirectSsh' || value) {
     return confirmation;
   }
