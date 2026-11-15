@@ -68,6 +68,10 @@ If refreshing history before sending fails, the reason appears beside the compos
 Answers and actions remain in the transcript. Unsent text is saved as a draft.
 Questions prepared from help open a separate conversation and wait for you to send them.
 
+New answer blocks preserve earlier replies and steering messages in their order.
+Receiving the same block again does not add a copy. You do not need to clear
+a long conversation's history to process new replies.
+
 ## Limits and recovery
 
 Chats use the executor's active [access profile](access-profiles.md). Switching keeps messages;

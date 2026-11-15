@@ -3659,8 +3659,8 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
     /**
-     * Страницы читаются до зафиксированной границы sequence, даже если ход ещё идёт.
-     * Только полный проход разрешает удалить pending после сохранения истории.
+     * Первая страница восстанавливает проекцию даже при уже известном запуске.
+     * Повторные страницы пропускают только неизменённую историю, но не чтение и ACK-барьер.
      */
     async _reconcileInTurn(chatKey: string, runId: string): Promise<boolean> {
       if (!chatKey || !runId || !this.isChatMessagesLoaded(chatKey)) {
@@ -3674,13 +3674,15 @@ export const useChatStore = defineStore('chat', {
       if (!run) {
         return false;
       }
-
       if (historical) {
         run.active = false;
       }
 
       let afterSequence = 0;
       let throughSequence = 0;
+      let projectedMessages: ChatMessage[] | undefined;
+      let projectedLength = -1;
+      let projectedParentTurnId = run.parentTurnId;
 
       for (let pages = 0; pages < 100; pages += 1) {
         let page;
@@ -3700,8 +3702,19 @@ export const useChatStore = defineStore('chat', {
         }
 
         mergeInTurnAvailability(run, page.availability);
-        mergeInTurnPage(run, page);
-        this._materializeInTurn(run);
+
+        const changed = mergeInTurnPage(run, page);
+        const messages = this._find(chatKey)?.messages;
+        const historyChanged = messages !== projectedMessages
+          || (messages?.length || 0) !== projectedLength
+          || run.parentTurnId !== projectedParentTurnId;
+
+        if (pages === 0 || changed || historyChanged) {
+          this._materializeInTurn(run);
+          projectedMessages = this._find(chatKey)?.messages;
+          projectedLength = projectedMessages?.length || 0;
+          projectedParentTurnId = run.parentTurnId;
+        }
 
         if (page.nextAfterSequence === null) {
           return true;
