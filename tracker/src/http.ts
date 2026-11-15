@@ -66,7 +66,7 @@ async function failureReason(response: IncomingMessage, token: string): Promise<
 export async function request(
   connection: Connection,
   spec: RequestSpec,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<Uint8Array> {
   const headers: Record<string, string> = { 'X-GrigDesk-Token': connection.token };
 
@@ -86,6 +86,7 @@ export async function request(
     const response = await new Promise<IncomingMessage>((resolve, reject) => {
       const outgoing = transport.request(`${connection.baseUrl}${spec.path}`, {
         method: spec.method,
+        signal: options.signal,
         headers,
         agent,
       }, resolve);
@@ -115,6 +116,10 @@ export async function request(
 
     return Buffer.concat(chunks);
   } catch (error) {
+    if (options.signal?.aborted) {
+      throw options.signal.reason;
+    }
+
     if (error instanceof B24Error) {
       throw error;
     }

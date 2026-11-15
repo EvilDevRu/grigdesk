@@ -8,6 +8,17 @@ ELF для Linux x64 на закреплённом официальном Node 2
 ([граница B24](integration-boundary.md)). Команды и поля задачи — в
 [CLI для агента и оператора](agent-and-operator-cli.md).
 
+## Общий пакет агентских CLI
+
+В `tracker/` также находится отдельная команда [pipeline](../pipeline/agent-cli.md).
+Общий `processIO.ts` связывает оба CLI с процессом; ограничение stdin и отмена включаются
+для pipeline явно. Сборщик `buildBinary` использует один pin Node и публикует выбранный ELF
+атомарно; `build` собирает tracker, `build:pipeline` — pipeline.
+Общий SEA-протокол вынесен в `shared/node/cliSeaBuild.ts`; отдельный пакет
+[routes](../pipeline/routes-cli.md) использует его со своими исходниками и зависимостями.
+Команды tracker, их HTTP-пути, выбор доски и байты stdin create сохраняют прежний контракт.
+Exact DTO управления конвейером относятся к pipeline и не добавляются к старым командам tracker.
+
 ## Целевая доска
 
 Команды `boards`, `analyze <id>`, `launch-options <id>`, `launch <id>` и флаг `--board <id>`
@@ -120,7 +131,7 @@ JSON-тела сервера: читается не больше 64 КиБ те�
 
 ## Установка и обновление
 
-`deploy/install.sh` вызывает `grigdesk_install_b24_cli` из `deploy/lib/tracker-cli.sh`:
+`deploy/install.sh` вызывает `grigdesk_install_tracker_cli` из `deploy/lib/tracker-cli.sh`:
 
 - `npm ci --include=dev` в `tracker/` выполняется, если нет `tracker/node_modules/esbuild` или
   `tracker/node_modules/postject`: до пяти попыток с паузой 10 с;

@@ -56,7 +56,7 @@
 - [Статусы и приоритет обработки](statuses-and-priority.md)
 - [Действия завершённой задачи в карточке](completed-task-actions.md)
 - [CLI агента: создание без браузера, явная доска, проверка возможности и ошибки](agent-and-operator-cli.md)
-- [Команда tracker: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
+- [Команда tracker: настройки, коды выхода, установка и общий SEA-сборщик с pipeline](binary-cli.md) — CLI tracker/pipeline и общий SEA-протокол.
 - [HTTP API GrigDesk](http-api-grigdesk.md)
 
 ## Грабли

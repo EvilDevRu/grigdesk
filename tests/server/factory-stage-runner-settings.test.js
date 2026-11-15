@@ -208,3 +208,40 @@ test('bootstrap-reads-saved-provider-without-base-metadata', async (t) => {
     headers: { cookie: 'grigdesk_sid=fixture' },
   }), 400);
 });
+
+test('PIPE-SETTINGS-INTEGRATION: CLI сохраняет через HTTP и pinned engine', async (t) => {
+    const { pipelineFixture } = await import('../tracker/helpers/pipelineFixture.mts');
+    const fx = await settingsServer(t);
+    const cli = await pipelineFixture(t, async (seen, response) => {
+        const result = await fx.app.inject({
+            method: seen.method,
+            url: seen.url,
+            headers: {
+                ...seen.headers,
+                cookie: 'grigdesk_sid=fixture'
+            },
+            payload: seen.body.length ? seen.body : undefined,
+        });
+
+        response.statusCode = result.statusCode;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(result.rawPayload);
+    });
+    const options = httpJson(await fx.get());
+    const payload = applyPayload(options);
+    const applied = await cli.run(['runner-set', '81'], payload);
+
+    assert.equal(applied.code, 0, applied.stderr);
+    assert.deepEqual(JSON.parse(applied.stdout).selection, payload.selection);
+    assert.deepEqual(httpJson(await fx.get()).selection, payload.selection);
+    assert.ok((await fx.engineCalls()).some((args) => args.includes('apply')));
+
+    const stale = await cli.run(['runner-set', '81'], {
+        ...payload,
+        requestId: 'second-request',
+        expectedRevision: 0,
+    });
+
+    assert.equal(stale.code, 22);
+    assert.deepEqual(httpJson(await fx.get()).selection, payload.selection);
+});

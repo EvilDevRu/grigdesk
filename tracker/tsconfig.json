@@ -11,7 +11,22 @@
     "noEmit": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "fastify": [
+        "../server/node_modules/fastify/fastify.d.ts"
+      ]
+    }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.mts", "../tests/b24/**/*.mts"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.mts",
+    "../tests/b24/**/*.mts",
+    "../tests/tracker/pipeline*.test.mts",
+    "../tests/tracker/helpers/pipelineFixture.mts",
+    "../tests/tracker/sea/pipeline.test.mts",
+    "../server/src/lib/fastifyDecorations.ts"
+  ]
 }

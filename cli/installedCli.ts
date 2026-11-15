@@ -3,7 +3,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
 
-import { readInstallation, readInstalledPointer } from '../shared/node/installedLayout.ts';
+import {
+  readInstallation, readInstalledPointer, assertInstallationPath,
+} from '../shared/node/installedLayout.ts';
 import { InstalledUpdateService } from '../shared/node/installedUpdateService.ts';
 import { inspectInstalledServer, startInstalledServer, stopInstalledServer }
   from '../shared/node/installedServer.ts';
@@ -148,11 +150,76 @@ async function followInstalledCommand(command: string, args: string[]): Promise<
 }
 
 /**
+ * Запускает только CLI выбранного server-поколения проверенной установки.
+ * Execve сохраняет stdio, сигналы и exit; отсутствие бинарника не разрешает другой источник.
+ */
+async function runInstalledPipeline(root: string, argv: string[]): Promise<never> {
+    const receipt = await readInstallation(root);
+    const current = await readInstalledPointer(receipt);
+
+    if (!current.server) {
+        throw new Error('pipeline_installed_server_missing');
+    }
+
+    let executable: string;
+
+    try {
+        executable = await assertInstallationPath(root, current.server + '/bin/pipeline');
+    }
+    catch (error) {
+        // Ошибки файловой системы (ENOENT и т.п.) не раскрывают локальный путь
+        // в stderr и получают устойчивый код, как остальные отказы входа.
+        if ((error as NodeJS.ErrnoException).code !== undefined) {
+            throw new Error('pipeline_installed_executable_invalid');
+        }
+
+        throw error;
+    }
+
+    const stat = await fs.lstat(executable).catch(() => null);
+
+    if (!stat || !stat.isFile() || (stat.mode & 0o100) === 0) {
+        throw new Error('pipeline_installed_executable_invalid');
+    }
+
+    const env = Object.fromEntries(Object.entries(process.env)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+
+    env.GRIGDESK_HOME = receipt.dataHome;
+    env.GRIGDESK_DESKTOP_DATA_DIR = receipt.userData;
+    env.GRIGDESK_ENV_FILE = path.join(receipt.dataHome, '.env');
+
+    for (const key of ['APPIMAGE', 'APPDIR', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE']) {
+        delete env[key];
+    }
+
+    if (!process.execve) {
+        throw new Error('maintenance_runtime_incompatible');
+    }
+
+    process.execve(executable, [executable, ...argv], env);
+
+    throw new Error('maintenance_exec_failed');
+}
+
+/**
  * Отдельный ctl управляет только проверенной установкой и известными каноническими launchers.
  * Стоп из app/server cgroup требует явного --force, не обходящего trust или права.
  */
 export async function runInstalledCli(root: string, argv: string[]): Promise<number> {
   const { t } = cliTranslator();
+
+    if (argv[0] === 'pipeline') {
+        try {
+            return await runInstalledPipeline(root, argv.slice(1));
+        } catch (error) {
+            process.stderr.write(t('updates.failure', {
+                code: error instanceof Error ? error.message : 'pipeline_launch_failed',
+            }) + '\n');
+
+            return 1;
+        }
+    }
 
   if (!argv.length && process.stdin.isTTY && process.stdout.isTTY) {
     return runInstalledMenu(root);

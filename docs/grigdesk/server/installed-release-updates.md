@@ -32,6 +32,15 @@ Installer хранит архивы в [потоковом хвосте ELF](ins
 
 ## Установка
 
+Server-компонент включает `bin/pipeline` с подписанными size/SHA256 и режимом 0555.
+Установленный `grigdesk-ctl pipeline` через maintenance ctl заново читает проверенные receipt/current,
+выбирает `bin/pipeline` из `current.server` и заменяет процесс через execve.
+Аргументы, stdin/stdio, сигналы и код выхода получает выбранный CLI. Папки данных и env-file
+принадлежат receipt этой установки; явные GRIGDESK_URL/GRIGDESK_TOKEN сохраняют приоритет.
+Следующий вызов после смены current выбирает новое поколение. Remote без server, отсутствующий
+ELF, ссылка или небезопасный executable дают отказ 1 без source/PATH/другого поколения.
+
+
 `install local|remote|server` принимает `--root`, `--data-home`, `--user-data`,
 `--bin-dir`, `--applications-dir`, `--unit-dir`. Значения — абсолютные пути.
 Default root — пользовательская папка программы, данные и Electron userData — отдельно.

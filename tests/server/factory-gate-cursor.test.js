@@ -686,3 +686,51 @@ test('«Продолжить» с мёртвым стендом, который 
   assert.match(response.json().message, /реестра песочницы t7 нет/);
   assert.doesNotMatch(readFileSync(fx.callsLog, 'utf8'), /systemd-run .* resume /);
 });
+
+test('PIPE-GOTO-CAS: HTTP возврат передаёт exact head в pinned engine', async (t) => {
+    const fx = await fixture(t, {
+        cursor: {
+            node: 'gate_accept', state: 'paused'
+        }
+    });
+    // Фикстура не создаёт route-v2 бандлы RoutesStore: без явного графа goto ответит
+    // 409 node_unknown до вызова движка. Подмена повторяет factoryDecisionFixture.
+    fx.adapter.getTaskGraph = async () => ({ keys: { build: 'BUILD' } });
+
+    const app = await server(t, fx);
+    const current = await app.inject({
+        method: 'GET', url: '/api/tasks/7/mobile-state'
+    });
+
+    assert.equal(current.statusCode, 200);
+
+    const expectedMobile = current.json().identity;
+    const response = await app.inject({
+        method: 'POST',
+        url: '/api/tasks/7/stage/BUILD/running',
+        payload: {
+            expectedMobile, comment: 'Вернуть с полным пояснением'
+        },
+    });
+    // Фикстурный resume может отказать: здесь проверяется сам факт exact CLI до append.
+    assert.ok([200, 409].includes(response.statusCode));
+
+    const expectedStage = '--expected-stage ' + expectedMobile.sequence + ':' + expectedMobile.headEventHash;
+
+    assert.match(await readFile(fx.callsLog, 'utf8'), new RegExp(expectedStage));
+    await writeFile(fx.callsLog, '');
+
+    const stale = await app.inject({
+        method: 'POST',
+        url: '/api/tasks/7/stage/BUILD/running',
+        payload: {
+            expectedMobile: {
+                ...expectedMobile, headEventHash: 'f'.repeat(64)
+            },
+            comment: 'Старое решение',
+        },
+    });
+
+    assert.equal(stale.statusCode, 409);
+    assert.equal(await readFile(fx.callsLog, 'utf8'), '');
+});

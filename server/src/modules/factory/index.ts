@@ -33,7 +33,7 @@ import { config as runtimeConfig } from '../../config.ts';
 import { dataPath } from '../../../../shared/runtime/dataHome.ts';
 import { unpinFactoryRuntimeAttempt } from '../../lib/factoryRuntimePins.ts';
 import {
-  factoryMobileIdentity, factorySnapshotHash, sameFactoryIdentity,
+  factoryMobileIdentity, factoryPreludeIdentity, factorySnapshotHash, sameFactoryIdentity,
 } from '../../lib/mobile/factoryIdentity.ts';
 import { STAGES, StageKind } from '../../lib/stages.ts';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factoryCli.ts';
@@ -413,6 +413,32 @@ async function factoryModule(
             });
           }
         }
+        if (body?.expectedPrelude !== undefined) {
+          if (body.expectedMobile !== undefined
+            || !['/api/tasks/:id/stop', '/api/tasks/:id/resume'].includes(route.url)
+            || Object.keys(body).some((key) => key !== 'expectedPrelude')) {
+            return reply.code(400).send({
+              error: 'bad_prelude_action',
+              message: 'Подготовительный снимок допускает только stop/resume.',
+            });
+          }
+
+          const managed = await managedRegistry(id, reply);
+
+          if (!managed) {
+            return reply;
+          }
+
+          const current = factoryPreludeIdentity(managed.trusted, managed.registry);
+
+          if (!current || factorySnapshotHash(body.expectedPrelude) !== factorySnapshotHash(current)) {
+            return reply.code(409).send({
+              error: 'state_changed',
+              message: 'Подготовительная фаза или попытка изменились; прочитайте состояние.',
+            });
+          }
+        }
+
         if (body?.expectedBasis !== undefined) {
           const expected = body.expectedBasis as { name?: unknown; hash?: unknown };
 
@@ -693,6 +719,28 @@ async function factoryModule(
 
     return {
       identity: factoryMobileIdentity(managed.trusted, managed.registry),
+      running: factoryState.isDaemonAlive(managed.registry.ORCH_PID, id),
+    };
+  });
+
+  fastify.get<FactoryRoute>('/api/tasks/:id/prelude-state', async (request, reply) => {
+    const id = request.params.id || '';
+
+    if (!/^[1-9][0-9]{0,18}$/u.test(id)) {
+      return reply.code(400).send({ error: 'bad_task_id' });
+    }
+
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    return {
+      identity: factoryPreludeIdentity(managed.trusted, managed.registry),
+      attempt: managed.trusted.attempt,
+      profile: managed.trusted.profile,
+      terminal: managed.trusted.terminal ?? null,
       running: factoryState.isDaemonAlive(managed.registry.ORCH_PID, id),
     };
   });
@@ -2373,7 +2421,15 @@ async function factoryModule(
 
     try {
       const rewound = await runRouteDecision(config, routeGotoArgs(config, {
-        task: id, profile: trusted.profile, attempt: trusted.attempt, node, reason: comment,
+        task: id,
+        profile: trusted.profile,
+        attempt: trusted.attempt,
+        node,
+        reason: comment,
+        expectedStage: request.body?.expectedMobile as {
+          sequence: number;
+          headEventHash: string;
+        } | undefined,
       }));
 
       if (rewound.timedOut) {
@@ -3077,7 +3133,7 @@ async function factoryModule(
       task: id,
       orchPid: Number(registry.ORCH_PID),
       isAlive: () => factoryState.isDaemonAlive(registry.ORCH_PID, id),
-      exactPid: request.body?.expectedMobile !== undefined,
+      exactPid: request.body?.expectedMobile !== undefined || request.body?.expectedPrelude !== undefined,
     });
     if (!stop.ok) return reply.code(500).send({ error: 'stop_failed', message: stop.message });
     return stop;

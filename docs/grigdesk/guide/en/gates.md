@@ -30,6 +30,13 @@ For new failure formats, the log shows the executor's last diagnostic message.
 Missing reasons explicitly say so and show an exit code; unavailable logs are marked separately.
 A diagnostic message does not mean completed work will automatically repeat.
 
+## Decisions through an agent
+
+An agent runs `pipeline gate` and `pipeline arbiter-apply` only on the person's explicit instruction.
+Discussion with the arbiter and diagnosis do not authorize a transition or restart.
+An approve comment is not sent to the stage agent: use rejection or a separate return with full instructions.
+If the decision is saved but resume fails, read the current state and retry only resume.
+
 ## Result
 
 A human explicitly accepts the result or sends rework to the required stage.

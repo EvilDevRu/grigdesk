@@ -93,6 +93,34 @@ After completion, profile switching is available again.
 A saved diagram without a live process does not prove execution.
 Reaching the round ceiling or making no progress requires a decision. Task environments may be available only during a stop.
 
+## Control through an agent
+
+Ask the agent to perform the required action. It uses pipeline through your running GrigDesk;
+a web development server is not required. pipeline list shows attempts, status shows details,
+state reads the current attempt identity, graph reads the workflow, and doc reads a stage document.
+
+For a launch, the agent reads `pipeline source <board>` and
+`pipeline launch-options <task> <profile> <source>`, presents the selected route, and sends the
+agreed JSON to `pipeline launch <task>`. Both source and route are explicit.
+
+Stop, resume, return and gate commands use the identity that was read before the decision.
+Before the main cursor exists, `pipeline prelude-state <task>` provides expectedPrelude for
+stop/resume; this also resumes the same attempt after a bootstrap answer.
+If state changes, the command fails and the agent reports the current state before another action.
+runner-options provides the model and effort catalog. runner-set either saves the next-run
+selection or explicitly restarts the stage with the selected parameters.
+
+The arbiter has separate commands for reading, discussion, question answers, diagnosis,
+applying a proposal and retrying a committed decision's resume. Discussion and diagnosis
+do not authorize a workflow transition. Gate decisions and applying proposals require
+the person's explicit instruction.
+
+`pipeline wait <task> <attempt> [timeoutMs] [intervalMs]` observes one attempt.
+Its result distinguishes a terminal outcome, human input, a manual stop and a timeout.
+An attempt closed before the main cursor exists also returns its trusted terminal outcome.
+If a decision is saved but resume fails, exit code 3 keeps the result in stdout:
+retry only resume. Check state before repeating an operation after a connection failure.
+
 ## Related articles
 
 [Qwen Code](qwen.md) · [Tasks](tasks.md) · [Gates](gates.md) · [Routes](routes.md) · [Environments](sandboxes.md) · [Backups](data-and-backups.md)

@@ -19,6 +19,8 @@
 
 ## Устройство
 
+- [pipeline: полный CLI, exact DTO и исходы](agent-cli.md)
+
 - [Доставка объявленных ключей участников маршрута и выбора сервиса Qwen](legacy-credential-delivery.md)
 
 - [Закрепление доступа цепочек исполнителей, identity попытки, паузы и рестарт](access-profile-pins.md)
