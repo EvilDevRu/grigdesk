@@ -26,7 +26,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
 import { projectRepos } from '../../lib/projects.ts';
-import { generateCommitTitle } from '../../lib/codeCommitMessage.ts';
+import { generateChangeSummary, generateCommitTitle } from '../../lib/codeCommitMessage.ts';
 import { CodeBranchRuns } from '../../lib/codeBranchRuns.ts';
 import type { CommitTargetResolver } from '../../lib/codeCommitMessage.ts';
 import type {
@@ -44,6 +44,9 @@ import type {
   CodeRoot,
   CodeRootsResponse,
   CodeSearchResponse,
+  CodeDiffSummaryResponse,
+  CodeCommitSearchResponse,
+  CodeQuickOpenResponse,
   CodeWorktree,
 } from '../../../../shared/plugins/code/codeContracts.ts';
 import {
@@ -62,6 +65,8 @@ import {
   pullCurrentBranch,
   pushCurrentBranch,
   searchTree,
+  searchCommitLog,
+  quickOpenFiles,
   stageWorktreeChanges,
   unstageWorktreeChanges,
   undoLastCommit,
@@ -109,6 +114,9 @@ interface CodeRoute {
     to?: unknown;
     base?: unknown;
     q?: unknown;
+    accuracy?: unknown;
+    case?: unknown;
+    word?: unknown;
   };
   Body: unknown;
 }
@@ -1207,7 +1215,10 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
 
     try {
-      const result = await blameFile(ctx.tree.path, String(req.query.path || ''));
+      const result = await blameFile(ctx.tree.path, String(req.query.path || ''), {
+        refactorAware: String(req.query.accuracy || '') === 'refactor',
+        isHidden: (relPath) => isHiddenReal(path.join(ctx.tree.path, relPath), hidden),
+      });
 
       return result satisfies CodeBlameResponse;
     } catch (routeError) {
@@ -1230,11 +1241,120 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     try {
       return await searchTree(ctx.tree.path, String(req.query.q || ''), {
         limit: opts.searchMaxBytes,
+        ignoreCase: String(req.query.case || '') === '0',
+        wholeWord: String(req.query.word || '') === '1',
         isHidden: (relPath) => isHiddenReal(path.join(ctx.tree.path, relPath), hidden),
       }) satisfies CodeSearchResponse;
     } catch (routeError) {
       return sendGitError(reply, routeError);
     }
+  });
+
+  fastify.get<CodeRoute>('/api/code/:project/quick-open', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    try {
+      return await quickOpenFiles(ctx.tree.path, String(req.query.q || ''), {
+        isHidden: (relPath) => isHiddenReal(path.join(ctx.tree.path, relPath), hidden),
+      }) satisfies CodeQuickOpenResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  fastify.get<CodeRoute>('/api/code/:project/commit-search', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    try {
+      const result = await searchCommitLog(ctx.tree.path, String(req.query.q || ''));
+
+      return result satisfies CodeCommitSearchResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  fastify.post<CodeRoute>('/api/code/:project/diff-summary', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    const group = isRecord(req.body) ? req.body.group : null;
+
+    if (group !== 'staged' && group !== 'work') {
+      return reply.code(400).send({
+        error: 'bad_group',
+        message: 'Сводка доступна для групп «индекс» и «рабочая копия».',
+      });
+    }
+
+    const settings = fastify.pluginSettings?.('code');
+    const setting = isRecord(settings) ? settings.commitMessageModel ?? null : null;
+    const preferences = prefs.read();
+    let result: Awaited<ReturnType<typeof generateChangeSummary>>;
+
+    try {
+      result = await generateChangeSummary({
+        cwd: ctx.tree.path,
+        group,
+        modelRef: setting,
+        config,
+        providerSettings: isRecord(preferences) ? preferences.providerSettings || {} : {},
+        log: fastify.log,
+        patchMaxBytes: opts.patchMaxBytes,
+        isHidden: (relPath) => isHiddenReal(path.join(ctx.tree.path, relPath), hidden),
+        ...(resolveCommitTarget ? { resolveTarget: resolveCommitTarget } : {}),
+      });
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+
+    if (result.ok) {
+      return result satisfies CodeDiffSummaryResponse;
+    }
+
+    const messages: Record<string, string> = {
+      empty_group: 'В этой группе нет доступных изменений для сводки.',
+      no_model: 'Выбери модель: «Настройки → Плагины → Код».',
+      invalid_model_ref: 'Настройка модели сообщения коммита повреждена — выбери её заново.',
+      unknown_provider: 'Выбранный исполнитель больше не доступен — выбери модель заново.',
+      unknown_model: 'Выбранной модели больше нет в реестре — выбери модель заново.',
+      registry_failed: 'Не удалось прочитать реестр моделей.',
+      executor_unavailable: 'Выбранный исполнитель сейчас недоступен.',
+      unsafe_model_provider: 'Выбранная модель не поддерживает безопасное чтение diff. '
+        + 'Выбери совместимую модель в «Настройки → Плагины → Код».',
+      run_failed: 'Модель не смогла составить сводку.',
+      bad_model_reply: 'Модель вернула ответ не в ожидаемом формате. Повтори сводку.',
+    };
+    const upstreamFailure = ['run_failed', 'bad_model_reply', 'registry_failed']
+      .includes(result.error);
+
+    return reply.code(upstreamFailure ? 502 : 409).send({
+      error: result.error,
+      message: messages[result.error] || 'Не удалось составить сводку изменений.',
+    });
   });
 
   // `+` у файла или группы: рабочее дерево → индекс.

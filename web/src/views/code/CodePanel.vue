@@ -1,10 +1,17 @@
 <template>
   <div class="code-panel" :class="{ compact, narrow: codePanelNarrow }"
-       :aria-busy="loading ? 'true' : undefined" @keydown="onDiffKeydown">
+       :aria-busy="loading ? 'true' : undefined" @keydown="onCodeKeydown">
     <div ref="panelHeader" class="code-head" tabindex="-1">
       <UiPaneHeader class="code-pane-heading" :data-ui-host-actions="compact ? '' : undefined">
         <template #title><h2>{{ t('core.code') }}</h2></template>
         <template #actions>
+          <UiIconButton v-if="tab === 'files' && !fileHistoryActive" role="embedded"
+                        data-context="workspace-toolbar" data-action="quick-open-launch"
+                        :disabled="!canQuickOpen" :label="t('core.codeBystroeOtkrytie')"
+                        v-tooltip="t('core.codeBystroeOtkrytie')" @click="setQuickOpen(true)">
+            <span class="codicon codicon-go-to-file" aria-hidden="true"></span>
+          </UiIconButton>
+
       <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
            справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
       <UiIconButton v-if="!codePanelNarrow" class="navigator-toggle" role="embedded"
@@ -57,6 +64,39 @@
 
     <!-- Холодный запуск сразу занимает финальную сетку. Без этого сначала был
          короткий пустой экран «Загрузка…», а затем вся рабочая область прыгала. -->
+    <UiDialog :open="quickOpenActive" size="compact" :title="t('core.codeBystroeOtkrytie')"
+              data-testid="quick-open-dialog" initial-focus='[data-action="quick-open-query"]'
+              :mobile-fullscreen="false" @update:open="setQuickOpen">
+      <UiInput v-model="quickQuery" data-action="quick-open-query"
+               :aria-label="t('core.codeBystroeOtkrytie')"
+               :placeholder="t('core.codeVvediteChastImeniFayla')" @keydown="onQuickKeydown" />
+      <UiLoadingState v-if="quickLoading" variant="inline" data-action="quick-open-loading"
+                      :label="t('core.codeQuickOpenLoading')" />
+      <UiInlineMessage v-else-if="quickError" tone="danger" data-action="quick-open-error">
+        {{ quickError }}
+        <UiButton variant="ghost" data-action="quick-open-retry" @click="scheduleQuickOpen">
+          {{ t('core.codeQuickOpenRetry') }}
+        </UiButton>
+      </UiInlineMessage>
+      <UiInlineMessage v-else-if="quickQuery.trim() && !quickFiles.length" tone="neutral"
+                       data-action="quick-open-empty">
+        {{ t('core.codeQuickOpenNichegoNaydeno') }}
+      </UiInlineMessage>
+      <div ref="quickResultsHost" class="quick-results" role="group"
+           :aria-label="t('core.codeQuickOpenResults')">
+        <UiButton v-for="(rel, index) in quickFiles" :key="rel" block variant="ghost"
+                  data-action="quick-open-item" :data-file="rel" :pressed="index === quickIndex"
+                  @click="pickQuickFile(index)" @focus="quickIndex = index">
+          <span class="quick-path mono">{{ rel }}</span>
+        </UiButton>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="setQuickOpen(false)">
+          {{ t('core.codeQuickOpenClose') }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
     <div v-if="loading" ref="layHost" class="lay code-loading"
          :class="layoutClasses"
          :style="compactStyle">
@@ -140,6 +180,17 @@
             @keydown.enter.prevent="openFirstSearchResult"
           />
         </div>
+
+          <div v-if="tab === 'files' && !fileHistoryActive" class="search-flags">
+            <UiSwitch :model-value="!searchFlags.case" data-action="search-case"
+                      @change="toggleSearchFlag('case')">
+              {{ t('core.codePoiskBezUchetaRegistra') }}
+            </UiSwitch>
+            <UiSwitch :model-value="searchFlags.word" data-action="search-word"
+                      @change="toggleSearchFlag('word')">
+              {{ t('core.codeSlovoTselikom') }}
+            </UiSwitch>
+          </div>
 
         <!-- Композер относится к изменениям, но живёт внизу панели: дерево получает
              высоту первым, а пустой индекс больше не отнимает четверть экрана. -->
@@ -340,6 +391,7 @@
                            class="trow search-result" data-search-kind="file"
                            :data-search-path="file.path" v-tooltip="file.path"
                            @click="openSearchResult(file.path, 1)">
+                <span class="tree-glyph codicon" :class="fileGlyph(file.path)" aria-hidden="true"></span>
                 <span class="search-file mono">{{ file.path }}</span>
               </UiPressable>
             </template>
@@ -358,6 +410,7 @@
                 v-tooltip="t('core.codePathLine', { path: match.path, line: match.line })"
                 @click="openSearchResult(match.path, match.line)"
               >
+                <span class="tree-glyph codicon" :class="fileGlyph(match.path)" aria-hidden="true"></span>
                 <span class="search-location mono">{{ match.path }}:{{ match.line }}</span>
                 <span class="search-text mono">{{ match.text }}</span>
               </UiPressable>
@@ -372,11 +425,11 @@
              имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
              уровнем выше — лесенка читалась рваной. Каталог на тысячи файлов рисуется
              окном VirtualRows: целиком он замораживал панель. -->
-        <div v-else-if="tab === 'files'" class="scroll tree file-tree">
+        <div v-else-if="tab === 'files'" ref="fileTreeHost" class="scroll tree file-tree">
           <p v-if="!rows.length && !contextLoading && !error" class="pnote">
             {{ context ? t('core.codeVEtoyRabocheyKopii') : t('core.codeVyberiteRabochuyuKopiyuRepozitoriya') }}
           </p>
-          <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey">
+          <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey" :ref="setFilesRows">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
                          v-tooltip="fileTreeDecorations.directories.has(row.rel)
@@ -397,6 +450,8 @@
                            ? CONFLICT_HINT : undefined"
                          :style="rowDepth(row.depth)" @click="openFile(row.rel)">
               <span class="chev" aria-hidden="true"></span>
+              <span class="tree-glyph codicon" :class="fileGlyph(row.rel)" aria-hidden="true"></span>
+
               <span v-if="fileTreeDecorations.files.get(row.rel)" class="st"
                     :class="fileTreeDecorations.files.get(row.rel)">
                 {{ STLABEL[fileTreeDecorations.files.get(row.rel) || '']
@@ -561,8 +616,30 @@
                   <UiSkeletonLayout layout="list" :header="false" />
                 </UiLoadingState>
                 <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
+                                <div class="commit-search">
+                  <UiSearchInput v-model="commitQuery" data-action="commit-search"
+                                 :placeholder="t('core.codePoiskPoZhurnaluKommitov')"
+                                 :aria-label="t('core.codePoiskPoZhurnaluKommitov')" />
+                  <UiLoadingState v-if="commitSearchLoading" variant="inline"
+                                  data-action="commit-search-loading"
+                                  :label="t('core.codeIschuKommity')" />
+                  <UiInlineMessage v-else-if="commitSearchError" tone="danger">
+                    {{ commitSearchError }}
+                  </UiInlineMessage>
+                  <div v-else-if="commitSearch && !commitSearch.log.length"
+                       class="pnote" data-action="commit-search-empty">
+                    {{ t('core.codeCommitSearchNichegoNaydeno') }}
+                  </div>
+                  <UiButton v-if="commitQuery" variant="ghost" data-action="commit-search-reset"
+                            @click="resetCommitSearch">{{ t('core.codePokazatVesZhurnal') }}</UiButton>
+                  <UiInlineMessage v-if="commitSelectionNotice" tone="neutral"
+                                   data-action="commit-selection-changed">
+                    {{ commitSelectionNotice }}
+                  </UiInlineMessage>
+                </div>
+
                 <div class="commit-log">
-                  <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
+                  <UiPressable v-for="c in commitLogShown" :key="c.hash" class="commit"
                                data-context="code-commit-row" :data-hash="c.hash"
                                :class="{ sel: commitSel.has(c.hash) }"
                                :pressed="commitSel.has(c.hash)" v-tooltip="c.when"
@@ -696,7 +773,28 @@
                   :disabled="gitActionBusy"
                   @click="changeGitGroup(group)"
                 >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                <UiIconButton v-if="group.mutable && group.files.length"
+                              role="embedded" data-context="code-group-action"
+                              data-action="diff-summary" :data-group="group.id"
+                              :label="t('core.codeAiSvodkaIzmeneniy')"
+                              v-tooltip="t('core.codeAiSvodkaIzmeneniy')"
+                              :loading="diffSummaryBusy === group.id"
+                              :disabled="!!diffSummaryBusy || gitActionBusy"
+                              @click="runDiffSummary(group.id)">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M8 1.5l1.6 3.2 3.4.5-2.5 2.4.6 3.4L8 9.4l-3.1 1.6.6-3.4L3 5.2l3.4-.5z" />
+                  </svg>
+                </UiIconButton>
               </div>
+                            <UiInlineMessage v-if="diffSummaries[group.id]"
+                               :tone="diffSummaries[group.id]?.error ? 'danger' : 'neutral'"
+                               data-action="diff-summary-result" :data-group="group.id">
+                {{ diffSummaries[group.id]?.text }}
+                <UiIconButton role="embedded" data-action="diff-summary-close"
+                              :data-group="group.id" :label="t('core.codeZakrytSvodku')"
+                              @click="closeDiffSummary(group.id)">×</UiIconButton>
+              </UiInlineMessage>
+
               <div v-if="!group.files.length" class="pnote">
                 {{ group.id === 'commits' ? t('core.codeVVybrannyhKommitahNet') : t('core.codeNesohranennyhIzmeneniyNet') }}
               </div>
@@ -873,6 +971,22 @@
       <!-- Просмотр: файл или диф -->
       <section ref="editorHost" class="editorwrap">
         <header class="editor-header">
+          <div v-if="tab === 'files' && !fileHistoryActive && openTabs.length" class="file-tabs"
+               role="group" :aria-label="t('core.codeOtkrytyeFayly')">
+            <div v-for="rel in openTabs" :key="rel" class="file-tab-pair">
+              <UiButton variant="ghost" data-action="file-tab" :data-file="rel"
+                        :pressed="fileSel === rel" v-tooltip="rel" @click="openFile(rel)">
+                <span class="tree-glyph codicon" :class="fileGlyph(rel)" aria-hidden="true"></span>
+                <span class="file-tab-name mono">{{ rel.split('/').pop() }}</span>
+              </UiButton>
+              <UiIconButton role="embedded" data-action="close-tab" :data-file="rel"
+                            :label="t('core.codeZakrytVkladkuFayla', { path: rel })"
+                            @click="closeTab(rel)">
+                <span aria-hidden="true">×</span>
+              </UiIconButton>
+            </div>
+          </div>
+
         <div class="ehead file-head-row">
           <UiIconButton v-if="codePanelNarrow && narrowPane === 'editor'" role="embedded"
                         data-context="code-editor-action" data-action="back-to-navigator"
@@ -939,6 +1053,26 @@
                 class="file-view-state">{{ t('core.codeProsmotr') }}</span>
           <span class="grow"></span>
           <div class="file-head-actions" role="group" :aria-label="t('core.codeDeystviyaFayla')">
+              <UiPopover v-if="tab === 'files' && fileSel && !fileHistoryActive && !showsImage"
+                         has-popup="dialog" placement="bottom-end">
+                <template #trigger>
+                  <UiIconButton role="embedded" data-context="code-editor-action"
+                                data-action="file-view" :label="t('core.codeVidFayla')"
+                                v-tooltip="t('core.codeVidFayla')">
+                    <span class="codicon codicon-settings-gear" aria-hidden="true"></span>
+                  </UiIconButton>
+                </template>
+                <template #default>
+                  <div class="code-popover-panel">
+                    <strong class="code-popover-title">{{ t('core.codeVidFayla') }}</strong>
+                    <UiSwitch :model-value="fileMinimap" data-action="toggle-minimap"
+                              @change="toggleFileMinimap">{{ t('core.codeMinimap') }}</UiSwitch>
+                    <UiSwitch :model-value="fileSticky" data-action="toggle-sticky"
+                              @change="toggleFileSticky">{{ t('core.codeStickyScroll') }}</UiSwitch>
+                  </div>
+                </template>
+              </UiPopover>
+
               <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
                         data-context="code-editor-action" data-action="close-patch-review"
                         v-tooltip="t('core.codeVernutsyaKFaylu')" @click="closePatchReview">
@@ -993,6 +1127,13 @@
                               block variant="ghost" data-context="code-popover-action"
                               data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
                               v-tooltip="blameTitle" @click="toggleBlame"> {{ t('core.codeAvtorstvoStrok') }} </UiButton>
+                    <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive"
+                              block variant="ghost" data-context="code-popover-action"
+                              data-action="blame-accuracy" :pressed="blameAccuracy"
+                              :disabled="!canUseBlame" @click="toggleBlameAccuracy">
+                      {{ t('core.codeTochnoeAvtorstvo') }}
+                    </UiButton>
+
                     <UiButton v-if="canCopyCodeLink" block variant="ghost"
                               data-context="code-popover-action" data-action="copy-code-link"
                               @click="copyCodeLink(); close('action')">
@@ -1373,6 +1514,7 @@ import type { ToolWindowState } from '../../shared/tools/toolWindowState.ts';
 // Пути репозиториев проекта задаются в разделе «Проекты».
 import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { codeApi, codeErrorMessage } from '../../shared/codeApi';
+import { parseCodeCommitSelectionHistory } from '../../../../shared/plugins/code/codeContracts';
 import { useSse } from '../../composables/useSse';
 import { useChatStore } from '../../stores/chat.ts';
 import { router } from '../../router.ts';
@@ -1388,6 +1530,9 @@ import type {
   CodeGitEntry,
   CodeGitFile,
   CodeGitResponse,
+  CodeGitLogEntry,
+  CodeCommitSearchEntry,
+  CodeCommitSearchResponse,
   CodePatchResponse,
   CodeProject,
   CodeRepo,
@@ -1438,7 +1583,7 @@ import type {
 } from '../../shared/codeTree';
 import {
   UiButton, UiIconButton, UiPaneHeader, UiInlineMessage, UiPopover, UiPressable, UiSearchInput,
-  UiSelect, UiSwitch, UiTextarea, confirmDialog, promptDialog, vTooltip, UiLoadingState,
+  UiDialog, UiInput, UiSelect, UiSwitch, UiTextarea, confirmDialog, promptDialog, vTooltip, UiLoadingState,
   showToast,
 } from '../../ui';
 
@@ -1592,6 +1737,41 @@ const fileSel = ref('');
 const fileData = ref<CodeFileResponse | null>(null);      // { content, binary, tooBig, size }
 const fileLoading = ref(false);
 const searchQuery = ref('');
+const searchFlags = ref(readSearchFlags());
+
+/**
+ * Повреждённое или недоступное хранилище не мешает обычному поиску.
+ * Каждое поле принимается только как boolean, иначе действует прежний стандарт.
+ */
+function readSearchFlags(): { case: boolean; word: boolean } {
+  try {
+    const raw = JSON.parse(localStorage.getItem('grigdesk-code-search-flags') || 'null');
+
+    return {
+      case: typeof raw?.case === 'boolean' ? raw.case : true,
+      word: typeof raw?.word === 'boolean' ? raw.word : false,
+    };
+  } catch {
+    return { case: true, word: false };
+  }
+}
+
+/**
+ * Изменение флага заново проходит штатный debounce и инвалидирует старый запрос.
+ * При отказе storage выбор продолжает работать до закрытия панели.
+ */
+function toggleSearchFlag(key: 'case' | 'word') {
+  searchFlags.value = { ...searchFlags.value, [key]: !searchFlags.value[key] };
+
+  try {
+    localStorage.setItem('grigdesk-code-search-flags', JSON.stringify(searchFlags.value));
+  } catch {
+    // Сетевой поиск не зависит от доступности локального хранилища.
+  }
+
+  scheduleSearch(searchQuery.value);
+}
+
 const searchResult = ref<CodeSearchResponse | null>(null);
 const searchLoading = ref(false);
 const searchError = ref('');
@@ -1848,8 +2028,267 @@ const gitKnownDirs = ref(new Set<string>());
 const gitDirsReady = ref(false);
 // Группы изменений, как Source Control в VS Code: индекс и рабочее дерево. Пустая
 // группа не рисуется, поэтому при чистом индексе панель выглядит ровно как раньше.
+const commitQuery = ref('');
+const commitSearch = ref<CodeCommitSearchResponse | null>(null);
+const commitSearchLoading = ref(false);
+const commitSearchError = ref('');
+const commitSelectionNotice = ref('');
+const commitKnown = ref(new Map<string, CodeCommitSearchEntry>());
+const commitSearchHead = ref('');
+let commitSearchRequestId = 0;
+let commitSearchTimer: ReturnType<typeof setTimeout> | null = null;
+let commitSearchDisposed = false;
+
+/**
+ * Возвращает порядок известных записей одного HEAD, включая найденные за первыми 50.
+ * Снимок /git остаётся неизменным, а его записи имеют приоритет над поисковым кэшем.
+ */
+function commitOrder(snapshot: CodeGitResponse | null): CodeGitLogEntry[] {
+  const entries = new Map<string, CodeGitLogEntry & { ordinal: number }>();
+  const shortHead = snapshot?.log[0]?.hash || '';
+
+  if (shortHead && commitSearchHead.value.startsWith(shortHead)) {
+    for (const entry of commitKnown.value.values()) {
+      entries.set(entry.hash, entry);
+    }
+  }
+
+  for (const [ordinal, entry] of (snapshot?.log || []).entries()) {
+    entries.set(entry.hash, { ...entry, ordinal });
+  }
+
+  return [...entries.values()].sort((left, right) => left.ordinal - right.ordinal);
+}
+
+const commitLogShown = computed(() => commitQuery.value.trim().length >= 2
+  ? commitSearch.value?.log || []
+  : git.value?.log || []);
+const commitSelectionLog = computed(() => commitOrder(git.value));
+
+/**
+ * Преобразует только отправляемую ссылку, оставляя UI-выбор и cache key короткими.
+ * Полный OID найденной записи позволяет открыть диапазон даже при core.abbrev=4.
+ */
+function commitRangeReference(hash: string): string {
+  const shortHead = git.value?.log[0]?.hash || '';
+
+  return shortHead && commitSearchHead.value.startsWith(shortHead)
+    ? commitKnown.value.get(hash)?.oid || hash
+    : hash;
+}
+
+/**
+ * Инвалидирует запрос до следующего ввода или сброса, включая ожидающий debounce.
+ * Кэш порядка и выбранный диапазон этим действием не изменяются.
+ */
+function invalidateCommitSearchRequest() {
+  commitSearchRequestId += 1;
+
+  if (commitSearchTimer !== null) {
+    clearTimeout(commitSearchTimer);
+    commitSearchTimer = null;
+  }
+
+  commitSearchLoading.value = false;
+}
+
+/**
+ * Проверяет владельца успеха, ошибки и finally одним условием.
+ * Скрытие панели и смена текста закрывают запрос до выполнения нового таймера.
+ */
+function commitSearchIsCurrent(own: number, snapshot: ContextSnapshot, query: string): boolean {
+  return !commitSearchDisposed && props.active && own === commitSearchRequestId
+    && contextIsCurrent(snapshot) && commitQuery.value.trim() === query;
+}
+
+/**
+ * Принимает результат только для текущего контекста, текста и HEAD снимка /git.
+ * История, успевшая смениться на сервере, требует обычного обновления панели.
+ */
+async function executeCommitSearch(query: string, snapshot: ContextSnapshot, own: number) {
+  try {
+    const result = await codeApi.commitSearch(snapshot, query);
+
+    if (!commitSearchIsCurrent(own, snapshot, query)) {
+      return;
+    }
+
+    const shortHead = git.value?.log[0]?.hash || '';
+    const sameHead = shortHead ? result.head.startsWith(shortHead) : !result.head;
+
+    if (!sameHead) {
+      commitSearchError.value = t('core.codeIstoriyaIzmenilasObnovite');
+
+      return;
+    }
+
+    const known = new Map(commitKnown.value);
+
+    for (const entry of result.log) {
+      known.set(entry.hash, entry);
+    }
+
+    commitKnown.value = known;
+    commitSearchHead.value = result.head;
+    commitSearch.value = result;
+    commitSearchError.value = '';
+  } catch (error) {
+    if (commitSearchIsCurrent(own, snapshot, query)) {
+      commitSearchError.value = codeErrorMessage(error);
+    }
+  } finally {
+    if (commitSearchIsCurrent(own, snapshot, query)) {
+      commitSearchLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Закрепляет query/context/id синхронно с вводом и запускает один отложенный поиск.
+ * Пустая строка и неактивная панель отменяют сеть, сохраняя выбранный диапазон.
+ */
+function scheduleCommitSearch(value: string) {
+  invalidateCommitSearchRequest();
+  commitSearch.value = null;
+  commitSearchError.value = '';
+
+  const query = value.trim();
+
+  if (query.length < 2 || !context.value || !props.active || commitSearchDisposed) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const own = commitSearchRequestId;
+
+  commitSearchLoading.value = true;
+  commitSearchTimer = setTimeout(() => {
+    commitSearchTimer = null;
+
+    if (commitSearchIsCurrent(own, snapshot, query)) {
+      void executeCommitSearch(query, snapshot, own);
+    }
+  }, 300);
+}
+
+/**
+ * Возвращает журнал /git без изменения кэша выбранных поисковых коммитов.
+ * Повторный сброс также инвалидирует летящий ответ даже при уже пустой строке.
+ */
+function resetCommitSearch() {
+  commitQuery.value = '';
+  invalidateCommitSearchRequest();
+  commitSearch.value = null;
+  commitSearchError.value = '';
+}
+
+/**
+ * Убирает данные прежней рабочей копии; их ordinal нельзя применять к другой истории.
+ * Выбор коммитов очищает существующий resetState рядом с этим вызовом.
+ */
+function resetCommitSearchContext() {
+  resetCommitSearch();
+  commitKnown.value = new Map();
+  commitSearchHead.value = '';
+  commitSelectionNotice.value = '';
+}
+
+/**
+ * Принятый новый HEAD отменяет старые ordinals и применяет прежнее правило pruning.
+ * При том же HEAD найденные старые коммиты продолжают принадлежать диапазону.
+ */
+function reconcileCommitSearch(next: CodeGitResponse) {
+  const previousHead = git.value?.log[0]?.hash || '';
+  const nextHead = next.log[0]?.hash || '';
+  const changed = previousHead !== nextHead;
+
+  if (changed) {
+    invalidateCommitSearchRequest();
+    commitKnown.value = new Map();
+    commitSearchHead.value = '';
+    commitSearch.value = null;
+    commitSearchError.value = '';
+  }
+
+  const selection = pruneCommitSelection(commitOrder(next), commitSel.value);
+
+  if (changed && selection.size < commitSel.value.size) {
+    commitSelectionNotice.value = t('core.codeVyborIstoriiObnovlen');
+  }
+
+  return { selection, restart: changed && commitQuery.value.trim().length >= 2 };
+}
+
+watch(commitQuery, scheduleCommitSearch, { flush: 'sync' });
+watch(() => props.active, (active) => {
+  if (active && commitQuery.value.trim().length >= 2) {
+    scheduleCommitSearch(commitQuery.value);
+  } else if (!active) {
+    invalidateCommitSearchRequest();
+  }
+}, { flush: 'sync' });
+
+/**
+ * Снимок окна включает только необходимые выбранные найденные записи одного HEAD.
+ * Это обычные JSON-данные; кэш не теряется при снятии прежнего экземпляра панели.
+ */
+function exportCommitSelectionHistory(): CodeCommitSearchResponse | null {
+  const shortHead = git.value?.log[0]?.hash || '';
+
+  if (!shortHead || !commitSearchHead.value.startsWith(shortHead)) {
+    return null;
+  }
+
+  const log = [...commitKnown.value.values()]
+    .filter((entry) => commitSel.value.has(entry.hash))
+    .sort((left, right) => left.ordinal - right.ordinal);
+
+  return log.length ? { head: commitSearchHead.value, log } : null;
+}
+
+/**
+ * Восстановление не доверяет порядку другой рабочей копии или другого HEAD.
+ * Старый снимок без истории сохраняет прежний путь, новый проходит общий декодер.
+ */
+function restoreCommitSelection(state: ToolWindowState, snapshot: ContextSnapshot): boolean {
+  if (!contextIsCurrent(snapshot) || snapshot.project !== state.project
+    || snapshot.repoKey !== state.repo || snapshot.treePath !== state.root) {
+    return false;
+  }
+
+  resetCommitSearchContext();
+
+  const selected = new Set(Array.isArray(state.commitSel) ? state.commitSel.map(String) : []);
+  const history = state.commitHistory === undefined
+    ? null : parseCodeCommitSelectionHistory(state.commitHistory);
+
+  if (history) {
+    const shortHead = git.value?.log[0]?.hash || '';
+    const sameHead = shortHead ? history.head.startsWith(shortHead) : !history.head;
+
+    if (sameHead) {
+      commitKnown.value = new Map(history.log.map((entry) => [entry.hash, entry]));
+      commitSearchHead.value = history.head;
+    }
+
+    const valid = pruneCommitSelection(commitOrder(git.value), selected);
+
+    if (valid.size < selected.size) {
+      commitSelectionNotice.value = t('core.codeVyborIstoriiObnovlen');
+    }
+
+    commitSel.value = valid;
+  } else {
+    commitSel.value = selected;
+  }
+
+  commitAnchor.value = '';
+
+  return true;
+}
+
 const selectedCommitBounds = computed(() => commitRangeBounds(
-  git.value?.log || [],
+  commitSelectionLog.value,
   commitSel.value,
 ));
 const commitsWorkAvailable = computed(() => {
@@ -1953,6 +2392,50 @@ const gitFilterTotal = computed(() => (
 
 // Ключи строк для VirtualRows — постоянные функции, а не стрелки в шаблоне: новая стрелка
 // на каждом рендере панели была бы новым prop и будила бы окно впустую.
+const FILE_GLYPH: Record<string, string> = {
+  ts: 'file-code',
+  tsx: 'file-code',
+  js: 'file-code',
+  mjs: 'file-code',
+  cjs: 'file-code',
+  jsx: 'file-code',
+  php: 'file-code',
+  vue: 'file-code',
+  css: 'file-code',
+  scss: 'file-code',
+  html: 'file-code',
+  xml: 'file-code',
+  yml: 'file-code',
+  yaml: 'file-code',
+  sql: 'file-code',
+  py: 'file-code',
+  sh: 'file-code',
+  bash: 'file-code',
+  json: 'json',
+  md: 'markdown',
+  png: 'file-media',
+  jpg: 'file-media',
+  jpeg: 'file-media',
+  gif: 'file-media',
+  webp: 'file-media',
+  bmp: 'file-media',
+  ico: 'file-media',
+  zip: 'file-zip',
+  gz: 'file-zip',
+  tar: 'file-zip',
+};
+
+/**
+ * Расширение читается только из basename: точка в каталоге не задаёт тип файла.
+ * Глиф неизвестного формата остаётся обычным файлом без догадок по содержимому.
+ */
+function fileGlyph(rel: string): string {
+  const name = rel.split('/').pop() || '';
+  const extension = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
+
+  return `codicon-${FILE_GLYPH[extension] || 'file'}`;
+}
+
 const fileRowKey = (row: FileTreeRow) => row.rel;
 const gitRowKey = (row: GitGroup['rows'][number]) => row.key;
 const gitListKey = (entry: GitGroup['list'][number]) => entry.file.path;
@@ -2061,6 +2544,171 @@ const canShowFileHistory = computed(() => !fileHistoryActive.value && !patchRevi
 // Обновление относится ко всему текущему контексту, поэтому меню остаётся доступным
 // и в чистом Git-состоянии, когда выбрать файл ещё невозможно.
 const canShowFileMenu = computed(() => !patchReviewActive.value);
+const fileMinimap = ref(readFileViewFlag('grigdesk-code-minimap'));
+const fileSticky = ref(readFileViewFlag('grigdesk-code-sticky-scroll'));
+
+/**
+ * Настройки принимают только точное значение «1»; остальное сохраняет прежний вид.
+ * Недоступный storage не должен мешать чтению файлов.
+ */
+function readFileViewFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Опции применяются только к обычному fileEditor, а не к редакторам сравнения.
+ * Отказ сохранения не отменяет уже выбранный вид в текущем окне.
+ */
+function applyFileViewOptions() {
+  fileEditor?.updateOptions({
+    minimap: { enabled: fileMinimap.value },
+    stickyScroll: { enabled: fileSticky.value },
+  });
+
+  try {
+    localStorage.setItem('grigdesk-code-minimap', fileMinimap.value ? '1' : '0');
+    localStorage.setItem('grigdesk-code-sticky-scroll', fileSticky.value ? '1' : '0');
+  } catch {
+    // В текущем редакторе настройки уже применены.
+  }
+}
+
+function toggleFileMinimap() {
+  fileMinimap.value = !fileMinimap.value;
+  applyFileViewOptions();
+}
+
+function toggleFileSticky() {
+  fileSticky.value = !fileSticky.value;
+  applyFileViewOptions();
+}
+
+interface DiffSummaryState {
+  text: string;
+  error: boolean;
+}
+
+const diffSummaries = ref<Record<GitGroupId, DiffSummaryState | null>>({
+  staged: null,
+  work: null,
+  commits: null,
+});
+const diffSummaryBusy = ref<GitGroupId | ''>('');
+let diffSummaryRequestId = 0;
+let diffSummaryGeneration = 0;
+let diffSummaryDisposed = false;
+
+/**
+ * Новые стороны Git или новая рабочая копия лишают сводку её исходного снимка.
+ * Поздние ответы прежнего поколения не имеют права ни показать текст, ни снять busy.
+ */
+function resetDiffSummaries() {
+  diffSummaryGeneration += 1;
+  diffSummaryRequestId += 1;
+  diffSummaryBusy.value = '';
+  diffSummaries.value = {
+    staged: null,
+    work: null,
+    commits: null,
+  };
+}
+
+/**
+ * Общий допуск всех ветвей ответа учитывает контекст, снимок и владельца запроса.
+ * Платный запрос может завершиться после скрытия панели, но не после замены снимка.
+ */
+function diffSummaryIsCurrent(own: number, generation: number, snapshot: ContextSnapshot) {
+  return !diffSummaryDisposed && own === diffSummaryRequestId
+    && generation === diffSummaryGeneration && contextIsCurrent(snapshot);
+}
+
+/**
+ * Генерирует сводку только живой mutable-группы и проверяет владельца после каждого ожидания.
+ * Вход принимает весь GitGroupId, а узкий контракт API достигается guard до вызова.
+ */
+async function runDiffSummary(groupId: GitGroupId) {
+  if ((groupId !== 'staged' && groupId !== 'work')
+    || !context.value || diffSummaryDisposed || diffSummaryBusy.value || gitActionBusy.value) {
+    return;
+  }
+
+  const group = gitGroups.value.find((item) => item.id === groupId);
+
+  if (!group?.files.length) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const generation = diffSummaryGeneration;
+  const own = ++diffSummaryRequestId;
+
+  diffSummaryBusy.value = groupId;
+  diffSummaries.value = { ...diffSummaries.value, [groupId]: null };
+
+  try {
+    const result = await codeApi.diffSummary(snapshot, groupId);
+
+    if (diffSummaryIsCurrent(own, generation, snapshot)) {
+      diffSummaries.value = {
+        ...diffSummaries.value,
+        [groupId]: { text: result.summary, error: false },
+      };
+    }
+  } catch (error) {
+    if (diffSummaryIsCurrent(own, generation, snapshot)) {
+      diffSummaries.value = {
+        ...diffSummaries.value,
+        [groupId]: { text: codeErrorMessage(error), error: true },
+      };
+    }
+  } finally {
+    if (diffSummaryIsCurrent(own, generation, snapshot)) {
+      diffSummaryBusy.value = '';
+    }
+  }
+}
+
+/**
+ * Закрывает только указанную сводку, не меняя дерево и не затрагивая другую группу.
+ * Если эту группу ещё завершает запрос, закрытие также снимает право вернуть её текст.
+ */
+function closeDiffSummary(groupId: GitGroupId) {
+  if (diffSummaryBusy.value === groupId) {
+    diffSummaryRequestId += 1;
+    diffSummaryBusy.value = '';
+  }
+
+  diffSummaries.value = { ...diffSummaries.value, [groupId]: null };
+}
+
+const blameAccuracy = ref(readFileViewFlag('grigdesk-code-blame-accuracy'));
+
+/**
+ * Существующий loadBlame снимает старые подписи и закрепляет новое поколение запроса.
+ * Если авторство выключено, выбор сохраняется без скрытого сетевого вызова.
+ */
+function toggleBlameAccuracy() {
+  if (!canUseBlame.value) {
+    return;
+  }
+
+  blameAccuracy.value = !blameAccuracy.value;
+
+  try {
+    localStorage.setItem('grigdesk-code-blame-accuracy', blameAccuracy.value ? '1' : '0');
+  } catch {
+    // Текущий режим работает и без записи предпочтения на устройство.
+  }
+
+  if (blameEnabled.value && fileSel.value) {
+    void loadBlame(captureContext(), fileSel.value);
+  }
+}
+
 const blameEnabled = ref(localStorage.getItem('grigdesk-code-blame') === '1');
 const blameLines = ref<CodeBlameLine[]>([]);
 const blamePath = ref('');
@@ -3139,6 +3787,197 @@ const projectIsCurrent = (generation: number, id: string, requestId: number) => 
 );
 const activationIsCurrent = (id: number | null) => id == null || id === activationId;
 
+const quickOpenActive = ref(false);
+const quickQuery = ref('');
+const quickFiles = ref<string[]>([]);
+const quickIndex = ref(0);
+const quickLoading = ref(false);
+const quickError = ref('');
+const quickResultsHost = ref<HTMLElement | null>(null);
+let quickRequestId = 0;
+let quickTimer: ReturnType<typeof setTimeout> | null = null;
+const canQuickOpen = computed(() => props.active && tab.value === 'files'
+  && !fileHistoryActive.value && !!context.value && !contextLoading.value);
+
+/**
+ * Новый ввод или закрытие немедленно отзывают право старого ответа менять диалог.
+ * Таймер, результат, ошибка и индикатор всегда принадлежат одному поколению.
+ */
+function invalidateQuickOpen() {
+  quickRequestId += 1;
+
+  if (quickTimer !== null) {
+    clearTimeout(quickTimer);
+    quickTimer = null;
+  }
+
+  quickFiles.value = [];
+  quickIndex.value = 0;
+  quickLoading.value = false;
+  quickError.value = '';
+
+  return quickRequestId;
+}
+
+/**
+ * Смена контекста и unmount используют тот же сброс, что закрытие общего диалога.
+ * Строка очищается после закрытия, поэтому watcher не создаёт нового запроса.
+ */
+function resetQuickOpen() {
+  quickOpenActive.value = false;
+  invalidateQuickOpen();
+  quickQuery.value = '';
+}
+
+/**
+ * Управляет только состоянием палитры; фокусом и Escape владеет UiDialog.
+ * Открытие запрещено, пока контекст не готов или панель скрыта.
+ */
+function setQuickOpen(open: boolean) {
+  if (!open) {
+    resetQuickOpen();
+
+    return;
+  }
+  if (!canQuickOpen.value) {
+    return;
+  }
+
+  resetQuickOpen();
+  quickOpenActive.value = true;
+}
+
+/**
+ * Одинаковая проверка владельца применяется к успеху, ошибке и finally.
+ * Даже ответ между клавишей и debounce уже не относится к новой строке.
+ */
+function quickOwnerIsCurrent(query: string, snapshot: ContextSnapshot, own: number) {
+  return quickOpenActive.value && canQuickOpen.value && own === quickRequestId
+    && quickQuery.value.trim() === query && contextIsCurrent(snapshot);
+}
+
+/**
+ * Выполняет один уже запланированный запрос и принимает только его актуальный ответ.
+ * Ошибка остаётся отдельным состоянием с возможностью повторить тот же запрос.
+ */
+async function executeQuickOpen(query: string, snapshot: ContextSnapshot, own: number) {
+  if (!quickOwnerIsCurrent(query, snapshot, own)) {
+    return;
+  }
+
+  try {
+    const result = await codeApi.quickOpen(snapshot, query);
+
+    if (quickOwnerIsCurrent(query, snapshot, own)) {
+      quickFiles.value = result.files;
+      quickIndex.value = 0;
+    }
+  } catch (failure) {
+    if (quickOwnerIsCurrent(query, snapshot, own)) {
+      quickError.value = codeErrorMessage(failure);
+    }
+  } finally {
+    if (quickOwnerIsCurrent(query, snapshot, own)) {
+      quickLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Снимок строки и контекста закрепляется до таймера, после синхронной инвалидации.
+ * Пустой ввод не ходит в сеть и никогда не оставляет старый доступный результат.
+ */
+function scheduleQuickOpen() {
+  const own = invalidateQuickOpen();
+  const query = quickQuery.value.trim();
+
+  if (!quickOpenActive.value || !canQuickOpen.value || !query) {
+    return;
+  }
+
+  const snapshot = captureContext();
+
+  quickLoading.value = true;
+  quickTimer = setTimeout(() => {
+    quickTimer = null;
+    void executeQuickOpen(query, snapshot, own);
+  }, 150);
+}
+
+/**
+ * Клик и Enter используют один выбранный путь из актуального списка.
+ * Закрытие инвалидирует запрос до начала обычного файлового чтения.
+ */
+function pickQuickFile(index: number) {
+  const rel = quickFiles.value[index];
+
+  if (!rel || quickLoading.value || !quickOpenActive.value || !canQuickOpen.value) {
+    return;
+  }
+
+  resetQuickOpen();
+  void openFile(rel);
+}
+
+/**
+ * Стрелки и Enter принадлежат списку, Escape оставлен общему стеку слоёв UiDialog.
+ * Нажатие при пустом или загружаемом результате не открывает прежний путь.
+ */
+function onQuickKeydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+
+    const count = quickFiles.value.length;
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+
+    quickIndex.value = count ? (quickIndex.value + delta + count) % count : 0;
+
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    pickQuickFile(quickIndex.value);
+  }
+}
+
+/**
+ * Хоткей файлов обрабатывается перед прежними клавишами diff без перехвата полей.
+ * Кнопка шапки остаётся альтернативой для touch и скрытого навигатора.
+ */
+function onCodeKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+  const inField = !!target?.closest(
+    'input, textarea, select, [contenteditable="true"], [role="dialog"]',
+  );
+
+  if (quickOpenActive.value) {
+    return;
+  }
+  if (canQuickOpen.value && !inField && (event.ctrlKey || event.metaKey)
+    && event.key.toLowerCase() === 'p') {
+    event.preventDefault();
+    setQuickOpen(true);
+
+    return;
+  }
+
+  onDiffKeydown(event);
+}
+
+watch(quickQuery, scheduleQuickOpen, { flush: 'sync' });
+watch(canQuickOpen, (available) => {
+  if (!available) {
+    resetQuickOpen();
+  }
+}, { flush: 'sync' });
+watch(quickIndex, async () => {
+  await nextTick();
+
+  quickResultsHost.value?.querySelectorAll<HTMLElement>('[data-action="quick-open-item"]')
+    [quickIndex.value]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+});
+
+
 // Ширина рейки разделов слева: одна цифра и для сетки (через CSS-переменную), и для
 // перевода координаты указателя в ширину навигатора.
 const RAIL_WIDTH = 44;
@@ -3418,6 +4257,8 @@ async function exportState(): Promise<ToolWindowState> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
+  const commitHistory = exportCommitSelectionHistory();
+
   return {
     project: project.value,
     repo: repoKey.value,
@@ -3428,6 +4269,8 @@ async function exportState(): Promise<ToolWindowState> {
     gitRef: gitSel.value,
     line: fileEditor?.getPosition?.()?.lineNumber || 1,
     commitSel: [...commitSel.value],
+    ...(commitHistory ? { commitHistory } : {}),
+
     branchMode: branchMode.value,
     commitsWithWork: commitsWithWork.value,
     commitMessage: commitMessage.value,
@@ -3489,17 +4332,26 @@ async function importState(value: ToolWindowState): Promise<void> {
       line: Number(state.line) || 1,
     });
   } else if (state.tab === 'git') {
+    const snapshot = captureContext();
+
+    if (!restoreCommitSelection(state, snapshot)) {
+      return;
+    }
+
     branchMode.value = state.branchMode === true;
-    commitSel.value = new Set(Array.isArray(state.commitSel) ? state.commitSel.map(String) : []);
     commitsWithWork.value = state.commitsWithWork !== false;
     gitPane.value = ['changes', 'commits', 'branches'].includes(String(state.gitPane))
       ? state.gitPane as GitPane : 'changes';
     await setTab('git');
 
+    if (!contextIsCurrent(snapshot)) {
+      return;
+    }
     if (typeof state.gitRef === 'string' && gitEntries.value.has(state.gitRef)) {
       await selectGit(state.gitRef);
     }
   }
+
 
   commitMessage.value = typeof state.commitMessage === 'string' ? state.commitMessage : '';
   amendCommit.value = state.amendCommit === true;
@@ -3604,6 +4456,9 @@ async function setContext(id: string, { activation = null }: ActivationOptions =
   localStorage.setItem(contextStorageKey(project.value), encodeStoredCodeContext(selected));
 
   const snapshot = captureContext();
+
+  openTabs.value = readOpenTabs(snapshot);
+
   const rootLoaded = await loadDir('', snapshot, { activation });
 
   if (rootLoaded && activationIsCurrent(activation) && contextIsCurrent(snapshot)) {
@@ -3620,6 +4475,13 @@ async function setContext(id: string, { activation = null }: ActivationOptions =
  * Смена идентификаторов запросов лишает поздние ответы права менять новую панель.
  */
 function resetState() {
+  resetDiffSummaries();
+  resetCommitSearchContext();
+  openTabs.value = [];
+  pendingTreeReveal = null;
+  runningTreeReveal = null;
+
+  resetQuickOpen();
   gitSelection.value = new Set();
   gitSelectionAnchor.value = '';
   includeHiddenSelection.value = false;
@@ -3877,7 +4739,9 @@ function applyBlameDecorations() {
         inlineClassName: 'code-blame-after',
         inlineClassNameAffectsLetterSpacing: true,
       },
-      hoverMessage: { value: line.subject || t('core.codeBezTemy') },
+      hoverMessage: { value: line.sourcePath === null
+        ? t('core.codeBlameSourceUnavailable')
+        : line.subject || t('core.codeBezTemy') },
     },
   }));
 
@@ -3906,7 +4770,9 @@ async function loadBlame(snapshot: ContextSnapshot, relPath: string) {
   removeBlameDecorations();
 
   try {
-    const response = await codeApi.blame(snapshot, relPath);
+    const response = await codeApi.blame(snapshot, relPath, {
+      refactorAware: blameAccuracy.value,
+    });
 
     if (!contextIsCurrent(snapshot) || own !== blameRequestId
       || !blameEnabled.value || fileSel.value !== relPath) {
@@ -3959,12 +4825,22 @@ async function openBlameCommit(line: CodeBlameLine) {
     return;
   }
 
+  if (line.sourcePath === null) {
+    blameError.value = t('core.codeBlameSourceUnavailable');
+
+    return;
+  }
+
+  const sourcePath = line.sourcePath === undefined ? relPath : line.sourcePath;
+
+  blameError.value = '';
+
   const entry: CodeFileLogEntry = {
     hash: line.hash,
     base: line.base,
     subject: line.subject,
     when: line.when,
-    path: relPath,
+    path: sourcePath,
   };
 
   fileHistoryOrigin.value = {
@@ -4891,7 +5767,10 @@ function resetSearch() {
  */
 async function executeSearch(query: string, snapshot: ContextSnapshot, own: number) {
   try {
-    const response = await codeApi.search(snapshot, query);
+    const response = await codeApi.search(snapshot, query, {
+      ignoreCase: !searchFlags.value.case,
+      wholeWord: searchFlags.value.word,
+    });
 
     if (!contextIsCurrent(snapshot) || own !== searchRequestId || searchQuery.value !== query) {
       return;
@@ -4968,6 +5847,241 @@ function openFirstSearchResult() {
 
 watch(searchQuery, scheduleSearch);
 
+type TreeRevealRequest = {
+  rel: string;
+  snapshot: ContextSnapshot;
+  fileRequest: number;
+};
+
+const fileTreeHost = ref<HTMLElement | null>(null);
+const filesRowsRef = ref<{ reveal(index: number): Promise<void> } | null>(null);
+let pendingTreeReveal: TreeRevealRequest | null = null;
+let runningTreeReveal: TreeRevealRequest | null = null;
+
+const treeRevealVisible = computed(() => props.active && !loading.value && !contextLoading.value
+  && tab.value === 'files' && !fileHistoryActive.value && !searchActive.value
+  && (codePanelNarrow.value ? narrowPane.value === 'navigator' : !navigatorCollapsed.value));
+
+/**
+ * Дерево монтируется заново после поиска, поэтому instance хранится function-ref.
+ * Тип содержит только публичную команду VirtualRows, без доступа к его внутреннему окну.
+ */
+function setFilesRows(instance: unknown) {
+  filesRowsRef.value = instance as { reveal(index: number): Promise<void> } | null;
+}
+
+/**
+ * Отложенный переход относится к одному открытому файлу и одному поколению контекста.
+ * Проверка после каждого ожидания не позволяет старому переходу менять новое дерево.
+ */
+function treeRevealIsCurrent(request: TreeRevealRequest) {
+  return pendingTreeReveal === request && contextIsCurrent(request.snapshot)
+    && fileRequestId === request.fileRequest && fileSel.value === request.rel;
+}
+
+/**
+ * Принимает последнее успешное открытие; скрытый навигатор не разворачивается сам.
+ * Новый запрос заменяет прежний, даже если тот ещё ждёт чтение каталога.
+ */
+function requestTreeReveal(rel: string, snapshot: ContextSnapshot, fileRequest: number) {
+  pendingTreeReveal = {
+    rel,
+    snapshot,
+    fileRequest,
+  };
+  void flushTreeReveal();
+}
+
+/**
+ * Раскрывает предков только после чтения, затем объединяет virtual и обычную прокрутку.
+ * Скрытие дерева оставляет запрос ожидающим; отказ чтения завершает его без ложного раскрытия.
+ */
+async function flushTreeReveal() {
+  const request = pendingTreeReveal;
+
+  if (!request || !treeRevealVisible.value || runningTreeReveal === request) {
+    return;
+  }
+  if (!treeRevealIsCurrent(request)) {
+    pendingTreeReveal = null;
+
+    return;
+  }
+
+  runningTreeReveal = request;
+
+  try {
+    const segments = request.rel.split('/');
+
+    for (let index = 1; index < segments.length; index += 1) {
+      if (!treeRevealIsCurrent(request) || !treeRevealVisible.value) {
+        return;
+      }
+
+      const dir = segments.slice(0, index).join('/');
+
+      if (!dirs.value.has(dir)) {
+        const loaded = await loadDir(dir, request.snapshot, { activation: null });
+
+        if (!treeRevealIsCurrent(request) || !treeRevealVisible.value) {
+          return;
+        }
+        if (!loaded) {
+          pendingTreeReveal = null;
+
+          return;
+        }
+      }
+
+      openDirs.value = new Set([...openDirs.value, dir]);
+    }
+
+    await nextTick();
+
+    if (!treeRevealIsCurrent(request) || !treeRevealVisible.value || !filesRowsRef.value) {
+      return;
+    }
+
+    const index = rows.value.findIndex((row) => row.rel === request.rel && !row.dir);
+
+    if (index < 0) {
+      pendingTreeReveal = null;
+
+      return;
+    }
+
+    await filesRowsRef.value.reveal(index);
+
+    if (!treeRevealIsCurrent(request) || !treeRevealVisible.value) {
+      return;
+    }
+
+    await nextTick();
+
+    if (!treeRevealIsCurrent(request) || !treeRevealVisible.value) {
+      return;
+    }
+
+    const candidates = fileTreeHost.value?.querySelectorAll<HTMLElement>('[data-file-path]');
+    const row = Array.from(candidates || [])
+      .find((element) => element.dataset.filePath === request.rel);
+
+    if (row) {
+      row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      pendingTreeReveal = null;
+    }
+  } finally {
+    if (runningTreeReveal === request) {
+      runningTreeReveal = null;
+    }
+  }
+}
+
+watch([treeRevealVisible, fileTreeHost, filesRowsRef], () => {
+  void flushTreeReveal();
+}, { flush: 'post' });
+
+const openTabs = ref<string[]>([]);
+
+/**
+ * Относительный POSIX-путь не может выходить из корня или содержать пустые сегменты.
+ * Проверка storage дополняет серверную границу, но не заменяет её.
+ */
+function validOpenTabPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && !value.includes('\0')
+    && !value.startsWith('/') && !value.split('/').some((part) => !part || part === '.' || part === '..');
+}
+
+/**
+ * Полный кортеж различает репозитории и рабочие копии внутри одного проекта.
+ * Кодирование не допускает коллизий из разделителей в именах и путях.
+ */
+function openTabsStorageKey(snapshot: ContextSnapshot): string {
+  const owner = [snapshot.project, snapshot.repoKey, snapshot.treePath];
+
+  return `grigdesk-code-open-files:v1:${encodeURIComponent(JSON.stringify(owner))}`;
+}
+
+/**
+ * Принимает только валидный массив без дубликатов; чужой старый формат игнорируется.
+ * Недоступное хранилище оставляет панель рабочей с пустой полосой вкладок.
+ */
+function readOpenTabs(snapshot: ContextSnapshot): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(openTabsStorageKey(snapshot)) || 'null');
+
+    if (!Array.isArray(raw) || !raw.every(validOpenTabPath) || new Set(raw).size !== raw.length) {
+      return [];
+    }
+
+    return raw.slice(-12);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Запись привязана к той же рабочей копии, из которой прочитан список.
+ * Отказ localStorage не прерывает открытие или закрытие обычного файла.
+ */
+function storeOpenTabs() {
+  if (!context.value) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(openTabsStorageKey(captureContext()), JSON.stringify(openTabs.value));
+  } catch {
+    // Текущий список остаётся доступным до закрытия панели.
+  }
+}
+
+/**
+ * Повторное открытие сохраняет порядок вкладок; вытеснение касается только нового пути.
+ * Метод вызывается пользовательским открытием файла, но не тихим обновлением снимка.
+ */
+function pushOpenTab(rel: string) {
+  if (!context.value || !validOpenTabPath(rel) || openTabs.value.includes(rel)) {
+    return;
+  }
+
+  openTabs.value = [...openTabs.value, rel].slice(-12);
+  storeOpenTabs();
+}
+
+/**
+ * Закрытие последней вкладки снимает модель и инвалидирует незавершённое файловое чтение.
+ * Остальные вкладки выбираются штатным openFile с теми же guards контекста и запроса.
+ */
+function closeTab(rel: string) {
+  openTabs.value = openTabs.value.filter((item) => item !== rel);
+  storeOpenTabs();
+
+  if (fileSel.value !== rel) {
+    return;
+  }
+
+  const next = openTabs.value.at(-1);
+
+  if (next) {
+    void openFile(next);
+
+    return;
+  }
+
+  fileRequestId += 1;
+  fileLoadingRequestId = 0;
+  fileLoading.value = false;
+  fileSel.value = '';
+  fileData.value = null;
+  imageError.value = '';
+  error.value = '';
+  pendingReveal = null;
+  pendingTreeReveal = null;
+  resetBlameView();
+  clearFileModel();
+}
+
 /**
  * Другой файл сначала снимает прежнюю модель, чтобы заголовок совпадал с содержимым.
  * Обновление того же пути сохраняет валидный снимок до проверенного ответа.
@@ -4989,6 +6103,11 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
   }
 
   fileSel.value = rel;
+
+  if (!silent && tab.value === 'files' && !fileHistoryActive.value) {
+    pushOpenTab(rel);
+  }
+
   imageError.value = '';
 
   if (!silent) {
@@ -5010,6 +6129,13 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
     if (activationIsCurrent(activation)
       && contextIsCurrent(snapshot) && fileRequestId === requestId && fileSel.value === rel) {
       showFile(rel, data);
+
+      if (!silent) {
+        requestTreeReveal(rel, snapshot, requestId);
+      } else if (pendingTreeReveal?.rel === rel) {
+        requestTreeReveal(rel, snapshot, requestId);
+      }
+
 
       if (blameEnabled.value && fileSupportsBlame(rel, data)) {
         void loadBlame(snapshot, rel);
@@ -5046,6 +6172,7 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
  * Ручной refresh может сохранить модель до принятия нового списка.
  */
 function resetDiffContent({ clearModels = true } = {}) {
+  resetDiffSummaries();
   diffContent.value = new Map();
   diffError.value = '';
   diffLoading.value = false;
@@ -5302,7 +6429,12 @@ async function syncCommitsDiff(snapshot = captureContext()) {
   commitsError.value = '';
 
   try {
-    const nextDiff = await codeApi.commitsDiff(snapshot, bounds.from, bounds.to, { work });
+    const nextDiff = await codeApi.commitsDiff(
+      snapshot,
+      commitRangeReference(bounds.from),
+      commitRangeReference(bounds.to),
+      { work },
+    );
     const current = selectedCommitBounds.value;
     const currentKey = current
       ? `${current.from}:${current.to}${commitsWorkActive.value ? ':work' : ''}`
@@ -5450,8 +6582,9 @@ function pickCommit(entry: CodeGitResponse['log'][number], event: MouseEvent) {
     commitsLoadedKey = '';
   }
 
+  commitSelectionNotice.value = '';
   commitSel.value = event.shiftKey
-    ? extendCommitSelection(git.value?.log || [], commitSel.value, commitAnchor.value, entry.hash)
+    ? extendCommitSelection(commitLogShown.value, commitSel.value, commitAnchor.value, entry.hash)
     : toggleCommitSelection(commitSel.value, entry.hash);
   commitAnchor.value = entry.hash;
 
@@ -5463,6 +6596,7 @@ function pickCommit(entry: CodeGitResponse['log'][number], event: MouseEvent) {
  * Один путь очистки не оставляет старый commit-range в Monaco.
  */
 function clearCommitSelection() {
+  commitSelectionNotice.value = '';
   branchMode.value = false;
   commitSel.value = new Set();
   commitAnchor.value = '';
@@ -5502,7 +6636,8 @@ async function loadGit(
     }
 
     const previousSelection = commitSel.value;
-    const nextSelection = pruneCommitSelection(nextGit.log, previousSelection);
+    const reconciled = reconcileCommitSearch(nextGit);
+    const nextSelection = reconciled.selection;
 
     commitSel.value = nextSelection;
 
@@ -5516,9 +6651,14 @@ async function loadGit(
     gitKnownDirs.value = nextDirs;
     gitDirsReady.value = true;
     git.value = nextGit;
+    resetDiffContent();
+
+    if (reconciled.restart) {
+      scheduleCommitSearch(commitQuery.value);
+    }
+
     gitSelection.value = new Set([...gitSelection.value].filter((key) => gitEntries.value.has(key)));
     await review.revalidateViewed();
-    resetDiffContent();
 
     if (gitSel.value && !gitEntries.value.has(gitSel.value)) {
       gitSel.value = '';
@@ -5765,6 +6905,9 @@ function showFile(rel: string, data: CodeFileResponse) {
   if (!fileEditor) {
     fileEditor = monaco.editor.create(fileHost.value, {
       ...READONLY_OPTS,
+      minimap: { enabled: fileMinimap.value },
+      stickyScroll: { enabled: fileSticky.value },
+
       fontSize: 13,
       lineHeight: 20,
       padding: { top: 8, bottom: 8 },
@@ -6223,27 +7366,9 @@ async function openIntentFile(intent: OpenFileIntent) {
     tab.value = 'files';
   }
 
-  // Каталоги раскрываем по одному сверху вниз: дерево ленивое, и без этого файл
-  // открылся бы в редакторе, но не подсветился бы в навигаторе.
-  const snapshot = captureContext();
-  const segments = rel.split('/').slice(0, -1);
-  let prefix = '';
-  const open = new Set(openDirs.value);
+  // После чтения файла общий reveal раскроет дерево, когда оно станет видимо.
+  // Координата строки Monaco независима от отложенной прокрутки навигатора.
 
-  for (const segment of segments) {
-    prefix = prefix ? `${prefix}/${segment}` : segment;
-
-    if (!dirs.value.has(prefix) && !(await loadDir(prefix, snapshot))) {
-      break;
-    }
-    if (!contextIsCurrent(snapshot)) {
-      return;
-    }
-
-    open.add(prefix);
-  }
-
-  openDirs.value = open;
   pendingReveal = intent.line ? { path: rel, line: intent.line } : null;
 
   if ((await openFile(rel)) === false) {
@@ -6324,6 +7449,15 @@ onMounted(() => {
   document.addEventListener('visibilitychange', refreshWhenVisible);
 });
 onBeforeUnmount(() => {
+  diffSummaryDisposed = true;
+  resetDiffSummaries();
+  commitSearchDisposed = true;
+  invalidateCommitSearchRequest();
+
+  pendingTreeReveal = null;
+  runningTreeReveal = null;
+
+  resetQuickOpen();
   activationId += 1;
   gitActionId += 1;
   document.removeEventListener('visibilitychange', refreshWhenVisible);
@@ -6352,6 +7486,22 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.tree-glyph { flex: none; width: 18px; font-size: 14px; text-align: center; }
+
+.file-tabs { display: flex; gap: 4px; overflow-x: auto; flex: none; min-width: 0; }
+.file-tab-pair { display: inline-flex; align-items: center; flex: none; }
+.file-tab-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quick-results { max-height: min(320px, 50dvh); overflow: auto; }
+.quick-path { min-width: 0; overflow-wrap: anywhere; text-align: left; }
+
+.search-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px var(--code-gutter);
+}
+
 .git-controls { flex: none; min-width: 0; }
 .git-filter-bar {
   display: flex;

@@ -5,6 +5,9 @@ import {
   parseCodeBlame,
   parseCodeRoots,
   parseCodeSearch,
+  parseCodeDiffSummary,
+  parseCodeCommitSearch,
+  parseCodeQuickOpen,
   parseCodeRepos,
   parseCodeProjects,
   parseCodeDirectory,
@@ -238,3 +241,74 @@ for (const [method, options] of [
     await assert.rejects(codeApi[method](context, options), CodeContractError);
   });
 }
+
+test('parseCodeQuickOpen: принимает список строк и отвергает повреждённые пути', () => {
+  assert.deepEqual(parseCodeQuickOpen({ files: ['a.ts', 'b.md'] }), { files: ['a.ts', 'b.md'] });
+  assert.throws(() => parseCodeQuickOpen({ files: 'a.ts' }), CodeContractError);
+  assert.throws(() => parseCodeQuickOpen({ files: [1] }), CodeContractError);
+});
+
+test('commit-search decoder: снимок, позиции, лимит и неверные поля', () => {
+  const value = {
+    head: 'a'.repeat(40),
+    log: [{
+      hash: 'bbbb',
+      oid: 'b'.repeat(40),
+      subject: 'old result',
+      when: 'now',
+      ordinal: 75,
+    }],
+  };
+
+  assert.deepEqual(parseCodeCommitSearch(value), value);
+  assert.deepEqual(parseCodeCommitSearch({ head: '', log: [] }), { head: '', log: [] });
+
+  for (const invalid of [
+    { ...value, head: 'short' },
+    { ...value, log: [{ ...value.log[0], ordinal: 200 }] },
+    { ...value, log: [{ ...value.log[0], ordinal: 1.5 }] },
+    { ...value, log: [{ ...value.log[0], hash: 3 }] },
+    { ...value, log: [{ ...value.log[0], oid: 'c'.repeat(40) }] },
+    { ...value, log: [value.log[0], value.log[0]] },
+    { head: '', log: value.log },
+  ]) {
+    assert.throws(() => parseCodeCommitSearch(invalid), CodeContractError);
+  }
+});
+
+test('blame sourcePath: отсутствие, null и исторический путь имеют разный смысл', () => {
+  const line = {
+    line: 1,
+    hash: 'a'.repeat(40),
+    base: 'b'.repeat(40),
+    author: 'Автор',
+    when: 'сейчас',
+    subject: 'Исходная правка',
+  };
+
+  assert.deepEqual(parseCodeBlame({ lines: [line] }), { lines: [line] });
+
+  for (const sourcePath of [null, 'source "quoted".js']) {
+    assert.deepEqual(parseCodeBlame({ lines: [{ ...line, sourcePath }] }), {
+      lines: [{ ...line, sourcePath }],
+    });
+  }
+  for (const sourcePath of ['', 4, '/outside', '../outside', 'a/../b', 'a\0b']) {
+    assert.throws(() => parseCodeBlame({ lines: [{ ...line, sourcePath }] }), CodeContractError);
+  }
+});
+
+test('parseCodeDiffSummary: успешный DTO и границы строки', () => {
+  assert.deepEqual(parseCodeDiffSummary({ ok: true, summary: 'ок' }), { ok: true, summary: 'ок' });
+
+  for (const value of [
+    { ok: true, summary: '' },
+    { ok: true, summary: '   ' },
+    { ok: true, summary: 'x'.repeat(501) },
+    { ok: false, summary: 'ок' },
+    { summary: 'ок' },
+    'ок',
+  ]) {
+    assert.throws(() => parseCodeDiffSummary(value), CodeContractError);
+  }
+});

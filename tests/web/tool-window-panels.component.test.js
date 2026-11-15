@@ -454,3 +454,46 @@ test(
   assert.equal(second.get('#docker-tab-images').attributes('aria-selected'), 'true');
   assert.equal(sockets.filter((socket) => socket.readyState === 1).length, 0);
 });
+
+test('TW-C-HISTORY: snapshot принимает выбранные ordinals и отвергает повреждения', async () => {
+  const product = await featureModule('src/shared/tools/toolWindowState.ts');
+  const entry = {
+    hash: 'aaaaaaa',
+    oid: 'a'.repeat(40),
+    subject: 'old',
+    when: 'now',
+    ordinal: 75,
+  };
+  const legacy = {
+    project: 'demo',
+    repo: 'demo',
+    root: '/demo',
+    tab: 'git',
+    commitSel: [entry.hash],
+  };
+  const value = { ...legacy, commitHistory: { head: 'b'.repeat(40), log: [entry] } };
+
+  assert.deepEqual(product.parseToolWindowState('code', value), value);
+  assert.deepEqual(product.parseToolWindowState('code', legacy), legacy);
+
+  for (const history of [
+    null,
+    { head: 'short', log: [entry] },
+    { head: '', log: [entry] },
+    { head: 'b'.repeat(40), log: [{ ...entry, oid: 'c'.repeat(40) }] },
+    { head: 'b'.repeat(40), log: [{ ...entry, ordinal: 1.5 }] },
+    { head: 'b'.repeat(40), log: [{ ...entry, ordinal: 200 }] },
+    { head: 'b'.repeat(40), log: [entry, entry] },
+    {
+      head: 'b'.repeat(40),
+      log: [entry],
+      secret: 'не поле снимка',
+    },
+  ]) {
+    assert.equal(product.parseToolWindowState('code', { ...legacy, commitHistory: history }), null);
+  }
+
+  assert.equal(product.parseToolWindowState('code', {
+    commitHistory: value.commitHistory,
+  }), null);
+});

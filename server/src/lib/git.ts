@@ -31,6 +31,8 @@ import type {
   CodePullResponse,
   CodePushResponse,
   CodeSearchResponse,
+  CodeCommitSearchResponse,
+  CodeQuickOpenResponse,
   CodeStageResponse,
   CodeStagedContext,
   CodeUndoCommitResponse,
@@ -102,6 +104,8 @@ interface LimitedGitOptions {
 }
 
 export interface PatchTextOptions {
+  /** Новый summary исключает скрытые пути; прежние patch-вызовы сохраняют поведение. */
+  isHidden?: (relPath: string) => boolean;
   directory?: string;
   paths?: string[];
   group: 'staged' | 'work' | 'commits';
@@ -112,6 +116,9 @@ export interface PatchTextOptions {
 }
 
 export interface SearchTreeOptions {
+  /** Флаги содержимого сохраняют прежний режим при отсутствии параметров. */
+  ignoreCase?: boolean;
+  wholeWord?: boolean;
   limit?: number;
   isHidden?: (relPath: string) => boolean;
 }
@@ -568,17 +575,25 @@ export async function taskDiff(cwd: string): Promise<CodeGitDiff> {
  */
 export async function worktreeChanges(
   cwd: string,
-  { withContent = true }: { withContent?: boolean } = {},
+  {
+    withContent = true,
+    detectRenames = false,
+  }: {
+    withContent?: boolean;
+    detectRenames?: boolean;
+  } = {},
 ): Promise<CodeWorktreeChanges> {
+  const renameArgs = detectRenames ? ['--find-renames'] : [];
   const [branch, stat, stagedNumstat, stagedNameStatus, workNumstat, workNameStatus, porcelain]
     = await Promise.all([
       git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
       git(cwd, ['diff', '--stat', 'HEAD']).catch(() => ''),
       // Без явного HEAD Git сам берёт его, а до первого коммита — пустое дерево.
-      git(cwd, ['diff', '--cached', '--numstat']).catch(() => ''),
-      git(cwd, ['diff', '--cached', '--name-status']).catch(() => ''),
-      git(cwd, ['diff', '--numstat']).catch(() => ''),
-      git(cwd, ['diff', '--name-status']).catch(() => ''),
+      // Имя и numstat одной стороны используют одинаковый режим переименований.
+      git(cwd, ['diff', ...renameArgs, '--cached', '--numstat']).catch(() => ''),
+      git(cwd, ['diff', ...renameArgs, '--cached', '--name-status']).catch(() => ''),
+      git(cwd, ['diff', ...renameArgs, '--numstat']).catch(() => ''),
+      git(cwd, ['diff', ...renameArgs, '--name-status']).catch(() => ''),
       git(cwd, ['status', '--porcelain', '--untracked-files=all']).catch(() => ''),
     ]);
 
@@ -1622,6 +1637,49 @@ const SEARCH_MATCH_MAX = 500;
 const SEARCH_FILE_MAX = 50;
 
 /**
+ * Общий список tracked/untracked путей с серверным исключением скрытых файлов.
+ * Порядок Git сохраняется: старый поиск не меняет порядок своих результатов.
+ */
+export async function repoFileList(
+  cwd: string,
+  { isHidden = () => false }: { isHidden?: (relPath: string) => boolean } = {},
+): Promise<string[]> {
+  const listed = await git(cwd, [
+    'ls-files', '-z', '--cached', '--others', '--exclude-standard',
+  ]);
+
+  return listed.split('\0').filter(Boolean).filter((relPath) => !isHidden(relPath));
+}
+
+/**
+ * Подбирает ограниченный список путей по подстроке, нормализованной на входе.
+ * Сортировка принадлежит quick-open и не меняет старый поиск содержимого.
+ */
+export async function quickOpenFiles(
+  cwd: string,
+  query: string,
+  { isHidden = () => false }: { isHidden?: (relPath: string) => boolean } = {},
+): Promise<CodeQuickOpenResponse> {
+  const normalized = typeof query === 'string' ? query.trim() : '';
+
+  if (!normalized || normalized.length > 200 || normalized.includes('\0')) {
+    throw new CodeGitError(
+      'bad_query',
+      'Запрос быстрого открытия должен содержать от 1 до 200 символов.',
+      400,
+    );
+  }
+
+  const needle = normalized.toLocaleLowerCase();
+  const files = (await repoFileList(cwd, { isHidden }))
+    .filter((relPath) => relPath.toLocaleLowerCase().includes(needle))
+    .sort()
+    .slice(0, 50);
+
+  return { files };
+}
+
+/**
  * Ищет буквальную строку в tracked и untracked-файлах без shell и регулярных выражений.
  * Файлы фильтруются отдельно по имени, а внешний guard исключает служебные каталоги.
  */
@@ -1631,6 +1689,8 @@ export async function searchTree(
   {
     limit = SEARCH_OUTPUT_MAX_BYTES,
     isHidden = () => false,
+    ignoreCase = false,
+    wholeWord = false,
   }: SearchTreeOptions = {},
 ): Promise<CodeSearchResponse> {
   if (typeof query !== 'string' || query.length < 2 || query.length > 200 || query.includes('\0')) {
@@ -1638,20 +1698,16 @@ export async function searchTree(
   }
 
   const [listed, grepResult] = await Promise.all([
-    git(cwd, [
-      'ls-files',
-      '-z',
-      '--cached',
-      '--others',
-      '--exclude-standard',
-    ]),
+    repoFileList(cwd, { isHidden }),
     limitedGit(cwd, [
       'grep',
       '-n',
       '-I',
       '--untracked',
       '--no-color',
+      ...(wholeWord ? ['-w'] : []),
       '-F',
+      ...(ignoreCase ? ['-i'] : []),
       '-e',
       query,
       '--',
@@ -1665,9 +1721,7 @@ export async function searchTree(
     }),
   ]);
   const normalizedQuery = query.toLocaleLowerCase();
-  const matchingFiles = listed.split('\0')
-    .filter(Boolean)
-    .filter((relPath) => !isHidden(relPath))
+  const matchingFiles = listed
     .filter((relPath) => relPath.toLocaleLowerCase().includes(normalizedQuery));
   const completeOutput = grepResult.truncated
     ? grepResult.output.slice(0, Math.max(0, grepResult.output.lastIndexOf('\n') + 1))
@@ -1742,7 +1796,12 @@ export async function patchText(
     to = options.work ? '' : await resolveCommit(cwd, options.to || '');
     sourceFiles = (await rangeDiff(cwd, base, to)).files;
   } else {
-    const changes = await worktreeChanges(cwd, { withContent: false });
+    // Новый summary фильтрует oldPath, поэтому его список явно определяет переименования.
+    // Без callback прежний patch сохраняет Git-настройки и прежний набор метаданных.
+    const changes = await worktreeChanges(cwd, {
+      withContent: false,
+      detectRenames: Boolean(options.isHidden),
+    });
 
     sourceFiles = options.group === 'staged' ? changes.staged : changes.files;
   }
@@ -1765,6 +1824,14 @@ export async function patchText(
     }
 
     sourceFiles = sourceFiles.filter((file) => paths.has(file.path));
+  }
+
+  const isHidden = options.isHidden;
+
+  if (isHidden) {
+    sourceFiles = sourceFiles.filter((file) => (
+      !isHidden(file.path) && (!file.oldPath || !isHidden(file.oldPath))
+    ));
   }
 
   const selected = reviewFiles(sourceFiles, options.path);
@@ -1841,6 +1908,76 @@ export async function patchText(
 }
 
 /**
+ * Ищет в последних 200 коммитах одного зафиксированного HEAD.
+ * В ответе не больше 50 строк; исходные позиции сохраняют порядок выбора диапазона.
+ */
+export async function searchCommitLog(cwd: string, value: string): Promise<CodeCommitSearchResponse> {
+  const query = typeof value === 'string' ? value.trim() : '';
+
+  if (query.length < 2 || query.length > 200 || query.includes('\0')) {
+    throw new CodeGitError('bad_query', 'Поисковый запрос должен содержать от 2 до 200 символов.', 400);
+  }
+
+  let head: string;
+
+  try {
+    head = (await git(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+      timeout: 10_000,
+    })).trim();
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 1) {
+      return { head: '', log: [] };
+    }
+
+    throw error;
+  }
+
+  const result = await limitedGit(cwd, [
+    'log',
+    '-n',
+    '200',
+    '-z',
+    '--format=%H%x00%h%x00%s%x00%cr',
+    head,
+    '--',
+  ], {
+    limit: SEARCH_OUTPUT_MAX_BYTES,
+    timeoutMs: 10_000,
+    timeoutMessage: 'Поиск по журналу занял больше 10 секунд.',
+    failureMessage: 'Не удалось прочитать журнал коммитов.',
+  });
+  const fields = result.output.split('\0');
+  const needle = query.toLocaleLowerCase();
+  const hashLookup = /^[0-9a-f]{4,64}$/iu.test(query);
+  const log: CodeCommitSearchResponse['log'] = [];
+
+  // Четыре NUL-поля и завершающий NUL образуют запись; обрезанный хвост не принимается.
+  for (let offset = 0; offset + 4 < fields.length; offset += 4) {
+    const full = fields[offset] || '';
+    const hash = fields[offset + 1] || '';
+    const subject = fields[offset + 2] || '';
+    const when = fields[offset + 3] || '';
+    const matches = subject.toLocaleLowerCase().includes(needle)
+      || (hashLookup && full.toLocaleLowerCase().startsWith(needle));
+
+    if (matches) {
+      log.push({
+        hash,
+        oid: full,
+        subject,
+        when,
+        ordinal: offset / 4,
+      });
+    }
+    if (log.length === 50) {
+      break;
+    }
+  }
+
+  return { head, log };
+}
+
+/**
  * Читает до 50 изменений одного пути и следует через rename. Формат с NUL-полями
  * отделяет subject/when от имени файла; имя каждой записи берётся из `--name-only`.
  */
@@ -1899,7 +2036,17 @@ interface BlameCommitMeta {
  * Возвращает blame рабочей копии. Метаданные родителей читаются отдельным `log`:
  * porcelain blame знает автора и subject, но не даёт базу для исторического diff.
  */
-export async function blameFile(cwd: string, relPath: string): Promise<CodeBlameResponse> {
+export async function blameFile(
+  cwd: string,
+  relPath: string,
+  {
+    refactorAware = false,
+    isHidden = () => false,
+  }: {
+    refactorAware?: boolean;
+    isHidden?: (relPath: string) => boolean;
+  } = {},
+): Promise<CodeBlameResponse> {
   if (!relPath || relPath.includes('\0') || path.isAbsolute(relPath)) {
     throw new CodeGitError('bad_path', 'Некорректный путь файла.', 400);
   }
@@ -1911,6 +2058,7 @@ export async function blameFile(cwd: string, relPath: string): Promise<CodeBlame
       '--literal-pathspecs',
       'blame',
       '--line-porcelain',
+      ...(refactorAware ? ['-w', '-C'] : []),
       '--',
       relPath,
     ]);
@@ -1932,6 +2080,7 @@ export async function blameFile(cwd: string, relPath: string): Promise<CodeBlame
     const rawHash = header[1] || '';
     let author = '';
     let subject = '';
+    let sourcePath = '';
 
     index += 1;
     while (index < sourceLines.length && !(sourceLines[index] || '').startsWith('\t')) {
@@ -1941,11 +2090,16 @@ export async function blameFile(cwd: string, relPath: string): Promise<CodeBlame
         author = metadata.slice('author '.length);
       } else if (metadata.startsWith('summary ')) {
         subject = metadata.slice('summary '.length);
+      } else if (metadata.startsWith('filename ')) {
+        sourcePath = unquotePath(metadata.slice('filename '.length));
       }
       index += 1;
     }
 
     const uncommitted = /^0+$/u.test(rawHash);
+    const validSource = sourcePath && !path.isAbsolute(sourcePath) && !sourcePath.includes('\0')
+      && !sourcePath.split('/').some((part) => !part || part === '.' || part === '..');
+    const allowedSource = validSource && !isHidden(sourcePath) ? sourcePath : null;
 
     lines.push({
       line: Number(header[2]),
@@ -1954,6 +2108,7 @@ export async function blameFile(cwd: string, relPath: string): Promise<CodeBlame
       author,
       when: '',
       subject,
+      ...(refactorAware ? { sourcePath: allowedSource } : {}),
     });
     index += 1;
 

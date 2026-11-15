@@ -26,6 +26,47 @@ Search paths above the change tree; the funnel opens status filters.
 Tree actions collapses/expands directories or reveals the open file. Filtering shows results and clear controls.
 Ctrl/Meta, Shift or row-selection buttons select multiple files and reveal an action bar with count and clear selection.
 
+## Files, quick open and appearance
+
+Open ordinary files in a strip of up to 12 tabs. Click a tab to switch and its cross to close.
+Opening a thirteenth file evicts the first tab. Lists are saved separately for each project,
+repository and working copy. Closing the last tab clears the editor; diffs keep their existing
+navigation. Opening a file expands its ancestors and scrolls its row into view. If search or
+a narrow editor hides the tree, show the navigator and clear search to reveal the row.
+
+Choose Quick open file or press Ctrl/Cmd+P in the file panel. Enter part of a path to see up
+to 50 case-insensitive matches, including available untracked files, after a short delay.
+Use arrows to select, Enter or a click to open, and Escape to close and return focus.
+Errors offer retry; no matches is a separate state. The shortcut leaves inputs and other dialogs alone.
+
+Content search above the tree starts with two characters. Ignore case and Whole word change
+content matches; path matching stays case-insensitive. Flags are saved on the device.
+Icons identify file types in the tree, search and tabs. In File view, enable Minimap or Sticky scroll
+and scroll nested code to see block headers at the top. Both options start disabled and are saved;
+they do not change comparison preferences.
+
+## Commit search, blame and summaries
+
+In Commits, enter at least two subject characters or a full-hash hex prefix of at least four.
+Search covers the latest 200 commits and shows up to 50 matches. Click selects a commit;
+Shift adds the visible interval. Clearing search, refreshing the same HEAD and transferring
+the tool window preserve the selected range, including results beyond the usual 50 entries.
+A new HEAD can remove old selections; a message asks you to search for them again.
+Include current only applies to ranges ending at HEAD.
+
+In File actions, enable blame and then Accurate blame. This ignores whitespace edits and uses
+Git's heuristic for substantial blocks moved from other files. Click an annotation to open the
+original file's change; Back restores the current file. A hidden source displays an unavailable
+message. Arbitrary rewrites are not guaranteed to be detected; accurate blame can take longer.
+
+For a nonempty staged or working group, choose AI change summary. The result is limited to
+500 characters and uses the model in Settings → Plugins → Code, without performing Git actions.
+Errors are visible and can be retried. Close the message separately from the tree; collapsing
+the group keeps the summary visible. Refreshing the Git snapshot or changing working copy clears it.
+The model receives a bounded patch of allowed paths without tools or a session. Hidden paths and
+recognized renames from them are excluded; arbitrary public copies are not traced to their origin.
+Commit groups do not have this action.
+
 ## Test another branch on the main environment
 
 1. Select the repository's main working copy and click the branch button.

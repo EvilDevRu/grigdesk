@@ -53,7 +53,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Human decisions and stops](gates.md)
 - [Route editor](routes.md)
 - [Plugins](plugins.md)
-- [Code and Git](code.md)
+- [Code and Git: file tabs, quick open, history search, accurate blame and AI summaries](code.md)
 - [Docker](docker.md)
 - [Sandboxes and test environments](sandboxes.md)
 - [Presentations and videos](showcase.md)

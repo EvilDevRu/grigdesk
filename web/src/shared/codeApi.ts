@@ -25,6 +25,9 @@ import {
   parseCodeRepos,
   parseCodeRoots,
   parseCodeSearch,
+  parseCodeDiffSummary,
+  parseCodeCommitSearch,
+  parseCodeQuickOpen,
   parseCodeStageResponse,
   parseCodeUndoCommitResponse,
 } from '../../../shared/plugins/code/codeContracts.ts';
@@ -211,16 +214,59 @@ export const codeApi = {
     return parseCodeFileLog(value);
   },
 
-  async blame(context: CodeRequestContext, path: string) {
-    const value: unknown = await api.get(actionUrl(context, 'blame', { path }));
+  /**
+   * Точный режим передаётся необязательным параметром, сохраняя прежний ответ.
+   * По умолчанию обычный blame не получает дорогую проверку переносов строк.
+   */
+  async blame(
+    context: CodeRequestContext,
+    path: string,
+    options: { refactorAware?: boolean } = {},
+  ) {
+    const value: unknown = await api.get(actionUrl(context, 'blame', {
+      path,
+      ...(options.refactorAware ? { accuracy: 'refactor' } : {}),
+    }));
 
     return parseCodeBlame(value);
   },
 
-  async search(context: CodeRequestContext, query: string) {
-    const value: unknown = await api.get(actionUrl(context, 'search', { q: query }));
+  /**
+   * Флаги меняют только поиск содержимого; сервер сохраняет прежний ответ.
+   * Необязательные параметры не влияют на старых вызывающих адаптера.
+   */
+  async search(
+    context: CodeRequestContext,
+    query: string,
+    options: { ignoreCase?: boolean; wholeWord?: boolean } = {},
+  ) {
+    const value: unknown = await api.get(actionUrl(context, 'search', {
+      q: query,
+      ...(options.ignoreCase ? { case: '0' } : {}),
+      ...(options.wholeWord ? { word: '1' } : {}),
+    }));
 
     return parseCodeSearch(value);
+  },
+
+  /**
+   * Подбор файлов ограничивает сервер; клиент не получает полный список репозитория.
+   * Ответ проходит общий декодер до записи в состояние диалога.
+   */
+  async quickOpen(context: CodeRequestContext, query: string) {
+    const value: unknown = await api.get(actionUrl(context, 'quick-open', { q: query }));
+
+    return parseCodeQuickOpen(value);
+  },
+
+  /**
+   * Получает только найденные строки и позиции одного серверного снимка.
+   * Непроверенный JSON не попадает в выбор диапазона панели.
+   */
+  async commitSearch(context: CodeRequestContext, query: string) {
+    const value: unknown = await api.get(actionUrl(context, 'commit-search', { q: query }));
+
+    return parseCodeCommitSearch(value);
   },
 
   async commitsDiff(
@@ -323,6 +369,16 @@ export const codeApi = {
     const value: unknown = await api.post(contextUrl(context, 'undo-commit'), {});
 
     return parseCodeUndoCommitResponse(value);
+  },
+
+  /**
+   * Запрашивает безопасную model-only сводку одной группы выбранной рабочей копии.
+   * POST без дополнительных query-полей использует тот же contextUrl, что commitMessage.
+   */
+  async diffSummary(context: CodeRequestContext, group: 'staged' | 'work') {
+    const value: unknown = await api.post(contextUrl(context, 'diff-summary'), { group });
+
+    return parseCodeDiffSummary(value);
   },
 
   async commitMessage(context: CodeRequestContext) {

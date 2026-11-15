@@ -364,7 +364,7 @@ const fileLogEntry = objectOf({
   path: text,
 });
 const fileLog = objectOf({ entries: listOf(fileLogEntry) });
-const blameLine = objectOf({
+const blameLineFields = objectOf({
   line: numeric,
   hash: text,
   base: text,
@@ -372,6 +372,34 @@ const blameLine = objectOf({
   when: text,
   subject: text,
 });
+
+type DecodedBlameLine = ReturnType<typeof blameLineFields> & { sourcePath?: string | null };
+
+/**
+ * Отсутствие пути означает старый сервер, null — явный запрет перехода к источнику.
+ * Пустой или выходящий из корня путь не должен открываться через файловую историю.
+ */
+function blameLine(value: unknown, path: string): DecodedBlameLine {
+  const source = record(value, path);
+  const base = blameLineFields(value, path);
+
+  if (source.sourcePath === undefined) {
+    return base;
+  }
+  if (source.sourcePath === null) {
+    return { ...base, sourcePath: null };
+  }
+
+  const rel = text(source.sourcePath, `${path}.sourcePath`);
+
+  if (!rel || rel.includes('\0') || rel.startsWith('/')
+    || rel.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw new CodeContractError(`${path}.sourcePath`);
+  }
+
+  return { ...base, sourcePath: rel };
+}
+
 const blame = objectOf({ lines: listOf(blameLine) });
 const searchFile = objectOf({ path: text });
 const searchMatch = objectOf({
@@ -379,6 +407,8 @@ const searchMatch = objectOf({
   line: numeric,
   text,
 });
+const quickOpen = objectOf({ files: listOf(text) });
+
 const search = objectOf({
   files: listOf(searchFile),
   matches: listOf(searchMatch),
@@ -423,6 +453,8 @@ export type CodeFileLogEntry = ReturnType<typeof fileLogEntry>;
 export type CodeFileLogResponse = ReturnType<typeof fileLog>;
 export type CodeBlameLine = ReturnType<typeof blameLine>;
 export type CodeBlameResponse = ReturnType<typeof blame>;
+export type CodeQuickOpenResponse = { files: string[] };
+
 export type CodeSearchResponse = ReturnType<typeof search>;
 export type CodeCommitTitleResponse = ReturnType<typeof commitTitle>;
 
@@ -526,4 +558,90 @@ export function parseCodeSearch(value: unknown): CodeSearchResponse {
 
 export function parseCodeCommitTitleResponse(value: unknown): CodeCommitTitleResponse {
   return commitTitle(value, 'commitTitle');
+}
+
+/**
+ * Проверяет форму ответа быстрого открытия до принятия в состояние клиента.
+ * Повреждённые пути отвергаются общим декодером без преобразования типов.
+ */
+export function parseCodeQuickOpen(value: unknown): CodeQuickOpenResponse {
+  return quickOpen(value, 'quickOpen');
+}
+
+const commitSearchEntry = objectOf({
+  hash: text,
+  oid: text,
+  subject: text,
+  when: text,
+  ordinal: numeric,
+});
+const commitSearchResponse = objectOf({
+  head: text,
+  log: listOf(commitSearchEntry),
+});
+
+export type CodeCommitSearchEntry = ReturnType<typeof commitSearchEntry>;
+export type CodeCommitSearchResponse = ReturnType<typeof commitSearchResponse>;
+
+/**
+ * Подтверждает один снимок истории и исходный порядок найденных коммитов.
+ * Короткий hash совместим с /git, ordinal не зависит от фильтра поисковой строки.
+ */
+function decodeCommitHistory(value: unknown, maxEntries: number): CodeCommitSearchResponse {
+  const parsed = commitSearchResponse(value, 'commitSearch');
+  const hashes = new Set<string>();
+  let previous = -1;
+
+  if ((parsed.head && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(parsed.head))
+    || (!parsed.head && parsed.log.length) || parsed.log.length > maxEntries) {
+    throw new CodeContractError('commitSearch');
+  }
+
+  for (const entry of parsed.log) {
+    if (!/^[0-9a-f]{4,64}$/u.test(entry.hash)
+      || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(entry.oid) || !entry.oid.startsWith(entry.hash)
+      || entry.ordinal < 0 || entry.ordinal > 199 || entry.ordinal <= previous
+      || hashes.has(entry.hash)) {
+      throw new CodeContractError('commitSearch.log');
+    }
+
+    previous = entry.ordinal;
+    hashes.add(entry.hash);
+  }
+
+  return parsed;
+}
+
+/**
+ * HTTP-поиск отдаёт не более 50 найденных строк одного снимка.
+ * Поля и позиции проверяет тот же декодер, что и перенос выбора между окнами.
+ */
+export function parseCodeCommitSearch(value: unknown): CodeCommitSearchResponse {
+  return decodeCommitHistory(value, 50);
+}
+
+/**
+ * Перенос сохраняет выбранные записи полного окна из 200 коммитов, а не выдачу одного запроса.
+ * Старые ordinals пригодны только после отдельной проверки контекста и HEAD получателем.
+ */
+export function parseCodeCommitSelectionHistory(value: unknown): CodeCommitSearchResponse {
+  return decodeCommitHistory(value, 200);
+}
+
+const diffSummary = objectOf({ ok: success, summary: text });
+
+export type CodeDiffSummaryResponse = { ok: true; summary: string };
+
+/**
+ * Проверяет успешный DTO сводки до записи результата в состояние панели.
+ * Пробельная строка и ответ сверх потолка не становятся успешным сообщением.
+ */
+export function parseCodeDiffSummary(value: unknown): CodeDiffSummaryResponse {
+  const parsed = diffSummary(value, 'diffSummary');
+
+  if (!parsed.summary.trim() || parsed.summary.length > 500) {
+    throw new CodeContractError('diffSummary.summary');
+  }
+
+  return parsed;
 }

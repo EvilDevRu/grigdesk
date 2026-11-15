@@ -194,6 +194,354 @@ function query(url) {
 }
 
 /**
+ * Изолирует файловые ответы от транспорта и оставляет настоящий codeApi в панели.
+ * Управляемые handlers удерживают ответ после журналирования для проверки гонок.
+ */
+function makeFilesApi({ getHandlers = {}, postHandlers = {}, diffSummaryError = false } = {}) {
+  const names = [
+    'a.ts', 'b.ts', 'f01', 'f02', 'f03', 'f04', 'f05', 'f06', 'f07',
+    'f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'package.json', 'Makefile',
+    'src/app.ts', 'src/web/main.ts', 'src/web/app.ts',
+  ];
+  const files = new Map(names.map((name) => [name, `// ${name}\nNeedle again\n`]));
+
+  files.set('package.json', '{"name":"fixture"}\n');
+  files.set('Makefile', 'all:\n\ttrue\n');
+
+  const filesByRoot = new Map([
+    ['/demo', files],
+    ['/demo-task', new Map(files)],
+    ['/other', new Map(files)],
+  ]);
+  const history = Array.from({ length: 100 }, (_, ordinal) => {
+    const hash = (100 - ordinal).toString(16).padStart(7, '0');
+
+    return {
+      hash,
+      full: hash + '0'.repeat(33),
+      subject: ordinal === 3 ? 'deploy fixtures' : `fixture change ${ordinal}`,
+      when: 'сейчас',
+      ordinal,
+    };
+  });
+  const head = history[0].full;
+  const urls = [];
+  const posts = [];
+
+  /**
+   * Разбирает реальный URL адаптера, включая закодированные path и root.
+   * Полный контекст доступен handler-у, чтобы он отличал две копии проекта.
+   */
+  function requestOf(url, body) {
+    const parsed = new URL(url, 'http://grigdesk.test');
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const params = parsed.searchParams;
+    const action = parts[1] === 'projects' ? 'projects' : parts.at(-1);
+    const project = parts.length === 4 ? decodeURIComponent(parts[2]) : 'demo';
+    const repoKey = params.get('repo') || 'demo';
+    const treePath = params.get('root') || (repoKey === 'other' ? '/other' : '/demo');
+
+    return {
+      url,
+      params,
+      action,
+      body,
+      context: {
+        project,
+        repoKey,
+        treePath,
+      },
+    };
+  }
+
+  /**
+   * Строит только непосредственных потомков запрошенного ленивого каталога.
+   * Наличие глубокого файла не раскрывает его родителей автоматически.
+   */
+  function directoryEntries(source, directory) {
+    const prefix = directory ? `${directory}/` : '';
+    const entries = new Map();
+
+    for (const filePath of source.keys()) {
+      if (!filePath.startsWith(prefix)) {
+        continue;
+      }
+
+      const tail = filePath.slice(prefix.length);
+      const [name] = tail.split('/');
+
+      if (name) {
+        entries.set(name, { name, dir: tail.includes('/') });
+      }
+    }
+
+    return [...entries.values()].sort((left, right) => (
+      Number(right.dir) - Number(left.dir) || left.name.localeCompare(right.name)
+    ));
+  }
+
+  /**
+   * Отдаёт полные DTO для существующих и новых read-only маршрутов.
+   * Неизвестный маршрут бросает ошибку, чтобы отсутствующая фикстура не стала пустым успехом.
+   */
+  function defaultGet({ action, params, context }) {
+    if (action === 'projects') {
+      return { projects: [projectFixture('demo', ['/demo', '/other'])] };
+    }
+    if (action === 'repos') {
+      return { repos: [
+        {
+          key: 'demo',
+          dir: '/demo',
+          trees: [mainTree('/demo'), worktree('/demo-task', 'задача', 'task-fixture')],
+        },
+        {
+          key: 'other',
+          dir: '/other',
+          trees: [mainTree('/other')],
+        },
+      ] };
+    }
+    if (action === 'roots') {
+      return { roots: [
+        {
+          project: 'demo',
+          repo: 'demo',
+          root: '/demo',
+          main: true,
+          branch: 'main',
+        },
+        {
+          project: 'demo',
+          repo: 'demo',
+          root: '/demo-task',
+          main: false,
+          branch: 'task-fixture',
+        },
+        {
+          project: 'demo',
+          repo: 'other',
+          root: '/other',
+          main: true,
+          branch: 'main',
+        },
+      ] };
+    }
+
+    const source = filesByRoot.get(context.treePath);
+
+    if (!source) {
+      throw new Error(`unexpected fixture root: ${context.treePath}`);
+    }
+    if (action === 'ls') {
+      return { entries: directoryEntries(source, params.get('dir') || '') };
+    }
+    if (action === 'file') {
+      const filePath = params.get('path');
+
+      if (!source.has(filePath)) {
+        throw Object.assign(new Error('Файл не найден.'), {
+          status: 404,
+          data: { error: 'no_file', message: 'Файл не найден.' },
+        });
+      }
+
+      const content = source.get(filePath);
+
+      return {
+        size: Buffer.byteLength(content),
+        binary: false,
+        tooBig: false,
+        content,
+      };
+    }
+    if (action === 'git') {
+      return {
+        branch: context.treePath === '/demo-task' ? 'task-fixture' : 'main',
+        stat: '',
+        files: [{
+          path: 'b.ts',
+          status: 'M',
+          add: 1,
+          del: 0,
+          binary: false,
+        }],
+        staged: [{
+          path: 'a.ts',
+          status: 'M',
+          add: 1,
+          del: 0,
+          binary: false,
+        }],
+        tracking: {
+          detached: false,
+          upstream: '',
+          ahead: 0,
+          behind: 0,
+        },
+        headMessage: history[0].subject,
+        log: history.slice(0, 50).map(({ hash, subject, when }) => ({
+          hash,
+          subject,
+          when,
+        })),
+      };
+    }
+    if (action === 'quick-open') {
+      const needle = (params.get('q') || '').trim().toLowerCase();
+
+      return { files: [...source.keys()].sort().filter((name) => (
+        name.toLowerCase().includes(needle)
+      )).slice(0, 50) };
+    }
+    if (action === 'search') {
+      // Семантика git grep проверяется серверными тестами; здесь наблюдаем URL флагов.
+      return {
+        files: [],
+        matches: [],
+        truncated: false,
+      };
+    }
+    if (action === 'blame') {
+      const accurate = params.get('accuracy') === 'refactor';
+
+      return { lines: [{
+        line: 1,
+        hash: (accurate ? 'a' : 'b').repeat(40),
+        base: 'c'.repeat(40),
+        author: accurate ? 'Автор кода' : 'Форматировщик',
+        when: 'сейчас',
+        subject: accurate ? 'содержательная правка' : 'форматирование',
+      }] };
+    }
+    if (action === 'commit-search') {
+      const needle = (params.get('q') || '').trim().toLowerCase();
+      const hashQuery = /^[0-9a-f]{4,64}$/u.test(needle);
+
+      return { head, log: history.filter((entry) => (
+        entry.subject.toLowerCase().includes(needle)
+          || (hashQuery && entry.full.startsWith(needle))
+      )).slice(0, 50).map(({ hash, full, subject, when, ordinal }) => ({
+        hash,
+        oid: full,
+        subject,
+        when,
+        ordinal,
+      })) };
+    }
+    if (action === 'commits-diff') {
+      const from = history.find((entry) => entry.full.startsWith(params.get('from') || '!'));
+      const to = history.find((entry) => entry.full.startsWith(params.get('to') || '!'));
+
+      if (!from || !to) {
+        throw new Error('commits-diff: неизвестный hash фикстуры');
+      }
+
+      return {
+        branch: 'main',
+        stat: '',
+        files: [{
+          path: 'a.ts',
+          status: 'M',
+          add: 1,
+          del: 0,
+          binary: false,
+        }],
+        range: {
+          from: from.full,
+          to: to.full,
+          base: 'f'.repeat(40),
+          commits: Math.abs(from.ordinal - to.ordinal) + 1,
+          work: params.get('work') === '1',
+        },
+      };
+    }
+    if (action === 'file-diff') {
+      return {
+        path: params.get('path') || 'a.ts',
+        status: 'M',
+        binary: false,
+        tooBig: false,
+        oldContent: 'base\n',
+        newContent: source.get(params.get('path')) || 'changed\n',
+      };
+    }
+
+    throw new Error(`unexpected GET action: ${action}`);
+  }
+
+  /**
+   * Модельный POST возвращает DTO либо ошибку с формой ApiError реального клиента.
+   * Отказ нельзя вернуть успешным JSON: codeErrorMessage читает error.data.message.
+   */
+  function defaultPost({ action, body }) {
+    if (action !== 'diff-summary') {
+      throw new Error(`unexpected POST action: ${action}`);
+    }
+    if (diffSummaryError) {
+      const message = 'Модель вернула ответ не в ожидаемом формате. Повтори сводку.';
+
+      throw Object.assign(new Error(message), {
+        status: 502,
+        data: { error: 'bad_model_reply', message },
+      });
+    }
+    if (body?.group !== 'staged' && body?.group !== 'work') {
+      throw new Error('unexpected summary group');
+    }
+
+    return { ok: true, summary: 'GrigDesk: правки про X' };
+  }
+
+  const api = {
+    /**
+     * Журналирует GET до управляемого ответа, сохраняя настоящий HTTP-адаптер.
+     * Неподменённые маршруты получают полный DTO из общей фикстуры.
+     */
+    async get(url) {
+      urls.push(url);
+
+      const request = requestOf(url);
+      const handler = getHandlers[request.action];
+
+      return handler ? handler(request, () => defaultGet(request)) : defaultGet(request);
+    },
+    /**
+     * Фиксирует POST до ожидания, чтобы тест мог обнаружить повторный запуск.
+     * Ответ или отказ принадлежат выбранному handler-у текущего сценария.
+     */
+    async post(url, body) {
+      posts.push({ url, body });
+
+      const request = requestOf(url, body);
+      const handler = postHandlers[request.action];
+
+      return handler ? handler(request, () => defaultPost(request)) : defaultPost(request);
+    },
+  };
+
+  return {
+    api,
+    urls,
+    posts,
+    files,
+    filesByRoot,
+    history,
+    head,
+  };
+}
+
+/**
+ * Ждёт реальный debounce панели; flushPromises сам таймер не продвигает.
+ * Для порядка ответов используются deferred, без случайной задержки транспорта.
+ */
+function waitDebounce() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 340);
+  });
+}
+
+/**
  * Бандл удерживает только переиспользуемый слот, а не порты завершённого сценария.
  * Методы читаются и привязываются к порту текущего mount при каждом обращении.
  */
@@ -7011,3 +7359,1259 @@ for (const view of ['tree', 'list']) {
       && !entry.url.includes('/review-fingerprints?')), false);
   });
 }
+
+test('CODE-FLAGS: текущая строка повторяется с флагами и сохраняет выбор', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-action="code-search"]').setValue('Needle');
+  await waitDebounce();
+  await settle(h.flushPromises);
+
+  const initial = fixture.urls.filter((url) => url.includes('/search?')).at(-1);
+
+  assert.equal(query(initial).get('q'), 'Needle');
+  assert.equal(query(initial).has('case'), false);
+  assert.equal(h.wrapper.find('input[data-action="search-case"]').exists(), true);
+
+  await h.wrapper.get('input[data-action="search-case"]').setValue(true);
+  await waitDebounce();
+  await settle(h.flushPromises);
+
+  const insensitive = fixture.urls.filter((url) => url.includes('/search?')).at(-1);
+
+  assert.equal(query(insensitive).get('case'), '0');
+  assert.equal(query(insensitive).get('q'), 'Needle');
+  await h.wrapper.get('input[data-action="search-word"]').setValue(true);
+  await waitDebounce();
+  await settle(h.flushPromises);
+
+  const whole = fixture.urls.filter((url) => url.includes('/search?')).at(-1);
+
+  assert.equal(query(whole).get('word'), '1');
+  assert.deepEqual(
+    JSON.parse(h.browser.localStorage.getItem('grigdesk-code-search-flags')),
+    { case: false, word: true },
+  );
+});
+
+test('CODE-QUICK: хоткей, две строки, стрелки и Enter открывают выбранный файл', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('.code-panel').trigger('keydown', { ctrlKey: true, key: 'p' });
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+
+  const input = body.get('[data-action="quick-open-query"]');
+
+  assert.equal(h.browser.document.activeElement === input.element, true);
+  await input.setValue('app.ts');
+  await waitDebounce();
+  await settle(h.flushPromises);
+
+  const items = body.findAll('[data-action="quick-open-item"]');
+
+  assert.equal(items.length, 2);
+  assert.equal(items[0].attributes('aria-pressed'), 'true');
+  await input.trigger('keydown', { key: 'ArrowDown' });
+  assert.equal(items[1].attributes('aria-pressed'), 'true');
+  await input.trigger('keydown', { key: 'ArrowUp' });
+  assert.equal(items[0].attributes('aria-pressed'), 'true');
+  await input.trigger('keydown', { key: 'ArrowDown' });
+  await input.trigger('keydown', { key: 'Enter' });
+  await settle(h.flushPromises);
+
+  const latest = fixture.urls.filter((url) => url.includes('/file?')).at(-1);
+
+  assert.equal(query(latest).get('path'), 'src/web/app.ts');
+  assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('src/web/app.ts'));
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), false);
+});
+
+test('CODE-QUICK: Escape возвращает фокус; запуск остаётся в узкой и скрытой панели', async (t) => {
+  const sizes = installResizeObserver(t);
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  assert.equal(h.wrapper.find('[data-action="quick-open-launch"]').exists(), true);
+  await h.wrapper.get('.navigator-toggle').trigger('click');
+
+  const trigger = h.wrapper.get('[data-action="quick-open-launch"]');
+
+  trigger.element.focus();
+  await trigger.trigger('click');
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Escape' });
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), false);
+  assert.equal(h.browser.document.activeElement === trigger.element, true);
+
+  sizes.resize(h.wrapper.get('.lay').element, 420, 600);
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('[data-action="quick-open-launch"]').isVisible(), true);
+  await trigger.trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+});
+
+test('CODE-QUICK: очистка, повторное открытие и смена строки отсекают поздний ответ', async (t) => {
+  const held = deferred();
+  const fixture = makeFilesApi({
+    getHandlers: { 'quick-open': ({ params }, fallback) => (
+      params.get('q') === 'old' ? held.promise : fallback()
+    ) },
+  });
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('.code-panel').trigger('keydown', { ctrlKey: true, key: 'p' });
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+  await body.get('[data-action="quick-open-query"]').setValue('old');
+  await waitDebounce();
+  await body.get('[data-action="quick-open-query"]').setValue('');
+  held.resolve({ files: ['a.ts'] });
+  await settle(h.flushPromises);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 0);
+
+  await body.get('[data-action="quick-open-query"]').setValue('app.ts');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 2);
+  await body.get('[data-action="quick-open-query"]').setValue('main.ts');
+  await settle(h.flushPromises);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 0);
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 1);
+  assert.match(body.get('[data-action="quick-open-item"]').text(), /src\/web\/main\.ts/u);
+});
+
+test('CODE-QUICK: закрытый запрос не заполняет новый диалог и не отдаёт чужую ошибку', async (t) => {
+  const held = deferred();
+  const fixture = makeFilesApi({ getHandlers: { 'quick-open': () => held.promise } });
+  const h = await mountCodeView(t, { api: fixture.api });
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await h.wrapper.get('.code-panel').trigger('keydown', { ctrlKey: true, key: 'p' });
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+  await body.get('[data-action="quick-open-query"]').setValue('old');
+  await waitDebounce();
+  await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Escape' });
+  await settle(h.flushPromises);
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-action="quick-open-launch"]').trigger('click');
+  await settle(h.flushPromises);
+  held.reject({ data: { message: 'Ошибка прежней копии' } });
+  await settle(h.flushPromises);
+
+  assert.equal(body.get('[data-action="quick-open-query"]').element.value, '');
+  assert.equal(body.find('[data-action="quick-open-error"]').exists(), false);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 0);
+});
+
+test('CODE-QUICK: размонтирование до debounce не отправляет запрос', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await h.wrapper.get('.code-panel').trigger('keydown', { ctrlKey: true, key: 'p' });
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+  await body.get('[data-action="quick-open-query"]').setValue('app');
+  h.wrapper.unmount();
+  await waitDebounce();
+  assert.equal(fixture.urls.filter((url) => url.includes('/quick-open?')).length, 0);
+});
+
+test('CODE-QUICK: loading, ошибка, повтор и пустота различимы', async (t) => {
+  const held = deferred();
+  let attempts = 0;
+  const fixture = makeFilesApi({
+    getHandlers: {
+      'quick-open': ({ params }, fallback) => {
+        if (params.get('q') === 'a.ts') {
+          attempts += 1;
+
+          return attempts === 1 ? held.promise : { files: ['a.ts'] };
+        }
+
+        return fallback();
+      },
+    },
+  });
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('.code-panel').trigger('keydown', { ctrlKey: true, key: 'p' });
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  assert.equal(body.find('[data-action="quick-open-query"]').exists(), true);
+  await body.get('[data-action="quick-open-query"]').setValue('a.ts');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-loading"]').exists(), true);
+  held.reject({ data: { message: 'Сеть недоступна' } });
+  await settle(h.flushPromises);
+  assert.match(body.get('[data-action="quick-open-error"]').text(), /Сеть недоступна/u);
+  assert.equal(body.find('[data-action="quick-open-empty"]').exists(), false);
+  await body.get('[data-action="quick-open-retry"]').trigger('click');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(body.findAll('[data-action="quick-open-item"]').length, 1);
+  assert.equal(body.find('[data-action="quick-open-error"]').exists(), false);
+  await body.get('[data-action="quick-open-query"]').setValue('zz-nothing');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="quick-open-empty"]').exists(), true);
+});
+
+/**
+ * DOM-среда не выполняет layout: задаём строки по 28 px и окно высотой 140 px.
+ * Настоящий VirtualRows продолжает сам менять окно; проверяется конечная видимость.
+ */
+function installCodeTreeGeometry(t, browser, order) {
+  const prototype = browser.HTMLElement.prototype;
+  const originalRect = prototype.getBoundingClientRect;
+  const originalScroll = prototype.scrollIntoView;
+  const height = 140;
+  const rowHeight = 28;
+
+  function box(top, size) {
+    return {
+      x: 0,
+      y: top,
+      top,
+      bottom: top + size,
+      left: 0,
+      right: 320,
+      width: 320,
+      height: size,
+    };
+  }
+
+  /**
+   * Положение берётся из заранее известного порядка fixture, включая невидимые строки.
+   * Распорки читаются из DOM, чтобы не имитировать внутреннее окно VirtualRows.
+   */
+  function rectangle() {
+    const tree = this.closest('.file-tree');
+
+    if (!tree) {
+      return originalRect.call(this);
+    }
+    if (this === tree) {
+      return box(100, height);
+    }
+
+    const path = this.getAttribute('data-file-path') || this.getAttribute('data-dir-path');
+    const index = order.indexOf(path);
+
+    if (index >= 0) {
+      return box(100 + index * rowHeight - tree.scrollTop, rowHeight);
+    }
+    if (this.hasAttribute('data-virtual-gap')) {
+      const before = tree.querySelector('[data-virtual-gap="before"]');
+      const rendered = tree.querySelectorAll('[data-context="code-tree-row"]').length;
+      const offset = this.getAttribute('data-virtual-gap') === 'before'
+        ? 0 : Number.parseFloat(before?.style.height || '0') + rendered * rowHeight;
+
+      return box(100 + offset - tree.scrollTop, Number.parseFloat(this.style.height || '0'));
+    }
+
+    return originalRect.call(this);
+  }
+
+  /**
+   * Эмуляция браузерного nearest меняет реальный scrollTop контейнера.
+   * Финальный assertion сравнивает прямоугольники строки и видимого окна.
+   */
+  function scrollNearest() {
+    const tree = this.closest('.file-tree');
+    const path = this.getAttribute('data-file-path') || this.getAttribute('data-dir-path');
+    const index = order.indexOf(path);
+
+    if (!tree || index < 0) {
+      return;
+    }
+
+    const top = index * rowHeight;
+
+    if (top < tree.scrollTop) {
+      tree.scrollTop = top;
+    } else if (top + rowHeight > tree.scrollTop + height) {
+      tree.scrollTop = top + rowHeight - height;
+    }
+
+    tree.dispatchEvent(new browser.Event('scroll'));
+  }
+
+  prototype.getBoundingClientRect = rectangle;
+  prototype.scrollIntoView = scrollNearest;
+  t.after(() => {
+    prototype.getBoundingClientRect = originalRect;
+    prototype.scrollIntoView = originalScroll;
+  });
+}
+
+test('CODE-REVEAL: корневой виртуальный и вложенный обычный файл попадают в окно', async (t) => {
+  for (const nested of [false, true]) {
+    await t.test(nested ? '100 вложенных строк' : '300 корневых строк', async (subtest) => {
+      const fixture = makeFilesApi();
+      const count = nested ? 100 : 300;
+      const paths = Array.from({ length: count }, (_, index) => (
+        `${nested ? 'src/' : ''}f${String(index).padStart(3, '0')}.ts`
+      ));
+
+      fixture.files.clear();
+
+      for (const path of paths) {
+        fixture.files.set(path, `content ${path}`);
+      }
+
+      const h = await mountCodeView(subtest, { api: fixture.api });
+      const order = nested ? ['src', ...paths] : paths;
+
+      installCodeTreeGeometry(subtest, h.browser, order);
+      await h.wrapper.get('[data-action="quick-open-launch"]').trigger('click');
+      await settle(h.flushPromises);
+
+      const body = new CodeViewDomWrapper(h.browser.document.body);
+      const target = paths.at(-1);
+
+      await body.get('[data-action="quick-open-query"]').setValue(target);
+      await waitDebounce();
+      await settle(h.flushPromises);
+      await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Enter' });
+      await settle(h.flushPromises);
+
+      const row = h.wrapper.find(`[data-file-path="${target}"]`);
+
+      assert.equal(row.exists(), true, 'выбранная строка должна появиться в DOM');
+
+      const viewport = h.wrapper.get('.file-tree').element.getBoundingClientRect();
+      const rectangle = row.element.getBoundingClientRect();
+
+      assert.ok(rectangle.top >= viewport.top, 'строка не должна остаться выше окна');
+      assert.ok(rectangle.bottom <= viewport.bottom, 'строка не должна остаться ниже окна');
+      assert.equal(row.attributes('aria-pressed'), 'true');
+    });
+  }
+});
+
+test('CODE-REVEAL: поздний каталог не раскрывает другую копию', async (t) => {
+  const held = deferred();
+  const fixture = makeFilesApi({
+    getHandlers: {
+      ls: ({ params, context }, fallback) => (
+        context.treePath === '/demo' && params.get('dir') === 'src' ? held.promise : fallback()
+      ),
+    },
+  });
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-action="quick-open-launch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await body.get('[data-action="quick-open-query"]').setValue('src/web/app');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Enter' });
+  await settle(h.flushPromises);
+  assert.equal(fixture.urls.some((url) => url.includes('/ls?')
+    && query(url).get('dir') === 'src'), true);
+
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+  await settle(h.flushPromises);
+  held.resolve({ entries: [{ name: 'web', dir: true }] });
+  await settle(h.flushPromises);
+
+  assert.equal(h.wrapper.get('[data-dir-path="src"]').attributes('aria-expanded'), 'false');
+  assert.equal(h.wrapper.find('[data-dir-path="src/web"]').exists(), false);
+});
+
+test('CODE-REVEAL: скрытое дерево ждёт, поиск и узкий редактор сохраняются', async (t) => {
+  const sizes = installResizeObserver(t);
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  sizes.resize(h.wrapper.get('.lay').element, 420, 600);
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-action="code-search"]').setValue('kept-query');
+  await h.wrapper.get('[data-action="quick-open-launch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await body.get('[data-action="quick-open-query"]').setValue('src/web/app');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Enter' });
+  await settle(h.flushPromises);
+
+  assert.equal(h.wrapper.get('.lay').classes().includes('narrow-editor'), true);
+  assert.equal(h.wrapper.get('[data-action="code-search"]').element.value, 'kept-query');
+  await h.wrapper.get('[data-action="back-to-navigator"]').trigger('click');
+  await h.wrapper.get('[data-action="code-search"]').setValue('');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.find('[data-file-path="src/web/app.ts"]').exists(), true);
+});
+
+test('CODE-REVEAL: новый файл в той же копии отменяет незавершённое раскрытие', async (t) => {
+  const held = deferred();
+  const fixture = makeFilesApi({
+    getHandlers: {
+      ls: ({ params }, fallback) => params.get('dir') === 'src' ? held.promise : fallback(),
+    },
+  });
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-action="quick-open-launch"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await body.get('[data-action="quick-open-query"]').setValue('src/web/app');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await body.get('[data-action="quick-open-query"]').trigger('keydown', { key: 'Enter' });
+  await settle(h.flushPromises);
+  assert.equal(fixture.urls.some((url) => url.includes('/ls?')
+    && query(url).get('dir') === 'src'), true);
+  await h.wrapper.get('[data-file-path="b.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  held.resolve({ entries: [{ name: 'web', dir: true }] });
+  await settle(h.flushPromises);
+
+  assert.equal(h.wrapper.get('[data-dir-path="src"]').attributes('aria-expanded'), 'false');
+  assert.equal(h.wrapper.get('[data-file-path="b.ts"]').attributes('aria-pressed'), 'true');
+  assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('b.ts'));
+});
+
+test('CODE-TABS: активная модель, стабильный порядок и закрытие последней', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-file-path="b.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 2);
+  await h.wrapper.get('[data-action="file-tab"][data-file="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const lastRead = fixture.urls.filter((url) => url.includes('/file?')).at(-1);
+
+  assert.equal(query(lastRead).get('path'), 'a.ts');
+  assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('a.ts'));
+  assert.equal(h.wrapper.get('[data-action="file-tab"][data-file="a.ts"]')
+    .attributes('aria-pressed'), 'true');
+  assert.deepEqual(h.wrapper.findAll('[data-action="file-tab"]')
+    .map((item) => item.attributes('data-file')), ['a.ts', 'b.ts']);
+  globalThis.__codeViewSse('chat-done');
+  await settle(h.flushPromises);
+  assert.deepEqual(h.wrapper.findAll('[data-action="file-tab"]')
+    .map((item) => item.attributes('data-file')), ['a.ts', 'b.ts']);
+  assert.equal(h.wrapper.find('[data-action="file-tab"] button').exists(), false);
+
+  await h.wrapper.get('[data-action="close-tab"][data-file="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('b.ts'));
+  await h.wrapper.get('[data-action="close-tab"][data-file="b.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 0);
+  assert.equal(h.monacoState.fileEditors.at(-1).model === null, true);
+  assert.equal(h.wrapper.find('[data-file-path][aria-pressed="true"]').exists(), false);
+});
+
+test('CODE-TABS: копии и репозитории изолированы, возврат и remount восстанавливают список', async (t) => {
+  const fixture = makeFilesApi();
+
+  fixture.filesByRoot.get('/demo-task').set('a.ts', 'task content');
+  fixture.filesByRoot.get('/other').set('a.ts', 'other content');
+
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 1);
+
+  for (const [repo, root, content] of [
+    ['demo', '/demo-task', 'task content'],
+    ['other', '/other', 'other content'],
+  ]) {
+    await h.wrapper.get('#code-context-native').setValue(JSON.stringify([repo, root]));
+    await settle(h.flushPromises);
+    assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 0);
+    await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+    await settle(h.flushPromises);
+    assert.equal(h.monacoState.fileEditors.at(-1).model.content, content);
+  }
+
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo']));
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 1);
+  await h.wrapper.get('[data-action="file-tab"][data-file="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('a.ts'));
+
+  const storage = {};
+
+  for (let index = 0; index < h.browser.localStorage.length; index += 1) {
+    const key = h.browser.localStorage.key(index);
+
+    storage[key] = h.browser.localStorage.getItem(key);
+  }
+
+  h.wrapper.unmount();
+
+  const next = await mountCodeView(t, { api: fixture.api, storage });
+
+  assert.equal(next.wrapper.findAll('[data-action="file-tab"]').length, 1);
+  assert.equal(next.wrapper.get('[data-action="file-tab"]').attributes('data-file'), 'a.ts');
+});
+
+test('CODE-TABS: капа и повреждённые сохранённые пути не создают чужие вкладки', async (t) => {
+  const fixture = makeFilesApi();
+  const key = 'grigdesk-code-open-files:v1:' + encodeURIComponent('["demo","demo","/demo"]');
+  const h = await mountCodeView(t, {
+    api: fixture.api,
+    storage: { [key]: JSON.stringify(['a.ts', '../outside.ts']) },
+  });
+
+  assert.equal(h.wrapper.findAll('[data-action="file-tab"]').length, 0);
+
+  for (let index = 1; index <= 13; index += 1) {
+    const name = `f${String(index).padStart(2, '0')}`;
+
+    await h.wrapper.get(`[data-file-path="${name}"]`).trigger('click');
+    await settle(h.flushPromises);
+  }
+
+  const tabs = h.wrapper.findAll('[data-action="file-tab"]');
+
+  assert.equal(tabs.length, 12);
+  assert.equal(tabs[0].attributes('data-file'), 'f02');
+  assert.equal(tabs.at(-1).attributes('data-file'), 'f13');
+  assert.equal(JSON.parse(h.browser.localStorage.getItem(key)).length, 12);
+});
+
+test('CODE-FILE-VIEW: оба переключателя меняют редактор и переживают remount', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.find('[data-action="file-view"]').exists(), true);
+  await h.wrapper.get('[data-action="file-view"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const body = new CodeViewDomWrapper(h.browser.document.body);
+
+  await body.get('input[data-action="toggle-minimap"]').setValue(true);
+  await body.get('input[data-action="toggle-sticky"]').setValue(true);
+  await settle(h.flushPromises);
+
+  const editor = h.monacoState.fileEditors.at(-1);
+
+  assert.equal(editor.options.minimap.enabled, true);
+  assert.equal(editor.options.stickyScroll.enabled, true);
+  assert.equal(h.browser.localStorage.getItem('grigdesk-code-minimap'), '1');
+  assert.equal(h.browser.localStorage.getItem('grigdesk-code-sticky-scroll'), '1');
+  assert.equal(editor.optionCalls.some((options) => options.minimap?.enabled === true), true);
+  assert.equal(editor.optionCalls.some((options) => options.stickyScroll?.enabled === true), true);
+
+  h.wrapper.unmount();
+
+  const next = await mountCodeView(t, {
+    api: fixture.api,
+    storage: { 'grigdesk-code-minimap': '1', 'grigdesk-code-sticky-scroll': '1' },
+  });
+
+  await next.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+  await settle(next.flushPromises);
+  assert.equal(next.monacoState.fileEditors.at(-1).options.minimap.enabled, true);
+  assert.equal(next.monacoState.fileEditors.at(-1).options.stickyScroll.enabled, true);
+});
+
+test('CODE-GLYPHS: тип виден в дереве, вкладке и обоих результатах поиска', async (t) => {
+  const fixture = makeFilesApi({
+    getHandlers: {
+      search: () => ({
+        files: [{ path: 'package.json' }],
+        matches: [{
+          path: 'Makefile',
+          line: 1,
+          text: 'all:',
+        }],
+        truncated: false,
+      }),
+    },
+  });
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  assert.equal(h.wrapper.get('[data-file-path="package.json"]')
+    .find('.codicon-json[aria-hidden="true"]').exists(), true);
+  assert.equal(h.wrapper.get('[data-file-path="Makefile"]')
+    .find('.codicon-file[aria-hidden="true"]').exists(), true);
+  await h.wrapper.get('[data-file-path="package.json"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('[data-action="file-tab"]')
+    .find('.codicon-json[aria-hidden="true"]').exists(), true);
+
+  await h.wrapper.get('[data-action="code-search"]').setValue('all');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('[data-search-kind="file"]')
+    .find('.codicon-json[aria-hidden="true"]').exists(), true);
+  assert.equal(h.wrapper.get('[data-search-kind="match"]')
+    .find('.codicon-file[aria-hidden="true"]').exists(), true);
+});
+
+test('CODE-BLAME-ACCURACY: новый запрос, сохранение и выключение точного режима', async (t) => {
+  const fixture = makeFilesApi();
+  const h = await mountCodeView(t, { api: fixture.api });
+
+  await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const panel = await openFileActions(h.wrapper, h.browser, h.flushPromises);
+  const body = new CodeViewDomWrapper(panel);
+
+  await body.get('[data-action="blame"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(body.find('[data-action="blame-accuracy"]').exists(), true);
+
+  const before = fixture.urls.filter((url) => url.includes('/blame?')).length;
+
+  await body.get('[data-action="blame-accuracy"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const urls = fixture.urls.filter((url) => url.includes('/blame?'));
+
+  assert.equal(urls.length, before + 1);
+  assert.equal(query(urls.at(-1)).get('accuracy'), 'refactor');
+  assert.equal(h.browser.localStorage.getItem('grigdesk-code-blame-accuracy'), '1');
+  assert.equal(body.get('[data-action="blame-accuracy"]').attributes('aria-pressed'), 'true');
+
+  await body.get('[data-action="blame-accuracy"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const last = fixture.urls.filter((url) => url.includes('/blame?')).at(-1);
+
+  assert.equal(query(last).has('accuracy'), false);
+  assert.equal(h.browser.localStorage.getItem('grigdesk-code-blame-accuracy'), '0');
+});
+
+test('CODE-BLAME-ORIGIN-UI: перенос открывает источник, null не допускает fallback', async (t) => {
+  for (const sourcePath of ['source "quoted".js', null]) {
+    await t.test(sourcePath === null ? 'недоступный источник' : 'доступный источник', async (subtest) => {
+      const fixture = makeFilesApi({
+        getHandlers: {
+          blame: () => ({ lines: [{
+            line: 1,
+            hash: 'a'.repeat(40),
+            base: 'b'.repeat(40),
+            author: 'Автор источника',
+            when: 'сейчас',
+            subject: 'Исходная правка',
+            sourcePath,
+          }] }),
+          'file-diff': ({ params }) => ({
+            path: params.get('path'),
+            status: 'A',
+            binary: false,
+            tooBig: false,
+            oldContent: '',
+            newContent: 'SOURCE_BLOCK\n',
+          }),
+        },
+      });
+      const h = await mountCodeView(subtest, { api: fixture.api });
+
+      await h.wrapper.get('[data-file-path="a.ts"]').trigger('click');
+      await settle(h.flushPromises);
+
+      const panel = await openFileActions(h.wrapper, h.browser, h.flushPromises);
+
+      new CodeViewDomWrapper(panel).get('[data-action="blame"]').element.click();
+      await settle(h.flushPromises);
+
+      const before = fixture.urls.filter((url) => url.includes('/file-diff?')).length;
+
+      h.monacoState.fileEditors.at(-1).mouseDown({ target: {
+        element: { closest: () => ({}) },
+        position: { lineNumber: 1, column: 1 },
+      } });
+      await settle(h.flushPromises);
+
+      if (sourcePath === null) {
+        assert.equal(fixture.urls.filter((url) => url.includes('/file-diff?')).length, before);
+        assert.match(h.wrapper.text(), /Исходный файл недоступен для просмотра/u);
+        assert.equal(h.wrapper.find('[data-action="close-file-history"]').exists(), false);
+      } else {
+        const last = query(fixture.urls.filter((url) => url.includes('/file-diff?')).at(-1));
+
+        assert.equal(last.get('path'), sourcePath);
+        assert.equal(last.get('to'), 'a'.repeat(40));
+        assert.equal(diffView(h.monacoState).modified.content, 'SOURCE_BLOCK\n');
+        await h.wrapper.get('[data-action="close-file-history"]').trigger('click');
+        await settle(h.flushPromises);
+        assert.equal(h.monacoState.fileEditors.at(-1).model.content, fixture.files.get('a.ts'));
+      }
+    });
+  }
+});
+
+/**
+ * Управляет историей из 90 записей и настоящими запросами диапазона адаптера.
+ * Первые 50 видны в /git, старые результаты доступны только через поиск.
+ */
+function makeCommitSearchApi() {
+  const history = Array.from({ length: 90 }, (_, ordinal) => ({
+    hash: (4096 + ordinal).toString(16).padStart(7, 'a'),
+    oid: (4096 + ordinal).toString(16).padStart(7, 'a').padEnd(40, '0'),
+    subject: `commit ${ordinal}`,
+    when: 'now',
+    ordinal,
+  }));
+  const state = { history, hold: null };
+  const full = (hash) => hash.padEnd(40, '0');
+  const fixture = makeFilesApi({
+    getHandlers: {
+      git: async (request, fallback) => ({
+        ...(await fallback()),
+        log: state.history.slice(0, 50).map(({ hash, subject, when }) => ({
+          hash,
+          subject,
+          when,
+        })),
+      }),
+      'commit-search': async (request) => {
+        const q = request.params.get('q');
+
+        if (state.hold) {
+          return state.hold(request);
+        }
+
+        const indexes = q === 'older' ? [60, 75, 80] : q === 'head' ? [0] : [];
+
+        return { head: full(state.history[0].hash), log: indexes.map((index) => state.history[index]) };
+      },
+      'file-diff': (request, fallback) => {
+        if (request.params.get('group') !== 'commits') {
+          return fallback();
+        }
+
+        return {
+          path: request.params.get('path'),
+          status: 'M',
+          binary: false,
+          tooBig: false,
+          oldContent: 'BEFORE_SELECTED_COMMIT\n',
+          newContent: `SELECTED_COMMIT ${request.params.get('to')}\n`,
+        };
+      },
+      'commits-diff': async (request) => ({
+        branch: 'main',
+        stat: '',
+        files: [{
+          path: 'a.ts',
+          status: 'M',
+          add: 1,
+          del: 1,
+          binary: false,
+        }],
+        range: {
+          from: full(request.params.get('from')),
+          to: full(request.params.get('to')),
+          base: 'f'.repeat(40),
+          commits: 1,
+          work: request.params.get('work') === '1',
+        },
+      }),
+    },
+  });
+
+  return {
+    ...fixture,
+    state,
+    full,
+  };
+}
+
+test('история: найденный №75, Shift, сброс, same-HEAD refresh и HEAD identity', async (t) => {
+  const f = makeCommitSearchApi();
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'commits');
+  await settle(h.flushPromises);
+
+  const input = h.wrapper.get('[data-action="commit-search"]');
+
+  await input.setValue('older');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await h.wrapper.get(`[data-hash="${f.state.history[75].hash}"]`).trigger('click');
+  await settle(h.flushPromises);
+
+  let range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+
+  assert.equal(range.get('from'), f.state.history[75].oid);
+  assert.equal(range.get('to'), f.state.history[75].oid);
+  assert.equal(range.has('work'), false);
+
+  await h.wrapper.get(`[data-hash="${f.state.history[80].hash}"]`).trigger('click', { shiftKey: true });
+  await settle(h.flushPromises);
+  range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+  assert.equal(range.get('from'), f.state.history[80].oid);
+  assert.equal(range.get('to'), f.state.history[75].oid);
+
+  await h.wrapper.get('[data-action="commit-search-reset"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-context="code-commit-row"]').length, 50);
+  assert.ok(h.wrapper.find('.commit-range-summary').exists());
+
+  await refreshCurrentCode(h.wrapper, h.browser, h.flushPromises);
+  assert.ok(h.wrapper.find('.commit-range-summary').exists());
+  assert.match(h.wrapper.get('.commit-range-summary').text(), new RegExp(f.state.history[80].hash));
+
+  await input.setValue('head');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await h.wrapper.get(`[data-hash="${f.state.history[0].hash}"]`).trigger('click');
+  await settle(h.flushPromises);
+  range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+  assert.equal(range.get('from'), f.state.history[80].oid);
+  assert.equal(range.get('to'), f.state.history[0].oid);
+  assert.equal(range.get('work'), '1');
+
+  await h.wrapper.get('[data-action="commit-search-reset"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get(`[data-hash="${f.state.history[0].hash}"]`).attributes('aria-pressed'), 'true');
+  await h.wrapper.get(`[data-hash="${f.state.history[0].hash}"]`).trigger('click');
+  await settle(h.flushPromises);
+  range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+  assert.equal(range.get('to'), f.state.history[75].oid);
+  assert.equal(range.has('work'), false);
+
+  f.state.history = [{
+    hash: 'ffffffe',
+    oid: f.full('ffffffe'),
+    subject: 'new HEAD',
+    when: 'now',
+    ordinal: 0,
+  },
+    ...f.state.history.map((entry) => ({ ...entry, ordinal: entry.ordinal + 1 }))];
+  await refreshCurrentCode(h.wrapper, h.browser, h.flushPromises);
+  assert.equal(h.wrapper.find('.commit-range-summary').exists(), false);
+  assert.ok(h.wrapper.find('[data-action="commit-selection-changed"]').exists());
+});
+
+test('история: ввод, reset и новая копия лишают поздний ответ права менять список', async (t) => {
+  const f = makeCommitSearchApi();
+  const first = deferred();
+  const cleared = deferred();
+  const previousContext = deferred();
+
+  f.state.hold = ({ params }) => {
+    const q = params.get('q');
+
+    return q === 'first' ? first.promise : q === 'clear' ? cleared.promise : previousContext.promise;
+  };
+
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'commits');
+  await settle(h.flushPromises);
+
+  const input = h.wrapper.get('[data-action="commit-search"]');
+  const answer = { head: f.full(f.state.history[0].hash), log: [f.state.history[75]] };
+
+  await input.setValue('first');
+  await waitDebounce();
+  await input.setValue('changed');
+  first.resolve(answer);
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.find(`[data-hash="${f.state.history[75].hash}"]`).exists(), false);
+
+  await input.setValue('clear');
+  await waitDebounce();
+  await h.wrapper.get('[data-action="commit-search-reset"]').trigger('click');
+  cleared.resolve(answer);
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.findAll('[data-context="code-commit-row"]').length, 50);
+
+  await input.setValue('context');
+  await waitDebounce();
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+  await settle(h.flushPromises);
+  previousContext.reject({ data: { message: 'ошибка старой копии' } });
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('[data-action="commit-search"]').element.value, '');
+  assert.doesNotMatch(h.wrapper.text(), /ошибка старой копии/u);
+  assert.equal(h.wrapper.find('[data-action="commit-search-loading"]').exists(), false);
+
+  const requests = f.urls.filter((url) => url.includes('/commit-search?')).length;
+
+  await h.wrapper.get('[data-action="commit-search"]').setValue('unmount');
+  h.wrapper.unmount();
+  await waitDebounce();
+  assert.equal(f.urls.filter((url) => url.includes('/commit-search?')).length, requests);
+});
+
+test('история: короткий hash из четырёх hex открывается по полному oid', async (t) => {
+  const f = makeCommitSearchApi();
+
+  f.state.history[75] = {
+    ...f.state.history[75],
+    hash: 'b075',
+    oid: f.full('b075'),
+  };
+
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'commits');
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-action="commit-search"]').setValue('older');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-hash="b075"]').trigger('click');
+  await settle(h.flushPromises);
+
+  const range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+
+  assert.equal(range.get('from'), f.full('b075'));
+  assert.equal(range.get('to'), f.full('b075'));
+  assert.equal(h.wrapper.get('[data-hash="b075"]').attributes('aria-pressed'), 'true');
+});
+
+test('история: несовпавший HEAD не принимается, refresh перезапускает активный поиск', async (t) => {
+  const f = makeCommitSearchApi();
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'commits');
+  await settle(h.flushPromises);
+  f.state.hold = async () => ({ head: f.full('ffffffe'), log: [f.state.history[75]] });
+  await h.wrapper.get('[data-action="commit-search"]').setValue('older');
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.match(h.wrapper.text(), /История изменилась/u);
+  assert.equal(h.wrapper.find('[data-hash="' + f.state.history[75].hash + '"]').exists(), false);
+
+  f.state.hold = null;
+  f.state.history = [{
+    hash: 'ffffffe',
+    oid: f.full('ffffffe'),
+    subject: 'new HEAD',
+    when: 'now',
+    ordinal: 0,
+  },
+  ...f.state.history.map((entry) => ({ ...entry, ordinal: entry.ordinal + 1 }))];
+
+  const before = f.urls.filter((url) => url.includes('/commit-search?')).length;
+
+  await refreshCurrentCode(h.wrapper, h.browser, h.flushPromises);
+  await waitDebounce();
+  await settle(h.flushPromises);
+  assert.equal(f.urls.filter((url) => url.includes('/commit-search?')).length, before + 1);
+  assert.equal(h.wrapper.findAll('[data-context="code-commit-row"]').length, 3);
+  assert.doesNotMatch(h.wrapper.text(), /Обновите журнал и повторите поиск/u);
+
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('[data-action="commit-search"]').element.value, '');
+  assert.equal(h.wrapper.findAll('[data-context="code-commit-row"]').length, 50);
+});
+
+for (const outcome of ['success', 'error']) {
+  test(`история: ответ ${outcome} старого контекста не снимает loading нового`, async (t) => {
+    const f = makeCommitSearchApi();
+    const old = deferred();
+    const current = deferred();
+
+    f.state.hold = ({ context }) => context.treePath === '/demo' ? old.promise : current.promise;
+
+    const h = await mountCodeView(t, { api: f.api });
+
+    await selectCodeTab(h.wrapper, 'commits');
+    await settle(h.flushPromises);
+    await h.wrapper.get('[data-action="commit-search"]').setValue('old');
+    await waitDebounce();
+    await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+    await settle(h.flushPromises);
+    await h.wrapper.get('[data-action="commit-search"]').setValue('new');
+    await waitDebounce();
+
+    if (outcome === 'success') {
+      old.resolve({ head: f.full(f.state.history[0].hash), log: [f.state.history[75]] });
+    } else {
+      old.reject({ data: { message: 'Ошибка чужого поиска.' } });
+    }
+
+    await settle(h.flushPromises);
+    assert.ok(h.wrapper.find('[data-action="commit-search-loading"]').exists());
+    assert.doesNotMatch(h.wrapper.text(), /Ошибка чужого поиска/u);
+    assert.equal(h.wrapper.find(`[data-hash="${f.state.history[75].hash}"]`).exists(), false);
+
+    current.resolve({ head: f.full(f.state.history[0].hash), log: [f.state.history[60]] });
+    await settle(h.flushPromises);
+    assert.ok(h.wrapper.find(`[data-hash="${f.state.history[60].hash}"]`).exists());
+    assert.equal(h.wrapper.find('[data-action="commit-search-loading"]').exists(), false);
+  });
+}
+
+test('TW-C-SEARCH: найденный №75 переживает открепление и возврат в скрытую панель', async (t) => {
+  const f = makeCommitSearchApi();
+  const first = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(first.wrapper, 'commits');
+  await settle(first.flushPromises);
+  await first.wrapper.get('[data-action="commit-search"]').setValue('older');
+  await waitDebounce();
+  await settle(first.flushPromises);
+
+  const selected = f.state.history[75];
+
+  await first.wrapper.get(`[data-hash="${selected.hash}"]`).trigger('click');
+  await settle(first.flushPromises);
+
+  let state = await first.wrapper.vm.exportState();
+
+  first.wrapper.unmount();
+
+  for (const active of [true, false]) {
+    const start = f.urls.length;
+    const next = await mountCodeView(t, { api: f.api, props: { active } });
+
+    await next.wrapper.vm.importState(state);
+    await settle(next.flushPromises, 10);
+
+    const calls = f.urls.slice(start);
+    const rangeUrl = calls.filter((url) => url.includes('/commits-diff?')).at(-1);
+    const sidesUrl = calls.filter((url) => url.includes('/file-diff?')).at(-1);
+
+    assert.equal(typeof rangeUrl, 'string', 'перенесённый выбор должен запросить диапазон');
+    assert.equal(typeof sidesUrl, 'string', 'перенесённый диапазон должен открыть файл');
+
+    const range = query(rangeUrl);
+    const sides = query(sidesUrl);
+
+    assert.equal(range.get('from'), selected.oid);
+    assert.equal(range.get('to'), selected.oid);
+    assert.equal(sides.get('to'), selected.oid);
+    assert.equal(sides.get('path'), 'a.ts');
+    assert.equal(diffView(next.monacoState).modified.content, `SELECTED_COMMIT ${selected.oid}\n`);
+    assert.match(next.wrapper.get('.commit-range-summary').text(), new RegExp(selected.hash));
+    state = await next.wrapper.vm.exportState();
+    assert.equal(state.commitHistory.log[0].ordinal, 75);
+    next.wrapper.unmount();
+  }
+});
+
+test('TW-C-SEARCH-HEAD: новый HEAD снимает старую позицию и сообщает о потере выбора', async (t) => {
+  const f = makeCommitSearchApi();
+  const selected = f.state.history[75];
+  const state = {
+    project: 'demo',
+    repo: 'demo',
+    root: '/demo',
+    tab: 'git',
+    gitPane: 'commits',
+    commitSel: [selected.hash],
+    commitHistory: { head: f.state.history[0].oid, log: [selected] },
+  };
+
+  f.state.history = [{
+    hash: 'ffffffe',
+    oid: f.full('ffffffe'),
+    subject: 'new HEAD',
+    when: 'now',
+    ordinal: 0,
+  },
+  ...f.state.history.map((entry) => ({ ...entry, ordinal: entry.ordinal + 1 }))];
+
+  const h = await mountCodeView(t, { api: f.api });
+
+  await h.wrapper.vm.importState(state);
+  await settle(h.flushPromises, 10);
+  assert.equal(f.urls.some((url) => url.includes('/commits-diff?')), false);
+  assert.equal(h.wrapper.find('.commit-range-summary').exists(), false);
+  assert.equal(h.wrapper.find('[data-action="commit-selection-changed"]').exists(), true);
+});
+
+test('TW-C-SEARCH-LEGACY: прежний snapshot без истории восстанавливает обычный коммит', async (t) => {
+  const f = makeCommitSearchApi();
+  const selected = f.state.history[3];
+  const h = await mountCodeView(t, { api: f.api });
+
+  await h.wrapper.vm.importState({
+    project: 'demo',
+    repo: 'demo',
+    root: '/demo',
+    tab: 'git',
+    gitPane: 'commits',
+    commitSel: [selected.hash],
+  });
+  await settle(h.flushPromises, 10);
+
+  const range = query(f.urls.filter((url) => url.includes('/commits-diff?')).at(-1));
+
+  assert.equal(range.get('from'), selected.hash);
+  assert.equal(range.get('to'), selected.hash);
+  assert.equal(h.wrapper.find('.commit-range-summary').exists(), true);
+});
+
+test('AI-сводка: результат не скрывает дерево и не отменяет collapsed', async (t) => {
+  const f = makeFilesApi();
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'changes');
+  await settle(h.flushPromises);
+
+  const group = h.wrapper.get('[data-group-section="staged"]');
+  const count = group.findAll('button.git-file').length;
+
+  assert.ok(count > 0);
+  await group.get('[data-action="diff-summary"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.match(group.get('[data-action="diff-summary-result"]').text(), /правки про X/u);
+  assert.equal(group.findAll('button.git-file').length, count);
+  assert.ok(f.posts.some((post) => post.url.includes('/diff-summary?') && post.body.group === 'staged'));
+
+  await group.get('[data-action="toggle-group"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(group.findAll('button.git-file').length, 0);
+  assert.equal(group.get('[data-action="toggle-group"]').attributes('aria-expanded'), 'false');
+  assert.ok(group.find('[data-action="diff-summary-result"]').exists());
+
+  await group.get('[data-action="diff-summary-close"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(group.find('[data-action="diff-summary-result"]').exists(), false);
+  assert.equal(group.findAll('button.git-file').length, 0);
+  await group.get('[data-action="toggle-group"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.equal(group.findAll('button.git-file').length, count);
+});
+
+test('AI-сводка: сообщение API видно, повтор заменяет ошибку успехом', async (t) => {
+  let attempt = 0;
+  const f = makeFilesApi({
+    postHandlers: {
+      'diff-summary': async () => {
+        attempt += 1;
+
+        if (attempt === 1) {
+          throw { data: { message: 'Модель вернула ответ не в ожидаемом формате.' } };
+        }
+
+        return { ok: true, summary: 'Повтор получился.' };
+      },
+    },
+  });
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'changes');
+  await settle(h.flushPromises);
+
+  const group = h.wrapper.get('[data-group-section="staged"]');
+
+  await group.get('[data-action="diff-summary"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.match(group.get('[data-action="diff-summary-result"]').text(), /Модель вернула/u);
+  await group.get('[data-action="diff-summary"]').trigger('click');
+  await settle(h.flushPromises);
+  assert.match(group.get('[data-action="diff-summary-result"]').text(), /Повтор получился/u);
+
+  await refreshCurrentCode(h.wrapper, h.browser, h.flushPromises);
+  assert.equal(h.wrapper.find('[data-action="diff-summary-result"]').exists(), false);
+});
+
+for (const boundary of ['context', 'refresh']) {
+  for (const outcome of ['success', 'error']) {
+    test(`AI-сводка: ${boundary} отбрасывает старый ${outcome} и сохраняет busy нового`, async (t) => {
+      const old = deferred();
+      const current = deferred();
+      let requests = 0;
+      const f = makeFilesApi({
+        postHandlers: {
+          'diff-summary': async () => {
+            requests += 1;
+
+            return requests === 1 ? old.promise : current.promise;
+          },
+        },
+      });
+      const h = await mountCodeView(t, { api: f.api });
+
+      await selectCodeTab(h.wrapper, 'changes');
+      await settle(h.flushPromises);
+      await h.wrapper.get('[data-action="diff-summary"][data-group="staged"]').trigger('click');
+      await settle(h.flushPromises);
+
+      // Повтор во время первого запроса не должен создавать второй платный вызов.
+      // Счётчик handler-а проверяет внешний эффект, а не только disabled-атрибут.
+      await h.wrapper.get('[data-action="diff-summary"][data-group="staged"]').trigger('click');
+      await settle(h.flushPromises);
+      assert.equal(requests, 1);
+      assert.equal(f.posts.filter((post) => post.url.includes('/diff-summary?')).length, 1);
+
+      if (boundary === 'context') {
+        await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/demo-task']));
+        await settle(h.flushPromises);
+      } else {
+        await refreshCurrentCode(h.wrapper, h.browser, h.flushPromises);
+      }
+
+      await h.wrapper.get('[data-action="diff-summary"][data-group="staged"]').trigger('click');
+      await settle(h.flushPromises);
+      assert.equal(requests, 2);
+
+      if (outcome === 'success') {
+        old.resolve({ ok: true, summary: 'Старый результат.' });
+      } else {
+        old.reject({ data: { message: 'Старая ошибка.' } });
+      }
+
+      await settle(h.flushPromises);
+      assert.doesNotMatch(h.wrapper.text(), /Старый результат|Старая ошибка/u);
+      assert.equal(h.wrapper.get('[data-action="diff-summary"][data-group="staged"]')
+        .attributes('aria-busy'), 'true');
+
+      current.resolve({ ok: true, summary: 'Текущий результат.' });
+      await settle(h.flushPromises);
+      assert.match(h.wrapper.get('[data-action="diff-summary-result"]').text(), /Текущий результат/u);
+      assert.notEqual(h.wrapper.get('[data-action="diff-summary"][data-group="staged"]')
+        .attributes('aria-busy'), 'true');
+    });
+  }
+}
+
+test('AI-сводка: позднее завершение после unmount не возвращает сообщение', async (t) => {
+  const pending = deferred();
+  const f = makeFilesApi({ postHandlers: { 'diff-summary': () => pending.promise } });
+  const h = await mountCodeView(t, { api: f.api });
+
+  await selectCodeTab(h.wrapper, 'changes');
+  await settle(h.flushPromises);
+  await h.wrapper.get('[data-action="diff-summary"][data-group="staged"]').trigger('click');
+  await settle(h.flushPromises);
+  h.wrapper.unmount();
+  pending.resolve({ ok: true, summary: 'Не должно вернуться.' });
+  await settle(h.flushPromises);
+  assert.equal(h.browser.document.querySelector('[data-action="diff-summary-result"]') === null, true);
+});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -512,4 +512,144 @@ test('CODE-PATCH-SCOPE: явные paths дедуплицируются и не 
   assert.match(response.patch, /app\.txt/);
   assert.doesNotMatch(response.patch, /other\.txt/);
   assert.equal(response.patch.match(/^diff --git /gm)?.length, 1);
+});
+
+test('CODE-BLAME-ACCURACY: пробелы и HTTP accuracy сохраняют исходного автора', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-blame-acc-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await git(root, ['init', '-q', '-b', 'main', '.']);
+  await git(root, ['config', 'user.email', 'test@example.com']);
+  await git(root, ['config', 'user.name', 'test']);
+  await writeFile(path.join(root, 'f.txt'), 'x\ny\n');
+  await git(root, ['add', '.']);
+  await git(root, ['commit', '-qm', 'a: base']);
+  await writeFile(path.join(root, 'f.txt'), 'x\n y\n');
+  await git(root, ['add', '.']);
+  await git(root, ['commit', '-qm', 'b: pad']);
+
+  const base = await blameFile(root, 'f.txt');
+  const accurate = await blameFile(root, 'f.txt', { refactorAware: true });
+
+  assert.equal(base.lines[1].subject, 'b: pad');
+  assert.equal(accurate.lines[1].subject, 'a: base');
+
+  const app = await codeApp(t, root);
+
+  for (const [accuracy, subject] of [
+    ['', 'b: pad'], ['refactor', 'a: base'], ['other', 'b: pad'],
+  ]) {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/code/demo/blame?repo=main&path=f.txt&accuracy=${accuracy}`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(parseCodeBlame(response.json()).lines[1].subject, subject);
+  }
+});
+
+test('CODE-BLAME-COPY: -C узнаёт длинный блок, перенесённый между файлами', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-blame-copy-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await git(root, ['init', '-q', '-b', 'main', '.']);
+  await git(root, ['config', 'user.email', 'test@example.com']);
+  await git(root, ['config', 'user.name', 'test']);
+
+  const block = Array.from({ length: 12 }, (_, index) => (
+    `const moved_line_${index} = "original substantive payload number ${index}";\n`
+  )).join('');
+  const kept = Array.from({ length: 12 }, (_, index) => (
+    `const kept_line_${index} = "source retained payload number ${index}";\n`
+  )).join('');
+
+  await writeFile(path.join(root, 'source.js'), block + kept);
+  await writeFile(path.join(root, 'target.js'), '// target original header\n');
+  await git(root, ['add', '.']);
+  await git(root, ['commit', '-qm', 'a: original code']);
+  await writeFile(path.join(root, 'source.js'), kept);
+  await writeFile(path.join(root, 'target.js'), '// target original header\n' + block);
+  await git(root, ['add', '.']);
+  await git(root, ['commit', '-qm', 'b: relocate code']);
+
+  const ordinary = await blameFile(root, 'target.js');
+  const accurate = await blameFile(root, 'target.js', { refactorAware: true });
+
+  assert.equal(ordinary.lines.length, 13);
+  assert.equal(accurate.lines.length, 13);
+  assert.equal(ordinary.lines.slice(1).every((line) => line.subject === 'b: relocate code'), true);
+  assert.equal(accurate.lines.slice(1).every((line) => line.subject === 'a: original code'), true);
+});
+
+test('CODE-BLAME-ORIGIN: исторический путь, кавычки и скрытый источник проходят HTTP', async (t) => {
+  for (const hidden of [false, true]) {
+    await t.test(hidden ? 'скрытый источник' : 'путь с кавычками', async (subtest) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-blame-origin-'));
+
+      subtest.after(() => rm(root, { recursive: true, force: true }));
+      await git(root, ['init', '-q', '-b', 'main', '.']);
+      await git(root, ['config', 'user.email', 'test@example.com']);
+      await git(root, ['config', 'user.name', 'test']);
+      await mkdir(path.join(root, '.state'));
+
+      const source = hidden ? '.state/private.js' : 'source "quoted".js';
+      const block = Array.from({ length: 12 }, (_, index) => (
+        `const moved_line_${index} = "original substantive payload number ${index}";\n`
+      )).join('');
+      const kept = Array.from({ length: 12 }, (_, index) => (
+        `const kept_line_${index} = "source retained payload number ${index}";\n`
+      )).join('');
+
+      await writeFile(path.join(root, source), block + kept);
+      await writeFile(path.join(root, 'target.js'), '// target original header\n');
+      await git(root, ['add', '-f', source, 'target.js']);
+      await git(root, ['commit', '-qm', 'original code']);
+
+      const original = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
+
+      await writeFile(path.join(root, source), kept);
+      await writeFile(path.join(root, 'target.js'), '// target original header\n' + block);
+      await git(root, ['add', '-f', source, 'target.js']);
+      await git(root, ['commit', '-qm', 'relocate code']);
+
+      const app = await codeApp(subtest, root);
+      const result = await app.inject({
+        method: 'GET',
+        url: '/api/code/demo/blame?repo=main&path=target.js&accuracy=refactor',
+      });
+
+      assert.equal(result.statusCode, 200);
+
+      const lines = parseCodeBlame(result.json()).lines;
+
+      assert.equal(lines[1].hash, original);
+      assert.equal(lines[1].sourcePath, hidden ? null : source);
+      assert.equal(lines.slice(1).every((line) => line.sourcePath === (hidden ? null : source)), true);
+
+      if (hidden) {
+        assert.doesNotMatch(result.body, /private\.js|\.state/u);
+      } else {
+        const params = new URLSearchParams({
+          repo: 'main',
+          group: 'commits',
+          path: lines[1].sourcePath,
+          base: lines[1].base,
+          to: lines[1].hash,
+        });
+        const sides = await app.inject({ method: 'GET', url: `/api/code/demo/file-diff?${params}` });
+
+        assert.equal(sides.statusCode, 200);
+        assert.equal(sides.json().path, source);
+        assert.equal(sides.json().newContent, block + kept);
+      }
+
+      const ordinary = await app.inject({
+        method: 'GET', url: '/api/code/demo/blame?repo=main&path=target.js',
+      });
+
+      assert.equal(ordinary.statusCode, 200);
+      assert.equal(ordinary.json().lines.some((line) => Object.hasOwn(line, 'sourcePath')), false);
+    });
+  }
 });

@@ -1,3 +1,4 @@
+import { parseCodeCommitSelectionHistory } from '../../../../shared/plugins/code/codeContracts.ts';
 import { isInstallPluginId } from '../../../../shared/plugins/pluginInstallValues.ts';
 
 import { recordOrNull } from '../../../../shared/lib/objects.ts';
@@ -12,7 +13,7 @@ export interface ToolPanelHandle {
 const fields: Record<string, string[]> = {
   code: ['project', 'repo', 'root', 'tab', 'gitPane', 'file', 'gitRef', 'line', 'commitSel',
     'branchMode', 'commitsWithWork', 'commitMessage', 'amendCommit', 'commitComposerOpen',
-    'commitComposerTouched'],
+    'commitComposerTouched', 'commitHistory'],
   ssh: ['sessionId', 'remotePath'],
   db: ['sessionId', 'profileId', 'query'],
   shelf: ['query', 'filter'],
@@ -31,12 +32,41 @@ export function parseToolWindowState(id: string, value: unknown): ToolWindowStat
     return null;
   }
 
+  if (state.commitHistory !== undefined && (id !== 'code'
+    || !['project', 'repo', 'root'].every((key) => typeof state[key] === 'string' && state[key]))) {
+    return null;
+  }
+
+  const decoded: ToolWindowState = { ...state };
+
   for (const [key, field] of Object.entries(state)) {
     if (key === 'viewer') {
       const viewer = recordOrNull(field);
 
       if (!viewer || Object.keys(viewer).some((name) => !['kind', 'containerId'].includes(name))
         || !['', 'logs', 'exec'].includes(String(viewer.kind)) || typeof viewer.containerId !== 'string') {
+        return null;
+      }
+    } else if (key === 'commitHistory') {
+      const history = recordOrNull(field);
+      const entryKeys = ['hash', 'oid', 'subject', 'when', 'ordinal'];
+
+      if (!history || Object.keys(history).some((name) => !['head', 'log'].includes(name))
+        || !Array.isArray(history.log)) {
+        return null;
+      }
+
+      for (const value of history.log) {
+        const entry = recordOrNull(value);
+
+        if (!entry || Object.keys(entry).some((name) => !entryKeys.includes(name))) {
+          return null;
+        }
+      }
+
+      try {
+        decoded.commitHistory = parseCodeCommitSelectionHistory(field);
+      } catch {
         return null;
       }
     } else if (key === 'commitSel') {
@@ -63,7 +93,7 @@ export function parseToolWindowState(id: string, value: unknown): ToolWindowStat
   }
 
   try {
-    const json = JSON.stringify(state);
+    const json = JSON.stringify(decoded);
 
     return json.length <= 1048576 ? JSON.parse(json) as ToolWindowState : null;
   } catch {

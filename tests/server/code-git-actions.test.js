@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,11 +49,15 @@ async function repository(t) {
   return root;
 }
 
-/** Поднимает только code-модуль с одним проектом и управляемой моделью теста. */
+/**
+ * Поднимает code-модуль с одним временным проектом и управляемой моделью.
+ * Необязательный потолок патча проверяет ограничение входа безопасного запуска.
+ */
 async function codeApp(t, root, {
   commitMessageModel = null,
   resolveCommitTarget = null,
   providerSettings = {},
+  patchMaxBytes,
 } = {}) {
   const app = Fastify({ logger: false });
   app.decorate('pluginEnabled', () => true);
@@ -76,6 +80,7 @@ async function codeApp(t, root, {
       }),
     },
     ...(resolveCommitTarget ? { resolveCommitTarget } : {}),
+    ...(patchMaxBytes === undefined ? {} : { patchMaxBytes }),
   });
   await app.ready();
   t.after(() => app.close());
@@ -934,4 +939,306 @@ test('CODE-BATCH-PARTIAL: первая порция не инвалидируе�
   const cached = await reviewGit(fixture.root, ['diff', '--cached', '--name-only']);
 
   assert.equal(cached.trim().split('\n').length, 501);
+});
+
+/**
+ * Возвращает контролируемый model-only транспорт для HTTP-тестов сводки.
+ * Обычного executor.run нет, поэтому успешный тест проходит через runUntrusted.
+ */
+function summaryTarget(runUntrusted) {
+  return async () => ({
+    ok: true,
+    ref: { provider: 'test', model: 'test-model' },
+    effort: 'high',
+    executor: { runUntrusted },
+  });
+}
+
+test('CODE-SUMMARY-01: один безопасный запуск получает patch только выбранной группы', async (t) => {
+  const root = await repository(t);
+
+  await writeFile(path.join(root, 'app.js'), 'base\nSTAGED_ONLY\n');
+  await git(root, ['add', 'app.js']);
+  await writeFile(path.join(root, 'app.js'), 'base\nSTAGED_ONLY\nWORK_ONLY\n');
+  await writeFile(path.join(root, 'new.js'), 'UNTRACKED_ONLY\n');
+
+  const calls = [];
+  const app = await codeApp(t, root, {
+    resolveCommitTarget: summaryTarget(async (args) => {
+      calls.push(args);
+
+      return { reply: '{"summary":"GrigDesk: правка app.js"}' };
+    }),
+  });
+  const staged = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(staged.statusCode, 200);
+  assert.deepEqual(staged.json(), { ok: true, summary: 'GrigDesk: правка app.js' });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].message, /^\+STAGED_ONLY$/mu);
+  assert.doesNotMatch(calls[0].message, /WORK_ONLY|UNTRACKED_ONLY/u);
+  assert.match(calls[0].message, /500/u);
+
+  const work = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'work' },
+  });
+
+  assert.equal(work.statusCode, 200);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].message, /^\+WORK_ONLY$/mu);
+  assert.match(calls[1].message, /^\+UNTRACKED_ONLY$/mu);
+  assert.doesNotMatch(calls[1].message, /^\+STAGED_ONLY$/mu);
+
+  for (const run of calls) {
+    assert.equal(run.model, 'test-model');
+    assert.equal(run.effort, 'high');
+    assert.deepEqual(run.images, []);
+
+    for (const name of ['cwd', 'workspace', 'tools', 'mcp', 'session', 'sessionId', 'resume']) {
+      assert.equal(Object.hasOwn(run, name), false);
+    }
+  }
+});
+
+test('CODE-SUMMARY-02: пустая группа, no_model и unsafe provider не запускают модель', async (t) => {
+  const root = await repository(t);
+  let resolved = 0;
+  const emptyApp = await codeApp(t, root, {
+    resolveCommitTarget: async () => {
+      resolved += 1;
+
+      throw new Error('пустая группа не должна разрешать модель');
+    },
+  });
+
+  for (const group of ['staged', 'work']) {
+    const empty = await emptyApp.inject({
+      method: 'POST',
+      url: actionUrl('diff-summary'),
+      payload: { group },
+    });
+
+    assert.equal(empty.statusCode, 409);
+    assert.equal(empty.json().error, 'empty_group');
+  }
+
+  assert.equal(resolved, 0);
+
+  const wrong = await emptyApp.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'commits' },
+  });
+
+  assert.equal(wrong.statusCode, 400);
+  assert.equal(wrong.json().error, 'bad_group');
+  await writeFile(path.join(root, 'app.js'), 'base\nchanged\n');
+  await git(root, ['add', 'app.js']);
+
+  const noModel = await codeApp(t, root);
+  const missing = await noModel.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(missing.statusCode, 409);
+  assert.equal(missing.json().error, 'no_model');
+  assert.match(missing.json().message, /Настройки.*Плагины.*Код/u);
+
+  let unsafeRuns = 0;
+  const unsafe = await codeApp(t, root, {
+    resolveCommitTarget: async () => ({
+      ok: true,
+      ref: { provider: 'test', model: 'test' },
+      executor: {
+        run: async () => {
+          unsafeRuns += 1;
+
+          return { reply: '{"summary":"нельзя"}' };
+        },
+      },
+    }),
+  });
+  const rejected = await unsafe.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(rejected.statusCode, 409);
+  assert.equal(rejected.json().error, 'unsafe_model_provider');
+  assert.equal(unsafeRuns, 0);
+});
+
+test('CODE-SUMMARY-03: точная граница 500 и отказ транспорта имеют машинные коды', async (t) => {
+  const root = await repository(t);
+
+  await writeFile(path.join(root, 'app.js'), 'base\nchanged\n');
+  await git(root, ['add', 'app.js']);
+
+  let reply = '';
+  let fail = false;
+  let calls = 0;
+  const app = await codeApp(t, root, {
+    resolveCommitTarget: summaryTarget(async () => {
+      calls += 1;
+
+      if (fail) {
+        throw new Error('transport unavailable');
+      }
+
+      return { reply };
+    }),
+  });
+
+  for (const value of [
+    'мусор без JSON', '{"summary":""}', '{"summary":12}',
+    '{"summary":"ok","extra":true}', JSON.stringify({ summary: 'x'.repeat(501) }),
+  ]) {
+    reply = value;
+
+    const before = calls;
+    const response = await app.inject({
+      method: 'POST',
+      url: actionUrl('diff-summary'),
+      payload: { group: 'staged' },
+    });
+
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.json().error, 'bad_model_reply');
+    assert.equal(calls, before + 1);
+  }
+
+  reply = JSON.stringify({ summary: 'x'.repeat(500) });
+
+  const boundary = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(boundary.statusCode, 200);
+  assert.equal(boundary.json().summary.length, 500);
+  fail = true;
+
+  const failure = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(failure.statusCode, 502);
+  assert.equal(failure.json().error, 'run_failed');
+});
+
+test('CODE-SUMMARY-04: hidden oldPath исключается даже при diff.renames=false', async (t) => {
+  const root = await repository(t);
+
+  await mkdir(path.join(root, '.state'));
+  await mkdir(path.join(root, 'chats'));
+  await writeFile(path.join(root, '.state', 'rename.txt'), 'RENAMED_PRIVATE_MARKER\n');
+  await writeFile(path.join(root, '.state', 'hidden.txt'), 'old state\n');
+  await writeFile(path.join(root, 'chats', 'private.txt'), 'old private\n');
+  await git(root, ['add', '-f', '.state', 'chats']);
+  await git(root, ['commit', '-qm', 'private baseline']);
+
+  // Настройка этой временной fixture отключает обычное определение переименований.
+  // Summary обязан получить oldPath независимо от неё, сохранив публичный rename.
+  await git(root, ['config', 'diff.renames', 'false']);
+  await git(root, ['mv', '.state/rename.txt', 'public-renamed.txt']);
+  await git(root, ['mv', 'old.js', 'allowed-renamed.js']);
+  await writeFile(path.join(root, '.state', 'hidden.txt'), 'STATE_PRIVATE_MARKER\n');
+  await writeFile(path.join(root, 'chats', 'private.txt'), 'CHAT_PRIVATE_MARKER\n');
+  await writeFile(path.join(root, 'app.js'), 'base\nPUBLIC_ALLOWED_MARKER\n');
+  await git(root, ['add', 'app.js']);
+
+  const messages = [];
+  const app = await codeApp(t, root, {
+    resolveCommitTarget: summaryTarget(async ({ message }) => {
+      messages.push(message);
+
+      return { reply: '{"summary":"Публичная правка."}' };
+    }),
+  });
+  const staged = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(staged.statusCode, 200);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /PUBLIC_ALLOWED_MARKER/u);
+  assert.match(messages[0], /^rename from old\.js$/mu);
+  assert.match(messages[0], /^rename to allowed-renamed\.js$/mu);
+  assert.doesNotMatch(messages[0], /RENAMED_PRIVATE_MARKER|public-renamed|\.state|chats/u);
+
+  const hiddenOnly = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'work' },
+  });
+
+  assert.equal(hiddenOnly.statusCode, 409);
+  assert.equal(hiddenOnly.json().error, 'empty_group');
+  assert.equal(messages.length, 1);
+  await writeFile(path.join(root, 'public-work.js'), 'PUBLIC_WORK_MARKER\n');
+
+  const mixed = await app.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'work' },
+  });
+
+  assert.equal(mixed.statusCode, 200);
+  assert.equal(messages.length, 2);
+  assert.match(messages[1], /PUBLIC_WORK_MARKER/u);
+  assert.doesNotMatch(messages[1], /STATE_PRIVATE_MARKER|CHAT_PRIVATE_MARKER|\.state|chats/u);
+});
+
+test('CODE-SUMMARY-05: ограниченный patch помечен, отказ реестра даёт 502', async (t) => {
+  const root = await repository(t);
+
+  await writeFile(path.join(root, 'app.js'), `base\n${'changed line\n'.repeat(100)}`);
+  await git(root, ['add', 'app.js']);
+
+  const messages = [];
+  const bounded = await codeApp(t, root, {
+    patchMaxBytes: 100,
+    resolveCommitTarget: summaryTarget(async ({ message }) => {
+      messages.push(message);
+
+      return { reply: '{"summary":"Правка файла."}' };
+    }),
+  });
+  const response = await bounded.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /Патч обрезан/u);
+
+  const unavailable = await codeApp(t, root, {
+    resolveCommitTarget: async () => {
+      throw new Error('registry unavailable');
+    },
+  });
+  const failed = await unavailable.inject({
+    method: 'POST',
+    url: actionUrl('diff-summary'),
+    payload: { group: 'staged' },
+  });
+
+  assert.equal(failed.statusCode, 502);
+  assert.equal(failed.json().error, 'registry_failed');
 });
