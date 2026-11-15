@@ -6,6 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import providersModule from '../../server/src/modules/providers/index.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -213,4 +215,131 @@ test('беда лимитов приносит прочитанное состо
   assert.equal(usage['future-provider'].vendorStatus, undefined,
     'исполнителю без беды лимитов страницу состояния не читают');
   assert.deepEqual(requested, ['https://status.example.test/api/v2/summary.json']);
+});
+
+/**
+ * Настройку объявляет настоящий Codex; реальный PrefsStore пишет только во временный файл.
+ * Повторное создание store отличает сохранение на диске от случайного состояния DTO или cache.
+ */
+async function codexSettingsFixture(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-host-settings-'));
+  const prefsPath = path.join(root, 'prefs.json');
+  const prefs = new PrefsStore({ prefsPath });
+  const adapter = {
+    ...localAdapter(),
+    id: 'codex',
+    name: 'Codex',
+    settings: codex.settings,
+  };
+  const app = Fastify({ logger: false });
+
+  prefs.write({
+    providerSettings: {
+      codex: { blockDirectSsh: true },
+      neighbor: { keep: 'me' },
+    }
+  });
+  app.decorate('sse', { broadcast() { } });
+  await app.register(providersModule, {
+    config: { modelsPath: path.join(root, 'models.json') },
+    claudeAuth: null,
+    prefs,
+    getProviderAdapters: async () => new Map([['codex', adapter]]),
+    getModelsRegistry: async () => ({}),
+  });
+  t.after(async () => {
+    await app.close();
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  return {
+    app,
+    prefs,
+    prefsPath,
+  };
+}
+
+test('Codex Host: registry содержит один toggle, default off и confirm.on', async (t) => {
+  const f = await codexSettingsFixture(t);
+  const response = await f.app.inject({
+    method: 'GET',
+    url: '/api/providers',
+  });
+  const settings = response.json().providers.find((entry) => entry.id === 'codex')?.settings || [];
+  const toggles = settings.filter((entry) => entry.id === 'allowHostAccess');
+
+  assert.equal(toggles.length, 1, 'AC1: один объявленный тумблер Codex Host');
+  assert.equal(toggles[0].kind, 'toggle');
+  assert.equal(toggles[0].value, false);
+  assert.ok(toggles[0].confirm?.on?.text);
+  assert.equal(toggles[0].confirm?.off, undefined);
+});
+
+for (const confirmed of [undefined, false, 'true']) {
+  test(`Codex Host: сервер отвергает включение без точного confirmed=true: ${confirmed}`, async (t) => {
+    const f = await codexSettingsFixture(t);
+    const before = await fs.readFile(f.prefsPath, 'utf8');
+    const response = await f.app.inject({
+      method: 'POST',
+      url: '/api/providers/codex/settings',
+      payload: {
+        settingId: 'allowHostAccess',
+        value: true,
+        confirmed,
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, 'confirmation_required');
+    assert.equal(await fs.readFile(f.prefsPath, 'utf8'), before);
+  });
+}
+
+test('Codex Host: confirmed сохраняется, новый PrefsStore читает его, Off не требует согласия', async (t) => {
+  const f = await codexSettingsFixture(t);
+  const enabled = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/codex/settings',
+    payload: {
+      settingId: 'allowHostAccess',
+      value: true,
+      confirmed: true,
+    },
+  });
+
+  assert.equal(enabled.statusCode, 200, enabled.body);
+  assert.equal(enabled.json().settings.find((entry) => entry.id === 'allowHostAccess')?.value, true);
+
+  const reopened = new PrefsStore({ prefsPath: f.prefsPath });
+
+  assert.equal(reopened.read().providerSettings.codex.allowHostAccess, true);
+
+  const registry = await f.app.inject({
+    method: 'GET',
+    url: '/api/providers',
+  });
+
+  assert.equal(registry.json().providers[0].settings.find((entry) => entry.id === 'allowHostAccess').value,
+    true);
+
+  const disabled = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/codex/settings',
+    payload: {
+      settingId: 'allowHostAccess',
+      value: false,
+    },
+  });
+
+  assert.equal(disabled.statusCode, 200, disabled.body);
+  assert.deepEqual(new PrefsStore({ prefsPath: f.prefsPath }).read().providerSettings, {
+    codex: {
+      blockDirectSsh: true,
+      allowHostAccess: false,
+    },
+    neighbor: { keep: 'me' },
+  });
 });

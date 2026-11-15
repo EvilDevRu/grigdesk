@@ -344,6 +344,18 @@ export interface PermissionModeContext {
   providerSettings?: unknown;
   settingsRevision?: unknown;
   workToolPolicy?: import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy;
+  // Потребитель создаётся сервером: ordinary-chat отличает обычный чат от служебных
+  // запусков; тело HTTP не копируется в контекст и не выбирает допуск.
+  consumer?: string;
+}
+
+// Сериализуемое описание фиксированного профиля следующего хода для реестра и окон.
+// Это презентация общей настройки, а не handle и не право запуска.
+export interface FixedPermissionProfilePresentation {
+  id: string;
+  labelKey: string;
+  hintKey: string;
+  requestMode: string;
 }
 
 export interface ExecutorAdapter {
@@ -409,6 +421,16 @@ export interface ExecutorAdapter {
     config: unknown,
     options: { signal: AbortSignal; permissionModeContext?: PermissionModeContext },
   ) => Promise<PreparedExecutorRuntime>;
+  // Фиксированный профиль следующего хода из серверных настроек; отсутствие поля
+  // сохраняет обычное меню режимов. Реестр показывает его без per-chat выбора.
+  fixedPermissionProfile?: (
+    providerSettings: Record<string, unknown> | null | undefined,
+  ) => FixedPermissionProfilePresentation | null | undefined;
+  // Описание эффективного профиля подготовленного runtime для снимка хода;
+  // подтверждение приходит отдельно после readback живого процесса.
+  runtimePermissionProfile?: (
+    preparedRuntime: PreparedExecutorRuntime | undefined,
+  ) => import('../../../../shared/chat/chatRun.ts').ChatRunPermissionProfile | null;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
   compaction?: Record<string, unknown>;

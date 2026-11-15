@@ -56,10 +56,15 @@
           <h5>{{ resolveUiText(title(item)) }}</h5>
           <span class="settings-process-status" :data-running="item.running">
             <span aria-hidden="true" />
-            {{ item.running ? t('settings.turnRunning') : t('settings.processStatusIdle') }}
+            {{ item.running ? t('settings.turnRunning')
+              : item.cleanupPending ? t('settings.processCleanupPending')
+              : t('settings.processStatusIdle') }}
           </span>
         </header>
         <p class="settings-process-provider">{{ runLabel(item) }}</p>
+        <p v-if="item.cleanupError" class="settings-process-cleanup" role="alert">
+          {{ item.cleanupError }}
+        </p>
         <div class="settings-process-meta">
           <span class="settings-process-pid">PID {{ item.pid ?? t('settings.unknown') }}</span>
           <span>{{ t('settings.processOpenedAgo', { minutes: minutes(item.openedAt) }) }}</span>
@@ -134,6 +139,15 @@ interface ProcessView {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  permissionProfile?: {
+    id: string;
+    sandbox: string;
+    approvalPolicy: string;
+    approvalsReviewer: string;
+    confirmed: boolean;
+  };
+  cleanupPending?: boolean;
+  cleanupError?: string | null;
   running: boolean;
   pid?: number;
   openedAt?: number;
@@ -216,18 +230,22 @@ function title(item: ProcessView): MessageRef {
 
 /**
  * Сведения об исполнителе остаются в отдельной строке под названием чата.
- * Неизвестные модель и режим показываются как пришли, без потери данных реестра.
+ * Эффективный профиль процесса важнее запрошенного режима: Host показывается
+ * своим именем, а не обещает песочницу или автоматическую проверку.
  */
 function runLabel(item: ProcessView): string {
   const provider = (providers.providers as ProviderEntry[]).find((entry) => entry.id === item.executor);
-
-  const mode = provider?.modes?.find((entry) => entry.id === item.permissionMode)?.label;
+  const profile = item.permissionProfile;
+  const modeId = profile?.id || item.permissionMode;
+  const mode = profile?.id === 'host'
+    ? t('core.codexModeHostLabel')
+    : provider?.modes?.find((entry) => entry.id === modeId)?.label;
 
   return [
     provider?.name || item.executor,
     item.model,
     item.effort ? t('settings.effort2', { itemEffort: item.effort }) : '',
-    mode || item.permissionMode,
+    mode || modeId,
   ].filter(Boolean).join(' · ');
 }
 
@@ -526,6 +544,10 @@ onBeforeUnmount(() => {
 }
 .settings-process-pid {
   font-variant-numeric: tabular-nums;
+}
+/* Отказ подтверждённого закрытия виден до повтора: причина сервера без stderr/env. */
+.settings-process-cleanup {
+  color: var(--bad);
 }
 .settings-process-footer {
   margin-top: 4px;

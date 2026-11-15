@@ -12,6 +12,8 @@ import { isChatModeSelection } from '../../../../shared/chat/chatPermissionModes
 import type { PermissionModeContext } from './index.ts';
 import { ExecutorRuntimeError } from './errors.ts';
 import { withSettingsStdioProbe } from '../executorSettings/probe.ts';
+import { prepareOwnedProcessScope, type PreparedProcessScopeOwner }
+  from '../providerInstall/ownedProcessScope.ts';
 
 const execute = promisify(execFile);
 const SCHEMA_FILES = ['ThreadStartParams', 'ThreadResumeParams', 'TurnStartParams', 'ThreadStartResponse',
@@ -20,13 +22,58 @@ const SCHEMA_FILES = ['ThreadStartParams', 'ThreadResumeParams', 'TurnStartParam
 const schemaCache = new Map<string, Promise<string>>();
 const handles = new WeakMap<object, RuntimeState>();
 
-export const CODEX_MODE_ADMISSION = Object.freeze({
+interface CodexModeAdmission {
+  admissionRevision: number;
+  codecRevision: number;
+  version: string;
+  schemaFingerprint: string;
+  nativePaths: readonly string[];
+}
+
+export const CODEX_MODE_ADMISSION: CodexModeAdmission = Object.freeze({
   admissionRevision: 1,
   codecRevision: 1,
   version: '0.164.0',
   schemaFingerprint: 'c1a49972d4fdb1b2a7f0869fd04c43a6100308799bd6201ca0a62ba92f635abd',
   nativePaths: Object.freeze(['code-mode/exec_command', 'code-mode/apply_patch']),
 });
+
+/**
+ * Отдельный допуск Host и возврата в песочницу на проверенной установке 0.167.1.
+ * Схема получена настоящим CLI; legacy-допуск 0.164.0 не объявляет Host проверенным.
+ */
+export const CODEX_HOST_MODE_ADMISSION: CodexModeAdmission = Object.freeze({
+  admissionRevision: 1,
+  codecRevision: 2,
+  version: '0.167.1',
+  schemaFingerprint: 'ae89726268e386a2c43092158c9876e240ae256601f5fe7717f4714e197a747e',
+  nativePaths: Object.freeze(['code-mode/exec_command', 'code-mode/apply_patch']),
+});
+
+/**
+ * Эффективный Host-профиль: без sandbox-границы прежние запросы её расширения не
+ * возникают, поэтому never/user описан честно и не обещает проверки каждой команды.
+ */
+export const CODEX_HOST_PROFILE = Object.freeze({
+  sandbox: 'danger-full-access',
+  approvalPolicy: 'never',
+  approvalsReviewer: 'user',
+  enabled: true,
+  reason: '',
+});
+
+/**
+ * Менеджер процессов Codex переопределяется только окружением теста.
+ * Значения читаются лениво при каждом вызове, продукт остаётся на системных путях.
+ */
+const codexScopeOptions = {
+  unitPrefix: 'grigdesk-codex',
+  label: 'Codex',
+  unavailableCode: 'codex_host_scope_unavailable',
+  systemdRunBin: () => process.env.GRIGDESK_CODEX_SYSTEMD_RUN_BIN || '/usr/bin/systemd-run',
+  systemctlBin: () => process.env.GRIGDESK_CODEX_SYSTEMCTL_BIN || '/usr/bin/systemctl',
+  probeBus: true,
+};
 
 const profiles = Object.freeze({
   plan: Object.freeze({
@@ -92,6 +139,9 @@ interface RuntimeState {
   requirements: string;
   nativeConfig: string;
   processFingerprint: string;
+  hostAccess: boolean;
+  effectiveProfile: CodexNativeProfile;
+  owner: PreparedProcessScopeOwner | null;
 }
 
 /**
@@ -140,8 +190,11 @@ export function codexModeProfile(mode: unknown, workspaceAccess?: unknown): Code
 /**
  * Nullable managed-списки не ограничивают профиль, пустые запрещают любой выбор.
  * Ошибочный RPC и пропущенная структура не подменяются отсутствием требований.
+ * Сверяется эффективный tuple: при Host это danger-full-access/never/user, а не
+ * запрошенный режим меню, который общий профиль перекрывает.
  */
-export function validateCodexRequirements(value: unknown, mode: CodexPermissionMode) {
+export function validateCodexRequirements(value: unknown, mode: CodexPermissionMode,
+  effective?: CodexNativeProfile) {
   if (!isRecord(value) || !Object.hasOwn(value, 'requirements')) {
     throw new ExecutorRuntimeError('mode_unavailable', 'Codex не сообщил управляемые требования.');
   }
@@ -152,7 +205,7 @@ export function validateCodexRequirements(value: unknown, mode: CodexPermissionM
     throw new ExecutorRuntimeError('mode_unavailable', 'Некорректные управляемые требования Codex.');
   }
 
-  const profile = profiles[mode];
+  const profile = effective ?? profiles[mode];
   const fields = {
     allowedApprovalPolicies: profile.approvalPolicy,
     allowedApprovalsReviewers: profile.approvalsReviewer,
@@ -217,7 +270,7 @@ export async function availableCodexPermissionModes(config: { codexBin: string; 
   try {
     const signal = AbortSignal.timeout(15_000);
     const identity = await executableIdentity(config.codexBin);
-    const schema = await schemaFingerprint(config.codexBin, identity, signal);
+    const schema = await schemaFingerprint(config.codexBin, identity, signal, CODEX_MODE_ADMISSION);
 
     if (schema !== CODEX_MODE_ADMISSION.schemaFingerprint) {
       return legacy;
@@ -240,18 +293,21 @@ export async function availableCodexPermissionModes(config: { codexBin: string; 
 }
 
 /**
- * Схема кэшируется только по точной identity executable, временный каталог удаляется.
- * Неизвестная версия или codec не получает право использовать новый профиль.
+ * Схема кэшируется по точной identity executable и версии допуска; временный каталог
+ * удаляется. Неизвестная версия или codec не получает право использовать профиль.
  */
-async function schemaFingerprint(bin: string, identity: string, signal: AbortSignal) {
-  if (!schemaCache.has(identity)) {
+async function schemaFingerprint(bin: string, identity: string, signal: AbortSignal,
+  admission: CodexModeAdmission) {
+  const cacheKey = `${identity}@${admission.version}`;
+
+  if (!schemaCache.has(cacheKey)) {
     const pending = (async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-modes-'));
 
       try {
         const version = await execute(bin, ['--version'], { signal, maxBuffer: 16_384 });
 
-        if (!version.stdout.includes(`codex-cli ${CODEX_MODE_ADMISSION.version}`)) {
+        if (!version.stdout.includes(`codex-cli ${admission.version}`)) {
           throw new ExecutorRuntimeError('mode_unavailable', 'Версия Codex не прошла допуск режимов.');
         }
 
@@ -270,11 +326,36 @@ async function schemaFingerprint(bin: string, identity: string, signal: AbortSig
       }
     })();
 
-    schemaCache.set(identity, pending);
-    pending.catch(() => schemaCache.delete(identity));
+    schemaCache.set(cacheKey, pending);
+    pending.catch(() => schemaCache.delete(cacheKey));
   }
 
-  return schemaCache.get(identity)!;
+  return schemaCache.get(cacheKey)!;
+}
+
+/**
+ * Возврат в песочницу допускается на legacy-установке 0.164.0 и на проверенной
+ * 0.167.1; неизвестная версия не получает молчаливого fallback на другой профиль.
+ */
+async function admittedSandboxSchema(bin: string, identity: string, signal: AbortSignal) {
+  let lastError: unknown = new ExecutorRuntimeError('mode_unavailable',
+    'Схема Codex не прошла допуск режимов.');
+
+  for (const admission of [CODEX_MODE_ADMISSION, CODEX_HOST_MODE_ADMISSION]) {
+    try {
+      const schema = await schemaFingerprint(bin, identity, signal, admission);
+
+      if (schema === admission.schemaFingerprint) {
+        return { schema, admission };
+      }
+
+      lastError = new ExecutorRuntimeError('mode_unavailable', 'Схема Codex не прошла допуск режимов.');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 /**
@@ -318,8 +399,19 @@ async function runtimeMetadata(bin: string, cwd: string, signal: AbortSignal) {
 }
 
 /**
+ * Host допускается только серверным контекстом обычного чата: потребитель создан
+ * сервером, workspaceAccess отсутствует, настройка — строгий boolean true.
+ * Присланный boolean/JSON в теле хода или marker чата основанием не являются.
+ */
+function ordinaryHostAccess(context: PermissionModeContext): boolean {
+  return context.consumer === 'ordinary-chat' && !context.workspaceAccess
+    && isRecord(context.providerSettings) && context.providerSettings.allowHostAccess === true;
+}
+
+/**
  * Только адаптер выдаёт брендированный frozen handle из серверного контекста.
  * Legacy Auto сохраняет handshake, новые режимы требуют точной схемы и свежих requirements.
+ * Host фиксирует эффективный профиль и подготовленного OS-владельца в состоянии handle.
  */
 export async function prepareCodexPermissionRuntime(config: { codexBin: string }, options: {
   signal: AbortSignal;
@@ -355,17 +447,33 @@ export async function prepareCodexPermissionRuntime(config: { codexBin: string }
 
   codexModeProfile(mode, context.workspaceAccess);
 
+  const hostAccess = ordinaryHostAccess(context);
   const identity = await executableIdentity(config.codexBin);
   let requirements = '';
   let nativeConfig = '';
   let schema = '';
+  let admission = CODEX_MODE_ADMISSION;
+  let effectiveProfile: CodexNativeProfile = codexModeProfile(mode, context.workspaceAccess);
 
-  if (mode !== 'auto' && !context.workspaceAccess) {
-    schema = await schemaFingerprint(config.codexBin, identity, options.signal);
+  if (hostAccess) {
+    admission = CODEX_HOST_MODE_ADMISSION;
+    effectiveProfile = CODEX_HOST_PROFILE;
+    schema = await schemaFingerprint(config.codexBin, identity, options.signal, admission);
 
-    if (schema !== CODEX_MODE_ADMISSION.schemaFingerprint) {
-      throw new ExecutorRuntimeError('mode_unavailable', 'Схема Codex не прошла допуск режимов.');
+    if (schema !== admission.schemaFingerprint) {
+      throw new ExecutorRuntimeError('mode_unavailable', 'Схема Codex не прошла допуск Host.');
     }
+
+    const metadata = await runtimeMetadata(config.codexBin, context.cwd, options.signal);
+
+    validateCodexRequirements(metadata.requirements, mode, effectiveProfile);
+    requirements = fingerprint(metadata.requirements);
+    nativeConfig = fingerprint(metadata.config);
+  } else if (mode !== 'auto' && !context.workspaceAccess) {
+    const admitted = await admittedSandboxSchema(config.codexBin, identity, options.signal);
+
+    schema = admitted.schema;
+    admission = admitted.admission;
 
     const metadata = await runtimeMetadata(config.codexBin, context.cwd, options.signal);
 
@@ -374,7 +482,20 @@ export async function prepareCodexPermissionRuntime(config: { codexBin: string }
     nativeConfig = fingerprint(metadata.config);
   }
 
-  const state = {
+  // Обычный чат владеет собственным scope в обоих профилях: отсутствие менеджера
+  // даёт явную причину отказа, а не слабый fallback без владения процессами.
+  let owner: PreparedProcessScopeOwner | null = null;
+
+  if (context.consumer === 'ordinary-chat' && !context.workspaceAccess) {
+    try {
+      owner = await prepareOwnedProcessScope(codexScopeOptions);
+    } catch (error) {
+      throw new ExecutorRuntimeError('codex_host_scope_unavailable',
+        error instanceof Error ? error.message : 'Codex: user bus процессов недоступен.');
+    }
+  }
+
+  const state: RuntimeState = {
     bin: config.codexBin,
     identity,
     context,
@@ -382,14 +503,37 @@ export async function prepareCodexPermissionRuntime(config: { codexBin: string }
     requirements,
     nativeConfig,
     processFingerprint: externalCliProcessFingerprint(),
+    hostAccess,
+    effectiveProfile,
+    owner,
     fingerprint: fingerprint([identity, context, schema, requirements, nativeConfig,
-      externalCliProcessFingerprint(), CODEX_MODE_ADMISSION])
+      externalCliProcessFingerprint(), admission])
   };
   const handle = Object.freeze({});
 
   handles.set(handle, state);
 
   return handle;
+}
+
+/**
+ * Сериализуемое описание эффективного профиля для снимка хода; это не handle и не
+ * допуск. Подтверждение приходит только после успешного readback живого runtime.
+ */
+export function codexRuntimePermissionProfile(handle: object | undefined) {
+  const state = handle && handles.get(handle);
+
+  if (!state) {
+    return null;
+  }
+
+  return {
+    id: state.hostAccess ? 'host' : state.mode,
+    sandbox: state.effectiveProfile.sandbox,
+    approvalPolicy: state.effectiveProfile.approvalPolicy,
+    approvalsReviewer: state.effectiveProfile.approvalsReviewer,
+    confirmed: false,
+  };
 }
 
 /**
@@ -444,7 +588,8 @@ export function assertCodexRuntimeBeforeSpawn(handle: object | undefined, input:
 
 /**
  * Повторный send получает свежий handle с тем же fingerprint живого процесса.
- * Managed requirements перечитываются независимо от кэша схемы перед каждым turn.
+ * Managed requirements перечитываются независимо от кэша схемы перед каждым turn
+ * и сверяются с эффективным профилем, зафиксированным при подготовке.
  */
 export async function assertCodexRuntime(handle: object | undefined,
   input: Parameters<typeof assertCodexRuntimeBeforeSpawn>[1], refresh = false) {
@@ -453,7 +598,7 @@ export async function assertCodexRuntime(handle: object | undefined,
   if (refresh && state?.requirements) {
     const metadata = await runtimeMetadata(state.bin, state.context.cwd, AbortSignal.timeout(15_000));
 
-    validateCodexRequirements(metadata.requirements, state.mode);
+    validateCodexRequirements(metadata.requirements, state.mode, state.effectiveProfile);
 
     if (fingerprint(metadata.requirements) !== state.requirements
       || fingerprint(metadata.config) !== state.nativeConfig) {

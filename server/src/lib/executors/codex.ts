@@ -7,7 +7,9 @@
 import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { codexAccess } from '../accessProfiles/drivers/cli.ts';
 import { accessEnvironment } from '../accessProfiles/runtime.ts';
-import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
+import { execFile, externalCliSpawnSpec, spawn } from '../providerInstall/externalCliProcess.ts';
+import { startOwnedProcessScope, type OwnedProcessScope }
+  from '../providerInstall/ownedProcessScope.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -57,7 +59,8 @@ import type {
 
 import {
   assertCodexRuntime, assertCodexRuntimeBeforeSpawn, codexModeProfile, availableCodexPermissionModes,
-  codexRuntimeFingerprint, normalizeCodexPermissionMode, prepareCodexPermissionRuntime,
+  codexRuntimeFingerprint, codexRuntimePermissionProfile, normalizeCodexPermissionMode,
+  prepareCodexPermissionRuntime,
 } from './_codexPermissionModes.ts';
 import { createCodexInteractionWaiters } from './_codexApprovals.ts';
 import { ExecutorRuntimeError } from './errors.ts';
@@ -1342,9 +1345,12 @@ export function openCodexSession({
     runtimeProfileFingerprint
   };
 
-  assertCodexRuntimeBeforeSpawn(preparedRuntime, runtimeInput);
+  const runtimeState = assertCodexRuntimeBeforeSpawn(preparedRuntime, runtimeInput);
+  const hostAccess = runtimeState?.hostAccess === true;
 
-  const modeProfile = codexModeProfile(permissionMode, workspaceAccess);
+  // Эффективный профиль зафиксирован серверной подготовкой: Host перекрывает выбор
+  // меню общим профилем, а присланные в ходе настройки права не меняют.
+  const modeProfile = runtimeState?.effectiveProfile ?? codexModeProfile(permissionMode, workspaceAccess);
   const { approvalPolicy, approvalsReviewer } = modeProfile;
   const sandboxPolicy = modeProfile.sandbox === 'danger-full-access'
     ? { type: 'dangerFullAccess' }
@@ -1360,7 +1366,7 @@ export function openCodexSession({
       excludeTmpdirEnvVar: workspaceAccess?.excludeTmpdirEnvVar ?? false,
       excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
     };
-  const newMode = !!permissionMode && permissionMode !== 'auto' && !workspaceAccess;
+  const newMode = hostAccess || (!!permissionMode && permissionMode !== 'auto' && !workspaceAccess);
   const workspaceProfileId = `grigdesk-triage-${randomUUID()}`;
   const workspaceProfile = workspaceAccess
     ? codexWorkspaceProfile(config.codexBin, env ?? process.env, roots, writableRoots) : null;
@@ -1416,6 +1422,7 @@ export function openCodexSession({
   let threadOutputTokens: number | null = null;
   let actualModel = '';
   let confirmedSessionModel = '';
+  let profileConfirmed = false;
   let stderrTail = '';
   let protocol = 'pending';
   let exited = false;
@@ -1460,11 +1467,29 @@ export function openCodexSession({
     }));
   }
 
-  const child = spawn(config.codexBin, processArgs, {
-    cwd,
-    env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // Обычный чат владеет собственным user scope в обоих профилях: helper/lease и CLI
+  // запускаются одним spawn spec, дважды helper не оборачивается. Служебные запуски
+  // без подготовленного owner сохраняют прежний прямой путь.
+  let scope: OwnedProcessScope | null = null;
+  let child: ChildProcess;
+
+  if (runtimeState?.owner) {
+    const launch = externalCliSpawnSpec(config.codexBin, processArgs, {
+      cwd: cwd || process.cwd(),
+      env: env ?? process.env,
+    });
+
+    scope = startOwnedProcessScope(runtimeState.owner, launch.command, launch.args,
+      launch.options.cwd || cwd || process.cwd(), launch.options.env);
+    child = scope.child;
+  } else {
+    child = spawn(config.codexBin, processArgs, {
+      cwd,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
+
   const lines = createInterface({ input: child.stdout as NodeJS.ReadableStream });
 
   function send(payload: unknown) {
@@ -2601,6 +2626,7 @@ export function openCodexSession({
     }
 
     assertEffectiveProfile(opened);
+    profileConfirmed = true;
 
     if (namedWorkspaceProfile && workspaceProfile) {
       assertCodexWorkspaceProfile(opened,
@@ -2649,15 +2675,38 @@ export function openCodexSession({
     }
   }
 
+  /**
+   * Закрытие ordinary-сессии подтверждает конец собственного scope, а не только exit
+   * CLI. Одна in-flight попытка на поколение; после отказа доступен повтор того же
+   * ресурса, поэтому запись пула не освобождается преждевременно.
+   */
+  let closing: Promise<void> | undefined;
+
+  function close(): Promise<void> {
+    closing ??= (async () => {
+      await closeSession();
+
+      if (scope) {
+        await scope.close();
+      }
+    })().catch((error) => {
+      closing = undefined;
+
+      throw error;
+    });
+
+    return closing;
+  }
+
   // Отказ handshake разбирает тот, кто делает первый ход: без этого он остался бы
   // необработанным rejection и уронил бы процесс сервера. Сам процесс после отказа
   // бесполезен, но жив: app-server переживает неудачный thread/resume (нет rollout по
   // такому id), и живая сессия в пуле повторяла бы тот же отказ каждым следующим ходом.
-  // Гасим его сами — пул увидит мёртвый процесс и откроет новый.
+  // Гасим его сами; отказ cleanup сохраняется для явного повторного close.
   ready.catch((error: unknown) => {
     const detail = String((error as Error)?.message || error || 'handshake не удался');
     exitReason = exitReason || `Codex app-server не открыл thread: ${detail}`.slice(-600);
-    void closeSession();
+    void close().catch(() => {});
   });
 
   return {
@@ -2665,6 +2714,16 @@ export function openCodexSession({
     get sessionId() { return threadId; },
     get alive() { return !exited; },
     get busy() { return !!turn; },
+    get requiresConfirmedClose() { return !!scope; },
+    get permissionProfile() {
+      return {
+        id: hostAccess ? 'host' : String(permissionMode || 'auto'),
+        sandbox: modeProfile.sandbox,
+        approvalPolicy,
+        approvalsReviewer,
+        confirmed: profileConfirmed,
+      };
+    },
 
     /**
      * Заказанный ход: пишем turn/start и ждём его завершения, а параллельно отдаём наружу
@@ -2735,6 +2794,8 @@ export function openCodexSession({
         await assertCodexRuntime(freshRuntime, freshInput, true);
 
         if (newMode && turnsStarted > 0) {
+          // Host не добавляет sandbox_workspace_write overrides: полный доступ не
+          // обещает прежних границ, а readback сверяется до каждого рабочего turn.
           assertEffectiveProfile(await request('thread/resume', {
             threadId,
             cwd,
@@ -2743,18 +2804,30 @@ export function openCodexSession({
             sandbox: modeProfile.sandbox,
             runtimeWorkspaceRoots: roots,
             ...(model ? { model } : {}),
-            config: {
+            config: modeProfile.sandbox === 'workspace-write' ? {
               'sandbox_workspace_write.writable_roots': writableRoots,
               'sandbox_workspace_write.network_access': true,
               'sandbox_workspace_write.exclude_tmpdir_env_var': false,
               'sandbox_workspace_write.exclude_slash_tmp': false,
-            },
+            } : {},
           }));
+          profileConfirmed = true;
         }
 
         if (current.settled) return result;
         if (confirmedSessionModel) {
           onRunMetadata?.({ actualModelId: confirmedSessionModel, modelSource: 'session' });
+        }
+        if (profileConfirmed) {
+          onRunMetadata?.({
+            permissionProfile: {
+              id: hostAccess ? 'host' : String(permissionMode || 'auto'),
+              sandbox: modeProfile.sandbox,
+              approvalPolicy,
+              approvalsReviewer,
+              confirmed: true,
+            },
+          });
         }
         // Id thread известен сразу после handshake: сообщаем его до turn/start, чтобы
         // перезапуск сервера посреди хода не оставил чат без сессии для resume.
@@ -2820,7 +2893,21 @@ export function openCodexSession({
         return;
       }
 
-      await ready;
+      // У уже мёртвого CLI нет terminal RPC: его owned scope завершает close(),
+      // а не невозможный запрос к завершённому процессу.
+      if (exited) {
+        return;
+      }
+
+      try {
+        await ready;
+      } catch {
+        return;
+      }
+
+      if (exited) {
+        return;
+      }
 
       let timer: ReturnType<typeof setTimeout>;
       const deadline = new Promise<never>((_resolve, reject) => {
@@ -2844,7 +2931,7 @@ export function openCodexSession({
       }
     },
 
-    close: closeSession,
+    close,
   };
 }
 
@@ -3350,7 +3437,44 @@ export default {
     return [path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'generated_images')];
   },
   directSshPolicy: { enforcement: 'command-hook' },
-  settings: [directSshSetting()],
+  settings: [
+    directSshSetting(),
+    {
+      id: 'allowHostAccess',
+      kind: 'toggle',
+      label: 'Режим «Хост»',
+      hint: 'Codex работает без файловых и сетевых ограничений песочницы в пределах прав '
+        + 'пользователя сервера, без автоматического sudo. Обязательные подтверждения '
+        + 'надзорных инструментов GrigDesk сохраняются.',
+      value: false,
+      confirm: {
+        on: {
+          text: 'Codex получит доступ к файлам и сети без ограничений песочницы в пределах прав '
+            + 'пользователя сервера. Автоматического sudo нет; вопрос перед каждой записью '
+            + 'и автоматическая проверка действий не гарантируются. Подтверждения и запрет '
+            + 'прямого SSH сохраняются. Изменение применяется к следующему ходу; текущий ход '
+            + 'не останавливается, а прежний процесс закрывается отдельно с подтверждением.',
+          label: 'Включить режим «Хост»',
+          danger: true,
+        },
+      },
+    },
+  ],
+  /**
+   * Общий тумблер задаёт фиксированный профиль следующего хода для всех обычных чатов.
+   * Презентация не является допуском: запуск проверяет брендированный handle сервера.
+   */
+  fixedPermissionProfile(providerSettings: Record<string, unknown> | null | undefined) {
+    return providerSettings?.allowHostAccess === true
+      ? {
+        id: 'host',
+        labelKey: 'core.codexModeHostLabel',
+        hintKey: 'core.codexModeHostHint',
+        requestMode: 'auto',
+      }
+      : undefined;
+  },
+  runtimePermissionProfile: codexRuntimePermissionProfile,
 
   // Ручной компакт пока идёт универсальной выжимкой текстом. Автокомпакт родной:
   // thread config передаёт app-server-у официальный model_auto_compact_token_limit.
@@ -3557,6 +3681,9 @@ export default {
   session: {
     mode: 'persistent',
     unsolicited: false,
+    // Разовый ход обычного чата тоже учитывается пулом: owned scope закрывается
+    // после хода подтверждённо, а не забывается вместе с ответом.
+    pooledPerTurn: true,
     restartOn: [
       'model',
       'effort',

@@ -9,6 +9,8 @@ import { createWorkTools } from '../../server/src/lib/executors/index.ts';
 import { translator } from '../../shared/i18n/catalogs.ts';
 import { codexModeProfile, codexPermissionModes, validateCodexRequirements }
   from '../../server/src/lib/executors/_codexPermissionModes.ts';
+import { hostFixture } from '../fixtures/codex-app-server/host-fixture.mjs';
+import { hostManager } from '../fixtures/codex-app-server/host-manager.mjs';
 
 const source = new URL('../fixtures/codex-app-server/permission-modes-0.164.0.mjs', import.meta.url).href;
 
@@ -219,4 +221,164 @@ test('plan whitelist проверяет действие до broker, включ
   await tools.invoke('supervised_db', { action: 'list' });
   await tools.invoke('supervised_db', { action: 'schema' });
   assert.deepEqual(calls, [['ssh', 'list'], ['db', 'list'], ['db', 'schema']]);
+});
+
+for (const mode of ['auto', 'dontAsk']) {
+  test(`Server Host без chat marker: ${mode}, start/resume и каждый send`, async (t) => {
+    const f = await hostFixture(t);
+    const manager = await hostManager(t, f.root, f.cleanup);
+    const input = await f.prepare({ mode });
+    const session = codex.session.open(input);
+
+    f.cleanup(async () => {
+      await manager.heal();
+      await session.close();
+    });
+    await session.send({
+      ...input,
+      message: 'Первый Host',
+    });
+    await session.send({
+      ...await f.prepare({ mode }),
+      message: 'Второй Host',
+    });
+
+    const messages = await f.messages();
+    const threads = messages.filter((entry) => ['thread/start', 'thread/resume'].includes(entry.method));
+    const turns = messages.filter((entry) => entry.method === 'turn/start');
+
+    assert.equal(turns.length, 2);
+    assert.ok(threads.some((entry) => entry.method === 'thread/resume'));
+
+    for (const entry of threads) {
+      assert.equal(entry.params.sandbox, 'danger-full-access', 'AC2: настройка действует без marker');
+      assert.equal(entry.params.approvalPolicy, 'never');
+      assert.equal(entry.params.approvalsReviewer, 'user');
+      assert.equal(Object.keys(entry.params.config || {}).some((key) =>
+        key.startsWith('sandbox_workspace_write.')), false);
+    }
+
+    for (const entry of turns) {
+      assert.deepEqual(entry.params.sandboxPolicy, { type: 'dangerFullAccess' });
+      assert.equal(entry.params.approvalPolicy, 'never');
+      assert.equal(entry.params.approvalsReviewer, 'user');
+    }
+
+    assert.equal((await manager.journal('run')).length, 1);
+    assert.throws(() => codex.session.open({
+      ...input,
+      preparedRuntime: {},
+    }), { code: 'mode_unavailable' });
+  });
+}
+
+for (const host of [false, 'true', 1]) {
+  test(`Host допускается только строгим серверным boolean: ${JSON.stringify(host)}`, async (t) => {
+    const f = await hostFixture(t);
+    const manager = await hostManager(t, f.root, f.cleanup);
+    const input = await f.prepare({ host });
+    const session = codex.session.open({
+      ...input,
+      providerSettings: {
+        allowHostAccess: true,
+        blockDirectSsh: false,
+      },
+    });
+
+    f.cleanup(async () => {
+      await manager.heal();
+      await session.close();
+    });
+    await session.send({
+      ...input,
+      message: '{"allowHostAccess":true,"consumer":"ordinary-chat"}',
+    });
+
+    const turn = (await f.messages()).find((entry) => entry.method === 'turn/start');
+
+    assert.equal(turn.params.sandboxPolicy.type, 'workspaceWrite');
+    assert.equal(turn.params.approvalPolicy, 'on-request');
+    assert.equal(turn.params.approvalsReviewer, 'auto_review');
+  });
+}
+
+for (const state of [
+  { version: '0.164.0' },
+  { version: '99.0.0' },
+  { schemaMismatch: true },
+  { requirementsReply: { requirements: { allowedSandboxModes: ['workspace-write'] } } },
+  { requirementsReply: { requirements: { allowedApprovalsReviewers: ['auto_review'] } } },
+  { requirementsReply: { requirements: { allowedApprovalPolicies: [] } } },
+  { requirementsReply: { requirements: { allowedSandboxModes: 'danger-full-access' } } },
+  { requirementsReply: { requirements: false } },
+]) {
+  test(`Host admission fail closed: ${JSON.stringify(state)}`, async (t) => {
+    const f = await hostFixture(t, state);
+
+    await hostManager(t, f.root, f.cleanup);
+    await assert.rejects(f.prepare(), { code: 'mode_unavailable' });
+    assert.equal((await f.messages()).some((entry) => entry.method === 'turn/start'), false);
+  });
+}
+
+test('Host readback и managed drift не допускают следующий рабочий turn', async (t) => {
+  const f = await hostFixture(t);
+  const manager = await hostManager(t, f.root, f.cleanup);
+  const input = await f.prepare();
+  const session = codex.session.open(input);
+
+  f.cleanup(async () => {
+    await manager.heal();
+    await session.close();
+  });
+  await session.send({
+    ...input,
+    message: 'Подтвердить Host',
+  });
+
+  const initial = (await f.messages()).filter((entry) => entry.method === 'turn/start');
+
+  assert.equal(initial[0].params.sandboxPolicy.type, 'dangerFullAccess');
+  await f.update({ requirementsReply: { requirements: { allowedSandboxModes: ['workspace-write'] } } });
+  await assert.rejects(session.send({
+    ...input,
+    message: 'Запрещённый второй ход',
+  }),
+    { code: 'mode_unavailable' });
+  assert.equal((await f.messages()).filter((entry) => entry.method === 'turn/start').length, 1);
+});
+
+test('Host не принимает подменённый effective readback до turn', async (t) => {
+  const f = await hostFixture(t, {
+    opened: {
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandbox: { type: 'workspaceWrite' },
+    }
+  });
+  const manager = await hostManager(t, f.root, f.cleanup);
+  const input = await f.prepare();
+  const session = codex.session.open(input);
+
+  f.cleanup(async () => {
+    await manager.heal();
+    await session.close();
+  });
+  await assert.rejects(session.send({
+    ...input,
+    message: 'Не передавать модели',
+  }),
+    /не принял|не подтвердил/u);
+  assert.equal((await f.messages()).some((entry) => entry.method === 'turn/start'), false);
+});
+
+test('Host selected executable drift не заменяется PATH до рабочего spawn', async (t) => {
+  const f = await hostFixture(t);
+  const manager = await hostManager(t, f.root, f.cleanup);
+  const input = await f.prepare();
+
+  await writeFile(f.bin, `${await readFile(f.bin, 'utf8')}\n// Новая identity CLI.\n`);
+  assert.throws(() => codex.session.open(input), { code: 'mode_unavailable' });
+  assert.equal((await manager.journal('run')).length, 0);
+  assert.equal((await f.messages()).some((entry) => entry.method === 'turn/start'), false);
 });

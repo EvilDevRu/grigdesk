@@ -48,6 +48,17 @@ export interface LiveHandle {
   prepareTransition?: (next: LiveSessionSpec) => Promise<void>;
   pid?: number | null;
   alive: boolean;
+  // Opt-in подтверждённого закрытия: exit CLI не освобождает owned resource,
+  // запись и слот удерживаются до успешного cleanup, ошибка видна и допускает повтор.
+  requiresConfirmedClose?: boolean;
+  // Эффективный профиль прав процесса для списка процессов; описание, не допуск.
+  permissionProfile?: {
+    id: string;
+    sandbox: string;
+    approvalPolicy: string;
+    approvalsReviewer: string;
+    confirmed: boolean;
+  };
   send: (turn: unknown) => Promise<{ sessionId?: string } | null>;
   interrupt: () => Promise<unknown>;
   close: () => Promise<unknown>;
@@ -64,6 +75,9 @@ export interface LiveExecutor {
     enabled?: (spec: LiveSessionSpec) => boolean;
     fingerprint?: (spec: LiveSessionSpec) => Promise<string> | string;
     keepAlive?: boolean;
+    // Разовый ход тоже учитывается пулом: owned resource закрывается после хода
+    // тем же подтверждённым контрактом, а не забывается вместе с ответом.
+    pooledPerTurn?: boolean;
   };
 }
 
@@ -82,6 +96,10 @@ interface LiveEntry {
   executorId: string;
   unsolicited: boolean;
   keepAlive: boolean;
+  requiresConfirmedClose: boolean;
+  cleanupPending: boolean;
+  cleanupError: string | null;
+  closeAttempt: Promise<void> | null;
   fingerprint: string;
   sessionId: string | null;
   model: string;
@@ -286,18 +304,44 @@ export class ChatLiveSessions {
       // sessionId нужен и живой сессии: по нему она переоткроется после простоя,
       // рестарта сервера или смены модели.
       if (result?.sessionId) entry.sessionId = result.sessionId;
+
+      if (spec.perTurn === true) {
+        await this._closePerTurn(entry);
+      }
+
       return result;
+    } catch (error) {
+      // Разовый ход не оставляет живой процесс и после ошибки хода: cleanup идёт
+      // тем же подтверждённым контрактом, его отказ сохраняется для повтора.
+      if (spec.perTurn === true && !entry.cleanupPending
+        && this.entries.get(entry.chatKey) === entry) {
+        await this._closePerTurn(entry).catch(() => {});
+      }
+
+      throw error;
     } finally {
       entry.managed = false;
       entry.lastUsed = Date.now();
 
-      if (!entry.background && this.entries.get(entry.chatKey) === entry) {
+      if (spec.perTurn !== true && !entry.background && this.entries.get(entry.chatKey) === entry) {
         this._armIdle(entry);
 
         if (sleeping(entry)) {
           this.onChange?.({ chatKey: entry.chatKey, event: 'tasks' });
         }
       }
+    }
+  }
+
+  /**
+   * Разовый owned resource закрывается после хода и забывается только при
+   * подтверждённом завершении; отказ удерживает запись и виден в списке процессов.
+   */
+  private async _closePerTurn(entry: LiveEntry): Promise<void> {
+    await this._closeHandle(entry);
+
+    if (this.entries.get(entry.chatKey) === entry) {
+      this._forget(entry, 'разовый ход завершён');
     }
   }
 
@@ -312,12 +356,13 @@ export class ChatLiveSessions {
   has(chatKey: unknown): boolean {
     const entry = this.entries.get(String(chatKey || ''));
 
-    return !!entry && (entry.keepAlive || !!entry.handle?.alive);
+    return !!entry && (entry.keepAlive || entry.requiresConfirmedClose || !!entry.handle?.alive);
   }
 
   /**
-   * Закрытие keepAlive-процесса сначала подтверждает завершение scope и только потом
-   * убирает запись: неизвестный исход оставляет слот занятым до повторного close.
+   * Закрытие keepAlive/confirmed-close процесса сначала подтверждает завершение
+   * scope и только потом убирает запись: неизвестный исход оставляет слот занятым
+   * до повторного close. Обычные сессии сохраняют прежний порядок.
    */
   async close(chatKey: unknown, reason = 'закрыта'): Promise<boolean> {
     const entry = this.entries.get(String(chatKey || ''));
@@ -326,7 +371,7 @@ export class ChatLiveSessions {
       return false;
     }
 
-    if (entry.keepAlive) {
+    if (entry.keepAlive || entry.requiresConfirmedClose) {
       await this._closeHandle(entry);
       this._forget(entry, reason);
     } else {
@@ -340,22 +385,47 @@ export class ChatLiveSessions {
   /**
    * Закрывает все поколения пула и будит ожидающие фон ходы.
    * Уведомление о каждой entry отправляется до ожидания закрытия транспорта.
+   * Confirmed-close записи удерживаются при отказе: общий итог не говорит
+   * «всё закрыто», пока хотя бы один owned resource не подтвердил завершение.
    */
   async closeAll(reason = 'остановка сервера'): Promise<void> {
     this.closed = true;
     const entries = [...this.entries.values()];
-    this.entries.clear();
+    let failed = 0;
 
-    for (const entry of entries) {
+    await Promise.all(entries.map(async (entry) => {
       this._clearIdle(entry);
-      this._notifyClosed(entry, reason);
-    }
 
-    await Promise.all(entries.map((entry) => entry.handle.close().catch((error) => {
-      this.log?.warn?.({ err: (error as Error).message }, 'чат: process scope не подтвердил завершение');
-    })));
+      if (entry.requiresConfirmedClose) {
+        try {
+          await this._closeHandle(entry);
+          this._forget(entry, reason);
+        } catch (error) {
+          failed += 1;
+          this.log?.warn?.({ err: (error as Error).message, chatKey: entry.chatKey },
+            'чат: process scope не подтвердил завершение');
+        }
+
+        return;
+      }
+
+      this._notifyClosed(entry, reason);
+
+      if (this.entries.get(entry.chatKey) === entry) {
+        this.entries.delete(entry.chatKey);
+      }
+
+      await entry.handle.close().catch((error) => {
+        this.log?.warn?.({ err: (error as Error).message }, 'чат: process scope не подтвердил завершение');
+      });
+    }));
+
     if (entries.length) {
-      this.log?.info?.({ count: entries.length, reason }, 'чат: живые сессии закрыты');
+      this.log?.info?.({
+        count: entries.length,
+        failed,
+        reason,
+      }, 'чат: живые сессии закрыты');
       this.onChange?.({ chatKey: '', event: 'closed', reason });
     }
   }
@@ -380,6 +450,11 @@ export class ChatLiveSessions {
       model: entry.model || '',
       effort: entry.effort || '',
       permissionMode: entry.permissionMode || '',
+      // Эффективный профиль прав процесса и состояние подтверждённого cleanup:
+      // причина видна без stderr/env, повтор доступен обычным действием закрытия.
+      ...(entry.handle?.permissionProfile ? { permissionProfile: entry.handle.permissionProfile } : {}),
+      cleanupPending: entry.cleanupPending,
+      cleanupError: entry.cleanupError,
       cwd: entry.cwd || '',
       extraDirs: entry.extraDirs || [],
       openedAt: entry.openedAt,
@@ -471,7 +546,9 @@ export class ChatLiveSessions {
         sessionId: spec.sessionIdAuthoritative === true ? spec.sessionId : spec.sessionId || inherited,
       };
 
-      if (existing.keepAlive) {
+      if (existing.keepAlive || existing.requiresConfirmedClose) {
+        // Новый профиль не открывается до подтверждённого закрытия прежнего:
+        // отказ удерживает запись и слот, повтор использует тот же ресурс.
         await this._closeHandle(existing);
         this._forget(existing, reason);
       } else {
@@ -497,6 +574,10 @@ export class ChatLiveSessions {
         executorId: String(executor?.id ?? ''),
         unsolicited: !!session.unsolicited,
         keepAlive: session.keepAlive === true,
+        requiresConfirmedClose: false,
+        cleanupPending: false,
+        cleanupError: null,
+        closeAttempt: null,
         fingerprint,
         sessionId: spec.sessionId || null,
         // Копия параметров запуска: они зафиксированы на жизнь процесса, и человек по
@@ -644,14 +725,30 @@ export class ChatLiveSessions {
             });
           },
           onExit: ({ reason }: { reason?: string }) => {
-            if (this.entries.get(chatKey) === entry) {
-              this._forget(entry, reason || 'процесс завершился');
-            } else {
+            if (this.entries.get(chatKey) !== entry) {
               this._notifyClosed(entry, reason || 'процесс завершился');
+
+              return;
             }
+
+            // Exit CLI не освобождает owned resource: начинается подтверждённый
+            // cleanup, отказ удерживает запись до явного повтора, а не забывается.
+            if (entry.requiresConfirmedClose) {
+              void this._closeHandle(entry).then(() => {
+                if (this.entries.get(chatKey) === entry) {
+                  this._forget(entry, reason || 'процесс завершился');
+                }
+              }).catch(() => {});
+
+              return;
+            }
+
+            this._forget(entry, reason || 'процесс завершился');
           },
         },
       });
+
+      entry.requiresConfirmedClose = entry.handle.requiresConfirmedClose === true;
 
       if (this.closed || spec.signal?.aborted) {
         await entry.handle.close();
@@ -702,8 +799,16 @@ export class ChatLiveSessions {
         );
         return;
       }
-      this._forget(idle, 'вытеснена по потолку живых сессий');
-      await this._closeHandle(idle);
+
+      if (idle.requiresConfirmedClose) {
+        // Вытеснение owned resource допускается только после подтверждённого
+        // закрытия: отказ удерживает слот и останавливает новый open.
+        await this._closeHandle(idle);
+        this._forget(idle, 'вытеснена по потолку живых сессий');
+      } else {
+        this._forget(idle, 'вытеснена по потолку живых сессий');
+        await this._closeHandle(idle);
+      }
     }
   }
 
@@ -757,6 +862,17 @@ export class ChatLiveSessions {
         this._armIdle(entry);
         return;
       }
+
+      if (entry.requiresConfirmedClose) {
+        void this._closeHandle(entry).then(() => {
+          if (this.entries.get(entry.chatKey) === entry) {
+            this._forget(entry, 'простой');
+          }
+        }).catch(() => {});
+
+        return;
+      }
+
       this._forget(entry, 'простой');
       void this._closeHandle(entry);
     }, this.idleMs);
@@ -766,18 +882,55 @@ export class ChatLiveSessions {
   /**
    * Закрывает процесс entry и помнит это закрытие по чату, пока оно не кончится.
    * Новый процесс того же чата `_acquire` поднимает только после него.
+   * Confirmed-close поколения делят одну in-flight попытку; после отказа она
+   * снимается для повтора, а запись удерживает причину и занятый слот.
    */
   _closeHandle(entry: LiveEntry): Promise<void> {
-    const done = entry.handle.close().then(() => {}, (error) => {
+    if (entry.requiresConfirmedClose && entry.closeAttempt) {
+      return entry.closeAttempt;
+    }
+
+    if (entry.requiresConfirmedClose) {
+      entry.cleanupPending = true;
+    }
+
+    const done = entry.handle.close().then(() => {
+      if (entry.requiresConfirmedClose) {
+        entry.cleanupPending = false;
+        entry.cleanupError = null;
+      }
+    }, (error) => {
+      if (entry.requiresConfirmedClose) {
+        entry.cleanupPending = true;
+        entry.cleanupError = String((error as Error)?.message || error || 'cleanup не подтверждён')
+          .slice(0, 300);
+
+        // Маркер для HTTP-границы: отказ cleanup — отдельный typed исход, а не
+        // обычная ошибка хода; запись и слот остаются занятыми до повтора.
+        if (error && typeof error === 'object') {
+          (error as { processCleanupFailed?: boolean }).processCleanupFailed = true;
+        }
+
+        throw error;
+      }
+
       if (entry.keepAlive) {
         throw error;
       }
     });
     const tracked = done.finally(() => {
+      if (entry.closeAttempt === tracked) {
+        entry.closeAttempt = null;
+      }
+
       if (this.closing.get(entry.chatKey) === tracked) {
         this.closing.delete(entry.chatKey);
       }
     });
+
+    if (entry.requiresConfirmedClose) {
+      entry.closeAttempt = tracked;
+    }
 
     this.closing.set(entry.chatKey, tracked);
 

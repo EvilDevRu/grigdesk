@@ -53,13 +53,19 @@ export function effectivePermissionMode(value: unknown, modes: readonly Permissi
 /**
  * Запрос фиксирует mode вместе с selection до первого await сохранения.
  * Необъявленные режимы legacy providers сохраняют прежний пустой wire-контракт.
+ * Фиксированный профиль общей настройки не требует per-chat выбора и не
+ * перезаписывает сохранённый режим чата: он понадобится при возврате в песочницу.
  */
 export function permissionModeRequest(chat: {
   id: string;
   mode?: string;
   modeSelection?: unknown
 },
-  provider: Policy & Pick<ProviderEntry, 'modes'>) {
+  provider: Policy & Pick<ProviderEntry, 'modes' | 'fixedPermissionProfile'>) {
+  if (provider.fixedPermissionProfile) {
+    return { mode: provider.fixedPermissionProfile.requestMode };
+  }
+
   const result = resolvePermissionMode(chat.mode, provider.modes || [], provider,
     chat.modeSelection, chat.id);
 

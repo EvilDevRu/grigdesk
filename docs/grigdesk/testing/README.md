@@ -24,7 +24,7 @@
 - [Native bridge и отложенные Vue runtime imports в типизированной mounted fixture](browser-viewport-types.md)
 - [Timeout генерируемого child может скрывать SyntaxError](generated-fixture-syntax.md)
 - [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
-- [Native-пробы режимов Codex: loopback, отсутствие CLI, очистка RPC и граница вложенной песочницы](codex-permission-mode-fixtures.md)
+- [Native-пробы режимов Codex: loopback, отсутствие CLI, очистка RPC, граница вложенной песочницы и проведённый допуск «Хост»](codex-permission-mode-fixtures.md)
 - [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)
 - [Гейты DeepSeek: sandbox, unit/SEA, source candidate, host parity и диагностика отказа](deepseek-test-gates.md)
 - [Подтверждение установки: прежняя всплывашка тоже имеет role=dialog](provider-confirmation-target.md)

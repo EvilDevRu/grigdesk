@@ -126,7 +126,9 @@ export function isProvider(value: unknown): value is ProviderEntry {
         && (command.kind == null || command.kind === 'skill')
         && (command.args == null || ['string', 'boolean'].includes(typeof command.args)))))
     && ['settings', 'credentials', 'modes'].every((key) => value[key] == null
-      || (Array.isArray(value[key]) && value[key].every(isRecord)));
+      || (Array.isArray(value[key]) && value[key].every(isRecord)))
+    && (value.fixedPermissionProfile == null
+      || fields(value.fixedPermissionProfile, ['id', 'labelKey', 'hintKey', 'requestMode']));
 }
 
 /**

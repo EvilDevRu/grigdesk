@@ -6,6 +6,12 @@ Effective readback policy/reviewer и sandbox workspaceWrite проверяет�
 Пользовательские native settings не владеют этими параметрами. `workspaceAccess`
 явно получает never/user с прежними roots, сетью и tmp; untrusted runner не меняется.
 
+Общий [режим «Хост»](codex-permission-modes.md#режим-хост) задаёт эффективный
+danger-full-access/never/user и Auto-review не вызывает: без sandbox-границы прежние
+запросы её расширения не возникают. Host не обещает проверку каждой команды и вопрос
+перед каждой записью вне workspace; обязательные надзорные подтверждения GrigDesk
+сохраняются. Описание Auto-review ниже относится к песочным профилям, не к Host.
+
 `item/autoApprovalReview/completed` превращается в ограниченную заметку существующей
 ленты: native status, краткое действие и rationale. Причина сохраняется даже когда
 agentMessage её не повторил. ReviewId дедуплицируется внутри одного хода; разные

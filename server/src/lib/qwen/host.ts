@@ -1,22 +1,20 @@
-import { spawn, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { setTimeout as pause } from 'node:timers/promises';
-import { promisify } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { currentExternalCliProcess, externalCliSpawnSpec }
   from '../providerInstall/externalCliProcess.ts';
 import { inspectCliLeases } from '../providerInstall/leases.ts';
+import { prepareOwnedProcessScope, startOwnedProcessScope }
+  from '../providerInstall/ownedProcessScope.ts';
 import { redactRunnerError } from '../factoryProviderRunner.ts';
 import { qwenConfig, type QwenSnapshot } from './settings.ts';
 import type { QwenLaunchOptions } from './sandbox.ts';
 
 const record = (value: unknown): Record<string, unknown> => isRecord(value) ? value : {};
-const execute = promisify(execFile);
 
 /**
  * Путь менеджера процессов переопределяется только окружением теста (§4в).
@@ -26,172 +24,16 @@ const systemdRunBin = () => process.env.GRIGDESK_QWEN_SYSTEMD_RUN_BIN || '/usr/b
 const systemctlBin = () => process.env.GRIGDESK_QWEN_SYSTEMCTL_BIN || '/usr/bin/systemctl';
 
 /**
- * Срок жизни native scope привязан к отдельному unit приложения, а не терминалу.
- * Unit определяется ОС для собственного процесса; модель не выбирает имя цели сигналов.
+ * Qwen передаёт общему OS-helper свои метки и env-швы; порядок шагов и сообщения
+ * отказа сохраняются, отдельной пробы bus перед запуском у Qwen нет.
  */
-async function hostOwnerUnit(): Promise<string> {
-  const text = await fs.readFile('/proc/self/cgroup', 'utf8');
-  const group = text.split('\n').find((line) => line.startsWith('0::'))?.slice(3);
-  const unit = group?.split('/').reverse().find((part) => /\.(service|scope)$/.test(part));
-
-  if (!unit || !/^[a-zA-Z0-9_.@\\x-]+\.(service|scope)$/.test(unit)
-    || /^user@/.test(unit)
-    || (unit.endsWith('.scope') && !/^app-grigdesk-[a-zA-Z0-9_-]+\.scope$/.test(unit))) {
-    throw Object.assign(new Error('Qwen Host: требуется отдельный user unit приложения.'), {
-      code: 'qwen_host_scope_unavailable',
-    });
-  }
-
-  return unit;
-}
-
-/**
- * В ответе читаются только собственные lifecycle-поля уникального unit.
- * Ошибка user bus не считается доказанным завершением и не заменяется пустым снимком.
- */
-async function unitState(unit: string, env: NodeJS.ProcessEnv) {
-  const result = await execute(systemctlBin(), ['--user', 'show', unit,
-    '--property=LoadState', '--property=ActiveState', '--property=ControlGroup'], {
-    env,
-    encoding: 'utf8',
-    timeout: 3000,
-    maxBuffer: 16384,
-  });
-  const values = Object.fromEntries(result.stdout.trim().split('\n').map((line) => {
-    const at = line.indexOf('=');
-
-    return [line.slice(0, at), line.slice(at + 1)];
-  }));
-
-  return {
-    loaded: values.LoadState,
-    active: values.ActiveState,
-    group: values.ControlGroup || '',
-  };
-}
-
-/**
- * Уникальный scope содержит helper, CLI и все его detached shell/MCP/monitor.
- * BindsTo+After завершает scope при остановке app unit, в том числе после аварии приложения.
- */
-async function startHostScope(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
-  const owner = await hostOwnerUnit();
-  const unit = `grigdesk-qwen-${randomUUID()}.scope`;
-  const child = spawn(systemdRunBin(), [
-    '--user', '--scope', '--collect', '--quiet',
-    '--expand-environment=no', `--unit=${unit}`, `--working-directory=${cwd}`,
-    '--property=KillMode=control-group', '--property=SendSIGKILL=yes',
-    '--property=TimeoutStopSec=2s', `--property=BindsTo=${owner}`, `--property=After=${owner}`,
-    '--', command, ...args,
-  ], {
-    cwd,
-    env,
-    detached: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  let didExit = false;
-  let group = '';
-  let stderr = '';
-  const exited = new Promise<void>((resolve) => {
-    const finish = () => {
-      didExit = true;
-      resolve();
-    };
-
-    child.once('error', finish);
-    child.once('close', finish);
-  });
-
-  child.stderr.on('data', (data: Buffer) => {
-    stderr = (stderr + data.toString()).slice(-8192);
-  });
-
-  /**
-   * Успешный stop подтверждается inactive/not-found и пустой собственной cgroup.
-   * При отказе остаются lease и live entry; чужие unit/PID не являются fallback-целями.
-   */
-  const close = async () => {
-    let state = await unitState(unit, env);
-
-    if (state.loaded !== 'not-found' && !['inactive', 'failed'].includes(state.active || '')) {
-      await execute(systemctlBin(), ['--user', 'stop', unit], {
-        env,
-        timeout: 8000,
-        encoding: 'utf8',
-      }).catch(async () => {
-        await execute(systemctlBin(), ['--user', 'kill', '--kill-whom=all', '--signal=KILL', unit], {
-          env,
-          timeout: 3000,
-          encoding: 'utf8',
-        });
-      });
-
-      state = await unitState(unit, env);
-    }
-
-    const deadline = Date.now() + 3000;
-
-    while (true) {
-      state = await unitState(unit, env);
-
-      const inactive = state.loaded === 'not-found' || ['inactive', 'failed'].includes(state.active || '');
-      const events = group ? await fs.readFile(path.join('/sys/fs/cgroup', group, 'cgroup.events'), 'utf8')
-        .catch((error) => {
-          if (error.code === 'ENOENT') {
-            return 'populated 0';
-          }
-
-          throw error;
-        }) : '';
-
-      if (inactive && (!group || /^populated 0$/m.test(events))) {
-        break;
-      }
-
-      if (Date.now() >= deadline) {
-        throw new Error('Qwen Host: завершение собственного process scope не подтверждено.');
-      }
-
-      await pause(20);
-    }
-
-    if (!didExit) {
-      child.kill('SIGTERM');
-
-      const timer = setTimeout(() => child.kill('SIGKILL'), 500);
-
-      await exited;
-      clearTimeout(timer);
-    }
-  };
-  const ready = (async () => {
-    const deadline = Date.now() + 15000;
-
-    while (Date.now() < deadline && !didExit) {
-      const state = await unitState(unit, env);
-
-      if (state.active === 'active' && state.group.endsWith('/' + unit)) {
-        group = state.group;
-
-        return;
-      }
-
-      await pause(20);
-    }
-
-    throw Object.assign(new Error('Qwen Host: не удалось открыть user process scope.'), {
-      code: 'qwen_host_scope_unavailable',
-    });
-  })();
-
-  return {
-    child,
-    ready,
-    close,
-    stderr: () => stderr,
-  };
-}
+const qwenScopeOptions = {
+  unitPrefix: 'grigdesk-qwen',
+  label: 'Qwen Host',
+  unavailableCode: 'qwen_host_scope_unavailable',
+  systemdRunBin,
+  systemctlBin,
+};
 
 /**
  * Системный слой копируется во временный overlay без изменения исходного JSONC.
@@ -320,7 +162,9 @@ export async function startQwenHost(
 
     delete launch.options.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD_PROVIDER;
 
-    const scope = await startHostScope(launch.command, launch.args, options.cwd, launch.options.env);
+    const preparedOwner = await prepareOwnedProcessScope(qwenScopeOptions);
+    const scope = startOwnedProcessScope(preparedOwner, launch.command, launch.args,
+      options.cwd, launch.options.env);
 
     cleanupScope = scope.close;
 

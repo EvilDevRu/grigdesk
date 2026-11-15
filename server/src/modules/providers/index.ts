@@ -327,6 +327,13 @@ async function providersModule(
       const commands = universal && typeof ex.commands === 'function'
         ? normalizeCommands(await Promise.resolve(ex.commands(config)).catch(() => []))
         : [];
+      // Фиксированный профиль следующего хода объявляет адаптер из серверных
+      // настроек; это презентация общей настройки, а не допуск запуска.
+      const fixedPermissionProfile = chatEnabled && typeof ex.fixedPermissionProfile === 'function'
+        ? ex.fixedPermissionProfile(
+          (prefs?.read().providerSettings as Record<string, Record<string, unknown>> | undefined)?.[ex.id],
+        )
+        : undefined;
 
       providers.push({
         id: ex.id,
@@ -411,6 +418,7 @@ async function providersModule(
         defaultPermissionMode: ex.defaultPermissionMode,
         permissionModeSelectionPolicy: ex.permissionModeSelectionPolicy,
         permissionModesRequiringExplicitSelection: ex.permissionModesRequiringExplicitSelection,
+        ...(fixedPermissionProfile ? { fixedPermissionProfile } : {}),
         commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
         settings: await settingsOf(ex),

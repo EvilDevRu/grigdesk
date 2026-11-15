@@ -73,6 +73,14 @@ Questions prepared from help open a separate conversation and wait for you to se
 Chats use the executor's active [access profile](access-profiles.md). Switching keeps messages;
 a note explains when a new native session is needed. If sign-in is required, restore that profile.
 Another account is not selected automatically, and a turn with an unknown outcome is not replayed.
+
+Codex permissions come from the shared [Host mode](settings.md#codex-host-mode) in the
+executor settings, not a per-chat choice. With Host enabled a read-only "Host" label replaces
+the mode select; the current turn's permissions and the next turn's setting are distinguished.
+Until the current turn's permissions are confirmed by the live run, the window says so explicitly
+and does not pass the next turn's setting off as fact. Saving the setting does not interrupt a
+running turn; the next turn gets the new profile after the previous process is closed with
+confirmation.
 “New session…” notes stay in history before the agent's work, rather than pinned by the composer.
 New reasoning, tools and answers appear after them.
 

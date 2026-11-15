@@ -34,7 +34,9 @@ function uiFacadeStub(prefix) {
 
   return [
     ...imports,
-    'export { t, messageRef, resolveUiText } from "./src/services/locale.ts";',
+    'export { t, messageRef, resolveUiText, uiLocale } from "./src/services/locale.ts";',
+    'import { setUiLocale } from "./src/services/locale.ts";',
+    `globalThis.${prefix}SetUiLocale = setUiLocale;`,
     'export { vTooltip } from "./src/services/tooltipDirective.ts";',
     `export { ${names} };`,
     'export const confirmDialog = (...args) => {',
