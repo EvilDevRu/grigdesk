@@ -468,11 +468,12 @@ function serverInstaller(t, {
   t.after(() => rmSync(container, { recursive: true, force: true }));
 
   for (const directory of [fakeBin, home, path.join(root, 'web'), path.join(root, 'bin'),
-    path.join(root, 'tracker')]) {
+    path.join(root, 'tracker'), path.join(root, 'routes')]) {
     mkdirSync(directory, { recursive: true });
   }
 
   for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/tracker-cli.sh',
+    'deploy/lib/pipeline-cli.sh', 'deploy/lib/routes-cli.sh', 'deploy/lib/agent-cli.sh',
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
     'shared/package.json',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts',
@@ -492,11 +493,17 @@ function serverInstaller(t, {
   // npm пишет полный argv; сборка tracker создаёт исполняемый результат, который проверяет helper.
   writeFileSync(path.join(fakeBin, 'npm'), [
     '#!/bin/bash',
-    `printf 'npm %s\\n' "$*" >> ${shellQuote(otherLog)}`,
-    'if [[ "$1" == --prefix && "$2" == */tracker && "$3" == run && "$4" == build ]]; then',
-    trackerFails ? '  exit 4' : '  :',
-    '  printf \'#!/bin/sh\\n\' > "$2/../bin/tracker"',
-    '  chmod 755 "$2/../bin/tracker"',
+    "printf 'npm %s\\n' \"$*\" >> " + shellQuote(otherLog),
+    'if [[ "$1" == --prefix && ( "$2" == */tracker || "$2" == */routes ) && "$3" == run ]]; then',
+    '  case "$4" in',
+    '    build) program=tracker ;;',
+    '    build:pipeline) program=pipeline ;;',
+    '    *) exit 0 ;;',
+    '  esac',
+    '  [[ "$2" != */routes ]] || program=routes',
+    trackerFails ? '  [[ "$program" != tracker ]] || exit 4' : '  :',
+    "  printf '#!/bin/sh\\n' > \"$2/../bin/$program\"",
+    '  chmod 755 "$2/../bin/$program"',
     'fi',
     'exit 0',
     '',
@@ -784,4 +791,24 @@ test('build all: установка окна с --keep-runtime сохраняе�
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(box.runtime, 'utf8'), previous);
   assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
+});
+
+test('BL-PIPELINE: full source install ставит три CLI, unit-only не ставит ни одного', (t) => {
+  const full = serverInstaller(t);
+
+  assert.equal(full.status, 0, full.stderr);
+  assert.match(full.others, /npm --prefix .+\/tracker run build:pipeline\n/u);
+  assert.match(full.others, /npm --prefix .+\/routes run build\n/u);
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/routes'))
+    .endsWith('/code/bin/routes'));
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/tracker'));
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/pipeline')).endsWith('/code/bin/pipeline'));
+
+  const unit = serverInstaller(t, { unitOnly: true });
+
+  assert.equal(unit.status, 0, unit.stderr);
+  assert.equal(unit.others, '');
+  assert.equal(existsSync(path.join(unit.home, '.local/bin/tracker')), false);
+  assert.equal(existsSync(path.join(unit.home, '.local/bin/pipeline')), false);
+  assert.equal(existsSync(path.join(unit.home, '.local/bin/routes')), false);
 });

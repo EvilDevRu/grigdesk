@@ -72,7 +72,8 @@ export async function fixture(t, { source = true, binary = true, release = false
   await fs.cp(path.join(repository, 'deploy'), path.join(root, 'deploy'), { recursive: true });
 
   for (const directory of ['bin', 'cli', 'tools', 'server/src', 'server/node_modules',
-    'web/node_modules', 'tracker/node_modules', 'desktop', 'shared/desktop', 'shared/runtime',
+    'web/node_modules', 'tracker/node_modules', 'routes/node_modules', 'voice/node_modules', 'desktop',
+    'shared/desktop', 'shared/runtime',
     'shared/node', 'server/scripts', 'server/build', 'server/src/lib']) {
     await fs.mkdir(path.join(root, directory), { recursive: true });
   }
@@ -211,12 +212,14 @@ export async function fixture(t, { source = true, binary = true, release = false
 }
 
 /**
- * Контракт all: общие зависимости, затем параллельные цепочки сервера, окна и tasks,
+ * Контракт all: общие зависимости, затем параллельные цепочки сервера, окна, tasks и voice,
  * установка окна строго последней. Цепочки могут интерливиться в любом порядке.
  */
 export function expectedAllPhases(box) {
   const cache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/server-binary');
   const trackerCache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/tracker-binary');
+  const routesCache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/routes-binary');
+  const voiceCache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/voice-binary');
 
   return {
     deps: [{
@@ -265,6 +268,29 @@ export function expectedAllPhases(box) {
           args: ['--prefix', path.join(box.root, 'tracker'), 'run', 'build', '--',
             '--out-dir', path.join(box.root, 'bin'),
             '--cache-dir', path.join(trackerCache, 'cache')],
+        },
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'tracker'), 'run', 'build:pipeline', '--',
+            '--out-dir', path.join(box.root, 'bin'),
+            '--cache-dir', path.join(trackerCache, 'cache')],
+        },
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'routes'), 'run', 'build', '--',
+            '--out-dir', path.join(box.root, 'bin'),
+            '--cache-dir', path.join(routesCache, 'cache')],
+        },
+      ],
+      [
+        {
+          command: 'npm',
+          cwd: '/',
+          args: ['--prefix', path.join(box.root, 'voice'), 'run', 'build', '--',
+            '--out-dir', path.join(box.root, 'bin'),
+            '--cache-dir', path.join(voiceCache, 'cache')],
         },
       ],
     ],

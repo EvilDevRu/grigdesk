@@ -370,6 +370,42 @@ test('build all: без node_modules tasks ставит зависимости �
   assert.ok(calls.indexOf(deps) < build, 'сборка tasks началась до зависимостей');
 });
 
+test('build: отказ voice оставляет установку окна несостоявшейся, код сохранён', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', path.join(box.root, 'voice'), 27);
+
+  const result = await box.run(['build']);
+  const calls = await box.calls();
+
+  assert.equal(result.code, 27, result.stderr);
+  assert.match(result.stderr, /не удалось: voice/u);
+  assert.ok(calls.some((call) => call.args.includes('install:binary')),
+    'сервер не собирался параллельно');
+  assert.ok(!calls.some((call) => call.command === 'desktop' && call.args.includes('install')));
+  assert.doesNotMatch(result.stdout, /Закройте окно/);
+});
+
+test('build all: без node_modules voice ставит зависимости перед сборкой', async (t) => {
+  const box = await fixture(t);
+
+  await fs.rm(path.join(box.root, 'voice/node_modules'), { recursive: true });
+
+  const result = await box.run(['build']);
+  const calls = await box.calls();
+  const deps = calls.find((call) => call.args.includes('install')
+    && call.args.includes('--no-audit') && call.args.includes(path.join(box.root, 'voice')));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(deps, 'зависимости voice не ставились');
+  assert.ok(deps.args.includes('--no-fund'));
+
+  const build = calls.findIndex((call) => call.args.includes(path.join(box.root, 'voice'))
+    && call.args.includes('build'));
+
+  assert.ok(calls.indexOf(deps) < build, 'сборка voice началась до зависимостей');
+});
+
 test('build server: D и кэш по умолчанию вычисляются из временного HOME', async (t) => {
   const box = await fixture(t);
   const result = await box.run(['build', 'server'], {
@@ -522,4 +558,35 @@ test('build all: другая установка сохраняется без �
   await assert.rejects(fs.stat(`${file}.build-selection`), { code: 'ENOENT' });
   assert.match(result.stdout, /Окно сохраняет выбор другой установки сервера/);
   assert.doesNotMatch(result.stdout, /откройте снова — запустится новый код/);
+});
+
+
+test('build routes: отказ своего пакета сохраняет код и не устанавливает окно', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', path.join(box.root, 'routes'), 37);
+
+  const result = await box.run(['build', 'all']);
+  const calls = await box.calls();
+
+  assert.equal(result.code, 37, result.stderr);
+  assert.ok(calls.some((call) => call.args.includes(path.join(box.root, 'tracker'))));
+  assert.ok(!calls.some((call) => call.command === 'desktop' && call.args.includes('install')));
+});
+
+test('build routes: зависимости своего пакета устанавливаются до его сборки', async (t) => {
+  const box = await fixture(t);
+  const prefix = path.join(box.root, 'routes');
+
+  await fs.rm(path.join(prefix, 'node_modules'), { recursive: true });
+
+  const result = await box.run(['build', 'all']);
+  const calls = (await box.calls()).filter((call) => call.args.includes(prefix));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(calls.map((call) => call.args), [
+    ['--prefix', prefix, 'install', '--no-audit', '--no-fund'],
+    ['--prefix', prefix, 'run', 'build', '--', '--out-dir', path.join(box.root, 'bin'),
+      '--cache-dir', path.join(box.env.XDG_CACHE_HOME, 'grigdesk/routes-binary/cache')],
+  ]);
 });

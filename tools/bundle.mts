@@ -125,6 +125,28 @@ async function main(): Promise<void> {
 
         return path.join(input.outDir, 'tracker');
       },
+      async pipeline(input) {
+        await run('npm', ['--prefix', path.join(root, 'tracker'), 'run', 'build:pipeline', '--',
+          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
+
+        return path.join(input.outDir, 'pipeline');
+      },
+      async routes(input) {
+        await run('npm', ['--prefix', path.join(root, 'routes'), 'run', 'build', '--',
+          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
+
+        return path.join(input.outDir, 'routes');
+      },
+      /**
+       * Автономный voice собирается своим pinned Node в отдельный выход bundle.
+       * Синтез, модели и установочные эффекты для сборки команды не требуются.
+       */
+      async voice(input) {
+        await run('npm', ['--prefix', path.join(root, 'voice'), 'run', 'build', '--',
+          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
+
+        return path.join(input.outDir, 'voice');
+      },
       async relay(input) {
         await run('npm', ['--prefix', path.join(root, 'relay'), 'run', 'build', '--',
           '--out-dir', input.outDir], input);

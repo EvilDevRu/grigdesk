@@ -13,7 +13,7 @@ import { decodeChannelEntry } from '../../shared/runtime/releaseChannelContracts
 const execute = promisify(execFile);
 
 /**
- * Минимальная фикстура сборки: пять builders пишут настоящие файлы, tar настоящий.
+ * Минимальная фикстура сборки: шесть builders пишут настоящие файлы, tar настоящий.
  * Ключ ed25519 одноразовый: проверяются и подпись, и содержимое channel.json.
  * readSourceState обязателен: без него executeBundle зовет git во временном каталоге.
  */
@@ -38,6 +38,9 @@ async function fixture(t) {
   const targets = {
     server: 'bin/grigdesk-server',
     tracker: 'bin/tracker',
+    pipeline: 'bin/pipeline',
+    routes: 'bin/routes',
+    voice: 'bin/voice',
     relay: 'bin/grigdesk-relay',
     deepseek: 'bin/deepseek',
     window: 'GrigDesk',

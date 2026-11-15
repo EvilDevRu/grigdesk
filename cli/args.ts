@@ -63,10 +63,10 @@ grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl artifacts-cleanup [--dry-run] [--older-than 7d] [--keep-generations 3] [--json]
                                 Срок: положительное целое с m (минуты), h (часы), d (сутки)
-grigdesk-ctl desktop … | tracker … | mobile … | release …
+grigdesk-ctl desktop … | tracker … | pipeline … | voice … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
 grigdesk-ctl build [all|server|web|window|deepseek|apk]
-                                Без аргументов: сервер → веб → окно (all по умолчанию)
+                                Без аргументов: сервер, окно, tasks и voice (all)
                                 apk: Android-приложение со встроенным вебом
 grigdesk-ctl dev | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help

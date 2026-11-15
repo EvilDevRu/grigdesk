@@ -550,6 +550,7 @@ test('BS-RESULTS: узкий терминал, resize, NO_COLOR и TERM=dumb б�
 
   await session.wait(totalTime, 10000);
   assert.ok(visibleLines(session.output()).every((line) => [...line].length <= 40), session.output());
+  assert.match(session.output(), /≈/u, 'оценка времени видна в узком терминале');
   assert.doesNotMatch(session.output(), /\x1b\[[\d;]*m/u);
 
   const log = await buildLog(box);

@@ -27,7 +27,7 @@
 - [Автономный установщик: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
 - [Подписанный канал сайта: CI, публикация обеих редакций справки RU/EN и восстановление](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)
-- [Release workflow: ручной full/skip, этапы, логи, явные install-скрипты и проверенные загрузки](release-workflow-validation.md)
+- [Release workflow: ручной full/skip, этапы, обязательные voice_tests/routes_tests, логи, явные install-скрипты и проверенные загрузки](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, проверка пакетов и сверка Git-дерева](release-validation-reuse.md)
 - [Фоновый реестр исполнителей: бюджет 1,2 с, сохранение карточек при переименовании, wait и refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
@@ -38,7 +38,7 @@
 - [Общие экраны консоли: состояния, команды, ввод, QR, журналы и сборка](cli-terminal-screens.md)
 - [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
 - [Каталог плагинов: автоматический выбор сайта и закрытый локальный API](../plugins/plugin-marketplace.md)
-- [Сборка из исходников: сверка серверных npm-зависимостей, сервер, веб, окно и задачи Б24](ctl-build.md)
+- [Сборка из исходников: сверка npm-зависимостей, сервер, веб, окно, агентские CLI и четвёртый трек voice](ctl-build.md)
 - [Android APK в меню сборки и отдельной команде, пути и ошибки](ctl-build-apk.md)
 - [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
 - [E0 без baseline: функциональные ворота, cold-порог и приватный HOME независимо от umask](server-binary-smoke-baseline.md)
@@ -114,4 +114,4 @@
 
 - [История: Исторический embedded переход DeepSeek: публикация и восстановление](deepseek-release-transition.md)
 
-- [Обычная установка, подписанный v2, внешний worker, применение до обычного Stop и восстановление](installed-release-updates.md)
+- [Обычная установка, подписанный v2 с bin/voice и bin/pipeline, внешний worker, применение до обычного Stop и восстановление](installed-release-updates.md)

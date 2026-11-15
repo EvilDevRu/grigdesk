@@ -38,7 +38,7 @@
   "devices": "Устройства",
   "devicesDescription": "привязать телефон по QR, список, отозвать",
   "build": "Сборка",
-  "buildDescription": "сервер, веб, окно, tasks, DeepSeek, APK, переносимый комплект",
+  "buildDescription": "сервер, веб, окно, tasks, voice, DeepSeek, APK, переносимый комплект",
   "development": "Разработка",
   "developmentDescription": "dev-режим, зависимости, run",
   "exit": "Выход",
@@ -60,7 +60,7 @@
   "namePrompt": "Введите имя устройства (Esc — отмена):",
   "idPrompt": "Введите id устройства (Esc — отмена):",
   "all": "Всё",
-  "allDescription": "(server, desktop, tasks) — параллельная сборка и установка",
+  "allDescription": "(server, desktop, tasks, voice) — параллельная сборка и установка",
   "serverOnly": "Только сервер",
   "serverOnlyDescription": "собрать и установить серверный ELF",
   "web": "Только веб",
@@ -89,7 +89,7 @@
   "failed": "Ошибка: {step}, код {code}",
   "interrupted": "прервано",
   "total": "Общее время: {time}",
-  "summaryAll": "Поставлены сервер, веб, окно и tasks.",
+  "summaryAll": "Поставлены сервер, веб, окно, tasks и voice.",
   "summaryServer": "Поставлен сервер: {path}",
   "summaryWeb": "Собран веб: {path}",
   "summaryWindow": "Поставлено окно: {path}; веб собран.",
@@ -139,6 +139,13 @@
       "deps": "Tasks: зависимости",
       "build": "Tasks: сборка"
     },
+    "pipeline": {
+      "build": "Конвейер: сборка CLI"
+    },
+    "routes": {
+      "deps": "Маршруты: зависимости",
+      "build": "Маршруты: сборка CLI"
+    },
     "deepseek": {
       "deps": "DeepSeek: зависимости",
       "prepare": "DeepSeek: подготовка среды",
@@ -150,6 +157,10 @@
       "smoke-coding-plan": "DeepSeek: живой smoke (coding-plan)",
       "install": "DeepSeek: установка",
       "prune": "DeepSeek: чистка кэша"
+    },
+    "voice": {
+      "deps": "Voice: зависимости",
+      "build": "Voice: сборка"
     }
   },
   "screens": {

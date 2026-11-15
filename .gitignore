@@ -64,8 +64,18 @@ web/.generated/markdown/
 
 # Готовый tracker и проверяемый кэш его сборки SEA.
 /bin/tracker
+/bin/pipeline
+/bin/routes
 /bin/.tracker-*.tmp
+/bin/.pipeline-*.tmp
+/bin/.routes-*.tmp
 /tracker/.cache/
+/routes/.cache/
+
+# Готовый voice и проверяемый кэш его сборки SEA.
+/bin/voice
+/bin/.voice-*.tmp
+/voice/.cache/
 
 # Готовый DeepSeek и отдельные зависимости и кэш его SEA-сборки.
 /bin/deepseek

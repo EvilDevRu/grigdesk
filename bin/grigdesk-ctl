@@ -65,6 +65,20 @@ if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/
       }
       exec "$DIR/bin/tracker" "${@:2}"
       ;;
+    voice)
+      [[ -f "$DIR/bin/voice" && -x "$DIR/bin/voice" ]] || {
+        echo 'Установите отдельный ELF voice в bin этой установки (npm --prefix voice run build).' >&2
+        exit 1
+      }
+      exec "$DIR/bin/voice" "${@:2}"
+      ;;
+    pipeline)
+      [[ -f "$DIR/bin/pipeline" && -x "$DIR/bin/pipeline" ]] || {
+        echo 'Установите отдельный ELF pipeline в bin этой установки.' >&2
+        exit 1
+      }
+      exec "$DIR/bin/pipeline" "${@:2}"
+      ;;
     desktop)
       if [[ "$PORTABLE" == 1 ]]; then
         if [[ "${2:-}" != use-server || $# != 3 ]]; then
@@ -114,6 +128,26 @@ if [[ -f "$DIR/release.json" ]]; then
       fi
 
       exec "$DIR/bin/tracker" "$@"
+      ;;
+    voice)
+      shift
+
+      if [[ ! -x "$DIR/bin/voice" ]]; then
+        echo "Повреждён комплект: нет bin/voice" >&2
+        exit 1
+      fi
+
+      exec "$DIR/bin/voice" "$@"
+      ;;
+    pipeline)
+      shift
+
+      if [[ ! -x "$DIR/bin/pipeline" ]]; then
+        echo "Повреждён комплект: нет bin/pipeline" >&2
+        exit 1
+      fi
+
+      exec "$DIR/bin/pipeline" "$@"
       ;;
     desktop)
       shift
@@ -270,10 +304,10 @@ developer_command() {
     window_install
   }
 
-  # Задачи Б24 (tasks) собираются своим ELF из tracker/: закреплённый Node и атомарная
-  # публикация прямо в bin/tracker самим сборщиком. Зависимости ставятся только при
+  # Агентские CLI собираются последовательно: tracker/pipeline из tracker/, routes из routes/.
+  # Каждый пакет использует закреплённый Node и атомарную публикацию. Зависимости ставятся при
   # отсутствии — как у deepseek, повторный запуск живое дерево не трогает.
-  build_tracker() {
+  build_agent_clis() {
     local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/tracker-binary"
 
     if [ ! -d "$DIR/tracker/node_modules" ]; then
@@ -285,6 +319,37 @@ developer_command() {
     fi
 
     observed_step tracker.build npm --prefix "$DIR/tracker" run build -- \
+      --out-dir "$DIR/bin" --cache-dir "$cache/cache" || return $?
+    observed_step pipeline.build npm --prefix "$DIR/tracker" run build:pipeline -- \
+      --out-dir "$DIR/bin" --cache-dir "$cache/cache" || return $?
+    local routes_cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/routes-binary"
+
+    if [ ! -d "$DIR/routes/node_modules" ]; then
+      observed_step routes.deps npm --prefix "$DIR/routes" install --no-audit --no-fund \
+        || return $?
+    else
+      build_event start routes.deps
+      build_event end routes.deps 0
+    fi
+
+    observed_step routes.build npm --prefix "$DIR/routes" run build -- \
+      --out-dir "$DIR/bin" --cache-dir "$routes_cache/cache" || return $?
+  }
+
+  # Озвучка собирается независимым ELF; загрузка движков не нужна для сборки команды.
+  # Кэш закреплённого Node отделён от tracker, публикация идёт прямо в bin/voice.
+  build_voice() {
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/voice-binary"
+
+    if [ ! -d "$DIR/voice/node_modules" ]; then
+      observed_step voice.deps npm --prefix "$DIR/voice" install --no-audit --no-fund \
+        || return $?
+    else
+      build_event start voice.deps
+      build_event end voice.deps 0
+    fi
+
+    observed_step voice.build npm --prefix "$DIR/voice" run build -- \
       --out-dir "$DIR/bin" --cache-dir "$cache/cache" || return $?
   }
 
@@ -482,19 +547,25 @@ developer_command() {
         # node_modules последовательно, дальше сборки не спорят за деревья npm.
         build_step web observed_step web.dependencies ensure_deps || return $?
 
-        # Три цепочки собираются параллельно: сервер, окно (веб и упаковка AppImage)
-        # и задачи Б24. Их каталоги и выходы не пересекаются. Итоговый код — первой
-        # отказавшей цепочки в порядке сервер → окно → tasks.
+        # Четыре цепочки собираются параллельно: сервер, окно (веб и упаковка AppImage),
+        # задачи Б24 и voice. Их каталоги и выходы не пересекаются. Итоговый код — первой
+        # отказавшей цепочки в порядке сервер → окно → tasks → voice.
         track_server() { build_step server build_server; }
         track_desktop() {
           build_step web observed_step web.build build_web || return $?
           build_step window window_package
         }
-        track_tasks() { build_step tasks build_tracker; }
+        track_tasks() { build_step tasks build_agent_clis; }
+        # Voice сообщает собственные стадии в общий наблюдатель сборки.
+        # Эта цепочка завершится до установки окна и отложенной привязки сервера.
+        track_voice() {
+          build_step voice build_voice
+        }
 
         track_server & server_job=$!
         track_desktop & desktop_job=$!
         track_tasks & tasks_job=$!
+        track_voice & voice_job=$!
 
         parallel_code=0
         wait "$server_job" || parallel_code=$?
@@ -510,6 +581,14 @@ developer_command() {
 
           if [[ "$parallel_code" == 0 ]]; then
             parallel_code=$tasks_code
+          fi
+        }
+
+        wait "$voice_job" || {
+          voice_code=$?
+
+          if [[ "$parallel_code" == 0 ]]; then
+            parallel_code=$voice_code
           fi
         }
 
@@ -562,7 +641,7 @@ developer_command() {
       fi
 
       case "$build_target" in
-        all) echo 'Поставлены сервер, веб, окно и tasks.' ;;
+        all) echo 'Поставлены сервер, веб, окно, tasks и voice.' ;;
         server) echo "Поставлен сервер: $DIR/bin/grigdesk-server" ;;
         web) echo "Собран веб: $DIR/web/dist" ;;
         window) echo "Поставлено окно: $DIR/bin/grigdesk-app; веб собран." ;;
@@ -641,6 +720,28 @@ case "$CMD" in
     source "$DIR/deploy/lib/runtime-env.sh"
     grigdesk_require_node
     exec node "$DIR/tracker/src/main.ts" "$@"
+    ;;
+  voice)
+    shift
+
+    if [[ -x "$DIR/bin/voice" ]]; then
+      exec "$DIR/bin/voice" "$@"
+    fi
+
+    source "$DIR/deploy/lib/runtime-env.sh"
+    grigdesk_require_node
+    exec node "$DIR/voice/src/main.ts" "$@"
+    ;;
+  pipeline)
+    shift
+
+    if [[ -x "$DIR/bin/pipeline" ]]; then
+      exec "$DIR/bin/pipeline" "$@"
+    fi
+
+    source "$DIR/deploy/lib/runtime-env.sh"
+    grigdesk_require_node
+    exec node "$DIR/tracker/src/pipelineMain.ts" "$@"
     ;;
   mobile|release)
     shift

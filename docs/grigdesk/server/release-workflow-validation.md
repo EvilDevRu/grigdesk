@@ -17,7 +17,7 @@
 Выражения `${{ runner.temp }}` в `steps[*].env` для ключей публикации допустимы.
 
 После переименования CLI задач сборка устанавливает зависимости `tracker/`;
-прежней папки `b24/` в checkout нет. Порядок установки server/web/mobile/tracker/relay/deepseek/desktop
+прежней папки `b24/` в checkout нет. Порядок установки server/web/mobile/tracker/routes/voice/relay/deepseek/desktop
 и закреплённые версии всех четырёх Actions, включая загрузку артефактов, проверяются контрактными тестами.
 
 `mobile ci` выполняется до серверных тестов: общая программа TypeScript включает
@@ -94,8 +94,19 @@ Skip несовместим с validation_run: подтверждение пре
 отдельным режимом, а не отсутствием проверки. Причина skip входит также в оба текста
 подписанного описания и testValidation файла release-acceptance.json.
 
-В full server/shared/руководство и web выполняются параллельно. Три серверных набора
-имеют continue-on-error для сбора результатов; итоговые ворота требуют outcome success
+Зависимости `voice/` устанавливаются через `npm --prefix voice ci --include=dev`
+в jobs server/web/build до потребления. В server отдельный `voice_tests` запускает
+`npm --prefix voice test` через сторож памяти пакета; платный синтез и настоящие
+установки моделей тестами не выполняются. Его outcome `VOICE_RESULT` обязателен
+в общих серверных воротах. Bundle включает stage voice и `bin/voice` в серверный архив.
+
+Зависимости отдельного `routes/` готовятся в server/web/build через
+`npm --prefix routes ci --include=dev`. Шаг `routes_tests` выполняет строгие типы
+и профильные команды на HTTP-фикстурах; `ROUTES_RESULT=success` обязателен в общих
+серверных воротах. Серверный архив содержит отдельный ELF `bin/routes`.
+
+В full задания server и web выполняются параллельно. Пять последовательных наборов
+внутри server имеют continue-on-error для сбора результатов; итоговые ворота требуют outcome success
 каждого. Web не имеет continue-on-error. Сборка требует успех обоих jobs в full либо
 фактический skipped обоих jobs при согласованном skip или подтверждённом reuse.
 Провал или отмена уже запущенного теста не маскируются решением о пропуске.

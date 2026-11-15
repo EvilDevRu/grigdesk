@@ -292,14 +292,12 @@ async function observeBuild(
     const width = Math.max(4, Math.min(30, session.columns - 12));
     const filled = Math.floor(width * estimate.percent / 100);
 
-    lines.push({ text: '' });
-    lines.push({
-      text: `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(estimate.percent)}%`,
+    // Итог расположен перед стадиями: новые CLI не прячут процент на терминале 80×24.
+    // Подробные стадии и журнал сохраняют прежний порядок ниже сводной строки.
+    lines.unshift({
+      text: `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(estimate.percent)}%`
+        + `  ${duration(elapsed)} / ≈ ${duration(elapsed + estimate.remainingMs)}`,
       tone: succeeded ? 'success' : 'accent',
-    });
-    lines.push({
-      text: `${duration(elapsed)} / ≈ ${duration(elapsed + estimate.remainingMs)}`,
-      tone: 'muted',
     });
     lines.push({ text: `› ${lastLine}`, tone: 'muted' });
     lines.push({ text: '' }, { text: t('log', { path: log.path }), tone: 'muted' });

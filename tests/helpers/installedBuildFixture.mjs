@@ -85,7 +85,11 @@ export async function installedBuild(t, channel, options = {}) {
 
   const builders = {};
 
-  for (const name of ['server', 'window', 'tracker', 'relay', 'deepseek']) {
+  for (const name of ['server', 'window', 'tracker', 'pipeline', 'routes', 'voice', 'relay', 'deepseek']) {
+    if (options.omitBuilder === name) {
+      continue;
+    }
+
     builders[name] = async (input) => {
       if (options.failBuilder === name) {
         throw new Error(`fixture_builder_failed:${name}`);

@@ -38,7 +38,7 @@
   "devices": "Devices",
   "devicesDescription": "pair with QR, list, revoke",
   "build": "Build",
-  "buildDescription": "server, web, window, tasks, DeepSeek, APK, portable bundle",
+  "buildDescription": "server, web, window, tasks, voice, DeepSeek, APK, portable bundle",
   "development": "Development",
   "developmentDescription": "dev mode, dependencies, run",
   "exit": "Exit",
@@ -60,7 +60,7 @@
   "namePrompt": "Device name (Esc to cancel):",
   "idPrompt": "Device id (Esc to cancel):",
   "all": "Everything",
-  "allDescription": "(server, desktop, tasks) — parallel build and install",
+  "allDescription": "(server, desktop, tasks, voice) — parallel build and install",
   "serverOnly": "Server only",
   "serverOnlyDescription": "build and install server ELF",
   "web": "Web only",
@@ -89,7 +89,7 @@
   "failed": "Failed: {step}, code {code}",
   "interrupted": "interrupted",
   "total": "Total time: {time}",
-  "summaryAll": "Installed server, web, window and tasks.",
+  "summaryAll": "Installed server, web, window, tasks and voice.",
   "summaryServer": "Installed server: {path}",
   "summaryWeb": "Built web: {path}",
   "summaryWindow": "Installed window: {path}; web built.",
@@ -139,6 +139,13 @@
       "deps": "Tasks: dependencies",
       "build": "Tasks: build"
     },
+    "pipeline": {
+      "build": "Pipeline: CLI build"
+    },
+    "routes": {
+      "deps": "Routes: dependencies",
+      "build": "Routes: CLI build"
+    },
     "deepseek": {
       "deps": "DeepSeek: dependencies",
       "prepare": "DeepSeek: prepare runtime",
@@ -150,6 +157,10 @@
       "smoke-coding-plan": "DeepSeek: live smoke (coding-plan)",
       "install": "DeepSeek: install",
       "prune": "DeepSeek: prune cache"
+    },
+    "voice": {
+      "deps": "Voice: dependencies",
+      "build": "Voice: build"
     }
   },
   "screens": {

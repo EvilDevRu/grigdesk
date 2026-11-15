@@ -98,16 +98,30 @@ fi
 # прежняя ссылка остаётся, повторить шаг можно одной командой из предупреждения. Код 2 — сборка
 # прошла, но чужой файл в PATH не тронут; об этом helper уже предупредил сам.
 tracker_status=0
+pipeline_status=0
+routes_status=0
 if [[ -n "$_grigdesk_server_binary" ]]; then
   echo "→ Отдельные утилиты: готовые ELF в $GRIGDESK_DIR/bin"
 else
   echo "→ CLI tracker в PATH…"
   source "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh"
   grigdesk_install_tracker_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || tracker_status=$?
+  source "$GRIGDESK_DIR/deploy/lib/pipeline-cli.sh"
+  grigdesk_install_pipeline_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || pipeline_status=$?
+  source "$GRIGDESK_DIR/deploy/lib/routes-cli.sh"
+  grigdesk_install_routes_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || routes_status=$?
 fi
 if (( tracker_status == 1 )); then
   printf '  ⚠ tracker не собран; повтор: bash %q %q %q\n' \
     "$GRIGDESK_DIR/deploy/lib/tracker-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
+fi
+if (( pipeline_status == 1 )); then
+  printf '  ⚠ pipeline не собран; повтор: bash %q %q %q\n' \
+    "$GRIGDESK_DIR/deploy/lib/pipeline-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
+fi
+if (( routes_status == 1 )); then
+  printf '  ⚠ routes не собран; повтор: bash %q %q %q\n' \
+    "$GRIGDESK_DIR/deploy/lib/routes-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
 fi
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 
