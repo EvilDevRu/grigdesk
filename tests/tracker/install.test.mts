@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, symlinkSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,9 @@ const FAKE_NPM = [
   'done',
   'printf \'%s\\n\' "$line" >> "$FAKE_NPM_LOG"',
   'prefix=$2',
+  'program=tracker',
+  '[[ " $* " != *" run build:pipeline "* ]] || program=pipeline',
+  '[[ "$prefix" != */routes ]] || program=routes',
   'if [[ " $* " == *" ci "* && "${FAKE_NPM_FAIL:-}" == ci ]]; then',
   '  exit 3',
   'fi',
@@ -37,8 +40,8 @@ const FAKE_NPM = [
   '  fi',
   '  if [[ "${FAKE_NPM_FAIL:-}" != noresult ]]; then',
   '    mkdir -p "$prefix/../bin"',
-  '    printf \'#!/bin/sh\\necho new\\n\' > "$prefix/../bin/tracker"',
-  '    chmod 755 "$prefix/../bin/tracker"',
+  '    printf \'#!/bin/sh\\necho new\\n\' > "$prefix/../bin/$program"',
+  '    chmod 755 "$prefix/../bin/$program"',
   '  fi',
   'fi',
   'exit 0',
@@ -66,6 +69,7 @@ function prepare(name: string): Omit<Installation, 'status' | 'stderr'> {
   const log = path.join(base, 'npm.log');
 
   mkdirSync(path.join(root, 'tracker'), { recursive: true });
+  mkdirSync(path.join(root, 'routes'), { recursive: true });
   mkdirSync(stubs);
   writeFileSync(path.join(stubs, 'npm'), FAKE_NPM, { mode: 0o755 });
 
@@ -87,14 +91,15 @@ function install(
   box: Omit<Installation, 'status' | 'stderr'>,
   fail = '',
   mode: 'call' | 'direct' | 'source' = 'call',
+  program: 'tracker' | 'pipeline' | 'routes' = 'tracker',
 ): Installation {
   const stubs = path.join(path.dirname(box.log), 'stubs');
   const script = mode === 'source'
     ? 'set -euo pipefail; source "$1"'
-    : 'set -euo pipefail; source "$1"; grigdesk_install_tracker_cli "$2" "$3"';
+    : 'set -euo pipefail; source "$1"; grigdesk_install_tracker_cli "$2" "$3" "$4"';
   const args = mode === 'direct'
-    ? [HELPER, box.root, box.linkDir]
-    : ['-c', script, 'tracker-install-test', HELPER, box.root, box.linkDir];
+    ? [HELPER, box.root, box.linkDir, program]
+    : ['-c', script, 'tracker-install-test', HELPER, box.root, box.linkDir, program];
   const result = spawnSync('/bin/bash', args, {
     cwd: path.dirname(box.log),
     encoding: 'utf8',
@@ -130,20 +135,24 @@ test('BL-01: установщик собирает до обновления с�
 });
 
 test('BL-02: сбой ci/build и отсутствие результата сохраняют прежнюю ссылку', () => {
-  for (const fail of ['ci', 'build', 'noresult']) {
-    const box = prepare(`отказ ${fail}`);
-    const previous = path.join(path.dirname(box.log), 'previous-tracker');
+  for (const program of ['tracker', 'pipeline', 'routes'] as const) {
+    for (const fail of ['ci', 'build', 'noresult']) {
+      const box = prepare(`отказ ${program} ${fail}`);
+      const previous = path.join(path.dirname(box.log), `previous-${program}`);
+      const previousBytes = `прежний ELF ${program}\n`;
 
-    mkdirSync(box.linkDir, { recursive: true });
-    symlinkSync(previous, path.join(box.linkDir, 'tracker'));
+      mkdirSync(box.linkDir, { recursive: true });
+      writeFileSync(previous, previousBytes, { mode: 0o755 });
+      symlinkSync(previous, path.join(box.linkDir, program));
 
-    const result = install(box, fail);
+      const result = install(box, fail, 'call', program);
 
-    assert.notEqual(result.status, 0, fail);
-    assert.match(result.stderr, /[А-Яа-я]/, fail);
-    assert.equal(readlinkSync(path.join(box.linkDir, 'tracker')), previous, fail);
-    // Сеть машины нестабильна: ci повторяется пять раз, прежде чем шаг сдаётся.
-    assert.deepEqual(result.calls().length, fail === 'ci' ? 5 : 2, fail);
+      assert.notEqual(result.status, 0, `${program}: ${fail}`);
+      assert.match(result.stderr, /[А-Яа-я]/, fail);
+      assert.equal(readlinkSync(path.join(box.linkDir, program)), previous, fail);
+      assert.equal(readFileSync(previous, 'utf8'), previousBytes);
+      assert.equal(result.calls().length, fail === 'ci' ? 5 : 2, fail);
+    }
   }
 });
 
@@ -271,4 +280,61 @@ test('BL-11: source без вызова функции не запускает n
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.calls(), []);
   assert.equal(existsSync(result.linkDir), false);
+});
+
+test('PIPE-INSTALL: общий helper устанавливает выбранный pipeline и бережёт чужой файл', () => {
+    const box = prepare('pipeline с пробелами');
+    const stubs = path.join(path.dirname(box.log), 'stubs');
+    const fake = FAKE_NPM;
+
+    writeFileSync(path.join(stubs, 'npm'), fake, {
+        mode: 0o755
+    });
+
+    const call = () => spawnSync('/bin/bash', [
+        '-c', 'source "$1"; grigdesk_install_tracker_cli "$2" "$3" pipeline',
+        'pipeline-install-test', HELPER, box.root, box.linkDir,
+    ], {
+        encoding: 'utf8',
+        env: {
+            PATH: stubs + ':/usr/bin:/bin',
+            HOME: path.dirname(box.log),
+            FAKE_NPM_LOG: box.log,
+            GRIGDESK_B24_INSTALL_PAUSE: '0',
+        },
+        timeout: 10000,
+    });
+    const first = call();
+
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(
+        existsSync(path.join(box.linkDir, 'pipeline')), true,
+        'helper выпустил выбранную команду pipeline',
+    );
+    assert.equal(readlinkSync(path.join(box.linkDir, 'pipeline')), path.join(box.root, 'bin/pipeline'));
+    unlinkSync(path.join(box.linkDir, 'pipeline'));
+    writeFileSync(path.join(box.linkDir, 'pipeline'), 'чужая команда');
+
+    const protectedFile = call();
+
+    assert.equal(protectedFile.status, 2);
+    assert.equal(readFileSync(path.join(box.linkDir, 'pipeline'), 'utf8'), 'чужая команда');
+});
+
+test('ROUTES-INSTALL: общий helper собирает и линкует routes без замены чужого файла', () => {
+  const box = prepare('маршруты с пробелами');
+  const first = install(box, '', 'call', 'routes');
+  const link = path.join(box.linkDir, 'routes');
+
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(readlinkSync(link), path.join(box.root, 'bin/routes'));
+  assert.ok(first.calls().some((args) => args.includes(path.join(box.root, 'routes'))
+    && args.includes('build')));
+  unlinkSync(link);
+  writeFileSync(link, 'чужая команда');
+
+  const protectedFile = install(box, '', 'call', 'routes');
+
+  assert.equal(protectedFile.status, 2);
+  assert.equal(readFileSync(link, 'utf8'), 'чужая команда');
 });

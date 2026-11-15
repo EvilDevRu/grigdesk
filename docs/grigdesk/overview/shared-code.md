@@ -94,6 +94,8 @@
 | `node/files.ts` | ENOENT→null, временная папка, fsync; read-only modes готового дерева без обхода symlinks |
 | `node/logArchives.ts` | Потоковый gzip, восстановление raw, импорт прежнего .1 и снимки чтения по inode |
 | `node/rotatingLog.ts` | Общий Writable для stdout/stderr: ротация по размеру и пределы числа, возраста и объёма архивов |
+| `node/cliSeaBuild.ts` | Общая сборка CLI tracker/pipeline/routes: bundle через переданную зависимость пакета, SEA, проверка версии и атомарная публикация |
+| `node/cliBuildArgs.ts` | Разбор каталогов сборки CLI с собственным package/cache и проверкой до эффектов |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
 | `node/nodeRuntime.ts` | Манифест Node 24, кэш архива с SHA256, `SEA_FUSE`, запрет tracked output и атомарная публикация файла Б24/DeepSeek/посредника/сервера; шаги конкретного сборщика остаются у пакета |
 | `node/seaRuntime.ts` | Проверка готового R без boot: startup для окна, полный хеш для выбора пакета |
@@ -109,6 +111,7 @@
 | `lib/shellQuote.ts` | Один буквальный shell-аргумент для команд, включая транзакцию публикации |
 | `plugins/ssh/sessionLabels.ts` | Одинаковые подписи SSH-вкладок в панели и подтверждениях чата |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
+| `node/factorySnapshotHash.ts` | Прежний fingerprint factory: SHA256 JSON с рекурсивной сортировкой ключей через localeCompare и сохранением порядка массивов; общий для сервера и pipeline |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
 | `node/installerArchiveTail.ts` | Потоковое размещение и чтение архивов за ELF установщика: подписанные размеры/SHA, O_NOFOLLOW и эксклюзивная копия |
