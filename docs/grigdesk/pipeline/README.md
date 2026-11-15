@@ -68,6 +68,7 @@
 - [Авто-шип фабрики](automatic-shipping.md) — порядок задаёт профиль; адресный tracker,
   штатное разрешение Git и переиспользование опубликованных результатов при повторе.
 - [Маршруты (modules/routes)](route-management.md)
+- [CLI авторинга маршрутов](routes-cli.md) — пакет routes/, отдельный ELF routes, CAS apply, source и receipts.
 - [Палитра](graph-palette.md)
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
 - [Стадии — глобальный enum (server/src/lib/stages.ts)](stage-catalog.md)

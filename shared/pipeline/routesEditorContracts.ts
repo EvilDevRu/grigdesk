@@ -9,7 +9,8 @@ export const ROUTES_EDITOR_LIMITS = {
   routes: 64,
   nodes: 512,
   promptBlocks: 128,
-  operations: 128,
+  // Полная замена каталога: 64 удаления + 64 добавления + три поля metadata.
+  operations: 131,
   simulationSteps: 200,
   // Маршрут с циклом: потолок до 300 кругов — это 601 шаг до остановки `loop-ceiling`
   // (передача и ответ исполнителя на каждый круг), с запасом на ворота и решения человека.

@@ -23,6 +23,36 @@ Model and effort belong to launch policy outside the route catalog; the inspecto
 The add-stage wizard asks for role, environment/permission needs and position, previewing transitions before application.
 Ctrl+S saves applied changes. Apply a field's local input with its own button first.
 
+## From the terminal
+
+`routes` ships as a standalone SEA executable and needs no system Node.
+In a source checkout, run `npm --prefix routes run build` to create
+`bin/routes`, which is ignored by Git. Before building, use
+`node routes/src/main.ts …`. Local information: `--help`, `--version`, `--license`.
+The server package includes the CLI in its generation's bin directory. For a manual ELF
+installation, place the new executable in the selected installation's bin directory.
+
+`bin/routes` returns JSON through the same server. Start with `editor <profile>`.
+If necessary, explicitly call `source <profile> --mode editor --yes` using the values read for
+`--expected-source-revision` and `--expected-catalog-hash` (none means no catalog).
+Use `new <profile> --from empty`, save `show <profile> --draft <id>` as JSON, edit all five
+content fields, then run `apply <profile> --draft <id> --file document.json --expected-revision <N>`.
+Apply replaces the full content and removes omitted routes. N belongs to the snapshot read
+before editing and is never replaced by a newer GET revision.
+
+Run `validate <profile> --draft <id> --expected-revision <new-revision>` and inspect issues/severity:
+exit 0 only means a report was received. Read editor again, compare expectations and call publish
+with --draft, --expected-revision, --expected-source-revision, --expected-catalog-hash and --yes.
+Use `rollback <profile> --hash <hash>` with the source/current expectations and --yes to roll back.
+Before publication stderr prints an operationId. After a lost response, read
+`publications <profile> <operationId>` instead of blindly repeating the write. Compare versions on conflicts.
+
+`profile-config get <profile>` reads metadata;
+`profile-config set <profile> --file profile.sh --set PROFILE_LOOP_MAX_ROUNDS=40`
+changes an allowed value using its read from value. It does not create profiles.
+The full technical reference is `docs/grigdesk/pipeline/routes-cli.md` in the source repository.
+The live CLI workflow after restarting the server still needs manual acceptance.
+
 ## Result
 
 New attempts use the published catalog. Saving a draft alone does not change a run.
