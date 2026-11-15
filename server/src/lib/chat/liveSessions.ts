@@ -145,6 +145,8 @@ export class ChatLiveSessions {
 
   readonly log: LiveLog | null;
 
+  private isArchived: ((chatKey: string) => Promise<boolean>) | null;
+
   private onBackgroundStart: ((event: BackgroundStartEvent) => void) | null;
 
   private onBackgroundTurn:
@@ -192,6 +194,7 @@ export class ChatLiveSessions {
     maxSessions = DEFAULT_MAX_SESSIONS,
     idleMs = DEFAULT_IDLE_MS,
     log = null,
+    isArchived = null,
     onBackgroundStart = null,
     onBackgroundTurn = null,
     onBackgroundStep = null,
@@ -202,6 +205,7 @@ export class ChatLiveSessions {
     maxSessions?: number;
     idleMs?: number;
     log?: LiveLog | null;
+    isArchived?: ((chatKey: string) => Promise<boolean>) | null;
     onBackgroundStart?: ((event: BackgroundStartEvent) => void) | null;
     onBackgroundTurn?: ((event: {
       chatKey: string;
@@ -230,6 +234,7 @@ export class ChatLiveSessions {
     this.maxSessions = Math.max(1, Number(maxSessions) || DEFAULT_MAX_SESSIONS);
     this.idleMs = Math.max(60_000, Number(idleMs) || DEFAULT_IDLE_MS);
     this.log = log;
+    this.isArchived = isArchived;
     this.onBackgroundStart = onBackgroundStart;
     this.onBackgroundTurn = onBackgroundTurn;
     this.onBackgroundStep = onBackgroundStep;
@@ -248,19 +253,8 @@ export class ChatLiveSessions {
    * разовый `executor.run`, поэтому вызывающий код о смене модели работы не знает.
    */
   async run(spec: LiveSessionSpec, turn: unknown): Promise<{ sessionId?: string } | null> {
-    const entry = await this._acquire(spec);
+    const { entry, wasSleeping } = await this._acquire(spec);
 
-    if (spec.signal?.aborted) {
-      throw Object.assign(new Error('Ход остановлен.'), {
-        stopped: true,
-        steps: [],
-        sessionId: entry.sessionId,
-      });
-    }
-
-    const wasSleeping = sleeping(entry);
-
-    entry.managed = true;
     this._clearIdle(entry);
 
     if (wasSleeping) {
@@ -281,7 +275,16 @@ export class ChatLiveSessions {
         },
       }
       : turn;
+
     try {
+      if (spec.signal?.aborted) {
+        throw Object.assign(new Error('Ход остановлен.'), {
+          stopped: true,
+          steps: [],
+          sessionId: entry.sessionId,
+        });
+      }
+
       const result = await entry.handle.send(send);
       // sessionId нужен и живой сессии: по нему она переоткроется после простоя,
       // рестарта сервера или смены модели.
@@ -396,7 +399,11 @@ export class ChatLiveSessions {
     return { maxSessions: this.maxSessions, idleMs: this.idleMs, live: this.entries.size };
   }
 
-  async _acquire(spec: LiveSessionSpec): Promise<LiveEntry> {
+  /**
+   * Выдаёт подходящий процесс и резервирует его для хода до возврата Promise.
+   * Предыдущее состояние сна нужно run для уведомления об ожидающих задачах.
+   */
+  async _acquire(spec: LiveSessionSpec): Promise<{ entry: LiveEntry; wasSleeping: boolean }> {
     const chatKey = String(spec.chatKey || '');
     if (!chatKey) throw new Error('Живая сессия требует ключ чата.');
     if (this.closed) throw new Error('Сервер останавливается — новая сессия не открывается.');
@@ -413,6 +420,12 @@ export class ChatLiveSessions {
       : DEFAULT_RESTART_ON;
     const fingerprint = session.fingerprint
       ? await session.fingerprint(spec) : fingerprintOf(spec, fields);
+
+    // Вытеснение архивного keepAlive ждёт подтверждения close, сохраняя запись пула.
+    // Продолжение этого чата не должно отправить сообщение в уже закрываемый процесс.
+    while (this.closing.has(chatKey)) {
+      await this.closing.get(chatKey);
+    }
 
     let existing = this.entries.get(chatKey);
 
@@ -446,7 +459,16 @@ export class ChatLiveSessions {
         && sameExecutor
         && !foreignSession
         && !authoritativeReset;
-      if (reusable) return existing;
+
+      if (reusable) {
+        const wasSleeping = sleeping(existing);
+
+        // Выдача процесса резервирует его до возврата Promise: проверка архивности
+        // другого запуска не должна вытеснить его до продолжения run в микрозадаче.
+        existing.managed = true;
+
+        return { entry: existing, wasSleeping };
+      }
 
       // Сессия умерла сама либо изменилось то, что задаётся при запуске процесса.
       // Разговор при этом не теряется: новый процесс поднимается с прежним sessionId.
@@ -508,7 +530,7 @@ export class ChatLiveSessions {
         cwd: spec.cwd || '',
         extraDirs: Array.isArray(spec.extraDirs) ? [...spec.extraDirs] : [],
         sessionToken: `live-${randomUUID()}`,
-        managed: false,
+        managed: true,
         background: null,
         backgroundTasks: [],
         closedNotified: false,
@@ -665,16 +687,13 @@ export class ChatLiveSessions {
 
       this.entries.set(chatKey, entry);
 
-      if (!entry.background) {
-        this._armIdle(entry);
-      }
-
       this.log?.info?.(
         { chatKey, executor: entry.executorId, pid: entry.handle.pid },
         'чат: открыта живая сессия',
       );
       this.onChange?.({ chatKey, event: 'opened' });
-      return entry;
+
+      return { entry, wasSleeping: false };
     } finally {
       releaseOpening();
     }
@@ -682,16 +701,46 @@ export class ChatLiveSessions {
 
   /**
    * Потолок живых процессов — обязательная часть, а не отделка: каждый держит память
-   * и свои MCP-серверы. Гасим самую давнюю СВОБОДНУЮ сессию; если свободных нет,
-   * ход человека важнее потолка, но это остаётся в журнале.
+   * и свои MCP-серверы. Архивный keepAlive можно освободить только без ходов и фоновых
+   * задач; остальные keepAlive защищены. Обычный запуск сохраняет мягкий потолок.
    */
   async _enforceLimit(strict = false): Promise<void> {
     while (this.entries.size + this.opening >= this.maxSessions) {
-      const idle = [...this.entries.values()]
-        .filter((entry) => !entry.managed && !entry.background && !sleeping(entry) && !entry.keepAlive)
-        .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+      const candidates = [...this.entries.values()]
+        .filter((entry) => !entry.managed && !entry.background && !sleeping(entry))
+        .sort((a, b) => a.lastUsed - b.lastUsed);
+      let idle: LiveEntry | undefined;
+
+      for (const entry of candidates) {
+        if (entry.keepAlive) {
+          try {
+            if (!await this.isArchived?.(entry.chatKey)) {
+              continue;
+            }
+          } catch (error) {
+            this.log?.warn?.({ err: (error as Error).message, chatKey: entry.chatKey },
+              'чат: архивность живой сессии не подтверждена');
+
+            continue;
+          }
+        }
+
+        // Пока читалась история, процесс мог начать ход, получить задачи или смениться.
+        // Решение о закрытии принадлежит только всё ещё свободному поколению.
+        if (this.entries.get(entry.chatKey) === entry
+          && !this.closing.has(entry.chatKey)
+          && !entry.managed && !entry.background && !sleeping(entry)) {
+          idle = entry;
+
+          break;
+        }
+      }
 
       if (!idle) {
+        if (this.entries.size + this.opening < this.maxSessions) {
+          continue;
+        }
+
         if (strict) {
           throw new Error('Нет свободного слота живых сессий. Закройте ненужный живой процесс агента.');
         }
@@ -702,8 +751,10 @@ export class ChatLiveSessions {
         );
         return;
       }
-      this._forget(idle, 'вытеснена по потолку живых сессий');
-      await this._closeHandle(idle);
+
+      await this.close(idle.chatKey, idle.keepAlive
+        ? 'архивный чат освобождён по потолку живых сессий'
+        : 'вытеснена по потолку живых сессий');
     }
   }
 

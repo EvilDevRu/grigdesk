@@ -164,7 +164,10 @@ is being prepared, its result is still published to the feed exactly once with t
 and is not mixed into the reply to your message. Stop interrupts the current turn, not the process.
 Closing the live process in Settings → Runs → Live agent processes, resetting memory, deleting the chat
 and exiting GrigDesk terminate it; there is no autostart after an OS reboot.
-Live processes are not evicted automatically: when slots are full, a new Host gets a refusal
+Closing a chat moves it to the archive and lets background work continue. When slots are full,
+a new launch automatically closes an idle archived chat's process. History and saved conversation
+memory remain available. Active chats, running turns and agents with background tasks stay protected;
+if no process can be released, a new Host gets a refusal
 suggesting to close an unneeded process.
 The bulk “Stop idle processes” action on that page shows an explicit message with the number
 of failures when processes did not confirm shutdown: such processes remain in the list

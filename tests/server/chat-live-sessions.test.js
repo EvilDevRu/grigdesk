@@ -2267,6 +2267,251 @@ test('пул: выключенная capability не открывает проц
   }
 });
 
+test('архивный keepAlive освобождает слот новому чату и сохраняет память разговора', async (t) => {
+  const f = await apiFixture(t, { keepAlive: true });
+
+  for (let i = 0; i < 4; i += 1) {
+    const id = await f.chat(`retained-${i}`);
+    const response = await f.turn(id);
+
+    assert.equal(response.statusCode, 200, response.body);
+  }
+
+  const archived = await f.app.inject({
+    method: 'PATCH',
+    url: '/api/chat/store/chat/retained-0',
+    payload: { patch: { archived: true, closedAt: Date.now() } },
+  });
+
+  assert.equal(archived.statusCode, 200, archived.body);
+  assert.equal(archived.json().head.archived, true);
+
+  const next = await f.chat('next-retained');
+  const started = await f.turn(next);
+
+  assert.equal(started.statusCode, 200, started.body);
+  assert.equal(f.handles[0].closed, true);
+  assert.equal((await sleepSessions(f.app)).length, 4);
+
+  const saved = await f.app.inject({ url: '/api/chat/store/chat/retained-0' });
+
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.equal(saved.json().chat.archived, true);
+  assert.equal(saved.json().chat.sessionId, 'sid-live');
+
+  await f.app.inject({ method: 'DELETE', url: '/api/chat/sessions/next-retained' });
+
+  const restored = await f.app.inject({
+    method: 'PATCH',
+    url: '/api/chat/store/chat/retained-0',
+    payload: { patch: { archived: false, closedAt: null } },
+  });
+
+  assert.equal(restored.statusCode, 200, restored.body);
+
+  const continued = await f.turn('retained-0');
+
+  assert.equal(continued.statusCode, 200, continued.body);
+  assert.equal(f.handles.at(-1).openedWith, 'sid-live');
+});
+
+test('архивный keepAlive с фоновыми задачами сохраняет защиту слота', async (t) => {
+  const f = await apiFixture(t, { keepAlive: true });
+
+  for (let i = 0; i < 4; i += 1) {
+    const id = await f.chat(`protected-${i}`);
+
+    assert.equal((await f.turn(id)).statusCode, 200);
+  }
+
+  reportTasks(f.handles[0]);
+
+  const archived = await f.app.inject({
+    method: 'PATCH',
+    url: '/api/chat/store/chat/protected-0',
+    payload: { patch: { archived: true } },
+  });
+
+  assert.equal(archived.statusCode, 200, archived.body);
+
+  const next = await f.chat('next-protected');
+  const refused = await f.turn(next);
+
+  assert.equal(refused.statusCode, 500, refused.body);
+  assert.match(refused.json().message, /слота живых сессий/);
+  assert.equal(f.handles[0].closed, false);
+
+  reportTasks(f.handles[0], []);
+
+  const started = await f.turn(next);
+
+  assert.equal(started.statusCode, 200, started.body);
+  assert.equal(f.handles[0].closed, true);
+});
+
+test('архивный keepAlive не вытесняется, если за время проверки начался фон', async (t) => {
+  const checked = deferred();
+  const f = poolFixture(t, {
+    maxSessions: 1,
+    isArchived: () => checked.promise,
+  });
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+
+  const opening = f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  const refused = assert.rejects(opening, /слота живых сессий/);
+
+  await pause();
+  f.opened[0].spec.hooks.onBackgroundStart();
+  checked.resolve(true);
+  await refused;
+
+  assert.equal(f.opened[0].closed, false);
+  assert.equal(f.pool.stats()[0].busy, true);
+  await f.opened[0].spec.hooks.onBackground({ reply: 'готово' });
+  await f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  assert.equal(f.opened[0].closed, true);
+});
+
+test('архивный keepAlive защищён уже при выдаче процесса продолжающемуся ходу', async (t) => {
+  const checking = deferred();
+  const checked = deferred();
+  const active = deferred();
+
+  t.after(() => active.resolve());
+
+  const f = poolFixture(t, {
+    maxSessions: 1,
+    isArchived: () => {
+      checking.resolve();
+
+      return checked.promise;
+    },
+  });
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+  f.opened[0].send = async () => {
+    await active.promise;
+
+    return { sessionId: 'sid-1' };
+  };
+
+  const opening = f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  const refused = assert.rejects(opening, /слота живых сессий/);
+
+  await checking.promise;
+  checked.resolve(true);
+
+  const continuing = f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+
+  await refused;
+  assert.equal(f.opened[0].closed, false);
+  active.resolve();
+  await continuing;
+});
+
+test('архивный keepAlive снимает резерв хода при отмене сразу после выдачи процесса', async (t) => {
+  const f = poolFixture(t, { maxSessions: 1, isArchived: async () => true });
+  const ac = new AbortController();
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+
+  const continuing = f.pool.run({
+    chatKey: 'archived',
+    executor: f.executor,
+    signal: ac.signal,
+  }, {});
+
+  ac.abort();
+  await assert.rejects(continuing, { stopped: true });
+  assert.equal(f.pool.stats()[0].busy, false);
+  await f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  assert.equal(f.opened[0].closed, true);
+});
+
+test('архивный keepAlive удерживает слот при отказе закрытия и разрешает повтор', async (t) => {
+  const f = poolFixture(t, { maxSessions: 1, isArchived: async () => true });
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+
+  const handle = f.opened[0];
+  const close = handle.close;
+
+  handle.close = async () => {
+    throw new Error('scope completion unknown');
+  };
+
+  await assert.rejects(f.pool.run({ chatKey: 'next', executor: f.executor }, {}),
+    /scope completion unknown/);
+  assert.equal(f.pool.has('archived'), true);
+  assert.equal(f.pool.limits().live, 1);
+  assert.equal(f.opened.length, 1);
+  handle.close = close;
+  await f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  assert.equal(handle.closed, true);
+  assert.equal(f.pool.limits().live, 1);
+});
+
+test('архивный keepAlive не принимает продолжение во время подтверждения закрытия', async (t) => {
+  const closing = deferred();
+  const released = deferred();
+
+  t.after(() => released.resolve());
+
+  const f = poolFixture(t, {
+    maxSessions: 2,
+    isArchived: async (chatKey) => chatKey === 'archived',
+  });
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+  await f.pool.run({ chatKey: 'protected', executor: f.executor }, {});
+
+  const handle = f.opened[0];
+  const close = handle.close;
+
+  handle.close = async () => {
+    closing.resolve();
+    await released.promise;
+    await close();
+  };
+
+  const opening = f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+
+  await closing.promise;
+
+  const continuing = f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+  const refused = assert.rejects(continuing, /слота живых сессий/);
+
+  await pause();
+  assert.equal(handle.sends, 1, 'в закрываемый процесс не передаётся новый ход');
+  released.resolve();
+  await opening;
+  await refused;
+  assert.equal(handle.closed, true);
+});
+
+test('архивный keepAlive: исчезнувший во время проверки процесс освобождает место', async (t) => {
+  const f = poolFixture(t, {
+    maxSessions: 1,
+    isArchived: async () => {
+      f.opened[0].spec.hooks.onExit({ reason: 'процесс завершился' });
+
+      return true;
+    },
+  });
+
+  f.executor.session.keepAlive = true;
+  await f.pool.run({ chatKey: 'archived', executor: f.executor }, {});
+  await f.pool.run({ chatKey: 'next', executor: f.executor }, {});
+  assert.equal(f.pool.has('next'), true);
+  assert.equal(f.pool.limits().live, 1);
+});
+
 test('пул: keepAlive не выдаёт сон, не истекает и не вытесняет защищённый процесс', async (t) => {
   let closes = 0;
   const pool = new ChatLiveSessions({ maxSessions: 1, idleMs: 100 });

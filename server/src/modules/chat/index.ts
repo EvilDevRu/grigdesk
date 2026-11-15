@@ -1114,6 +1114,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // после закрытого окна (chats/pending + SSE), поэтому доезжает во все окна разом.
   const liveSessions = new ChatLiveSessions({
     log: fastify.log,
+    isArchived: async (chatKey) => {
+      const entry = await history.readEntry(chatKey);
+
+      return entry?.chat.archived === true && !activeRuns.has(chatKey)
+        && !turnLocks.isBusy({ chatKey }) && !backgroundRuns.has(chatKey)
+        && !acceptedTurns.get(chatKey);
+    },
     onBackgroundStart: ({ identity, session }) => {
       backgroundRuns.start(identity, session);
     },
