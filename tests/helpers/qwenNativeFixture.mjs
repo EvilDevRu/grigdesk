@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -219,8 +219,13 @@ export async function qwenNativeFixture(t, { dashscope = false } = {}) {
 
   const metadata = await nativeMetadata(fixture);
 
+  // Native обновляет версию схемы при первом initialize в своём тестовом home.
+  // Поздняя настройка модели сохраняет эту версию и не запускает миграцию повторно.
+  const currentSettings = JSON.parse(await readFile(fixture.file, 'utf8'));
+
   return {
     ...fixture,
+    settings: currentSettings,
     requests,
     actions,
     classifications,

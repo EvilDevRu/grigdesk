@@ -12,7 +12,7 @@ import { qwenConfig, qwenHostEnabled } from './settings.ts';
 import { resolveQwenSnapshot } from './discovery.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
-import { createQwenTextSteps } from './steps.ts';
+import { createQwenTextSteps, qwenToolFailed } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { resolveQwenSessionHome } from './session.ts';
@@ -274,12 +274,15 @@ async function runQwenSession(
         && ['completed', 'failed'].includes(String(update.status)) && !results.has(id)) {
         emitSteps(textSteps.flush());
         results.add(id);
+
+        const failed = qwenToolFailed(update);
+
         sink.emit({
           k: 'res',
           id,
           text: JSON.stringify(update.content || []),
-          ok: update.status === 'completed',
-          error: update.status === 'failed',
+          ok: !failed,
+          error: failed,
         });
       }
     },

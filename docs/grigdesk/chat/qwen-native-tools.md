@@ -114,6 +114,18 @@ QWEN_RUNTIME_DIR. Исходные настройки не переписыва�
 при отсутствии массива configOptions Host отказывает до prompt, persist-default
 fallback `session/set_model` в Host не используется.
 
+В CLI 0.27.3 workspace `.lsp.json` исполняется только при явном native-доверии:
+включён `security.folderTrust.enabled`, а рабочая папка доверена в Qwen
+(либо доверие сообщает IDE). GrigDesk не добавляет правила доверия автоматически.
+Для прямого вызова медиа-инструмента также нужен его штатный opt-in
+`omni.processing.policyTools.<toolName>.modelAccess.enabled`; одних ffmpeg/ffprobe
+недостаточно. Эти настройки принадлежат native Qwen и сохраняют свои приоритеты.
+
+LSP может передать диагностический ответ `LSP … failed: …` со статусом ACP
+`completed`. Коллекторы GrigDesk отмечают такой результат ошибкой только при
+native metadata `toolName: lsp`, `provenance: builtin` и соответствующем rawOutput.
+Текст файлов, результаты MCP и успешные ответы LSP не классифицируются по слову «ошибка».
+
 Guard остаётся обязательным: `QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD=required-v1`
 и private-parent nonce, без attached-provider маркера. Не-shell инструменты
 выполняет builtin-путь CLI; `run_shell_command` и `monitor` проходят reverse guard
@@ -141,6 +153,11 @@ Host без живой сессии отклоняется (`host_persistent_req
 если освободить нечего, новый Host получает видимый отказ с предложением закрыть
 ненужный живой процесс. Архивирование само по себе фон не останавливает.
 
+CLI может завершиться сам между снимком состояния и командами stop/kill, а
+`--collect` успеть удалить его scope. После ошибок этих команд launcher повторно
+читает состояние unit: inactive/not-found допускает дальнейшую проверку пустоты
+cgroup. Только подтверждённое завершение освобождает reader и запись пула;
+недоступный manager или оставшиеся процессы сохраняют видимый отказ close.
 
 Процесс живёт между сообщениями: фон, расписания и субагенты публикуются в ленте
 через общий владелец фоновых ходов, «Стоп» прерывает ход, а закрытие живого
@@ -189,9 +206,11 @@ Stop/EOF/heartbeat, replay, настоящий cron в окне load без ис
 время initialize на двойниках systemd-run/systemctl (один scope, отсутствие
 позднего prompt, пустой lease, argv без sudo); `qwen-host.test.js` — неизменность
 исходных settings, отсутствие attached-маркера и `session/set_model`, очистка
-overlay; UI-тест `qwen-provider.component.test.js` — ручное подтверждение, Apply,
-отказ и повтор на английском. Native-приёмка с живым user scope (процессы и сокеты
+overlay; `qwen-tool-results.test.js` — диагностические ошибки builtin LSP в обоих
+коллекторах, без ложных ошибок файлов/MCP; UI-тест `qwen-provider.component.test.js` —
+ручное подтверждение, Apply, отказ и повтор на английском.
+Native-приёмка с живым user scope (процессы и сокеты
 хоста, субагент, LSP/медиа/поиск, MCP scopes, подтверждения, картинка второго
-send, close detached shell и lease) требует работающего user systemd приложения
-и выполняется владельцем на хосте; в окружении исполнителя без user bus эти
+send, close detached shell и lease) запускается в собственном transient user service
+на хосте с работающим user systemd; в окружении исполнителя без user bus эти
 проверки дают видимый отказ и не считаются зелёными.

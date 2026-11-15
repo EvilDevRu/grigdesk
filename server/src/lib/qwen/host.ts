@@ -115,6 +115,8 @@ async function startHostScope(command: string, args: string[], cwd: string, env:
     let state = await unitState(unit, env);
 
     if (state.loaded !== 'not-found' && !['inactive', 'failed'].includes(state.active || '')) {
+      let stopFailure: unknown;
+
       await execute(systemctlBin(), ['--user', 'stop', unit], {
         env,
         timeout: 8000,
@@ -124,10 +126,19 @@ async function startHostScope(command: string, args: string[], cwd: string, env:
           env,
           timeout: 3000,
           encoding: 'utf8',
+        }).catch((error) => {
+          stopFailure = error;
         });
       });
 
       state = await unitState(unit, env);
+
+      // Между снимком и сигналами CLI может завершиться, а --collect удалить scope.
+      // Ошибка сигналов не заменяет проверку состояния и пустоты cgroup ниже.
+      if (stopFailure && state.loaded !== 'not-found'
+        && !['inactive', 'failed'].includes(state.active || '')) {
+        throw stopFailure;
+      }
     }
 
     const deadline = Date.now() + 3000;

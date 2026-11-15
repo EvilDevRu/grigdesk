@@ -155,6 +155,9 @@ of a compatible CLI. Web search, LSP, skills and media processing use the progra
 already configured in Qwen: new subscriptions, keys and programs are not purchased or installed automatically;
 a missing dependency shows its reason. Enabled plugin documentation is available in both modes.
 
+LSP requires an explicitly trusted workspace in Qwen. A media tool must also be enabled
+for model calls in Qwen's native settings; having ffmpeg and ffprobe alone is not enough.
+
 Requirements: the enabled Settings → Runs → Keep the chat agent alive between turns toggle,
 a working user systemd and a separate GrigDesk application unit. If the environment is unavailable,
 the turn gets a visible refusal reason; there is no unprotected launch and no sandbox fallback.
@@ -174,6 +177,8 @@ suggesting to close an unneeded process.
 The bulk “Stop idle processes” action on that page shows an explicit message with the number
 of failures when processes did not confirm shutdown: such processes remain in the list
 until a repeated close confirms their termination.
+If a process has already exited while being closed, GrigDesk confirms its termination
+and removes the entry without a false error. An unavailable shutdown check remains an explicit failure.
 
 Enabling and disabling applies to the next turn; already running work is stopped immediately
 by closing the live process in the list. Switching profiles separates Qwen's native memory;
@@ -198,7 +203,9 @@ Paid smoke testing requires a real key entered by its owner through Access setti
 
 Host mode is covered by automated checks without paid calls: one process across two turns, the mandatory guard
 protocol, background replies and schedules, Stop, repeated close after a refusal, and manual enabling
-with confirmation and setting persistence. Acceptance with a live user systemd (host process and socket access,
-subagents, configured LSP/media/search, server-owned MCP tools, background command close) is performed
-by the owner on the host after a manual server restart; in an environment without user systemd these checks
-give a visible refusal and are not considered passed.
+with confirmation and setting persistence. Native tests using CLI 0.27.3 and a local API cover host process
+and socket access, subagents, configured LSP/media/search, server-owned MCP tools, the second message's
+image and background command shutdown. They require user systemd and a separate test service;
+without that environment, checks give a visible refusal and are not considered passed.
+Manual application acceptance and live-model checks remain with the owner after updating
+and manually restarting the server.

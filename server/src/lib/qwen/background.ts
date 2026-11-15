@@ -1,5 +1,5 @@
 import { createStepSink, type ChatStep } from '../chat/streamSteps.ts';
-import { createQwenTextSteps } from './steps.ts';
+import { createQwenTextSteps, qwenToolFailed } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { record } from './transport.ts';
 
@@ -73,12 +73,15 @@ export function createQwenBackground(sessionId: string, hooks: QwenBackgroundHoo
         && (update.status === 'completed' || update.status === 'failed')) {
         emit(text.flush());
         results.add(id);
+
+        const failed = qwenToolFailed(update);
+
         sink.emit({
           k: 'res',
           id,
           text: JSON.stringify(update.content || []),
-          ok: update.status === 'completed',
-          error: update.status === 'failed',
+          ok: !failed,
+          error: failed,
         });
       }
     },

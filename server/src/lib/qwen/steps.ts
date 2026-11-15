@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
 import {
   cut, STEP_TEXT_LIMIT, STEP_THINK_LIMIT, type ChatStep,
 } from '../chat/streamSteps.ts';
@@ -62,4 +63,19 @@ export function createQwenTextSteps(now: () => number = Date.now) {
   }
 
   return { append, flush };
+}
+
+/**
+ * Native LSP может вернуть диагностическую ошибку со статусом completed.
+ * Учитываем его формат только при builtin identity, не по тексту файлов или MCP.
+ */
+export function qwenToolFailed(update: Record<string, unknown>): boolean {
+  if (update.status === 'failed') {
+    return true;
+  }
+
+  const meta = isRecord(update._meta) ? update._meta : {};
+
+  return update.status === 'completed' && meta.toolName === 'lsp' && meta.provenance === 'builtin'
+    && typeof update.rawOutput === 'string' && /^LSP [^\r\n:]+ failed: /.test(update.rawOutput);
 }

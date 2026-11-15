@@ -563,6 +563,19 @@ process.stdin.on('data', (data) => {
 });
 `;
 
+/**
+ * CLI запускает workspace LSP только после явного native-доверия каталогу.
+ * Согласие принадлежит изолированной фикстуре и не меняет доверие пользователя.
+ */
+async function configureLspTrust(fixture) {
+  fixture.settings.security.folderTrust = { enabled: true };
+
+  await fixture.writeSettings(fixture.settings);
+  await writeFile(path.join(fixture.qwenHome, 'trustedFolders.json'), JSON.stringify({
+    [fixture.workspace]: 'TRUST_FOLDER',
+  }));
+}
+
 test('Qwen native Host: настроенный LSP исполняет local server вне sandbox', {
   timeout: 90000,
 }, async (t) => {
@@ -572,6 +585,7 @@ test('Qwen native Host: настроенный LSP исполняет local serv
 
   await writeFile(server, lspSource);
   await writeFile(file, 'x');
+  await configureLspTrust(fixture);
   await writeFile(path.join(fixture.workspace, '.lsp.json'), JSON.stringify({ probe: {
     command: process.execPath,
     args: [server],
@@ -618,6 +632,17 @@ test('Qwen native Host: медиа использует ffmpeg и выдаёт �
   await writeFile(input, pcm);
   await mkdir(output);
 
+  fixture.settings.omni = {
+    enabled: true,
+    processing: {
+      policyTools: {
+        omni_clip_audio: { modelAccess: { enabled: true } },
+      },
+    },
+  };
+
+  await fixture.writeSettings(fixture.settings);
+
   const action = { name: 'omni_clip_audio', args: {
     inputPath: input,
     outputDir: output,
@@ -657,6 +682,7 @@ test('Qwen native Host: отсутствующий LSP backend показыва�
 
   await writeFile(server, lspSource);
   await writeFile(file, 'x');
+  await configureLspTrust(fixture);
   await writeFile(path.join(fixture.workspace, '.lsp.json'), JSON.stringify({ probe: {
     command: path.join(fixture.root, 'missing-language-server'),
     args: [],
@@ -934,6 +960,11 @@ test('Qwen native Host: картинка второго send доходит ба
 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const image = await qwenImage(fixture);
+
+  fixture.settings.modelProviders.openai[0].generationConfig.modalities = { image: true };
+
+  await fixture.writeSettings(fixture.settings);
+
   const original = await readFile(fixture.file, 'utf8');
   const handle = await hostProbe(fixture, runInput(fixture, 'shared-model(openai)', {
     permissionMode: 'yolo', providerSettings: { allowHostAccess: true },

@@ -50,6 +50,8 @@ const verb = args[1];
 const unit = verb === 'kill' ? args[args.length - 1] : args[2];
 const file = path.join(stateDir, unit + '.json');
 const failStop = fs.existsSync(path.join(stateDir, 'fail-stop'));
+const collectOnStop = fs.existsSync(path.join(stateDir, 'collect-on-stop'));
+const collectOnKill = fs.existsSync(path.join(stateDir, 'collect-on-kill'));
 const read = () => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -67,6 +69,42 @@ if (verb === 'show') {
     ? 'LoadState=loaded\\nActiveState=active\\nControlGroup=' + state.group + '\\n'
     : 'LoadState=not-found\\nActiveState=inactive\\nControlGroup=\\n');
   process.exit(0);
+}
+
+if (!failStop && (collectOnStop || collectOnKill)) {
+  const state = read();
+
+  if (!state) {
+    process.stderr.write('Unit not loaded\\n');
+    process.exit(1);
+  }
+
+  if (verb === 'stop' && collectOnKill) {
+    process.stderr.write('synthetic stop failed\\n');
+    process.exit(1);
+  }
+
+  if ((verb === 'stop' && collectOnStop) || (verb === 'kill' && collectOnKill)) {
+    // Двойник не владеет cgroup: SIGTERM helper передаёт дочернему fake CLI.
+    // Здесь проверяется сборка unit после ошибки команды, реальный SIGKILL проверяется отдельно.
+    process.kill(state.pid, 'SIGTERM');
+
+    const deadline = Date.now() + 8000;
+    const poll = setInterval(() => {
+      if (!read()) {
+        clearInterval(poll);
+        process.stderr.write('Unit not loaded\\n');
+        process.exit(1);
+      }
+
+      if (Date.now() > deadline) {
+        clearInterval(poll);
+        process.exit(2);
+      }
+    }, 20);
+
+    return;
+  }
 }
 
 if (verb === 'stop') {
@@ -162,6 +200,7 @@ async function managerFixture(t, root) {
     journal,
     failStop: () => writeFile(path.join(state, 'fail-stop'), '1'),
     heal: () => unlink(path.join(state, 'fail-stop')).catch(() => {}),
+    collectOn: (verb) => writeFile(path.join(state, 'collect-on-' + verb), '1'),
   };
 }
 
@@ -262,3 +301,38 @@ test('Qwen Host lifecycle: force-close во время initialize без поз�
     providerId: 'qwen',
   }), [], 'lease не утёк');
 });
+
+for (const verb of ['stop', 'kill']) {
+  test(`Qwen Host lifecycle: исчезнувший scope после ${verb} подтверждает закрытие`, {
+    timeout: 30000,
+  }, async (t) => {
+    const fixture = await qwenFixture(t);
+    const manager = await managerFixture(t, fixture.root);
+    const control = path.join(fixture.workspace, 'control.jsonl');
+
+    await writeFile(control, '');
+    await fixture.fake({
+      control,
+      metadata: { 'shared-model(openai)': { context: 32768 } },
+    });
+
+    const handle = await openLive(fixture);
+
+    t.after(() => handle.close());
+    await handle.send({ message: 'Закрыть после ответа.', signal: AbortSignal.timeout(12000) });
+    await manager.collectOn(verb);
+
+    const result = await handle.close().then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error }),
+    );
+
+    assert.equal(result.ok, true, `Завершённый scope должен быть подтверждён: ${result.error || ''}`);
+    assert.equal((await manager.journal('run')).length, 1, 'Закрытие не создаёт новый scope');
+    assert.equal((await readdir(manager.state)).some((file) => file.endsWith('.json')), false);
+    assert.deepEqual(await inspectCliLeases({
+      directory: path.join(fixture.dataHome, 'provider-cli-leases'),
+      providerId: 'qwen',
+    }), [], 'Reader освобождён после подтверждённого завершения');
+  });
+}
