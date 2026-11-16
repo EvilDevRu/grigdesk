@@ -1,7 +1,11 @@
 # Chat list filters
 
-The chat list shows active conversations; the archive is switched by the
-"Active / Archive" segment next to the search field.
+The chat list shows active conversations; the archive is switched by the compact
+"Active / Archive" segment next to the search field. The number of archived
+conversations appears as a separate counter beside the "Archive" label and does not
+stretch the switch; when the archive is empty, there is no counter. The switch is
+styled as light tabs, with the filters icon right after them in one left-aligned
+cluster.
 
 ## Filters
 

@@ -1819,7 +1819,7 @@
   "chatNetAktivnyhChatov": "No active chats",
   "chatListScope": "List scope",
   "chatFilterActive": "Active",
-  "chatFilterArchivedCount": "Archive{archivedChatCount}",
+  "chatFilterArchived": "Archive",
   "chatListFilters": "Chat filters",
   "chatListFiltersActive": "Chat filters, active: {count}",
   "chatFilterState": "State",

@@ -22,35 +22,32 @@
         <UiSegmentedControl
           v-model="scopeSegment"
           class="scope"
+          data-context="chat-scope"
           size="compact"
           :options="scopeOptions"
           :label="t('core.chatListScope')"
         />
-        <UiButton
+        <UiIconButton
           v-if="filtersAvailable"
           class="filter-toggle"
           data-chat-filter-toggle
-          variant="outline"
-          size="compact"
+          :label="activeFilterCount
+            ? t('core.chatListFiltersActive', { count: activeFilterCount })
+            : t('core.chatListFilters')"
           :tone="activeFilterCount ? 'accent' : 'neutral'"
           :pressed="Boolean(activeFilterCount)"
           :aria-expanded="String(filtersOpen)"
-          :aria-label="activeFilterCount
-            ? t('core.chatListFiltersActive', { count: activeFilterCount })
-            : t('core.chatListFilters')"
           v-tooltip="t('core.chatListFilters')"
           aria-controls="chat-list-filters"
           @click="filtersOpen = !filtersOpen"
         >
-          <span class="filter-toggle-content">
-            <svg width="16" height="16" viewBox="0 0 24 24"
-                 fill="none" stroke="currentColor" stroke-width="1.8"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
-            </svg>
-            <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
-          </span>
-        </UiButton>
+          <svg width="16" height="16" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
+          </svg>
+          <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+        </UiIconButton>
       </div>
       <div
         v-if="filtersAvailable"
@@ -585,13 +582,14 @@ const scopeSegment = computed({
   },
 });
 
+// Счётчик архива — отдельный бейдж сегмента, а не « · N» в подписи: название
+// остаётся коротким, число читается плашкой и не растягивает переключатель.
 const scopeOptions = computed(() => [
   { value: 'active', label: t('core.chatFilterActive') },
   {
     value: 'archived',
-    label: t('core.chatFilterArchivedCount', {
-      archivedChatCount: chat.archivedChatCount ? ` · ${chat.archivedChatCount}` : '',
-    }),
+    label: t('core.chatFilterArchived'),
+    badge: chat.archivedChatCount || '',
   },
 ]);
 
@@ -1016,15 +1014,17 @@ async function del(r: ListRow) {
   min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; align-items: center; gap: 7px; }
 .search { flex: 1; min-width: 0; }
-/* Сегмент области и кнопка фильтров делят строку под поиском; панель раскрывается
-   ниже и отодвигает строки, как filterbar доски задач. */
-.list-controls { display: flex; align-items: center; gap: 7px; }
-.scope { flex: 1; min-width: 0; }
-.filter-toggle { flex: none; }
-.filter-toggle-content { display: flex; align-items: center; gap: 5px; }
-.filter-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px;
-  padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--surface);
-  font-size: 10.5px; font-weight: 700; }
+/* Строка под поиском — единый левый кластер: лёгкий pill-переключатель области
+   (chat-scope) и сразу за ним голая иконка фильтров, без прижатия к правому краю.
+   Панель раскрывается ниже и отодвигает строки, как filterbar доски задач.
+   Счётчик активных фильтров — угловой бейдж иконки, а не коробка с подписью. */
+.list-controls { display: flex; align-items: center; gap: 6px; }
+.scope { flex: 0 1 auto; min-width: 0; }
+.filter-toggle { position: relative; flex: none; }
+.filter-count { position: absolute; top: -3px; right: -3px; display: inline-grid; place-items: center;
+  min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent);
+  color: var(--surface); font-size: 9.5px; font-weight: 700; line-height: 1;
+  box-shadow: 0 0 0 2px var(--surface); }
 .filterbar {
   display: none;
   flex-direction: column;

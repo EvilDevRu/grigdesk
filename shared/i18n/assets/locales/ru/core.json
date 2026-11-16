@@ -1839,7 +1839,7 @@
   "chatNetAktivnyhChatov": "Нет активных чатов",
   "chatListScope": "Область списка",
   "chatFilterActive": "Активные",
-  "chatFilterArchivedCount": "Архив{archivedChatCount}",
+  "chatFilterArchived": "Архив",
   "chatListFilters": "Фильтры чатов",
   "chatListFiltersActive": "Фильтры чатов, активно: {count}",
   "chatFilterState": "Состояние",

@@ -465,6 +465,32 @@
   line-height: 1.4;
 }
 
+/* Необязательный счётчик сегмента — тихая плашка, а не часть подписи: число
+   архива или раздела читается отдельно от названия и не растягивает сегмент
+   строкой «Архив · 1779». Табличные цифры держат ширину стабильной при смене
+   числа. Нейтральный тон не требует действия; у выбранного сегмента плашка
+   получает акцентный оттенок, чтобы счётчик оставался частью активной области. */
+.ui-segmented-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink-mid) 18%, transparent);
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-segmented-control > .ui-button[aria-pressed='true'] .ui-segmented-badge,
+.ui-segmented-control > .ui-button.is-pressed .ui-segmented-badge {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--ink);
+}
+
 .ui-tabs {
   width: max-content;
   max-width: 100%;
@@ -564,6 +590,28 @@
   padding: 0 10px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+/* Область списка чатов — лёгкий pill-переключатель вида, а не тяжёлая коробка
+   формы: утопленный лоток без внешней рамки и разделителя, активная область —
+   скруглённая плашка. Иконка фильтров стоит сразу за вкладками одним левым
+   кластером, поэтому строка читается как единый toolbar, а не два виджета. */
+.ui-segmented-control[data-context='chat-scope'] {
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ground) 70%, transparent);
+}
+
+.ui-segmented-control[data-context='chat-scope'] > .ui-button {
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+
+.ui-segmented-control[data-context='chat-scope'] > .ui-button + .ui-button {
+  border-inline-start: 0;
 }
 
 /* Вкладки Docker занимают свою область рядом со сводкой.
