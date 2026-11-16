@@ -93,6 +93,10 @@ Closing the dialog does not stop its job; reopening shows the result.
 Switching GrigDesk itself loses connection until restart and requires user systemd availability before stopping.
 An older branch may lack this management screen.
 
+When building GrigDesk itself from source, server, desktop and command stages can run
+in parallel. Progress keeps each stage's status separate; desktop installation begins
+after every build track succeeds.
+
 ## Prepare and push a commit
 
 1. Stage the required files with `+`; `−` unstages them. Check directory and partial selections first.

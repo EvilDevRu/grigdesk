@@ -8,6 +8,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 
 import { assertRestored } from './helpers/pty.mts';
 import { visibleLines, exitMenus } from './helpers/menuFixture.mts';
+import { expectedBuildCalls } from '../server/helpers/ctlBuildFixture.js';
 import {
   terminalBuildFixture, launchBuild, chooseBuild, buildLog,
 } from './helpers/buildFixture.mts';
@@ -456,7 +457,7 @@ for (const mode of ['agent', 'stdin-pipe', 'stdout-pipe']) {
     assert.equal(result.timedOut, false);
     assert.match(session.output(), /fixture-out/u);
     assert.doesNotMatch(session.output(), /Журнал|\d+%/u);
-    assert.equal((await box.calls()).length, 2);
+    assert.deepEqual(await box.calls(), expectedBuildCalls(box, 'web'));
     await assert.rejects(stat(path.join(box.env.GRIGDESK_HOME, 'artifacts/ctl-build')), { code: 'ENOENT' });
   });
 }
