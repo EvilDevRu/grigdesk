@@ -101,6 +101,7 @@ test('AP20_pipeline_pin: systemd и detached сохраняют выбранны
       assert.equal(launch.capture.env.DEEPSEEK_API_KEY, OLD_KEY);
       await activate(f, neighbor);
       await worker('factory-pause');
+      assert.equal((await profiles(f, 'deepseek')).switchAllowed, false);
       await activate(f, second, 'deepseek', {}, 409);
       await worker('restart');
       await f.restart();
@@ -120,6 +121,7 @@ test('AP20_pipeline_pin: systemd и detached сохраняют выбранны
       await fs.chmod(runtime, 0o600);
       await fs.copyFile(path.join(root, 'after.json'), runtime);
       await fs.chmod(runtime, 0o400);
+      assert.equal((await profiles(f, 'deepseek')).switchAllowed, true);
       await activate(f, second, 'deepseek');
       assert.equal((await profiles(f, 'deepseek')).activeProfileId, second.id);
     });

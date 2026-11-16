@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 // Блок «Обсуждение в Telegram» в модалке задачи.
 //
 // Главное требование раздела 5 плана: НЕРАСКРЫТАЯ ссылка показывается с причиной,
@@ -51,7 +52,15 @@ async function mountModal(t, task) {
   ]);
 
   globalThis.__tgExpandApi = {
+    /**
+     * Возможности карточки подтверждаются синтетическим каталогом независимо от деталей.
+     * Остальные ответы остаются в прежнем сценарии без обращения к реальному трекеру.
+     */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
       return {};

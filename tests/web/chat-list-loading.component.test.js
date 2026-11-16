@@ -109,6 +109,13 @@ async function fixture(t, initial = {}, pagingOverrides = {}) {
     ensureChatPage() {},
     loadChatPage() {},
     refreshChatPage() {},
+    retryChatPage(query, archived, filters) {
+      const current = this.pageFor(query, archived, filters);
+
+      return current.needsRefresh
+        ? this.refreshChatPage(query, archived, filters)
+        : this.loadChatPage(query, archived, false, filters);
+    },
     list() {
       calls.list += 1;
 
@@ -176,8 +183,14 @@ async function fixture(t, initial = {}, pagingOverrides = {}) {
 
   t.after(() => {
     wrapper.unmount();
+
     locale.setUiLocale('ru');
+
     delete globalThis.__loadListChat;
+
+    localStorage.removeItem('chat.list.scope');
+
+    localStorage.removeItem('chat.list.filters');
   });
   await drain();
 
@@ -211,7 +224,8 @@ test('LIST-STATE-01', async (t) => {
       const { wrapper, state, calls } = await fixture(sub, { loading: false, loadError: reason });
 
       await wrapper.find('.search input').setValue('Нет совпадений');
-      await wrapper.find('[role="switch"]').trigger('click');
+
+      await wrapper.find('[data-option-value="archived"]').trigger('click');
       assert.ok(wrapper.text().includes(TEXT.ru.failed));
       assert.ok(wrapper.text().includes(TEXT.ru[reason]));
       assert.equal(wrapper.text().includes('Данные Я🦊'), false);

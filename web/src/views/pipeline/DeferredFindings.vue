@@ -1,23 +1,21 @@
 <template>
   <section class="sect deferred-sect" data-role="pipeline-deferred-findings">
     <header class="deferred-head">
-      <span class="deferred-title">Замечания на будущее</span>
+      <span class="deferred-title">{{ t('core.pipelineZamechaniyaNaBuduschee') }}</span>
       <span v-if="items.length" class="deferred-count">{{ items.length }}</span>
     </header>
 
-    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document">
+    <UiLoadingState v-if="loading" :label="t('core.pipelineChitayuZamechaniyaPopytki')" variant="document">
       <div class="findings-loading"><UiSkeletonLayout layout="text" :header="false" /></div>
     </UiLoadingState>
     <div v-else-if="error" class="deferred-error" role="alert">
       <p>{{ error }}</p>
-      <UiButton variant="text" size="compact" @click="load">Повторить чтение</UiButton>
+      <UiButton variant="text" size="compact" @click="load">{{ t('core.pipelinePovtoritChtenie') }}</UiButton>
     </div>
     <template v-else>
-      <p v-if="!items.length" class="deferred-empty">Отложенных замечаний нет.</p>
+      <p v-if="!items.length" class="deferred-empty">{{ t('core.pipelineOtlozhennyhZamechaniyNet') }}</p>
       <template v-else>
-        <p class="deferred-note">
-          Эти замечания ждут твоего решения на приёмке. Маршрут их не исправлял.
-        </p>
+        <p class="deferred-note"> {{ t('core.pipelineEtiZamechaniyaZhdutTvoego') }} </p>
         <ol class="deferred-list">
           <li v-for="(item, index) in items" :key="findingKey(item)" class="deferred-item">
             <span class="deferred-num" aria-hidden="true">{{ index + 1 }}</span>
@@ -41,11 +39,7 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { api } from '../../shared/apiClient.ts';
-import {
-  UiButton,
-  UiLoadingState,
-  UiSkeletonLayout,
-} from '../../ui';
+import { UiButton, UiLoadingState, UiSkeletonLayout, t } from '../../ui';
 
 interface DeferredFindingView {
   id: string;
@@ -72,7 +66,9 @@ function findingKey(item: DeferredFindingView) {
 }
 
 function sourceLabel(item: DeferredFindingView) {
-  return item.source?.phase === 'bootstrap' ? 'Разведка SCOUT' : `Узел ${item.sourceNode}`;
+  return item.source?.phase === 'bootstrap'
+        ? t('core.pipelineRazvedkaScout')
+        : t('core.pipelineUzelSourcenode', { sourceNode: item.sourceNode });
 }
 
 /**
@@ -100,7 +96,7 @@ async function load() {
 
   try {
     if (!props.task || !props.profile || !props.attempt) {
-      throw new Error('Попытка не определена.');
+      throw new Error(t('core.pipelinePopytkaNeOpredelena'));
     }
 
     const query = new URLSearchParams({ profile: props.profile, attempt: props.attempt });
@@ -113,7 +109,7 @@ async function load() {
     if (!isRecord(value) || value.attemptId !== props.attempt || value.profile !== props.profile
         || !isRecord(value.findings) || !Array.isArray(value.findings.deferred)
         || !value.findings.deferred.every(isDeferredFinding)) {
-      throw new Error('Попытка изменилась — обнови карточку.');
+      throw new Error(t('core.pipelinePopytkaIzmenilasObnoviKartochku'));
     }
 
     items.value = value.findings.deferred;
@@ -123,7 +119,9 @@ async function load() {
       return;
     }
 
-    error.value = `Замечания недоступны: ${errorMessage(cause, 'Не удалось выполнить запрос')}`;
+    error.value = t('core.pipelineZamechaniyaNedostupnyErrormessagecause', {
+      errorMessagecause: errorMessage(cause, t('core.pipelineNeUdalosVypolnitZapros')),
+    });
   } finally {
     if (request === generation) {
       loading.value = false;

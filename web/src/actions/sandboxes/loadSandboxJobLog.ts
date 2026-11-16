@@ -1,6 +1,11 @@
 import type { SandboxJobLog } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 import { sandboxApi, sandboxErrorMessage } from '../../shared/sandboxApi';
 import { useSandboxesStore } from '../../stores/sandboxes';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Хвост вывода задания стенда — по запросу карточки, а не в обзоре: полный журнал
@@ -13,7 +18,7 @@ export async function loadSandboxJobLog(task: string): Promise<SandboxJobLog | n
   try {
     return await sandboxApi.jobLog(task);
   } catch (error) {
-    store.setError(sandboxErrorMessage(error, 'Журнал задания не прочитался.'));
+    store.setError(sandboxErrorMessage(error, translateUi('core.loadSandboxJobLogCouldNotReadTheJobLog')));
 
     return null;
   }

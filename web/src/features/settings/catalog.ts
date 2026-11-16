@@ -31,6 +31,14 @@ export interface StaticSettingsField extends SettingsFieldMetadata {
 
 const PREFERENCE_DEFINITIONS = [
   [
+    'agents.providers',
+    'providerUsageAutoRefresh',
+    'switch',
+    translator.t('ru', 'settings.providerUsageAutoRefresh'),
+    translator.t('ru', 'settings.providerUsageAutoRefreshHint'),
+  ],
+
+  [
     'automation.chats',
     'chatLiveSessions',
     'switch',
@@ -64,6 +72,13 @@ const PREFERENCE_DEFINITIONS = [
     'switch',
     translator.t('ru', 'settings.refreshRepositoriesBeforeStarting'),
     translator.t('ru', 'settings.appliesToNewTriageAndPipelineRuns'),
+  ],
+  [
+    'automation.launch',
+    'pipelineAutoStart',
+    'switch',
+    translator.t('ru', 'settings.automaticallyStartThePipelineOnCreation'),
+    translator.t('ru', 'settings.disabledThePipelineIsCreatedAndWaits'),
   ],
   [
     'automation.monitoring',
@@ -316,6 +331,37 @@ SETTINGS_FIELDS.push({
   description: translator.t('ru', 'settings.applicationAutostartDescription'),
   scope: translator.t('ru', 'settings.applicationComputer'),
 });
+
+const VPN_GATE_FIELDS = [
+  [
+    'requireVpn',
+    'switch',
+    translator.t('ru', 'settings.vpnGateRequire'),
+    translator.t('ru', 'settings.vpnGateRequireHint'),
+  ],
+  [
+    'iface',
+    'text',
+    translator.t('ru', 'settings.vpnGateIface'),
+    translator.t('ru', 'settings.vpnGateIfaceHint'),
+  ],
+  [
+    'probe',
+    'text',
+    translator.t('ru', 'settings.vpnGateProbe'),
+    translator.t('ru', 'settings.vpnGateProbeHint'),
+  ],
+] as const;
+
+SETTINGS_FIELDS.push(...VPN_GATE_FIELDS.map(([key, control, label, description]) => ({
+  address: { pageId: 'system.startup', fieldPath: ['vpnGate', key] },
+  resourceId: 'vpnGate',
+  key,
+  control,
+  label,
+  description,
+  scope: translator.t('ru', 'settings.selectedServerComputer'),
+})));
 
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
 export const DEFAULT_SETTINGS_PAGE = 'interface.behavior';
@@ -864,6 +910,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.appliesToNewTriageAndPipelineRuns",
     "scope": "settings.allDevices"
   },
+  "prefs:pipelineAutoStart": {
+    "label": "settings.automaticallyStartThePipelineOnCreation",
+    "description": "settings.disabledThePipelineIsCreatedAndWaits",
+    "scope": "settings.allDevices"
+  },
   "prefs:runSilenceWindow": {
     "label": "settings.turnSilenceThresholdMinutes",
     "description": "settings.disableAlertsForAStalledPipelineTurn",
@@ -883,6 +934,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.arbiterEffort",
     "description": "settings.availableLevelsComeFromTheSelectedModel",
     "scope": "settings.allDevices"
+  },
+  'prefs:providerUsageAutoRefresh': {
+    label: 'settings.providerUsageAutoRefresh',
+    description: 'settings.providerUsageAutoRefreshHint',
+    scope: 'settings.allDevices',
   },
   "prefs:showAllModels": {
     "label": "settings.showAllModels",
@@ -978,6 +1034,21 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.usePreviousText",
     "description": "settings.forDictationVideoTranscriptionUsesItsOwn",
     "scope": "settings.allDevices"
+  },
+  "vpnGate:requireVpn": {
+    "label": "settings.vpnGateRequire",
+    "description": "settings.vpnGateRequireHint",
+    "scope": "settings.selectedServerComputer"
+  },
+  "vpnGate:iface": {
+    "label": "settings.vpnGateIface",
+    "description": "settings.vpnGateIfaceHint",
+    "scope": "settings.selectedServerComputer"
+  },
+  "vpnGate:probe": {
+    "label": "settings.vpnGateProbe",
+    "description": "settings.vpnGateProbeHint",
+    "scope": "settings.selectedServerComputer"
   },
   "autostart:enabled": {
     "label": "settings.startWhenTheMachineTurnsOn",

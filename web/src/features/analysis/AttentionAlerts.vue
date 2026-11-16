@@ -45,10 +45,11 @@
       <ul class="attention-list">
         <li
           v-for="item in items"
-          :key="item.task"
+          :key="item.key"
           class="attention-row"
         >
           <span class="attention-copy">
+            <TaskSourceChip v-if="item.source" :source="item.source" />
             <b class="attention-task mono">#{{ item.task }}</b>
             <span class="attention-reason">{{ item.reason }}</span>
           </span>
@@ -58,8 +59,8 @@
               :label="t('core.restartEvaluation', { itemTask: item.task })"
               v-tooltip="t('core.restartEvaluation2')"
               role="embedded"
-              :disabled="busy === item.task"
-              @click="restart(item.task)"
+              :disabled="busyRows.has(item.key) || busy === 'all'"
+              @click="restart(item)"
             >
 <UiRefreshIcon />
             </UiIconButton>
@@ -67,8 +68,8 @@
               :label="t('core.hideEvaluation', { itemTask: item.task })"
               v-tooltip="t('core.hideDoNotRestart')"
               role="embedded"
-              :disabled="busy === item.task"
-              @click="dismiss(item.task)"
+              :disabled="busyRows.has(item.key) || busy === 'all'"
+              @click="dismiss(item)"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -113,6 +114,10 @@
 </template>
 
 <script setup lang="ts">
+import { taskReferenceKey } from '../../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
+import TaskSourceChip from '../../shared/TaskSourceChip.vue';
+
 import { t } from '../../ui.ts';
 
 import { computed, ref } from 'vue';
@@ -131,6 +136,12 @@ import {
   vTooltip,
 } from '../../ui';
 
+interface AttentionItem {
+  task: number;
+  source?: TaskSourceId | null;
+  key: string;
+}
+
 const analysis = useAnalysisStore();
 
 // Шапка живёт на всех экранах, а запуск опроса идемпотентен.
@@ -138,25 +149,28 @@ if (!analysis.disabled) {
   startAnalysisPolling();
 }
 
-const busy = ref<string | number | null>(null);
+const busy = ref<'all' | null>(null);
+const busyRows = ref(new Set<string>());
 const items = computed(() => (analysis.disabled ? [] : analysis.issues).map((issue) => ({
   task: issue.task,
+  source: issue.source,
+  key: taskReferenceKey({ id: issue.task, source: issue.source }),
   reason: issue.status?.error || (
     issue.status?.state === 'interrupted' ? t('core.interrupted') : t('core.failed')
   ),
 })));
 
 /**
- * Busy привязан к task id, чтобы обе конфликтующие операции конкретной строки
+ * Busy привязан к паре source/id, чтобы обе конфликтующие операции конкретной строки
  * оставались недоступны до завершения запроса.
  */
-async function restart(id: number) {
-  busy.value = id;
+async function restart(item: AttentionItem) {
+  busyRows.value.add(item.key);
 
   try {
-    await analyzeTask(id);
+    await analyzeTask(item.task, item.source ? { source: item.source } : {});
   } finally {
-    busy.value = null;
+    busyRows.value.delete(item.key);
   }
 }
 
@@ -164,13 +178,13 @@ async function restart(id: number) {
  * Скрытие использует тот же row-lock, что и перезапуск: повторный клик не должен
  * отправить конкурирующую команду для одной оценки.
  */
-async function dismiss(id: number) {
-  busy.value = id;
+async function dismiss(item: AttentionItem) {
+  busyRows.value.add(item.key);
 
   try {
-    await dismissAnalysis(id);
+    await dismissAnalysis(item.task, item.source || undefined);
   } finally {
-    busy.value = null;
+    busyRows.value.delete(item.key);
   }
 }
 
@@ -183,7 +197,7 @@ async function restartAll() {
 
   try {
     for (const item of items.value) {
-      await analyzeTask(item.task);
+      await analyzeTask(item.task, item.source ? { source: item.source } : {});
     }
   } finally {
     busy.value = null;
@@ -199,7 +213,7 @@ async function dismissAll() {
 
   try {
     for (const item of items.value) {
-      await dismissAnalysis(item.task);
+      await dismissAnalysis(item.task, item.source || undefined);
     }
   } finally {
     busy.value = null;

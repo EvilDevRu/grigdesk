@@ -452,6 +452,49 @@ test('отказ подготовки называет выбранную lifecy
   assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
 });
 
+test('отказ проверки npm показывает перевод причины prepare на RU и EN', async (t) => {
+  const cases = [
+    {
+      code: 'installer_strategy_unverified',
+      ru: /Способ установки этой версии не проверен/u,
+      en: /This installation method is not verified for the version/u,
+    },
+    {
+      code: 'npm_graph_invalid',
+      ru: /Не удалось проверить граф npm-пакета/u,
+      en: /The npm package graph could not be verified/u,
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.code, async (scenario) => {
+      const fixture = await dialogFixture(scenario, null, {
+        prepare: async () => {
+          throw new ApiError(entry.code, 409, { error: entry.code, message: '' });
+        },
+      });
+
+      fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+      await fixture.store.requestInstall('claude', 'update');
+
+      for (const locale of ['ru', 'en']) {
+        fixture.module.setUiLocale(locale);
+        await fixture.flushPromises();
+
+        const text = fixture.wrapper.text();
+
+        assert.match(text, entry[locale]);
+        assert.doesNotMatch(text,
+          /Подготовка операции не удалась|installer_strategy_unverified|npm_graph_invalid/u);
+      }
+
+      assert.equal(fixture.calls.confirmations.length, 0);
+      assert.equal(fixture.calls.posts.length, 1);
+      assert.equal(fixture.calls.posts[0].url.endsWith('/prepare'), true);
+    });
+  }
+});
+
 test('Войти не исполняет installer', async (t) => {
   const fixture = await dialogFixture(t, job({
     operation: 'install',

@@ -33,6 +33,7 @@ interface ExitOperation {
   id: string;
   context: DesktopExitContext;
   generation: number;
+  ownership: string;
   bridge: ReturnType<typeof createDesktopExitBridge>;
   controller: AbortController;
   phase: 'inspecting' | 'prompt' | 'stopping' | 'finishing';
@@ -59,18 +60,20 @@ export function createDesktopExitController(options: ExitOptions) {
   let nativeClose = false;
 
   /**
-   * Адрес local недостаточен: нужен собственный supervisor и тот же выбранный профиль.
-   * Скрытое окно не удерживает запуск и сохраняет прежний путь отказа старта.
+   * Вопрос касается выбранного местного происхождения независимо от владения сервером:
+   * отдельно запущенный сервер получает вопрос и остановку конвейеров, хотя слив остаётся
+   * уделом собственного сервера. Скрытое окно не удерживает запуск и сохраняет прежний
+   * путь отказа старта, а удалённая машина идёт мимо предварительной фазы.
    */
   function eligible(context: DesktopExitContext): boolean {
     return options.revealed() && context.window.isVisible() && !context.window.isDestroyed()
-      && context.local && context.address === context.selectedOrigin
-      && context.supervisor.ownership === 'owned';
+      && context.local && context.address === context.selectedOrigin;
   }
 
   /**
    * Все эффекты привязаны к захваченным машине, документу и поколению supervisor.
-   * После начала stop переход ownership в none ожидаем и не снимает общий срок.
+   * Смена владения посреди операции отменяет её: слив начатого чужого сервера недопустим.
+   * После начала stop переход owned в none ожидаем и не снимает общий срок.
    */
   function current(operation: ExitOperation, requireOwned = true): boolean {
     const context = options.context();
@@ -81,7 +84,7 @@ export function createDesktopExitController(options: ExitOptions) {
       && context.profileId === captured.profileId && context.address === captured.address
       && context.selectedOrigin === captured.selectedOrigin && context.local
       && context.supervisor === captured.supervisor && context.supervisor.generation === operation.generation
-      && (!requireOwned || context.supervisor.ownership === 'owned') && operation.bridge.valid();
+      && (!requireOwned || context.supervisor.ownership === operation.ownership) && operation.bridge.valid();
   }
 
   /**
@@ -261,7 +264,9 @@ export function createDesktopExitController(options: ExitOptions) {
 
   /**
    * Сначала подтверждаем кадр модала, затем Stop конвейеров и штатный слив своего сервера.
-   * Старый quit получает управление только после слива, поэтому труба остаётся живой.
+   * Внешний сервер проходит тот же вопрос и Stop, но слив и строгий updater пропускает:
+   * приложению запрещено сигнализировать процессу, которым оно не владеет. Старый quit
+   * получает управление только после слива, поэтому труба остаётся живой.
    */
   async function run(operation: ExitOperation): Promise<void> {
     const snapshot = decodeDesktopExitSnapshot(await send(operation, 'inspect', 5000));
@@ -305,10 +310,10 @@ export function createDesktopExitController(options: ExitOptions) {
         return;
       }
 
-      const update = options.applyUpdate?.();
+      // Строгий updater обещает drain-proof своего сервера; внешний сервер этот путь не проходит.
+      const update = operation.ownership === 'owned' ? options.applyUpdate?.() : null;
 
       if (update) {
-        // Строгий updater владеет сливом и сроками; обычный deadline не заменяет его proof.
         clearTimeout(operation.deadline);
         operation.deadline = undefined;
 
@@ -374,6 +379,7 @@ export function createDesktopExitController(options: ExitOptions) {
       id: randomUUID(),
       context,
       generation: context.supervisor.generation,
+      ownership: context.supervisor.ownership,
       bridge: createDesktopExitBridge(context.window, context.origin),
       controller: new AbortController(),
       phase: 'inspecting',

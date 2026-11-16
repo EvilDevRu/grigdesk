@@ -1,32 +1,10 @@
 import { recordOrNull } from '../../../../shared/lib/objects.ts';
 
+import { cut, lineCount, STEP_THINK_LIMIT } from '../chat/streamSteps.ts';
 import {
-  base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
-} from '../chat/streamSteps.ts';
+  acpToolStep, firstString, parseAcpContent, type AcpDiff, type AcpContent,
+} from '../chat/acpSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-
-const KIMI_CHANGE_LIMIT = 20;
-const KIMI_DIFF_TEXT_BUDGET = 16 * 1024;
-const KIMI_CHANGE_PATH_LIMIT = 500;
-const MIDDLE_MARKER = '\n… сокращено …\n';
-
-/**
- * Блоки content ACP: текст и структурный diff. Форма диффа — `{type:'diff', path,
- * oldText, newText}`; поля `diff` у него нет, и чтение несуществующего поля
- * оставляло правку файла в ленте пустой строкой.
- */
-// Структурная правка файла из блока content ACP.
-interface KimiDiff {
-  path: string;
-  old: string;
-  new: string;
-}
-
-// Разобранный content дельты: текст и все её правки.
-interface ParsedContent {
-  text: string;
-  diffs: KimiDiff[];
-}
 
 // Дельта ACP: форма зависит от sessionUpdate, поэтому все поля необязательны.
 export interface KimiUpdate {
@@ -49,139 +27,15 @@ interface ToolState {
   rawInput: Record<string, unknown>;
   locations: Array<{ path?: unknown } | null>;
   text: string;
-  diffs: KimiDiff[];
+  diffs: AcpDiff[];
   status: string;
   emitted: boolean;
   resultEmitted: boolean;
 }
 
-function splitContent(content: unknown): ParsedContent {
-  const list = (Array.isArray(content) ? content : []) as Array<{
-    type?: string;
-    path?: unknown;
-    oldText?: unknown;
-    newText?: unknown;
-    content?: { type?: string; text?: unknown };
-  } | null>;
-  const texts: string[] = [];
-  const diffs: KimiDiff[] = [];
-  for (const entry of list) {
-    if (entry?.type === 'diff') {
-      diffs.push({
-        path: String(entry.path || ''),
-        old: String(entry.oldText ?? ''),
-        new: String(entry.newText ?? ''),
-      });
-      continue;
-    }
-    if (entry?.type === 'content' && entry.content?.type === 'text') {
-      const text = String(entry.content.text || '');
-      if (text.trim()) texts.push(text);
-    }
-  }
-  return { text: texts.join('\n'), diffs };
-}
-
-function firstString(...values: unknown[]): string {
-  return String(values.find((value) => typeof value === 'string' && value.trim()) || '');
-}
-
-function uniquePaths(values: unknown[]): string[] {
-  return [...new Set(values.map((value) => String(value || '')).filter(Boolean))];
-}
-
-function boundedPath(value: unknown): string {
-  const path = String(value || '');
-  if (path.length <= KIMI_CHANGE_PATH_LIMIT) return path;
-  return `${path.slice(0, KIMI_CHANGE_PATH_LIMIT - 1)}…`;
-}
-
 function meaningfulKind(value: unknown): string {
   const kind = typeof value === 'string' ? value.trim() : '';
   return kind && kind.toLowerCase() !== 'other' ? kind : '';
-}
-
-function utf8Prefix(value: unknown, byteLimit: number): string {
-  const chars: string[] = [];
-  let bytes = 0;
-  for (const char of String(value ?? '')) {
-    const size = Buffer.byteLength(char);
-    if (bytes + size > byteLimit) break;
-    chars.push(char);
-    bytes += size;
-  }
-  return chars.join('');
-}
-
-function utf8Suffix(value: unknown, byteLimit: number): string {
-  const source = Array.from(String(value ?? ''));
-  const chars: string[] = [];
-  let bytes = 0;
-  for (let index = source.length - 1; index >= 0; index--) {
-    const char = String(source[index]);
-    const size = Buffer.byteLength(char);
-    if (bytes + size > byteLimit) break;
-    chars.push(char);
-    bytes += size;
-  }
-  return chars.reverse().join('');
-}
-
-function cutMiddleBytes(value: unknown, byteLimit: number): string {
-  const text = String(value ?? '');
-  if (Buffer.byteLength(text) <= byteLimit) return text;
-  const markerBytes = Buffer.byteLength(MIDDLE_MARKER);
-  if (byteLimit <= markerBytes) return utf8Prefix(text, byteLimit);
-  const available = byteLimit - markerBytes;
-  const head = Math.ceil(available / 2);
-  return `${utf8Prefix(text, head)}${MIDDLE_MARKER}${utf8Suffix(text, available - head)}`;
-}
-
-function boundedDiff(diff: KimiDiff, byteBudget: number): { old: string; new: string } {
-  const old = String(diff.old ?? '');
-  const next = String(diff.new ?? '');
-  const oldBytes = Buffer.byteLength(old);
-  const newBytes = Buffer.byteLength(next);
-  if (oldBytes + newBytes <= byteBudget) return { old, new: next };
-
-  let oldBudget = old ? Math.floor(byteBudget / 2) : 0;
-  let newBudget = next ? byteBudget - oldBudget : 0;
-  if (!old) newBudget = byteBudget;
-  if (!next) oldBudget = byteBudget;
-  if (oldBytes < oldBudget) {
-    newBudget += oldBudget - oldBytes;
-    oldBudget = oldBytes;
-  }
-  if (newBytes < newBudget) {
-    oldBudget += newBudget - newBytes;
-    newBudget = newBytes;
-  }
-  return {
-    old: cutMiddleBytes(old, oldBudget),
-    new: cutMiddleBytes(next, newBudget),
-  };
-}
-
-function boundedChanges(diffs: KimiDiff[]) {
-  const selected = diffs.slice(0, KIMI_CHANGE_LIMIT);
-  let remaining = KIMI_DIFF_TEXT_BUDGET;
-  return selected.map((diff, index) => {
-    const slots = selected.length - index;
-    const budget = Math.floor(remaining / slots);
-    const bounded = boundedDiff(diff, budget);
-    remaining -= Buffer.byteLength(bounded.old) + Buffer.byteLength(bounded.new);
-    return {
-      path: boundedPath(diff.path),
-      kind: diffKind(diff),
-      diff: bounded,
-    };
-  });
-}
-
-function diffKind(diff: KimiDiff): string {
-  if (!diff.old && diff.new) return 'add';
-  if (diff.old && !diff.new) return 'delete';
-  return 'update';
 }
 
 function mergeLocations(current: unknown, incoming: unknown): Array<{ path?: unknown } | null> {
@@ -194,7 +48,9 @@ function mergeLocations(current: unknown, incoming: unknown): Array<{ path?: unk
   return out;
 }
 
-function canonicalPayload(update: KimiUpdate, parsed: ParsedContent): boolean {
+// Каноническое повышение sparse-дельты: осмысленный kind или структурный diff
+// плюс содержательные title/rawInput/locations; иначе строку рано выпускать.
+function canonicalPayload(update: KimiUpdate, parsed: AcpContent): boolean {
   const kind = typeof update.kind === 'string' ? update.kind.trim().toLowerCase() : '';
   // Lazy ACP-дельта может уже называться `other` и нести обрывок rawInput. Это
   // всё ещё не канонический upgrade: безопасным самостоятельным сигналом без
@@ -209,10 +65,12 @@ function canonicalPayload(update: KimiUpdate, parsed: ParsedContent): boolean {
   );
 }
 
+// Накопление состояния вызова между дельтами: kind, title, rawInput, locations;
+// диффы дополняются, канонический снимок их заменяет; дельта other не понижает тип.
 function mergeToolUpdate(
   state: ToolState,
   update: KimiUpdate,
-  parsed: ParsedContent,
+  parsed: AcpContent,
   canonical: boolean,
 ): ToolState {
   const kind = meaningfulKind(update.kind);
@@ -254,86 +112,6 @@ function mergeToolUpdate(
   }
   if (typeof update.status === 'string' && update.status) state.status = update.status;
   return state;
-}
-
-/**
- * Шаг ленты из tool_call/tool_call_update. Аргументы берём из `rawInput` — он
- * приходит только на upgrade вызова (`in_progress`), поэтому строку ленты
- * собираем именно тогда, а не на lazy-create первой дельты.
- */
-function toolStep(state: ToolState): ChatStep {
-  const { id } = state;
-  const kind = String(state.kind || 'other');
-  const raw = state.rawInput;
-  const text = state.text;
-  const title = String(state.title || kind);
-
-  if (kind === 'execute') {
-    // Заголовком идёт сама команда: «Bash Bash» ничего человеку не сообщает.
-    const command = firstString(raw.command, raw.cmd, raw.script) || text;
-    return {
-      k: 'tool', id, name: 'Bash', lang: 'bash',
-      title: cut((command || title).split('\n')[0], 200),
-      command: cutMiddle(command, STEP_TEXT_LIMIT),
-      preview: command ? '' : cut(title, 200),
-    };
-  }
-
-  if (kind === 'edit' || state.diffs.length) {
-    const locationPaths = state.locations.map((location) => location?.path);
-    const fallback = firstString(locationPaths[0], raw.path, raw.file_path);
-    const diffs = state.diffs.map((diff, index) => ({
-      ...diff,
-      path: firstString(diff.path, locationPaths[index], index === 0 ? fallback : ''),
-    }));
-    const allFiles = uniquePaths([
-      ...diffs.map((diff) => diff.path),
-      ...locationPaths,
-      raw.path,
-      raw.file_path,
-    ]);
-    const files = allFiles.slice(0, KIMI_CHANGE_LIMIT).map(boundedPath);
-    const file = firstString(files[0], boundedPath(fallback));
-    const changes = boundedChanges(diffs);
-    const omittedChanges = Math.max(
-      0,
-      diffs.length - changes.length,
-      allFiles.length - files.length,
-    );
-    return {
-      k: 'tool', id, name: 'Edit',
-      title: file ? base(file) : cut(title, 200),
-      sub: file,
-      files,
-      ...(changes.length ? { changes } : {}),
-      ...(omittedChanges
-        ? { omittedChanges, preview: `… ещё ${omittedChanges} файлов` }
-        : {}),
-      ...(!changes.length && !omittedChanges
-        ? { preview: cut(text || JSON.stringify(raw), 600) }
-        : {}),
-    };
-  }
-
-  if (kind === 'read') {
-    const file = boundedPath(firstString(state.locations[0]?.path, raw.path, raw.file_path));
-    return {
-      k: 'tool', id, name: 'Read', title: file ? base(file) : cut(title, 200), sub: file,
-    };
-  }
-
-  if (kind === 'search') {
-    return {
-      k: 'tool', id, name: 'Grep',
-      title: cut(firstString(raw.pattern, raw.query, raw.regex) || title, 200),
-      sub: boundedPath(firstString(raw.path, raw.glob)),
-    };
-  }
-
-  const args = Object.keys(raw).length ? JSON.stringify(raw) : text;
-  return {
-    k: 'tool', id, name: title, title: cut(title, 200), preview: cut(args, 600),
-  };
 }
 
 /** Stateful ACP → provider-neutral ChatStep normalizer. */
@@ -379,7 +157,7 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
 
     if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
       const id = update.toolCallId;
-      const parsed = splitContent(update.content);
+      const parsed = parseAcpContent(update.content);
       const canonical = canonicalPayload(update, parsed);
       const state: ToolState = tools.get(id) || {
         id,
@@ -405,8 +183,9 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
       // структурированный диф; терминальный путь остаётся для правок без такого блока.
       const waitsForEditDiff = state.kind === 'edit' && state.diffs.length === 0;
       const ready = update.status !== 'pending' && canonical && !waitsForEditDiff;
+
       if (!state.emitted && (ready || terminal)) {
-        const step = toolStep(state);
+        const step = acpToolStep(state);
         state.emitted = true;
         out.push(step);
       }
@@ -441,4 +220,57 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
   // текстом): без явного flush он пропадал бы вместе с нормализатором.
   normalize.flush = () => flushThought([]);
   return normalize;
+}
+
+/**
+ * Серверный output бывает строкой, ACP-массивом, прямым блоком или content-объектом.
+ * Известные блоки разбираются общим парсером; неизвестный объект сохраняет поля
+ * в JSON, а не превращается в object Object. Обрезку выполняет вызывающий.
+ */
+function kimiServerOutputText(output: unknown): string {
+  if (typeof output === 'string') {
+    return output;
+  }
+
+  const record = recordOrNull(output);
+  const content = Array.isArray(output)
+    ? output
+    : Array.isArray(record?.content) ? record.content : [output];
+  const blocks = content.map((value) => {
+    const block = recordOrNull(value);
+
+    return block && ['text', 'image'].includes(String(block.type))
+      ? { type: 'content', content: block }
+      : value;
+  });
+  const parsed = parseAcpContent(blocks);
+
+  if (parsed.text) {
+    return parsed.text;
+  }
+  if (parsed.diffs.length) {
+    return parsed.diffs.map((diff) => diff.path).filter(Boolean).join('\n');
+  }
+  if (record) {
+    return typeof record.text === 'string' ? record.text : JSON.stringify(record);
+  }
+
+  return Array.isArray(output) ? '' : String(output ?? '');
+}
+
+/**
+ * Итог инструмента серверного web-потока Kimi получает текст без wire-обёрток;
+ * пределы 400/600 и счётчик строк, как у ленты ACP.
+ */
+export function kimiServerResultStep(payload: Record<string, unknown>): ChatStep {
+  const ok = payload.isError !== true && payload.is_error !== true;
+  const text = kimiServerOutputText(payload.output);
+
+  return {
+    k: 'res',
+    id: String(payload.toolCallId || payload.tool_call_id || ''),
+    ok,
+    text: cut(text, ok ? 400 : 600),
+    lines: lineCount(text),
+  };
 }

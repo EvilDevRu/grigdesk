@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import deepseek from '../../server/src/lib/executors/deepseek.ts';
+import deepseek, { createDeepSeekAdapter } from '../../server/src/lib/executors/deepseek.ts';
 import {
   NEW_KEY, OLD_KEY, activate, active, addProfile, apiMethod, base, createAttempt,
-  operationId, profileFixture, profiles, runChat, saveChat, settled, submit,
+  operationId, profileFixture, profiles, resolvedAdapter, runChat, saveChat, settled, submit,
 } from '../helpers/accessProfiles.js';
 import { liveAdapter } from '../helpers/accessLiveAdapter.js';
 
@@ -125,3 +125,31 @@ test('AP18_work_auth_failure: отказ обычного хода блокир�
   await runChat(f, {}, 409);
   assert.equal(f.calls.length, 1, 'неизвестный результат хода не повторяется');
 });
+
+test('AP18_usage_recovery: успешные лимиты снимают needs-auth без мастера, успешный MCP не снимает',
+  async (t) => {
+    const f = await profileFixture(t, { auth: true });
+
+    await profiles(f);
+    await saveChat(f);
+
+    const adapter = f.adapters.get('synthetic-access');
+    adapter.usage = createDeepSeekAdapter({ usageFetch: f.vendor.fetchImpl }).usage;
+    adapter.mcpStatus = async () => ({ state: 'ok', groups: [], servers: [] });
+    const resolved = await resolvedAdapter(f);
+
+    f.vendor.control.status = 401;
+    await resolved.usage(f.config);
+    assert.equal(active(await profiles(f)).authState, 'needs-auth');
+
+    f.vendor.control.status = 200;
+    await resolved.mcpStatus(f.config);
+    assert.equal(active(await profiles(f)).authState, 'needs-auth',
+      'успешный MCP не доказывает доступ аккаунта');
+
+    await resolved.usage(f.config);
+    assert.equal(active(await profiles(f)).authState, 'ready');
+
+    const selected = await f.app.accessProfiles.select('synthetic-access', true);
+    await selected.release();
+  });

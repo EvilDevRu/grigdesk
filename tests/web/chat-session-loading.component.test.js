@@ -242,7 +242,7 @@ function mountHelpForError(t) {
 
   globalThis.fetch = async (url) => {
     calls.push(String(url));
-    assert.equal(String(url), '/api/help');
+    assert.equal(String(url), '/api/help?locale=ru');
 
     return Response.json(corpus);
   };
@@ -453,8 +453,7 @@ test('PAGE-UI-OLDER-WITH-NEWER: новый хвост оставляет дос�
   await state.chat._pullChat(state.id, false);
   await drain();
 
-  const older = state.wrapper.findAll('button')
-    .find((button) => button.text() === 'Показать более ранние сообщения');
+  const older = state.wrapper.get('[data-role="chat-history-older"]');
 
   assert.ok(older);
   assert.equal(state.chat.hasNewerMessages(state.id), true);

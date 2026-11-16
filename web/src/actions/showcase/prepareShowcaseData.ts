@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { openShowcaseProject } from './openShowcaseProject';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface SeedStatus {
   available: boolean;
@@ -25,7 +30,9 @@ export async function loadSeedStatus(store: ShowcaseStore): Promise<SeedStatus |
   try {
     return await showcaseApi.seedStatus(opened.id);
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось узнать про подготовку данных.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataCouldNotReadDataPreparationOptions')),
+    );
 
     return null;
   }
@@ -54,7 +61,7 @@ export async function prepareShowcaseData(
 
     return outcome.reason;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Подготовка данных не удалась.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataDataPreparationFailed')));
 
     return '';
   } finally {
@@ -79,7 +86,9 @@ export async function markShowcaseDataUpdated(store: ShowcaseStore): Promise<boo
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось отметить обновление данных.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataCouldNotMarkTheDataAsUpdated')),
+    );
 
     return false;
   }

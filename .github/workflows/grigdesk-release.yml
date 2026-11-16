@@ -218,6 +218,8 @@ jobs:
       - name: Зависимости комплекта
         run: |
           npm --prefix tracker ci
+          npm --prefix routes ci --include=dev
+          npm --prefix voice ci --include=dev
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci
@@ -262,17 +264,31 @@ jobs:
         continue-on-error: true
         run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test --test-concurrency=2
           tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs
+      - name: Тесты voice
+        id: voice_tests
+        continue-on-error: true
+        run: npm --prefix voice test
+      - name: Тесты routes
+        id: routes_tests
+        continue-on-error: true
+        run: npm --prefix routes test
       - name: Подтверждение серверных проверок
         if: ${{ !cancelled() }}
         env:
           SERVER_RESULT: ${{ steps.server_tests.outcome }}
           SHARED_RESULT: ${{ steps.shared_tests.outcome }}
           GUIDE_RESULT: ${{ steps.guide_tests.outcome }}
+          VOICE_RESULT: ${{ steps.voice_tests.outcome }}
+          ROUTES_RESULT: ${{ steps.routes_tests.outcome }}
         run: |
-          printf '%s\n' "server=$SERVER_RESULT" "shared=$SHARED_RESULT" "guide=$GUIDE_RESULT"
+          printf '%s\n' \
+            "server=$SERVER_RESULT" "shared=$SHARED_RESULT" \
+            "guide=$GUIDE_RESULT" "voice=$VOICE_RESULT" "routes=$ROUTES_RESULT"
           test "$SERVER_RESULT" = success
           test "$SHARED_RESULT" = success
           test "$GUIDE_RESULT" = success
+          test "$VOICE_RESULT" = success
+          test "$ROUTES_RESULT" = success
     needs:
       - plan
   web:
@@ -385,6 +401,8 @@ jobs:
       - name: Зависимости комплекта
         run: |
           npm --prefix tracker ci
+          npm --prefix routes ci --include=dev
+          npm --prefix voice ci --include=dev
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci --ignore-scripts
@@ -488,6 +506,8 @@ jobs:
       - name: Зависимости комплекта
         run: |
           npm --prefix tracker ci
+          npm --prefix routes ci --include=dev
+          npm --prefix voice ci --include=dev
           npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci --ignore-scripts

@@ -1,5 +1,10 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Открывает карточку ролика. Цель перепроверяется сервером при каждом чтении,
@@ -13,7 +18,7 @@ export async function openShowcaseProject(store: ShowcaseStore, id: string): Pro
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось открыть ролик.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.openShowcaseProjectCouldNotOpenTheVideo')));
 
     return false;
   }

@@ -71,6 +71,7 @@ async function routeFixture(t, { fetchImpl, patch = {}, modelsOf, neighbors = []
   }
 
   await app.register(providersModule, {
+    prefs: { read: () => ({ providerUsageAutoRefresh: true }) },
     config: {
       modelsPath: path.join(root, 'models.json'),
       providerUsageSeenPath: seenPath,
@@ -428,6 +429,7 @@ test('старый success/error/429 после смены не меняет HTT
         const pending = entry === 'background' ? f.app.refreshProvidersUsage() : f.app.inject({
           method: entry === 'get' ? 'GET' : 'POST',
           url: entry === 'get' ? '/api/providers/usage' : '/api/providers/usage/refresh',
+          ...(entry === 'refresh' ? { payload: { providerId: 'tripo' } } : {}),
         });
 
         await started.promise;
@@ -640,7 +642,11 @@ test('недоверенные поля Tripo не попадают в HTTP/SSE/
     })),
   });
   const list = await f.app.inject({ url: '/api/providers' });
-  const usage = await f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const usage = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/usage/refresh',
+    payload: { providerId: 'tripo' },
+  });
 
   assert.equal(list.json().providers[0].credentials[0].preview, '…cdef');
   assert.equal(usage.json().usage.tripo.state, 'auth_required');

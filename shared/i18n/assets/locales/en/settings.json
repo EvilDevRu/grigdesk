@@ -290,7 +290,7 @@
   "test": "Test",
   "enableAndTest": "Enable and test",
   "notificationsAreAllowedOnThisDevice": "Notifications are allowed on this device.",
-  "systemNotificationsAreUnavailableInThisBrowser": "System notifications are unavailable in this browser.",
+  "systemNotificationsAreUnavailableInThisBrowser": "System notifications are unavailable here.",
   "pluginDisabledShortcutInactive": "The plugin is disabled; the shortcut is inactive.",
   "pluginStatusNotReceivedYet": "The plugin status has not been received yet.",
   "pluginStatusesNotReceivedYet": "Plugin status has not been received yet: their tool shortcuts will work after loading.",
@@ -366,6 +366,8 @@
   "processFactLimit": "Pool limit",
   "processFactLimitValue": "{count}, auto stop after {minutes} min idle",
   "stoppedBusyProcessesSkipped": "Stopped: {resultClosed}. Busy processes skipped: {value2}.",
+  "processesClosePartialFailed": "Stopped: {resultClosed}. Failed to stop: {failedCount}. These processes did not confirm shutdown and remain in the list.",
+  "processesCloseAllFailed": "Failed to stop processes: {failedCount}. They did not confirm shutdown and remain in the list.",
   "processActionsTakeEffectImmediately": "Process actions take effect immediately.",
   "loadingProcesses": "Loading processes…",
   "inPool": "In pool:",
@@ -419,6 +421,16 @@
   "commandLine": "Command line",
   "developer": "Developer",
   "setupRequired": "Setup required",
+  "providerChatNotInstalled": "Not installed",
+  "providerChatInstallHint": "Install the provider on the Overview tab to start a conversation.",
+  "providerChatAccessHint": "Set up the connection on the Access tab, then click Recheck.",
+  "providerChatNoModels": "No models",
+  "providerChatNoModelsHint": "The model list is empty. Click Recheck. If no models appear, check the connection on the Access tab.",
+  "providerChatUnavailableHint": "The provider will appear in the chat model picker after setup succeeds and models are loaded.",
+  "providerChatConfigureAccess": "Configure access",
+  "providerAccessUnconfirmed": "Access changes could not be confirmed. Recheck the connection before entering them again.",
+  "providerAccessPending": "Save the connection",
+  "providerAccessPendingHint": "Click Apply to load models for the selected service. Until you save, Recheck uses the previous connection.",
   "installationIsAvailableConnectionToChatsIs": "Installation is available; connection to chats is not enabled yet.",
   "buildReady": "Build ready",
   "buildUnavailable": "Build unavailable",
@@ -625,6 +637,8 @@
   "separateThresholdForPipelineStagesLetThe": "Separate threshold for pipeline stages. 0 — let the provider handle compaction.",
   "refreshRepositoriesBeforeStarting": "Refresh repositories before starting",
   "appliesToNewTriageAndPipelineRuns": "Applies to new triage and pipeline runs.",
+  "automaticallyStartThePipelineOnCreation": "Automatically start the pipeline on creation",
+  "disabledThePipelineIsCreatedAndWaits": "Disabled: the pipeline is created and waits for a manual start — assign executors per node before work begins. Rule-based auto-launches are not affected.",
   "turnSilenceThresholdMinutes": "Turn silence threshold, minutes",
   "disableAlertsForAStalledPipelineTurn": "0 — disable alerts for a stalled pipeline turn.",
   "analyzeAutomatically": "Analyze automatically",
@@ -743,7 +757,7 @@
   "parameterUnavailableReloadTheProviderRegistry": "Parameter unavailable; reload the provider registry",
   "fieldNoLongerAvailableRecheckTheRegistry": "Field no longer available; recheck the registry",
   "checkTheAccessFieldAndSelectedMode": "Check the access field and selected mode",
-  "keysSavedReloadTheProviderRegistry": "Keys saved; reload the provider registry",
+  "keysSavedReloadTheProviderRegistry": "Access saved. The provider list could not be refreshed. Click Recheck; you do not need to enter the key again.",
   "pipeline": "pipeline",
   "sandbox": "sandbox",
   "gate": "gate",
@@ -832,6 +846,8 @@
   "blockDirectSshHint": "Blocks direct SSH for a cooperative agent; this does not isolate processes with the same user ID.",
   "allowDirectSsh": "Allow direct SSH",
   "allowDirectSshConfirm": "The agent will be able to run direct SSH clients with GrigDesk process permissions. Bash permission mode does not replace this restriction. SSH tool confirmations and logging will not apply.",
+  "qwenHostAccessConfirm": "Qwen will access Docker, processes and files with the server user's permissions. Approval modes and the direct SSH restriction remain active. The change applies to the next turn; close the current process separately.",
+  "qwenEnableHostAccess": "Enable Host mode",
   "installStage": {
     "fetching": "Downloading from source",
     "validating": "Verifying package",
@@ -1223,6 +1239,62 @@
         "chinaKeyConfigured": "Key configured · China",
         "chinaKeyMissing": "Key not configured · China"
       }
+    },
+    "qwen": {
+      "auth": {
+        "configured": "API key configured.",
+        "missing": "Configure an API key.",
+        "settingsFailed": "Qwen: model settings could not be read. Check the Qwen Code configuration.",
+        "incompatible": "Qwen Code is incompatible with GrigDesk. Update or reinstall Qwen Code on the Overview tab.",
+        "sandboxMissing": "Qwen: the required sandbox is unavailable. The Linux server needs bwrap installed.",
+        "catalogFailed": "Qwen Code could not load models. Click Recheck. If the error persists, update or reinstall Qwen Code on the Overview tab.",
+        "catalogEmpty": "Qwen Code returned no models. Check the service and key on the Access tab, then click Recheck."
+      },
+      "credentials": {
+        "GRIGDESK_QWEN_SERVICE": {
+          "label": "API service and region",
+          "hint": "Select the service that issued your key. The default is Alibaba Model Studio in Singapore.",
+          "options": {
+            "dashscope-intl": {
+              "label": "Alibaba Model Studio — Singapore (default)"
+            },
+            "dashscope-china": {
+              "label": "Alibaba Model Studio — China"
+            },
+            "dashscope-us": {
+              "label": "Alibaba Model Studio — US"
+            },
+            "qwencloud-intl": {
+              "label": "QwenCloud — Singapore"
+            },
+            "coding-intl": {
+              "label": "Alibaba Coding Plan — International",
+              "hint": "Alibaba Cloud subscription. For an Individual Plan on qwencloud.com, select QwenCloud Token Plan."
+            },
+            "coding-china": {
+              "label": "Alibaba Coding Plan — China",
+              "hint": "Alibaba Cloud subscription. For an Individual Plan on qwencloud.com, select QwenCloud Token Plan."
+            },
+            "qwencloud-token": {
+              "label": "QwenCloud Token Plan — Singapore",
+              "hint": "Individual Plan and Team Plan on qwencloud.com. Use the key from your QwenCloud account."
+            },
+            "openrouter": {
+              "label": "OpenRouter"
+            }
+          }
+        },
+        "DASHSCOPE_API_KEY": {
+          "label": "API key",
+          "hint": "API key for the model service."
+        }
+      },
+      "settings": {
+        "allowHostAccess": {
+          "label": "Host mode",
+          "hint": "Docker, processes and files of the server user. Live chat sessions and the application user systemd unit are required."
+        }
+      }
     }
   },
   "invalidPluginCatalog": "The server returned an invalid plugin catalog.",
@@ -1233,10 +1305,10 @@
   "wakeLockDenied": "The system did not allow keeping the screen awake. Check power saving settings.",
   "wakeLockFailed": "Could not keep the screen awake.",
   "notificationDenied": "Notifications are blocked. Allow them in system or browser settings.",
-  "notificationNotGranted": "The browser did not grant notification permission.",
+  "notificationNotGranted": "Notification permission was not granted.",
   "notificationTestTitle": "Notifications work",
   "notificationTestBody": "GrigDesk will notify you when an agent replies or work needs your attention.",
-  "notificationTestFailed": "The browser could not display the test notification.",
+  "notificationTestFailed": "Could not display the test notification.",
   "providerSettingsFailure": "Could not load settings",
   "providerWriteCancelled": "The write was cancelled because of a conflict; check and select again",
   "providerReloadCatalog": "Reload the settings catalog first",
@@ -1398,6 +1470,11 @@
       "containedSsh": "Contained mode blocks SSH through the network sandbox regardless of the switch.",
       "containedMcp": "Contained mode isolates user and project MCP servers.",
       "savedMcp": "Showing mcp.json configuration; Kimi checks availability in a new session."
+    },
+    "qwen": {
+      "guard": "Checked before each tool executes.",
+      "mcp": "MCP is provided by the server for each turn.",
+      "quotaUnsupported": "Qwen quota retrieval is not yet supported in GrigDesk."
     }
   },
   "kimiDirectSshExtraConfirmation": "If contained mode later changes to host mode, the permission remains disabled.",
@@ -1831,6 +1908,79 @@
   "appUpdateNextActionCheck": "The update was rolled back to the previous release. Check for updates again once the cause is resolved.",
   "appUpdateCheckedAt": "Last checked: {time}. This result may be out of date.",
   "appUpdateLogDrainTimeout": "Could not confirm server log drain. The update is retained; retry after the server exits.",
+  "remoteAccess": "Remote access",
+  "remotePlatform": "Ubuntu/Debian x64 with systemd. Verified binary installation without Docker or Node.",
+  "remoteHome": "Home server",
+  "remoteThisServer": "This computer",
+  "remoteSetup": "Set up remote access",
+  "remoteResume": "Continue setup",
+  "remoteRestore": "Restore on a new server",
+  "remoteDelete": "Delete access",
+  "remoteOnline": "Online",
+  "remoteOffline": "No connection",
+  "remoteRouteUpdate": "On the phone open Connection settings → Change address → Update route. Your key and trust remain. If unavailable, update the app in place without deleting data.",
+  "remoteLoadFailed": "Could not load jobs. Try loading again.",
+  "remoteName": "Connection name",
+  "remoteSshHost": "SSH server host",
+  "remoteSshUser": "SSH user",
+  "remoteAdvanced": "Advanced options",
+  "remoteSshPort": "SSH port",
+  "remotePublicHost": "Public relay address",
+  "remotePublicPort": "Public relay port",
+  "remoteCandidateHost": "New VPS verification address",
+  "remoteCheck": "Check",
+  "remoteTrust": "Trust SSH fingerprint",
+  "remoteUseKey": "Use a private key instead of a password",
+  "remoteKeyFile": "Choose private key file",
+  "remoteSecretRequired": "Enter the password or choose a private key file.",
+  "remoteInvalidPort": "The port must be an integer between 1 and 65535.",
+  "remotePassphrase": "Key passphrase",
+  "remotePassword": "SSH password",
+  "remotePreview": "Planned changes: a separate user and system service. Verify fingerprint and settings.",
+  "remoteInstall": "Start installation",
+  "remoteReady": "GrigDesk–relay channel verified.",
+  "remotePhonePending": "Phone connection is pending. Only authenticated phone hello confirms it.",
+  "remoteQr": "Phone QR",
+  "remoteDns": "Point DNS to the new VPS, then check again. The previous route is preserved.",
+  "remoteVpn": "The home server needs VPN for a public relay. Enable it, then check again.",
+  "remoteRetry": "Retry with new SSH credentials",
+  "remoteWorking": "The server is running the job. You may close this window.",
+  "remotePortBusy": "Port is busy. Choose a free port; the other service was preserved.",
+  "remoteFailure": "Action failed. Check SSH credentials, permissions, DNS and port. Saved connections were not deleted. After an SSH interruption, check the VPS service state in the job.",
+  "remotePreviousRestored": "The previous VPS service was restored after verification failed. Fix the connection and retry restoration with SSH access.",
+  "remoteRollbackFailed": "VPS rollback was not confirmed. Check the service state and retry restoration with SSH access.",
+  "remoteCancelWait": "End waiting",
+  "remoteCancelHint": "This attempt has not started installing on the VPS. End waiting and free the connection for another server? Saved keys and devices will remain in place.",
+  "remoteCancelled": "Waiting ended. You can use a new VPS or retry this attempt. Saved keys and devices were not deleted.",
+  "remoteDeleteHint": "Delete the saved relay route and identity? Restoring it without these keys will be impossible. Paired devices are preserved.",
+  "remoteAuthFailed": "SSH rejected the password or key. Check the user, secret and fingerprint, then retry.",
+  "remotePlatformFailed": "Unsupported VPS: Ubuntu/Debian x64, glibc 2.28 or newer and required libraries are needed.",
+  "remotePreflightFailed": "Preflight failed. Check systemd, libraries, root or sudo -n and the free port. No VPS changes were made.",
+  "remoteChangedKey": "The SSH key changed. Verify the new fingerprint with the VPS owner before replacing trust.",
+  "remoteChangeBinary": "Install the verified relay binary",
+  "remoteChangeUser": "Create a separate unprivileged user",
+  "remoteChangeConfig": "Write protected relay.env with mode 0600",
+  "remoteChangeService": "Enable the restricted systemd service at boot",
+  "remoteStepPreflight": "Preflight",
+  "remoteStepInstall": "Installation",
+  "remoteStepChannel": "GrigDesk–relay channel",
+  "remoteStepRollback": "Restore the previous service",
+  "remoteStepCompleted": "completed",
+  "remoteStepFailed": "failed",
+  "remoteStepRunning": "running",
+  "remoteServiceResult": "Service verification result",
+  "remoteServiceRunning": "startup verified",
+  "remoteServiceUnverified": "startup not confirmed",
+  "accessProfilesConnection": "Connection",
+  "accessProfilesConnections": "Saved connections",
+  "accessProfilesChoose": "Choose a profile",
+  "accessProfilesManage": "Manage connections",
+  "accessProfilesMore": "More connections",
+  "accessProfilesSwitchBusy": "Switching is available after this provider’s active chats and pipelines finish.",
+  "accessProfilesApiKey": "API key",
+  "accessProfilesCli": "CLI login",
+  "accessProfilesScope": "The active connection is used in chats and pipelines.",
+  "accessProfilesImmediate": "Changes are saved immediately.",
   "accessProfilesAdd": "Add profile",
   "accessProfilesRetry": "Retry",
   "accessProfilesLoading": "Loading profiles…",
@@ -1870,5 +2020,24 @@
   "accessProfilesChanged": "The profile or step changed in another window. Refresh its state and try signing in again.",
   "accessProfilesBusy": "The executor is busy. Wait for its work to finish before signing in again.",
   "accessProfilesSaveFailed": "The profile could not be saved. Check the storage and try signing in again.",
-  "accessProfilesFailed": "Sign-in could not be completed. Start a new attempt."
+  "accessProfilesFailed": "Sign-in could not be completed. Start a new attempt.",
+  "vpnGateSection": "VPN gate",
+  "vpnGateSectionDescription": "Startup waits until the route to the probe address goes through the tunnel. Off by default.",
+  "vpnGateRequire": "Require VPN at startup",
+  "vpnGateRequireHint": "The gate runs before the server starts: without a route through the tunnel, startup waits for one to appear.",
+  "vpnGateIface": "VPN interface",
+  "vpnGateIfaceHint": "Empty — auto-detection by route. Set a name for schemes without tun_flags, e.g. wg0.",
+  "vpnGateIfacePlaceholder": "wg0",
+  "vpnGateProbe": "Probe address",
+  "vpnGateProbeHint": "The route to this address must go through the tunnel. Empty — 1.1.1.1.",
+  "vpnGateSave": "Save",
+  "vpnGateSaved": "Gate settings saved.",
+  "vpnGateRestartPending": "The saved configuration differs from the running one — it applies after a server restart.",
+  "vpnGateRestartNote": "The gate is checked before the server starts, so changes take effect only after a restart.",
+  "vpnGateActiveRequire": "In effect since startup",
+  "vpnGateActiveIface": "Interface since startup",
+  "vpnGateOn": "on",
+  "vpnGateOff": "off",
+  "providerUsageAutoRefresh": "Refresh quotas automatically",
+  "providerUsageAutoRefreshHint": "For all executors on this server. When disabled, quotas are checked only with the ↻ button."
 }

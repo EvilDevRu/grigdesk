@@ -1,23 +1,21 @@
 <template>
   <section ref="dialog" class="route-publish-dialog" role="dialog" aria-modal="true"
-           aria-label="Подтверждение публикации маршрутов" tabindex="-1">
-    <h3>Опубликовать черновик r{{ report.draftRevision }}?</h3>
-    <p>Новые попытки пойдут по новой ревизии. Уже запущенные сохранят свой каталог.</p>
+           :aria-label="t('core.routePodtverzhdeniePublikatsiiMarshrutov')" tabindex="-1">
+    <h3>{{ t('core.routeOpublikovatChernovikR') }}{{ report.draftRevision }}?</h3>
+    <p>{{ t('core.routeNovyePopytkiPoydutPo') }}</p>
     <dl>
-      <dt>Текущий каталог</dt><dd class="mono">{{ report.currentCatalogHash?.slice(0, 12) ?? 'нет' }}</dd>
-      <dt>Источник</dt><dd>редактор, источник r{{ report.sourceRevision }}</dd>
-      <dt>Изменений</dt><dd>{{ report.changes.length }}</dd>
+      <dt>{{ t('core.routeTekuschiyKatalog') }}</dt><dd class="mono">{{ report.currentCatalogHash?.slice(0, 12) ?? t('core.routeNet') }}</dd>
+      <dt>{{ t('core.trackerSource') }}</dt><dd>{{ t('core.routeRedaktorIstochnikR') }}{{ report.sourceRevision }}</dd>
+      <dt>{{ t('core.routeIzmeneniy') }}</dt><dd>{{ report.changes.length }}</dd>
     </dl>
-    <label for="route-publication-comment">Комментарий к публикации
-      <UiTextarea id="route-publication-comment" v-model="comment"
+    <label for="route-publication-comment">{{ t('core.routeKommentariyKPublikatsii') }} <UiTextarea id="route-publication-comment" v-model="comment"
                   data-test="publication-comment" maxlength="2000" />
     </label>
-    <p v-if="!canPublish" class="bad">Снимок устарел или содержит ошибки. Сохраните,
-      проверьте и сравните черновик снова.</p>
+    <p v-if="!canPublish" class="bad">{{ t('core.routeSnimokUstarelIliSoderzhit') }}</p>
     <div class="route-publish-dialog__actions">
-      <UiButton @click="$emit('cancel')">Отмена</UiButton>
+      <UiButton @click="$emit('cancel')">{{ t('core.cancel') }}</UiButton>
       <UiButton data-test="confirm-publish" :disabled="!canPublish || busy"
-                @click="$emit('confirm', comment)">Опубликовать этот снимок</UiButton>
+                @click="$emit('confirm', comment)">{{ t('core.routeOpublikovatEtotSnimok') }}</UiButton>
     </div>
   </section>
 </template>
@@ -25,7 +23,7 @@
 <script setup lang="ts">
 import type { RouteCompareReport } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { onMounted, onUnmounted, ref } from 'vue';
-import { UiButton, UiTextarea } from '../../ui';
+import { UiButton, UiTextarea, t } from '../../ui';
 
 defineProps<{
   report: RouteCompareReport;

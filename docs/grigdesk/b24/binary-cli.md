@@ -8,10 +8,23 @@ ELF для Linux x64 на закреплённом официальном Node 2
 ([граница B24](integration-boundary.md)). Команды и поля задачи — в
 [CLI для агента и оператора](agent-and-operator-cli.md).
 
+## Общий пакет агентских CLI
+
+В `tracker/` также находится отдельная команда [pipeline](../pipeline/agent-cli.md).
+Общий `processIO.ts` связывает оба CLI с процессом; ограничение stdin и отмена включаются
+для pipeline явно. Сборщик `buildBinary` использует один pin Node и публикует выбранный ELF
+атомарно; `build` собирает tracker, `build:pipeline` — pipeline.
+Общий SEA-протокол вынесен в `shared/node/cliSeaBuild.ts`; отдельный пакет
+[routes](../pipeline/routes-cli.md) использует его со своими исходниками и зависимостями.
+Команды tracker, их HTTP-пути, выбор доски и байты stdin create сохраняют прежний контракт.
+Exact DTO управления конвейером относятся к pipeline и не добавляются к старым командам tracker.
+
 ## Целевая доска
 
-Команда `boards` и флаг `--board <id>` доступны в исходниках CLI. Команды без флага,
-навыки и хуки сохраняют прежний HTTP-контракт дефолтной доски и байты stdin create.
+Команды `boards`, `analyze <id>`, `launch-options <id>`, `launch <id>` и флаг `--board <id>`
+доступны в исходниках CLI. Новые команды с --board подтверждают полный source через context.
+Без флага оценка и запуск используют дефолтную доску, source из launch stdin не теряется.
+Прежние команды, навыки и хуки сохраняют HTTP-контракт дефолтной доски и байты stdin create.
 Адресный HTTP 404 не вызывает повтор на дефолте. Дубликат или пустой `--board` — код 2
 до stdin и HTTP; остальные коды, сроки и запрет автоматического повтора сохраняются.
 Обновление установленного бинарного файла требует отдельной сборки при поставке;
@@ -81,7 +94,10 @@ devDependencies пакета (`npm --prefix tracker ci --include=dev`). Поря
 
 ## Запросы, вывод и коды выхода
 
-Каждая команда — один HTTP-запрос к `/api/tracker/…` с заголовком `X-GrigDesk-Token`; `start <id>` —
+Чтения и мутации доски идут в `/api/tracker/…` с заголовком `X-GrigDesk-Token`.
+Оценка и запуск идут в `/api/tasks/<id>/analyze|launch-options|launch`; с --board перед ними
+выполняется GET адресного context. Launch читает JSON-объект stdin один раз; неверный JSON,
+не-объект и конфликт source дают код 2 до POST. `start <id>` —
 renew с подавлением его ошибки, затем timer/start. Транспорт — `node:http` / `node:https` с
 собственным агентом на каждый запрос, созданным без `proxyEnv`. Прокси не используются:
 `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, их варианты в нижнем регистре и `NODE_USE_ENV_PROXY`
@@ -115,7 +131,7 @@ JSON-тела сервера: читается не больше 64 КиБ те�
 
 ## Установка и обновление
 
-`deploy/install.sh` вызывает `grigdesk_install_b24_cli` из `deploy/lib/tracker-cli.sh`:
+`deploy/install.sh` вызывает `grigdesk_install_tracker_cli` из `deploy/lib/tracker-cli.sh`:
 
 - `npm ci --include=dev` в `tracker/` выполняется, если нет `tracker/node_modules/esbuild` или
   `tracker/node_modules/postject`: до пяти попыток с паузой 10 с;

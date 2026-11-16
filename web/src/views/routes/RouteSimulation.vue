@@ -1,80 +1,62 @@
 <template>
   <section class="route-simulation">
-    <h3>Пробный сценарий</h3>
-    <p class="muted">Задайте наблюдаемые исходы узлов. ИИ, команды профиля и живые задачи
-      здесь не запускаются. Внешние проверки предполагаются пройденными.</p>
+    <h3>{{ t('core.routeProbnyyStsenariy') }}</h3>
+    <p class="muted">{{ t('core.routeZadayteNablyudaemyeIshodyUzlov') }}</p>
     <div class="route-simulation__controls">
-      <label>Начать с
-        <UiSelect v-model="startTarget" data-test="simulation-start-target">
-          <option value="bootstrap">Разведка Scout</option>
-          <option v-for="routeId in routeIds" :key="routeId" :value="routeId">
-            Маршрут {{ routeId }}
+      <label>{{ t('core.routeNachatS') }} <UiSelect v-model="startTarget" data-test="simulation-start-target">
+          <option value="bootstrap">{{ t('core.routeRazvedkaScout') }}</option>
+          <option v-for="routeId in routeIds" :key="routeId" :value="routeId"> {{ t('core.routeMarshrut') }} {{ routeId }}
           </option>
         </UiSelect>
       </label>
-      <UiCheckbox v-model="pinned">Закреплённый маршрут</UiCheckbox>
-      <label v-if="startIsLoop">Потолок кругов
-        <UiNumberInput v-model="loopMaxRounds" data-test="simulation-loop-max-rounds"
+      <UiCheckbox v-model="pinned">{{ t('core.routeZakreplennyyMarshrut') }}</UiCheckbox>
+      <label v-if="startIsLoop">{{ t('core.routePotolokKrugov') }} <UiNumberInput v-model="loopMaxRounds" data-test="simulation-loop-max-rounds"
                        :min="1" :max="ROUTES_EDITOR_LIMITS.loopMaxRounds" />
       </label>
-      <UiButton data-test="simulation-start" @click="start">Начать заново</UiButton>
+      <UiButton data-test="simulation-start" @click="start">{{ t('core.routeNachatZanovo') }}</UiButton>
     </div>
-    <p v-if="simulation?.stale" class="bad" role="alert">
-      Сценарий устарел после правки черновика. Начните заново после сохранения.
-    </p>
+    <p v-if="simulation?.stale" class="bad" role="alert"> {{ t('core.routeStsenariyUstarelPoslePravki') }} </p>
     <p v-if="simulation?.error" class="bad" role="alert">{{ simulation.error }}</p>
     <template v-if="simulation">
-      <p>Шаг {{ Math.min(simulation.stepIndex, stepLimit) }} из {{ stepLimit }} · узел
-        <strong>{{ simulation.cursor.nodeId }}</strong>
+      <p>{{ t('core.routeShag') }} {{ Math.min(simulation.stepIndex, stepLimit) }} {{ t('settings.from') }} {{ stepLimit }} {{ t('core.routeUzel') }} <strong>{{ simulation.cursor.nodeId }}</strong>
         <span v-if="simulation.cursor.routeId"> · {{ simulation.cursor.routeId }}</span>
-        <span v-if="simulation.loopMaxRounds !== null">
-          · потолок кругов {{ simulation.loopMaxRounds }}</span>
+        <span v-if="simulation.loopMaxRounds !== null"> {{ t('core.routePotolokKrugov2') }} {{ simulation.loopMaxRounds }}</span>
       </p>
-      <p v-if="simulation.cursor.terminal">Сценарий остановлен. Продолжение возможно только
-        после нового запуска.</p>
+      <p v-if="simulation.cursor.terminal">{{ t('core.routeStsenariyOstanovlenProdolzhenieVozmozhno') }}</p>
       <div class="route-simulation__controls">
-        <label>Наблюдаемый исход
-          <UiSelect v-model="outcome" data-test="simulation-outcome">
+        <label>{{ t('core.routeNablyudaemyyIshod') }} <UiSelect v-model="outcome" data-test="simulation-outcome">
             <option v-for="option in outcomes" :key="option" :value="option">
               {{ outcomeLabel(option) }}
             </option>
           </UiSelect>
         </label>
-        <label v-if="failureOwners.length && effectiveOutcome === 'failed'">Причина отказа
-          <UiSelect v-model="failureOwner" data-test="simulation-failure-owner">
-            <option value="">Без уточнения</option>
+        <label v-if="failureOwners.length && effectiveOutcome === 'failed'">{{ t('core.routePrichinaOtkaza') }} <UiSelect v-model="failureOwner" data-test="simulation-failure-owner">
+            <option value="">{{ t('core.routeBezUtochneniya') }}</option>
             <option v-for="owner in failureOwners" :key="owner" :value="owner">
               {{ failureOwnerLabel(owner) }}
             </option>
           </UiSelect>
         </label>
-        <label v-if="escalationRoutes.length">Выбранный маршрут
-          <UiSelect v-model="selectedRouteId" data-test="simulation-route">
-            <option value="">Без выбора</option>
+        <label v-if="escalationRoutes.length">{{ t('core.routeVybrannyyMarshrut') }} <UiSelect v-model="selectedRouteId" data-test="simulation-route">
+            <option value="">{{ t('core.routeBezVybora') }}</option>
             <option v-for="routeId in escalationRoutes" :key="routeId" :value="routeId">
               {{ routeId }}
             </option>
           </UiSelect>
         </label>
-        <UiButton data-test="simulation-step" :disabled="!canStep" @click="step">
-          Проверить шаг
-        </UiButton>
+        <UiButton data-test="simulation-step" :disabled="!canStep" @click="step"> {{ t('core.routeProveritShag') }} </UiButton>
       </div>
-      <p v-if="escalationRoutes.length && !selectedRouteId" class="muted">
-        Выберите целевой маршрут перед проверкой шага.
-      </p>
+      <p v-if="escalationRoutes.length && !selectedRouteId" class="muted"> {{ t('core.routeVyberiteTselevoyMarshrutPered') }} </p>
       <div v-if="simulation.pendingHuman" class="route-simulation__decision">
-        <p>Требуется решение человека: закреплённый маршрут нельзя сменить автоматически.</p>
+        <p>{{ t('core.routeTrebuetsyaReshenieChelovekaZakreplennyy') }}</p>
         <UiButton data-test="simulation-approve" :disabled="simulation.busy || simulation.stale"
-                  @click="emit('approve')">Подтвердить выбор</UiButton>
+                  @click="emit('approve')">{{ t('core.routePodtverditVybor') }}</UiButton>
       </div>
       <div v-if="simulation.last" class="route-simulation__result">
-        <p v-if="simulation.last.stop">Остановка: {{ stopLabel(simulation.last.stop) }}</p>
-        <p v-if="simulation.last.reset?.length">
-          Сброс узлов: {{ simulation.last.reset.join(', ') }}
+        <p v-if="simulation.last.stop">{{ t('core.routeOstanovka') }} {{ stopLabel(simulation.last.stop) }}</p>
+        <p v-if="simulation.last.reset?.length"> {{ t('core.routeSbrosUzlov') }} {{ simulation.last.reset.join(', ') }}
         </p>
-        <p v-if="simulation.last.escalation?.length">
-          Допустимые маршруты: {{ simulation.last.escalation.join(', ') }}
+        <p v-if="simulation.last.escalation?.length"> {{ t('core.routeDopustimyeMarshruty') }} {{ simulation.last.escalation.join(', ') }}
         </p>
         <ul v-if="simulation.last.issues.length">
           <li v-for="(issue, index) in simulation.last.issues" :key="index">
@@ -94,7 +76,7 @@ import {
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteSimulationObservation, RouteSimulationState } from '../../stores/routes.ts';
-import { UiButton, UiCheckbox, UiNumberInput, UiSelect } from '../../ui';
+import { UiButton, UiCheckbox, UiNumberInput, UiSelect, t } from '../../ui';
 import type { UiNumberValue } from '../../ui';
 import { outcomeNames } from './routeLabels.ts';
 
@@ -118,18 +100,38 @@ const failureOwner = ref('');
 const selectedRouteId = ref('');
 
 const ownerNames: Record<string, string> = {
-  build: 'Сборка',
-  tests: 'Тесты',
-  environment: 'Среда',
-  plan: 'План',
-  human: 'Решение человека',
+  get build() {
+    return t('core.codeBranchBuildCommand');
+  },
+  get tests() {
+    return t('core.routeTesty');
+  },
+  get environment() {
+    return t('core.routeSreda');
+  },
+  get plan() {
+    return t('core.routePlan');
+  },
+  get human() {
+    return t('core.routeReshenieCheloveka');
+  },
 };
 const stopNames: Record<string, string> = {
-  human: 'нужно решение человека',
-  failed: 'ошибка',
-  done: 'завершено',
-  'rewind-limit': 'исчерпан лимит возвратов',
-  'loop-ceiling': 'исчерпан потолок кругов цикла',
+  get human() {
+    return t('core.routeNuzhnoReshenieCheloveka');
+  },
+  get failed() {
+    return t('settings.error');
+  },
+  get done() {
+    return t('core.routeZaversheno');
+  },
+  get 'rewind-limit'() {
+    return t('core.routeIscherpanLimitVozvratov');
+  },
+  get 'loop-ceiling'() {
+    return t('core.routeIscherpanPotolokKrugovTsikla');
+  },
 };
 const routeIds = computed(() => Object.keys(props.document.routes).sort());
 const startIsLoop = computed(() => startTarget.value !== 'bootstrap'

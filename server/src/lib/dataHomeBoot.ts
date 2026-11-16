@@ -4,9 +4,6 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseEnv } from 'node:util';
 import { dataHome, dataHomeExplicit, dataPath, envFilePath } from '../../../shared/runtime/dataHome.ts';
-import {
-  LEGACY, LEGACY_DATA_PATHS, legacyEnvWarnings, legacyRootProblem,
-} from '../../../shared/runtime/legacyBrand.ts';
 
 export type BootFs = typeof nodeFs;
 
@@ -123,51 +120,13 @@ function migrationError(reason: string): DataHomeError {
     + 'Для второй копии репозитория задайте свою GRIGDESK_HOME.');
 }
 
-/**
- * Старый каталог не превращается в пустую новую установку, а две базы не смешиваются.
- * Даже явно выбранная папка требует переноса внутренних имён до первых записей сервера.
- */
-function checkBrandDataHome(selected: string, input: CheckInput, fs: BootFs): void {
-  if (!dataHomeExplicit(input)) {
-    const old = path.join(input.home, LEGACY.dataHomeDir);
-    const info = stat(old, fs);
-
-    if (info?.isSymbolicLink()) {
-      if (canonical(old, fs) !== canonical(selected, fs)) {
-        throw new DataHomeError(`Ссылка ~/${LEGACY.dataHomeDir} должна вести в ~/.grigdesk.`);
-      }
-    } else if (info) {
-      if (stat(selected, fs)) {
-        throw new DataHomeError('Найдены две папки данных; выберите одну перед запуском.');
-      }
-
-      throw new DataHomeError('Найдена прежняя папка данных. Закройте приложение и выполните '
-        + `mv -T ~/${LEGACY.dataHomeDir} ~/.grigdesk && ln -s .grigdesk ~/${LEGACY.dataHomeDir}.`);
-    }
-  }
-
-  for (const [oldPath] of LEGACY_DATA_PATHS) {
-    if (stat(path.join(selected, oldPath), fs)) {
-      throw new DataHomeError('В папке данных остались прежние внутренние имена: '
-        + 'запустите node tools/brandMove.mts --apply.');
-    }
-  }
-}
-
 // Та же проверка доступна запускалкам без создания папок, чтения .env или захвата блокировки.
 // Явный независимый каталог позволяет запустить вторую копию репозитория.
 export function checkDataHome(input: CheckInput, fs: BootFs): string {
   try {
-    const problem = legacyRootProblem(input.env);
-
-    if (problem) {
-      throw new DataHomeError(problem);
-    }
-
     const selected = dataHome(input);
 
     checkPlacement(selected, input, fs);
-    checkBrandDataHome(selected, input, fs);
 
     if (dataHomeExplicit(input)) {
       return selected;
@@ -248,10 +207,6 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
     text = fs.readFileSync(file, 'utf8');
   } catch (error) {
     if (missing(error)) {
-      for (const warning of legacyEnvWarnings(env)) {
-        process.stderr.write(`${warning}\n`);
-      }
-
       return [];
     }
 
@@ -260,10 +215,11 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
 
   const parsed = parseEnv(text);
 
-  const problem = legacyRootProblem(parsed, true);
-
-  if (problem) {
-    throw new DataHomeError(problem);
+  // Файл настроек не переназначает корни данных: эти ключи читаются только из окружения.
+  for (const reserved of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
+    if (Object.hasOwn(parsed, reserved)) {
+      throw new DataHomeError(`Ключ ${reserved} запрещён в файле настроек.`);
+    }
   }
 
   const added: string[] = [];
@@ -275,10 +231,6 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
 
     env[key] = value;
     added.push(key);
-  }
-
-  for (const warning of legacyEnvWarnings(env)) {
-    process.stderr.write(`${warning}\n`);
   }
 
   return added;

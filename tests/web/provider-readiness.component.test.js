@@ -98,3 +98,40 @@ test('PROVIDER-READINESS: общий статус и восстановлени�
   assert.equal(listStatus(), 'Доступен');
   assert.deepEqual(h.writes(), []);
 });
+
+/**
+ * Готовый CLI с ключом и пустым каталогом не выглядит пригодным для чата.
+ * Исправление доступа и повтор доступны на месте, без записи нового ключа.
+ */
+test('PROVIDER-READINESS: пустые модели объясняются и восстанавливаются', async (t) => {
+  const h = await settingsHarness(t, 'agents.providers', 'ProviderPage', {
+    entityId: 'fixture',
+    prepare({ providers }) {
+      Object.assign(providers.providers[0], {
+        available: true,
+        installed: true,
+        chatEnabled: true,
+        models: [],
+      });
+    },
+  });
+
+  h.settings.selectPage('agents.providers', 'fixture', 'models');
+  await h.flushPromises();
+  assert.equal(h.wrapper.get('.settings-provider-status').text(), 'Нет моделей');
+  assert.match(h.wrapper.get('[data-provider-chat-notice]').text(), /Список моделей пуст/);
+  await h.wrapper.findAll('[data-provider-chat-notice] button')
+    .find((button) => button.text() === 'Настроить доступ').trigger('click');
+  assert.equal(h.settings.tabId, 'access');
+  h.control.handlers['/api/providers?refresh=1'] = () => Response.json({
+    providers: h.providers.providers.map((provider) => ({
+      ...provider, models: [{ id: 'recovered', name: 'Доступная модель' }],
+    })),
+  });
+  await h.wrapper.get('[data-provider-chat-notice] button').trigger('click');
+  await h.providers.whenRegistryReady();
+  await h.flushPromises();
+  assert.equal(h.wrapper.get('.settings-provider-status').text(), 'Доступен');
+  assert.equal(h.wrapper.find('[data-provider-chat-notice]').exists(), false);
+  assert.deepEqual(h.writes(), []);
+});

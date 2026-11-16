@@ -1,8 +1,7 @@
 import './startDataHome.ts';
 import { createHelpService } from './lib/help/service.ts';
 import helpModule from './modules/help/index.ts';
-import { runtimeKind } from './lib/runtimePaths.ts';
-import { GrigdeskTaskStore } from './lib/grigdeskTasks/store.ts';
+import { nodeExecutable, runtimeKind } from './lib/runtimePaths.ts';
 // Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -19,6 +18,7 @@ import { isProjectDeleted, deletedProjectIds } from './lib/projects/deletion.ts'
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent } from './lib/desktopParent.ts';
+import { startProcessWatchdog } from './lib/processWatchdog.ts';
 import type { DesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
 import { MobileService } from './lib/mobile/service.ts';
@@ -132,7 +132,6 @@ import staticPlugin from './plugins/static.ts';
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
 import trackerModule from './modules/tracker/index.ts';
-import grigdeskTasksModule from './modules/grigdesk-tasks/index.ts';
 import taskFavoritesModule from './modules/task-favorites/index.ts';
 import taskShelfModule from './modules/task-shelf/index.ts';
 import taskSeenModule from './modules/task-seen/index.ts';
@@ -153,6 +152,7 @@ import { SESSION_ONLY_PREFIXES } from './modules/plugins/installRoutes.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
 import projectsModule from './modules/projects/index.ts';
+import profileConfigModule from './modules/profileConfig/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
 import {
   countGitHubRules,
@@ -277,12 +277,12 @@ async function build(desktopParent: DesktopParent | null) {
   }, 60_000);
 
   loggingPolicyTimer.unref();
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('diagnostics', async () => {
     clearInterval(loggingPolicyTimer);
     stopLoggingPolicy();
     diagnosticLogging.close();
     runtimeDiagnostics.close();
-  });
+  }));
   // Остановка: модули регистрируют слив (чат прерывает ходы и сохраняет их итог), а
   // сигнал или кнопка «Перезапустить» запускают его ДО закрытия сервера. Обработчики
   // сигналов вешаются после listen — до него закрывать нечего.
@@ -370,10 +370,10 @@ async function build(desktopParent: DesktopParent | null) {
     return rows;
   });
 
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('browser', async () => {
     removeTaskOwners();
     await browser.close();
-  });
+  }));
 
   const isDeletedProject = (id: string) => isProjectDeleted(prefs, id);
   const permissionQueue = createPermissionQueue();
@@ -515,7 +515,9 @@ async function build(desktopParent: DesktopParent | null) {
     log: fastify.log,
   });
 
-  fastify.addHook('onClose', async () => dbEngineInstalls.close());
+  fastify.addHook('onClose', () => shutdown.closeStep('db-engine-installs', async () => {
+    await dbEngineInstalls.close();
+  }));
 
   const dbRecovery = await dbEngineInstalls.recover();
   const dbEngines = await createEngineRegistry({
@@ -746,10 +748,13 @@ async function build(desktopParent: DesktopParent | null) {
       await dbSessions.closeAll('plugin_disabled');
     },
   };
-  fastify.addHook('onClose', async () => dbSessions.dispose('server_shutdown'));
-  fastify.addHook('onClose', async () => {
+
+  fastify.addHook('onClose', () => shutdown.closeStep('db-sessions', async () => {
+    await dbSessions.dispose('server_shutdown');
+  }));
+  fastify.addHook('onClose', () => shutdown.closeStep('ssh-sessions', async () => {
     await sshSessions.closeAll('server_shutdown');
-  });
+  }));
 
   const credsStore = new TrackerCredentialsStore({
     trackerCredentialsPath: config.trackerCredentialsPath,
@@ -777,8 +782,6 @@ async function build(desktopParent: DesktopParent | null) {
     config,
     traceRead: (event) => fastify.log.debug(event, 'Чтение трекера'),
     credsStore,
-    factoryState,
-    projectsService,
     grigDeskVersion: installOptions.grigDeskVersion,
     onChanged: async () => {
       await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
@@ -786,7 +789,7 @@ async function build(desktopParent: DesktopParent | null) {
   });
   const { tracker } = trackerRuntime;
 
-  fastify.addHook('onClose', async () => trackerRuntime.close());
+  fastify.addHook('onClose', () => shutdown.closeStep('tracker-runtime', async () => trackerRuntime.close()));
   await fastify.register(trackersModule, {
     runtime: trackerRuntime,
     driverSourcesPath: config.driverSourcesPath,
@@ -1039,28 +1042,24 @@ async function build(desktopParent: DesktopParent | null) {
   });
   const system = new SystemAdapter({ dataHome: config.dataHome });
 
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('system', async () => {
     system.stop();
-  });
+  }));
 
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
-  const ownPersonalTasks = new GrigdeskTaskStore({ config });
   const taskFavorites = new TaskFavoritesService({
     store: taskFavoritesStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
   const taskShelf = new TaskShelfService({
     store: taskShelfStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
   const taskSeen = new TaskSeenService({
     store: taskSeenStore,
     tracker,
-    ownTasks: ownPersonalTasks
   });
   const analyzer = new Analyzer({
     config,
@@ -1170,9 +1169,9 @@ async function build(desktopParent: DesktopParent | null) {
     applicationVersion: installOptions.grigDeskVersion,
   });
 
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('plugin-catalog', async () => {
     await pluginCatalog.close();
-  });
+  }));
   await fastify.register(pluginCatalogModule, { catalog: pluginCatalog });
 
   // Сервис получает полный список встроенных id и только проверенные boot paths.
@@ -1183,9 +1182,9 @@ async function build(desktopParent: DesktopParent | null) {
     log: fastify.log,
   });
 
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('plugin-installs', async () => {
     await pluginInstalls.close();
-  });
+  }));
 
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, {
@@ -1358,13 +1357,7 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
-  await fastify.register(grigdeskTasksModule, {
-    service: trackerRuntime.own,
-    config,
-    tracker,
-    factoryState,
-    projectsService,
-  });
+  await fastify.register(profileConfigModule, { config });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService, installs: dbEngineInstalls });
   await fastify.register(dockerModule, { service: dockerService });
@@ -1417,7 +1410,8 @@ async function build(desktopParent: DesktopParent | null) {
     executorFor: asPort((id: string) => fastify.executorFor?.(id)),
     log: fastify.log,
   });
-  analyzer.onAnalyzed = (id: string) => analysisArbiter.arbitrate(id, { automatic: true });
+
+  analyzer.onAnalyzed = (id, options) => analysisArbiter.arbitrate(id, { automatic: true, ...options });
   await analyzer.start();
   await fastify.register(analysisModule, {
     analyzer,
@@ -1461,6 +1455,7 @@ async function build(desktopParent: DesktopParent | null) {
   const mobile = new MobileService({
     directory: config.mobileDir,
     port: config.mobilePort,
+    relayDeployment: { transport: sshTransport, hostKeys: sshHostKeys },
     vpnGate: relayVpnGate,
     registerRoutes: (app) => registerMobileFacade(app, {
       callApi: internalCallApi,
@@ -1479,7 +1474,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(mobileModule, { service: mobile });
   fastify.addHook('onListen', () => mobile.start());
   shutdown.register('mobile', () => mobile.close());
-  fastify.addHook('onClose', () => mobile.close());
+  fastify.addHook('onClose', () => shutdown.closeStep('mobile', () => mobile.close()));
 
   let clientIdentity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
   const clientBootstrapOptions = {
@@ -1534,7 +1529,7 @@ async function build(desktopParent: DesktopParent | null) {
   };
 
   shutdown.register('client', closeClientListener);
-  fastify.addHook('onClose', closeClientListener);
+  fastify.addHook('onClose', () => shutdown.closeStep('client', closeClientListener));
 
   const pultStores = new Map<string, TelegramPultStateStore>();
   // Одна фабрика state на вотчер и действия: карточки, экран навигации и реестр
@@ -1667,22 +1662,29 @@ async function build(desktopParent: DesktopParent | null) {
     }, 2000);
     showcaseWatch.unref?.();
   });
-  fastify.addHook('onClose', async () => {
+  fastify.addHook('onClose', () => shutdown.closeStep('background', async () => {
     if (showcaseWatch) {
       clearInterval(showcaseWatch);
       showcaseWatch = null;
     }
 
-    await showcaseService.disable();
+    telegramPult?.actions?.stop();
+
+    const stoppingPoller = shutdown.closeStep('telegram-poller', () => telegramPoller.stop());
+    const stoppingWatch = shutdown.closeStep('telegram-watch', () => pultWatch.stop());
+
+    void stoppingPoller.catch(() => {});
+    void stoppingWatch.catch(() => {});
+
+    await shutdown.closeStep('showcase', () => showcaseService.disable());
     sandboxService.stop();
     githubConnection.stop();
-    telegramPult?.actions?.stop();
-    await telegramPoller.stop();
-    await pultWatch.stop();
+    await stoppingPoller;
+    await stoppingWatch;
     inboxAutoTasks.stop();
     arbiterWatch.stop();
-    await speechRuntime.shutdown();
-  });
+    await shutdown.closeStep('speech', () => speechRuntime.shutdown());
+  }));
 
   return fastify;
 }
@@ -1700,7 +1702,14 @@ export async function startServer(): Promise<FastifyInstance> {
   const desktopParent = attachDesktopParent({
     env: process.env,
     channel: typeof process.send === 'function' ? process : null,
-    exit: (code) => process.exit(code),
+    exit: (code) => {
+      startProcessWatchdog({
+        node: nodeExecutable(),
+        deadline: Date.now() + config.shutdownTimeoutMs,
+        phase: 'startup-parent-exit',
+      });
+      process.exit(code);
+    },
   });
   const app = await build(desktopParent);
 
@@ -1734,6 +1743,11 @@ export async function startServer(): Promise<FastifyInstance> {
 void startServer().catch((error: unknown) => {
   const detail = error instanceof Error ? error.stack ?? error.message : String(error);
 
+  startProcessWatchdog({
+    node: nodeExecutable(),
+    deadline: Date.now() + config.shutdownTimeoutMs,
+    phase: 'startup-exit',
+  });
   process.stderr.write(`GrigDesk не запустился: ${detail}\n`);
   // Живые таймеры, watchers или дочерние процессы могли стартовать до отказа:
   // exitCode их не остановит, и сервер повис бы без признака падения для окна/systemd.

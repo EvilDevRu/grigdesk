@@ -10,6 +10,7 @@ import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 import { textOr, trimmedText } from '../../../../shared/lib/text.ts';
 
 import { createStepSink, cut, cutMiddle, STEP_THINK_LIMIT } from '../chat/streamSteps.ts';
+import { kimiServerResultStep } from '../executors/_kimiSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type {
   InTurnAssistantEvent,
@@ -493,12 +494,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
       if (kind === 'tool.result') {
         flushThought();
-        emit({
-          k: 'res',
-          id: String(payload.toolCallId || payload.tool_call_id || ''),
-          ok: payload.isError !== true && payload.is_error !== true,
-          text: String(payload.output || ''),
-        });
+        emit(kimiServerResultStep(payload));
 
         return;
       }

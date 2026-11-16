@@ -2,10 +2,15 @@ import {
   localeTranslator, messages, translator, type LocaleSource,
 } from '../../../../shared/i18n/catalogs.ts';
 import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
+import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
 export interface ProviderAvailabilityView {
   available: boolean;
   label: string;
+}
+
+export interface ProviderChatReadiness extends ProviderAvailabilityView {
+  message: string;
 }
 
 interface ProviderAction {
@@ -29,6 +34,47 @@ export function providerAvailability(
     available,
     label: available ? t('settings.available') : t('settings.unavailable2'),
   };
+}
+
+/**
+ * Готовность чата требует моделей сверх наличия CLI и локального доступа.
+ * Узкие и setup-only исполнители сохраняют собственный статус подключения.
+ */
+export function providerChatReadiness(
+  provider: ProviderEntry,
+  locale: LocaleSource = 'ru',
+): ProviderChatReadiness | null {
+  if (normalizeExecutorType(provider.type) !== 'universal' || provider.chatEnabled === false) {
+    return null;
+  }
+
+  const t = localeTranslator(locale);
+
+  if (provider.installed === false && provider.kind !== 'api') {
+    return {
+      available: false,
+      label: t('settings.providerChatNotInstalled'),
+      message: t('settings.providerChatInstallHint'),
+    };
+  }
+
+  if (provider.available !== true) {
+    return {
+      available: false,
+      label: t('settings.setupRequired'),
+      message: provider.authLabel || t('settings.providerChatAccessHint'),
+    };
+  }
+
+  if (!provider.models?.length) {
+    return {
+      available: false,
+      label: t('settings.providerChatNoModels'),
+      message: t('settings.providerChatNoModelsHint'),
+    };
+  }
+
+  return { ...providerAvailability(provider, locale), message: '' };
 }
 
 /**

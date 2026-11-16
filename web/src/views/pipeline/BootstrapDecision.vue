@@ -1,20 +1,20 @@
 <template>
   <section class="sect" data-role="pipeline-bootstrap-decision">
-    <div class="secth">Вопрос разведки SCOUT</div>
+    <div class="secth">{{ t('core.pipelineVoprosRazvedkiScout') }}</div>
     <p>{{ stop.reason }}</p>
     <ul v-if="stop.verdict?.findings?.length">
       <li v-for="finding in stop.verdict.findings" :key="finding.id">{{ finding.summary }}</li>
     </ul>
-    <p v-if="recorded" role="status">Ответ сохранён. Следующий SCOUT получит его целиком.</p>
+    <p v-if="recorded" role="status">{{ t('core.pipelineOtvetSohranenSleduyuschiyScout') }}</p>
     <template v-else>
-      <label for="bootstrap-answer">Твоё решение</label>
+      <label for="bootstrap-answer">{{ t('core.pipelineTvoeReshenie') }}</label>
       <UiTextarea
         id="bootstrap-answer"
         v-model="answer"
         data-role="pipeline-bootstrap-answer"
         rows="6"
         :disabled="busy"
-        placeholder="Ответь на вопросы и укажи, какой вариант выбрать"
+        :placeholder="t('core.pipelineOtvetNaVoprosyI')"
       />
     </template>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -24,7 +24,7 @@
       :disabled="busy || running || (!recorded && !answer.trim())"
       @click="submit"
     >
-      {{ recorded ? 'Продолжить после ответа' : 'Сохранить ответ и продолжить' }}
+      {{ recorded ? t('core.pipelineProdolzhitPosleOtveta') : t('core.pipelineSohranitOtvetIProdolzhit') }}
     </UiButton>
   </section>
 </template>
@@ -36,7 +36,7 @@ import type { PropType } from 'vue';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { api } from '../../shared/apiClient.ts';
-import { UiButton, UiTextarea } from '../../ui';
+import { UiButton, UiTextarea, t } from '../../ui';
 
 interface BootstrapStopView {
   reason: string;
@@ -97,7 +97,7 @@ async function submit() {
 
       if (!isRecord(result) || !result.ok || !isRecord(result.decision)
           || result.decision.visitId !== stop.visitId || result.decision.stopHash !== stop.recordHash) {
-        throw new Error('Сохранение ответа не подтверждено — обнови карточку.');
+        throw new Error(t('core.pipelineSohranenieOtvetaNePodtverzhdeno'));
       }
 
       recorded.value = true;
@@ -110,11 +110,11 @@ async function submit() {
       return;
     }
 
-    const message = errorMessage(cause, 'Не удалось выполнить запрос');
+    const message = errorMessage(cause, t('core.pipelineNeUdalosVypolnitZapros'));
 
     error.value = recorded.value
-      ? `Ответ сохранён, продолжение не запустилось: ${message}`
-      : `Ответ не принят: ${message}`;
+      ? t('core.pipelineOtvetSohranenProdolzhenieNe', { message: message })
+      : t('core.pipelineOtvetNePrinyatMessage', { message: message });
   } finally {
     busy.value = false;
   }

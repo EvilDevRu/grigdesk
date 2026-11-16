@@ -3,8 +3,6 @@ import test from 'node:test';
 
 import { useTaskFavoritesStore } from '../../web/src/stores/taskFavorites.ts';
 import { useTaskSeenStore } from '../../web/src/stores/taskSeen.ts';
-import { useGrigdeskTasksStore } from '../../web/src/stores/grigdeskTasks.ts';
-import { grigdeskPersonalStateVersion } from '../../web/src/shared/grigdeskPersonalState.ts';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { flushMulti, webMultiFixture } from './helpers/trackerMulti.js';
 import { shelfInput } from '../server/helpers/trackerMulti.js';
@@ -51,7 +49,7 @@ async function personalFixture(t, options) {
   await fixture.trackers.load(true);
 
   globalThis.__multiShelfBoard = fixture.board;
-  globalThis.__multiShelfPersonalState = grigdeskPersonalStateVersion;
+  globalThis.__multiShelfPersonalState = { value: 0 };
   globalThis.__multiShelfAlerts = [];
   t.after(() => {
     delete globalThis.__multiShelfBoard;
@@ -73,7 +71,7 @@ async function personalFixture(t, options) {
   };
 }
 
-test('MD-BRANCHES: звезда, seen и полка A42 не меняют B42 и own', async (t) => {
+test('MD-BRANCHES: звезда, seen и полка A42 не меняют B42', async (t) => {
   const fixture = await personalFixture(t);
   const a = branch(fixture.favorites, fixture.sourceA);
   const b = branch(fixture.favorites, fixture.sourceB);
@@ -97,11 +95,9 @@ test('MD-BRANCHES: звезда, seen и полка A42 не меняют B42 и
   assert.equal(await a.setFavorite('42', true), true);
   assert.equal(a.isFavorite('42'), true);
   assert.equal(b.isFavorite('42'), false);
-  assert.equal(fixture.favorites.own.isFavorite('42'), false);
   assert.equal(await seenA.markSeen(['42']), true);
   assert.equal(seenA.isSeen('42'), true);
   assert.equal(seenB.isSeen('42'), false);
-  assert.equal(fixture.seen.own.isSeen('42'), false);
 
   for (const id of ['fixture-a', 'fixture-b']) {
     assert.equal((await fixture.request('PUT', `/api/tracker/${id}/task-shelf/42`, shelfInput(id)))
@@ -110,17 +106,12 @@ test('MD-BRANCHES: звезда, seen и полка A42 не меняют B42 и
 
   await shelfA.load(true);
   await shelfB.load(true);
-  await useGrigdeskTasksStore().load();
-  assert.equal((await fixture.request('PUT', '/api/grigdesk-tasks/task-shelf/100000000001',
-    shelfInput('Своя задача'))).statusCode, 200);
-  assert.equal(await fixture.shelf.own.load(true), true);
   await flushMulti();
   shelfA.reconcile();
   shelfB.reconcile();
-  fixture.shelf.own.reconcile();
   fixture.shelf.reconcile();
   assert.deepEqual(fixture.shelf.allRows.map((row) => row.taskSource).sort(),
-    [fixture.sourceA, fixture.sourceB, 'grigdesk'].sort());
+    [fixture.sourceA, fixture.sourceB].sort());
 });
 
 test('MD-BASELINE: первый успешный A не инициализирует B', async (t) => {

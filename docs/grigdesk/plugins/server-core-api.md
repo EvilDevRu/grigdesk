@@ -13,12 +13,15 @@
 
 | Поле core | Поведение |
 |---|---|
+| `fetch(url, init?)` | Небольшой HTTP(S)-ответ в отдельном Node: 15 секунд, до 2 МиБ после распаковки, строковое тело запроса; отмена завершает процесс. Request и потоки не поддержаны. |
 | `getProviders(type)` | Асинхронно читает singleton реестра исполнителей. Только строгий тип `3d` и capability `studio3d`; остальные типы дают `[]`. |
 | `emit(event, data?)` | Посылает `plugin-event` в общий `/api/events`; id и envelope принадлежат ядру. |
 | `withPathLock(key, task)` | Прямая функция очереди ядра по ключу внутри процесса. |
 | `acquireKernelFileLock(options)` | Frozen фасад kernel flock; освобождение через `await lock.release()` в finally. |
 | `documents` | Только bound `roots`, `resolveAbsolute`, `read`, `readAsset` того же DocumentReader, который создало приложение. |
 | `parseByteRange(header, size)` | Штатный разбор одного Range: `{start,end}`, `'invalid'` или `null`. |
+
+Сетевой контракт и ограничения Response описаны в [изоляции статистики](../server/isolated-statistics-fetch.md).
 
 Новый реестр, очередь и reader не создаются. Поздно добавленные корни reader видны сразу;
 методов добавления корней нет. Отсутствие reader или SSE в изолированном подключении

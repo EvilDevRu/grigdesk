@@ -125,7 +125,7 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
   }
   if (sources) {
     list = list.filter((task) => {
-      const personal = task.personalSource || (task.source === 'grigdesk' ? 'grigdesk' : 'tracker');
+      const personal = task.personalSource || 'tracker';
 
       return sources.includes(personal) || (isTaskSourceId(task.source) && sources.includes(task.source))
         || (isTaskSourceId(task.source) && sources.includes(task.source.split('@')[0]!))
@@ -203,25 +203,11 @@ export function boardTaskListResetKey({
 }
 
 /**
- * Только summary собственного хранилища назначает строке личное пространство GrigDesk.
- * Vendor source внешних задач не используется для выбора собственных операций.
+ * Общая лента содержит только внешние задачи с нейтральным личным пространством.
+ * Подтверждённый source каждой доски сохраняется для кешей и адресных операций.
  */
-export function unifiedBoardTasks(
-  external: BoardTask[] = [],
-  own: import('../../../shared/tasks/grigdeskTaskContracts.ts').GrigdeskTaskSummary[] = [],
-): BoardTask[] {
-  return [
-    ...external.map((task) => ({
-      ...task,
-      source: task.source === 'grigdesk' ? undefined : task.source,
-      personalSource: 'tracker' as const,
-    })),
-    ...own.map((task) => ({
-      ...task,
-      group: task.projectTitle,
-      personalSource: 'grigdesk' as const
-    })),
-  ];
+export function unifiedBoardTasks(external: BoardTask[] = []): BoardTask[] {
+  return external.map((task) => ({ ...task, personalSource: 'tracker' as const }));
 }
 
 /**

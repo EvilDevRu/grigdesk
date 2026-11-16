@@ -17,11 +17,6 @@
       "kind": "script"
     },
     {
-      "path": "shared/runtime/legacyBrand.ts",
-      "helper": "legacy-brand",
-      "kind": "library"
-    },
-    {
       "path": "server/scripts/deepseekRunner.mts",
       "helper": "deepseek-runner",
       "kind": "script"
@@ -39,6 +34,16 @@
     {
       "path": "server/scripts/glmRuntimeInfo.mts",
       "helper": "glm-runtime-info",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/factoryRunnerModels.mts",
+      "helper": "factory-runner-models",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/qwenRunner.mts",
+      "helper": "qwen-runner",
       "kind": "script"
     }
   ]

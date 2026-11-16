@@ -1,6 +1,11 @@
 import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { forgetProject, runtimeOf } from './projectsRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Список проектов целиком — вместе с архивными: прятать их должен потребитель, а
@@ -41,7 +46,7 @@ export async function loadProjects(): Promise<void> {
       return;
     }
 
-    store.setError(projectsFailureText(error, 'Не удалось прочитать список проектов.'));
+    store.setError(projectsFailureText(error, translateUi('core.loadProjectsCouldNotReadTheProjectList')));
   } finally {
     if (request === runtime.listRequest) {
       store.setLoading(false);

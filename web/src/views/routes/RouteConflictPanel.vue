@@ -1,17 +1,16 @@
 <template>
   <section class="route-conflict" role="alert">
-    <strong>Черновик изменился в другой вкладке</strong>
-    <p>Ваши несохранённые правки остались здесь. Можно сохранить их отдельной копией
-      или перечитать версию сервера после подтверждения.</p>
+    <strong>{{ t('core.routeChernovikIzmenilsyaVDrugoy') }}</strong>
+    <p>{{ t('core.routeVashiNesohranennyePravkiOstalis') }}</p>
     <div class="route-conflict__actions">
-      <UiButton @click="$emit('copy')">Сохранить отдельной копией</UiButton>
-      <UiButton @click="$emit('reload')">Перечитать</UiButton>
+      <UiButton @click="$emit('copy')">{{ t('core.routeSohranitOtdelnoyKopiey') }}</UiButton>
+      <UiButton @click="$emit('reload')">{{ t('core.routePerechitat') }}</UiButton>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 
 defineEmits<{ copy: []; reload: [] }>();
 </script>

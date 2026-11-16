@@ -48,6 +48,7 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   }
 
   assert.match(build, /сервер.*веб.*окно/iu);
+  assert.match(build, /\(server, desktop, tasks\)/u);
 
   const apkStart = session.output().length;
 
@@ -89,6 +90,9 @@ for (const [groupIndex, component] of [[2, 'server'], [3, 'relay']] as const) {
     test(`MA-COMMANDS: ${component} ${action}, прежние argv без follow`, async (t) => {
       const box = await sourceMenu(t);
 
+      // Мастер удалённого доступа добавил setup/restore в начало подменю посредника.
+      const itemOffset = component === 'relay' ? 2 : 0;
+
       if (component === 'server') {
         box.unit({ ActiveState: action === 'start' ? 'inactive' : 'active' });
 
@@ -103,7 +107,7 @@ for (const [groupIndex, component] of [[2, 'server'], [3, 'relay']] as const) {
       const session = launchMenu(t, box);
 
       await enterGroup(session, groupIndex, /Запустить|Остановить|Перезапустить/u);
-      session.write(down.repeat(actionIndex) + '\r');
+      session.write(down.repeat(actionIndex + itemOffset) + '\r');
 
       const expected = component === 'server'
         ? action === 'logs' ? 'journalctl --user -u grigdesk-server.service -n 100 --no-pager'

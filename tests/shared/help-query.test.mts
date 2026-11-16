@@ -3,6 +3,7 @@ import test from 'node:test';
 import { decodeHelpBundle, parseHelpInput } from '../../shared/help/helpContracts.ts';
 import { queryHelp } from '../../shared/help/helpQuery.ts';
 import { helpHref, helpArticleForContext } from '../../shared/help/helpLinks.ts';
+import { localeCorpus } from '../helpers/helpLocale.mts';
 
 const overview = {
   id: 'overview',
@@ -122,4 +123,82 @@ test('HELP-Q3: неизвестные поля, невалидные смеще�
   assert.throws(() => decodeHelpBundle({
     ...bundle, format: 2
   }));
+});
+
+// Общая фикстура подписывает самостоятельные корпуса, не вызывая новый compiler.
+
+test('HELP-Q-L1: EN format1, identity, поиск и Unicode paging используют выбранный корпус', () => {
+  const english = decodeHelpBundle(localeCorpus('en'));
+
+  assert.deepEqual(parseHelpInput({
+    action: 'read',
+    id: 'chats',
+    locale: 'en',
+  }), {
+    action: 'read',
+    id: 'chats',
+    offset: 0,
+    locale: 'en',
+  });
+  assert.deepEqual(parseHelpInput({ action: 'index' }), { action: 'index' });
+
+  for (const input of [
+    { action: 'index', locale: 'en' },
+    {
+      action: 'search',
+      query: 'working directory',
+      locale: 'en',
+    },
+    {
+      action: 'read',
+      id: 'chats',
+      locale: 'en',
+    },
+  ]) {
+    const result = queryHelp(english, input);
+
+    assert.equal(result.ok, true);
+    assert.equal('locale' in result && result.locale, 'en');
+    assert.equal('revision' in result && result.revision, english.revision);
+    assert.equal('commit' in result && result.commit, english.commit);
+    assert.equal('version' in result && result.version, english.version);
+  }
+
+  const text = 'a'.repeat(11999) + '😀' + 'b'.repeat(12001);
+  const long = { ...english, articles: [{ ...english.articles[0]!, markdown: text }] };
+  const first = queryHelp(long, {
+    action: 'read',
+    id: 'overview',
+    locale: 'en',
+  });
+
+  assert.ok('text' in first && 'nextOffset' in first);
+  assert.equal(first.text.endsWith('😀'), true);
+
+  const second = queryHelp(long, {
+    action: 'read',
+    id: 'overview',
+    locale: 'en',
+    offset: first.nextOffset,
+  });
+
+  assert.ok('text' in second);
+  assert.ok('nextOffset' in second);
+
+  const third = queryHelp(long, {
+    action: 'read',
+    id: 'overview',
+    locale: 'en',
+    offset: second.nextOffset,
+  });
+
+  assert.ok('text' in third);
+  assert.equal(first.text + second.text + third.text, text);
+  assert.deepEqual(queryHelp(english, { action: 'index', locale: 'ru' }), {
+    ok: false, error: 'help_locale_unavailable',
+  });
+
+  for (const locale of ['de', '../en', ['en'], null]) {
+    assert.throws(() => parseHelpInput({ action: 'index', locale }), /help_input_invalid/u);
+  }
 });

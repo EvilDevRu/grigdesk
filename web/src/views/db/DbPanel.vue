@@ -16,14 +16,12 @@
         <UiPaneHeader class="db-panel__header">
           <template #title>
             <div class="db-panel__title">
-              <h2 id="db-panel-title">Базы</h2>
-              <span class="ui-maturity-chip" data-product-maturity="beta" aria-label="Бета-версия">
-                бета
-              </span>
+              <h2 id="db-panel-title">{{ t('core.databases') }}</h2>
+              <span class="ui-maturity-chip" data-product-maturity="beta" :aria-label="t('core.dbBetaVersiya')"> {{ t('core.dbBeta') }} </span>
             </div>
           </template>
           <template #meta>
-            <span class="db-panel__summary" aria-label="Сводка по базам">
+            <span class="db-panel__summary" :aria-label="t('core.dbSvodkaPoBazam')">
               {{ t('core.dbDesignSummary', {
                 profiles: store.profiles?.length || 0,
                 sessions: store.sessions?.length || 0,
@@ -35,8 +33,8 @@
           </template>
           <template #actions>
             <UiIconButton class="db-refresh" role="embedded" data-context="workspace-toolbar"
-                          label="Обновить базы" v-tooltip="'Обновить'" :loading="refreshLoading"
-                          loading-label="Обновляю" @click="refresh">
+                          :label="t('core.dbObnovitBazy')" v-tooltip="t('core.trackerUpdate')" :loading="refreshLoading"
+                          :loading-label="t('core.updating')" @click="refresh">
               <UiRefreshIcon />
             </UiIconButton>
             <UiButton data-context="workspace-toolbar" :aria-label="t('core.dbInstallDriver')"
@@ -51,12 +49,11 @@
 
       <div class="db-panel__body">
         <div v-show="!showCreate" class="db-panel__navigation">
-          <UiTabs v-model="mobileWorkspace" data-ui-workspace-tabs size="compact" label="Рабочая область базы">
-            <UiTab value="profiles" controls="db-profiles-pane">
-              Профили · {{ store.profiles?.length || 0 }}
+          <UiTabs v-model="mobileWorkspace" data-ui-workspace-tabs size="compact" :label="t('core.dbRabochayaOblastBazy')">
+            <UiTab value="profiles" controls="db-profiles-pane"> {{ t('core.dbProfili') }} {{ store.profiles?.length || 0 }}
             </UiTab>
-            <UiTab value="console" controls="db-session-panel" :disabled="!activeSession">Консоль</UiTab>
-            <UiTab value="activity" controls="db-queries-pane">Запросы · {{ store.queries?.length || 0 }}</UiTab>
+            <UiTab value="console" controls="db-session-panel" :disabled="!activeSession">{{ t('core.dbKonsol') }}</UiTab>
+            <UiTab value="activity" controls="db-queries-pane">{{ t('core.dbZaprosy') }} {{ store.queries?.length || 0 }}</UiTab>
           </UiTabs>
         </div>
         <UiInlineMessage v-if="visibleError" tone="danger">
@@ -87,12 +84,12 @@
                 </template>
               </UiPaneHeader>
               <form class="db-profile-form" @submit.prevent="saveProfile">
-                <UiField label="Проект" required>
+                <UiField :label="t('core.taskEditProject')" required>
                   <UiSelect
                     v-model="draft.projectId"
                     required
                     :disabled="!projectOptions.length"
-                    aria-label="Проект"
+                    :aria-label="t('core.taskEditProject')"
                     data-db-project-select
                   >
                     <option value="" disabled>{{ projectPlaceholder }}</option>
@@ -102,78 +99,78 @@
                   </UiSelect>
                 </UiField>
 
-                <UiField label="Метка" required>
+                <UiField :label="t('core.dbMetka')" required>
                   <UiInput
                     v-model.trim="draft.label"
                     required
-                    placeholder="Например, аналитика"
-                    aria-label="Метка профиля"
+                    :placeholder="t('core.dbNaprimerAnalitika')"
+                    :aria-label="t('core.dbMetkaProfilya')"
                   />
                 </UiField>
 
-                <UiField label="Движок" required>
-                  <UiSelect v-model="draft.engine" required aria-label="Движок базы">
-                    <option value="" disabled>Выберите движок</option>
+                <UiField :label="t('core.dbDvizhok')" required>
+                  <UiSelect v-model="draft.engine" required :aria-label="t('core.dbDvizhokBazy')">
+                    <option value="" disabled>{{ t('core.dbVyberiteDvizhok') }}</option>
                     <option v-for="engine in store.engines" :key="engine.id" :value="engine.id">
                       {{ engine.label }}
                     </option>
                   </UiSelect>
                 </UiField>
 
-                <UiField label="Роль">
-                  <UiSelect v-model="draft.role" aria-label="Роль профиля">
-                    <option value="read">Только чтение</option>
-                    <option value="write">Чтение и запись</option>
+                <UiField :label="t('core.dbRol')">
+                  <UiSelect v-model="draft.role" :aria-label="t('core.dbRolProfilya')">
+                    <option value="read">{{ t('core.agentModeReadOnly') }}</option>
+                    <option value="write">{{ t('core.dbChtenieIZapis') }}</option>
                   </UiSelect>
                 </UiField>
 
-                <UiField label="Адрес" required>
+                <UiField :label="t('core.browserAddress')" required>
                   <UiInput
                     v-model.trim="draft.host"
                     required
-                    placeholder="db.internal"
-                    aria-label="Адрес базы"
+                    :placeholder="'db.internal'"
+                    :aria-label="t('core.dbAdresBazy')"
                   />
                 </UiField>
 
-                <UiField label="Порт" required>
+                <UiField :label="t('settings.port')" required>
                   <UiNumberInput
                     v-model="draft.port"
                     :min="1"
                     :max="65535"
                     required
                     placeholder="3306"
-                    aria-label="Порт базы"
+                    :aria-label="t('core.dbPortBazy')"
                   />
                 </UiField>
 
-                <UiField label="Пользователь" required>
+                <UiField :label="t('settings.user')" required>
                   <UiInput
                     v-model.trim="draft.user"
                     required
                     autocomplete="username"
-                    placeholder="reader"
-                    aria-label="Пользователь базы"
+                    :placeholder="'reader'"
+                    :aria-label="t('core.dbPolzovatelBazy')"
                   />
                 </UiField>
 
-                <UiField label="База / номер">
+                <UiField :label="t('core.dbBazaNomer')">
                   <UiInput
                     v-model.trim="draft.database"
-                    placeholder="Необязательно"
-                    aria-label="Имя или номер базы"
+                    :placeholder="t('settings.optional')"
+                    :aria-label="t('core.dbImyaIliNomerBazy')"
                   />
                 </UiField>
 
-                <UiField label="Маршрут">
-                  <UiSelect v-model="draft.via" aria-label="Маршрут подключения">
-                    <option value="direct">Напрямую</option>
-                    <option value="ssh">Через открытую SSH-сессию</option>
+                <UiField :label="t('core.dbMarshrut')">
+                  <UiSelect v-model="draft.via" :aria-label="t('core.dbMarshrutPodklyucheniya')">
+                    <option value="direct">{{ t('core.dbNapryamuyu') }}</option>
+                    <option value="ssh">{{ t('core.dbCherezOtkrytuyuSshSessiyu') }}</option>
                   </UiSelect>
                 </UiField>
 
                 <div class="db-profile-form__environment">
-                  <UiSwitch v-model="draft.prod">Прод-среда</UiSwitch>
+                  <UiSwitch v-model="draft.prod">{{ t('core.dbProdSreda') }}</UiSwitch>
                 </div>
 
                 <UiInlineMessage v-if="store.projectsError" tone="danger">
@@ -186,11 +183,9 @@
                     variant="solid"
                     tone="accent"
                     :loading="savingProfile"
-                    loading-label="Сохраняю профиль"
+                    :loading-label="t('core.dbSohranyayuProfil')"
                     :disabled="!profileDraftValid"
-                  >
-                    Сохранить профиль
-                  </UiButton>
+                  > {{ t('core.dbSohranitProfil') }} </UiButton>
                 </UiFormActions>
               </form>
             </section>
@@ -203,10 +198,10 @@
               :class="{ 'has-active': activeQueryCount }"
               id="db-queries-pane"
               data-db-queries
-              aria-label="Живая лента запросов"
+              :aria-label="t('core.dbZhivayaLentaZaprosov')"
             >
               <summary>
-                <span>Живая лента запросов</span>
+                <span>{{ t('core.dbZhivayaLentaZaprosov') }}</span>
                 <span class="db-live-queries__status">
                   <span class="db-activity-label">
                     {{ activeQueryCount
@@ -239,11 +234,11 @@
                       variant="text"
                       :disabled="!querySessionOpen(item)"
                       v-tooltip="querySessionOpen(item)
-                        ? 'Показать результат в его сессии'
-                        : 'Сессия этого запроса уже закрыта'"
+                        ? t('core.dbPokazatRezultatVEgo')
+                        : t('core.dbSessiyaEtogoZaprosaUzhe')"
                       @click="inspectQuery(item)"
                     >
-                      {{ querySessionOpen(item) ? 'Результат' : 'Сессия закрыта' }}
+                      {{ querySessionOpen(item) ? t('core.stageResult') : t('core.dbSessiyaZakryta') }}
                     </UiButton>
                     <UiButton
                       v-show="item.state === 'running'"
@@ -251,16 +246,12 @@
                       tone="danger"
                       :disabled="!item.id || item.state !== 'running'"
                       @click="cancelQuery(item.id)"
-                    >
-                      Прервать
-                    </UiButton>
+                    > {{ t('core.dbPrervat') }} </UiButton>
                   </div>
                 </article>
               </div>
 
-              <div v-else class="db-query-list__empty" data-db-cancel>
-                Новые запросы появятся здесь во время выполнения.
-              </div>
+              <div v-else class="db-query-list__empty" data-db-cancel> {{ t('core.dbNovyeZaprosyPoyavyatsyaZdes') }} </div>
 
             </details>
 
@@ -274,12 +265,12 @@
               class="db-console"
               :class="{ 'has-session': activeSession }"
               data-db-sessions
-              aria-label="Рабочая сессия базы данных"
+              :aria-label="t('core.dbRabochayaSessiyaBazyDannyh')"
             >
               <header class="db-console__header">
                 <div v-if="store.sessions?.length" class="db-session-switcher">
-                  <span class="db-session-switcher__label">Сессии</span>
-                  <UiTabs v-model="selectedSessionId" class="db-tabs" label="Сессии баз данных">
+                  <span class="db-session-switcher__label">{{ t('core.dbSessii') }}</span>
+                  <UiTabs v-model="selectedSessionId" class="db-tabs" :label="t('core.dbSessiiBazDannyh')">
                     <UiTab
                       v-for="session in store.sessions"
                       :id="sessionTabId(session.id)"
@@ -306,35 +297,31 @@
                   class="db-session-close"
                   role="embedded"
                   tone="danger"
-                  :label="`Закрыть активную сессию ${activeSession.label}`"
-                  v-tooltip="`Закрыть ${activeSession.label}`"
+                  :label="t('core.dbZakrytAktivnuyuSessiyuLabel', { label: activeSession.label })"
+                  v-tooltip="t('core.dbZakrytLabel', { label: activeSession.label })"
                   :loading="closingSessionId === activeSession.id"
-                  loading-label="Закрываю сессию"
+                  :loading-label="t('core.dbZakryvayuSessiyu')"
                   @click="closeActiveSession"
                 >
                   ×
                 </UiIconButton>
 
                 <div v-else class="db-console__title">
-                  <span aria-hidden="true">SQL</span>
-                  Консоль
-                </div>
+                  <span aria-hidden="true">{{ t('core.dbSql') }}</span> {{ t('core.dbKonsol') }} </div>
 
                 <div v-if="activeSession" class="db-console__context">
                   <span class="db-role-badge">{{ roleLabel(activeSession.role) }}</span>
-                  <span v-if="activeSession.prod" class="db-prod-badge">прод</span>
+                  <span v-if="activeSession.prod" class="db-prod-badge">{{ t('core.dbProd') }}</span>
                   <span class="db-live-label">
-                    <i aria-hidden="true"></i>
-                    Подключено
-                  </span>
+                    <i aria-hidden="true"></i> {{ t('core.machineConnected') }} </span>
                 </div>
               </header>
 
               <div v-if="activeSession" class="db-console__navigation">
-                <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" label="Рабочая область базы">
-                  <UiTab value="query" controls="db-workbench">Запрос</UiTab>
-                  <UiTab value="result" controls="db-workbench">Результат</UiTab>
-                  <UiTab value="schema" controls="db-workbench">Схема</UiTab>
+                <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" :label="t('core.dbRabochayaOblastBazy')">
+                  <UiTab value="query" controls="db-workbench">{{ t('core.dbZapros') }}</UiTab>
+                  <UiTab value="result" controls="db-workbench">{{ t('core.stageResult') }}</UiTab>
+                  <UiTab value="schema" controls="db-workbench">{{ t('core.dbShema') }}</UiTab>
                 </UiTabs>
               </div>
 
@@ -345,16 +332,16 @@
                 role="tabpanel"
                 :aria-labelledby="activeSession ? sessionTabId(activeSession.id) : undefined"
               >
-                <aside class="db-schema" data-db-schema aria-label="Схема базы данных">
+                <aside class="db-schema" data-db-schema :aria-label="t('core.dbShemaBazyDannyh')">
                   <header class="db-subsection-heading">
                     <div>
-                      <h3>Схема</h3>
+                      <h3>{{ t('core.dbShema') }}</h3>
                       <small v-if="activeSession">{{ activeSession.label }}</small>
                     </div>
                     <UiIconButton
                       role="embedded"
-                      label="Обновить схему"
-                      v-tooltip="'Обновить схему'"
+                      :label="t('core.dbObnovitShemu')"
+                      v-tooltip="t('core.dbObnovitShemu')"
                       :loading="schemaLoadingIds.has(selectedSessionId)"
                       :disabled="!selectedSessionId"
                       @click="loadSchema"
@@ -388,9 +375,9 @@
 
                   <div v-else class="db-schema__empty">
                     <span aria-hidden="true">⌘</span>
-                    <strong>{{ activeSession ? 'Схема ещё не загружена' : 'Нет сессии' }}</strong>
-                    <small v-if="activeSession">Нажмите кнопку обновления.</small>
-                    <small v-else>Откройте профиль базы.</small>
+                    <strong>{{ activeSession ? t('core.dbShemaEscheNeZagruzhena') : t('core.dbNetSessii') }}</strong>
+                    <small v-if="activeSession">{{ t('core.dbNazhmiteKnopkuObnovleniya') }}</small>
+                    <small v-else>{{ t('core.dbOtkroyteProfilBazy') }}</small>
                   </div>
                 </aside>
 
@@ -398,23 +385,23 @@
                   <div class="db-query-editor">
                     <header>
                       <div>
-                        <h3>Консоль человека</h3>
+                        <h3>{{ t('core.dbKonsolCheloveka') }}</h3>
                         <small>
                           {{ activeSession
-                            ? `${engineLabel(activeSession.engine)} · ${roleLabel(activeSession.role)}`
-                            : 'Сначала откройте сессию' }}
+                            ? t('core.dbEngineRole', { engine: engineLabel(activeSession.engine), role: roleLabel(activeSession.role) })
+                            : t('core.dbSnachalaOtkroyteSessiyu') }}
                         </small>
                       </div>
-                      <span class="db-query-shortcut">Ctrl ↵</span>
+                      <span class="db-query-shortcut">{{ t('core.dbCtrl') }}</span>
                     </header>
 
-                    <UiField label="Запрос">
+                    <UiField :label="t('core.dbZapros')">
                       <UiTextarea
                         v-model="query"
                         data-role="db-query"
                         rows="7"
                         spellcheck="false"
-                        placeholder="SELECT …"
+                        :placeholder="'SELECT …'"
                         :disabled="!activeSession"
                         @keydown.ctrl.enter.prevent="runQuery"
                         @keydown.meta.enter.prevent="runQuery"
@@ -422,13 +409,13 @@
                     </UiField>
 
                     <div class="db-query-editor__actions">
-                      <small>Результат считается недоверенными данными.</small>
+                      <small>{{ t('core.dbRezultatSchitaetsyaNedoverennymiDannymi') }}</small>
                       <UiButton
                         class="db-run-button"
                         variant="solid"
                         tone="accent"
                         :loading="submittingQuery"
-                        loading-label="Запускаю запрос"
+                        :loading-label="t('core.dbZapuskayuZapros')"
                         :disabled="!selectedSessionId || !query.trim()"
                         @click="runQuery"
                       >
@@ -442,30 +429,24 @@
                           >
                             <path d="m8 5 11 7-11 7z" />
                           </svg>
-                        </template>
-                        Выполнить
-                      </UiButton>
+                        </template> {{ t('core.dbVypolnit') }} </UiButton>
                     </div>
                   </div>
 
                   <div class="db-result-stage" aria-live="polite">
                     <header class="db-result-stage__header">
                       <div>
-                        <h3>Результат</h3>
-                        <span v-if="limitedResult" class="db-untrusted-badge">
-                          Недоверенные данные
-                        </span>
+                        <h3>{{ t('core.stageResult') }}</h3>
+                        <span v-if="limitedResult" class="db-untrusted-badge"> {{ t('core.dbNedoverennyeDannye') }} </span>
                       </div>
-                      <span v-if="limitedResult" class="db-result-count">
-                        Показано {{ limitedResult.shownRows }}
-                        из {{ limitedResult.totalRows ?? '?' }}
+                      <span v-if="limitedResult" class="db-result-count"> {{ t('core.dbPokazano') }} {{ limitedResult.shownRows }} {{ t('settings.from') }} {{ limitedResult.totalRows ?? '?' }}
                       </span>
                     </header>
 
                     <div v-if="queryInFlight" class="db-result-state is-running">
                       <span class="db-result-state__pulse" aria-hidden="true"></span>
                       <strong>{{ queryStateLabel(activeResultQuery?.state || '') }}</strong>
-                      <small>Лента обновится после ответа базы.</small>
+                      <small>{{ t('core.dbLentaObnovitsyaPosleOtveta') }}</small>
                     </div>
 
                     <UiInlineMessage v-else-if="failedResult" tone="danger" data-db-query-error>
@@ -500,9 +481,9 @@
 
                     <div v-else class="db-result-state">
                       <span class="db-result-state__icon" aria-hidden="true">{ }</span>
-                      <strong>Результатов пока нет</strong>
-                      <small v-if="activeSession">Введите запрос и запустите его.</small>
-                      <small v-else>Откройте сессию из профиля слева.</small>
+                      <strong>{{ t('core.dbRezultatovPokaNet') }}</strong>
+                      <small v-if="activeSession">{{ t('core.dbVvediteZaprosIZapustite') }}</small>
+                      <small v-else>{{ t('core.dbOtkroyteSessiyuIzProfilya') }}</small>
                     </div>
                   </div>
                 </section>
@@ -526,18 +507,18 @@
                   </span>
                   <span>
                     <strong>{{ activeSession.label }}</strong>
-                    <small>{{ activeSession.projectId }} · сессия хранится в GrigDesk</small>
+                    <small>{{ activeSession.projectId }} {{ t('core.dbSessiyaHranitsyaVGrigdesk') }}</small>
                   </span>
                 </div>
 
                 <div class="db-agent-access">
                   <span>
-                    <strong>Запросы агента</strong>
-                    <small>Изменения всегда требуют подтверждения</small>
+                    <strong>{{ t('core.dbZaprosyAgenta') }}</strong>
+                    <small>{{ t('core.dbIzmeneniyaVsegdaTrebuyutPodtverzhdeniya') }}</small>
                   </span>
                   <UiSwitch
                     :model-value="activeSession.agentAllowed === true"
-                    :aria-label="`Доступ агента к ${activeSession.label}`"
+                    :aria-label="t('core.dbDostupAgentaKLabel', { label: activeSession.label })"
                     @update:model-value="setAgentAccess(activeSession.id, $event)"
                   />
                 </div>
@@ -558,9 +539,7 @@
                     aria-hidden="true"
                   >
                     <path d="M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5" />
-                  </svg>
-                  Журнал запросов
-                </span>
+                  </svg> {{ t('core.dbZhurnalZaprosov') }} </span>
                 <span class="db-count">{{ store.audit?.length || 0 }}</span>
               </summary>
 
@@ -582,19 +561,17 @@
                   </header>
                   <code>{{ item.query }}</code>
                   <small v-if="item.rows != null">
-                    {{ item.rows }} строк · {{ formatBytes(item.bytes) }}
+                    {{ item.rows }} {{ t('core.dbStrok') }} {{ formatBytes(item.bytes) }}
                   </small>
                 </article>
               </div>
-              <p v-else-if="!store.auditError && !store.auditSkippedRecords" class="db-audit__empty">
-                Запросов в журнале ещё не было.
-              </p>
+              <p v-else-if="!store.auditError && !store.auditSkippedRecords" class="db-audit__empty"> {{ t('core.dbZaprosovVZhurnaleEsche') }} </p>
             </details>
           </div>
 
-          <aside id="db-profiles-pane" class="db-profiles" data-db-profiles aria-label="Профили баз данных">
+          <aside id="db-profiles-pane" class="db-profiles" data-db-profiles :aria-label="t('core.dbProfiliBazDannyh')">
             <UiPaneHeader class="db-catalog-heading">
-              <template #title><h3>Профили</h3></template>
+              <template #title><h3>{{ t('core.dbProfili2') }}</h3></template>
               <template #meta>{{ store.profiles?.length || 0 }}</template>
             </UiPaneHeader>
             <div class="db-catalog-search">
@@ -618,7 +595,7 @@
                             :disabled="Boolean(openingProfileId)" @click="selectProfile(profile.id)">
                     <span class="db-profile__heading">
                       <strong>{{ profile.label }}</strong>
-                      <span v-if="profile.prod" class="db-prod-badge">прод</span>
+                      <span v-if="profile.prod" class="db-prod-badge">{{ t('core.dbProd') }}</span>
                       <span v-if="profileSessionCount(profile.id)" class="db-live-badge"
                             :aria-label="t('core.dbDesignSessionCount', {
                               count: profileSessionCount(profile.id),
@@ -642,7 +619,7 @@
                 </div>
               </div>
               <div v-else-if="!store.error" class="db-profiles__empty db-catalog-empty" role="status">
-                <strong>Профилей пока нет</strong>
+                <strong>{{ t('core.dbProfileyPokaNet') }}</strong>
                 <span>{{ t('core.dbDesignEmptyHint') }}</span>
                 <UiButton tone="accent" @click="toggleCreate">{{ t('core.dbDesignAddProfile') }}</UiButton>
               </div>
@@ -651,7 +628,7 @@
                   <p class="db-selected__project">{{ selectedProfile.projectId }}</p>
                   <div class="db-selected__heading">
                     <strong>{{ selectedProfile.label }}</strong>
-                    <span v-if="selectedProfile.prod" class="db-prod-badge">прод</span>
+                    <span v-if="selectedProfile.prod" class="db-prod-badge">{{ t('core.dbProd') }}</span>
                   </div>
                   <code class="db-selected__address">
                     {{ selectedProfile.user }}@{{ selectedProfile.host }}:{{ selectedProfile.port }}
@@ -673,33 +650,29 @@
                   </div>
                   <form v-if="!profileSessionCount(selectedProfile.id) || showNewLogin"
                         id="db-login" class="db-connect-form" @submit.prevent="openSession">
-                    <UiField label="Пароль на один вход">
+                    <UiField :label="t('core.dbParolNaOdinVhod')">
                       <UiPasswordInput ref="passwordInput" v-model="password" autocomplete="current-password"
-                                       :aria-label="`Пароль для ${selectedProfile.label}`"
-                                       placeholder="Пароль" :disabled="Boolean(openingProfileId)" />
+                                       :aria-label="t('core.dbParolDlyaLabel', { label: selectedProfile.label })"
+                                       :placeholder="t('core.trackerPassword')" :disabled="Boolean(openingProfileId)" />
                     </UiField>
-                    <UiField v-if="selectedProfile.via === 'ssh'" label="SSH-сессия" :hint="sshSessionHint">
+                    <UiField v-if="selectedProfile.via === 'ssh'" :label="t('core.dbSshSessiya')" :hint="sshSessionHint">
                       <UiSelect v-model="sshSessionId" data-db-ssh-session :disabled="Boolean(openingProfileId)">
-                        <option value="">Выберите SSH-сессию</option>
+                        <option value="">{{ t('core.dbVyberiteSshSessiyu') }}</option>
                         <option v-for="session in availableSshSessions" :key="session.id" :value="session.id">
                           {{ session.label || session.id }}
                         </option>
                       </UiSelect>
                     </UiField>
                     <UiButton type="submit" block variant="solid" tone="accent" data-context="workspace-form"
-                              :loading="openingProfileId === selectedProfile.id" loading-label="Открываю сессию"
-                              :disabled="!password || (selectedProfile.via === 'ssh' && !sshSessionId)">
-                      Открыть сессию
-                    </UiButton>
+                              :loading="openingProfileId === selectedProfile.id" :loading-label="t('core.dbOtkryvayuSessiyu')"
+                              :disabled="!password || (selectedProfile.via === 'ssh' && !sshSessionId)"> {{ t('core.dbOtkrytSessiyu') }} </UiButton>
                   </form>
                 </section>
                 <p class="db-secret-note">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="m5 12 4 4L19 6" />
-                  </svg>
-                  Пароль не сохраняется и передаётся только при ручном входе.
-                </p>
+                  </svg> {{ t('core.dbParolNeSohranyaetsyaI') }} </p>
               </div>
             </div>
           </aside>
@@ -740,7 +713,7 @@ import {
   alertDialog,
   t,
   vTooltip,
-  UiLoadingState,
+  UiLoadingState, uiLocale
 } from '../../ui';
 import type {
   DbEngine,
@@ -898,15 +871,15 @@ const availableSshSessions = computed(() => (store.sshSessions || []).filter((se
 )));
 const sshSessionHint = computed(() => (
   availableSshSessions.value.length
-    ? 'Туннель пойдёт через уже открытую SSH-сессию.'
-    : 'Для этого проекта нет открытых SSH-сессий.'
+    ? t('core.dbTunnelPoydetCherezUzhe')
+    : t('core.dbDlyaEtogoProektaNet')
 ));
 const projectPlaceholder = computed(() => {
   if (store.projectsLoading && !projectOptions.value.length) {
-    return 'Загрузка проектов…';
+    return t('core.dbZagruzkaProektov');
   }
 
-  return projectOptions.value.length ? 'Выберите проект' : 'Проектов пока нет';
+  return projectOptions.value.length ? t('core.taskFormChooseProject') : t('core.dbProektovPokaNet');
 });
 const profileDraftValid = computed(() => Boolean(
   draft.projectId
@@ -925,7 +898,7 @@ const schemaItems = computed(() => schemaRows.value
   .filter(Boolean));
 const schemaLoaded = computed(() => currentSchema.value !== null);
 const formattedSchema = computed(() => (
-  currentSchema.value ? JSON.stringify(currentSchema.value, null, 2) : 'Схема ещё не загружена'
+  currentSchema.value ? JSON.stringify(currentSchema.value, null, 2) : t('core.dbShemaEscheNeZagruzhena')
 ));
 
 const activeResultId = computed(() => resultQueryIds[selectedSessionId.value] || '');
@@ -961,7 +934,7 @@ const resultColumns = computed(() => {
   for (const row of resultRows.value) {
     const names = row && typeof row === 'object' && !Array.isArray(row)
       ? Object.keys(row)
-      : ['значение'];
+      : [t('core.dbZnachenie')];
 
     for (const name of names) {
       if (!columns.includes(name)) {
@@ -995,27 +968,27 @@ function engineLabel(engine: string | DbEngine | null | undefined): string {
   return known?.label
     || (typeof engine === 'string' ? '' : engine?.label)
     || id
-    || 'движок';
+    || t('core.dbDvizhok');
 }
 
 function roleLabel(role: string): string {
-  return role === 'write' ? 'запись' : 'чтение';
+  return role === 'write' ? t('core.videoZapis3') : t('core.chatChtenie');
 }
 
 function queryActorLabel(actor: string | null | undefined): string {
-  return actor === 'agent' ? 'агент' : 'человек';
+  return actor === 'agent' ? t('core.dbAgent') : t('core.dbChelovek');
 }
 
 function queryStateLabel(state: string): string {
   return ({
-    checking: 'проверяется',
-    waiting: 'ждёт подтверждения',
-    running: 'выполняется',
-    done: 'завершён',
-    denied: 'отклонён',
-    error: 'ошибка',
-    cancelled: 'прерван',
-  } as Record<string, string>)[state] || 'ожидание';
+    checking: t('settings.checking'),
+    waiting: t('core.dbZhdetPodtverzhdeniya'),
+    running: t('settings.running'),
+    done: t('core.dbZavershen'),
+    denied: t('core.dbOtklonen'),
+    error: t('settings.error'),
+    cancelled: t('core.interrupted'),
+  } as Record<string, string>)[state] || t('core.showcaseOzhidanie');
 }
 
 function queryTone(state: string): string {
@@ -1032,11 +1005,11 @@ function queryTone(state: string): string {
 
 function outcomeLabel(outcome: string | null | undefined): string {
   return ({
-    success: 'успешно',
-    query_failed: 'ошибка запроса',
-    cancelled: 'прерван',
-    session_lost: 'сессия потеряна',
-  } as Record<string, string>)[String(outcome)] || 'отклонён';
+    success: t('core.dbUspeshno'),
+    query_failed: t('core.dbOshibkaZaprosa'),
+    cancelled: t('core.interrupted'),
+    session_lost: t('core.dbSessiyaPoteryana'),
+  } as Record<string, string>)[String(outcome)] || t('core.dbOtklonen');
 }
 
 function outcomeTone(outcome: string | null | undefined): string {
@@ -1050,7 +1023,7 @@ function formatDate(value: string): string {
     return value || '';
   }
 
-  return new Intl.DateTimeFormat('ru-RU', {
+  return new Intl.DateTimeFormat(uiLocale.value, {
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -1064,13 +1037,15 @@ function formatBytes(value: unknown): string {
   const bytes = Number(value);
 
   if (!Number.isFinite(bytes) || bytes < 0) {
-    return 'объём неизвестен';
+    return t('core.dbObemNeizvesten');
   }
   if (bytes < 1_024) {
-    return `${bytes} Б`;
+    return t('core.docBytesB', { bytes: bytes });
   }
 
-  return `${(bytes / 1_024).toFixed(bytes < 10_240 ? 1 : 0)} КиБ`;
+  return t('core.dbTofixedbytes1024010Kib', { toFixedbytes1024010: (bytes / 1_024).toFixed(bytes < 10_240
+                        ? 1
+                        : 0) });
 }
 
 function sessionTabId(sessionId: string): string {
@@ -1138,7 +1113,7 @@ function querySessionOpen(item: DbQuery | null | undefined): boolean {
 // объект с именем таблицы, у другого — просто строка.
 function schemaItemLabel(row: unknown, index: number): string {
   if (row === null || row === undefined) {
-    return `Элемент ${index + 1}`;
+    return t('core.dbElementIndex1', { index1: index + 1 });
   }
   if (typeof row !== 'object') {
     return String(row);
@@ -1153,7 +1128,7 @@ function schemaItemLabel(row: unknown, index: number): string {
     .find((value) => value !== undefined);
   const value = preferred ?? Object.values(named)[0];
 
-  return value === undefined ? `Элемент ${index + 1}` : String(value);
+  return value === undefined ? t('core.dbElementIndex1', { index1: index + 1 }) : String(value);
 }
 
 // Ячейка ответа базы: null показывается как есть, отсутствующая колонка — пустым
@@ -1234,7 +1209,7 @@ async function openSession(): Promise<void> {
       showNewLogin.value = false;
     }
   } catch (error) {
-    localError.value = errorMessage(error, 'Не удалось открыть сессию базы');
+    localError.value = errorMessage(error, t('core.dbNeUdalosOtkrytSessiyu'));
   } finally {
     password.value = '';
     openingProfileId.value = '';
@@ -1258,7 +1233,7 @@ async function loadSchema(): Promise<void> {
   try {
     await loadDbSchema(sessionId);
   } catch (error) {
-    localError.value = errorMessage(error, 'Не удалось загрузить схему');
+    localError.value = errorMessage(error, t('core.dbNeUdalosZagruzitShemu'));
   } finally {
     schemaLoadingIds.delete(sessionId);
   }
@@ -1283,7 +1258,7 @@ async function runQuery(): Promise<void> {
     fallbackResults[sessionId] = null;
     mobilePane.value = 'result';
   } catch (error) {
-    localError.value = errorMessage(error, 'Не удалось запустить запрос');
+    localError.value = errorMessage(error, t('core.dbNeUdalosZapustitZapros'));
   } finally {
     submittingQuery.value = false;
   }
@@ -1314,7 +1289,7 @@ async function cancelQuery(queryId: string): Promise<void> {
   try {
     await cancelDbQuery(queryId);
   } catch (error) {
-    localError.value = errorMessage(error, 'Не удалось прервать запрос');
+    localError.value = errorMessage(error, t('core.dbNeUdalosPrervatZapros'));
   }
 }
 
@@ -1342,7 +1317,7 @@ async function closeActiveSession(): Promise<void> {
     selectedSessionId.value = (store.sessions || [])
       .some((session) => session.id === replacementId) ? replacementId : '';
   } catch (error) {
-    await alertDialog(errorMessage(error, 'Не удалось закрыть сессию базы'), { title: 'Базы' });
+    await alertDialog(errorMessage(error, t('core.dbNeUdalosZakrytSessiyu')), { title: t('core.databases') });
   } finally {
     closingSessionId.value = '';
   }
@@ -1355,8 +1330,8 @@ async function setAgentAccess(sessionId: string, allowed: boolean): Promise<void
     await setDbAgentAccess(sessionId, allowed);
   } catch (error) {
     await alertDialog(
-      errorMessage(error, 'Не удалось изменить доступ агента'),
-      { title: 'Базы' },
+      errorMessage(error, t('core.dbNeUdalosIzmenitDostup')),
+      { title: t('core.databases') },
     );
   }
 }
@@ -1399,7 +1374,10 @@ async function saveProfile(): Promise<void> {
     showCreate.value = false;
     mobilePane.value = 'profiles';
   } catch (error) {
-    await alertDialog(errorMessage(error, 'Не удалось сохранить профиль'), { title: 'Базы' });
+    await alertDialog(
+      errorMessage(error, t('core.dbNeUdalosSohranitProfil')),
+      { title: t('core.databases') },
+    );
   } finally {
     savingProfile.value = false;
   }
@@ -1414,7 +1392,7 @@ watch(selectedProfileId, async () => {
     try {
       await loadDbSshSessions();
     } catch (error) {
-      localError.value = errorMessage(error, 'Не удалось загрузить SSH-сессии');
+      localError.value = errorMessage(error, t('core.dbNeUdalosZagruzitSsh'));
     }
   }
 });

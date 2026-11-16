@@ -1,4 +1,9 @@
 import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface ChatRuntimeRun {
   runId: string;
@@ -90,37 +95,49 @@ export function chatStatus(
     ? session.workdirPreview?.target : null;
   const cwd = snapshot?.cwd || (unknown ? '' : committed?.cwd || preview?.cwd || '');
   const modelId = snapshot?.actualModelId || snapshot?.requestedModelId || (unknown ? '' : selection.modelId);
-  const modelKind = snapshot ? snapshot.actualModelId ? 'сообщена' : 'запрошена' : 'выбрана';
-  const modelDetail = snapshot?.modelSource === 'response' ? 'Модель ответа основного агента'
-    : snapshot?.modelSource === 'session' ? 'Исполнитель сообщил модель сессии'
-      : snapshot ? 'Модель запрошена у исполнителя; подтверждения пока нет'
-        : 'Выбор для следующей отправки';
+  const modelKind = snapshot
+    ? snapshot.actualModelId
+      ? translateUi('core.chatStatusReported')
+      : translateUi('core.chatStatusRequested')
+    : translateUi('core.chatStatusSelected');
+  const modelDetail = snapshot?.modelSource === 'response' ? translateUi(
+    'core.chatStatusMainAgentResponseModel',
+  )
+    : snapshot?.modelSource === 'session' ? translateUi('core.chatStatusTheExecutorReportedTheSessionModel')
+      : snapshot ? translateUi('core.chatStatusTheModelWasRequestedFromTheExecutor')
+        : translateUi('core.chatStatusSelectionForTheNextMessage');
 
   return {
     phase,
     phaseLabel: ({
       idle: '',
       running: '',
-      compact: 'Сжимаю контекст',
-      workdir: 'Перенос папки',
-      sending: 'Отправляется',
-      queued: 'В очереди',
-      background: 'Фоновая активность',
-      legacy: 'Работает',
+      compact: translateUi('core.chatStatusCompactingContext'),
+      workdir: translateUi('core.chatStatusMovingTheFolder'),
+      sending: translateUi('core.chatOtpravlyaetsya'),
+      queued: translateUi('core.queued'),
+      background: translateUi('core.chatStatusBackgroundActivity'),
+      legacy: translateUi('core.chatStatusRunning'),
     } as Record<string, string>)[phase] || '',
     thinking: phase === 'running',
     runKey: `${session.id}:${runtime?.runId || phase}`,
     providerId: snapshot?.providerId || (unknown ? '' : selection.providerId),
     modelId,
-    modelLabel: snapshot ? modelId : unknown ? 'Модель текущего хода неизвестна' : selection.modelLabel,
+    modelLabel: snapshot
+      ? modelId
+      : unknown ? translateUi('core.chatStatusTheCurrentTurnModelIsUnknown') : selection.modelLabel,
     modelKind: unknown ? '' : modelKind,
-    modelDetail: unknown ? 'Параметры запуска не подтверждены' : modelDetail,
+    modelDetail: unknown ? translateUi('core.chatStatusLaunchParametersAreNotConfirmed') : modelDetail,
     cwd,
-    cwdLabel: cwd ? shortDirectory(cwd) : 'Папка не определена',
-    cwdDetail: snapshot ? 'Рабочий каталог запуска'
-      : committed?.cwd ? 'Подтверждённый рабочий каталог' : 'Папка для следующего запуска',
+    cwdLabel: cwd ? shortDirectory(cwd) : translateUi('core.chatStatusFolderNotSet'),
+    cwdDetail: snapshot ? translateUi('core.chatStatusWorkingFolderAtLaunch')
+      : committed?.cwd
+        ? translateUi('core.chatStatusConfirmedWorkingFolder')
+        : translateUi('core.chatStatusFolderForTheNextLaunch'),
     extraDirs: snapshot?.extraDirs || (unknown ? [] : committed?.extraDirs || preview?.extraDirs || []),
-    detail: unknown ? 'Параметры запуска не подтверждены'
-      : session.workdirChanging || session.workdirProposal ? 'Переход папки ещё не подтверждён' : '',
+    detail: unknown ? translateUi('core.chatStatusLaunchParametersAreNotConfirmed')
+      : session.workdirChanging || session.workdirProposal
+        ? translateUi('core.chatStatusTheFolderChangeIsNotConfirmedYet')
+        : '',
   };
 }

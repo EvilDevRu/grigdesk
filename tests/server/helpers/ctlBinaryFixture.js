@@ -73,7 +73,7 @@ export async function binaryFixture(t) {
     'exec "$FIXTURE_NODE" "$@"',
   ].join('\n'), { mode: 0o555 });
 
-  for (const id of ['grigdesk-cli', 'data-home-check', 'legacy-brand']) {
+  for (const id of ['grigdesk-cli', 'data-home-check']) {
     await buildHelper({
       root: SOURCE,
       manifestPath: path.join(SOURCE, 'server/build/helpers.json'),

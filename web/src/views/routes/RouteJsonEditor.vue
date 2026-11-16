@@ -1,23 +1,19 @@
 <template>
   <section class="route-json-editor">
-    <h3>JSON полного черновика</h3>
-    <p class="muted">Здесь редактируются название, маршруты, разведка, инструкции и данные
-      раскладки. Служебные ID, ревизия и публикация остаются на сервере.</p>
+    <h3>{{ t('core.routeJsonPolnogoChernovika') }}</h3>
+    <p class="muted">{{ t('core.routeZdesRedaktiruyutsyaNazvanieMarshruty') }}</p>
     <div class="route-json-editor__actions">
-      <UiButton data-test="json-format" @click="emit('format')">Форматировать</UiButton>
-      <UiButton data-test="json-apply" :disabled="readOnly" @click="emit('apply')">
-        Применить к формам
-      </UiButton>
+      <UiButton data-test="json-format" @click="emit('format')">{{ t('core.routeFormatirovat') }}</UiButton>
+      <UiButton data-test="json-apply" :disabled="readOnly" @click="emit('apply')"> {{ t('core.routePrimenitKFormam') }} </UiButton>
     </div>
-    <p v-if="buffer.dirty" class="bad">JSON-текст ещё не применён. Сохранение и публикация
-      недоступны до применения или отмены этого текста.</p>
+    <p v-if="buffer.dirty" class="bad">{{ t('core.routeJsonTekstEscheNe') }}</p>
     <p v-if="buffer.error" class="bad" role="alert">{{ buffer.error }}</p>
     <RouteMarkdownInput :model-value="buffer.raw" language="json"
                         data-test="json-raw"
                         @update:model-value="emit('update:raw', $event)"
                         @save="emit('apply')" />
     <div v-if="issues.length" role="alert" class="route-json-editor__issues">
-      <strong>Проблемы проверки этого документа</strong>
+      <strong>{{ t('core.routeProblemyProverkiEtogoDokumenta') }}</strong>
       <ul>
         <li v-for="(issue, index) in issues" :key="index">
           <code>{{ issue.path }}</code>: {{ issue.message }}
@@ -30,7 +26,7 @@
 <script setup lang="ts">
 import type { RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteJsonBuffer } from '../../actions/routes/jsonDraftBuffer.ts';
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 import RouteMarkdownInput from './RouteMarkdownInput.vue';
 
 defineProps<{

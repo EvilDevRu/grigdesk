@@ -1,5 +1,5 @@
-import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
-import type { PersonalScopeOptions, OwnTaskReader } from './taskPersonalScope.ts';
+import { personalWriteGuard, resolvePersonalScope } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions } from './taskPersonalScope.ts';
 import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой избранного: браузер не передаёт account scope, он выводится
 // из текущего трекера и пользователя и возвращается только как opaque hash.
@@ -35,16 +35,12 @@ export class TaskFavoritesService {
   // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
   readonly tracker: PersonalIdentitySource;
 
-  readonly ownTasks?: OwnTaskReader;
-
-  constructor({ store, tracker, ownTasks }: {
-    ownTasks?: OwnTaskReader;
+  constructor({ store, tracker }: {
     store: TaskFavoritesStore;
     tracker: PersonalIdentitySource;
   }) {
     this.store = store;
     this.tracker = tracker;
-    this.ownTasks = ownTasks;
   }
 
   /**
@@ -77,8 +73,8 @@ export class TaskFavoritesService {
   }
 
   /**
-   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
-   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   * Локальная мутация закрепляет учётную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции внешней доски.
    */
   async add(
     taskId: unknown,
@@ -87,16 +83,12 @@ export class TaskFavoritesService {
     const beforeWrite = personalWriteGuard(this.tracker, options);
     const scope = await this._scope({}, options);
 
-    if (options.source === 'grigdesk') {
-      await validateOwnPersonalTasks([taskId], this.ownTasks, true);
-    }
-
     return { scope, ...await this.store.add(scope, taskId, beforeWrite) };
   }
 
   /**
-   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
-   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   * Локальная мутация закрепляет учётную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции внешней доски.
    */
   async remove(
     taskId: unknown,
@@ -104,10 +96,6 @@ export class TaskFavoritesService {
   ): Promise<FavoritesScope & { scope: string }> {
     const beforeWrite = personalWriteGuard(this.tracker, options);
     const scope = await this._scope({}, options);
-
-    if (options.source === 'grigdesk') {
-      await validateOwnPersonalTasks([taskId], this.ownTasks, false);
-    }
 
     return { scope, ...await this.store.remove(scope, taskId, beforeWrite) };
   }

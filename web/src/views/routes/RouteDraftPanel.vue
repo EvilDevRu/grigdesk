@@ -6,7 +6,7 @@
         <li v-for="node in routeEntry.route.nodes" :key="node.id">
           <span class="mono">{{ node.id }}</span>
           <small>{{ node.executor }}</small>
-          <UiButton v-if="node.prompt" @click="$emit('select-node', node.id)">Инструкция</UiButton>
+          <UiButton v-if="node.prompt" @click="$emit('select-node', node.id)">{{ t('core.routeInstruktsiya') }}</UiButton>
           <div v-if="node.prompt" class="route-draft-panel__prompts">
             <div v-for="block in node.prompt.blocks" :key="block.file">
               <small class="mono">{{ block.file }}</small>
@@ -16,14 +16,14 @@
         </li>
       </ol>
     </template>
-    <p v-else class="bad">Маршрут «{{ routeId }}» отсутствует в этом черновике.</p>
+    <p v-else class="bad">{{ t('core.routeMarshrut2') }}{{ routeId }}{{ t('core.routeOtsutstvuetVEtomChernovike') }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { RouteDraftContent } from '../../../../shared/pipeline/routesEditorContracts.ts';
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 
 const props = defineProps<{ document: RouteDraftContent; routeId: string }>();
 

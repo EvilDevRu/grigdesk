@@ -51,6 +51,7 @@ export interface FactoryExternalCliDescriptor {
   schemaVersion: 1;
   providers: Record<string, FactoryExternalCliProvider>;
   unavailable: Record<string, string>;
+  unavailableBins?: Record<string, string>;
 }
 
 /**
@@ -69,6 +70,7 @@ export async function buildFactoryExternalCliDescriptor(input: {
 }): Promise<FactoryExternalCliDescriptor> {
   const providers: Record<string, FactoryExternalCliProvider> = {};
   const unavailable: Record<string, string> = {};
+  const unavailableBins: Record<string, string> = {};
   const lease = helperCommand('external-cli-lease', []);
 
   for (const adapter of input.adapters.values()) {
@@ -78,7 +80,13 @@ export async function buildFactoryExternalCliDescriptor(input: {
       continue;
     }
 
+    let selectedBin = definition.binName;
+
     try {
+      const configuredBin = String(adapter.bin(input.config) ?? '');
+
+      selectedBin = configuredBin || definition.binName;
+
       const shell = await resolveUserCliEnvironment({
         env: input.env,
         cliName: definition.binName,
@@ -87,15 +95,18 @@ export async function buildFactoryExternalCliDescriptor(input: {
       const inventory = await discoverExternalCli({
         providerId: adapter.id,
         definition,
-        configuredBin: String(adapter.bin(input.config) ?? ''),
+        configuredBin,
         env: shell.env,
         home: input.home,
       });
       const selected = inventory.installations.find((entry) =>
         entry.installationId === (inventory.selectedId ?? inventory.terminalId));
 
+      selectedBin = selected?.path || shell.cli.path || selectedBin;
+
       if (!selected?.realpath || selected.state !== 'ready') {
         unavailable[adapter.id] = selected?.state === 'broken' ? 'cli_broken' : 'cli_missing';
+        unavailableBins[adapter.id] = selectedBin;
 
         continue;
       }
@@ -142,6 +153,7 @@ export async function buildFactoryExternalCliDescriptor(input: {
     } catch (error) {
       unavailable[adapter.id] = error instanceof Error && 'code' in error
         ? String(error.code) : 'environment_unavailable';
+      unavailableBins[adapter.id] = selectedBin;
     }
   }
 
@@ -149,6 +161,7 @@ export async function buildFactoryExternalCliDescriptor(input: {
     schemaVersion: 1,
     providers,
     unavailable,
+    unavailableBins,
   };
 
   await fs.mkdir(path.dirname(input.descriptorPath), { recursive: true, mode: 0o700 });

@@ -38,8 +38,12 @@ gate_rc() {
 }
 
 rm -f "$calls"
-assert_rc 1 "$(gate_rc)" "VPN gate fails closed by default without a TUN route"
-assert_file_exists "$calls" "default gate probes the effective route"
+assert_rc 0 "$(gate_rc)" "VPN gate is disabled by default and lets any start through"
+assert_file_missing "$calls" "default gate performs no route probe"
+
+rm -f "$calls"
+assert_rc 1 "$(gate_rc GRIGDESK_REQUIRE_VPN=1)" "enabled gate fails closed without a TUN route"
+assert_file_exists "$calls" "enabled gate probes the effective route"
 
 rm -f "$calls"
 assert_rc 0 "$(gate_rc GRIGDESK_REQUIRE_VPN=0 GRIGDESK_VPN_IFACE='bad iface')" \
@@ -47,7 +51,7 @@ assert_rc 0 "$(gate_rc GRIGDESK_REQUIRE_VPN=0 GRIGDESK_VPN_IFACE='bad iface')" \
 assert_file_missing "$calls" "explicitly disabled gate performs no route probe"
 assert_rc 1 "$(gate_rc GRIGDESK_REQUIRE_VPN=maybe)" \
   "unknown gate mode fails closed"
-assert_rc 1 "$(gate_rc FIXTURE_ROUTE_MODE=badname)" \
+assert_rc 1 "$(gate_rc GRIGDESK_REQUIRE_VPN=1 FIXTURE_ROUTE_MODE=badname)" \
   "auto-detected interface cannot escape sysfs"
 assert_rc 1 "$(gate_rc GRIGDESK_REQUIRE_VPN=1 \
   GRIGDESK_VPN_IFACE='bad iface' GRIGDESK_VPN_PROBE=203.0.113.10)" \
@@ -72,8 +76,8 @@ assert_rc 0 "$(gate_rc GRIGDESK_REQUIRE_VPN=1 GRIGDESK_VPN_IFACE=vpn0 GRIGDESK_V
 printf 'unknown\n' >"$sys_net/vpn0/operstate"
 assert_rc 0 "$(gate_rc GRIGDESK_REQUIRE_VPN=1 GRIGDESK_VPN_IFACE=vpn0 GRIGDESK_VPN_PROBE=203.0.113.10 FIXTURE_ROUTE_MODE=match)" \
   "tun-style unknown operstate remains valid when the route matches"
-assert_rc 0 "$(gate_rc FIXTURE_ROUTE_MODE=match)" \
-  "default gate discovers the routed TUN without a host-specific interface name"
+assert_rc 0 "$(gate_rc GRIGDESK_REQUIRE_VPN=1 FIXTURE_ROUTE_MODE=match)" \
+  "enabled gate discovers the routed TUN without a host-specific interface name"
 
 source_text=$(cat "$gate")
 assert_contains "$source_text" '[[ "${FACTORY_TESTING:-0}" == 1 ]]' \

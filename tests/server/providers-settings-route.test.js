@@ -70,7 +70,9 @@ function faultyAdapter() {
 async function routeFixture(t, extraAdapters = []) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-settings-route-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
+
   let snapshot = {
+    providerUsageAutoRefresh: true,
     providerSettings: {
       'future-provider': { blockDirectSsh: true },
       neighbor: { keep: 'me' },

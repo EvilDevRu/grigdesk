@@ -6,7 +6,7 @@
     </p>
     <p v-else-if="record?.checkedAt && !record.checkError">{{ t('core.trackerUpToDate') }}</p>
     <p v-if="record?.checkedAt">
-      {{ t('core.trackerCheckedAt', { time: new Date(record.checkedAt).toLocaleString() }) }}
+      {{ t('core.trackerCheckedAt', { time: new Date(record.checkedAt).toLocaleString(uiLocale) }) }}
     </p>
     <UiInlineMessage v-if="record?.checkError" tone="warning">
       {{ record.checkError.message }}
@@ -16,7 +16,7 @@
 
 <script setup lang="ts">
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { t, UiInlineMessage } from '../../ui.ts';
+import { t, uiLocale, UiInlineMessage } from '../../ui.ts';
 
 defineProps<{ record?: PluginInstallInfo }>();
 </script>

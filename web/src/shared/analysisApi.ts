@@ -9,9 +9,22 @@ import {
   parseAnalysisRows,
 } from '../../../shared/pipeline/analysisContracts.ts';
 import type { AnalysisAnswerInput } from '../../../shared/pipeline/analysisContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 function taskPath(id: string | number, suffix = ''): string {
   return `/api/tasks/${encodeURIComponent(String(id))}${suffix}`;
+}
+
+/**
+ * Пара источника и номера сохраняется в каждом запросе пакета триажа.
+ * Старые вызовы без источника оставляют прежний URL числового API.
+ */
+function sourced(path: string, source?: string): string {
+  return source ? `${path}?${new URLSearchParams({ source })}` : path;
 }
 
 /**
@@ -21,31 +34,35 @@ function taskPath(id: string | number, suffix = ''): string {
  */
 export const analysisApi = {
   async rows() {
-    const value: unknown = await api.get('/api/analysis');
+    const value: unknown = await api.get('/api/analysis?sources=1');
 
     return parseAnalysisRows(value);
   },
 
-  async detail(id: string | number) {
-    const value: unknown = await api.get(`/api/analysis/${encodeURIComponent(String(id))}`);
+  async detail(id: string | number, source?: string) {
+    const value: unknown = await api.get(sourced(`/api/analysis/${encodeURIComponent(String(id))}`, source));
 
     return parseAnalysisDetail(value);
   },
 
   async enqueue(id: string | number, source?: string, options?: { headers?: Record<string, string> }) {
-    const value: unknown = await api.post(taskPath(id, '/analyze'), source ? { source } : undefined, options);
+    const value: unknown = await api.post(
+      taskPath(id, '/analyze'), source ? { source, taskSource: source } : undefined, options,
+    );
 
     return parseAnalysisQueue(value);
   },
 
-  async dismiss(id: string | number) {
-    const value: unknown = await api.del(`/api/analysis/${encodeURIComponent(String(id))}/status`);
+  async dismiss(id: string | number, source?: string) {
+    const value: unknown = await api.del(
+      sourced(`/api/analysis/${encodeURIComponent(String(id))}/status`, source),
+    );
 
     return parseAnalysisQueue(value);
   },
 
-  async clarifications(id: string | number) {
-    const value: unknown = await api.get(taskPath(id, '/clarifications'));
+  async clarifications(id: string | number, source?: string) {
+    const value: unknown = await api.get(sourced(taskPath(id, '/clarifications'), source));
 
     return parseAnalysisClarifications(value);
   },
@@ -54,14 +71,16 @@ export const analysisApi = {
    * Ответы человека на вопросы триажа. `text` уезжает вместе с ними как читаемая
    * копия: файл уточнений открывают и глазами, и следующим заходом агента.
    */
-  async answer(id: string | number, answers: AnalysisAnswerInput[], text: string) {
-    const value: unknown = await api.post(taskPath(id, '/clarifications'), { answers, text });
+  async answer(id: string | number, answers: AnalysisAnswerInput[], text: string, source?: string) {
+    const value: unknown = await api.post(
+      sourced(taskPath(id, '/clarifications'), source), { answers, text },
+    );
 
     return parseAnalysisClarifications(value);
   },
 
-  async arbitrate(id: string | number) {
-    const value: unknown = await api.post(taskPath(id, '/analysis/arbitrate'), {});
+  async arbitrate(id: string | number, source?: string) {
+    const value: unknown = await api.post(sourced(taskPath(id, '/analysis/arbitrate'), source), {});
 
     return parseAnalysisArbiter(value);
   },
@@ -82,7 +101,9 @@ export function analysisDisabledFailure(error: unknown): boolean {
  * Текст отказа для человека. Сервер триажа отдаёт машинный код, а обрыв сети приходит
  * без тела вовсе — тогда остаётся сообщение самой ошибки.
  */
-export function analysisErrorMessage(error: unknown, fallback = 'Триаж недоступен'): string {
+export function analysisErrorMessage(error: unknown, fallback = translateUi(
+  'core.analysisApiTriageIsUnavailable',
+)): string {
   const message = objectOrEmpty(error).message;
 
   return typeof message === 'string' && message ? message : fallback;

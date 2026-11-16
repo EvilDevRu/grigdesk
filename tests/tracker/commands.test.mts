@@ -235,3 +235,97 @@ test('MD-CLI-TARGET: все команды сохраняют тела и адр
     assert.equal(targeted.stdinReads, original.stdinReads);
   }
 });
+
+/**
+ * Разбор использует настоящий argv-контракт, поэтому база падает штатным UsageError.
+ * Неподдержанный kind никогда не проталкивается приведением типа в runCommand.
+ */
+async function sourceCommand(args: string[]) {
+  const { parseArgs } = await import('../../tracker/src/args.ts');
+  const command = parseArgs(args);
+
+  assert.ok('id' in command);
+
+  return command;
+}
+
+test('SOURCE-CLI-HTTP: команды подтверждают context и передают полный source', async () => {
+  const source = `fixture-a@${'a'.repeat(64)}`;
+
+  for (const kind of ['analyze', 'launch-options', 'launch']) {
+    const io = recorder(Buffer.from('{"profile":"demo","route":"feature","title":"Текст"}'));
+
+    io.request = async (_connection, spec) => {
+      io.specs.push(spec);
+
+      return new TextEncoder().encode(spec.path.endsWith('/context')
+        ? JSON.stringify({ source, generation: 9 }) : '{"outcome":"queued"}');
+    };
+
+    const command = await sourceCommand([kind, '42', '--board', 'fixture-a']);
+
+    await runCommand(command, CONNECTION, io);
+    assert.equal(io.specs[0]?.path, '/api/tracker/fixture-a/context');
+    assert.equal(io.specs.length, 2);
+
+    const request = io.specs[1]!;
+    const url = new URL(request.path, CONNECTION.baseUrl);
+
+    assert.equal(url.pathname, `/api/tasks/42/${kind}`);
+    assert.equal(request.method, kind === 'launch-options' ? 'GET' : 'POST');
+
+    if (kind === 'launch-options') {
+      assert.equal(url.searchParams.get('source'), source);
+    } else {
+      const body = typeof request.body === 'string' ? request.body : Buffer.from(request.body!).toString();
+
+      assert.equal(JSON.parse(body).source, source);
+    }
+
+    assert.equal(io.stdinReads, kind === 'launch' ? 1 : 0);
+  }
+});
+
+test('SOURCE-CLI-HTTP: без --board source не назначается, stdin source сохраняется', async () => {
+  const source = `fixture-a@${'a'.repeat(64)}`;
+
+  for (const kind of ['analyze', 'launch-options', 'launch']) {
+    const io = recorder(Buffer.from(JSON.stringify({ source, profile: 'demo' })));
+    const command = await sourceCommand([kind, '42']);
+
+    await runCommand(command, CONNECTION, io);
+    assert.equal(io.specs.length, 1);
+    assert.equal(io.specs[0]?.path, `/api/tasks/42/${kind}`);
+
+    const raw = io.specs[0]?.body;
+    const body = typeof raw === 'string' ? raw : raw ? Buffer.from(raw).toString() : '';
+
+    assert.equal(body ? JSON.parse(body).source : undefined, kind === 'launch' ? source : undefined);
+    assert.equal(io.stdinReads, kind === 'launch' ? 1 : 0);
+  }
+});
+
+test('SOURCE-CLI-HTTP: противоречивый source и не-object stdin не доходят до POST', async () => {
+  const { UsageError } = await import('../../tracker/src/args.ts');
+  const a = `fixture-a@${'a'.repeat(64)}`;
+  const b = `fixture-b@${'b'.repeat(64)}`;
+
+  for (const stdin of ['{broken', '[]', 'null', '42', JSON.stringify({ source: b })]) {
+    const command = await sourceCommand(['launch', '42', '--board', 'fixture-a']);
+    const io = recorder(Buffer.from(stdin));
+
+    io.request = async (_connection, spec) => {
+      io.specs.push(spec);
+
+      return new TextEncoder().encode(JSON.stringify({ source: a, generation: 1 }));
+    };
+
+    await assert.rejects(runCommand(command, CONNECTION, io), (error: unknown) => {
+      assert.ok(error instanceof UsageError || (error instanceof B24Error && error.code === 2));
+
+      return true;
+    });
+    assert.equal(io.stdinReads, 1);
+    assert.equal(io.specs.some((spec) => spec.method === 'POST'), false);
+  }
+});

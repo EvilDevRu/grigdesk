@@ -13,10 +13,12 @@ import local.grigdesk.client.shell.ShellApi;
 public final class AndroidActions implements ShellApi.Native {
   private final Context context;
   private final Supplier<MainActivity> activity;
+  private final BackgroundLink backgroundLink;
 
-  public AndroidActions(Context context, Supplier<MainActivity> activity) {
+  public AndroidActions(Context context, Supplier<MainActivity> activity, BackgroundLink backgroundLink) {
     this.context = context;
     this.activity = activity;
+    this.backgroundLink = backgroundLink;
   }
 
   @Override
@@ -31,6 +33,54 @@ public final class AndroidActions implements ShellApi.Native {
   @Override
   public void unlock() throws Exception {
     local.grigdesk.client.shell.ClientFailure.await(activity.get().unlock());
+  }
+
+  @Override
+  public String notifyPermission() {
+    return Notifications.permission(context);
+  }
+
+  /**
+   * Системный запрос разрешения принадлежит видимой Activity и жесту человека.
+   * Отказ возвращается состоянием, а не ошибкой трубы: интерфейс покажет причину.
+   */
+  @Override
+  public String requestNotifyPermission() throws Exception {
+    return local.grigdesk.client.shell.ClientFailure.await(activity.get().requestNotifyPermission());
+  }
+
+  @Override
+  public boolean notify(String title, String body, String tag, String url) {
+    return Notifications.show(context, title, body, tag, url);
+  }
+
+  @Override
+  public void cancelNotification(String tag) {
+    Notifications.cancel(context, tag);
+  }
+
+  /**
+   * Выбор человека сохраняется до управления сервисом: отказ записи не меняет фон.
+   * Включение поднимает foreground-сервис, выключение останавливает его сразу.
+   */
+  @Override
+  public void setBackgroundLink(boolean enabled) throws Exception {
+    backgroundLink.set(enabled);
+
+    if (enabled) {
+      LinkService.start(context);
+    } else {
+      LinkService.stop(context);
+    }
+  }
+
+  /**
+   * Запрос обновления виджета не ждёт воркера: труба отвечает сразу,
+   * счётчики доезжают до главного экрана после фонового запроса.
+   */
+  @Override
+  public void refreshWidget() {
+    PipelineWidget.refreshNow(context);
   }
 
   /**

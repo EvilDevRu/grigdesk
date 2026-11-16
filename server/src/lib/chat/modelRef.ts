@@ -21,6 +21,8 @@ export interface RegistryModel {
   family?: string;
   tier?: number;
   extra?: boolean;
+  nonChat?: boolean;
+  nonChatReason?: string;
   aliases?: string[];
   modelRefAliases?: string[];
 }

@@ -1,7 +1,7 @@
 <template>
   <div v-if="gaps.length" class="gaps">
     <UiDisclosureButton v-model:open="open" controls="showcase-script-gaps" density="compact">
-      {{ open ? 'Скрыть, что осталось за кадром' : `За кадром: ${gaps.length}` }}
+      {{ open ? t('core.showcaseSkrytChtoOstalosZa') : t('core.showcaseZaKadromLength', { length: gaps.length }) }}
     </UiDisclosureButton>
     <div v-show="open" id="showcase-script-gaps" class="gaps__body">
       <p class="gaps__intro">{{ SCRIPT_GAPS_INTRO }}</p>
@@ -16,7 +16,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import { UiDisclosureButton } from '../../ui';
+import { UiDisclosureButton, t } from '../../ui';
 import { SCRIPT_GAPS_HINT, SCRIPT_GAPS_INTRO } from '../../actions/showcase';
 
 // Пробелы карты экранов — текст модели, и показывается он как текст, списком:

@@ -4,7 +4,14 @@ import type { ApiClient } from '../../../shared/apiClient.ts';
 import { isPlainRecord } from '../../../../../shared/lib/objects.ts';
 import type { FieldIntent, JsonValue, ResourceAdapter } from '../contracts.ts';
 
-const BOOLEANS = ['gitRefreshBeforeRun', 'showAllModels', 'chatLiveSessions', 'chatAutoContinue'];
+const BOOLEANS = [
+  'gitRefreshBeforeRun',
+  'pipelineAutoStart',
+  'providerUsageAutoRefresh',
+  'showAllModels',
+  'chatLiveSessions',
+  'chatAutoContinue',
+];
 const NUMBERS = ['chatAutoCompactWindow', 'stageAutoCompactWindow', 'runSilenceWindow'];
 const ARBITER_KEYS = ['arbiterAuto', 'arbiterModelRef', 'arbiterEffort'];
 
@@ -28,7 +35,8 @@ export function preferencesValues(payload: unknown, defaults = false,
     if (typeof payload[key] === 'boolean') {
       values[key] = payload[key];
     } else if (defaults) {
-      values[key] = key === 'chatLiveSessions' || key === 'chatAutoContinue';
+      values[key] = key === 'chatLiveSessions' || key === 'chatAutoContinue'
+        || key === 'pipelineAutoStart';
     }
   }
 
@@ -100,7 +108,8 @@ export function createPreferencesAdapter(
   client: Pick<ApiClient, 'get' | 'post'>,
   onSaved: (values: Record<string, JsonValue>) => void = () => {},
   locale: LocaleSource = 'ru',
-
+  project: (values: Record<string, JsonValue>, payload: unknown) => Record<string, JsonValue>
+    = (values) => values,
 ): ResourceAdapter {
   const t = localeTranslator(locale);
   const messageText = localeMessage(locale);
@@ -111,9 +120,11 @@ export function createPreferencesAdapter(
     order: 0,
     body: 'patch',
     supportsUnset: false,
-    read: async (signal) => preferencesValues(
-      await client.get('/api/settings/prefs', { signal }), true, locale,
-    ),
+    read: async (signal) => {
+      const payload = await client.get('/api/settings/prefs', { signal });
+
+      return project(preferencesValues(payload, true, locale), payload);
+    },
     validate: (intents) => [...intents].flatMap(([key, intent]) => {
       if (intent.op !== 'set') {
         return [{ key, message: messageText("settings.removingThisSettingIsUnavailable") }];
@@ -131,9 +142,14 @@ export function createPreferencesAdapter(
 
       return [];
     }),
+    /**
+     * Ответ записи проходит тот же порядок ревизий, что GET и SSE.
+     * Форма подтверждает принятый режим, сохраняя остальные поля общего ответа.
+     */
     async write(intents, baseline, signal) {
-      const values = preferencesValues(await client.post('/api/settings/prefs',
-        preferencesPatch(intents, baseline), { signal }), undefined, locale);
+      const payload = await client.post('/api/settings/prefs',
+        preferencesPatch(intents, baseline), { signal });
+      const values = project(preferencesValues(payload, undefined, locale), payload);
 
       onSaved(values);
 
@@ -146,5 +162,6 @@ export function createPreferencesAdapter(
         })),
       };
     },
+
   };
 }

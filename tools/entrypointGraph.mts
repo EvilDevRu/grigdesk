@@ -22,11 +22,14 @@ export const ENTRYPOINTS: readonly string[] = [
     // Команда задач Б24: исходный вход и сборка единственного файла SEA.
     'tracker/src/main.ts',
     'tracker/scripts/build.mts',
+    'tracker/src/pipelineMain.ts',
+    'tracker/scripts/buildPipeline.mts',
+    'routes/src/main.ts',
+    'routes/scripts/build.mts',
     // Launcher и worker DeepSeek имеют отдельные SEA/Node точки входа.
     'deepseek/src/launcher/main.ts',
     'deepseek/src/launcher/workerBootstrap.ts',
     'deepseek/src/runtime/verifyWorker.ts',
-    'tools/brandMove.mts',
     'server/scripts/dataHomeCheck.mts',
     'server/src/app.js',
     'server/src/lib/chat/permission-mcp.js',

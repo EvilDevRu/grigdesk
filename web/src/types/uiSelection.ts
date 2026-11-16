@@ -7,6 +7,7 @@ export interface UiSelectionOption<T = UiSelectionValue> {
   label: string;
   disabled?: boolean;
   description?: string;
+  badge?: string | number;
 }
 
 export type UiTabsActivation = 'automatic' | 'manual';

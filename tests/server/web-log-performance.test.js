@@ -57,7 +57,7 @@ test('замеры проходят ядро окна, auth, серверную 
   });
 
   log.record('perf.ready', {
-    tag: 'AGENT-DBG',
+    tag: 'chat-perf',
     longTasks: true,
     longFrames: false,
   });

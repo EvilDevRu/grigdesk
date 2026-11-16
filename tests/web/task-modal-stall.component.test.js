@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -48,6 +49,10 @@ async function mountTaskStop(t, presentation, { legacy = false, graphError = fal
        * Ошибка графа моделируется только в явно заданном сценарии совместимости.
        */
       async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
         calls.push(url);
 
         if (url === '/api/tasks?sources=1') {

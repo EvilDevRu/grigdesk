@@ -1,0 +1,10 @@
+export { UiAudio, UiVideo } from '../../../web/src/ui.ts';
+export { default as ChatThinking } from '../../../web/src/views/chat/ChatThinking.vue';
+export { default as TriageBadge } from '../../../web/src/views/board/TriageBadge.vue';
+export { uiLocale, setUiLocale } from '../../../web/src/services/locale.ts';
+export { connectUiLocalePort } from '../../../web/src/shared/uiLocalePort.ts';
+export { mdToHtml } from '../../../web/src/shared/md.ts';
+export { unifiedDiff } from '../../../web/src/shared/diff.ts';
+export { SANDBOX_STATES } from '../../../web/src/shared/sandboxPresentation.ts';
+export { continuationLabel } from '../../../web/src/views/showcase/sceneText.ts';
+export { thinkingWord, THINKING_WORDS } from '../../../web/src/views/chat/chatThinking.ts';

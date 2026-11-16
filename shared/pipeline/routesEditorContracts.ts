@@ -1,4 +1,3 @@
-import { LEGACY_VALUES } from '../runtime/legacyBrand.ts';
 import type { DraftMachine } from './routeDefinition.ts';
 
 export const ROUTES_EDITOR_LIMITS = {
@@ -10,7 +9,8 @@ export const ROUTES_EDITOR_LIMITS = {
   routes: 64,
   nodes: 512,
   promptBlocks: 128,
-  operations: 128,
+  // Полная замена каталога: 64 удаления + 64 добавления + три поля metadata.
+  operations: 131,
   simulationSteps: 200,
   // Маршрут с циклом: потолок до 300 кругов — это 601 шаг до остановки `loop-ceiling`
   // (передача и ответ исполнителя на каждый круг), с запасом на ворота и решения человека.
@@ -623,8 +623,7 @@ export function parseRouteTransferBundle(value: unknown): RouteTransferBundle {
     'format', 'schema', 'sourceProfile', 'content', 'dependencies',
   ], [], 'routeTransfer');
 
-  // Выгрузки до второго этапа переименования несут прежнее имя формата.
-  const formats: readonly unknown[] = ['grigdesk-route-authoring', LEGACY_VALUES.routeAuthoringFormat];
+  const formats: readonly unknown[] = ['grigdesk-route-authoring'];
 
   if (!formats.includes(bundle.format) || bundle.schema !== 1) {
     throw new RoutesEditorContractError('routeTransfer.format/schema');

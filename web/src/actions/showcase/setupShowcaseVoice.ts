@@ -2,6 +2,11 @@ import { showcaseApi, showcaseErrorCode, showcaseErrorMessage } from '../../shar
 import type { ShowcasePronunciationOverrideDraft } from '../../shared/showcaseApi';
 import type { ShowcaseDirection, ShowcasePace } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface ShowcaseVoiceChoice {
   voiceRef: string | null;
@@ -17,7 +22,9 @@ export async function loadShowcaseVoices(store: ShowcaseStore): Promise<void> {
   try {
     store.setVoices(await showcaseApi.voices());
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось прочитать список голосов.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.setupShowcaseVoiceCouldNotReadTheVoiceList')),
+    );
   }
 }
 
@@ -30,7 +37,7 @@ export async function loadShowcaseVoicePreview(voiceRef: string): Promise<Blob> 
   try {
     return await showcaseApi.voicePreview(voiceRef);
   } catch (error: unknown) {
-    throw new Error(showcaseErrorMessage(error, 'Образец не воспроизвёлся: движок не ответил.'));
+    throw new Error(showcaseErrorMessage(error, translateUi('core.showcaseObrazetsNeVosproizvelsyaDvizhok')));
   }
 }
 
@@ -49,7 +56,7 @@ export async function loadShowcaseNarrationPreview(input: {
   } catch (error: unknown) {
     throw new Error(showcaseErrorMessage(
       error,
-      'Реплика не воспроизвелась: голосовой движок не ответил.',
+      translateUi('core.showcaseReplikaNeVosproizvelasGolosovoy'),
     ));
   }
 }
@@ -66,7 +73,9 @@ export async function installShowcaseVoice(store: ShowcaseStore, voiceId: string
     store.setVoices(await showcaseApi.installVoice(voiceId));
     store.setError('');
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось начать установку голоса.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.setupShowcaseVoiceCouldNotStartVoiceInstallation')),
+    );
   } finally {
     store.setVoiceBusy(false);
   }
@@ -82,7 +91,9 @@ export async function cancelShowcaseVoiceInstall(store: ShowcaseStore): Promise<
   try {
     store.setVoices(await showcaseApi.cancelVoiceInstall());
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось отменить установку.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.setupShowcaseVoiceCouldNotCancelInstallation')),
+    );
   } finally {
     store.setVoiceBusy(false);
   }
@@ -97,7 +108,12 @@ export async function loadShowcaseDictionary(store: ShowcaseStore): Promise<void
   try {
     store.setDictionary(await showcaseApi.voiceDictionary());
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось прочитать словарь ударений.'));
+    store.setError(
+      showcaseErrorMessage(
+        error,
+        translateUi('core.setupShowcaseVoiceCouldNotReadThePronunciationDictionary'),
+      ),
+    );
   }
 }
 
@@ -115,7 +131,12 @@ export async function saveShowcaseDictionary(store: ShowcaseStore, text: string)
 
     return true;
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось сохранить словарь ударений.'));
+    store.setError(
+      showcaseErrorMessage(
+        error,
+        translateUi('core.setupShowcaseVoiceCouldNotSaveThePronunciationDictionary'),
+      ),
+    );
 
     return false;
   } finally {
@@ -146,7 +167,7 @@ export async function setShowcaseVoice(
 
     return true;
   } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось сменить голос.'));
+    store.setError(showcaseErrorMessage(error, translateUi('core.setupShowcaseVoiceCouldNotChangeTheVoice')));
 
     return false;
   } finally {

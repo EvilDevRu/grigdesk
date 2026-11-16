@@ -31,7 +31,7 @@ function fixture() {
     sha,
   });
   const product = [entry('VERSION'), entry('server/src/app.ts'),
-    entry('tests/web/client-phone.test.js'), entry('docs/grigdesk/guide/chats.md')];
+    entry('tests/web/client-phone.test.js'), entry('docs/grigdesk/guide/ru/chats.md')];
   const data = {
     '/actions/runs/42': {
       id: 42,

@@ -10,7 +10,6 @@ import test from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 import { completed } from './helpers/sandbox.mts';
 
 const helper = fileURLToPath(new URL('../../deploy/lib/cli-link.sh', import.meta.url));
@@ -78,24 +77,14 @@ test('CL-4 прежние имена команды убираются толь�
 
   mkdirSync(box.bin, { recursive: true });
   symlinkSync(path.join(box.root, 'bin/grigdesk'), path.join(box.bin, 'grigdesk'));
-  symlinkSync(path.join(box.root, 'bin', LEGACY.cliLink), path.join(box.bin, LEGACY.cliLink));
 
   assert.equal((await box.run()).code, 0);
-  // Обе ссылки висячие: проверяем саму ссылку, а не файл, на который она указывает.
+  // Ссылка висячая: проверяем её саму, а не файл, на который она указывает.
   assert.throws(() => lstatSync(path.join(box.bin, 'grigdesk')), /ENOENT/);
-  assert.throws(() => lstatSync(path.join(box.bin, LEGACY.cliLink)), /ENOENT/);
 
-  // Ссылка на другую копию и чужой файл с прежним именем не трогаются.
+  // Ссылка на другую копию сохраняется.
   symlinkSync('/example/other/bin/grigdesk', path.join(box.bin, 'grigdesk'));
-  writeFileSync(path.join(box.bin, LEGACY.cliLink), 'чужая команда');
 
   assert.equal((await box.run()).code, 0);
   assert.equal(readlinkSync(path.join(box.bin, 'grigdesk')), '/example/other/bin/grigdesk');
-  assert.equal(readFileSync(path.join(box.bin, LEGACY.cliLink), 'utf8'), 'чужая команда');
-});
-
-test('CL-5 Bash берёт прежнее имя команды из единого контракта', () => {
-  const source = readFileSync(helper, 'utf8');
-
-  assert.equal(source.match(/local legacy_cli='([^']+)'/)?.[1], LEGACY.cliLink);
 });

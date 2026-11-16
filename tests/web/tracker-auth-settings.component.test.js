@@ -70,7 +70,7 @@ test('Режим подключения: комбобокс, видимость,
   assert.equal(card.wrapper.findAll('input[type="password"]').length, 1);
   await card.wrapper.find('input[type="text"]').setValue('fixture-login');
   await card.wrapper.find('input[type="password"]').setValue('password-draft');
-  await actionButton(card.wrapper, /сохранить|save/iu).trigger('click');
+  await actionButton(card.wrapper, /применить|apply/iu).trigger('click');
   await card.flushPromises();
 
   const writes = () => card.apiCalls.filter((call) => call.url === '/api/trackers/settings'
@@ -84,7 +84,7 @@ test('Режим подключения: комбобокс, видимость,
   await chooseMode(card, 'Токен доступа');
   assert.equal(card.wrapper.find('input[type="password"]').element.value, 'token-draft');
   assert.equal(card.wrapper.find('input[type="text"]').exists(), false);
-  await actionButton(card.wrapper, /сохранить|save/iu).trigger('click');
+  await actionButton(card.wrapper, /применить|apply/iu).trigger('click');
   await card.flushPromises();
   assert.deepEqual(writes().at(-1).payload.settings['grigdesk-b24'], {
     authMode: 'token',

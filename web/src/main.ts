@@ -5,7 +5,6 @@ import './styles/index.css';
 import { installHelpNavigation } from './shared/helpNavigation.ts';
 import { toolWindowText } from './shared/tools/toolWindowMessages.ts';
 
-import './shared/legacyStorage.ts';
 import { bootstrapUiLocale } from './shared/uiLocale.ts';
 import { createApp, nextTick, watch } from 'vue';
 import { createToolWindowCoordinator } from './stores/toolWindows.ts';
@@ -174,7 +173,9 @@ function installSurfaceMainHandler() {
         return allowed() && router.currentRoute.value.path === '/pipeline';
       }
 
-      useUiStore(pinia).openTaskInline(request.target.id, request.target.source);
+      useUiStore(pinia).openTaskInline(
+        request.target.id, request.target.source, request.target.unavailable,
+      );
       await nextTick();
 
       return allowed();

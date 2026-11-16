@@ -1,46 +1,162 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/brand/grigdesk-wordmark-light.svg">
-    <img src="docs/images/brand/grigdesk-wordmark-graphite.svg" width="360" alt="GrigDesk">
-  </picture>
+  <a href="https://app.grigdesk.com">
+    <picture>
+      <source media="(max-width: 640px)" srcset="docs/images/readme/hero-mobile.svg">
+      <img src="docs/images/readme/hero.svg" width="1280" alt="GrigDesk — Your agents. One workspace. Plan, build, review, test.">
+    </picture>
+  </a>
 </p>
-
-<p align="center"><strong>Поручите работу конвейеру ИИ-агентов.</strong></p>
 
 <p align="center">
-  <a href="https://grigdesk.com">Документация</a>
+  <a href="https://github.com/EvilDevRu/grigdesk/releases/latest">
+    <img align="center" src="https://img.shields.io/github/v/release/EvilDevRu/grigdesk?label=version&amp;color=30363d" alt="Latest stable release">
+  </a>
+  <a href="LICENSE">
+    <img align="center" src="https://img.shields.io/badge/license-MIT-30363d" alt="MIT license">
+  </a>
 </p>
 
-Опишите задачу — GrigDesk автоматически проведёт её через изучение проекта, реализацию
-и проверки. Готовую работу можно открыть на отдельном стенде и принять.
+<p align="center">
+  <strong><a href="#install">Install</a></strong> &nbsp; / &nbsp;
+  <a href="#documentation">Docs</a> &nbsp; / &nbsp;
+  <a href="#plugins">Plugins</a> &nbsp; / &nbsp;
+  <a href="https://app.grigdesk.com">Website</a>
+</p>
 
-Вы сами выбираете способ работы: разрабатывайте через чаты с агентами или поручайте
-конвейеру полный цикл. Настраивайте исполнителей, модели, этапы и точки приёмки под себя.
+<p align="center">
+  An open-source workspace for building software with AI agents.<br>
+  Chat, run pipelines, and review the result — on your own machine.
+</p>
 
-![Конвейеры GrigDesk: этапы работы агентов, готовый стенд и задача на приёмке](docs/images/pipeline.png)
+<p align="center">
+  <img src="docs/images/readme/pipeline.png" width="1280" alt="GrigDesk pipelines: stages with assigned agents, human approval points, and a ready preview stand"><br>
+  <em>Pipelines carry a task from plan to acceptance; every task gets its own sandbox and preview stand.</em>
+</p>
 
-*Интерфейс GrigDesk с демонстрационными задачами.*
+## Works with
 
-## Возможности
+<p>
+  <strong>AI agents</strong><br>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/claude-light.svg">
+    <img src="docs/images/integrations/claude.svg" width="164" height="48" alt="Claude Code">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/codex-light.svg">
+    <img src="docs/images/integrations/codex.svg" width="164" height="48" alt="OpenAI Codex">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/kimi-light.svg">
+    <img src="docs/images/integrations/kimi.svg" width="164" height="48" alt="Kimi Code">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/deepseek-light.svg">
+    <img src="docs/images/integrations/deepseek.svg" width="164" height="48" alt="DeepSeek">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/glm-light.svg">
+    <img src="docs/images/integrations/glm.svg" width="164" height="48" alt="Z.ai (GLM)">
+  </picture>
+  <a href="docs/grigdesk/guide/en/qwen.md">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/qwen-light.svg">
+      <img src="docs/images/integrations/qwen.svg" width="164" height="48" alt="Qwen Code">
+    </picture>
+  </a>
+</p>
 
-- **Автоматические конвейеры.** Агенты планируют, пишут код, проводят ревью и запускают
-  проверки. Несколько задач и проектов могут выполняться параллельно.
-- **Чаты с агентами.** Ведите разработку напрямую: обсуждайте решения и поручайте правки.
-  Есть история, вложения и диктовка.
-- **Песочницы.** Отдельная рабочая копия Git, контейнеры и данные для каждой задачи.
-  Результат можно проверить до слияния в основную ветку.
-- **Задачи и входящие.** Доска Битрикс24, обращения из Telegram и GitHub Issues,
-  черновики задач из записей встреч.
-- **Инструменты под рукой.** Файлы, diff, Git, терминал, Docker и базы данных.
+Qwen Code supports chats and pipeline stages, with models discovered from your configured API service.
+[Set up Qwen Code](docs/grigdesk/guide/en/qwen.md).
 
-Поддерживаются Claude Code, OpenAI Codex, Kimi Code, DeepSeek и Z.ai (GLM).
+<p>
+  <strong>Task boards</strong><br>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/board-grigdesk-light.svg">
+    <img src="docs/images/integrations/board-grigdesk.svg" width="164" height="48" alt="GrigDesk tasks">
+  </picture>
+  <a href="https://github.com/EvilDevRu/grigdesk-b24">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/board-bitrix24-light.svg">
+      <img src="docs/images/integrations/board-bitrix24.svg" width="164" height="48" alt="Bitrix24">
+    </picture>
+  </a>
+  <a href="https://github.com/EvilDevRu/grigdesk-jira">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/integrations/board-jira-light.svg">
+      <img src="docs/images/integrations/board-jira.svg" width="164" height="48" alt="Jira Cloud">
+    </picture>
+  </a>
+</p>
 
-GrigDesk работает на вашей Linux-машине. Управляйте задачами дома или подключайтесь
-удалённо из приложения на другом компьютере или телефоне.
+GrigDesk tasks are built in. Bitrix24 and Jira Cloud connect through installable drivers.
 
-Установка готовой Linux-поставки и текущие ограничения описаны в
-[руководстве установки](docs/grigdesk/guide/installation.md).
+## From task to working code
 
----
+**Work in a conversation.** Choose an agent, attach context, and develop a solution together. Your files, diffs, Git, terminals, Docker, and databases stay within reach.
 
-Лицензия — [MIT](LICENSE).
+**Let a pipeline carry the task.** Connect planning, implementation, review, and testing. Choose the agents and approval points, and run tasks across projects in parallel. Prefer a [loop route](docs/grigdesk/guide/en/pipelines.md): a lead agent assigns work and checks results itself, and returns to you for acceptance.
+
+**Try the result before you approve.** Give a task its own Git working copy, containers, and data. Open the preview, inspect the changes, and decide what happens next.
+
+**Bring your task board.** Start with GrigDesk tasks or install the Bitrix24 and Jira drivers. Collect requests from Telegram and GitHub Issues, or draft tasks from meeting recordings.
+
+Run GrigDesk on your Linux machine and connect locally, from another computer, or from your phone.
+
+## Install
+
+**[Download the installer →](https://github.com/EvilDevRu/grigdesk/releases/latest/download/grigdesk-install)**
+
+Save `grigdesk-install`, open a terminal in the same folder, and run:
+
+```bash
+chmod +x grigdesk-install
+./grigdesk-install install local
+```
+
+This installs the desktop app and a local server in your user account. No source checkout, system Node.js, or npm is needed.
+
+**Requirements:** Linux x64 · glibc 2.28+ · FUSE 2 for the desktop app.<br>
+Set up your AI agent CLIs and sign-in separately.
+
+<details>
+<summary><strong>Remote client, headless server, or .deb package</strong></summary>
+
+Use the same installer for another setup:
+
+| Another setup | Command |
+| :--- | :--- |
+| Desktop client for a remote server | `./grigdesk-install install remote` |
+| Headless server | `./grigdesk-install install server` |
+
+A `.deb` package is also available in [releases](https://github.com/EvilDevRu/grigdesk/releases/latest).
+
+</details>
+
+[Installation guide](docs/grigdesk/guide/en/installation.md) ·
+[First launch](docs/grigdesk/guide/en/getting-started.md)
+
+## Plugins
+
+Make the workspace your own with extra tools and panels. Open **Settings → Plugins** to browse the catalog, or install a specific release from Git.
+
+[Install a plugin](docs/grigdesk/guide/en/plugins.md) · [Build your own](docs/grigdesk/plugins/author-contract.md) · [Example plugin](packages/plugin-types/example/README.md)
+
+## Documentation
+
+Open **Help** or press **F1** in the app to read the user guide included with your server version. The [source guide](docs/grigdesk/guide/en/README.md) covers setup, everyday work, and recovery.
+
+| Get started | Build and review |
+| :--- | :--- |
+| [Installation](docs/grigdesk/guide/en/installation.md) — set up GrigDesk | [Agent chats](docs/grigdesk/guide/en/chats.md) — choose models and work with agents |
+| [Projects](docs/grigdesk/guide/en/projects.md) — connect your repositories | [Pipelines](docs/grigdesk/guide/en/pipelines.md) — move a task through its stages |
+| [Tasks](docs/grigdesk/guide/en/tasks.md) — boards, creation, and triage | [Approval points](docs/grigdesk/guide/en/gates.md) — inspect results and decide |
+
+Help navigation, search and articles follow the active interface language, in English or Russian. Both guides ship offline; the [Russian guide](docs/grigdesk/guide/ru/README.md) is also available separately. For help, see [troubleshooting](docs/grigdesk/guide/en/troubleshooting.md); for architecture and development references, open the [documentation index](docs/README.md).
+
+## Contributing
+
+Bug reports and ideas are welcome in [GitHub Issues](https://github.com/EvilDevRu/grigdesk/issues). Read the [contribution guidelines](CONTRIBUTING.md) before sending changes.
+
+## License
+
+[MIT](LICENSE) © Dmitry Yurchenko.

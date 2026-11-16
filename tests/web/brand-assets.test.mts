@@ -6,7 +6,6 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const brand = 'docs/images/brand';
@@ -85,7 +84,7 @@ test('GI-01: в продукте только утверждённые маст�
   const actual = readdirSync(path.join(root, brand)).sort();
 
   assert.deepEqual(actual, expected);
-  assert.ok(actual.every((name) => !name.startsWith(`${LEGACY.configDir}-`)));
+  assert.ok(actual.every((name) => !name.startsWith('cockpit-')));
 
   for (const name of masters) {
     assert.doesNotMatch(text(`${brand}/grigdesk-${name}.svg`), /M202\.31 42\.24A106|Шкала C/);

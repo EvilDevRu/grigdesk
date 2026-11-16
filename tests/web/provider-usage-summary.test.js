@@ -168,7 +168,7 @@ test('поздний GET и refresh не заменяют новый SSE, вкл
   await get;
   assert.equal(store.usage.any.bars[0].pct, 80);
 
-  const refresh = store.refreshUsage();
+  const refresh = store.refreshUsage('any');
 
   store.applyUsage({ any: quota(90) });
   rejectRefresh(new Error('поздняя ошибка'));
@@ -176,6 +176,8 @@ test('поздний GET и refresh не заменяют новый SSE, вкл
   assert.equal(store.usage.any.bars[0].pct, 90);
   assert.equal(store.usageTransport.status, 'success');
   assert.equal(store.usageTransport.error, '');
+  assert.equal(store.usageRefreshErrorId, 'any');
+  assert.match(store.usageRefreshError, /поздняя ошибка/u);
 });
 
 test('ошибка первичной загрузки завершается, reconnect ждёт принятого снимка', async (t) => {

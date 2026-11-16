@@ -265,3 +265,34 @@ test('CE-TRACKER-3: ошибка готового tracker не запускае�
   assert.equal(result.stdout, '');
   assert.equal(existsSync(marker), false);
 });
+
+test('CLI-ENTRY: pipeline делегирует source и не повторяет отказ ELF', async (t) => {
+    const box = await createSandbox(t);
+
+    mkdirSync(path.join(box.root, 'tracker/src'), {
+        recursive: true
+    });
+    writeFileSync(path.join(box.root, 'tracker/package.json'), '{"type":"module"}\n');
+    writeFileSync(path.join(box.root, 'tracker/src/pipelineMain.ts'), [
+        'process.stdout.write(JSON.stringify(process.argv.slice(2)));',
+        'process.exitCode = 0;',
+        '',
+    ].join('\n'));
+
+    const source = await box.run(['pipeline', 'doc', '7', 'plan']);
+
+    assert.equal(source.code, 0, source.stderr);
+    assert.deepEqual(JSON.parse(source.stdout), ['doc', '7', 'plan']);
+
+    const executable = '#!/bin/bash\nprintf "неизвестный результат" >&2\nexit 22\n';
+
+    writeFileSync(path.join(box.root, 'bin/pipeline'), executable, {
+        mode: 0o755
+    });
+
+    const binary = await box.run(['pipeline', 'resume', '7']);
+
+    assert.equal(binary.code, 22);
+    assert.equal(binary.stdout, '');
+    assert.equal(binary.stderr, 'неизвестный результат');
+});

@@ -165,6 +165,10 @@
   font-size: 11px;
 }
 
+.ui-topbar-panel__footer:empty {
+  display: none;
+}
+
 /* Псевдоэлемент заполняет высоту полосы без изменения размеров кнопки и оси значков.
    Отрицательный z-index остаётся внутри собственного stacking context триггера. */
 [data-ui-topbar-trigger] {

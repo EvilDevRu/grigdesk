@@ -36,7 +36,7 @@ export function browserToolResult(value: unknown, action: string) {
   }
 
   const keys = ['ok', 'error', 'tabId', 'url', 'pageEpoch', 'text', 'elements',
-    'console', 'truncated', 'tabs'];
+    'console', 'truncated', 'tabs', 'width', 'height'];
   const result = Object.fromEntries(keys.filter((key) => source[key] !== undefined)
     .map((key) => [key, structuredClone(source[key])]));
 

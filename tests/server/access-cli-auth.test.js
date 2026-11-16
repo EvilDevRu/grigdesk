@@ -8,6 +8,8 @@ import {
 } from '../helpers/accessProfiles.js';
 import { cliFixture, cliRecords, cliStep } from '../helpers/accessCliFixture.js';
 import { liveAdapter } from '../helpers/accessLiveAdapter.js';
+import { codexAccess } from '../../server/src/lib/accessProfiles/drivers/cli.ts';
+import protocols from '../fixtures/access-profiles/cli-protocols.json' with { type: 'json' };
 
 test('AP11_cli_steps: код CLI вводится на сайте, открытая ссылка ещё не означает вход', async (t) => {
   for (const provider of ['codex', 'kimi']) {
@@ -195,3 +197,42 @@ test('AP12_cli_isolation: занятый основной CLI допускает
     assert.equal(control.handles[0].alive, true);
     control.handles[0].spec.hooks.onBackgroundTasks([]);
   });
+
+test('AP11_cli_steps: проверенная 0.167.1 принимается мастером без генерации схем', async (t) => {
+  const f = await cliFixture(t, 'codex', { version: '0.167.1' });
+  const attempt = await createAttempt(f, 'codex', f.method);
+  await cliStep(f, attempt, 'display-code');
+  await fs.writeFile(path.join(f.root, 'complete'), 'Владелец завершил вход');
+
+  assert.equal((await settled(f, 'codex', attempt)).state, 'saved');
+  assert.equal((await cliRecords(f)).some((entry) => entry.args?.includes('generate-json-schema')),
+    false, 'быстрый путь проверенных версий не генерирует схемы');
+});
+
+test('AP11_cli_protocol: будущая версия с неизменным протоколом принимается без релиза', async (t) => {
+  await t.test('0.168.0 с проверенными схемами', async (t) => {
+    const f = await cliFixture(t, 'codex', { version: '0.168.0' });
+    const attempt = await createAttempt(f, 'codex', f.method);
+    await cliStep(f, attempt, 'display-code');
+    await fs.writeFile(path.join(f.root, 'complete'), 'Владелец завершил вход');
+
+    assert.equal((await settled(f, 'codex', attempt)).state, 'saved');
+  });
+
+  await t.test('изменённый протокол отклоняется', async (t) => {
+    const f = await cliFixture(t, 'codex', { version: '0.168.0', schemaSet: 'tampered' });
+    const attempt = await createAttempt(f, 'codex', f.method);
+    const result = await settled(f, 'codex', attempt);
+
+    assert.equal(result.state, 'failed');
+    assert.equal(result.error.code, 'unsupported');
+    assert.equal(await fs.readFile(f.credentialFile, 'utf8'), f.credentialBytes);
+  });
+});
+
+test('AP11_cli_protocol: хэши драйвера совпадают с проверенными схемами фикстуры', async () => {
+  const entry = protocols.codex;
+  const sets = [entry.schemas, ...entry.versions.map((item) => item.schemas)];
+
+  assert.deepEqual(codexAccess.cli.protocolSchemas, sets);
+});

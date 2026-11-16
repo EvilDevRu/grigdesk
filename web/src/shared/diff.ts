@@ -1,3 +1,9 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
+
 // Построчный дифф для правок агента (шаг Edit в ленте чата).
 // Нужен, чтобы правка выглядела как в VS Code — «убрано / добавлено» с подсветкой,
 // а не двумя простынями «было»/«стало». Алгоритм — LCS по строкам; на больших
@@ -97,7 +103,7 @@ const CUT_MARKER = '… сокращено …';
  * и разбор его как patch давал «+0 −0» с одинаковыми колонками.
  */
 function wholeFileDiff(content: unknown, kind: string): DiffResult {
-  const t = kind === 'delete' ? 'del' : 'add';
+  const type = kind === 'delete' ? 'del' : 'add';
   const text = String(content ?? '');
 
   if (!text) {
@@ -110,14 +116,16 @@ function wholeFileDiff(content: unknown, kind: string): DiffResult {
 
   const lines = (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n');
   const rows = lines.map<DiffRow>((line) => (
-    line === CUT_MARKER ? { t: 'ctx', text: CUT_MARKER } : { t, text: line }
+    line === CUT_MARKER
+      ? { t: 'ctx', text: t('core.diffSokrascheno') }
+      : { t: type, text: line }
   ));
   const changed = rows.length - rows.filter((row) => row.t === 'ctx').length;
 
   return {
     rows,
-    added: t === 'add' ? changed : 0,
-    removed: t === 'del' ? changed : 0,
+    added: type === 'add' ? changed : 0,
+    removed: type === 'del' ? changed : 0,
   };
 }
 
@@ -155,7 +163,7 @@ export function unifiedDiff(patch: unknown, kind = 'update'): DiffResult {
       continue;
     }
     if (line === CUT_MARKER) {
-      rows.push({ t: 'ctx', text: CUT_MARKER });
+      rows.push({ t: 'ctx', text: t('core.diffSokrascheno') });
       continue;
     }
     if (!inHunk || line === '\\ No newline at end of file') {

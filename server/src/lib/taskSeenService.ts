@@ -1,5 +1,5 @@
-import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
-import type { PersonalScopeOptions, OwnTaskReader } from './taskPersonalScope.ts';
+import { personalWriteGuard, resolvePersonalScope } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions } from './taskPersonalScope.ts';
 import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой просмотренных задач: scope выводится из текущего B24-портала и
 // пользователя, наружу уходит только opaque hash — клиент не может попросить чужой набор.
@@ -35,16 +35,12 @@ export class TaskSeenService {
   // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
   readonly tracker: PersonalIdentitySource;
 
-  readonly ownTasks?: OwnTaskReader;
-
-  constructor({ store, tracker, ownTasks }: {
-    ownTasks?: OwnTaskReader;
+  constructor({ store, tracker }: {
     store: TaskSeenStore;
     tracker: PersonalIdentitySource;
   }) {
     this.store = store;
     this.tracker = tracker;
-    this.ownTasks = ownTasks;
   }
 
   /**
@@ -77,8 +73,8 @@ export class TaskSeenService {
   }
 
   /**
-   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
-   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   * Локальная мутация закрепляет учётную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции внешней доски.
    */
   async markSeen(
     taskIds: unknown,
@@ -87,17 +83,12 @@ export class TaskSeenService {
     const beforeWrite = personalWriteGuard(this.tracker, options);
     const scope = await this._scope({}, options);
 
-    if (options.source === 'grigdesk') {
-      await validateOwnPersonalTasks(Array.isArray(taskIds) ? taskIds : [taskIds], this.ownTasks);
-    }
-
     return {
       scope,
       ...await this.store.markSeen(scope, taskIds, {
-      ...options,
-      beforeWrite,
-      initializeOnce: options.source === 'grigdesk'
-    })
+        ...options,
+        beforeWrite,
+      }),
     };
   }
 }

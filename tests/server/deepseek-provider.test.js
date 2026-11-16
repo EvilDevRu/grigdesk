@@ -109,22 +109,26 @@ test('metadata probe делает initialize/new/close без prompt и возв
 });
 
 test('адаптер объявляет полный честный контракт и виден обоим реестрам', async () => {
-  assert.equal((await getProviderAdapters()).get('deepseek'), deepseek);
-  assert.equal(await getExecutor('deepseek'), deepseek);
-  assert.deepEqual([
-    deepseek.id, deepseek.name, deepseek.vendor, deepseek.color, deepseek.order,
-  ], ['deepseek', 'DeepSeek', 'DeepSeek', '#4D6BFE', 4]);
-  assert.equal(deepseek.workToolsTransport, 'mcp');
-  assert.equal(typeof deepseek.sessionBinding.authProfileId, 'function');
-  assert.equal(deepseek.retryContract, 'pre_prompt_only');
-  assert.deepEqual(deepseek.compaction, { kind: 'summary' });
-  assert.equal(typeof deepseek.run, 'function');
-  assert.equal(deepseek.session, undefined);
-  assert.deepEqual(deepseek.untrustedInput, { text: true, images: false });
-  assert.equal(typeof deepseek.scopedWorkspace, 'function');
-  assert.deepEqual(deepseek.workdir, { switch: 'reseed', roots: 'single' });
+  // Реестры отдают access-декоратор поверх исходного адаптера: карточка и чат
+  // получают профильный контекст, а контракт копируется полями декоратора.
+  const registered = (await getProviderAdapters()).get('deepseek');
 
-  const modes = await deepseek.modes();
+  assert.notEqual(registered, deepseek);
+  assert.equal(await getExecutor('deepseek'), registered);
+  assert.deepEqual([
+    registered.id, registered.name, registered.vendor, registered.color, registered.order,
+  ], ['deepseek', 'DeepSeek', 'DeepSeek', '#4D6BFE', 4]);
+  assert.equal(registered.workToolsTransport, 'mcp');
+  assert.equal(typeof registered.sessionBinding.authProfileId, 'function');
+  assert.equal(registered.retryContract, 'pre_prompt_only');
+  assert.deepEqual(registered.compaction, { kind: 'summary' });
+  assert.equal(typeof registered.run, 'function');
+  assert.equal(registered.session, undefined);
+  assert.deepEqual(registered.untrustedInput, { text: true, images: false });
+  assert.equal(typeof registered.scopedWorkspace, 'function');
+  assert.deepEqual(registered.workdir, { switch: 'reseed', roots: 'single' });
+
+  const modes = await registered.modes();
   assert.deepEqual(modes.map((mode) => mode.id), ['default', 'auto', 'read-only']);
   assert.equal(modes[0].label, 'Спрашивать');
   assert.match(modes[0].hint, /требуют разрешения/iu);

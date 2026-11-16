@@ -2,6 +2,11 @@ import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseSceneDraft } from '../../shared/showcaseApi';
 import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Общая обвязка правок сцен. Каждая правка уходит со своей ожидаемой редакцией и
@@ -52,7 +57,7 @@ export function addShowcaseScene(store: ShowcaseStore, draft: ShowcaseSceneDraft
   return apply(
     store,
     (project) => showcaseApi.addScene(project.id, project.revision, draft),
-    'Не удалось добавить сцену.',
+    translateUi('core.editShowcaseScenesCouldNotAddAScene'),
   );
 }
 
@@ -68,7 +73,7 @@ export function updateShowcaseScene(
   return apply(
     store,
     (project) => showcaseApi.updateScene(project.id, project.revision, sceneId, patch),
-    'Не удалось сохранить сцену.',
+    translateUi('core.editShowcaseScenesCouldNotSaveTheScene'),
   );
 }
 
@@ -80,7 +85,7 @@ export function removeShowcaseScene(store: ShowcaseStore, sceneId: string) {
   return apply(
     store,
     (project) => showcaseApi.removeScene(project.id, project.revision, sceneId),
-    'Не удалось удалить сцену.',
+    translateUi('core.editShowcaseScenesCouldNotDeleteTheScene'),
   );
 }
 
@@ -92,7 +97,7 @@ export function reorderShowcaseScenes(store: ShowcaseStore, order: string[]) {
   return apply(
     store,
     (project) => showcaseApi.reorderScenes(project.id, project.revision, order),
-    'Не удалось изменить порядок сцен.',
+    translateUi('core.editShowcaseScenesCouldNotReorderScenes'),
   );
 }
 
@@ -104,6 +109,6 @@ export function importShowcaseAudio(store: ShowcaseStore, sceneId: string, file:
   return apply(
     store,
     (project) => showcaseApi.importSceneAudio(project.id, project.revision, sceneId, file),
-    'Не удалось загрузить звук сцены.',
+    translateUi('core.editShowcaseScenesCouldNotUploadSceneAudio'),
   );
 }

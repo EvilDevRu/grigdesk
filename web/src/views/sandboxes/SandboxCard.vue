@@ -2,7 +2,7 @@
   <article class="sandbox-card ui-workspace-section" :aria-labelledby="`sandbox-title-${entry.task}`">
     <UiPaneHeader class="sandbox-card__head">
       <template #title>
-        <h3 :id="`sandbox-title-${entry.task}`">Стенд t{{ entry.task }} · {{ taskTitle }}</h3>
+        <h3 :id="`sandbox-title-${entry.task}`">{{ t('core.sandboxStendT') }}{{ entry.task }} · {{ taskTitle }}</h3>
       </template>
       <template #meta>
         <span class="sandbox-card__alive" :data-state="aliveState">
@@ -11,20 +11,18 @@
       </template>
       <template #actions>
         <div class="sandbox-card__meta">
-          <span v-if="entry.profile">Профиль: {{ entry.profile }}</span>
-          <span v-if="entry.slot !== null">Слот {{ entry.slot }}</span>
+          <span v-if="entry.profile">{{ t('core.sandboxProfil') }} {{ entry.profile }}</span>
+          <span v-if="entry.slot !== null">{{ t('core.sandboxSlot') }} {{ entry.slot }}</span>
         </div>
       </template>
     </UiPaneHeader>
     <div class="sandbox-card__body">
       <p v-if="stateLabel" class="sandbox-card__state">{{ stateLabel }}</p>
       <p v-if="stateDetail" class="sandbox-card__hint">{{ stateDetail }}</p>
-      <UiActionLink v-if="entry.owner === 'pipeline'" :href="taskHref" data-context="workspace-form">
-        Открыть задачу
-      </UiActionLink>
+      <UiActionLink v-if="entry.owner === 'pipeline'" :href="taskHref" data-context="workspace-form"> {{ t('core.openTask') }} </UiActionLink>
       <div v-if="job && job.state === 'running'" class="sandbox-card__progress">
         <UiProgress
-          :label="`${jobTitle} стенда t${entry.task}`"
+          :label="t('core.sandboxJobtitleStendaTTask', { jobTitle, task: entry.task })"
           :value="job.index"
           :max="job.total"
           :indeterminate="!job.total"
@@ -34,7 +32,7 @@
       </div>
 
       <UiInlineMessage v-if="job && job.state === 'failed'" tone="danger">
-        {{ job.message || 'Задание завершилось с ошибкой.' }}
+        {{ job.message || t('core.sandboxZadanieZavershilosSOshibkoy') }}
       </UiInlineMessage>
       <UiInlineMessage
         v-else-if="job && job.action === 'down' && job.state === 'done' && job.message"
@@ -59,33 +57,30 @@
           :controls="`sandbox-log-${entry.task}`"
           @update:open="toggleLog"
         >
-          {{ logOpen ? 'Скрыть журнал' : 'Журнал задания' }}
+          {{ logOpen ? t('core.sandboxSkrytZhurnal') : t('core.sandboxZhurnalZadaniya') }}
         </UiDisclosureButton>
         <pre
           v-if="logOpen"
           :id="`sandbox-log-${entry.task}`"
           class="sandbox-card__log-text"
-        >{{ logText || 'Вывода пока нет.' }}</pre>
-        <p v-if="logOpen && logTruncated" class="sandbox-card__hint">
-          Показан только хвост журнала.
-        </p>
+        >{{ logText || t('core.sandboxVyvodaPokaNet') }}</pre>
+        <p v-if="logOpen && logTruncated" class="sandbox-card__hint"> {{ t('core.sandboxPokazanTolkoHvostZhurnala') }} </p>
       </div>
 
       <div v-if="hasPorts" class="sandbox-card__ports">
         <StandLink v-if="feHref" :href="feHref" tone="accent"
-                      :aria-label="`Открыть сайт стенда t${entry.task}`"
-                      data-context="workspace-form" v-tooltip="`Открыть сайт стенда: ${feHref}`">
-          Сайт <span class="sandbox-card__port">:{{ entry.fePort }}</span>
+                      :aria-label="t('core.sandboxOtkrytSaytStendaT', { task: entry.task })"
+                      data-context="workspace-form" v-tooltip="t('core.sandboxOtkrytSaytStendaFehref', { feHref })"> {{ t('core.sandboxSayt') }} <span class="sandbox-card__port">:{{ entry.fePort }}</span>
           <span aria-hidden="true">↗</span>
         </StandLink>
         <StandLink v-if="apiHref" :href="apiHref" data-context="workspace-form"
-                      v-tooltip="`Открыть API — интерфейс сервера: ${apiHref}`">
+                      v-tooltip="t('core.sandboxOtkrytApiInterfeysServera', { apiHref })">
           API <span class="sandbox-card__port">:{{ entry.apiPort }}</span><span aria-hidden="true">↗</span>
         </StandLink>
       </div>
 
       <p v-if="typeof entry.feAlive === 'boolean'" class="sandbox-card__hint">
-        {{ entry.feAlive ? 'Сайт отвечает' : 'Сайт не отвечает' }}
+        {{ entry.feAlive ? t('core.sandboxSaytOtvechaet') : t('core.sandboxSaytNeOtvechaet') }}
       </p>
 
       <div v-if="actions.length" class="sandbox-card__runs">
@@ -103,18 +98,16 @@
         <details v-if="entry.repos.length || updatedLabel" class="ui-workspace-disclosure sandbox-card__details"
                  data-context="workspace-inline">
           <summary>
-            <template v-if="entry.repos.length">Код и рабочие папки · {{ entry.repos.length }}</template>
-            <template v-else>Сведения о стенде</template>
+            <template v-if="entry.repos.length">{{ t('core.sandboxKodIRabochiePapki') }} {{ entry.repos.length }}</template>
+            <template v-else>{{ t('core.sandboxSvedeniyaOStende') }}</template>
           </summary>
           <div class="ui-workspace-section__body">
-            <p v-if="entry.repos.length" class="sandbox-card__hint">
-              Отдельные копии репозиториев стенда (worktree). Путь можно скопировать.
-            </p>
+            <p v-if="entry.repos.length" class="sandbox-card__hint"> {{ t('core.sandboxOtdelnyeKopiiRepozitorievStenda') }} </p>
             <ul v-if="entry.repos.length" class="sandbox-card__repos">
               <li v-for="repo in entry.repos" :key="repo.path" class="sandbox-repo">
                 <span class="sandbox-repo__name">{{ repo.name }}</span>
                 <span class="sandbox-repo__branch" v-tooltip="repo.branch || undefined">
-                  {{ repo.branch || 'ветка неизвестна' }}
+                  {{ repo.branch || t('core.sandboxVetkaNeizvestna') }}
                 </span>
                 <code class="sandbox-repo__path" v-tooltip="repo.path">{{ repo.path }}</code>
                 <UiIconButton
@@ -142,7 +135,7 @@
         <details v-if="entry.removable || needsRemovalProfile" :open="needsRemovalProfile"
                  class="ui-workspace-disclosure sandbox-card__removal"
                  data-context="workspace-inline">
-          <summary>Удаление стенда</summary>
+          <summary>{{ t('core.sandboxUdalenieStenda') }}</summary>
           <div class="sandbox-card__actions ui-workspace-section__body">
             <UiField v-if="needsRemovalProfile" :label="t('core.sandboxRemovalProfile')"
                      :hint="t('core.sandboxRemovalProfileHint')">
@@ -158,28 +151,20 @@
             </p>
             <div class="sandbox-card__removal-option">
               <UiButton variant="outline" tone="danger" data-context="workspace-form-wrap"
-                        :loading="busy" :disabled="!canDismantle" @click="requestDismantle(false)">
-                Снести стенд
-              </UiButton>
-              <p class="sandbox-card__hint">
-                Удалить контейнеры и базы. Рабочие папки с незакоммиченными изменениями сохранятся.
-              </p>
+                        :loading="busy" :disabled="!canDismantle" @click="requestDismantle(false)"> {{ t('core.sandboxSnestiStend') }} </UiButton>
+              <p class="sandbox-card__hint"> {{ t('core.sandboxUdalitKonteyneryIBazy') }} </p>
             </div>
             <div class="sandbox-card__removal-option">
               <UiButton variant="ghost" tone="danger" data-context="workspace-form-wrap"
-                        :disabled="!canDismantle" @click="requestDismantle(true)">
-                Снести вместе с изменениями
-              </UiButton>
-              <p class="sandbox-card__hint">
-                Удалить и рабочие папки. Профиль предварительно сохранит изменения патчем в архив.
-              </p>
+                        :disabled="!canDismantle" @click="requestDismantle(true)"> {{ t('core.sandboxSnestiVmesteSIzmeneniyami') }} </UiButton>
+              <p class="sandbox-card__hint"> {{ t('core.sandboxUdalitIRabochiePapki') }} </p>
             </div>
           </div>
         </details>
         <p v-else-if="blockedReason" class="sandbox-card__hint">
           {{ blockedReason }}
           <UiActionLink v-if="entry.removableReason === 'pipeline_owned'" :href="taskHref"
-                        data-context="workspace-form">Открыть задачу</UiActionLink>
+                        data-context="workspace-form">{{ t('core.openTask') }}</UiActionLink>
         </p>
       </div>
     </div>
@@ -200,7 +185,7 @@ import {
   UiPaneHeader,
   UiSelect,
   t,
-  vTooltip,
+  vTooltip, uiLocale
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
 import { sandboxUrl } from '../../shared/sandbox.ts';
@@ -289,17 +274,23 @@ const aliveState = computed(() => {
 
 const aliveLabel = computed(() => {
   if (aliveState.value === 'unknown') {
-    return 'Не проверен';
+    return t('core.sandboxNeProveren');
   }
 
-  return aliveState.value === 'alive' ? 'Порты отвечают' : 'Порты не отвечают';
+  return aliveState.value === 'alive' ? t('core.sandboxPortyOtvechayut') : t('core.sandboxPortyNeOtvechayut');
 });
 
 // Шаг по умолчанию, пока задание не назвало свой: у прогона журнал ещё пуст.
 const RUNNING_STEP: Record<SandboxJob['action'], string> = {
-  up: 'идёт подъём',
-  down: 'идёт снос',
-  run: 'идёт прогон',
+  get up() {
+    return t('core.sandboxIdetPodem');
+  },
+  get down() {
+    return t('core.sandboxIdetSnos');
+  },
+  get run() {
+    return t('core.sandboxIdetProgon');
+  },
 };
 
 // Заголовок задания словами: у прогона это подпись действия из манифеста профиля.
@@ -311,10 +302,10 @@ const jobTitle = computed(() => {
   }
 
   if (job.action === 'run') {
-    return job.actionLabel || 'Прогон';
+    return job.actionLabel || t('core.sandboxProgon');
   }
 
-  return job.action === 'up' ? 'Подъём' : 'Снос';
+  return job.action === 'up' ? t('core.sandboxPodem') : t('core.sandboxSnos');
 });
 
 // Полоса прогресса сама по себе молчит: человеку нужен шаг словами, иначе неясно,
@@ -329,7 +320,7 @@ const progressLabel = computed(() => {
   const step = job.total ? `${job.index}/${job.total}` : '';
   const label = job.label || RUNNING_STEP[job.action];
 
-  return step ? `${step} · ${label}` : label;
+  return step ? t('core.sandboxStepLabel', { step, label }) : label;
 });
 
 // Итог прогона — хвост его вывода, где скрипт печатает сверку; без вывода — одно слово.
@@ -340,7 +331,9 @@ const runSummary = computed(() => {
     return '';
   }
 
-  return job.message || `${job.actionLabel || 'Прогон'}: выполнено.`;
+  return job.message
+          || t('core.sandboxActionlabelVypolneno', { actionLabel: job.actionLabel
+          || t('core.sandboxProgon') });
 });
 
 // Секунды записи реестра ничего не решают и только удлиняют строку меты.
@@ -351,25 +344,29 @@ const updatedLabel = computed(() => {
     return '';
   }
 
-  const when = new Date(value).toLocaleString('ru-RU', {
+  const when = new Date(value).toLocaleString(uiLocale.value, {
     dateStyle: 'short',
     timeStyle: 'short',
   });
 
-  return `Запись о стенде обновлена ${when}`;
+  return t('core.sandboxZapisOStendeObnovlena', { when });
 });
 
 // Причину запрета считает сервер: клиентская догадка по состоянию задания разошлась
 // бы с настоящим отказом ручки, а правило владения живёт там же, где и снос.
 const BLOCKED: Record<string, string> = {
-  pipeline_owned: 'Стендом владеет конвейер или общий checkout: он сносится из карточки задачи.',
-  job_running: 'Удаление недоступно, пока выполняется задание стенда.',
+  get pipeline_owned() {
+    return t('core.sandboxStendomVladeetKonveyerIli');
+  },
+  get job_running() {
+    return t('core.sandboxUdalenieNedostupnoPokaVypolnyaetsya');
+  },
 };
 
 const blockedReason = computed(() => BLOCKED[props.entry.removableReason || ''] || '');
 
 function copyLabel(path: string) {
-  return copied.value === path ? 'Скопировано' : 'Копировать путь';
+  return copied.value === path ? t('core.videoSkopirovano') : t('core.codeReviewMenuCopy');
 }
 
 /**

@@ -49,6 +49,23 @@ export function cliAccess(homeKey: string, homeName: string,
 
 export const codexAccess = cliAccess('CODEX_HOME', '.codex', {
   version: '0.166.0',
+  versions: ['0.167.1'],
+  protocolSchemas: [
+    {
+      'v1/InitializeResponse.json': '62ad689c2cb6379913c1d72749cfd8de5089d35760214123518eb92eef11acc9',
+      'v2/LoginAccountParams.json': '48fb9bea54d7e0890052653ac06737efb3200ba2261515b2c4014027f36bea3d',
+      'v2/LoginAccountResponse.json': '72e6d77f49bc5809c3af50f183e2a0862dd8f7836816d4796ff69bb13eae0e89',
+      'v2/GetAccountResponse.json': '1d44d4274ea35e1f866c4b0e3db64678fab108914c276353bdc3b1b0de286459',
+      'v2/AccountLoginCompletedNotification.json': 'd81e8821fd5a4a9ad118dfc3506ea156d32dcb18da388b336501bbc6a5ccb4a6',
+    },
+    {
+      'v1/InitializeResponse.json': '62ad689c2cb6379913c1d72749cfd8de5089d35760214123518eb92eef11acc9',
+      'v2/LoginAccountParams.json': '48fb9bea54d7e0890052653ac06737efb3200ba2261515b2c4014027f36bea3d',
+      'v2/LoginAccountResponse.json': '72e6d77f49bc5809c3af50f183e2a0862dd8f7836816d4796ff69bb13eae0e89',
+      'v2/GetAccountResponse.json': '7abd8b4da37ad1ea748df40adb47d30529afb16eba71d190f8fff5322e9520ab',
+      'v2/AccountLoginCompletedNotification.json': 'd81e8821fd5a4a9ad118dfc3506ea156d32dcb18da388b336501bbc6a5ccb4a6',
+    },
+  ],
   args: ['app-server'],
   protocol: 'codex-rpc',
   hosts: ['auth.openai.com'],

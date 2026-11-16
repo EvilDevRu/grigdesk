@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileTaskModal } from './helpers/task-modal.js';
@@ -33,8 +34,17 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   const shelfToggled = [];
   const acknowledged = [];
   const markedSeen = [];
+
   globalThis.__taskModalFavoriteApi = {
+    /**
+     * Возможности карточки подтверждаются синтетическим каталогом независимо от деталей.
+     * Остальные ответы остаются в прежнем сценарии без обращения к реальному трекеру.
+     */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
       return {};

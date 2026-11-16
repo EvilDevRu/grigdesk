@@ -10,14 +10,31 @@ import type {
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ChatInTurnRun } from '../../stores/chatInTurn.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 const REASONS: Record<InTurnUnavailableReason, string> = {
-  not_ready: 'Канал уточнений ещё не готов.',
-  unsupported: 'Этот исполнитель не принимает уточнения во время хода.',
-  compacting: 'Дождись окончания сжатия контекста.',
-  workdir_transition: 'Дождись смены рабочей папки.',
-  chat_busy: 'Чат занят другим действием.',
-  awaiting_answer: 'Сначала ответь на вопрос агента.',
+  get not_ready() {
+    return translateUi('core.chatInTurnTheInTurnMessageChannelIsNot');
+  },
+  get unsupported() {
+    return translateUi('core.chatInTurnThisExecutorDoesNotAcceptMessagesDuring');
+  },
+  get compacting() {
+    return translateUi('core.chatInTurnWaitForContextCompactionToFinish');
+  },
+  get workdir_transition() {
+    return translateUi('core.chatInTurnWaitForTheWorkingFolderToChange');
+  },
+  get chat_busy() {
+    return translateUi('core.chatInTurnTheChatIsBusyWithAnotherAction');
+  },
+  get awaiting_answer() {
+    return translateUi('core.chatInTurnAnswerTheAgentSQuestionFirst');
+  },
 };
 
 interface ComposerState {
@@ -47,13 +64,16 @@ function attachmentsReason(
     return '';
   }
   if (capability?.images !== true) {
-    return 'Вложения нельзя передать в текущий ход.';
+    return translateUi('core.chatInTurnAttachmentsCannotBeSentDuringTheCurrent');
   }
   if (!pendingImages) {
-    return 'В текущий ход передаются только картинки.';
+    return translateUi('core.chatInTurnOnlyImagesCanBeSentDuringThe');
   }
   if (pendingCount > IN_TURN_ATTACHMENT_LIMIT) {
-    return `В одном уточнении не больше ${IN_TURN_ATTACHMENT_LIMIT} картинок.`;
+    return translateUi(
+      'core.chatInTurnAnInTurnMessageCanContainAt',
+      { IN_TURN_ATTACHMENT_LIMIT: IN_TURN_ATTACHMENT_LIMIT },
+    );
   }
 
   return '';
@@ -84,7 +104,7 @@ export function inTurnComposerState({
   }
 
   if (protocol !== IN_TURN_PROTOCOL) {
-    return composerState(true, false, 'Сервер не поддерживает уточнения во время хода.');
+    return composerState(true, false, translateUi('core.chatInTurnTheServerDoesNotSupportInTurn'));
   }
   if (capability?.protocol !== IN_TURN_PROTOCOL || capability.text !== true) {
     return composerState(true, false, REASONS.unsupported);
@@ -96,7 +116,7 @@ export function inTurnComposerState({
     return composerState(true, false, attachments);
   }
   if (utf8Bytes(text || '') > IN_TURN_TEXT_LIMIT_BYTES) {
-    return composerState(true, false, 'Уточнение длиннее 32 КиБ.');
+    return composerState(true, false, translateUi('core.chatInTurnTheInTurnMessageExceeds32KiB'));
   }
   if (!run.availability?.available) {
     const reason = run.availability?.reason || 'not_ready';
@@ -113,12 +133,12 @@ export function inTurnComposerState({
  */
 export function inTurnDeliveryText(state: InTurnDeliveryState | undefined, error = ''): string {
   switch (state) {
-    case 'accepted': return 'Принято, ожидает передачи';
-    case 'delivering': return 'Передаётся агенту';
-    case 'forwarded': return 'Передано агенту';
-    case 'consumed': return 'Включено в контекст';
-    case 'failed': return error || 'Не передано агенту';
-    case 'unknown': return error || 'Исход передачи неизвестен. Проверь ответ агента перед повтором.';
-    default: return 'Ожидает подтверждения';
+    case 'accepted': return translateUi('core.chatInTurnAcceptedAwaitingDelivery');
+    case 'delivering': return translateUi('core.chatInTurnSendingToTheAgent');
+    case 'forwarded': return translateUi('core.chatInTurnDeliveredToTheAgent');
+    case 'consumed': return translateUi('core.chatInTurnIncludedInContext');
+    case 'failed': return error || translateUi('core.chatInTurnNotDeliveredToTheAgent');
+    case 'unknown': return error || translateUi('core.chatInTurnTheDeliveryOutcomeIsUnknownCheckThe');
+    default: return translateUi('core.chatInTurnAwaitingConfirmation');
   }
 }

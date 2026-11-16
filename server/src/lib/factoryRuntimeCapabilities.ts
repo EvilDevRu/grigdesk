@@ -36,6 +36,31 @@ export async function probeFactoryGotoCapability(
   identity: Pick<StopIdentity, 'task' | 'attempt' | 'profile'>,
   deps: ProbeDeps = {},
 ): Promise<Omit<ArbiterCapabilities, 'targets'>> {
+  return probeFactoryCapability(config, identity, 'goto-expected-stage-v1', deps);
+}
+
+/**
+ * Поддержка редактора проверяется отдельно от goto именно в закреплённом движке.
+ * Отрицательный результат не кэшируется и допускает явный повтор discovery.
+ */
+export async function probeFactoryStageRunnerSettingsCapability(
+  config: RouteConfig,
+  identity: Pick<StopIdentity, 'task' | 'attempt' | 'profile'>,
+  deps: ProbeDeps = {},
+): Promise<Omit<ArbiterCapabilities, 'targets'>> {
+  return probeFactoryCapability(config, identity, 'stage-runner-settings-v1', deps);
+}
+
+/**
+ * Общий probe сохраняет authority pin и разделяет положительный кэш по capability.
+ * Исходная поставка и ошибки перечитываются без подмены текущей версией сервера.
+ */
+async function probeFactoryCapability(
+  config: RouteConfig,
+  identity: Pick<StopIdentity, 'task' | 'attempt' | 'profile'>,
+  feature: string,
+  deps: ProbeDeps,
+): Promise<Omit<ArbiterCapabilities, 'targets'>> {
   let selected;
 
   try {
@@ -62,7 +87,9 @@ export async function probeFactoryGotoCapability(
     };
   }
 
-  if (selected.packageId && supportedPackages.has(selected.packageId)) {
+  const cacheKey = `${feature}:${selected.packageId}`;
+
+  if (selected.packageId && supportedPackages.has(cacheKey)) {
     return { status: 'supported', message: '' };
   }
 
@@ -82,12 +109,12 @@ export async function probeFactoryGotoCapability(
       return { status: 'unknown', message: unknownMessage };
     }
 
-    if (!value.features.includes('goto-expected-stage-v1')) {
+    if (!value.features.includes(feature)) {
       return { status: 'unsupported', message: unsupportedMessage };
     }
 
     if (selected.packageId) {
-      supportedPackages.add(selected.packageId);
+      supportedPackages.add(cacheKey);
     }
 
     return { status: 'supported', message: '' };

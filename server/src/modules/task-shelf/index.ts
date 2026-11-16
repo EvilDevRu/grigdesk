@@ -26,8 +26,7 @@ interface TaskShelfRoute {
  */
 function publicError(reply: FastifyReply, error: unknown): FastifyReply {
   const code = errorCode(error);
-  const status = (error as { status?: number }).status
-    ?? (String(code).startsWith('grigdesk_tasks_') ? 503 : undefined);
+  const status = (error as { status?: number }).status;
 
   if (status && [400, 404, 409, 503].includes(status)) {
     return reply.code(status).send({ error: code, message: (error as Error).message });
@@ -115,19 +114,7 @@ async function taskShelfModule(
     }, { mutation: true }));
   }
 
-  fastify.get<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf', (request, reply) =>
-    withTrackerRequestRead(request, reply, (options) =>
-      run(() => shelf.list(options, { source: 'grigdesk' }))(request, reply)));
-  fastify.put<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf/:taskId', run((request) => {
-    const taskId = normalizeShelfTaskId(request.params.taskId);
 
-    return shelf.put(taskId, request.body, { source: 'grigdesk' });
-  }, { mutation: true }));
-  fastify.delete<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf/:taskId', run((request) => {
-    const taskId = normalizeShelfTaskId(request.params.taskId);
-
-    return shelf.remove(taskId, { source: 'grigdesk' });
-  }, { mutation: true }));
 }
 
 export default fp(taskShelfModule, { name: 'module-task-shelf' });

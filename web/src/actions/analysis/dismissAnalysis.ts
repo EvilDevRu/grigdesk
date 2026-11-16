@@ -6,16 +6,16 @@ import type { AnalysisQueueResponse } from '../../../../shared/pipeline/analysis
  * Убирает прерванный или упавший статус с экрана. Сама оценка остаётся: человек решил
  * не перезапускать разбор, а не отказаться от того, что уже посчитано.
  */
-export async function dismissAnalysis(id: string | number): Promise<AnalysisQueueResponse> {
+export async function dismissAnalysis(id: string | number, source?: string): Promise<AnalysisQueueResponse> {
   const store = useAnalysisStore();
 
   if (store.disabled) {
     return { outcome: 'plugin_disabled', position: null };
   }
 
-  const result = await analysisApi.dismiss(id);
+  const result = await analysisApi.dismiss(id, source);
 
-  store.dropStatus(id);
+  store.dropStatus(id, source);
 
   return result;
 }

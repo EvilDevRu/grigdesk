@@ -54,8 +54,8 @@ export async function runLauncherWorker(options: WorkerOptions) {
   }
 
   const stdio: StdioOptions = options.capture
-    ? ['inherit', 'pipe', 'pipe', 'ipc']
-    : ['inherit', 'inherit', 'inherit', 'ipc'];
+    ? ['inherit', 'pipe', 'pipe', 'ipc', 'pipe']
+    : ['inherit', 'inherit', 'inherit', 'ipc', 'pipe'];
   const child = spawn(path.join(options.root, 'runtime/node/bin/node'), [
     path.join(options.root, 'server/worker-bootstrap.cjs'),
     path.join(options.root, 'server/payload.cjs'),
@@ -68,9 +68,10 @@ export async function runLauncherWorker(options: WorkerOptions) {
   let stdout = '';
   let stderr = '';
   let stopping = false;
-  let escalated = false;
   let overflow = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let deadline = 0;
+  let restartRequested = false;
   const completion = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', resolve);
@@ -84,6 +85,22 @@ export async function runLauncherWorker(options: WorkerOptions) {
 
   void completion.catch(() => {});
   void drained.catch(() => {});
+
+  /**
+   * Срок внутреннего shutdown может только сократить срок launcher, но не продлить.
+   * Таймер снимается после exit worker, включая зависание native cleanup.
+   */
+  const armDeadline = (until: number) => {
+    if (deadline && deadline <= until) {
+      return;
+    }
+
+    deadline = until;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      child.kill('SIGKILL');
+    }, Math.max(0, deadline - Date.now()));
+  };
 
   /**
    * Только первый stop передаётся worker; повторные сигналы не дублируют shutdown.
@@ -102,10 +119,7 @@ export async function runLauncherWorker(options: WorkerOptions) {
       child.disconnect();
     }
 
-    timer = setTimeout(() => {
-      escalated = true;
-      child.kill('SIGKILL');
-    }, grace);
+    armDeadline(Date.now() + grace);
   };
   const term = () => stop('SIGTERM');
   const interrupt = () => stop('SIGINT');
@@ -130,6 +144,14 @@ export async function runLauncherWorker(options: WorkerOptions) {
     }
   });
   child.on('message', (message) => {
+    const value = message as Record<string, unknown> | null;
+
+    if (value?.type === 'grigdesk:shutdown-start'
+      && Number.isSafeInteger(value.deadline) && Number(value.deadline) > 0) {
+      restartRequested = value.exitCode === 75;
+      armDeadline(Math.min(Number(value.deadline), Date.now() + grace));
+    }
+
     options.onMessage?.(message);
 
     if (externalParent && process.connected && process.send) {
@@ -161,10 +183,11 @@ export async function runLauncherWorker(options: WorkerOptions) {
 
     const code = await completion;
 
+    clearTimeout(timer);
     await drained;
 
     return {
-      code: escalated || overflow ? 1 : code ?? 1,
+      code: overflow ? 1 : code ?? (restartRequested && Date.now() >= deadline ? 75 : 1),
       stdout,
       stderr,
     };

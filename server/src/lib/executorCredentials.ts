@@ -5,7 +5,9 @@
 // процесса, поэтому ключ начинает действовать без перезапуска службы.
 // Значение секрета наружу не выходит никогда: карточка видит только «задан» и хвост ключа.
 import type { ExecutorAdapter } from './executors/index.ts';
-import { EnvFileError, applyEnvChanges, isEnvName, readEnvFile, updateEnvFile } from './envFile.ts';
+import {
+  ENV_FILE_STATE_ERROR_CODES, EnvFileError, applyEnvChanges, isEnvName, readEnvFile, updateEnvFile,
+} from './envFile.ts';
 
 export type CredentialKind = 'secret' | 'choice';
 
@@ -56,13 +58,6 @@ const OPTION_RE = /^[A-Za-z0-9._:-]{1,64}$/;
 const KINDS = new Set<CredentialKind>(['secret', 'choice']);
 // Хвост показывается только у длинного ключа: у короткого четыре символа — заметная часть.
 const PREVIEW_MIN_LENGTH = 16;
-// Состояние файла, которое правит человек, а не ввод окна: такие отказы идут как 409.
-const FILE_STATE_ERRORS = new Set([
-  'env_file_unsupported',
-  'env_file_not_regular',
-  'env_file_too_large',
-  'env_file_conflict',
-]);
 
 function boundedText(value: unknown, limit: number): string {
   return typeof value === 'string' ? value.trim().slice(0, limit) : '';
@@ -295,6 +290,6 @@ export async function applyCredentialValues({
       throw error;
     }
 
-    return rejected(FILE_STATE_ERRORS.has(error.code) ? 409 : 400, error.code, error.message);
+    return rejected(ENV_FILE_STATE_ERROR_CODES.has(error.code) ? 409 : 400, error.code, error.message);
   }
 }

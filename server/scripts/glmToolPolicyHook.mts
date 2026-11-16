@@ -3,6 +3,7 @@
 // Hook исполняется в песочнице процесса: наружу он сообщает только через stderr,
 // который DSH публикует в событии hook/result. Аргументы вызова в stderr не попадают.
 import { readFileSync } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 
 import { glmGateHash, parseGlmGateBinding } from '../../shared/node/glmGateProtocol.ts';
 
@@ -26,21 +27,25 @@ function report(value: Record<string, unknown>): void {
 }
 
 /**
- * Вход hook ограничен по объёму: огромный stdin не должен держать ход.
- * Неразбираемый JSON — отказ, а не пропуск.
+ * Лимит считается по входным байтам до декодирования, чтобы огромный stdin не держал ход.
+ * Потоковый decoder сохраняет UTF-8 символ на границе блоков и исходный хэш аргументов.
  */
 async function stdin(): Promise<string> {
+  const decoder = new StringDecoder('utf8');
   let value = '';
+  let bytes = 0;
 
   for await (const chunk of process.stdin) {
-    value += String(chunk);
+    bytes += chunk.length;
 
-    if (Buffer.byteLength(value, 'utf8') > 4 * 1024 * 1024) {
+    if (bytes > 4 * 1024 * 1024) {
       deny('вход hook слишком велик');
     }
+
+    value += decoder.write(chunk);
   }
 
-  return value;
+  return value + decoder.end();
 }
 
 const index = process.argv.indexOf('--policy');

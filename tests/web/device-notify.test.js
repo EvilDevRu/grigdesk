@@ -5,6 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const NOTIFY_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/notify.ts', import.meta.url),
 )).href;
+// Vue фиксирует наличие document при импорте runtime-dom. Загружаем Pinia до установки
+// минимального fake document: канал оболочки читает стор, но DOM-рендерер не нужен.
+await import('../../web/node_modules/pinia/dist/pinia.mjs');
 let fixtureId = 0;
 
 async function fixture(t, { permission = 'granted', registration = null } = {}) {

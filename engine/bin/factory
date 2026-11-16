@@ -14,7 +14,7 @@ if [[ "${1:-}" == capabilities ]]; then
     printf '%s\n' 'factory: capabilities требует --format json' >&2
     exit 78
   fi
-  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1"]}'
+  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1","stage-runner-settings-v1"]}'
   exit 0
 fi
 
@@ -43,7 +43,7 @@ usage() {
                    [--diagnosis-signal TEXT]
                    [--backend-base REF] [--frontend-base REF]
                    [--delivery-target repo=branch]...
-                   [--task-comment]
+                   [--task-comment] [--hold-start]
 
   factory TASK resume --attempt a_<32hex> [те же общие пути]
 
@@ -90,6 +90,13 @@ capability "route-v2" в graph.json и реализовать route-хуки к�
 task-level override в реестр и выигрывает у project policy профиля, а failover
 берётся из PROJECT_RUNNER_FAILOVER профиля с убранным выбранным id. Без флага
 цепочка исполнителей живёт только в runners.env профиля.
+
+--hold-start создаёт конвейер БЕЗ старта: попытка, контракты, ticket и полностью
+готовый стенд поднимаются штатно, но ни один узел (включая разведку) не
+диспетчеризуется. В реестре остаётся метка HELD_START=1, команда выходит с 0.
+Человек назначает исполнителей на узлах и стартует прогон обычным resume: он сам
+выполнит разведку и создаст курсор. Метку снимает любой следующий заход движка.
+Стенд и слот остаются зарезервированными до старта или abandon.
 
 Abandon закрывает АКТИВНУЮ попытку терминалом abandoned (штатный выход из
 заклинившего прогона). Recover создаёт из abandoned-терминала НОВУЮ попытку
@@ -276,6 +283,7 @@ GATE_COMMIT_ONLY=0
 BE_BASE_REF=""
 FE_BASE_REF=""
 TASK_COMMENT=0
+HOLD_START=0
 declare -a INSTRUMENTATION_SPECS=()
 declare -a DELIVERY_TARGETS=()
 
@@ -457,6 +465,10 @@ while (( $# > 0 )); do
       GATE_COMMIT_ONLY=1
       shift
       ;;
+    --hold-start)
+      HOLD_START=1
+      shift
+      ;;
     --instrumentation-file)
       (( $# >= 2 )) || die "после --instrumentation-file нужен repo:path"
       INSTRUMENTATION_SPECS+=("$2")
@@ -527,6 +539,10 @@ fi
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
   die "--runner-primary допустим только при start"
+# Создание без старта — режим только новой попытки: resume/gate ведут уже
+# созданную попытку, у которой решение о старте принял человек.
+[[ "$MODE" == start || "$HOLD_START" == 0 ]] ||
+  die "--hold-start допустим только при start"
 [[ "$MODE" == check || "$MODE" == start || -z "$EXPECTED_CATALOG_HASH" ]] ||
   die "--expected-catalog-hash допустим только при check или start"
 [[ "$MODE" == start || -z "$QUEUE_DISPATCH_ID" ]] ||
@@ -2790,16 +2806,9 @@ v2_bootstrap_pause() {
 v2_lifecycle_begin_human_for_stop() {
   local attempt=$1 stop=$2 reason evidence
   runtime_lifecycle_enabled_v2 || return 0
-  case "$stop" in
-    # Потолок кругов цикла — тот же исчерпанный бюджет автоматических возвратов:
-    # закрытый словарь аналитики не расширяется ради синонима.
-    rewind-limit|loop-ceiling) reason=rewind_limit ;;
-    no-progress) reason=no_progress ;;
-    human) reason=manual_resume_required ;;
-    *) reason=operator_requested ;;
-  esac
+  reason=$(runtime_lifecycle_stop_reason_v2 "$stop") || return
   evidence=$(v2_lifecycle_latest_stage_hash "$attempt") || return
-  runtime_lifecycle_human_begin_v2 "$reason" "$evidence" >/dev/null
+  runtime_lifecycle_human_begin_once_v2 "$reason" "$evidence" >/dev/null
 }
 
 v2_on_signal() {
@@ -3003,6 +3012,17 @@ v2_main() {
       return 0
     fi
     bootstrap_decision_hash=$(jq -r '.decision.recordHash // empty' <<<"$bootstrap_journal") || return 78
+    # Сбой после event rename нельзя отдать первому strict read в runner preflight.
+    # Уже удерживаем orchestrator lock; helper берёт task-state lock и чинит лишь exact pointer.
+    if [[ -e "$ROUTE_V2_ATTEMPT_DIR/pending-transition.json" ||
+          -L "$ROUTE_V2_ATTEMPT_DIR/pending-transition.json" ]]; then
+      _route_v2_pending_origin_check "$TASK" "$EXPECTED_ATTEMPT" || return
+      attempt_stage_state_reconcile_pending_v2 "$TASK" "$EXPECTED_ATTEMPT" || {
+        rc=$?
+        v2_log "resume: сохранённый переход не прошёл проверку восстановления (код $rc)"
+        return "$rc"
+      }
+    fi
   fi
 
   # Решение человека на воротах в режиме --commit-only не запускает ни одного
@@ -3099,7 +3119,7 @@ v2_main() {
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
       PROFILE "$PROFILE" \
       ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
-      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 HELD_START 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
       RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
@@ -3146,6 +3166,30 @@ v2_main() {
       # Остановка по потолку кругов без поднятого потолка: отказ до сессии lifecycle,
       # закрытия вмешательства человека и снятия STALLED_HUMAN — журнал, реестр и
       # lifecycle продолжают согласованно говорить «ждёт человека». Подсказка — в журнале.
+      # После accepted stop дописываем только проекции до read-only hold.
+      # Режим 2 не запускает модель, commit или снимок ещё не установленных workspace roots.
+      _route_v2_pending_wait_probe "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 0 )); then
+        v2_lifecycle_begin_session "$attempt" resume "$ROUTE" "$route_hash" || return
+        _route_v2_pending_drive "$TASK" "$attempt" 2 >/dev/null
+        rc=$?
+        if (( rc != 0 && rc != 21 )); then return "$rc"; fi
+        cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
+        stop=$(json_value stop <<<"$cursor") || return 78
+        stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
+        set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop" || return
+        v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
+        _route_v2_pending_ack_stop "$TASK" "$attempt" || return
+        v2_log "recovery: проекция остановки восстановлена без повторного узла"
+        v2_log "${stop_node^^}: маршрут остановлен: $stop"
+      elif (( rc != 3 )); then
+        return "$rc"
+      fi
+      route_v2_recovered_stop_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then return 0; fi
+      (( rc == 0 )) || return "$rc"
       route_v2_loop_ceiling_held "$TASK" "$attempt"
       rc=$?
       if (( rc == 11 )); then
@@ -3163,12 +3207,13 @@ v2_main() {
         return "$rc"
       fi
     fi
-    v2_lifecycle_begin_session \
-      "$attempt" resume "$ROUTE" "$route_hash" || {
+    if [[ "$V2_LIFECYCLE_SESSION_OPEN" != 1 ]]; then
+      v2_lifecycle_begin_session "$attempt" resume "$ROUTE" "$route_hash" || {
         rc=$?
         v2_log "lifecycle resume не открыт (код $rc)"
         return "$rc"
       }
+    fi
     v2_lifecycle_resolve_human \
       "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" \
       "$bootstrap_decision_hash" || {
@@ -3223,9 +3268,16 @@ v2_main() {
   fi
 
   # Любой новый заход движка стирает метку штатной остановки: после старта демона
-  # мёртвый процесс снова означает обрыв, а не решение человека.
-  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 \
+  # мёртвый процесс снова означает обрыв, а не решение человека. Метка создания
+  # без старта снимается тем же заходом: resume принял решение человека стартовать.
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 HELD_START 0 \
     DELIVERY_MODE "$V2_DELIVERY_MODE" INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
+
+  # Создание без старта фиксируется ДО подъёма стенда: витрина показывает «создаётся»,
+  # пока среда поднимается, а полный маркер HELD_START=1 появится после её готовности.
+  if [[ "$HOLD_START" == 1 ]]; then
+    set_st "$TASK" HELD_START pending || return
+  fi
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
     CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
@@ -3269,6 +3321,23 @@ v2_main() {
   export PROFILE_AGENT_CWD="$V2_PRIMARY_WORKTREE"
   export PROFILE_AGENT_DIRS="$V2_AGENT_DIRS"
   export ROUTE_V2_INSTRUMENTATION_SCOPE_FILE="$V2_SCOPE_FILE"
+
+  # Создание без старта: попытка, контракты и стенд уже на месте, но ни один узел
+  # (включая разведку) не диспетчеризуется — человек назначает исполнителей и
+  # стартует прогон штатным resume, который сам выполнит bootstrap и создаст курсор.
+  # Выход допустим только после ПОЛНОГО ожидания стенда: EXIT-trap убивает
+  # незавершённый up.sh и оставляет частичную песочницу (тупик 75 на resume).
+  if [[ "$HOLD_START" == 1 ]]; then
+    v2_sandbox_bootstrap_wait || {
+      rc=$?
+      set_st "$TASK" STALLED_HUMAN 1
+      v2_log "среда профиля не готова для создания без старта (код $rc)"
+      return "$rc"
+    }
+    set_st "$TASK" HELD_START 1 || return
+    v2_log "конвейер создан без старта: ожидает ручного запуска"
+    return 0
+  fi
 
   _route_v2_load_attempt "$TASK" "$attempt" || return
   route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
@@ -3387,6 +3456,11 @@ v2_main() {
       v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || {
         rc=$?
         v2_log "маршрут остановлен: $stop; lifecycle вмешательства человека не открыт (код $rc)"
+        return "$rc"
+      }
+      _route_v2_pending_ack_stop "$TASK" "$attempt" || {
+        rc=$?
+        v2_log "stop projection сохранена, но pending ack не завершён (код $rc)"
         return "$rc"
       }
       if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then
@@ -3691,7 +3765,7 @@ v2_admin_main() {
         loop_reset=(LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" LOOP_STAGE "" LOOP_REPORT "")
     done
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
-      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered ATTEMPT_ID "$out" \
+      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered HELD_START 0 ATTEMPT_ID "$out" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
       QUEUE_DISPATCH_ID "" \

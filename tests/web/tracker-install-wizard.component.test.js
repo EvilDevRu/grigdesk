@@ -5,13 +5,13 @@ import test from 'node:test';
 import { migrationHarness, webFile } from './helpers/compile-vue.js';
 import {
   actionButton, chooseExternal, driverInstallInfo, driverJob, liveTrackerDialog, mountTrackerBoard,
-  openTrackerManager, prepareTracker,
+  openTrackerDriverSettings, openTrackerInstaller, prepareTracker,
 } from './helpers/trackerBoard.js';
 
 process.env.NODE_ENV = 'test';
 
 test('WIZARD-PHONE: подготовка компактна, показывает этап и сохраняет отмену', async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (_url, state) => {
         if (!state.job) {
@@ -23,6 +23,9 @@ test('WIZARD-PHONE: подготовка компактна, показывае�
       },
     },
   });
+
+  await openTrackerInstaller(card);
+
   const { compileStyle } = await import('../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.cjs.js');
   const source = await readFile(webFile('src/views/board/TrackerInstallDialog.vue'), 'utf8');
   const style = card.browser.document.createElement('style');
@@ -48,7 +51,7 @@ test('WIZARD-PHONE: подготовка компактна, показывае�
 
 test('WIZARD-OFFICIAL: встроенный репозиторий скрывает общее предупреждение',
   async (t) => {
-    const card = await manager(t, {
+    const card = await driverSettings(t, {
       handlers: {
         post: async (url, payload, state) => {
           if (url === '/api/driver-installs/jobs') {
@@ -70,13 +73,13 @@ test('WIZARD-OFFICIAL: встроенный репозиторий скрыва�
   });
 
 /**
- * Открывает список и возвращает текущую единственную модальную оболочку.
+ * Открывает параметры драйвера и возвращает текущую единственную модальную оболочку.
  * Запросы остаются наблюдаемыми, реальные stores обслуживают весь маршрут.
  */
-async function manager(t, options) {
+async function driverSettings(t, options) {
   const card = await mountTrackerBoard(t, options);
 
-  await openTrackerManager(card);
+  await openTrackerDriverSettings(card);
 
   return { ...card, dialog: liveTrackerDialog(card) };
 }
@@ -86,7 +89,7 @@ async function manager(t, options) {
  * Доступная версия берётся из check, а не из предположений интерфейса.
  */
 async function showUpdate(card) {
-  await actionButton(card.dialog, /^К трекерам$/u).trigger('click');
+  await actionButton(card.dialog, /^К настройкам$/u).trigger('click');
   card.state.installed.updateAvailable = true;
   card.state.installed.latest = {
     version: '1.1.0',
@@ -100,7 +103,7 @@ async function showUpdate(card) {
 test('WIZARD-01: подготовка, скрытые подробности, одно предупреждение, явное применение и обновление',
   async (t) => {
     const held = Promise.withResolvers();
-    const card = await manager(t, {
+    const card = await driverSettings(t, {
       handlers: {
         post: async (url) => {
           if (url.endsWith('/apply')) {
@@ -146,9 +149,9 @@ test('WIZARD-01: подготовка, скрытые подробности, о
     assert.equal(card.apiCalls.some((call) => call.url.includes('plugin-installs')), false);
   });
 
-test('WIZARD-02: открытие списка и подтверждения отката не обращается к Git и не меняет версию',
+test('WIZARD-02: открытие настроек и подтверждения отката не обращается к Git и не меняет версию',
   async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (_url, state) => {
         state.installed ??= driverInstallInfo('1.1.0', 2, driverInstallInfo('1.0.0', 1));
@@ -159,10 +162,7 @@ test('WIZARD-02: открытие списка и подтверждения о�
   assert.equal(card.apiCalls.some((call) =>
     call.url.endsWith('/check') || call.url.endsWith('/versions')), false);
 
-  const entry = card.dialog.findAll('.driver-package').find((node) => node.text().includes('Кастомный Б24'));
-
-  await actionButton(entry, /^Другие действия$/u).trigger('click');
-  await actionButton(entry, /^Откатить$/u).trigger('click');
+  await actionButton(card.dialog, /^Откатить$/u).trigger('click');
   await card.flushPromises();
   assert.match(card.dialog.text(), /1\.1\.0 → 1\.0\.0/u);
   assert.equal(card.state.installed.version, '1.1.0');
@@ -179,7 +179,7 @@ test('WIZARD-02: открытие списка и подтверждения о�
 
 test('WIZARD-03: сменившаяся previous отклоняет подтверждённый снимок, новый откат не отправляется',
   async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (_url, state) => {
         state.installed ??= driverInstallInfo('1.1.0', 2, driverInstallInfo('1.0.0', 1));
@@ -193,10 +193,8 @@ test('WIZARD-03: сменившаяся previous отклоняет подтве
       },
     },
   });
-  const entry = card.dialog.findAll('.driver-package').find((node) => node.text().includes('Кастомный Б24'));
 
-  await actionButton(entry, /^Другие действия$/u).trigger('click');
-  await actionButton(entry, /^Откатить$/u).trigger('click');
+  await actionButton(card.dialog, /^Откатить$/u).trigger('click');
   await card.flushPromises();
   await actionButton(card.dialog, /^Откатить$/u).trigger('click');
   await card.flushPromises();
@@ -207,7 +205,7 @@ test('WIZARD-03: сменившаяся previous отклоняет подтве
 });
 
 test('WIZARD-04: потерянный ответ apply проверяется по job, успешная операция не повторяется', async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       post: async (url, _payload, state) => {
         if (url.endsWith('/apply')) {
@@ -235,7 +233,7 @@ test('WIZARD-04: потерянный ответ apply проверяется п
 });
 
 test('WIZARD-05: успех установки сохраняется при отказе последующего чтения каталога', async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (url, state) => {
         if (url.endsWith('/installed') && state.installed) {
@@ -254,7 +252,7 @@ test('WIZARD-05: успех установки сохраняется при о�
 });
 
 test('WIZARD-06: секретный черновик сохраняется между формой и мастером без вложенного модала', async (t) => {
-  const card = await manager(t);
+  const card = await driverSettings(t);
 
   await chooseExternal(card, 'grigdesk-b24');
   await card.wrapper.find('input[type="password"]').setValue('in-memory-draft');
@@ -262,8 +260,7 @@ test('WIZARD-06: секретный черновик сохраняется ме
   await card.flushPromises();
   assert.equal(card.wrapper.findAll('[role="dialog"]').length, 1);
   assert.equal(card.wrapper.find('input[type="password"]').exists(), false);
-  await actionButton(card.dialog, /^К трекерам$/u).trigger('click');
-  await actionButton(card.dialog, /^Подключение доски$/u).trigger('click');
+  await actionButton(card.dialog, /^К настройкам$/u).trigger('click');
   await card.flushPromises();
   assert.equal(card.wrapper.findAll('[role="dialog"]').length, 1);
   assert.equal(card.wrapper.find('input[type="password"]').element.value, 'in-memory-draft');
@@ -271,16 +268,14 @@ test('WIZARD-06: секретный черновик сохраняется ме
 });
 
 test('WIZARD-07: замена ручных правок требует отдельного выбора и подтверждения пакета', async (t) => {
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (_url, state) => {
         state.installed ??= driverInstallInfo('1.0.0', 1, null, { localChanges: true });
       },
     },
   });
-  const entry = card.dialog.findAll('.driver-package').find((node) => node.text().includes('Кастомный Б24'));
 
-  await actionButton(entry, /^Другие действия$/u).trigger('click');
   await actionButton(card.dialog, /^Восстановить из репозитория$/u).trigger('click');
   await card.flushPromises();
   assert.match(card.dialog.text(), /Ручные правки сохранятся в резервной копии/u);
@@ -297,7 +292,7 @@ test('WIZARD-07: замена ручных правок требует отде�
 test('WIZARD-08: потерянный ответ отката повторяет то же намерение и не меняет версии второй раз',
   async (t) => {
   let posted = false;
-  const card = await manager(t, {
+  const card = await driverSettings(t, {
     handlers: {
       get: async (_url, state) => {
         state.installed ??= driverInstallInfo('1.1.0', 2, driverInstallInfo('1.0.0', 1));
@@ -322,9 +317,7 @@ test('WIZARD-08: потерянный ответ отката повторяет
       },
     },
   });
-  const entry = card.dialog.findAll('.driver-package').find((node) => node.text().includes('Кастомный Б24'));
 
-  await actionButton(entry, /^Другие действия$/u).trigger('click');
   await actionButton(card.dialog, /^Откатить$/u).trigger('click');
   await card.flushPromises();
   await actionButton(card.dialog, /^Откатить$/u).trigger('click');
@@ -340,32 +333,34 @@ test('WIZARD-08: потерянный ответ отката повторяет
   assert.match(card.dialog.text(), /Сохранённая версия восстановлена/u);
 });
 
-test('WIZARD-09: сохранённый успешный update не подменяет список драйверов старым результатом', async (t) => {
-  const card = await manager(t, {
-    handlers: {
-      get: async (_url, state) => {
-        state.installed ??= driverInstallInfo('1.1.0', 2, driverInstallInfo('1.0.0', 1), {
-          checkedAt: '2026-01-01T00:00:00.000Z',
-        });
-        state.job ??= driverJob('update', state.installed, 'done', state.installed.previous);
-      },
-    },
-  });
+test('WIZARD-09: завершённые попытки не подменяют новое добавление старым результатом', async (t) => {
+  for (const status of ['done', 'failed', 'cancelled', 'interrupted']) {
+    await t.test(status, async (subtest) => {
+      const card = await driverSettings(subtest, {
+        handlers: {
+          get: async (_url, state) => {
+            state.installed ??= driverInstallInfo('1.1.0', 2);
+            state.job ??= driverJob('update', state.installed, status);
+          },
+        },
+      });
 
-  assert.equal(card.dialog.find('.driver-install__title').text(), 'Трекеры');
-  assert.equal(card.dialog.find('.driver-job').exists(), false);
-  assert.match(card.dialog.text(), /Установлена последняя версия/u);
-  assert.equal(Boolean(actionButton(card.dialog, /^Обновить$/u)), false);
-  assert.equal(card.state.job.status, 'done');
-  assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
-  await actionButton(card.dialog, /^Добавить трекер$/u).trigger('click');
-  await card.flushPromises();
-  assert.equal(card.dialog.find('.driver-sources').exists(), true);
+      assert.equal(card.wrapper.find('[data-role="tracker-install"]').exists(), false);
+      assert.equal(Boolean(actionButton(card.dialog, /^Другие действия$/u)), false);
+      assert.equal(card.apiCalls.some((call) => call.url.endsWith('/jobs/current')), false);
+      await actionButton(card.dialog, /^Добавить трекер$/u).trigger('click');
+      await card.flushPromises();
+      assert.equal(card.dialog.find('.driver-sources').exists(), true);
+      assert.equal(card.dialog.find('.driver-job').exists(), false);
+      assert.equal(card.state.job.status, status);
+      assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
+    });
+  }
 });
 
 test('WIZARD-10: повторный вход восстанавливает неизвестный исход и показывает подтверждённый результат',
   async (t) => {
-    const card = await manager(t, {
+    const card = await driverSettings(t, {
       handlers: {
         post: async (url, _payload, state) => {
           if (url.endsWith('/apply')) {
@@ -386,9 +381,82 @@ test('WIZARD-10: повторный вход восстанавливает не
     await card.flushPromises();
     await card.dialog.find('button[aria-label="Закрыть"]').trigger('click');
     await card.flushPromises();
-    await openTrackerManager(card);
+    await openTrackerDriverSettings(card);
+    await actionButton(card.dialog, /^Проверить результат операции$/u).trigger('click');
+    await card.flushPromises();
     assert.equal(card.dialog.find('.driver-install__title').text(), 'Трекер установлен');
     assert.match(card.dialog.text(), /Установлена версия 1\.0\.0/u);
     assert.equal(card.dialog.find('.driver-steps').exists(), false);
     assert.equal(card.apiCalls.filter((call) => call.url.endsWith('/apply')).length, 1);
   });
+
+test('WIZARD-11: завершение возвращает в настройки драйвера без второго списка', async (t) => {
+  const card = await driverSettings(t);
+
+  await prepareTracker(card);
+  await actionButton(card.dialog, /^Установить$/u).trigger('click');
+  await card.flushPromises();
+  await actionButton(card.dialog, /^Готово$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-install"]').exists(), false);
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+  assert.match(card.wrapper.get('.tracker-settings__driver-heading').text(), /Кастомный Б24/u);
+  assert.equal(Boolean(actionButton(card.dialog, /^Другие действия$/u)), false);
+  assert.equal(card.apiCalls.filter((call) => call.url.endsWith('/apply')).length, 1);
+  assert.equal(card.apiCalls.some((call) => call.url === '/api/trackers/settings'
+    && call.method === 'POST'), false);
+});
+
+test('WIZARD-12: ошибка начального чтения оставляет повтор запрошенного добавления', async (t) => {
+  let unavailable = true;
+  const card = await driverSettings(t, {
+    handlers: {
+      get: async (url) => {
+        if (unavailable && url.endsWith('/jobs/current')) {
+          throw new Error('Состояние установки недоступно');
+        }
+      },
+    },
+  });
+
+  await openTrackerInstaller(card);
+  assert.match(card.dialog.text(), /Состояние установки недоступно/u);
+  assert.equal(card.dialog.find('.driver-sources').exists(), false);
+  unavailable = false;
+  await actionButton(card.dialog, /^Повторить проверку$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.dialog.find('.driver-sources').exists(), true);
+  assert.doesNotMatch(card.dialog.text(), /Состояние установки недоступно/u);
+  assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
+});
+
+test('WIZARD-13: обновление после старого отказа сохраняет цель и возвращается в её настройки', async (t) => {
+  const card = await driverSettings(t, {
+    handlers: {
+      get: async (_url, state) => {
+        state.installed ??= driverInstallInfo('1.0.0', 1, null, {
+          updateAvailable: true,
+          latest: {
+            version: '1.1.0',
+            tag: 'v1.1.0',
+            sha: 'c'.repeat(40),
+          },
+        });
+        state.job ??= driverJob('install', state.installed, 'failed');
+      },
+    },
+  });
+
+  await actionButton(card.dialog, /^Обновить$/u).trigger('click');
+  await card.flushPromises();
+  assert.match(card.dialog.text(), /1\.0\.0\s*→\s*1\.1\.0/u);
+  assert.equal(card.apiCalls.filter((call) => call.url.endsWith('/update')).length, 1);
+  assert.equal(card.apiCalls.some((call) => call.url.endsWith('/apply')), false);
+  await actionButton(card.dialog, /^Назад$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.dialog.find('select').exists(), true);
+  await actionButton(card.dialog, /^Назад$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+  assert.match(card.wrapper.get('.tracker-settings__driver-heading').text(), /Кастомный Б24/u);
+});

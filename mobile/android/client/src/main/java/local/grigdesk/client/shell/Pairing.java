@@ -136,6 +136,54 @@ public final class Pairing {
   }
 
   /**
+   * Обновление маршрута проверяет прежний pin до сети и использует прежний ключ устройства.
+   * Только новый authenticated hello разрешает атомарную замену адресов известного профиля.
+   */
+  public void updateRoutes(String id, String text) throws Exception {
+    JSONObject expected = new JSONObject(store.get(id).toString());
+    JSONObject payload = PhonePairingPayload.decode(text);
+    String fp = expected.getString("fp");
+
+    if (!fp.equals(payload.getJSONObject("server").getString("fp"))) {
+      throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
+    }
+
+    if (payload.getJSONObject("pair").getDouble("exp") <= System.currentTimeMillis()) {
+      throw new IllegalArgumentException(ClientFailure.message("pair_code_invalid", locale));
+    }
+
+    JSONObject candidate = new JSONObject().put("fp", fp).put("direct", payload.getJSONArray("direct"));
+
+    if (payload.has("relay")) {
+      candidate.put("relay", payload.getJSONObject("relay"));
+    }
+
+    X509KeyManager key = keys.get(expected.optInt("clientKey", 1));
+    JSONObject paired;
+
+    try (RoutedUpstream upstream = new RoutedUpstream(candidate, key,
+      new VersionGate(major, minor), (status, code) -> {})) {
+      paired = json(upstream, "/api/client/pair", new JSONObject()
+        .put("code", payload.getJSONObject("pair").getString("code")));
+    }
+
+    try (RoutedUpstream upstream = new RoutedUpstream(candidate, key,
+      new VersionGate(major, minor), (status, code) -> {})) {
+      JSONObject hello = json(upstream, "/api/client/hello", null);
+      JSONObject device = hello.optJSONObject("device");
+
+      if (!fp.equals(paired.getJSONObject("server").optString("fp"))
+        || !fp.equals(hello.optString("fp")) || device == null
+        || expected.has("deviceId") && !expected.getString("deviceId").equals(device.optString("id"))) {
+        throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
+      }
+
+      store.updateRoutes(expected, payload.getJSONArray("direct"), payload.optJSONObject("relay"),
+        device.getString("id"));
+    }
+  }
+
+  /**
    * Управляющий ответ ограничен, а тело привязки никогда не попадает в диагностику.
    * Любой неуспех не создаёт профиль и требует явного исправления человеком.
    */

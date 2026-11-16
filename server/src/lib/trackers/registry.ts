@@ -23,7 +23,7 @@ interface Entry {
 
 export class TrackerRegistry {
   private readonly entries = new Map<string, Entry>();
-  private readonly active = new Set<string>(['own']);
+  private readonly active = new Set<string>();
   private closed = false;
   private readonly contexts = new Map<string, { generation: number; dataRevision: number }>();
   private readonly health = new Map<string, string>();
@@ -102,7 +102,7 @@ export class TrackerRegistry {
 
   /**
    * Системные экземпляры регистрируются до сканирования пользовательской папки.
-   * Файловый пакет никогда не заменяет own или встроенный облачный драйвер.
+   * Файловый пакет проходит проверку манифеста до загрузки.
    */
   register(tracker: TaskTracker, name: string, schema: DriverManifest['settings'] = {}): void {
     this.entries.set(tracker.id, {
@@ -115,7 +115,7 @@ export class TrackerRegistry {
         configured: tracker.isConfigured(),
         capabilities: tracker.capabilities,
         schema,
-        status: tracker.id === 'own' ? 'active' : 'available',
+        status: 'available',
       },
       loaded: false,
       closed: false,
@@ -170,7 +170,7 @@ export class TrackerRegistry {
     const seen = new Map<string, string[]>();
 
     for (const entry of directories) {
-      if (entry.name.startsWith('.') || ['own'].includes(entry.name)) {
+      if (entry.name.startsWith('.')) {
         continue;
       }
 
@@ -320,17 +320,15 @@ export class TrackerRegistry {
 
   /**
    * Выбор доски снимает внешний допуск без выгрузки кешированного ESM.
-   * Собственный источник сохраняет постоянную активность при любом выборе.
+   * Снятие допуска сохраняет пакет для следующего включения.
    */
   deactivate(id: string): void {
-    if (id !== 'own') {
-      this.active.delete(id);
+    this.active.delete(id);
 
-      const entry = this.entries.get(id);
+    const entry = this.entries.get(id);
 
-      if (entry && !entry.closed) {
-        entry.descriptor.status = 'available';
-      }
+    if (entry && !entry.closed) {
+      entry.descriptor.status = 'available';
     }
   }
 

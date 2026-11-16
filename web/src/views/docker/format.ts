@@ -9,12 +9,25 @@ import type {
   DockerImage,
   DockerPort,
 } from '../../../../shared/plugins/docker/dockerContracts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 const UNITS = [
-  { limit: 1024 ** 4, suffix: 'ТБ' },
-  { limit: 1024 ** 3, suffix: 'ГБ' },
-  { limit: 1024 ** 2, suffix: 'МБ' },
-  { limit: 1024, suffix: 'КБ' },
+  { limit: 1024 ** 4, get suffix() {
+    return translateUi('core.formatTB');
+  } },
+  { limit: 1024 ** 3, get suffix() {
+    return translateUi('core.gb');
+  } },
+  { limit: 1024 ** 2, get suffix() {
+    return translateUi('core.formatMBce2d0c');
+  } },
+  { limit: 1024, get suffix() {
+    return translateUi('core.formatKB4a0e8a');
+  } },
 ];
 
 /**
@@ -25,7 +38,7 @@ export function formatSize(value: number | null | undefined): string {
   const bytes = Number(value);
 
   if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 Б';
+    return translateUi('core.format0B');
   }
 
   for (const unit of UNITS) {
@@ -36,7 +49,7 @@ export function formatSize(value: number | null | undefined): string {
     }
   }
 
-  return `${Math.round(bytes)} Б`;
+  return translateUi('core.formatB', { value: Math.round(bytes) });
 }
 
 /**
@@ -57,24 +70,26 @@ export function formatAge(iso: string | null | undefined): string {
   const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
 
   if (minutes < 60) {
-    return `${minutes} мин`;
+    return translateUi('core.coreMinutesMin', { minutes: minutes });
   }
 
   const hours = Math.round(minutes / 60);
 
   if (hours < 48) {
-    return `${hours} ч`;
+    return translateUi('core.formatH', { hours: hours });
   }
 
   const days = Math.round(hours / 24);
 
   if (days < 60) {
-    return `${days} дн`;
+    return translateUi('core.formatD', { days: days });
   }
 
   const months = Math.round(days / 30);
 
-  return months < 24 ? `${months} мес` : `${Math.round(months / 12)} г`;
+  return months < 24
+    ? translateUi('core.formatMo', { months: months })
+    : translateUi('core.formatYr', { value: Math.round(months / 12) });
 }
 
 /**
@@ -98,13 +113,27 @@ export function formatContainerImage(image: string): string {
 }
 
 const STATE_LABELS: Record<string, string> = {
-  running: 'работает',
-  exited: 'остановлен',
-  created: 'создан',
-  restarting: 'перезапускается',
-  paused: 'на паузе',
-  dead: 'мёртв',
-  removing: 'удаляется',
+  get running() {
+    return translateUi('core.formatRunning');
+  },
+  get exited() {
+    return translateUi('core.dockerOstanovlen');
+  },
+  get created() {
+    return translateUi('core.dockerSozdan');
+  },
+  get restarting() {
+    return translateUi('core.formatRestarting');
+  },
+  get paused() {
+    return translateUi('core.formatPaused');
+  },
+  get dead() {
+    return translateUi('core.formatDead');
+  },
+  get removing() {
+    return translateUi('core.formatRemoving');
+  },
 };
 
 /**
@@ -145,5 +174,5 @@ export function formatTags(image: DockerImage): string {
     return image.tags.join(', ');
   }
 
-  return `<без тега> ${image.shortId}`;
+  return translateUi('core.formatUntagged', { shortId: image.shortId });
 }

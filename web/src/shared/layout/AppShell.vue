@@ -151,13 +151,16 @@
       <div class="status">
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <BoardTimerPopover
-          v-if="topbarTimerTasks.length"
+          v-if="topbarTimerTasks.length || boardStaleNotice || timerActionError"
           :tasks="topbarTimerTasks"
+          :stale-notice="boardStaleNotice"
+          :refreshing="boardStore.loading"
           :worked-today-hours="workedTodayHours"
           :busy-task-id="timerActionTaskId ?? undefined"
           :error="timerActionError"
           @open-task="openBoardTask"
           @open-board="openBoard"
+          @retry="boardStore.load(true)"
           @toggle-timer="toggleBoardTimer"
         />
         </PhoneShellPortal>
@@ -277,10 +280,10 @@
                     v-tooltip="usagePauseOf(p)
                       ? t('core.theVendorRequestedAPauseNextCheck', { value1: usagePauseOf(p) })
                       : t('core.checkLimitsNow')"
-                    :disabled="!!usagePauseOf(p)"
-                    :loading="prov.usageRefreshing"
+                    :disabled="!!usagePauseOf(p) || prov.usageRefreshing && prov.usageRefreshingId !== p.id"
+                    :loading="prov.usageRefreshing && prov.usageRefreshingId === p.id"
                     :loading-label="t('core.checking')"
-                    @click="prov.refreshUsage()"
+                    @click="prov.refreshUsage(p.id)"
                   >
                     <UiRefreshIcon />
                   </UiIconButton>
@@ -300,7 +303,6 @@
                 </span>
               </template>
               <template #default="{ close }">
-                <AccessProfileMenu v-if="p.accessProfiles?.supported" :provider-id="p.id" />
                 <span class="ptip">
                   <!-- В сводке остаются ошибки установки; успешный результат и готовность
                        терминала доступны в общем окне установки и настройках. -->
@@ -332,6 +334,10 @@
                     >
                       {{ usageOf(p)!.action!.label }}
                     </UiButton>
+                  </span>
+                  <ProviderUsageTransportNotice :provider-id="p.id" />
+                  <span v-if="prov.usageAutoRefresh === false" class="pu-reset">
+                    {{ t('core.usageAutoRefreshOff') }}
                   </span>
                   <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
                   <span v-if="p.usagePresentation?.freshness" class="pu-reset"
@@ -387,6 +393,9 @@
                     />
                   </span>
                 </span>
+              </template>
+              <template v-if="p.accessProfiles?.supported" #footer>
+                <AccessProfileMenu :provider-id="p.id" />
               </template>
             </UiTopbarPanel>
           </span>
@@ -464,7 +473,7 @@
 import { taskReferenceKey, isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import PluginIcon from '../PluginIcon.vue';
 
-import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
+import { selectTopbarTimerTasks } from '../boardTimerTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
@@ -472,6 +481,7 @@ import { uiLocale } from '../../ui.ts';
 import { t } from '../../ui.ts';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { isTransientTrackerReadFailure } from '../trackerReadRecovery.ts';
 import { failureText } from '../apiClient.ts';
 import type { BoardTask } from '../boardContracts.ts';
 
@@ -519,6 +529,7 @@ import { localizePluginCategory } from '../../features/settings/metadataLocale.t
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
+import { refreshPipelineWidget, disposePipelineWidgetRefresh } from '../widgetRefresh.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
 import { useGrigDeskUpdateStore } from '../../stores/grigdeskUpdate.ts';
 import { useApplicationUpdateStore } from '../../stores/applicationUpdate.ts';
@@ -548,6 +559,7 @@ import NavigationCount from './NavigationCount.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
 import ProviderIcon from '../ProviderIcon.vue';
+import ProviderUsageTransportNotice from '../../features/providers/ProviderUsageTransportNotice.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
 import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
@@ -666,6 +678,7 @@ const usageNow = ref(Date.now());
 const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale, {
   now: usageNow.value,
   deliveryStale: prov.usageTransport.deliveryStale,
+  manualOnly: prov.usageAutoRefresh === false,
 });
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
@@ -795,6 +808,7 @@ let stopAlertLinks: (() => void) | null = null;
 
 setAlertTargetOpener((target) => openAlertTarget(target, alertLinkDeps));
 onUnmounted(() => {
+  disposePipelineWidgetRefresh();
   stopAlertLinks?.();
   setAlertTargetOpener(null);
 });
@@ -805,16 +819,31 @@ const taskStore = useTasksStore();
 const recentPausedTimerIds = ref<string[]>([]);
 const timerActionTaskId = ref<string | null>(null);
 const timerActionError = ref('');
-const boardTasks = computed(() => boardStore.data?.multiSource || boardSupportsTimer(boardStore.data)
-  ? boardStore.data?.tasks || [] : []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
-const topbarTimerTasks = computed(() => {
-  const recentIds = new Set(recentPausedTimerIds.value);
+const topbarTimerTasks = computed(() => selectTopbarTimerTasks(
+  boardStore.data?.multiSource || boardSupportsTimer(boardStore.data) ? boardStore.data : null,
+  new Set(recentPausedTimerIds.value),
+));
 
-  return boardTasks.value.filter((task) => (
-    task.timerRunning || recentIds.has(taskReferenceKey(task))
-  ));
+// Подпись устаревания считается от последнего успеха отказавшей ветки; число минут
+// обновляется при событиях стора, между ними остаётся прежним (принятое упрощение).
+const boardStaleNotice = computed(() => {
+  if (!boardStore.refreshProblem) {
+    return '';
+  }
+
+  const since = boardStore.staleSinceMs;
+
+  if (!since) {
+    return t('core.boardTrackerUnavailable');
+  }
+
+  const observed = boardStore.lastRefreshAttemptAt || boardStore.loadedAt;
+  const minutes = Math.max(1, Math.floor((observed - since) / 60000));
+
+  return t('core.boardTimersStale', { minutes });
 });
+
 
 /**
  * Таймер передаёт полную ссылку в прежнюю границу размещения карточки.
@@ -845,6 +874,12 @@ async function toggleBoardTimer(task: BoardTask) {
     return;
   }
 
+  if (useTrackersStore().error) {
+    timerActionError.value = t('core.taskReadOnly');
+
+    return;
+  }
+
   const taskId = taskReferenceKey(task);
   const action = task.timerRunning ? 'pause' : 'start';
   const wasRemembered = recentPausedTimerIds.value.includes(taskId);
@@ -867,7 +902,12 @@ async function toggleBoardTimer(task: BoardTask) {
       recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
     }
 
-    timerActionError.value = failureText(error, t('core.couldNotToggleTheTimer'));
+    if (isTransientTrackerReadFailure(error)) {
+      timerActionError.value = t('core.trackerActionUnknown', { reason: failureText(error) });
+      void boardStore.load(true);
+    } else {
+      timerActionError.value = failureText(error, t('core.couldNotToggleTheTimer'));
+    }
   } finally {
     timerActionTaskId.value = null;
   }
@@ -898,6 +938,7 @@ watch(() => props.active, (active) => {
   void prov.load(false, { reason: 'startup' });
   void prov.loadUsage();
   notifyWatch.start();
+  refreshPipelineWidget();
 }, { immediate: true });
 
 const pipelineTopbar = computed(() => {
@@ -1132,9 +1173,6 @@ const { connected } = useSse((name, data) => {
     void boardStore.load(true);
   }
 
-  if (name === 'grigdesk-tasks-changed' || name === 'hello') {
-    void useGrigdeskTasksStore().load();
-  }
 
   if (name === 'mobile-changed' && phoneAccess.open) {
     void phoneAccess.refresh().catch(() => {});
@@ -1143,6 +1181,7 @@ const { connected } = useSse((name, data) => {
 
   if (name === 'state-change') {
     notifyWatch.check();
+    refreshPipelineWidget();
   }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
   if (name === 'providers-update') {
@@ -1154,7 +1193,9 @@ const { connected } = useSse((name, data) => {
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
   if (name === 'providers-usage') {
-    prov.applyUsage(isRecord(data) ? data.usage : undefined);
+    prov.applyUsage(isRecord(data) ? data.usage : undefined,
+      isRecord(data) ? data.autoRefresh : undefined,
+      isRecord(data) ? data.autoRefreshRevision : undefined);
   }
   if (name === 'grigdesk-update') {
     grigDeskUpdate.load({ quiet: true });

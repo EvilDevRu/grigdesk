@@ -18,8 +18,8 @@
         </span>
         <UiIconButton
           role="embedded"
-          label="Закрыть диф"
-          v-tooltip="'Закрыть (Esc)'"
+          :label="t('core.diffZakrytDif')"
+          v-tooltip="t('core.docZakrytEsc')"
           @click="close('action')"
         >
           <svg

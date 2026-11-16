@@ -1,4 +1,9 @@
 import type { UsageSummaryItem } from '../../features/providers/providerUsageSummary.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 // Что из сведений справа в строке хода видно при данной ширине блока и что уходит во
 // всплывашку «+N». Одно правило на оба вопроса: счётчик и список всплывашки всегда
@@ -80,7 +85,7 @@ export function statusOverflow(
   if (!layout.model) {
     entries.push({
       key: 'model',
-      label: 'Модель',
+      label: t('core.chatOptionModel'),
       value: `${facts.modelKind} ${facts.modelLabel}`.trim(),
     });
   }
@@ -88,7 +93,7 @@ export function statusOverflow(
   if (!layout.cwd && facts.cwd) {
     entries.push({
       key: 'cwd',
-      label: 'Папка',
+      label: t('core.workdirFolder'),
       value: facts.cwd,
     });
   }
@@ -96,7 +101,7 @@ export function statusOverflow(
   if (facts.extraDirs.length) {
     entries.push({
       key: 'extra-dirs',
-      label: 'Доп. каталоги',
+      label: t('core.chatDopKatalogi'),
       value: facts.extraDirs.join(', '),
     });
   }

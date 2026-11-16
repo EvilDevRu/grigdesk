@@ -199,6 +199,8 @@ export class TelegramPultWatch {
 
   _again: boolean;
 
+  _controller: AbortController | null;
+
   _timer: ReturnType<typeof setTimeout> | null;
 
   _interval: ReturnType<typeof setInterval> | null;
@@ -266,6 +268,7 @@ export class TelegramPultWatch {
     this._summary = null;
     this._inflight = null;
     this._again = false;
+    this._controller = null;
     this._timer = null;
     this._interval = null;
     this._unsubscribe = null;
@@ -282,8 +285,14 @@ export class TelegramPultWatch {
     void this.check();
   }
 
+  /**
+   * Синхронно запрещает новый обход и отменяет текущую сеть его собственным сигналом.
+   * Обещание завершается после подтверждения сетевого close и сохранения остатка state.
+   */
   async stop(): Promise<void> {
     this._stopped = true;
+    this._again = false;
+    this._controller?.abort();
     if (this._interval) clearInterval(this._interval);
     this._interval = null;
     if (this._timer) clearTimeout(this._timer);
@@ -322,45 +331,67 @@ export class TelegramPultWatch {
     void this._persistState();
   }
 
+  /**
+   * Записывает только карточки, сохраняя поля действий пульта через merge хранилища.
+   * Отпечаток обновляется после записи: неудача не блокирует следующий flush.
+   */
   async _persistState(): Promise<void> {
     if (!this._store || !this._state) return;
     const snapshot = JSON.stringify(this._state.cards);
     if (snapshot === this._persisted) return;
-    this._persisted = snapshot;
+
     try {
       // Merge-запись: screen/sent действий пульта это не трогает.
       await this._store.write({ cards: this._state.cards });
+      this._persisted = snapshot;
     } catch (error) {
       this.log.warn?.({ code: errorCode(error) }, 'telegram-pult: state не записался');
     }
   }
 
-  /** Обходы сериализованы; вызов во время обхода дозаказывает ещё один круг. */
+  /**
+   * Одновременно работает один обход со своим сигналом отмены.
+   * Запрос ещё одного круга допустим только до stop; после него check не ставит работу.
+   */
   check(): Promise<void> {
+    if (this._stopped) {
+      return Promise.resolve();
+    }
+
     if (this._inflight) {
       this._again = true;
       return this._inflight;
     }
+
+    const controller = new AbortController();
+
+    this._controller = controller;
     this._inflight = (async () => {
       try {
         do {
           this._again = false;
-          await this._checkOnce();
+          await this._checkOnce(controller.signal);
         } while (this._again && !this._stopped);
       } catch (error) {
-        this.log.warn?.(
-          { code: errorCode(error) },
-          `telegram-pult: обход сорвался: ${errorText(error) || 'unknown'}`,
-        );
+        if (!controller.signal.aborted) {
+          this.log.warn?.({ code: errorCode(error) }, 'telegram-pult: обход сорвался');
+        }
       } finally {
         this._inflight = null;
+        this._controller = null;
       }
     })();
     return this._inflight;
   }
 
-  async _checkOnce(): Promise<void> {
+  /**
+   * Обход владеет своим сигналом: stop отменяет сеть и только его задания очереди.
+   * Частично подтверждённые изменения сохраняются даже при прерывании следующих карточек.
+   */
+  async _checkOnce(signal: AbortSignal): Promise<void> {
     if (!await this.isEnabled()) return;
+
+    signal.throwIfAborted();
 
     let lease: WatchLease;
 
@@ -371,8 +402,12 @@ export class TelegramPultWatch {
       throw error;
     }
 
+    let next: Record<string, WatchCard> | null = null;
+
     try {
       if (!lease.isCurrent()) return;
+
+      signal.throwIfAborted();
 
       let settings: Payload;
 
@@ -386,6 +421,9 @@ export class TelegramPultWatch {
 
         return;
       }
+
+      signal.throwIfAborted();
+
       // Пульт не подтверждён — не ходим даже в API GrigDesk: выключенный пульт
       // не должен создавать фоновых обходов.
       if (settings.pultConfirmedAtMs == null || settings.pultChatId == null) {
@@ -430,13 +468,19 @@ export class TelegramPultWatch {
       }
 
       const desired = await this._desired();
+
+      signal.throwIfAborted();
+
       if (!lease.isCurrent()) return;
 
       const chatId = settings.pultChatId;
       const cards = (this._state as PultStateSnapshot).cards;
-      const next: Record<string, WatchCard> = {};
+
+      next = { ...cards };
 
       for (const [key, want] of desired) {
+        signal.throwIfAborted();
+
         const have = cards[key];
         // Живая карточка доехавшего прогона в исход НЕ правится: рядом уходит
         // done: с тем же итогом, а сама live удаляется отдельным проходом ниже —
@@ -478,9 +522,11 @@ export class TelegramPultWatch {
               text: want.text,
               link_preview_options: { is_disabled: true },
               reply_markup: { inline_keyboard: want.keyboard || [] },
-            }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
+            }, { timeoutMs: CALL_TIMEOUT_MS, signal }), { priority: 'background', signal });
             next[key] = { ...have, ...meta, editedAt: this.now() };
           } catch (error) {
+            signal.throwIfAborted();
+
             if (isUnchangedEdit(error)) {
               // Текст на экране и так этот: правка не нужна, состояние актуально.
               next[key] = { ...have, ...meta, editedAt: this.now() };
@@ -497,16 +543,24 @@ export class TelegramPultWatch {
           next[key] = { messageId: null, at: this.now(), ...meta };
           continue;
         }
+
+        let sendStarted = false;
+
         try {
-          const sent = await this.queue.push(() => lease.context.botApi.callBotApi(token, 'sendMessage', {
-            chat_id: chatId,
-            text: want.text,
-            link_preview_options: { is_disabled: true },
-            // Живая карточка и служебный исход не будят телефон: звонить имеет
-            // право только то, что действительно стоит на человеке.
-            ...(want.silent === true ? { disable_notification: true } : {}),
-            ...(want.keyboard ? { reply_markup: { inline_keyboard: want.keyboard } } : {}),
-          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
+          const sent = await this.queue.push(() => {
+            signal.throwIfAborted();
+            sendStarted = true;
+
+            return lease.context.botApi.callBotApi(token, 'sendMessage', {
+              chat_id: chatId,
+              text: want.text,
+              link_preview_options: { is_disabled: true },
+              // Живая карточка и служебный исход не будят телефон: звонить имеет
+              // право только то, что действительно стоит на человеке.
+              ...(want.silent === true ? { disable_notification: true } : {}),
+              ...(want.keyboard ? { reply_markup: { inline_keyboard: want.keyboard } } : {}),
+            }, { timeoutMs: CALL_TIMEOUT_MS, signal });
+          }, { priority: 'background', signal });
           const messageId = Number((sent as Payload)?.message_id);
           next[key] = {
             messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null,
@@ -515,6 +569,16 @@ export class TelegramPultWatch {
             ...meta,
           };
         } catch (error) {
+          if (signal.aborted && sendStarted) {
+            next[key] = {
+              messageId: null,
+              delivery: 'unknown',
+              at: this.now(),
+              ...meta,
+            };
+          }
+
+          signal.throwIfAborted();
           // Best effort, at most once: не записываем как отправленное — карточка
           // уйдёт следующим обходом. Авторетрая внутри обхода нет намеренно.
           this.log.warn?.(
@@ -526,19 +590,29 @@ export class TelegramPultWatch {
 
       // Повод ушёл: карточка удаляется из чата по сохранённому message_id.
       for (const [key, card] of Object.entries(cards)) {
+        signal.throwIfAborted();
+
         if (desired.has(key)) continue;
-        if (!card.messageId) continue; // silent-карточка: сообщений не было, забыть достаточно
+        if (!card.messageId || card.sticky) {
+          delete next[key];
+          continue;
+        }
         // Липкая карточка — единственная запись об исходе прогона: удалить её
         // значило бы стереть, чем всё кончилось. Уход из desired для неё значит
         // лишь «задачу заархивировали» — ключ забывается, сообщение остаётся.
-        if (card.sticky) continue;
         try {
           await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
             chat_id: chatId,
             message_id: card.messageId,
-          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
+          }, { timeoutMs: CALL_TIMEOUT_MS, signal }), { priority: 'background', signal });
+          delete next[key];
         } catch (error) {
-          if (isMissingMessage(error)) continue; // человек уже удалил сам — забыть достаточно
+          signal.throwIfAborted();
+
+          if (isMissingMessage(error)) {
+            delete next[key];
+            continue;
+          } // человек уже удалил сам — забыть достаточно
           // Не удалилось — не записываем как успех: карточка остаётся в state
           // и удаление повторится следующим обходом. Обход это не роняет.
           next[key] = card;
@@ -552,6 +626,8 @@ export class TelegramPultWatch {
       // Прогон доехал: done: ушёл отдельным сообщением, и живая карточка рядом —
       // дубль того же итога. Удаляем её, но ТОЛЬКО когда done: реально отправлен.
       for (const [key, card] of Object.entries(next)) {
+        signal.throwIfAborted();
+
         if (!key.startsWith('done:')) continue;
         const liveKey = `live:${key.slice(5)}`;
         const live = next[liveKey];
@@ -573,9 +649,11 @@ export class TelegramPultWatch {
               text: want.text,
               link_preview_options: { is_disabled: true },
               reply_markup: { inline_keyboard: [] },
-            }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
+            }, { timeoutMs: CALL_TIMEOUT_MS, signal }), { priority: 'background', signal });
             next[liveKey] = { ...live, kind: 'done', sig: null, hash: textHash(want.text), editedAt: this.now() };
           } catch (error) {
+            signal.throwIfAborted();
+
             if (isUnchangedEdit(error)) {
               next[liveKey] = { ...live, kind: 'done', sig: null, hash: textHash(want.text), editedAt: this.now() };
               continue;
@@ -594,14 +672,17 @@ export class TelegramPultWatch {
           }
           continue;
         }
+
         try {
           await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
             chat_id: chatId,
             message_id: live.messageId,
-          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
+          }, { timeoutMs: CALL_TIMEOUT_MS, signal }), { priority: 'background', signal });
           // Надгробие: messageId null — повторной отправки и правки не будет.
           next[liveKey] = { ...live, messageId: null };
         } catch (error) {
+          signal.throwIfAborted();
+
           if (isMissingMessage(error)) {
             next[liveKey] = { ...live, messageId: null };
             continue;
@@ -614,9 +695,12 @@ export class TelegramPultWatch {
         }
       }
 
-      this._state = { ...(this._state as PultStateSnapshot), cards: next };
-      await this._persistState();
     } finally {
+      if (next) {
+        this._state = { ...(this._state as PultStateSnapshot), cards: next };
+        await this._persistState();
+      }
+
       await lease?.release?.();
     }
   }
@@ -832,7 +916,13 @@ export class TelegramPultWatch {
     }
   }
 
+  /**
+   * Не запускает следующую локальную операцию остановленного обхода.
+   * Ответ inject проверяется отдельно от transport ошибок Telegram.
+   */
   async _api(method: string, url: string, payload?: unknown): Promise<unknown> {
+    this._controller?.signal.throwIfAborted();
+
     const res = await this.callApi(method, url, payload) as {
       statusCode?: number;
       body?: unknown;

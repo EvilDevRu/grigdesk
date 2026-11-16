@@ -4,10 +4,10 @@
     :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined" :class="`m-${pane}`" :style="layoutStyle">
     <ChatList @open="pane = 'chat'" />
     <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
-         aria-label="Ширина списка чатов"
+         :aria-label="t('core.chatShirinaSpiskaChatov')"
          :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
          :aria-valuenow="Math.round(listWidth ?? LIST_DEF_W)"
-         v-tooltip="'Потяни — ширина списка. Двойной клик — вернуть обычную'"
+         v-tooltip="t('core.chatPotyaniShirinaSpiskaDvoynoy')"
          @pointerdown.prevent="startListResize" @pointermove.prevent="moveListResize"
          @pointerup.prevent="finishListResize" @pointercancel.prevent="cancelListResize"
          @dblclick="resetListWidth" @keydown="onListResizeKey">
@@ -29,7 +29,7 @@ import { useDockViewport } from '../shared/tools/viewport.ts';
 import ChatList from './chat/ChatList.vue';
 import ChatLoadingPreview from './chat/ChatLoadingPreview.vue';
 import ChatSession from './chat/ChatSession.vue';
-import { vTooltip } from '../ui';
+import { vTooltip, t } from '../ui';
 
 // Рабочее место агентов в телеграм-раскладке: слева список чатов, справа активный чат.
 const chat = useChatStore();

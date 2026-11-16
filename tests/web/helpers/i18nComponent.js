@@ -84,6 +84,18 @@ export async function i18nComponent(t, options = {}) {
       },
       '/api/system/launcher': data.launcher,
       '/api/system/server': data.server,
+      '/api/system/vpn-gate': {
+        requireVpn: false,
+        iface: '',
+        probe: '',
+        defaults: { probe: '1.1.1.1' },
+        restartRequired: false,
+        active: {
+          requireVpn: false,
+          iface: '',
+          probe: '',
+        },
+      },
       '/api/system/version': data.release,
       '/api/mobile/status': data.mobile,
       '/api/chat/sessions': data.sessions,

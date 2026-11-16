@@ -1,17 +1,12 @@
 <template>
   <div class="source" data-testid="showcase-source">
-    <p class="source__intro">
-      Что модель прочитает при разборе. По умолчанию — {{ defaultText }}
+    <p class="source__intro"> {{ t('core.showcaseChtoModelProchitaetPri') }} {{ defaultText }}
     </p>
 
-    <UiInlineMessage v-if="blocked" tone="warning">
-      Стенд недоступен — выбор нельзя применить, пока он не вернётся.
-    </UiInlineMessage>
+    <UiInlineMessage v-if="blocked" tone="warning"> {{ t('core.showcaseStendNedostupenVyborNelzya') }} </UiInlineMessage>
 
     <!-- Чужая правка выбора (другая вкладка) не затирает то, что человек уже набрал. -->
-    <UiInlineMessage v-if="externalChange" tone="warning" data-role="source-external">
-      Сохранённый выбор изменился, пока вы его правили. Ваш черновик не применён.
-      <UiButton variant="ghost" :disabled="locked" @click="resetDraft">Вернуть сохранённый</UiButton>
+    <UiInlineMessage v-if="externalChange" tone="warning" data-role="source-external"> {{ t('core.showcaseSohranennyyVyborIzmenilsyaPoka') }} <UiButton variant="ghost" :disabled="locked" @click="resetDraft">{{ t('core.showcaseVernutSohranennyy') }}</UiButton>
     </UiInlineMessage>
 
     <div class="source__fields">
@@ -20,22 +15,15 @@
         :disabled="locked || !options?.taskAvailable"
         data-testid="showcase-source-task"
         @update:checked="setTask"
-      >
-        Текст задачи из портала
-      </UiCheckbox>
+      > {{ t('core.showcaseTekstZadachiIzPortala') }} </UiCheckbox>
       <UiCheckbox
         :checked="code"
         :disabled="locked"
         data-testid="showcase-source-code"
         @update:checked="setCode"
-      >
-        Показывать модели код изменений
-      </UiCheckbox>
-      <p class="source__hint">
-        Без кода модель видит описания коммитов и список файлов — это помогает, когда
-        изменения огромные или шумные.
-      </p>
-      <UiField label="Своими словами" hint="Что показать и на что сделать упор. Необязательно.">
+      > {{ t('core.showcasePokazyvatModeliKodIzmeneniy') }} </UiCheckbox>
+      <p class="source__hint"> {{ t('core.showcaseBezKodaModelVidit') }} </p>
+      <UiField :label="t('core.showcaseSvoimiSlovami')" :hint="t('core.showcaseChtoPokazatINa')">
         <UiTextarea
           :model-value="note"
           rows="3"
@@ -47,14 +35,12 @@
       </UiField>
     </div>
 
-    <UiLoadingState v-if="loading && !options" label="Читаю историю репозиториев стенда…"
+    <UiLoadingState v-if="loading && !options" :label="t('core.showcaseChitayuIstoriyuRepozitorievStenda')"
                     :failed="Boolean(error)">
       <div class="source-loading"><UiSkeletonLayout layout="list" :header="false" /></div>
     </UiLoadingState>
     <UiInlineMessage v-else-if="error" tone="warning">{{ error }}</UiInlineMessage>
-    <p v-else-if="options && !options.repos.length" class="source__hint">
-      У стенда нет репозиториев — разбор пойдёт по задаче и вашему тексту.
-    </p>
+    <p v-else-if="options && !options.repos.length" class="source__hint"> {{ t('core.showcaseUStendaNetRepozitoriev') }} </p>
 
     <!-- Коммиты — по линии ветки, свежие сверху. Слияние видно, но не выбирается: его
          патч смешивает чужую ветку с разрешением конфликтов. Выбор вне списка — ниже
@@ -63,11 +49,11 @@
       v-for="repo in options?.repos ?? []"
       :key="`${repo.name}:${listVersion}`"
       class="source__repo"
-      :aria-label="`Репозиторий ${repo.name}`"
+      :aria-label="t('core.showcaseRepozitoriyName', { name: repo.name })"
     >
       <div class="source__repo-head">
         <strong>{{ repo.name }}</strong>
-        <span class="source__meta">{{ repo.branch ? `ветка ${repo.branch}` : 'ветка не определена' }}</span>
+        <span class="source__meta">{{ repo.branch ? t('core.showcaseVetkaBranch', { branch: repo.branch }) : t('core.showcaseVetkaNeOpredelena') }}</span>
       </div>
       <UiInlineMessage v-if="repo.error" tone="warning">{{ repo.error }}</UiInlineMessage>
       <ul class="source__list">
@@ -77,9 +63,7 @@
             :disabled="locked || (!selectionOf(repo.name).work && repo.workFiles === 0)"
             :data-testid="`showcase-source-work-${repo.name}`"
             @update:checked="setWork(repo.name, $event)"
-          >
-            Незакоммиченные правки ·
-            {{ repo.error ? 'не удалось проверить' : repo.workFiles ? `файлов: ${repo.workFiles}` : 'нет' }}
+          > {{ t('core.showcaseNezakommichennyePravki') }} {{ repo.error ? t('core.showcaseNeUdalosProverit') : repo.workFiles ? t('core.showcaseFaylovWorkfiles', { workFiles: repo.workFiles }) : t('core.showcaseNet') }}
           </UiCheckbox>
         </li>
         <li v-for="commit in repo.commits" :key="commit.id">
@@ -101,7 +85,7 @@
             @update:checked="setCommit(repo.name, row.id, $event)"
           >
             <span class="source__commit">
-              <code>{{ row.id.slice(0, 7) }}</code> {{ row.subject ?? 'описание недоступно' }}
+              <code>{{ row.id.slice(0, 7) }}</code> {{ row.subject ?? t('core.showcaseOpisanieNedostupno') }}
             </span>
           </UiCheckbox>
           <span class="source__meta">{{ OUTSIDE_TEXT[row.state] }}</span>
@@ -114,36 +98,25 @@
       :key="`missing:${name}`"
       class="source__repo"
       data-role="source-missing"
-      :aria-label="`Репозиторий ${name}`"
+      :aria-label="t('core.showcaseRepozitoriyName', { name })"
     >
       <div class="source__repo-head">
         <strong>{{ name }}</strong>
-        <span class="source__meta">больше не у стенда</span>
+        <span class="source__meta">{{ t('core.showcaseBolsheNeUStenda') }}</span>
       </div>
-      <p class="source__hint">
-        Репозиторий остался в сохранённом выборе, но стенд его больше не называет: разбор
-        с ним не пройдёт.
-      </p>
+      <p class="source__hint"> {{ t('core.showcaseRepozitoriyOstalsyaVSohranennom') }} </p>
       <UiButton
         variant="ghost"
         :disabled="locked"
         :data-testid="`showcase-source-drop-${name}`"
         @click="dropRepo(name)"
-      >
-        Убрать из выбора
-      </UiButton>
+      > {{ t('core.showcaseUbratIzVybora') }} </UiButton>
     </section>
 
     <div class="source__actions">
-      <UiButton variant="ghost" :loading="loading" :disabled="locked" @click="emit('reload')">
-        Обновить список
-      </UiButton>
-      <UiButton variant="ghost" :disabled="locked || repos === null" @click="resetRepos">
-        Коммиты по умолчанию
-      </UiButton>
-      <UiButton variant="ghost" :disabled="locked || !options?.repos.length" @click="clearRepos">
-        Снять все
-      </UiButton>
+      <UiButton variant="ghost" :loading="loading" :disabled="locked" @click="emit('reload')"> {{ t('core.browserRefreshOwners') }} </UiButton>
+      <UiButton variant="ghost" :disabled="locked || repos === null" @click="resetRepos"> {{ t('core.showcaseKommityPoUmolchaniyu') }} </UiButton>
+      <UiButton variant="ghost" :disabled="locked || !options?.repos.length" @click="clearRepos"> {{ t('core.showcaseSnyatVse') }} </UiButton>
       <UiButton
         variant="solid"
         tone="accent"
@@ -155,14 +128,12 @@
         {{ applyLabel }}
       </UiButton>
     </div>
-    <p class="source__hint">
-      «Коммиты по умолчанию» возвращает только выбор коммитов — пожелание и галочки выше остаются.
-    </p>
+    <p class="source__hint"> {{ t('core.showcaseKommityPoUmolchaniyuVozvraschaet') }} </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
+import { UiSkeletonLayout, t, messageRef, uiLocale } from '../../ui';
 
 import { computed, ref, watch } from 'vue';
 
@@ -211,14 +182,21 @@ type OutsideRow = Omit<ShowcaseSourceOutsideCommit, 'state'> & {
 };
 
 const OUTSIDE_TEXT: Record<OutsideRow['state'], string> = {
-  available: 'глубже показанного списка',
-  outdated: 'пропал из истории — снимите или выберите заново',
-  unavailable: 'история репозитория не читается',
-  local: 'вне списка — будет проверен при применении',
+  get available() {
+    return t('core.showcaseGlubzhePokazannogoSpiska');
+  },
+  get outdated() {
+    return t('core.showcasePropalIzIstoriiSnimite');
+  },
+  get unavailable() {
+    return t('core.showcaseIstoriyaRepozitoriyaNeChitaetsya');
+  },
+  get local() {
+    return t('core.showcaseVneSpiskaBudetProveren');
+  },
 };
 
-const NARROWING_TEXT = 'Умолчание читает всю ветку — и коммиты глубже показанных 50, и изменения '
-  + 'слияний. После отметок разбор прочитает только отмеченные коммиты и правки. Перейти к отметкам?';
+const NARROWING_TEXT = messageRef('core.showcaseUmolchanieChitaetVsyuVetku');
 
 // Черновик. Задача — null, пока человек её не трогал: тогда она следует умолчанию списка,
 // который может прийти позже введённого текста.
@@ -240,13 +218,12 @@ const locked = computed(() => props.busy || confirmingRepos.value);
 
 const defaultText = computed(() => (
   props.project.ref.kind === 'project'
-    ? 'изменения не читаются: отметьте коммиты, о которых рассказать.'
-    : 'вся ветка от главной, включая изменения слияний, и незакоммиченные правки; '
-      + 'в списке — последние 50 коммитов.'
+    ? t('core.showcaseIzmeneniyaNeChitayutsyaOtmette')
+    : t('core.showcaseVsyaVetkaOtGlavnoy')
 ));
 
 const applyLabel = computed(() => (
-  props.project.scenes.length ? 'Разобрать по этому выбору' : 'Снять ролик'
+  props.project.scenes.length ? t('core.showcaseRazobratPoEtomuVyboru') : t('core.showcaseSnyatRolik')
 ));
 
 const noteMax = computed(() => props.options?.noteMax ?? SHOWCASE_SOURCE_NOTE_MAX);
@@ -374,8 +351,8 @@ async function changeRepos(update: (list: ShowcaseStorySourceRepo[]) => Showcase
 
     try {
       accepted = await confirmDialog(NARROWING_TEXT, {
-        title: 'Сузить выбор',
-        okText: 'Отметить',
+        title: t('core.showcaseSuzitVybor'),
+        okText: t('core.showcaseOtmetit'),
       });
     } finally {
       confirmingRepos.value = false;
@@ -461,9 +438,13 @@ function commitMeta(commit: ShowcaseSourceCommit): string {
   const date = new Date(commit.date);
   const day = Number.isNaN(date.getTime())
     ? ''
-    : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+    : date.toLocaleDateString(uiLocale.value, { day: '2-digit', month: '2-digit' });
 
-  return [day, commit.own ? 'своя ветка' : '', commit.merge ? 'слияние, не выбирается' : '']
+  return [day, commit.own
+  ? t('core.showcaseSvoyaVetka')
+  : '', commit.merge
+    ? t('core.showcaseSliyanieNeVybiraetsya')
+    : '']
     .filter(Boolean)
     .join(' · ');
 }

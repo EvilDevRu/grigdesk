@@ -1,10 +1,19 @@
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
 
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
-import { isAppLockState, type ShellState } from '../../../shared/client/clientShell.ts';
+import {
+  isAppLockState,
+  isBackgroundLinkState,
+  type ShellState,
+} from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const controllers = new WeakMap<object, AbortController>();
 const retryWaits = new WeakMap<object, AbortController>();
@@ -38,6 +47,11 @@ export const useShellStore = defineStore('shell', {
       const block = state.snapshot?.appLock;
 
       return isAppLockState(block) ? block.locked : false;
+    },
+    backgroundLink: (state) => {
+      const block = state.snapshot?.backgroundLink;
+
+      return isBackgroundLinkState(block) ? block : null;
     },
   },
   actions: {
@@ -125,7 +139,7 @@ export const useShellStore = defineStore('shell', {
      */
     apply(state: ShellState | null) {
       if (state !== null && !isShellState(state)) {
-        throw new Error('Получено некорректное состояние оболочки');
+        throw new Error(t('core.corePoluchenoNekorrektnoeSostoyanieObolochki'));
       }
 
       if (!state && this.present) {
@@ -164,7 +178,11 @@ export const useShellStore = defineStore('shell', {
     addLocal() {
       return shellAction('POST', '/profiles', { local: true });
     },
-    editProfile(id: string, patch: { name?: string; address?: string }) {
+    editProfile(id: string, patch: {
+      name?: string;
+      address?: string;
+      routePairing?: string;
+    }) {
       return shellAction('PATCH', `/profiles/${encodeURIComponent(id)}`, patch);
     },
     removeProfile(id: string) {
@@ -197,6 +215,9 @@ export const useShellStore = defineStore('shell', {
     },
     scan() {
       return shellAction('POST', '/scan') as Promise<{ pairing: string }>;
+    },
+    setBackgroundLink(enabled: boolean) {
+      return shellAction('POST', '/background-link', { enabled });
     },
   },
 });

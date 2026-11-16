@@ -147,6 +147,7 @@ test('кредитные окна проходят HTTP usage вместе с п
 
   t.after(() => app.close());
   await app.register(providersModule, {
+    prefs: { read: () => ({ providerUsageAutoRefresh: true }) },
     config: {
       ...config,
       modelsPath: path.join(root, 'models.json'),

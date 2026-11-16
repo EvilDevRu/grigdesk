@@ -70,6 +70,7 @@ async function tickFixture(t, { clients, usageTickMs, adapter, extraAdapters = [
     clientCount: () => clients,
   });
   await app.register(providersModule, {
+    prefs: { read: () => ({ providerUsageAutoRefresh: true }) },
     config: {
       modelsPath: path.join(root, 'models.json'),
       providerUsageSeenPath: path.join(root, 'usage-seen.json'),
@@ -385,10 +386,12 @@ test('хук refreshProvidersUsage перечитывает и рассылае�
   assert.equal(fixture.events[0].event, 'providers-usage');
   assert.equal(fixture.events[0].data.usage['ticking-provider'].bars[0].pct, 42);
 
-  // Снимок свежий — второй вызов подряд к вендору не идёт и события не даёт.
+  const before = fixture.events[0].data.usage['ticking-provider'];
+
+  // Свежий снимок доставляется повторно без нового измерения у вендора.
   await fixture.app.refreshProvidersUsage();
   assert.equal(fixture.reads(), 1);
-  assert.equal(fixture.events.length, 1);
+  assert.deepEqual(fixture.events.at(-1).data.usage['ticking-provider'], before);
 });
 
 test('при открытом окне тик перечитывает лимиты и рассылает снимок событием providers-usage', async (t) => {
@@ -412,7 +415,7 @@ test('снимок, который только что принёс запрос
 
   await sleep(400);
   assert.equal(fixture.reads(), 1, 'тик перечитал снимок моложе половины периода');
-  assert.deepEqual(fixture.events, []);
+  assert.deepEqual(fixture.events.at(-1).data.usage, response.json().usage);
 });
 
 // Фон стучится круглосуточно, а не пока водят мышью, поэтому «стучитесь реже» — единственная
@@ -460,13 +463,21 @@ test('названный вендором срок продлевает пауз
 test('принудительная проверка перечитывает лимиты, рассылает снимок и не дробит клики', async (t) => {
   const fixture = await tickFixture(t, { clients: 1, usageTickMs: 60_000 });
 
-  const first = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const first = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/providers/usage/refresh',
+    payload: { providerId: 'ticking-provider' },
+  });
   assert.equal(first.statusCode, 200);
   assert.equal(first.json().usage['ticking-provider'].bars[0].pct, 42);
   assert.equal(fixture.reads(), 1);
   assert.deepEqual(fixture.events.map((event) => event.event), ['providers-usage']);
 
-  const second = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const second = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/providers/usage/refresh',
+    payload: { providerId: 'ticking-provider' },
+  });
   assert.equal(second.statusCode, 200);
   assert.equal(fixture.reads(), 1, 'снимок моложе 15 секунд перечитан второй раз подряд');
 });
@@ -481,7 +492,11 @@ test('после отказа вендора снимок называет ср�
     adapter: (onUsage) => rateLimitedAdapter(onUsage),
   });
 
-  const response = await fixture.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const response = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/providers/usage/refresh',
+    payload: { providerId: 'ticking-provider' },
+  });
   const snapshot = response.json().usage['ticking-provider'];
 
   assert.equal(snapshot.state, 'rate_limited');
@@ -618,18 +633,18 @@ test('живой patch во время опроса сохраняется на 
     extraAdapters: [{ ...tickingAdapter(() => {}), id: 'other-provider' }],
   });
   const sink = sinkOf(f.app);
-  const reading = f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  const reading = f.app.refreshProvidersUsage();
 
   await begun;
   assert.equal(sink({ bars: [liveBar(8)] }), true);
   assert.equal(f.events.filter((event) => event.event === 'providers-usage').length, 0);
   finish(liveSnapshot(6));
 
-  const response = await reading;
+  await reading;
+
   const current = (await f.app.inject('/api/providers/usage')).json().usage;
   const event = f.events.find((entry) => entry.event === 'providers-usage');
 
-  assert.equal(response.statusCode, 200);
   assert.equal(current['ticking-provider'].bars[0].pct, 8);
   assert.equal(event.data.usage['ticking-provider'].bars[0].pct, 8);
   assert.ok(event.data.usage['other-provider']);
@@ -677,7 +692,7 @@ test('R4: patch соседа после сброса ключа не рассы�
   assert.equal(sink({ bars: [liveBar(8)] }), false, 'оверлей сохранён без публикации');
   assert.equal(f.events.filter((entry) => entry.event === 'providers-usage').length, before);
 
-  await f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+  await f.app.refreshProvidersUsage();
 
   const event = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
 

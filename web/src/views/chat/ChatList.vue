@@ -8,18 +8,158 @@
           <UiSearchInput
             v-model="q"
             size="compact"
-            :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'"
+            :placeholder="showArchived ? t('core.chatPoiskVArhive') : t('core.search')"
           />
         </div>
         <UiCreateButton
           class="new"
-          label="Новый чат"
+          :label="t('core.chatNovyyChat')"
           :disabled="!chat.loaded"
           @click="newChat"
         />
       </div>
-      <div class="archive-toggle">
-        <UiSwitch v-model="showArchived">{{ archiveLabel }}</UiSwitch>
+      <div class="list-controls">
+        <UiSegmentedControl
+          v-model="scopeSegment"
+          class="scope"
+          data-context="chat-scope"
+          size="compact"
+          :options="scopeOptions"
+          :label="t('core.chatListScope')"
+        />
+        <UiIconButton
+          v-if="filtersAvailable"
+          class="filter-toggle"
+          data-chat-filter-toggle
+          :label="activeFilterCount
+            ? t('core.chatListFiltersActive', { count: activeFilterCount })
+            : t('core.chatListFilters')"
+          :tone="activeFilterCount ? 'accent' : 'neutral'"
+          :pressed="Boolean(activeFilterCount)"
+          :aria-expanded="String(filtersOpen)"
+          v-tooltip="t('core.chatListFilters')"
+          aria-controls="chat-list-filters"
+          @click="filtersOpen = !filtersOpen"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
+          </svg>
+          <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+        </UiIconButton>
+      </div>
+      <div
+        v-if="filtersAvailable"
+        id="chat-list-filters"
+        class="filterbar"
+        :class="{ expanded: filtersOpen }"
+        role="region"
+        :aria-label="t('core.chatListFilters')"
+      >
+        <div class="filter-section" role="group" :aria-label="t('core.chatFilterState')">
+          <div class="filter-heading">
+            <span class="filter-caption">{{ t('core.chatFilterState') }}</span>
+            <UiIconButton
+              role="embedded"
+              :label="t('core.chatFilterReset')"
+              v-tooltip="t('core.chatFilterReset')"
+              :disabled="!activeFilterCount"
+              data-chat-filter-reset
+              @click="resetFilters"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 10a9 9 0 1 1 2.6 8.4M3 4v6h6" />
+              </svg>
+            </UiIconButton>
+          </div>
+          <div class="filter-states">
+            <UiButton
+              v-for="state in stateFilterOptions"
+              :key="state.key"
+              :data-chat-filter="state.key"
+              variant="outline"
+              size="compact"
+              :tone="filters[state.key] ? 'accent' : 'neutral'"
+              :pressed="filters[state.key]"
+              @click="setFilter(state.key, !filters[state.key])"
+            >
+              <template #leading>
+                <span class="filter-state-dot" :class="`filter-state-dot--${state.key}`" aria-hidden="true" />
+              </template>
+              {{ state.label }}
+            </UiButton>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="filter-caption">{{ t('core.chatFilterTask') }}</span>
+          <div class="filter-task-fields">
+            <UiSelect
+              :model-value="taskSelect"
+              data-chat-filter="task-mode"
+              compact
+              :aria-label="t('core.chatFilterTask')"
+              @update:model-value="onTaskModeSelect"
+            >
+              <option value="all">{{ t('core.chatFilterTaskAll') }}</option>
+              <option value="any">{{ t('core.chatFilterTaskAny') }}</option>
+              <option value="none">{{ t('core.chatFilterTaskNone') }}</option>
+            </UiSelect>
+            <UiInput
+              class="task-number"
+              data-chat-filter="task-number"
+              :model-value="taskNumber"
+              inputmode="numeric"
+              :placeholder="t('core.chatFilterTaskNumber')"
+              :aria-label="t('core.chatFilterTaskNumber')"
+              @update:model-value="onTaskNumber"
+            />
+          </div>
+        </div>
+        <div class="filter-details">
+          <div class="filter-section">
+            <span class="filter-caption">{{ t('core.chatFilterProvider') }}</span>
+            <UiSelect
+              data-chat-filter="provider"
+              compact
+              :model-value="filters.provider"
+              :aria-label="t('core.chatFilterProvider')"
+              @update:model-value="setFilter('provider', String($event))"
+            >
+              <option value="">{{ t('core.chatFilterProviderAll') }}</option>
+              <option v-for="entry in prov.providers" :key="entry.id" :value="entry.id">
+                {{ entry.name }}
+              </option>
+            </UiSelect>
+          </div>
+          <div class="filter-section">
+            <span class="filter-caption">{{ t('core.chatFilterFresh') }}</span>
+            <UiSelect
+              data-chat-filter="fresh"
+              compact
+              :model-value="filters.fresh"
+              :aria-label="t('core.chatFilterFresh')"
+              @update:model-value="onFreshSelect"
+            >
+              <option value="">{{ t('core.chatFilterFreshAll') }}</option>
+              <option value="day">{{ t('core.chatFilterFreshDay') }}</option>
+              <option value="week">{{ t('core.chatFilterFreshWeek') }}</option>
+              <option value="month">{{ t('core.chatFilterFreshMonth') }}</option>
+            </UiSelect>
+          </div>
+        </div>
+      </div>
+      <div v-if="filterChips.length && !filtersOpen" class="filter-chips">
+        <span v-for="chip in filterChips" :key="chip.key" class="filter-chip" data-chat-chip>
+          {{ chip.label }}
+          <UiIconButton
+            role="embedded"
+            class="chip-x"
+            :label="t('core.chatFilterRemove')"
+            @click="clearFilter(chip.key)"
+          ><span aria-hidden="true">×</span></UiIconButton>
+        </span>
       </div>
     </div>
 
@@ -67,15 +207,23 @@
       <div v-else-if="!paging.loaded" class="load-state" role="status">
         <p>{{ paging.error || t('core.chatPageLoading') }}</p>
         <UiButton v-if="paging.error" :disabled="paging.loading"
-                  @click="chat.ensureChatPage(q, showArchived)">{{ t('core.chatPageRetry') }}</UiButton>
+                  @click="chat.ensureChatPage(q, showArchived, filters)">{{ t('core.chatPageRetry') }}</UiButton>
       </div>
       <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
         <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
-        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived)">
+        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived, filters)">
           {{ t('core.chatListRetry') }}
         </UiButton>
       </div>
-      <div v-else-if="!rows.length && !paging.hasMore" class="none muted">{{ emptyLabel }}</div>
+      <div v-else-if="!rows.length && !paging.hasMore" class="none muted">
+        <template v-if="activeFilterCount">
+          <p class="filter-empty">{{ t('core.chatFilterEmpty') }}</p>
+          <UiButton variant="ghost" size="compact" data-chat-filter-reset @click="resetFilters">
+            {{ t('core.chatFilterReset') }}
+          </UiButton>
+        </template>
+        <template v-else>{{ emptyLabel }}</template>
+      </div>
       <div
         v-for="r in rows"
         :key="r.id"
@@ -115,7 +263,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              v-tooltip="'непрочитанный ответ'"
+              v-tooltip="t('core.chatNeprochitannyyOtvet')"
             />
           </span>
           <span class="mid">
@@ -123,7 +271,7 @@
               ref="editEl"
               v-model="editVal"
               class="edit"
-              aria-label="Название чата"
+              :aria-label="t('core.chatNazvanieChata')"
               @keydown.enter="commitEdit"
               @keydown.esc="editId = null"
               @blur="commitEdit"
@@ -161,7 +309,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              v-tooltip="'непрочитанный ответ'"
+              v-tooltip="t('core.chatNeprochitannyyOtvet')"
             />
           </span>
 
@@ -171,16 +319,14 @@
               <span
                 v-if="r.waiting"
                 class="wchip"
-                v-tooltip="'агент ждёт твоего ответа — работа стоит'"
-              >
-                ждёт ответа
-              </span>
+                v-tooltip="t('core.chatAgentZhdetTvoegoOtveta')"
+              > {{ t('core.chatZhdetOtveta') }} </span>
               <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </span>
             <span class="t2 muted">
-              <span v-if="r.draft" class="dr">черновик:</span>{{
-                r.snippet || 'Пустой чат'
+              <span v-if="r.draft" class="dr">{{ t('core.chatChernovik') }}</span>{{
+                r.snippet || t('core.chatPustoyChat')
               }}
             </span>
           </span>
@@ -193,8 +339,8 @@
               v-if="r.archived"
               data-context="chat-list-action"
               role="rail"
-              label="Достать чат из архива"
-              v-tooltip="'Достать из архива'"
+              :label="t('core.chatDostatChatIzArhiva')"
+              v-tooltip="t('core.chatDostatIzArhiva')"
               tone="accent"
               @click="restore(r)"
             >
@@ -203,8 +349,8 @@
             <UiIconButton
               data-context="chat-list-action"
               role="rail"
-              label="Переименовать чат"
-              v-tooltip="'Переименовать'"
+              :label="t('core.chatPereimenovatChat')"
+              v-tooltip="t('core.machineRename')"
               @click="startEdit(r)"
             >
               ✎
@@ -212,8 +358,8 @@
             <UiIconButton
               data-context="chat-list-action"
               role="rail"
-              :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
-              v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+              :label="r.archived ? t('core.chatUdalitChatNavsegda') : t('core.chatPeremestitChatVArhiv')"
+              v-tooltip="r.archived ? t('core.chatUdalitNavsegda') : t('core.chatPeremestitVArhiv')"
               :tone="r.archived ? 'danger' : 'accent'"
               @click="del(r)"
             >
@@ -222,21 +368,21 @@
           </span>
           <!-- Палец: наведения нет, поэтому действия собраны в меню с полными подписями. -->
           <span class="acts-menu">
-            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
+            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="t('core.chatDeystviyaTitle', { title: r.title })">
               <template #trigger>
-                <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
+                <UiIconButton data-context="chat-list-action" role="rail" :label="t('core.chatDeystviyaTitle', { title: r.title })">
                   ⋯
                 </UiIconButton>
               </template>
               <template #default="{ close }">
                 <div class="ui-action-menu">
                   <UiButton v-if="r.archived" role="menuitem" variant="ghost"
-                            @click="close('action'); restore(r)">Достать из архива</UiButton>
+                            @click="close('action'); restore(r)">{{ t('core.chatDostatIzArhiva') }}</UiButton>
                   <UiButton role="menuitem" variant="ghost"
-                            @click="close('action'); startEdit(r)">Переименовать</UiButton>
+                            @click="close('action'); startEdit(r)">{{ t('core.machineRename') }}</UiButton>
                   <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
                             @click="close('action'); del(r)">
-                    {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
+                    {{ r.archived ? t('core.chatUdalitNavsegda') : t('core.chatPeremestitVArhiv') }}
                   </UiButton>
                 </div>
               </template>
@@ -249,8 +395,8 @@
         <p v-if="paging.loading">{{ t('core.chatPageLoading') }}</p>
         <p v-else-if="paging.error">{{ paging.error }}</p>
         <UiButton v-if="paging.needsRefresh" :disabled="paging.loading"
-                  @click="chat.refreshChatPage(q, showArchived)">{{ t('core.chatPageRefresh') }}</UiButton>
-        <UiButton v-else :disabled="paging.loading" @click="chat.loadChatPage(q, showArchived)">
+                  @click="chat.retryChatPage(q, showArchived, filters)">{{ t('core.chatPageRefresh') }}</UiButton>
+        <UiButton v-else :disabled="paging.loading" @click="chat.retryChatPage(q, showArchived, filters)">
           {{ t(paging.error ? 'core.chatPageRetry' : 'core.chatPageMore') }}
         </UiButton>
       </div>
@@ -259,7 +405,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeleton } from '../../ui';
+import { UiSkeleton, t, messageRef, uiLocale } from '../../ui';
 
 import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
@@ -273,20 +419,15 @@ import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ChatSleepBadge from './ChatSleepBadge.vue';
 import { useChatSleeping } from '../../composables/useChatSleeping.ts';
 import {
-  confirmDialog,
-  UiButton,
-  UiPopover,
-  UiIconButton,
-  UiCreateButton,
-  UiInput,
-  UiPressable,
-  UiSearchInput,
-  UiSpinner,
-  UiSwitch,
-  t,
-  resolveUiText,
-  vTooltip,
+  confirmDialog, UiButton, UiPopover, UiIconButton, UiCreateButton, UiInput,
+  UiPressable, UiSearchInput, UiSegmentedControl, UiSelect, UiSpinner, resolveUiText, vTooltip,
 } from '../../ui';
+
+import {
+  EMPTY_CHAT_FILTERS, hasChatFilters, normalizeChatFilters,
+} from '../../../../shared/chat/chatPaging.ts';
+
+import type { ChatListFilters } from '../../../../shared/chat/chatPaging.ts';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
@@ -302,32 +443,317 @@ const { sessions: sleepingSessions } = useChatSleeping();
 
 prov.load(false, { cached: true, reason: 'mount' });
 
+const SCOPE_LS = 'chat.list.scope';
+
+/**
+ * Область переживает монтирование: прежний тумблер слетал при каждом заходе.
+ * Повреждённое или отсутствующее значение даёт «активные»; сбой хранилища
+ * не ломает список.
+ */
+
+function restoreScope(): boolean {
+  try {
+    return localStorage.getItem(SCOPE_LS) === 'archived';
+  } catch {
+    return false;
+  }
+}
+
 const q = ref('');
-const showArchived = ref(false);
+
+const showArchived = ref(restoreScope());
+// Доступность протокола объявлена до filters: немедленный watch восстановления
+// регистрируется сразу после filters и читает её при регистрации (иначе TDZ).
+
+const filtersAvailable = computed(() => chat.pagingEnabled && chat.filtersProtocol === 1);
+
+const FILTERS_LS = 'chat.list.filters';
+
+/**
+ * Восстановление принимает только нормализованные значения: повреждённый
+ * или чужой JSON не ломает список и молча откатывается к пустым фильтрам.
+ */
+
+function restoreFilters(): ChatListFilters {
+  try {
+    return normalizeChatFilters(JSON.parse(localStorage.getItem(FILTERS_LS) || '{}'));
+  } catch {
+    return { ...EMPTY_CHAT_FILTERS };
+  }
+}
+
+const filters = ref<ChatListFilters>({ ...EMPTY_CHAT_FILTERS });
+
+const filtersOpen = ref(false);
+
+const taskSelect = ref<'all' | 'any' | 'none'>('all');
+
+const taskNumber = ref('');
+
+let taskTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Восстановленный набор применяется только после подтверждения протокола
+ * первой страницей: старый сервер отверг бы фильтры кодом 400 всего списка.
+ * При потере флага активные фильтры снимаются, чтобы список жил как прежде;
+ * сохранённый набор не затирается (персист ниже пропускает запись).
+ * Набор перечитывается при каждом подтверждении: после сброса и возврата
+ * протокола не воскрешаются значения времён монтирования.
+ * Watch стоит после объявления filtersAvailable (шаг 6) и до watch списка:
+ * его немедленный вызов должен видеть уже восстановленные фильтры.
+ */
+
+watch(filtersAvailable, (available) => {
+  if (available) {
+    const restored = restoreFilters();
+
+    if (hasChatFilters(restored) && !hasChatFilters(filters.value)) {
+      filters.value = { ...restored };
+
+      taskSelect.value = restored.task === 'any' || restored.task === 'none'
+        ? restored.task : 'all';
+
+      taskNumber.value = /^[0-9]+$/.test(restored.task) ? restored.task : '';
+    }
+
+    return;
+  }
+
+  if (hasChatFilters(filters.value)) {
+    filters.value = { ...EMPTY_CHAT_FILTERS };
+
+    taskSelect.value = 'all';
+
+    taskNumber.value = '';
+  }
+}, { immediate: true });
+
+/**
+ * Номер задачи приоритетнее режима; ввод с debounce, чтобы каждый символ
+ * не создавал серверную страницу. Повторная проверка внутри таймера гасит
+ * гонку со сбросом фильтров, случившимся за время ожидания.
+ */
+
+watch([taskSelect, taskNumber], () => {
+  clearTimeout(taskTimer ?? undefined);
+
+  taskTimer = setTimeout(() => {
+    const number = taskNumber.value.trim();
+
+    const task = number || (taskSelect.value === 'all' ? '' : taskSelect.value);
+
+    if (task !== filters.value.task) {
+      filters.value = { ...filters.value, task };
+    }
+  }, 250);
+});
+
+// Персист переживает сбой хранилища (приватный режим): фильтрация важнее записи.
+// Пока протокол не подтверждён, не пишем: сброс на старом сервере не должен
+// затирать сохранённый набор.
+
+watch(filters, (value) => {
+  if (!filtersAvailable.value) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(FILTERS_LS, JSON.stringify(value));
+  } catch {
+    // Запись недоступна — фильтры продолжают работать в памяти.
+  }
+});
+
+function onTaskNumber(value: string | number | null) {
+  taskNumber.value = String(value ?? '').replace(/\D/g, '').slice(0, 12);
+}
+
 const rowsHost = ref<HTMLElement | null>(null);
-const paging = computed(() => chat.pageFor(q.value, showArchived.value));
+
+const paging = computed(() => chat.pageFor(q.value, showArchived.value, filters.value));
+
+// Сегмент области — прямая замена тумблера: showArchived остаётся источником правды
+// для всего списка, сегмент лишь переключает его двумя кнопками.
+
+const scopeSegment = computed({
+  get: () => (showArchived.value ? 'archived' : 'active'),
+  set: (value: string) => {
+    showArchived.value = value === 'archived';
+  },
+});
+
+// Счётчик архива — отдельный бейдж сегмента, а не « · N» в подписи: название
+// остаётся коротким, число читается плашкой и не растягивает переключатель.
+const scopeOptions = computed(() => [
+  { value: 'active', label: t('core.chatFilterActive') },
+  {
+    value: 'archived',
+    label: t('core.chatFilterArchived'),
+    badge: chat.archivedChatCount || '',
+  },
+]);
+
+const activeFilterCount = computed(() => [
+  filters.value.unread,
+  filters.value.waiting,
+  filters.value.working,
+  filters.value.task !== '',
+  filters.value.provider !== '',
+  filters.value.fresh !== '',
+].filter(Boolean).length);
+
+const stateFilterOptions = computed(() => [
+  { key: 'unread', label: t('core.chatFilterUnread') },
+  { key: 'waiting', label: t('core.chatFilterWaiting') },
+  { key: 'working', label: t('core.chatFilterWorking') },
+] as const);
+
+/**
+ * Фильтры меняются только целой копией: watch списка видит замену объекта
+ * и перезагружает scope; мутация полей не породила бы гонку поколений.
+ */
+
+function setFilter<K extends keyof ChatListFilters>(key: K, value: ChatListFilters[K]) {
+  filters.value = { ...filters.value, [key]: value };
+}
+
+/**
+ * Подпись свежести — литеральные ключи: вычисляемый ключ потребовал бы таблицу
+ * dynamicExpressions в i18n-scope, а ветвей здесь всего три.
+ */
+
+function freshLabel(fresh: ChatListFilters['fresh']): string {
+  if (fresh === 'day') {
+    return t('core.chatFilterFreshDay');
+  }
+
+  if (fresh === 'week') {
+    return t('core.chatFilterFreshWeek');
+  }
+
+  return t('core.chatFilterFreshMonth');
+}
+
+/**
+ * UiSelect отдаёт string|number|null; свежесть принимает только три окна,
+ * неизвестное значение откатывается к «за всё время».
+ */
+
+function onFreshSelect(value: string | number | null) {
+  const fresh = value === 'day' || value === 'week' || value === 'month' ? value : '';
+
+  setFilter('fresh', fresh);
+}
+
+/**
+ * UiSelect отдаёт string|number|null; режим задачи принимает только три
+ * значения, неизвестное откатывается к «все чаты». Сужение здесь, а не в
+ * v-model: широкий union UiSelectValue не присваивается в литеральный тип ref.
+ */
+
+function onTaskModeSelect(value: string | number | null) {
+  taskSelect.value = value === 'any' || value === 'none' ? value : 'all';
+}
+
+/**
+ * Чипы перечисляют включённые фильтры в порядке панели.
+ * Задача показана номером либо режимом — тем же значением, что ушло на сервер.
+ */
+
+const filterChips = computed(() => {
+  const value = filters.value;
+
+  const chips: Array<{ key: keyof ChatListFilters; label: string }> = [];
+
+  if (value.unread) {
+    chips.push({ key: 'unread', label: t('core.chatFilterUnread') });
+  }
+
+  if (value.waiting) {
+    chips.push({ key: 'waiting', label: t('core.chatFilterWaiting') });
+  }
+
+  if (value.working) {
+    chips.push({ key: 'working', label: t('core.chatFilterWorking') });
+  }
+
+  if (value.task === 'any') {
+    chips.push({ key: 'task', label: t('core.chatFilterTaskAny') });
+  } else if (value.task === 'none') {
+    chips.push({ key: 'task', label: t('core.chatFilterTaskNone') });
+  } else if (value.task) {
+    chips.push({ key: 'task', label: t('core.coreTaskid', { taskId: value.task }) });
+  }
+
+  if (value.provider) {
+    chips.push({
+      key: 'provider',
+      label: prov.providers.find((entry) => entry.id === value.provider)?.name || value.provider,
+    });
+  }
+
+  if (value.fresh) {
+    chips.push({ key: 'fresh', label: freshLabel(value.fresh) });
+  }
+
+  return chips;
+});
+
+/**
+ * Крестик чипа выключает один фильтр; задача также сбрасывает оба своих controls.
+ * Полный сброс возвращает пустой набор и очищает номер с режимом.
+ */
+
+function clearFilter(key: keyof ChatListFilters) {
+  if (key === 'task') {
+    taskSelect.value = 'all';
+
+    taskNumber.value = '';
+  }
+
+  setFilter(key, EMPTY_CHAT_FILTERS[key]);
+}
+
+function resetFilters() {
+  taskSelect.value = 'all';
+
+  taskNumber.value = '';
+
+  filters.value = { ...EMPTY_CHAT_FILTERS };
+}
+
+// Персист области отдельным ключом: серверный контракт фильтров не меняется.
+
+watch(showArchived, (value) => {
+  try {
+    localStorage.setItem(SCOPE_LS, value ? 'archived' : 'active');
+  } catch {
+    // Запись недоступна — область продолжает работать в памяти.
+  }
+});
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let scopeEpoch = 0;
 let restoringScope = false;
 
-watch([q, showArchived], ([query, archived], previous) => {
+watch([q, showArchived, filters], ([query, archived, currentFilters], previous) => {
   clearTimeout(searchTimer ?? undefined);
 
   const epoch = ++scopeEpoch;
 
   if (previous?.[0] !== undefined && rowsHost.value) {
-    chat.pageFor(previous[0], previous[1]).scrollTop = rowsHost.value.scrollTop;
+    chat.pageFor(previous[0], previous[1], previous[2]).scrollTop = rowsHost.value.scrollTop;
   }
 
   restoringScope = true;
-  chat.beginChatSearch(query, archived);
+  chat.beginChatSearch(query, archived, currentFilters);
 
   /**
    * Возврат к scope восстанавливает его scroll только после принятой порции.
    * Быстрый переход к другому поиску отменяет применение прежнего положения.
    */
   const load = async () => {
-    await chat.searchChats(query, archived);
+    await chat.searchChats(query, archived, currentFilters);
     await nextTick();
 
     if (epoch === scopeEpoch) {
@@ -346,7 +772,11 @@ watch([q, showArchived], ([query, archived], previous) => {
   }
 }, { immediate: true });
 
-onUnmounted(() => clearTimeout(searchTimer ?? undefined));
+onUnmounted(() => {
+  clearTimeout(searchTimer ?? undefined);
+
+  clearTimeout(taskTimer ?? undefined);
+});
 
 /**
  * Контейнер сообщает собственную прокрутку и загружает одну следующую порцию.
@@ -364,19 +794,16 @@ function onRowsScroll() {
 
   if (page.loaded && page.hasMore && !page.loading && !page.error
     && element.scrollHeight - element.clientHeight - element.scrollTop <= 240) {
-    void chat.loadChatPage(q.value, showArchived.value);
+    void chat.loadChatPage(q.value, showArchived.value, false, filters.value);
   }
 }
 
-const archiveLabel = computed(() => (
-  `Показывать архив${chat.archivedChatCount ? ` · ${chat.archivedChatCount}` : ''}`
-));
 const emptyLabel = computed(() => {
   if (q.value.trim()) {
-    return 'Ничего не найдено';
+    return t('core.inboxNoResults');
   }
 
-  return showArchived.value ? 'Архив пуст' : 'Нет активных чатов';
+  return showArchived.value ? t('core.chatArhivPust') : t('core.chatNetAktivnyhChatov');
 });
 
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
@@ -386,7 +813,7 @@ const rows = computed(() => {
     return [];
   }
 
-  return chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
+  return chat.list(q.value, showArchived.value, filters.value).map((r: ChatListRow) => {
     const { model, provider } = prov.modelOf(r.modelRef || r.model);
 
     return {
@@ -444,13 +871,13 @@ function letter(row: ListRow) {
  * Сжатие имеет отдельную подпись при том же индикаторе занятости.
  */
 function avatarTitle(row: ListRow) {
-  const modelName = row.modelName || 'Модель по умолчанию';
+  const modelName = row.modelName || t('core.chatModelPoUmolchaniyu');
 
   if (row.compacting) {
-    return `${modelName} · сжимаю контекст`;
+    return t('core.chatModelnameSzhimayuKontekst', { modelName: modelName });
   }
   if (row.sending) {
-    return `${modelName} · агент работает`;
+    return t('core.chatModelnameAgentRabotaet', { modelName: modelName });
   }
 
   return modelName;
@@ -460,7 +887,9 @@ function avatarTitle(row: ListRow) {
  * Относительное время сохраняет компактный телеграмный формат строки.
  * После недели календарная дата устойчивее постоянно растущего числа дней.
  */
-const calendarDate = new Intl.DateTimeFormat('ru', { day: '2-digit', month: '2-digit' });
+const calendarDate = computed(
+  () => new Intl.DateTimeFormat(uiLocale.value, { day: '2-digit', month: '2-digit' }),
+);
 
 /**
  * Форматтер принадлежит смонтированному списку и создаётся один раз, а не для каждой строки.
@@ -474,19 +903,19 @@ function ago(ts: number) {
   const elapsed = Date.now() - ts;
 
   if (elapsed < 60e3) {
-    return 'сейчас';
+    return t('core.chatSeychas');
   }
   if (elapsed < 3600e3) {
-    return `${Math.floor(elapsed / 60e3)}м`;
+    return t('core.chatFloorelapsed60e3M', { floorelapsed60e3: Math.floor(elapsed / 60e3) });
   }
   if (elapsed < 86400e3) {
-    return `${Math.floor(elapsed / 3600e3)}ч`;
+    return t('core.chatFloorelapsed3600e3Ch', { floorelapsed3600e3: Math.floor(elapsed / 3600e3) });
   }
   if (elapsed < 7 * 86400e3) {
-    return `${Math.floor(elapsed / 86400e3)}д`;
+    return t('core.chatFloorelapsed86400e3D', { floorelapsed86400e3: Math.floor(elapsed / 86400e3) });
   }
 
-  return calendarDate.format(new Date(ts));
+  return calendarDate.value.format(new Date(ts));
 }
 
 const editId = ref<string | null>(null);
@@ -522,12 +951,19 @@ function commitEdit() {
  * Создание разрешено только после подтверждённого списка с сервера.
  * Мобильная область открывается, когда стор действительно создал разговор.
  */
+/**
+ * Созданный чат выходит из фильтрованной выборки в обычную активную область.
+ * Поиск сохраняет прежнее поведение: непустой текст может скрывать новую строку.
+ */
 function newChat() {
   if (!chat.loaded || !chat.newSession()) {
     return;
   }
 
   showArchived.value = false;
+
+  resetFilters();
+
   emit('open');
 }
 
@@ -549,11 +985,11 @@ async function del(r: ListRow) {
   const permanent = r.archived;
   const ok = await confirmDialog(
     permanent
-      ? `Удалить чат «${r.title}» безвозвратно? Восстановить его после этого не получится.`
-      : `Переместить чат «${r.title}» в архив?`,
+      ? messageRef('core.chatUdalitChatTitleBezvozvratno', { title: r.title })
+      : messageRef('core.chatPeremestitChatTitleV', { title: r.title }),
     {
-      title: permanent ? 'Удалить чат навсегда' : 'Переместить в архив',
-      okText: permanent ? 'Удалить' : 'В архив',
+      title: permanent ? t('core.chatUdalitChatNavsegda') : t('core.chatPeremestitVArhiv'),
+      okText: permanent ? t('core.taskDelete') : t('core.chatVArhiv'),
       danger: permanent,
     },
   );
@@ -578,9 +1014,81 @@ async function del(r: ListRow) {
   min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; align-items: center; gap: 7px; }
 .search { flex: 1; min-width: 0; }
-/* Flex-контейнер убирает место под текстовую базовую линию inline-flex переключателя.
-   Иначе шапка списка перерастает общий минимум и её нижняя граница образует ступеньку. */
-.archive-toggle { display: flex; align-self: flex-start; }
+/* Строка под поиском — единый левый кластер: лёгкий pill-переключатель области
+   (chat-scope) и сразу за ним голая иконка фильтров, без прижатия к правому краю.
+   Панель раскрывается ниже и отодвигает строки, как filterbar доски задач.
+   Счётчик активных фильтров — угловой бейдж иконки, а не коробка с подписью. */
+.list-controls { display: flex; align-items: center; gap: 6px; }
+.scope { flex: 0 1 auto; min-width: 0; }
+.filter-toggle { position: relative; flex: none; }
+.filter-count { position: absolute; top: -3px; right: -3px; display: inline-grid; place-items: center;
+  min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent);
+  color: var(--surface); font-size: 9.5px; font-weight: 700; line-height: 1;
+  box-shadow: 0 0 0 2px var(--surface); }
+.filterbar {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  container-type: inline-size;
+}
+.filterbar.expanded { display: flex; }
+.filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.filter-caption {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-mid);
+}
+.filter-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.filter-state-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.filter-state-dot--unread { background: var(--accent); }
+.filter-state-dot--waiting { background: var(--warn); }
+.filter-state-dot--working { background: var(--good); }
+.filter-task-fields,
+.filter-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.filter-section > .ui-select-wrap,
+.filter-task-fields > * {
+  width: 100%;
+  min-width: 0;
+}
+@container (max-width: 250px) {
+  .filter-task-fields,
+  .filter-details { grid-template-columns: minmax(0, 1fr); }
+}
+.filter-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 2px 0; }
+.filter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2);
+  font-size: 11.5px; color: var(--ink-mid); }
+.filter-empty { margin: 0 0 8px; }
 .new { flex: none; }
 
 .rows { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 5px; }

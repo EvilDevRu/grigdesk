@@ -36,15 +36,7 @@
     },
     "web/src/composables/useUiTabsContext.ts": {
       "function-explanation": {
-        "export function provideUiTabsContext(context: UiTabsContext): void { provide(UI_TABS_CONTEXT, context); }": 1,
-        "export function useUiTabsContext(): UiTabsContext { const context = inject(UI_TABS_CONTEXT, null); if (!context) throw new Error('UiTab должен находиться внутри UiTabs'); return co": 1
-      },
-      "logical-spacing": {
-        "declaration->branch: if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1,
-        "branch->exit: return context;": 1
-      },
-      "unbraced-control": {
-        "if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1
+        "export function provideUiTabsContext(context: UiTabsContext): void { provide(UI_TABS_CONTEXT, context); }": 1
       }
     },
     "web/src/services/dialogs.ts": {

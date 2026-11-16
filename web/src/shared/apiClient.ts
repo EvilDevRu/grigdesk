@@ -4,6 +4,11 @@ import { acquireTrackerRead, trackerReadRoute, shouldLogTrackerFailure } from '.
 import { resetApiDiagnostics, startApiDiagnostic, captureApiDiagnosticContext } from './apiDiagnostics.ts';
 import type { ApiDiagnostic, ApiDiagnosticContext } from './apiDiagnostics.ts';
 import type { WebApiTiming } from '../../../shared/web-log/webDiagnostics.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 // Единый клиент к серверу GrigDesk.
 //
@@ -48,7 +53,7 @@ export class ApiError extends Error {
  * знать, пришла ли туда `ApiError`, обрыв сети или брошенная строка: сообщение
  * сервера важнее всего, дальше — обычный Error, и только потом запасной текст.
  */
-export function failureText(error: unknown, fallback = 'Не удалось выполнить запрос'): string {
+export function failureText(error: unknown, fallback = t('core.apiRequestFailed')): string {
   if (error instanceof ApiError) {
     return error.message;
   }
@@ -368,7 +373,7 @@ async function requestWhileReceiving(
   const reset = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      controller.abort(new DOMException('Сервер перестал передавать данные', 'TimeoutError'));
+      controller.abort(new DOMException(t('core.coreServerPerestalPeredavatDannye'), 'TimeoutError'));
     }, idleTimeoutMs);
   };
   const cancel = () => controller.abort(consumer?.reason);

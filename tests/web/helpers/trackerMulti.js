@@ -9,7 +9,6 @@ import { useTrackersStore } from '../../../web/src/stores/trackers.ts';
 import { decodeTaskDetail } from '../../../web/src/shared/boardContracts.ts';
 import { multiFixture } from '../../server/helpers/trackerMulti.js';
 import { selectTracker } from '../../server/helpers/trackerFixture.js';
-import { ownTask, seedTasks } from '../../server/helpers/grigdesk-tasks.js';
 
 /**
  * Два оборота цикла пропускают продолжения Pinia и HTTP, без произвольного sleep.
@@ -29,7 +28,6 @@ export async function webMultiFixture(t, { intercept = null, afterResponse = nul
 
   const fixture = await multiFixture(t, { personal: true });
 
-  await seedTasks(fixture.config, [ownTask()]);
   await selectTracker(fixture, 'fixture-a');
 
   const sourceA = (await fixture.request('GET', '/api/tracker/dashboard')).json().source;

@@ -1,16 +1,14 @@
 <template>
   <main class="task-window-page"
-    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface" :aria-label="t('core.grigdeskTaskCard')">
+    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface" :aria-label="t('core.taskCard')">
     <TaskModal v-if="target && ready" presentation="document" />
     <template v-else>
       <header class="task-window-titlebar">
-        <span>GrigDesk · {{ t('core.grigdeskGenericTask') }}</span>
-        <UiIconButton label="Закрыть окно" @click="closeWindow">✕</UiIconButton>
+        <span>{{ t('core.taskGrigdesk') }} {{ t('core.taskFormGenericTask') }}</span>
+        <UiIconButton :label="t('core.taskZakrytOkno')" @click="closeWindow">✕</UiIconButton>
       </header>
-      <TaskLoading v-if="target" label="Подключаемся к GrigDesk…" area="window" />
-      <p v-else class="task-window-waiting" role="alert">
-        Не удалось определить задачу. Закройте окно и откройте карточку снова.
-      </p>
+      <TaskLoading v-if="target" :label="t('core.taskPodklyuchaemsyaKGrigdesk')" area="window" />
+      <p v-else class="task-window-waiting" role="alert"> {{ t('core.taskNeUdalosOpredelitZadachu') }} </p>
     </template>
   </main>
 </template>
@@ -24,7 +22,8 @@ import { useAuthStore } from '../stores/auth.ts';
 import { useChatStore } from '../stores/chat.ts';
 import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { useUiStore } from '../stores/ui.ts';
-import { t, UiIconButton } from '../ui';
+import { t } from '../ui';
+import { UiIconButton } from '../ui';
 import TaskModal from './TaskModal.vue';
 
 const props = defineProps<{
@@ -52,19 +51,20 @@ watch(() => auth.authenticated, (on) => {
 }, { immediate: true });
 onUnmounted(stopSpeech);
 
-
 // Первое получение владельца сессии очищает состояние App. Открываем карточку после
 // запуска синхронизации, чтобы начальная очистка не закрыла её native-документ.
 watch(() => props.target?.kind === 'task'
-  ? [props.target.id, props.target.source, props.ready] as const : null, (target) => {
-  const [id, source, ready] = target || [];
+  ? [props.target.id, props.target.source, props.ready, props.target.unavailable] as const
+  : null, (target) => {
+  const [id, source, ready, unavailable] = target || [];
 
   if (id) {
-    document.title = 'Задача #' + id + ' — GrigDesk';
+    document.title = t('core.taskZadachaIdGrigdesk', { id });
   }
 
-  if (ready && id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source)) {
-    ui.openTaskInline(id, source);
+  if (ready && id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source
+    || ui.taskUnavailable !== unavailable)) {
+    ui.openTaskInline(id, source, unavailable);
   }
 }, { immediate: true });
 // Закрытие карточки её действиями завершает только этот native-документ.

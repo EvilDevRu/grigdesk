@@ -88,10 +88,19 @@ export async function executeInstalledBundle(options: BundleOptions): Promise<vo
     const files: Record<string, string> = {
       server: 'server/bin/grigdesk-server',
       tracker: 'server/bin/tracker',
+      pipeline: 'server/bin/pipeline',
+      routes: 'server/bin/routes',
+      voice: 'server/bin/voice',
       relay: 'server/bin/grigdesk-relay',
       deepseek: 'server/bin/deepseek',
       window: 'desktop/GrigDesk',
     };
+
+    for (const name of Object.keys(files) as (keyof typeof options.builders)[]) {
+        if (typeof options.builders[name] !== 'function') {
+            throw new Error('release_builder_missing:' + name);
+        }
+    }
 
     for (const component of ['desktop', 'server']) {
       await fs.mkdir(path.join(work, component, 'bin'), { recursive: true, mode: 0o700 });

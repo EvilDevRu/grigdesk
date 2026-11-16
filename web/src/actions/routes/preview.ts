@@ -1,6 +1,11 @@
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface RoutePromptPreviewRequest {
   scope: 'route' | 'bootstrap';
@@ -23,7 +28,7 @@ export async function previewRoutePrompt(request: RoutePromptPreviewRequest): Pr
     return;
   }
   if (store.dirty || store.saving || store.conflict || store.jsonBuffer?.dirty) {
-    store.promptPreviewError = 'Сначала сохраните черновик или разрешите конфликт записи.';
+    store.promptPreviewError = translateUi('core.previewSaveTheDraftOrResolveTheSave');
 
     return;
   }
@@ -58,7 +63,7 @@ export async function previewRoutePrompt(request: RoutePromptPreviewRequest): Pr
     };
   } catch (error) {
     if (identity === runtime.openRequest) {
-      store.promptPreviewError = failureText(error, 'Не удалось показать инструкцию.');
+      store.promptPreviewError = failureText(error, translateUi('core.previewCouldNotShowTheInstructions'));
     }
   } finally {
     if (identity === runtime.openRequest) {

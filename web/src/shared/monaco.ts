@@ -7,6 +7,10 @@ import 'monaco-editor/basic-languages/monaco.contribution';
 // Шрифт значков Monaco (@font-face codicon) живёт в отдельной фиче, а не в editor.api.
 // Без него знаки «+»/«−» дифа и стрелки свёрнутых участков — квадратики запасного шрифта.
 import 'monaco-editor/features/codicon/register';
+// Узкий editor.api не регистрирует контроллер закрепления строк самостоятельно.
+// Contribution подключён один раз; опция остаётся выключенной до выбора человека.
+import 'monaco-editor/features/stickyScroll/register';
+
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 
 // Воркер один: editor.worker (в нём же считается сравнение для дифа).

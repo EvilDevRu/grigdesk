@@ -73,11 +73,14 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
       const stopLocal = job.scope === 'pair' || ports.ownsLocal();
       const owner = stopLocal ? await inspectInstalledServer(receipt) : null;
       const activity = owner?.running ? await inspectUpdateActivity(receipt) : null;
-      const message = desktopText('settings.appUpdateActivity', {
-        active: activity?.active ?? 0,
-        queued: activity?.queued ?? 0,
-        tasks: activity?.tasks.length ?? 0,
-      }) + '\n\n' + desktopText('settings.appUpdateConsequences');
+      const message = [
+        desktopText('settings.appUpdateActivity', {
+          active: activity?.active ?? 0,
+          queued: activity?.queued ?? 0,
+          tasks: activity?.tasks.length ?? 0,
+        }),
+        desktopText('settings.appUpdateConsequences'),
+      ].join('\n\n');
 
       if (!await ports.confirm(message)) {
         return;

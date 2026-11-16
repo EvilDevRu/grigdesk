@@ -171,3 +171,21 @@ test('SC-SOURCE: source-aware target проходит URL и main request без
     source: 'grigdesk'
   }), null);
 });
+
+test('SC-SOURCE: старый URL сохраняет отдельную legacy identity', () => {
+  const origin = 'http://127.0.0.1:47101';
+  const target = {
+    kind: 'task',
+    id: '100000000000',
+    unavailable: 'legacy-own',
+  };
+  const legacyUrl = `${origin}/?surface=task&id=100000000000&source=grigdesk#/surface`;
+
+  assert.deepEqual(surfaceTargetFromUrl(legacyUrl, origin), target);
+  assert.deepEqual(parseSurfaceTarget(target), target);
+  assert.deepEqual(surfaceTargetFromUrl(surfaceUrl(origin, target), origin), target);
+  assert.deepEqual(parseMainRequest({ destination: 'task-dialog', target }),
+    { destination: 'task-dialog', target });
+  assert.equal(parseSurfaceTarget({ ...target, extra: true }), null);
+  assert.equal(surfaceTargetFromUrl(legacyUrl.replace('&source=', '&extra=1&source='), origin), null);
+});

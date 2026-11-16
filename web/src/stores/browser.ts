@@ -3,6 +3,7 @@ import { normalizeBrowserPreferences } from '../../../shared/browser/browserCont
 import { useShellStore } from './shell.ts';
 import { decodeBrowserSnapshot } from '../shared/browser/browserUi.ts';
 import type {
+
   BrowserApp,
   BrowserGrantInput,
   BrowserHostControls,
@@ -10,6 +11,7 @@ import type {
   BrowserOwnerChoice,
   BrowserSnapshot,
 } from '../shared/browser/browserUi.ts';
+
 
 const hostPorts = new WeakMap<object, BrowserHostControls>();
 const snapshotPorts = new WeakMap<object, () => void>();

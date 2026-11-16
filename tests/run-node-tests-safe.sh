@@ -94,18 +94,6 @@ cleanup_test_home() {
 
 trap cleanup_test_home EXIT
 
-# Старые настройки не должны наследоваться даже до перехода на новые имена.
-# Префикс берётся из общего модуля, чтобы тесты не заводили второй список совместимости.
-LEGACY_ENV_PREFIX=$(node -e '
-  const path = require("node:path");
-  const legacy = require(path.resolve(process.argv[1]));
-  process.stdout.write(legacy.LEGACY.envPrefix);
-' "$(dirname "${BASH_SOURCE[0]}")/../shared/runtime/legacyBrand.ts") || exit $?
-while IFS= read -r key; do
-  if [[ "$key" == "$LEGACY_ENV_PREFIX"* ]]; then
-    unset "$key"
-  fi
-done < <(compgen -e)
 
 terminate_group() {
   if (( STOPPING )); then

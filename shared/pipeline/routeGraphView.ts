@@ -99,6 +99,10 @@ export interface RouteGraphOptions {
   routeChoices?: boolean;
   // Подзаголовок узла — его ID в машине: редактору он нужен для переходов.
   nodeIds?: boolean;
+  // Ручные координаты узлов редактора: ID узла машины → точка холста. Отсутствующие
+  // узлы остаются на змейке; неизвестные ID и служебные узлы игнорируются.
+  positions?: Record<string, [number, number]>;
+
 }
 
 type MachineScope = 'route' | 'bootstrap';
@@ -452,6 +456,21 @@ export function buildRouteGraph(
       Y0 + row * ROW_H,
     ];
   });
+
+  // Ручные координаты редактора приходят по ID узла машины. Известные узлы
+  // переезжают на свою точку, остальные остаются на змейке; координаты
+  // неизвестных узлов игнорируются без ошибки.
+  if (options.positions) {
+    const displayOfOrigin = new Map(stages.map((item) => [item.node.id, item.id]));
+
+    for (const [originId, point] of Object.entries(options.positions)) {
+      const id = displayOfOrigin.get(originId);
+
+      if (id && order.has(id) && Number.isFinite(point[0]) && Number.isFinite(point[1])) {
+        pos[id] = [point[0], point[1]];
+      }
+    }
+  }
 
   // Песочница — ромб готовности стенда (статус даёт адаптер из tN.env). Стенд
   // поднимается ПАРАЛЛЕЛЬНО разведке: из стартовой точки две линии — в Scout и в

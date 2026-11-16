@@ -7,7 +7,7 @@
     data-role="task-modal"
     size="workspace"
     initial-focus="#task-modal-title"
-    :label="detail?.title || `Задача #${taskId || ''}`"
+    :label="detail?.title || t('core.taskZadachaTaskid', { taskId: taskId || '' })"
     :body-inset="false"
     fade-only
     @update:open="onTaskDialogOpenChange"
@@ -17,37 +17,36 @@
       <div class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
         <UiPaneHeader class="task-toolbar" inset="content" data-ui-task-header>
           <template #title>
-            <span class="meyebrow">{{ ownTask ? t('core.grigdeskTaskLabel')
-              : t('core.grigdeskGenericTask') }}</span>
+            <span class="meyebrow">{{ t('core.taskFormGenericTask') }}</span>
           </template>
           <template #meta>
             <span class="mid mono">#{{ taskId }}</span>
-            <TaskSourceChip v-if="taskSource || ownTask" :source="ownTask ? 'grigdesk' : taskSource" />
+            <TaskSourceChip v-if="taskSource" :source="taskSource" />
           </template>
           <template #actions>
-            <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
+            <div class="mhead-actions" role="group" :aria-label="t('core.taskDeystviyaSKartochkoy')">
               <TaskFavoriteButton
                 v-if="canUsePersonal"
                 :active="favorites.isFavorite(taskId)"
                 :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
-                :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
+                :task-title="detail?.title || boardTask?.title || t('core.taskZadachaTaskid', { taskId: String(taskId ?? '') })"
                 @toggle="toggleFavorite"
               />
               <UiIconButton
                 data-context="task-modal-header"
-                label="Обновить задачу"
-                v-tooltip="'Обновить'"
+                :label="t('core.taskObnovitZadachu')"
+                v-tooltip="t('core.trackerUpdate')"
                 :loading="loading"
                 :disabled="Boolean(editForm) || busy === 'edit'"
-                loading-label="Обновляю задачу"
+                :loading-label="t('core.taskObnovlyayuZadachu')"
                 @click="refresh"
               >
                 <UiRefreshIcon />
               </UiIconButton>
               <UiIconButton
                 data-context="task-modal-header"
-                label="Закрыть задачу"
-                v-tooltip="'Закрыть (Esc)'"
+                :label="t('core.taskZakrytZadachu')"
+                v-tooltip="t('core.taskZakrytEsc')"
                 @click="ui.close()"
               >
                 ✕
@@ -57,27 +56,55 @@
         </UiPaneHeader>
         <div class="mheading">
           <h3 id="task-modal-title" class="mtitle" tabindex="-1">
-            {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
+            {{ detail?.title || (loading ? t('core.browserLoading') : t('core.chatOptionTask')) }}
           </h3>
         </div>
       </div>
 
+      <div v-if="detailReadError || metadataReadError || commentsReadError" class="malerts" aria-live="polite">
+        <p v-if="detailReadError" data-role="task-read-status" class="err">
+          {{ detail ? t('core.taskReadStale') : t('core.taskReadFailed') }}
+          <time v-if="detailReadAt" :datetime="new Date(detailReadAt).toISOString()">
+            {{ t('core.taskReadReceived', { time: formatDateTime(new Date(detailReadAt).toISOString()) }) }}
+          </time>
+          {{ detailReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+        <p v-if="metadataReadError" data-role="task-metadata-status" class="err">
+          {{ metadataReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+        <p v-if="commentsReadError" data-role="task-page-status" class="err" aria-live="polite">
+          {{ commentsReadAt ? t('core.taskPageStale') : t('core.taskPageFailed') }}
+          <time v-if="commentsReadAt" :datetime="new Date(commentsReadAt).toISOString()">
+            {{ t('core.taskReadReceived', { time: formatDateTime(new Date(commentsReadAt).toISOString()) }) }}
+          </time>
+          {{ commentsReadError }}
+          <UiButton variant="text" :disabled="loading || trackers.loading || comLoading" @click="refresh">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+        </p>
+      </div>
       <div v-if="err || (canUsePersonal && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err"
     :data-perf-error="!detail && !loading ? '' : undefined">{{ err }}</p>
-        <p v-if="canUsePersonal && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
-        <p v-if="canUsePersonal && shelf.error" class="err">Полка: {{ shelf.error }}</p>
+        <p v-if="canUsePersonal && favorites.error" class="err">{{ t('core.taskIzbrannoe') }} {{ favorites.error }}</p>
+        <p v-if="canUsePersonal && shelf.error" class="err">{{ t('core.taskPolka') }} {{ shelf.error }}</p>
       </div>
 
-      <div class="mcontext" aria-label="Состояние задачи">
+      <div class="mcontext" :aria-label="t('core.taskSostoyanieZadachi')">
         <div class="meta">
           <span v-if="taskStatus" class="tag task-status">{{ taskStatus }}</span>
           <span v-if="detail?.replicate === 'Y'" class="tag">{{ t('core.taskRecurring') }}</span>
           <span v-if="taskProject" class="context-item">
-            <span class="context-label">Проект</span>{{ taskProject }}
+            <span class="context-label">{{ t('core.taskEditProject') }}</span>{{ taskProject }}
           </span>
           <span v-if="taskResponsible" class="context-item">
-            <span class="context-label">Исполнитель</span>
+            <span class="context-label">{{ t('core.taskEditResponsible') }}</span>
             <img v-if="responsibleAvatar" :key="responsibleAvatar" :src="responsibleAvatar" alt=""
                  class="task-avatar" referrerpolicy="no-referrer" @error="hideAvatar" />
             {{ taskResponsible }}
@@ -89,7 +116,7 @@
             {{ detail.creator.name }}
           </span>
           <span v-if="taskPriority" class="context-item">
-            <span class="context-label">Приоритет</span>{{ taskPriority }}
+            <span class="context-label">{{ t('core.taskEditPriority') }}</span>{{ taskPriority }}
           </span>
           <span v-if="taskDeadlineText" class="context-item" :class="{ over: taskDeadlineState === 'over' }">
             <span class="context-label">{{ t('core.taskDeadline') }}</span>
@@ -108,7 +135,7 @@
             {{ t('core.taskParent', { id: taskParentId }) }}
           </UiButton>
           <span v-if="!hasTaskMeta" class="context-empty">
-            {{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}
+            {{ loading ? t('core.taskChitayuDannyeZadachi') : t('core.taskDopolnitelnyhMetokNet') }}
           </span>
         </div>
       </div>
@@ -146,20 +173,18 @@
         <section id="task-description" class="task-pane brief-pane"
                  role="tabpanel" aria-labelledby="task-tab-description">
           <div class="brief-head">
-            <h4 class="pane-title">{{ editForm ? t('core.taskEditHeading') : 'Описание задачи' }}</h4>
+            <h4 class="pane-title">{{ editForm ? t('core.taskEditHeading') : t('core.taskOpisanieZadachi') }}</h4>
             <UiButton
               v-if="isB24Task && trackerCaps.editing && detail && !editForm"
               size="compact"
               data-role="task-edit-open"
-              v-tooltip="'Редактировать задачу'"
+              v-tooltip="t('core.taskRedaktirovatZadachu')"
               :disabled="loading || busy === 'edit'"
               @click="openTaskEdit"
-            >
-              Изменить
-            </UiButton>
+            > {{ t('settings.change') }} </UiButton>
           </div>
           <div class="brief-scroll" :class="{ 'brief-scroll--editing': editForm }">
-            <TaskLoading v-if="loading && !detail" label="Читаю данные задачи…"  area="description" />
+            <TaskLoading v-if="loading && !detail" :label="t('core.taskChitayuDannyeZadachi')"  area="description" />
             <form v-else-if="editForm" class="task-edit" :aria-label="t('core.taskEditHeading')"
                   @submit.prevent="saveTaskEdit" @keydown.ctrl.enter.prevent="saveTaskEdit"
                   @keydown.meta.enter.prevent="saveTaskEdit">
@@ -530,20 +555,20 @@
 
               <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
               <section v-if="tgLinks.length" class="tg">
-                <div class="tlbl">Обсуждение в Telegram</div>
+                <div class="tlbl">{{ t('core.taskObsuzhdenieVTelegram') }}</div>
                 <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
                   <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
                        как «в чате пусто», а причина — как «сюда нет доступа». -->
                   <div v-if="!l.ok" class="tgfail">
                     <span class="tgurl">{{ l.url }}</span>
-                    <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
+                    <span class="tgwhy">{{ l.message || t('core.taskSsylkaNeRaskryta') }}</span>
                   </div>
                   <template v-else>
                     <div class="tghead">
-                      <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
+                      <span class="tgchat">{{ l.chat?.title || t('core.taskChat') }}</span>
                       <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
-                      <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
-                      <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
+                      <span v-if="l.thread" class="tgthread">{{ t('core.taskTema') }} {{ l.thread }}</span>
+                      <a class="tgurl" :href="l.url" target="_blank" rel="noopener">{{ t('core.taskOtkryt') }}</a>
                     </div>
                     <div
                       v-for="q in l.quotes"
@@ -554,23 +579,18 @@
                       <div class="tgmeta">
                         <span class="tgauthor">{{ q.author }}</span>
                         <span class="tgtime">{{ tgTime(q.at) }}</span>
-                        <span v-if="q.target" class="tgpin">← ссылка</span>
+                        <span v-if="q.target" class="tgpin">{{ t('core.taskSsylka') }}</span>
                       </div>
                       <div class="tgtext">
                         {{ q.text }}<template v-if="q.trimmed">…</template>
                       </div>
                       <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
                     </div>
-                    <div v-if="l.more" class="tgmore">
-                      ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке
-                    </div>
+                    <div v-if="l.more" class="tgmore"> {{ t('core.taskEsche2') }} {{ l.more }} {{ tgPlural(l.more) }} {{ t('core.taskVVetke') }} </div>
                   </template>
                 </div>
               </section>
-              <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
-                {{ ownTask ? t('core.grigdeskEmptyDescription')
-                  : 'Постановка пока не загружена или в задаче нет описания.' }}
-              </div>
+              <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty"> {{ t('core.taskPostanovkaPokaNeZagruzhena') }} </div>
             </template>
           </div>
         </section>
@@ -585,18 +605,15 @@
               role="tabpanel"
               aria-labelledby="task-tab-triage"
             >
-          <div v-if="!analysisEnabled" class="triage-disabled">
-            Триаж выключен в настройках плагинов. Сохранённые оценки и уточнения не удалены.
-          </div>
+          <div v-if="!analysisEnabled" class="triage-disabled"> {{ t('core.taskTriazhVyklyuchenVNastroykah') }} </div>
           <template v-else>
           <div v-if="!triagePending" class="thead2" :class="{ 'is-empty': !triage?.analysis }">
             <div class="triage-summary">
-              <span class="triage-summary-title">Оценка по коду</span>
-              <span v-if="triage?.analysis" class="triage-ready">Готова</span>
-              <span v-else-if="triageState === 'failed'" class="terr">
-                Не удалось оценить: {{ triage?.status?.error || 'попробуйте ещё раз' }}
+              <span class="triage-summary-title">{{ t('core.taskOtsenkaPoKodu') }}</span>
+              <span v-if="triage?.analysis" class="triage-ready">{{ t('core.taskGotova') }}</span>
+              <span v-else-if="triageState === 'failed'" class="terr"> {{ t('core.taskNeUdalosOtsenit') }} {{ triage?.status?.error || t('core.taskPoprobuyteEscheRaz') }}
               </span>
-              <span v-else class="tmuted">Задача ещё не оценена</span>
+              <span v-else class="tmuted">{{ t('core.taskZadachaEscheNeOtsenena') }}</span>
             </div>
             <p v-if="!triage?.analysis" class="triage-empty-hint">{{ t('core.taskDesignAnalysisHint') }}</p>
             <UiButton
@@ -605,7 +622,7 @@
               :disabled="!canAnalyzeTask"
               @click="analyzeNow"
             >
-              {{ triage?.analysis ? 'Переоценить' : 'Оценить задачу' }}
+              {{ triage?.analysis ? t('core.taskPereotsenit') : t('core.taskOtsenitZadachu') }}
             </UiButton>
             <dl v-if="triage?.analysis" class="triage-metrics">
               <div
@@ -621,7 +638,7 @@
             </dl>
             <p v-if="triage?.analysis" class="triage-route" v-tooltip="triage.analysis.route_reason || ''">
               {{ triageWorkLabel }}
-              <span v-if="triageDepthLabel">· {{ triageDepthLabel }} маршрут</span>
+              <span v-if="triageDepthLabel">· {{ triageDepthLabel }} {{ t('core.taskMarshrut2') }}</span>
             </p>
           </div>
 
@@ -629,7 +646,7 @@
                только ход разбора со счётчиком. Прошлая оценка и уже отвеченные вопросы к
                нему отношения не имеют, а сделать с ними человек всё равно ничего не может. -->
           <div v-else class="thead2 triage-progress" role="status" aria-live="polite">
-            <span class="tlbl">Триаж</span>
+            <span class="tlbl">{{ t('core.pluginAnalysis') }}</span>
             <UiSpinner decorative />
             <span class="triage-progress-state">{{ triageProgressLabel }}</span>
             <span v-if="triageProgressElapsed" class="triage-progress-time mono">
@@ -642,15 +659,13 @@
               v-if="triage.analysis.summary || triage.stale?.length || triage.analysis.risk_markers?.length"
               class="triage-findings"
             >
-              <section v-if="triage.analysis.summary" class="triage-result" aria-label="Вывод оценки">
-                <h5>Вывод</h5>
+              <section v-if="triage.analysis.summary" class="triage-result" :aria-label="t('core.taskVyvodOtsenki')">
+                <h5>{{ t('core.taskVyvod') }}</h5>
                 <p class="tsum">{{ triage.analysis.summary }}</p>
               </section>
-              <p v-if="triage.stale?.length" class="tstale">
-                ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
-              </p>
+              <p v-if="triage.stale?.length" class="tstale"> {{ t('core.taskKodPodOtsenkoyMenyalsya') }} {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? t('core.taskIEscheLength5', { length5: triage.stale.length - 5 }) : '' }} {{ t('core.taskStoitPereotsenit') }} </p>
               <section v-if="triage.analysis.risk_markers?.length" class="triage-risks">
-                <h5>Риски и ограничения <span>{{ triage.analysis.risk_markers.length }}</span></h5>
+                <h5>{{ t('core.taskRiskiIOgranicheniya') }} <span>{{ triage.analysis.risk_markers.length }}</span></h5>
                 <ul class="tlist">
                   <li v-for="m in triage.analysis.risk_markers" :key="m">{{ m }}</li>
                 </ul>
@@ -663,8 +678,8 @@
             >
               <header class="clarify-head">
                 <div>
-                  <h5 id="task-triage-questions-title">Нужно ваше решение</h5>
-                  <p>Выберите подходящий вариант. При необходимости добавьте пояснение.</p>
+                  <h5 id="task-triage-questions-title">{{ t('core.taskNuzhnoVasheReshenie') }}</h5>
+                  <p>{{ t('core.taskVyberitePodhodyaschiyVariantPri') }}</p>
                 </div>
               </header>
               <div class="clarify-list">
@@ -686,15 +701,15 @@
                       }"
                     >
                       {{ answerFor(question)!.status === 'human_required'
-                        ? 'Арбитр оставил вопрос человеку'
+                        ? t('core.taskArbitrOstavilVoprosCheloveku')
                         : answerFor(question)!.actor === 'grigdesk-arbiter'
-                          ? 'Арбитр — машинный ответ'
-                          : 'Ответил человек' }}
+                          ? t('core.taskArbitrMashinnyyOtvet')
+                          : t('core.taskOtvetilChelovek') }}
                     </span>
                   </div>
                 </div>
                 <div v-if="question.recommendation" class="clarify-recommendation">
-                  <span class="clarify-recommendation-label">Рекомендация</span>
+                  <span class="clarify-recommendation-label">{{ t('core.taskRekomendatsiya') }}</span>
                   <strong v-if="recommendationOption(question)">
                     {{ recommendationOption(question) }}
                   </strong>
@@ -720,7 +735,7 @@
                     :open="composerOpenFor(question)"
                     @update:open="setComposerOpen(question.id, $event)"
                   >
-                    {{ composerOpenFor(question) ? 'Скрыть пояснение' : 'Добавить пояснение' }}
+                    {{ composerOpenFor(question) ? t('core.taskSkrytPoyasnenie') : t('core.taskDobavitPoyasnenie') }}
                   </UiDisclosureButton>
                 </div>
                 <div
@@ -729,8 +744,8 @@
                   class="clarify-answer"
                 >
                   <div class="clarify-answer-head">
-                    <span>{{ question.options.length ? 'Пояснение к выбору' : 'Ваш ответ' }}</span>
-                    <small>{{ question.options.length ? 'необязательно' : 'своими словами' }}</small>
+                    <span>{{ question.options.length ? t('core.taskPoyasnenieKVyboru') : t('core.taskVashOtvet') }}</span>
+                    <small>{{ question.options.length ? t('core.taskNeobyazatelno') : t('core.taskSvoimiSlovami') }}</small>
                   </div>
                   <UiTextarea
                     v-model="clarifyDrafts[question.id]!.text"
@@ -738,23 +753,23 @@
                     data-role="task-clarification"
                     rows="2"
                     :placeholder="question.options.length
-                      ? 'Добавьте детали, если одного варианта недостаточно'
-                      : 'Ответьте на вопрос триажа'"
+                      ? t('core.taskDobavteDetaliEsliOdnogo')
+                      : t('core.taskOtvetteNaVoprosTriazha')"
                     @focus="activeQuestionId = question.id"
                     @paste="onClarifyPaste(question.id, $event)"
                     @keydown.ctrl.enter.prevent="sendClarify"
                   />
                   <div class="clarify-answer-tools">
-                    <span>Локально, не в B24 · Ctrl+Enter — отправить</span>
+                    <span>{{ t('core.taskLokalnoNeVB24') }}</span>
                     <div class="clarify-card-actions">
                       <UiFilePicker
                         data-role="task-attachment"
                         accept="image/*"
                         multiple
                         density="compact"
-                        label="Приложить фото"
-                        loading-label="Прикладываю фото"
-                        v-tooltip="'Приложить фото к ответу'"
+                        :label="t('core.taskPrilozhitFoto')"
+                        :loading-label="t('core.taskPrikladyvayuFoto')"
+                        v-tooltip="t('core.taskPrilozhitFotoKOtvetu')"
                         :busy="clarifyUploading"
                         :show-summary="false"
                         :show-reset="false"
@@ -776,8 +791,8 @@
                         </template>
                       </UiFilePicker>
                       <UiIconButton
-                        :label="`Начать диктовку ответа на вопрос: ${question.text}`"
-                        v-tooltip="'Начать диктовку'"
+                        :label="t('core.taskNachatDiktovkuOtvetaNa', { text: question.text })"
+                        v-tooltip="t('core.taskNachatDiktovku')"
                         @click="startClarifyDictation(question.id)"
                       >
                         <svg
@@ -804,8 +819,8 @@
                       <img :src="attachment.url" :alt="attachment.name" />
                       <span class="attname">{{ attachment.name }}</span>
                       <UiIconButton
-                        :label="`Убрать ${attachment.name}`"
-                        v-tooltip="'Убрать'"
+                        :label="t('core.taskUbratName', { name: attachment.name })"
+                        v-tooltip="t('settings.remove')"
                         @click="dropClarifyAtt(question.id, attachment.file)"
                       >
                         ✕
@@ -823,20 +838,16 @@
                     variant="solid"
                     :loading="busy === 'clarify' || clarifyUploading"
                     :disabled="busy === 'clarify' || clarifyUploading || !hasClarifyAnswers"
-                    loading-label="Сохраняю уточнения"
+                    :loading-label="t('core.taskSohranyayuUtochneniya')"
                     @click="sendClarify"
                   >
-                    <template #leading><UiRefreshIcon /></template>
-                    Уточнить и переоценить
-                  </UiButton>
+                    <template #leading><UiRefreshIcon /></template> {{ t('core.taskUtochnitIPereotsenit') }} </UiButton>
                   <UiButton
                     v-if="analysisManifest"
                     :loading="busy === 'arbitrate'"
                     :disabled="busy === 'arbitrate'"
                     @click="arbitrateQuestions"
-                  >
-                    Разобрать арбитром
-                  </UiButton>
+                  > {{ t('core.taskRazobratArbitrom') }} </UiButton>
                 </UiFormActions>
               </div>
             </section>
@@ -847,11 +858,9 @@
                 density="compact"
                 :open="showClarifyHistory"
                 @update:open="showClarifyHistory = $event"
-              >
-                Уточнения для агентов
-              </UiDisclosureButton>
+              > {{ t('core.taskUtochneniyaDlyaAgentov') }} </UiDisclosureButton>
               <div v-if="showClarifyHistory" id="task-triage-history" class="clhist-body">
-                <p class="triage-private-hint">Хранятся локально. Заказчик их не видит.</p>
+                <p class="triage-private-hint">{{ t('core.taskHranyatsyaLokalnoZakazchikIh') }}</p>
                 {{ clarifySaved }}
               </div>
             </div>
@@ -862,9 +871,7 @@
               density="compact"
               :open="showNote"
               @update:open="showNote = $event"
-            >
-              Разведнота · карта кода
-            </UiDisclosureButton>
+            > {{ t('core.taskRazvednotaKartaKoda') }} </UiDisclosureButton>
             <div v-if="showNote" id="task-triage-note" class="tnote" v-html="noteHtml"></div>
             <div v-if="triage.analysis.generated_at || triage.analysis.meta" class="triage-details">
               <UiDisclosureButton
@@ -873,16 +880,14 @@
                 density="compact"
                 :open="showAnalysisDetails"
                 @update:open="showAnalysisDetails = $event"
-              >
-                Подробности оценки
-              </UiDisclosureButton>
+              > {{ t('core.taskPodrobnostiOtsenki') }} </UiDisclosureButton>
               <dl v-if="showAnalysisDetails" id="task-analysis-details" class="tmeta">
                 <template v-if="triage.analysis.generated_at">
-                  <dt>Получена</dt>
-                  <dd>{{ new Date(triage.analysis.generated_at).toLocaleString('ru-RU') }}</dd>
+                  <dt>{{ t('core.taskPoluchena') }}</dt>
+                  <dd>{{ new Date(triage.analysis.generated_at).toLocaleString(uiLocale) }}</dd>
                 </template>
                 <template v-if="Object.keys(triage.analysis.repos || {}).length">
-                  <dt>Код</dt>
+                  <dt>{{ t('core.code') }}</dt>
                   <dd>
                     <div
                       v-for="(repo, key) in triage.analysis.repos"
@@ -894,20 +899,20 @@
                   </dd>
                 </template>
                 <template v-if="triage.analysis.meta?.provider">
-                  <dt>Исполнитель</dt><dd>{{ triage.analysis.meta.provider }}</dd>
+                  <dt>{{ t('core.taskEditResponsible') }}</dt><dd>{{ triage.analysis.meta.provider }}</dd>
                 </template>
                 <template v-if="triage.analysis.meta?.model">
-                  <dt>Модель</dt><dd>{{ triage.analysis.meta.model }}</dd>
+                  <dt>{{ t('core.chatOptionModel') }}</dt><dd>{{ triage.analysis.meta.model }}</dd>
                 </template>
                 <template v-if="triage.analysis.meta?.effort">
-                  <dt>Усилие</dt><dd>{{ triage.analysis.meta.effort }}</dd>
+                  <dt>{{ t('settings.effort') }}</dt><dd>{{ triage.analysis.meta.effort }}</dd>
                 </template>
                 <template v-if="triage.analysis.meta?.duration_ms != null">
-                  <dt>Длительность</dt>
+                  <dt>{{ t('core.taskDlitelnost') }}</dt>
                   <dd>{{ mmss(triage.analysis.meta.duration_ms / 1000) }}</dd>
                 </template>
                 <template v-if="triage.analysis.meta?.cost_usd != null">
-                  <dt>Стоимость</dt><dd>${{ triage.analysis.meta.cost_usd.toFixed(2) }}</dd>
+                  <dt>{{ t('core.taskStoimost') }}</dt><dd>${{ triage.analysis.meta.cost_usd.toFixed(2) }}</dd>
                 </template>
               </dl>
             </div>
@@ -925,8 +930,8 @@
           aria-labelledby="task-tab-comments"
         >
           <TaskLoading v-if="mtab === 'comments' && comLoading && comments === null"
-                       label="загрузка комментариев…" area="comments" />
-          <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
+                       :label="t('core.taskZagruzkaKommentariev')" area="comments" />
+          <div v-else-if="comments && !comments.length" class="tmuted">{{ t('core.taskKommentarievNet') }}</div>
           <div v-else-if="comments" class="comlist">
             <div v-for="c in comments" :key="c.mid" class="com">
               <div class="comhead">
@@ -935,7 +940,7 @@
               </div>
               <div class="comtext">{{ c.text }}</div>
               <div v-if="c.attachments?.length" class="comatts">
-                <span v-for="a in c.attachments" :key="a.attachedId" class="comatt">📎 {{ a.name || `файл ${a.attachedId}` }}</span>
+                <span v-for="a in c.attachments" :key="a.attachedId" class="comatt">📎 {{ a.name || t('core.taskFaylAttachedid', { attachedId: a.attachedId }) }}</span>
               </div>
             </div>
           </div>
@@ -944,19 +949,17 @@
               v-model="commentText"
               class="comment-text"
               data-role="task-comment"
-              aria-label="Комментарий к задаче"
+              :aria-label="t('core.taskKommentariyKZadache')"
               rows="2"
               :disabled="busy === 'comment'"
-              placeholder="Добавить комментарий…"
+              :placeholder="t('core.taskDobavitKommentariy')"
             />
             <UiButton
               :loading="busy === 'comment'"
               :disabled="busy === 'comment' || !commentText.trim()"
-              loading-label="Отправляю комментарий"
+              :loading-label="t('core.taskOtpravlyayuKommentariy')"
               @click="sendComment"
-            >
-              Отправить
-            </UiButton>
+            > {{ t('core.send') }} </UiButton>
           </div>
         </div>
           </div>
@@ -965,11 +968,11 @@
 
       <!-- Управление -->
       <footer v-show="!editForm || taskSection !== 'description'" class="controls"
-              aria-label="Действия с задачей">
-          <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" aria-label="Учёт времени">
+              :aria-label="t('core.taskDeystviyaSZadachey')">
+          <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" :aria-label="t('core.taskUchetVremeni')">
             <div class="timer" :class="{ run: running }">
               <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
-              <span class="tstate">{{ running ? 'Идёт учёт' : 'Учёт остановлен' }}</span>
+              <span class="tstate">{{ running ? t('core.taskIdetUchet') : t('core.taskUchetOstanovlen') }}</span>
             </div>
             <UiButton
               data-context="task-footer-action"
@@ -977,11 +980,11 @@
               variant="outline"
               :loading="busy === 'timer'"
               :disabled="busy === 'timer' || timerStartBlocked"
-              loading-label="Обновляю учёт времени"
-              v-tooltip="timerStartBlocked ? 'Задача завершена — сначала возобновите её' : null"
+              :loading-label="t('core.taskObnovlyayuUchetVremeni')"
+              v-tooltip="timerStartBlocked ? t('core.taskZadachaZavershenaSnachalaVozobnovite') : null"
               @click="toggleTimer"
             >
-              {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
+              {{ running ? t('core.taskOstanovitUchet') : t('core.taskNachatUchet') }}
             </UiButton>
           </div>
           <div class="cbtns">
@@ -996,10 +999,10 @@
               variant="outline"
               v-tooltip="conveyor.stall
                 ? [conveyor.stall.title, conveyor.stall.hint].filter(Boolean).join(' — ')
-                : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`"
+                : t('core.taskZadachaUzheNaKonveyere', { route: conveyor.route || t('core.taskMarshrut2') })"
               @click="openConveyor"
             >
-              {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
+              {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? t('core.taskKonveyerOborvalsya') : t('core.taskKonveyerVstal'))
                  : conveyor.daemonAlive ? t('core.taskDesignPipelineRunning')
                    : t('core.taskDesignPipeline') }} →
             </UiButton>
@@ -1011,7 +1014,7 @@
               variant="outline"
               :loading="busy === 'launch' || launchOptionsBusy"
               :disabled="!detail || loading || busy === 'launch' || launchOptionsBusy || !!launchForm"
-              loading-label="Читаю параметры запуска"
+              :loading-label="t('core.taskChitayuParametryZapuska')"
               v-tooltip="launchOpenHint"
               @click="openLaunch"
             >
@@ -1024,11 +1027,9 @@
               variant="solid"
               :loading="busy === 'renew'"
               :disabled="busy === 'renew'"
-              loading-label="Возобновляю задачу"
+              :loading-label="t('core.taskVozobnovlyayuZadachu')"
               @click="renew"
-            >
-              ↺ Возобновить
-            </UiButton>
+            > {{ t('core.taskVozobnovit') }} </UiButton>
             <template v-else-if="isB24Task && awaitingReview && trackerCaps.review">
               <UiButton tone="success" :loading="busy === 'approve'" :disabled="Boolean(busy)"
                         data-role="task-approve" @click="reviewTask(true)">
@@ -1046,11 +1047,9 @@
               variant="solid"
               :loading="busy === 'complete'"
               :disabled="busy === 'complete'"
-              loading-label="Завершаю задачу"
+              :loading-label="t('core.taskZavershayuZadachu')"
               @click="complete"
-            >
-              ✓ Завершить
-            </UiButton>
+            > {{ t('core.taskZavershit') }} </UiButton>
           </div>
           <div v-if="canUsePersonal || sandbox" class="csecondary">
             <div class="ctools" role="group" :aria-label="t('core.taskToolsActions')">
@@ -1063,10 +1062,10 @@
                 :pressed="shelf.isOnShelf(taskId)"
                 :loading="shelf.isPending(taskId)"
                 :disabled="shelf.isPending(taskId)"
-                loading-label="Обновляю полку"
+                :loading-label="t('core.taskObnovlyayuPolku')"
                 @click="toggleShelf"
               >
-                {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
+                {{ shelf.isOnShelf(taskId) ? t('core.taskNaPolke') : t('core.taskNaPolku') }}
               </UiButton>
               <OpenDiffButton
                 data-context="task-footer-action"
@@ -1089,12 +1088,10 @@
                 variant="ghost"
                 :loading="sandboxBusy"
                 :disabled="sandboxBusy"
-                loading-label="Сношу стенд"
-                v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+                :loading-label="t('core.taskSnoshuStend')"
+                v-tooltip="t('core.taskSnestiPesochnitsuZadachiFront', { fePort: sandbox.fePort, apiPort: sandbox.apiPort ? `, API :${sandbox.apiPort}` : '' })"
                 @click="sandboxDown"
-              >
-                ⏏ Снести стенд
-              </UiButton>
+              > {{ t('core.taskSnestiStend') }} </UiButton>
               <UiButton
                 v-if="isB24Task && trackerCaps.delete"
                 data-context="task-footer-action"
@@ -1113,7 +1110,7 @@
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
           <div v-if="launchForm" class="lform">
             <div v-if="!launchForm.profile || launchOpts!.profiles?.length! > 1" class="lrow">
-              <label class="llbl" for="launch-profile">Профиль</label>
+              <label class="llbl" for="launch-profile">{{ t('core.taskProfil') }}</label>
               <UiSelect
                 id="launch-profile"
                 v-model="launchForm.profile"
@@ -1122,15 +1119,14 @@
                 :disabled="launchOptionsBusy || busy === 'launch'"
                 @change="changeLaunchProfile"
               >
-                <option v-if="!launchForm.profile" disabled value="">Выбери профиль</option>
+                <option v-if="!launchForm.profile" disabled value="">{{ t('core.taskVyberiProfil') }}</option>
                 <option v-for="p in launchOpts!.profiles" :key="p" :value="p">{{ p }}</option>
               </UiSelect>
               <span v-if="launchOptionsBusy" class="lhint">
-                <UiSpinner decorative /> читаю каталог…
-              </span>
+                <UiSpinner decorative /> {{ t('core.taskChitayuKatalog') }} </span>
             </div>
             <div class="lrow">
-              <label class="llbl" for="launch-route">Маршрут</label>
+              <label class="llbl" for="launch-route">{{ t('core.taskMarshrut3') }}</label>
               <UiSelect
                 id="launch-route"
                 v-model="launchForm.route"
@@ -1146,8 +1142,7 @@
                   :title="launchOpts!.routeOptions?.[r]?.title || ''"
                 >{{ r }}</option>
               </UiSelect>
-              <span v-if="launchRouteIsSuggested" class="lhint suggested">
-                рекомендован триажем<template v-if="routeDepthLabel"> · {{ routeDepthLabel }}</template>
+              <span v-if="launchRouteIsSuggested" class="lhint suggested"> {{ t('core.taskRekomendovanTriazhem') }}<template v-if="routeDepthLabel"> · {{ routeDepthLabel }}</template>
               </span>
               <!-- Человек ушёл с рекомендованного маршрута: основание относится к ней, а не к
                    выбранному, поэтому текстом его больше не показываем — только подсказкой. -->
@@ -1155,13 +1150,12 @@
                 v-else-if="routeSuggestion"
                 class="lhint"
                 v-tooltip="routeSuggestionReason"
-              >триаж предлагает: {{ routeSuggestion }}</span>
-              <span v-if="launchRouteIsSuggested && routeSuggestionReason" class="lhint lreason">
-                почему: {{ routeSuggestionReason }}
+              >{{ t('core.taskTriazhPredlagaet') }} {{ routeSuggestion }}</span>
+              <span v-if="launchRouteIsSuggested && routeSuggestionReason" class="lhint lreason"> {{ t('core.taskPochemu') }} {{ routeSuggestionReason }}
               </span>
             </div>
             <div v-if="launchOpts!.runners?.length" class="lrow">
-              <label class="llbl" for="launch-runner">Исполнитель</label>
+              <label class="llbl" for="launch-runner">{{ t('core.taskEditResponsible') }}</label>
               <UiSelect
                 id="launch-runner"
                 v-model="launchForm.runner"
@@ -1169,65 +1163,59 @@
                 compact
                 :disabled="launchOptionsBusy || busy === 'launch'"
               >
-                <option value="">Из профиля<template v-if="launchOpts!.defaultRunner"> ({{ providerLabel(launchOpts!.defaultRunner) }})</template></option>
+                <option value="">{{ t('core.stageProfileDefault') }}<template v-if="launchOpts!.defaultRunner"> ({{ providerLabel(launchOpts!.defaultRunner) }})</template></option>
                 <option v-for="r in launchOpts!.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
               </UiSelect>
             </div>
 
-            <div class="lsummary" aria-label="Параметры запуска">
+            <div class="lsummary" :aria-label="t('core.taskParametryZapuska')">
               <div class="lsummary-row">
-                <span>Профиль</span>
+                <span>{{ t('core.taskProfil') }}</span>
                 <b class="mono">{{ launchForm.profile }}</b>
               </div>
               <div v-if="launchNeedsDelivery" class="lsummary-row">
-                <span>SHIP</span>
+                <span>{{ t('core.taskShip') }}</span>
                 <b class="mono">{{ launchDeliverySummary }}</b>
               </div>
               <div v-if="launchNeedsInstrumentation" class="lsummary-row">
-                <span>Диагностика</span>
+                <span>{{ t('settings.diagnostics') }}</span>
                 <b>{{ launchDiagnosisSummary }} · {{ launchInstrumentationSummary }}</b>
               </div>
-              <p v-if="launchNeedsDelivery" class="lshipwarn">
-                После финальных одобренных ворот маршрут сделает commit, push и PR.
-              </p>
+              <p v-if="launchNeedsDelivery" class="lshipwarn"> {{ t('core.taskPosleFinalnyhOdobrennyhVorot') }} </p>
             </div>
 
-            <label class="llbl">Критерии приёмки <span class="lopt">— это и есть объём задачи</span></label>
+            <label class="llbl">{{ t('core.taskKriteriiPriemki') }} <span class="lopt">{{ t('core.taskEtoIEstObem') }}</span></label>
             <UiTextarea
               v-model="launchForm.criteria"
               data-role="task-launch-note"
               rows="3"
-              placeholder="Например: экспорт не падает на выборке 10 000 строк&#10;в отчёте появилась колонка «Менеджер»"
+              :placeholder="t('core.taskNaprimerEksportNePadaet')"
             />
-            <p class="lnote">
-              По строке на каждый пункт постановки. Конвейер не имеет права сузить этот список сам:
-              пункт, которого здесь нет, он выполнит по постановке как есть или остановится с вопросом.
-            </p>
+            <p class="lnote"> {{ t('core.taskPoStrokeNaKazhdyy') }} </p>
             <div
               v-if="launchOpts?.scopeSuggestion?.skip?.length"
               class="lnote lscope-skip"
               data-role="task-launch-scope-skip"
             >
-              <span class="lscope-skip-title">Триаж предлагает НЕ делать:</span>
+              <span class="lscope-skip-title">{{ t('core.taskTriazhPredlagaetNeDelat') }}</span>
               <ul>
                 <li v-for="line in launchOpts!.scopeSuggestion.skip" :key="line">{{ line }}</li>
               </ul>
-              <span>Не согласен — допиши пункт в критерии выше.</span>
+              <span>{{ t('core.taskNeSoglasenDopishiPunkt') }}</span>
             </div>
 
             <details v-if="launchNeedsDelivery || launchNeedsInstrumentation" class="ladvanced">
-              <summary>Дополнительные параметры</summary>
+              <summary>{{ t('settings.advancedParameters') }}</summary>
               <div class="ladvanced-body">
                 <template v-if="launchNeedsDelivery">
-                  <label class="llbl">Целевые ветки из конфигурации профиля</label>
+                  <label class="llbl">{{ t('core.taskTselevyeVetkiIzKonfiguratsii') }}</label>
                   <div v-for="repo in launchOpts!.repositories" :key="repo.name" class="lrepo">
                     <span class="mono">{{ repo.name }}</span>
                     <code class="mono">{{ repo.targetBranch }}</code>
                   </div>
                 </template>
                 <template v-if="launchNeedsInstrumentation">
-                  <label class="llbl" for="launch-instrumentation">
-                    Точный scope <span class="lopt">— по одному repo:relative/path на строку</span>
+                  <label class="llbl" for="launch-instrumentation"> {{ t('core.taskTochnyyScope') }} <span class="lopt">{{ t('core.taskPoOdnomuRepoRelative') }}</span>
                   </label>
                   <UiTextarea
                     id="launch-instrumentation"
@@ -1236,54 +1224,48 @@
                     data-role="task-launch-note"
                     rows="3"
                     spellcheck="false"
-                    placeholder="service:src/path/file.ext"
+                    :placeholder="'service:src/path/file.ext'"
                   />
                   <div class="lrow">
-                    <label class="llbl" for="launch-diagnosis-kind">Тип диагноза</label>
+                    <label class="llbl" for="launch-diagnosis-kind">{{ t('core.taskTipDiagnoza') }}</label>
                     <UiSelect
                       id="launch-diagnosis-kind"
                       v-model="launchForm.diagnosisKind"
                       data-context="task-launch"
                       compact
                     >
-                      <option value="functional">functional</option>
-                      <option value="performance">performance</option>
-                      <option value="data">data</option>
-                      <option value="integration">integration</option>
+                      <option value="functional">{{ 'functional' }}</option>
+                      <option value="performance">{{ 'performance' }}</option>
+                      <option value="data">{{ 'data' }}</option>
+                      <option value="integration">{{ 'integration' }}</option>
                     </UiSelect>
                   </div>
-                  <label class="llbl" for="launch-diagnosis-signal">Наблюдаемый сигнал</label>
+                  <label class="llbl" for="launch-diagnosis-signal">{{ t('core.taskNablyudaemyySignal') }}</label>
                   <UiInput
                     id="launch-diagnosis-signal"
                     v-model="launchForm.diagnosisSignal"
                     data-context="task-launch"
                     maxlength="200"
                     autocomplete="off"
-                    placeholder="Коротко: что именно воспроизводится"
+                    :placeholder="t('core.taskKorotkoChtoImennoVosproizvoditsya')"
                   />
-                  <p class="lnote">
-                    Scope закрепляется на всю попытку; временные probes разрешены только в этих файлах.
-                  </p>
+                  <p class="lnote"> {{ t('core.taskScopeZakreplyaetsyaNaVsyu') }} </p>
                 </template>
               </div>
             </details>
             <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
             <div class="lbtns">
-              <UiButton :disabled="!!busy" @click="closeLaunch">
-                Отмена
-              </UiButton>
+              <UiButton :disabled="!!busy" @click="closeLaunch"> {{ t('core.cancel') }} </UiButton>
               <UiButton
                 data-role="task-launch-submit"
                 tone="accent"
                 variant="solid"
-                aria-label="Запустить задачу"
+                :aria-label="t('core.taskZapustitZadachu')"
                 :loading="busy === 'launch'"
                 :disabled="!!busy || launchOptionsBusy || !!launchOpts!.error || !!launchValidationError"
-                loading-label="Запускаю задачу"
+                :loading-label="t('core.taskZapuskayuZadachu')"
                 @click="launchSelected"
-              >
-                🏭 Запустить
-              </UiButton>
+              > {{ t('core.taskZapustit') }} </UiButton>
             </div>
           </div>
           <PipelineStopPanel
@@ -1304,7 +1286,6 @@
 import TaskSourceChip from '../shared/TaskSourceChip.vue';
 import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import { trackerCapabilities } from '../shared/trackerCapabilities.ts';
-import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
 import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import TaskLoading from './TaskLoading.vue';
 
@@ -1325,6 +1306,11 @@ import { taskAvatar, taskPeopleNames, taskPeopleIds, taskChecklist } from '../sh
 import { decodeChatAttachment } from '../shared/chatContracts.ts';
 import { decodeLiveGraph, decodePipelineTasks } from '../shared/pipelineContracts.ts';
 
+import { useAuthStore } from '../stores/auth.ts';
+import { useShellStore } from '../stores/shell.ts';
+import {
+  createTrackerReadRecovery, isTransientTrackerReadFailure, isTrackerReadAccessFailure,
+} from '../shared/trackerReadRecovery.ts';
 import { ref, computed, watch, onUnmounted, nextTick, type PropType } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
@@ -1336,27 +1322,9 @@ import { useTrackersStore } from '../stores/trackers.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import {
-  UiRefreshIcon,
-  confirmDialog,
-  showToast,
-  UiButton,
-  UiCheckbox,
-  UiChoiceList,
-  UiDisclosureButton,
-  t,
-  UiField,
-  UiFilePicker,
-  UiFormActions,
-  UiIconButton,
-  UiInput,
-  UiPaneHeader,
-  UiSelect,
-  UiSpinner,
-  UiTab,
-  UiTabs,
-  UiTextarea,
-  UiTooltip,
-  vTooltip,
+  UiRefreshIcon, confirmDialog, showToast, UiButton, UiCheckbox, UiChoiceList,
+  UiDisclosureButton, t, UiField, UiFilePicker, UiFormActions, UiIconButton, UiInput,
+  UiPaneHeader, UiSelect, UiSpinner, UiTab, UiTabs, UiTextarea, UiTooltip, vTooltip, messageRef, uiLocale
 } from '../ui';
 import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';
@@ -1396,7 +1364,12 @@ const router = useRouter();
 const ui = useUiStore();
 const tasks = useTasksStore();
 const trackers = useTrackersStore();
+const readBlocked = ref(false);
 const trackerCaps = computed(() => {
+  if (readBlocked.value) {
+    return trackerCapabilities(undefined);
+  }
+
   if (!taskSource.value || !trackers.catalog?.enabledIds) {
     return trackers.capabilities;
   }
@@ -1407,39 +1380,35 @@ const trackerCaps = computed(() => {
 });
 const board = useBoardStore();
 const trackerFavorites = useTaskFavoritesStore();
-const favorites = computed(() => trackerFavorites.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerFavorites.own : trackerFavorites));
+const favorites = computed(() => trackerFavorites.forSource?.(taskSource.value)
+  ?? trackerFavorites);
 const trackerShelf = useTaskShelfStore();
-const shelf = computed(() => trackerShelf.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerShelf.own : trackerShelf));
+const shelf = computed(() => trackerShelf.forSource?.(taskSource.value)
+  ?? trackerShelf);
 const plugins = usePluginsStore();
 const trackerSeen = useTaskSeenStore();
-const seen = computed(() => trackerSeen.forSource?.(ownTask.value ? 'grigdesk' : taskSource.value)
-  ?? (ownTask.value ? trackerSeen.own : trackerSeen));
+const seen = computed(() => trackerSeen.forSource?.(taskSource.value)
+  ?? trackerSeen);
 const { taskId } = storeToRefs(ui);
 const taskSource = computed(() => ui.taskSource);
 
 const detail = ref<TaskDetail | null>(null);
-const ownTask = computed(() => detail.value?.source === 'grigdesk');
 const currentTaskKey = computed(() => taskReferenceKey({
   id: taskId.value!,
-  source: ownTask.value ? 'grigdesk' : taskSource.value || board.data?.source,
+  source: taskSource.value || board.data?.source,
+  unavailable: ui.taskUnavailable,
 }));
 
-// Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
-// Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
-const isB24Task = computed(() => {
-  return detail.value !== null ? !ownTask.value
-    : taskSource.value ? taskSource.value !== 'grigdesk'
-      : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value));
-});
+// Историческая ссылка закрывает все внешние эффекты до загрузки карточки.
+// Длина обычного номера не определяет его источник.
+const isB24Task = computed(() => !!taskId.value && !ui.taskUnavailable);
 let detailRequest = 0;
 const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
-const canUsePersonal = computed(() => isB24Task.value
-  || (ownTask.value && grigdeskPersonalStateVersion.value === 1));
-const canAnalyzeTask = computed(() => (!taskSource.value || taskSource.value === board.data?.source)
-  && isB24Task.value || (ownTask.value && !loading.value));
+const canUsePersonal = computed(() => isB24Task.value);
+const canAnalyzeTask = computed(() => isB24Task.value);
+let triageRequest = 0;
+let clarificationsRequest = 0;
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
 const commentText = ref('');
@@ -1451,7 +1420,7 @@ let ticker: ReturnType<typeof setInterval> | null = null;
 const boardTask = computed(() => {
   const d = board.data;
 
-  if (!d || !taskId.value || ownTask.value) {
+  if (!d || !taskId.value || ui.taskUnavailable || readBlocked.value) {
     return null;
   }
 
@@ -1483,9 +1452,7 @@ const awaitingReview = computed(() => detail.value?.status === 4
 const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
-const taskProject = computed(() => ownTask.value
-  ? detail.value?.projectTitle || ''
-  : detail.value?.group_name || boardTask.value?.group || '');
+const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
 const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
 
 const taskStatus = computed(() => detail.value?.statusText || detail.value?.status_label || '');
@@ -1896,9 +1863,7 @@ function htmlToText(s: string | null | undefined) {
     .replace(/\n{3,}/g, '\n\n').trim();
 }
 
-const cleanDesc = computed(() => ownTask.value
-  ? detail.value?.description || ''
-  : htmlToText(detail.value?.description));
+const cleanDesc = computed(() => htmlToText(detail.value?.description));
 
 // Описание — текстом, но URL в нём должны жить: экранируем и оборачиваем ссылки.
 function linkify(s: string) {
@@ -1963,7 +1928,7 @@ const editResponsibleOptions = computed(() => optionsWithCurrent(
   editUsers.value,
   editForm.value?.responsibleId,
   detail.value?.responsible?.name,
-  'Исполнитель',
+  t('core.taskEditResponsible'),
 ));
 const editParticipantOptions = computed(() => {
   const people = new Map(editUsers.value.map((user) => [String(user.id), user.name]));
@@ -1985,7 +1950,7 @@ const editGroupOptions = computed(() => optionsWithCurrent(
   editGroups.value,
   editForm.value?.groupId,
   detail.value?.group_name || boardTask.value?.group,
-  'Проект',
+  t('core.taskEditProject'),
 ));
 
 /**
@@ -2067,16 +2032,16 @@ async function loadEditOptions() {
   if (users.status === 'fulfilled') {
     editUsers.value = decodeBoardNamedItems(users.value, 'users');
   } else {
-    failures.push('исполнителей');
+    failures.push(t('core.coreIspolniteley'));
   }
   if (groups.status === 'fulfilled') {
     editGroups.value = decodeBoardNamedItems(groups.value, 'groups');
   } else {
-    failures.push('проекты');
+    failures.push(t('core.coreProekty'));
   }
 
   editOptionsError.value = failures.length
-    ? `Не удалось загрузить: ${failures.join(' и ')}`
+    ? t('core.coreNeUdalosZagruzitJoin', { join: failures.join(t('core.taskAnd')) })
     : null;
   editOptionsBusy.value = false;
 }
@@ -2141,7 +2106,7 @@ async function saveTaskEdit() {
 
     if ((Object.hasOwn(fields, 'title') || Object.hasOwn(fields, 'description'))
         && triage.value?.analysis) {
-      editMessage.value += ' Триаж основан на прежней постановке — запустите переоценку.';
+      editMessage.value += t('core.taskTriageStaleNotice');
     }
   });
 }
@@ -2159,7 +2124,7 @@ function tgTime(sec: number | undefined) {
     return '';
   }
 
-  return new Date(sec * 1000).toLocaleString('ru-RU',
+  return new Date(sec * 1000).toLocaleString(uiLocale.value,
     {
       day: '2-digit',
       month: '2-digit',
@@ -2173,26 +2138,26 @@ function tgPlural(n: number) {
   const teen = n % 100;
 
   if (teen >= 11 && teen <= 14) {
-    return 'сообщений';
+    return t('core.coreSoobscheniy');
   }
 
   const one = n % 10;
 
   if (one === 1) {
-    return 'сообщение';
+    return t('core.coreSoobschenie');
   }
   if (one >= 2 && one <= 4) {
-    return 'сообщения';
+    return t('core.coreSoobscheniya');
   }
 
-  return 'сообщений';
+  return t('core.coreSoobscheniy');
 }
 
 let personalTarget = '';
 
 /**
  * Личные эффекты выполняются только для подтверждённой карточки и поддерживаемого пространства.
- * Позднее подтверждение capability включает own-метки без повторного открытия карточки.
+ * Пара источника и номера не позволяет ответу прежней карточки отметить новую задачу.
  */
 function loadPersonalState() {
   if (!taskId.value || !detail.value || !canUsePersonal.value) {
@@ -2212,53 +2177,184 @@ function loadPersonalState() {
   void seen.value.markSeen([taskId.value]);
 }
 
-watch(grigdeskPersonalStateVersion, loadPersonalState);
-
 let detailAbort: AbortController | null = null;
 let commentsAbort: AbortController | null = null;
 
+const readAuth = useAuthStore();
+const readShell = useShellStore();
+const detailReadError = ref('');
+const metadataReadError = ref('');
+const detailReadAt = ref(0);
+const commentsReadError = ref('');
+const commentsReadAt = ref(0);
+let metadataRequest = 0;
+let readDisposed = false;
+let pendingCardDriver: {
+  id: string;
+  dataRevision?: number;
+  generation?: number;
+} | null = null;
+
+const allowMetadataRecovery = () => !readDisposed && !!taskId.value && !ui.taskUnavailable
+  && readAuth.authenticated && (!readShell.present || readShell.status === 'online');
+const allowReadRecovery = () => allowMetadataRecovery() && !readBlocked.value
+  && detailTrackerRevision.value === null;
+const detailRecovery = createTrackerReadRecovery(() => loadDetail(true), allowReadRecovery);
+const metadataRecovery = createTrackerReadRecovery(() => loadMetadata(true), allowMetadataRecovery);
+const commentsRecovery = createTrackerReadRecovery(() => loadComments(true), allowReadRecovery);
+
 /**
- * Загружает карточку через общий кеш задач с прежним принудительным обновлением.
- * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
+ * Терминальная граница убирает серверные данные и поздние ответы текущей карточки.
+ * Свой текст комментария остаётся в ref для того же владельца; заблокированный UI его не публикует.
  */
-async function loadDetail(force = false) {
-  if (!taskId.value) {
+function clearCardReadContent(block = true): void {
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailAbort?.abort();
+  commentsAbort?.abort();
+  detailRequest += 1;
+  commentsRequest += 1;
+  metadataRequest += 1;
+  detail.value = null;
+  comments.value = null;
+  taskTags.value = [];
+  taskTagsLoaded.value = false;
+  taskSubtasks.value = [];
+  detailReadAt.value = 0;
+  commentsReadAt.value = 0;
+  detailReadError.value = '';
+  commentsReadError.value = '';
+  loading.value = false;
+  comLoading.value = false;
+  readBlocked.value = block;
+  tasks.invalidate();
+  cancelTaskEdit();
+  closeLaunch();
+}
+
+/**
+ * Metadata может восстанавливаться при ожидаемой ревизии; зависимые чтения пока закрыты.
+ * Успех явно возобновляет уже прочитанное обсуждение, не объявляя старый page свежим.
+ */
+async function loadMetadata(force = false, resume = true): Promise<boolean> {
+  if (!allowMetadataRecovery()) {
+    return false;
+  }
+
+  const reference = currentTaskKey.value;
+  const request = ++metadataRequest;
+  const hadFailure = !!metadataReadError.value;
+
+  metadataRecovery.cancel();
+  await trackers.load(force);
+
+  if (request !== metadataRequest || reference !== currentTaskKey.value) {
+    return false;
+  }
+
+  const error = trackers.readFailure();
+
+  if (error && trackers.error) {
+    if (!isTransientTrackerReadFailure(error)) {
+      clearCardReadContent();
+    }
+
+    metadataReadError.value = failureText(error);
+
+    if (commentsReadAt.value) {
+      commentsReadError.value = t('core.taskPageStale');
+    }
+
+    metadataRecovery.schedule(error);
+
+    return false;
+  }
+
+  const waiting = detailTrackerRevision.value !== null;
+  const catalog = trackers.catalog;
+
+  if (waiting && (!catalog || catalog.revision < detailTrackerRevision.value!)) {
+    metadataReadError.value = t('core.taskReadAwaitingSource');
+    metadataRecovery.schedule(undefined, true);
+
+    return false;
+  }
+
+  if (waiting && pendingCardDriver) {
+    const next = catalog?.drivers.find((driver) => driver.id === pendingCardDriver!.id);
+
+    if (next?.dataRevision !== pendingCardDriver.dataRevision
+      || next?.generation !== pendingCardDriver.generation) {
+      clearCardReadContent(false);
+    }
+  }
+
+  pendingCardDriver = null;
+  detailTrackerRevision.value = null;
+  readBlocked.value = false;
+  metadataReadError.value = '';
+  metadataRecovery.reset();
+
+  if (resume && waiting && allowReadRecovery()) {
+    void loadDetail(true).then(() => {
+      if (allowReadRecovery() && comments.value !== null && !comLoading.value) {
+        void loadComments(true);
+      }
+    });
+  } else if (resume && hadFailure && allowReadRecovery() && commentsReadAt.value && !comLoading.value) {
+    void loadComments(true);
+  }
+
+  return true;
+}
+
+
+/**
+ * Неуспешное чтение сохраняет прежние детали и черновики, не скрывая ошибку команды.
+ * Повтор относится только к той же открытой карточке и не переживает отмену consumer.
+ */
+async function loadDetail(force = false): Promise<void> {
+  detailRecovery.cancel();
+
+  if (!taskId.value || ui.taskUnavailable || !allowReadRecovery()) {
     return;
   }
 
   const id = taskId.value;
   const reference = currentTaskKey.value;
   const request = ++detailRequest;
+  const controller = new AbortController();
 
   detailAbort?.abort();
-  detailAbort = new AbortController();
+  detailAbort = controller;
   loading.value = true;
-  err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force, detailAbort.signal, taskSource.value);
+    const loaded = await tasks.load(id, force, controller.signal, taskSource.value);
 
-    if (request !== detailRequest || currentTaskKey.value !== reference) {
+    if (controller.signal.aborted || request !== detailRequest || currentTaskKey.value !== reference) {
       return;
     }
 
     detail.value = loaded;
+    detailReadAt.value = Date.now();
+    detailReadError.value = '';
+    detailRecovery.reset();
     void loadConveyor();
-
     loadPersonalState();
-  } catch (e) {
-    if (request === detailRequest && currentTaskKey.value === reference) {
-      err.value = failureText(e);
+  } catch (error) {
+    if (!controller.signal.aborted && request === detailRequest && currentTaskKey.value === reference) {
+      if (isTrackerReadAccessFailure(error)) {
+        clearCardReadContent();
+      }
+
+      detailReadError.value = failureText(error);
+      detailRecovery.schedule(error);
     }
   } finally {
     if (request === detailRequest) {
       loading.value = false;
-
-      // Источник собственной задачи подтверждается только ответом details.
-      // Первый параллельный loadTriage ещё закрыт loading и не прочитает оценку.
-      if (ownTask.value) {
-        void loadTriage();
-      }
     }
   }
 }
@@ -2278,20 +2374,34 @@ const triageBusy = computed(() => triageState.value === 'queued' || triageState.
 const noteHtml = computed(() => (triage.value?.note ? mdToHtml(triage.value.note) : ''));
 
 const TRIAGE_WORK_LABELS: Record<string, string> = {
-  feature: 'Новая функциональность',
-  debug: 'Исправление ошибки',
-  perf: 'Оптимизация',
-  hunt: 'Поиск дефектов',
+  get feature() {
+    return t('core.taskNovayaFunktsionalnost');
+  },
+  get debug() {
+    return t('core.taskIspravlenieOshibki');
+  },
+  get perf() {
+    return t('core.taskOptimizatsiya');
+  },
+  get hunt() {
+    return t('core.taskPoiskDefektov');
+  },
 };
 const CONFIDENCE_LABELS: Record<string, string> = {
-  high: 'Высокая',
-  medium: 'Средняя',
-  low: 'Низкая',
+  get high() {
+    return t('core.taskVysokaya2');
+  },
+  get medium() {
+    return t('core.taskSrednyaya2');
+  },
+  get low() {
+    return t('core.taskNizkaya2');
+  },
 };
 const triageWorkLabel = computed(() => {
   const kind = triage.value?.analysis?.route_guess;
 
-  return TRIAGE_WORK_LABELS[kind || ''] || kind || 'Тип работы не указан';
+  return TRIAGE_WORK_LABELS[kind || ''] || kind || t('core.taskTipRabotyNeUkazan');
 });
 
 /**
@@ -2308,26 +2418,26 @@ const triageMetrics = computed(() => {
   return [
     {
       id: 'complexity',
-      label: 'Сложность',
+      label: t('core.taskSlozhnost'),
       value: triageScore(value.complexity),
       tone: value.complexity! >= 4 ? 'warning' : 'neutral',
     },
     {
       id: 'risk',
-      label: 'Риск',
+      label: t('core.taskRisk'),
       value: triageScore(value.risk),
       tone: value.risk! >= 4 ? 'danger' : value.risk === 3 ? 'warning' : 'neutral',
     },
     {
       id: 'diff',
-      label: 'Объём правок',
+      label: t('core.taskObemPravok'),
       value: value.diff_size || '—',
       tone: 'neutral',
     },
     {
       id: 'confidence',
-      label: 'Уверенность',
-      value: CONFIDENCE_LABELS[value.confidence || ''] || 'Не указана',
+      label: t('core.taskUverennost2'),
+      value: CONFIDENCE_LABELS[value.confidence || ''] || t('core.coreNeUkazana'),
       tone: value.confidence === 'low' ? 'warning' : 'neutral',
     },
   ];
@@ -2345,9 +2455,9 @@ function triageSourceLabel(
   key: string,
   repo: NonNullable<NonNullable<AnalysisDetail['analysis']>['repos']>[string],
 ) {
-  const where = repo.ref || 'рабочая копия';
+  const where = repo.ref || t('core.codeRabochayaKopiya');
   const revision = repo.sha ? ` @ ${repo.sha.slice(0, 7)}` : '';
-  const note = repo.note ? ` — ${repo.note}` : '';
+  const note = repo.note ? t('core.taskNote', { note: repo.note }) : '';
 
   return `${key}: ${where}${revision}${note}`;
 }
@@ -2363,16 +2473,16 @@ const triagePending = computed(() => busy.value === 'clarify'
 // сгорит ли уже показанная оценка.
 const triageProgressLabel = computed(() => {
   if (busy.value === 'clarify') {
-    return 'уточнения сохраняются…';
+    return t('core.coreUtochneniyaSohranyayutsya');
   }
 
   const again = Boolean(triage.value?.analysis);
 
   if (triageState.value === 'running') {
-    return again ? 'переоценка идёт…' : 'разведка идёт…';
+    return again ? t('core.corePereotsenkaIdet2') : t('core.coreRazvedkaIdet2');
   }
 
-  return again ? 'переоценка в очереди…' : 'в очереди…';
+  return again ? t('core.taskPereotsenkaVOcheredi2') : t('core.taskVOcheredi');
 });
 
 // Сколько заход уже длится. До старта считаем от постановки в очередь: ожидание очереди
@@ -2502,10 +2612,25 @@ async function loadTriage() {
     return;
   }
 
+  const request = ++triageRequest;
+  const reference = currentTaskKey.value;
+  const id = taskId.value;
+  const source = taskSource.value;
+
   try {
-    triage.value = await readAnalysisDetail(taskId.value!);
+    const response = await readAnalysisDetail(id, source);
+
+    if (request !== triageRequest || reference !== currentTaskKey.value) {
+      return;
+    }
+
+    triage.value = response;
     syncClarifyDrafts();
   } catch { /* блок триажа не ломает модалку */ }
+
+  if (request !== triageRequest || reference !== currentTaskKey.value) {
+    return;
+  }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
   if (triageBusy.value && !triageTimer) {
     triageTimer = setInterval(loadTriage, 6000);
@@ -2520,7 +2645,7 @@ const analyzeNow = () => act('analyze', async () => {
     return;
   }
 
-  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
+  await analyzeTask(taskId.value!, { source: taskSource.value });
   await loadTriage();
 });
 
@@ -2579,14 +2704,29 @@ const clarifySaved = ref('');
  * При отказе сохраняется прежний пустой fallback истории уточнений.
  */
 async function loadClarifications() {
+  if (!taskId.value || ui.taskUnavailable) {
+    return;
+  }
+
+  const request = ++clarificationsRequest;
+  const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
+
   try {
-    const response = await analysisApi.clarifications(taskId.value!);
+    const response = await analysisApi.clarifications(id, source);
+
+    if (request !== clarificationsRequest || reference !== currentTaskKey.value) {
+      return;
+    }
 
     clarifySaved.value = response.text || '';
     clarifyEntries.value = response.entries || [];
   } catch {
-    clarifySaved.value = '';
-    clarifyEntries.value = [];
+    if (request === clarificationsRequest && reference === currentTaskKey.value) {
+      clarifySaved.value = '';
+      clarifyEntries.value = [];
+    }
   }
 }
 
@@ -2621,23 +2761,37 @@ const sendClarify = () => act('clarify', async () => {
       answer.text,
       ...draft.attachments
         .map((attachment) => attachment.path
-          ? `[приложено фото: ${attachment.path}]`
+          ? t('core.corePrilozhenoFotoPath', { path: attachment.path })
           : '')
         .filter(Boolean),
     ].filter(Boolean).join('\n');
   }).filter(Boolean).join('\n\n');
-  const r = await analysisApi.answer(taskId.value!, answers, legacyText);
+  const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
+  const r = await analysisApi.answer(id, answers, legacyText, source);
+
+  if (reference !== currentTaskKey.value) {
+    return;
+  }
 
   clarifySaved.value = r.text || '';
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analyzeTask(taskId.value!, { source: ownTask.value ? 'grigdesk' : taskSource.value });
+  await analyzeTask(taskId.value!, { source: taskSource.value });
   await loadTriage();
 });
 
 const arbitrateQuestions = () => act('arbitrate', async () => {
-  await analysisApi.arbitrate(taskId.value!);
+  const reference = currentTaskKey.value;
+
+  await analysisApi.arbitrate(taskId.value!, taskSource.value);
+
+  if (reference !== currentTaskKey.value) {
+    return;
+  }
+
   await Promise.all([loadClarifications(), loadTriage()]);
 });
 
@@ -2656,7 +2810,9 @@ const dictationLease = dictationController.acquire('task-modal-analysis', {
 
     const current = clarifyDrafts.value[questionId]!.text.trimEnd();
 
-    clarifyDrafts.value[questionId]!.text = current ? `${current} ${text}` : String(text || '');
+    clarifyDrafts.value[questionId]!.text = current
+      ? t('core.taskCurrentText', { current, text })
+      : String(text || '');
   },
 });
 
@@ -2674,7 +2830,7 @@ async function startClarifyDictation(questionId: string) {
   try {
     await dictationLease.start();
   } catch (error) {
-    err.value = failureText(error, 'Микрофон недоступен');
+    err.value = failureText(error, t('core.coreMikrofonNedostupen'));
   }
 }
 
@@ -2711,47 +2867,56 @@ function selectTaskSection(section: 'description' | 'triage' | 'comments') {
 }
 
 /**
- * Один page-ответ наполняет описание тегами и подзадачами, а обсуждение — комментариями.
- * Неверные необязательные расширения скрываются без отказа прежнего обсуждения.
+ * Весь page-снимок принимается вместе, а временный отказ сохраняет его последнюю версию.
+ * Первое неудачное чтение остаётся ошибкой, не выдавая неизвестное обсуждение за пустое.
  */
-async function loadComments(force = false) {
-  if (!taskId.value || !isB24Task.value || (!trackerCaps.value.comments && !trackerCaps.value.tags)
-    || (comLoading.value && !force)) {
+async function loadComments(force = false): Promise<void> {
+  commentsRecovery.cancel();
+
+  if (!taskId.value || !isB24Task.value || !allowReadRecovery()
+    || (!trackerCaps.value.comments && !trackerCaps.value.tags) || (comLoading.value && !force)) {
     return;
   }
 
   const id = taskId.value;
   const reference = currentTaskKey.value;
   const request = ++commentsRequest;
+  const controller = new AbortController();
 
   commentsAbort?.abort();
-  commentsAbort = new AbortController();
+  commentsAbort = controller;
   comLoading.value = true;
 
   try {
-    const target = await resolveTrackerTarget(taskSource.value, api);
+    const target = await resolveTrackerTarget(taskSource.value, api, undefined, {
+      signal: controller.signal,
+    });
     const page = await api.get(`${target.prefix}/task/${id}/comments`, {
       ...target.options,
-      signal: commentsAbort.signal,
+      signal: controller.signal,
     });
     const result = decodeTaskComments(page);
+    const tags = decodeTaskTags(page);
+    const subtasks = decodeTaskSubtasks(page);
 
-    if (currentTaskKey.value === reference && request === commentsRequest && isB24Task.value) {
+    if (!controller.signal.aborted && currentTaskKey.value === reference
+      && request === commentsRequest && isB24Task.value) {
       comments.value = result;
-      taskTags.value = decodeTaskTags(page);
+      taskTags.value = tags;
       taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
-      taskSubtasks.value = decodeTaskSubtasks(page);
+      taskSubtasks.value = subtasks;
+      commentsReadAt.value = Date.now();
+      commentsReadError.value = '';
+      commentsRecovery.reset();
     }
   } catch (error) {
-    if (currentTaskKey.value === reference && request === commentsRequest) {
-      if (trackerCaps.value.tags) {
-        err.value = failureText(error);
+    if (!controller.signal.aborted && currentTaskKey.value === reference && request === commentsRequest) {
+      if (isTrackerReadAccessFailure(error)) {
+        clearCardReadContent();
       }
 
-      comments.value = [];
-      taskTags.value = [];
-      taskTagsLoaded.value = false;
-      taskSubtasks.value = [];
+      commentsReadError.value = failureText(error);
+      commentsRecovery.schedule(error);
     }
   } finally {
     if (currentTaskKey.value === reference && request === commentsRequest) {
@@ -2789,7 +2954,7 @@ async function loadConveyor() {
   conveyorGraph.value = null;
   sandbox.value = null;
 
-  if (!taskId.value) {
+  if (!taskId.value || ui.taskUnavailable) {
     return;
   }
 
@@ -2830,7 +2995,7 @@ function openConveyor() {
     close: () => ui.close(),
     failure: () => showToast({
       id: 'task-window-pipeline',
-      title: 'Не удалось открыть конвейер. Повторите переход.',
+      title: t('core.taskNeUdalosOtkrytKonveyer'),
       tone: 'warning',
     }),
   });
@@ -2854,10 +3019,8 @@ async function sandboxDown() {
     return;
   }
   if (!(await confirmDialog(
-    `Снести стенд задачи #${taskId.value}? Текущий прогон уйдёт в архив, `
-      + 'после чего задачу можно будет отправить на конвейер заново. '
-      + 'Ветка и незакоммиченные изменения сохранятся.',
-    { danger: true, okText: 'Снести' },
+    messageRef('core.taskSnestiStendZadachiTaskid', { taskId: taskId.value ?? '' }),
+    { danger: true, okText: t('core.taskSnesti') },
   ))) {
     return;
   }
@@ -2869,10 +3032,10 @@ async function sandboxDown() {
   try {
     await api.post(`/api/tasks/${taskId.value}/sandbox/down`);
     await loadConveyor();
-    sandboxMsg.value = 'Стенд снесён, прогон перенесён в архив';
+    sandboxMsg.value = t('core.coreStendSnesenProgonPerenesen');
   } catch (e) {
     err.value = objectOrEmpty(e).status === 501
-      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      ? t('core.pipelineSnosStendaNeNastroen')
       : failureText(e);
   } finally {
     sandboxBusy.value = false;
@@ -2880,19 +3043,41 @@ async function sandboxDown() {
 }
 
 /**
- * Одна выполняемая команда задаёт индикатор и сообщение отказа карточки.
- * Снятие busy происходит при любом исходе без повторной мутации сервера.
+ * Ошибка доставки команды не позволяет автоматически отправить её повторно.
+ * Только чтения сверяют текущее состояние, сохраняя сообщение и набранный черновик.
  */
 async function act(name: string, fn: () => Promise<unknown>) {
+  const reference = currentTaskKey.value;
+
+  if (busy.value) {
+    return;
+  }
+  if (readBlocked.value || metadataReadError.value || detailTrackerRevision.value !== null) {
+    err.value = t('core.taskReadOnly');
+
+    return;
+  }
+
   busy.value = name;
   err.value = null;
 
   try {
     await fn();
-  } catch (e) {
-    err.value = failureText(e);
+  } catch (error) {
+    if (reference === currentTaskKey.value) {
+      if (isTransientTrackerReadFailure(error)) {
+        err.value = t('core.trackerActionUnknown', { reason: failureText(error) });
+        void loadDetail(true);
+        void loadComments(true);
+        void board.load(true);
+      } else {
+        err.value = failureText(error);
+      }
+    }
   } finally {
-    busy.value = null;
+    if (reference === currentTaskKey.value) {
+      busy.value = null;
+    }
   }
 }
 
@@ -2910,7 +3095,7 @@ const complete = async () => {
   const source = taskSource.value;
   const reference = currentTaskKey.value;
 
-  if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) {
+  if (await confirmDialog(messageRef('core.taskZavershitZadachu'), { okText: t('core.taskZavershit2') })) {
     if (epoch !== trackers.epoch || currentTaskKey.value !== reference) {
       return;
     }
@@ -2961,7 +3146,10 @@ async function renew() {
   const source = taskSource.value;
   const reference = currentTaskKey.value;
 
-  if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
+  if (!(await confirmDialog(
+    messageRef('core.taskVozobnovitZadachu'),
+    { okText: t('core.taskVozobnovit2') },
+  ))) {
     return;
   }
 
@@ -2990,10 +3178,18 @@ const launchOpts = ref<TaskLaunchOptions | null>(null);   // ответ /launch-
 const launchOptionsBusy = ref(false);
 const launchOptionsFailed = ref(false);
 const DIAGNOSIS_LABELS: Record<string, string> = {
-  functional: 'поведение',
-  performance: 'производительность',
-  data: 'данные',
-  integration: 'интеграция',
+  get functional() {
+    return t('core.taskPovedenie');
+  },
+  get performance() {
+    return t('core.taskProizvoditelnost');
+  },
+  get data() {
+    return t('core.taskDannye');
+  },
+  get integration() {
+    return t('core.taskIntegratsiya');
+  },
 };
 let launchOptionsRequest = 0;
 
@@ -3035,20 +3231,20 @@ async function refreshLaunchOptions() {
   const requestId = ++launchOptionsRequest;
   const id = taskId.value;
   const reference = currentTaskKey.value;
-  const profile = launchForm.value?.profile || (ownTask.value ? detail.value?.projectId : undefined);
+  const profile = launchForm.value?.profile;
 
   launchOptionsBusy.value = true;
   launchOptionsFailed.value = true;
 
   try {
-    let opts = await tasks.launchOptions(id, ownTask.value ? profile : undefined);
+    let opts = await tasks.launchOptions(id, undefined, taskSource.value);
 
     if (requestId !== launchOptionsRequest) {
       return;
     }
 
     if (profile && opts.profiles?.includes(profile) && opts.profile !== profile) {
-      opts = await tasks.launchOptions(id, profile);
+      opts = await tasks.launchOptions(id, profile, taskSource.value);
     }
     if (requestId !== launchOptionsRequest) {
       return;
@@ -3059,7 +3255,7 @@ async function refreshLaunchOptions() {
     launchOpts.value = opts;
     launchForm.value = makeLaunchForm(opts, previous?.criteria ?? null);
     launchOptionsFailed.value = false;
-    err.value = opts.error ? opts.message || 'выбранный профиль сейчас нельзя запустить' : null;
+    err.value = opts.error ? opts.message || t('core.coreVybrannyyProfilSeychasNelzya') : null;
 
     if (!profile || !opts.profiles?.includes(profile) || opts.profile !== profile) {
       clearLaunchProfile();
@@ -3072,7 +3268,7 @@ async function refreshLaunchOptions() {
     }
   } catch (e) {
     if (requestId === launchOptionsRequest) {
-      err.value = `Не удалось обновить параметры запуска: ${failureText(e)}`;
+      err.value = t('core.coreNeUdalosObnovitParametry', { failureTexte: failureText(e) });
     }
   } finally {
     if (requestId === launchOptionsRequest) {
@@ -3083,43 +3279,37 @@ async function refreshLaunchOptions() {
 
 const stopLaunchEvents = sseSubscribe((name, payload) => {
   if (name === 'trackers-changed') {
-    if (taskSource.value && trackers.catalog?.enabledIds) {
-      const id = taskSource.value.split('@')[0];
-      const previous = trackers.catalog.drivers.find((entry) => entry.id === id);
+    const ownId = taskSource.value?.split('@')[0];
+    const previous = trackers.catalog?.enabledIds
+      ? trackers.catalog.drivers.find((driver) => driver.id === ownId) : undefined;
 
-      void trackers.load(true).then(() => {
-        const next = trackers.catalog?.drivers.find((entry) => entry.id === id);
-
-        if (previous?.dataRevision !== next?.dataRevision || previous?.generation !== next?.generation) {
-          detailAbort?.abort();
-          commentsAbort?.abort();
-          detail.value = null;
-          void loadDetail(true);
-        }
-      });
-
-      return;
-    }
-
-    detailRequest += 1;
-    commentsRequest += 1;
+    pendingCardDriver = previous ? {
+      id: previous.id,
+      dataRevision: previous.dataRevision,
+      generation: previous.generation,
+    } : null;
+    detailRecovery.reset();
+    metadataRecovery.reset();
+    commentsRecovery.reset();
     detailAbort?.abort();
     commentsAbort?.abort();
-    detail.value = null;
-    comments.value = null;
-    taskTags.value = [];
-    taskTagsLoaded.value = false;
-    taskSubtasks.value = [];
-    commentText.value = '';
-    tasks.invalidate?.();
-    trackers.invalidate();
-    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
-      ? Number(payload.revision) : 0;
+    detailRequest += 1;
+    commentsRequest += 1;
+    metadataRequest += 1;
     loading.value = false;
     comLoading.value = false;
-    void trackers.load(true);
+    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
+      ? Number(payload.revision) : 0;
+
+    if (!pendingCardDriver) {
+      clearCardReadContent(false);
+      trackers.invalidate();
+      commentText.value = '';
+    }
+
+    metadataReadError.value = t('core.taskReadAwaitingSource');
     closeLaunch();
-    cancelTaskEdit();
+    void loadMetadata(true);
 
     return;
   }
@@ -3141,19 +3331,6 @@ const stopLaunchEvents = sseSubscribe((name, payload) => {
   void refreshLaunchOptions();
 });
 
-// Новое поколение metadata подтверждает, что детали читаются уже из текущего подключения.
-// Ожидание переживает замену запроса metadata другим подписчиком или диалогом настроек.
-watch(
-  () => [trackers.catalog, detailTrackerRevision.value] as const,
-  ([catalog, revision]) => {
-    if (!catalog || revision === null || catalog.revision < revision) {
-      return;
-    }
-
-    detailTrackerRevision.value = null;
-    void loadDetail(true);
-  },
-);
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts: TaskLaunchOptions) {
@@ -3200,7 +3377,7 @@ async function openLaunch() {
   }
 
   if (conveyor.value) {
-    launchMsg.value = 'Уже на конвейере';
+    launchMsg.value = t('core.coreUzheNaKonveyere');
 
     return;
   }
@@ -3218,10 +3395,12 @@ async function openLaunch() {
   launchOptionsBusy.value = true;
 
   try {
-    opts = await tasks.launchOptions(taskId.value!, ownTask.value ? detail.value?.projectId : undefined);
+    opts = await tasks.launchOptions(
+      taskId.value!, undefined, taskSource.value,
+    );
   } catch (e) {
     if (requestId === launchOptionsRequest) {
-      err.value = `Не удалось узнать параметры запуска: ${failureText(e)}`;
+      err.value = t('core.coreNeUdalosUznatParametry', { failureTexte: failureText(e) });
     }
 
     return;
@@ -3242,7 +3421,7 @@ async function openLaunch() {
   const profiles = opts.profiles?.length ? opts.profiles : [opts.profile];
 
   if (opts.error && profiles.length === 1) {
-    err.value = opts.message || 'маршрут сейчас нельзя запустить';
+    err.value = opts.message || t('core.coreMarshrutSeychasNelzyaZapustit');
 
     return;
   }
@@ -3250,7 +3429,7 @@ async function openLaunch() {
   launchForm.value = makeLaunchForm(opts);
 
   if (opts.error) {
-    err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+    err.value = opts.message || t('core.coreVybrannyyProfilSeychasNelzya');
   }
 
   return undefined;
@@ -3276,7 +3455,7 @@ async function changeLaunchProfile() {
   err.value = null;
 
   try {
-    const opts = await tasks.launchOptions(taskId.value!, profile);
+    const opts = await tasks.launchOptions(taskId.value!, profile, taskSource.value);
 
     if (requestId !== launchOptionsRequest || !launchForm.value) {
       return;
@@ -3287,7 +3466,7 @@ async function changeLaunchProfile() {
     launchOptionsFailed.value = false;
 
     if (opts.error) {
-    err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+    err.value = opts.message || t('core.coreVybrannyyProfilSeychasNelzya');
   }
   } catch (e) {
     if (requestId === launchOptionsRequest) {
@@ -3295,7 +3474,7 @@ async function changeLaunchProfile() {
         launchForm.value.profile = previousProfile;
       }
 
-      err.value = `Не удалось выбрать профиль: ${failureText(e)}`;
+      err.value = t('core.coreNeUdalosVybratProfil', { failureTexte: failureText(e) });
     }
   } finally {
     if (requestId === launchOptionsRequest) {
@@ -3306,9 +3485,15 @@ async function changeLaunchProfile() {
 // Глубина — вторая половина рекомендации: человек видит не только «какой маршрут»,
 // но и «насколько короткий», а рядом — по каким числам оценки это вышло.
 const DEPTH_LABELS: Record<string, string> = {
-  light: 'лёгкий',
-  mid: 'средний',
-  full: 'полный',
+  get light() {
+    return t('core.taskLegkiy');
+  },
+  get mid() {
+    return t('core.taskSredniy');
+  },
+  get full() {
+    return t('core.taskPolnyy');
+  },
 };
 const triageDepthLabel = computed(() => DEPTH_LABELS[triage.value?.analysis?.route_depth || ''] || '');
 // Кнопка называет маршрут, который откроется уже выбранным: путь от оценки триажа до
@@ -3318,8 +3503,11 @@ const launchOpenHint = computed(() => {
   const depth = triageDepthLabel.value;
 
   return route
-    ? `Открыть параметры запуска: триаж предлагает «${route}»${depth ? ` (${depth} маршрут)` : ''}`
-    : 'Открыть параметры запуска фабрики по задаче';
+    ? t('core.taskOtkrytParametryZapuskaTriazh', {
+            route,
+            depthdepth: depth ? t('core.coreDepthMarshrut', { depth: depth }) : '',
+          })
+    : t('core.taskOtkrytParametryZapuskaFabriki');
 });
 const routeSuggestion = computed(() => launchOpts.value?.routeSuggestion?.route || null);
 const routeSuggestionReason = computed(() => launchOpts.value?.routeSuggestion?.reason || '');
@@ -3346,38 +3534,40 @@ const launchInstrumentationSummary = computed(() => {
   const [first, ...rest] = launchInstrumentationItems.value;
 
   if (!first) {
-    return 'scope не определён';
+    return t('core.coreScopeNeOpredelen');
   }
 
   const short = first.split('/').pop();
 
-  return rest.length ? `${short} + ещё ${rest.length}` : short;
+  return rest.length ? t('core.taskShortEscheLength', { short, length: rest.length }) : short;
 });
 const launchDiagnosisSummary = computed(() => (
-  DIAGNOSIS_LABELS[launchForm.value?.diagnosisKind || ''] || launchForm.value?.diagnosisKind || 'поведение'
+  DIAGNOSIS_LABELS[launchForm.value?.diagnosisKind || '']
+  || launchForm.value?.diagnosisKind
+  || t('core.taskPovedenie')
 ));
 const launchValidationError = computed(() => {
   if (loading.value || !detail.value) {
-    return 'Постановка задачи ещё загружается.';
+    return t('core.corePostanovkaZadachiEscheZagruzhaetsya');
   }
   if (launchOptionsFailed.value) {
-    return 'Параметры запуска не удалось обновить.';
+    return t('core.coreParametryZapuskaNeUdalos');
   }
   if (!launchForm.value?.profile) {
-    return 'Выбери профиль.';
+    return t('core.coreVyberiProfil');
   }
   if (!launchForm.value?.route) {
-    return 'Выбери маршрут.';
+    return t('core.coreVyberiMarshrut');
   }
   if (!launchRouteOption.value?.deliveryMode) {
-    return 'Каталог не отдал delivery contract маршрута.';
+    return t('core.coreKatalogNeOtdalDelivery');
   }
   if (launchOpts.value?.profileContractError) {
     return launchOpts.value.profileContractError;
   }
   if (launchNeedsDelivery.value) {
     if (!launchOpts.value?.repositories?.length) {
-      return 'Профиль не объявил репозитории для SHIP.';
+      return t('core.coreProfilNeObyavilRepozitorii');
     }
 
     const missing = launchOpts.value.repositories
@@ -3385,11 +3575,11 @@ const launchValidationError = computed(() => {
       .map((repo) => repo.name);
 
     if (missing.length) {
-      return `Профиль не настроил целевые ветки: ${missing.join(', ')}.`;
+      return t('core.coreProfilNeNastroilTselevye', { join: missing.join(', ') });
     }
   }
   if (launchNeedsInstrumentation.value && !launchForm.value!.instrumentationFiles.trim()) {
-    return 'Маршрут требует хотя бы один файл инструментации.';
+    return t('core.coreMarshrutTrebuetHotyaBy');
   }
 
   return null;
@@ -3413,38 +3603,60 @@ function launchErrorText(e: unknown) {
   const data = objectOrEmpty(error.data);
   const code = typeof data.error === 'string' ? data.error : '';
   const known: Record<string, string> = {
-    catalog_changed: 'Каталог маршрутов изменился. Перечитай параметры и поставь задачу заново.',
-    run_exists: 'У задачи уже есть незакрытый прогон. Продолжи или закрой его на странице конвейера.',
+    catalog_changed: t('core.taskKatalogMarshrutovIzmenilsyaPerechitay'),
+    run_exists: t('core.taskUZadachiUzheEst'),
   };
 
   return known[code] || (typeof data.message === 'string' ? data.message : '')
-    || failureText(e, 'Не удалось запустить задачу.');
+    || failureText(e, t('core.coreNeUdalosZapustitZadachu'));
 }
 /**
  * Команда запуска отправляется один раз из уже проверенной формы.
  * Сообщение результата строится из ACK, затем перечитывается состояние конвейера.
+ * Глобальная настройка автостарта читается свежим запросом: выключенная просит
+ * сервер создать конвейер без запуска узлов. Отказ чтения настройки не меняет
+ * прежнего поведения — конвейер стартует сразу.
  */
 async function doLaunch(payload: unknown) {
   if (busy.value) {
     return;
   }
 
+  const reference = currentTaskKey.value;
+  const id = taskId.value!;
+  const source = taskSource.value;
+
   busy.value = 'launch';
   err.value = null;
 
   try {
-    const r = await tasks.launch(taskId.value!, { ...objectOrEmpty(payload),
-      ...(taskSource.value ? { source: taskSource.value } : ownTask.value ? { source: 'grigdesk' } : {}),
+    const prefs = await api.get('/api/settings/prefs').catch(() => null);
+    const autoStart = objectOrEmpty(prefs).pipelineAutoStart !== false;
+    const r = await tasks.launch(id, {
+      ...objectOrEmpty(payload),
+      ...(source ? { source } : {}),
+      ...(autoStart ? {} : { autoStart: false }),
     });
 
+    if (reference !== currentTaskKey.value) {
+      return;
+    }
+
     launchForm.value = null;
-    launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
-      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile}`
-        + `${r.route ? `, маршрут ${r.route}` : ''}`
-        + `${r.attempt ? `, попытка ${r.attempt.slice(0, 10)}…` : ''})`
-      : r.note || 'Отправлено';
+    launchMsg.value = r.outcome === 'already_running' ? t('core.coreUzheIdetNaKonveyere')
+      : r.outcome === 'created' ? t('core.coreSozdanOzhidaetStarta')
+      : r.outcome === 'launched' ? t('core.coreZapuschenoProfilProfileRoute', {
+        profile: r.profile,
+        route: r.route ? t('core.coreMarshrutRoute', { route: r.route }) : '',
+        slice010: r.attempt ? t('core.corePopytkaSlice010', { slice010: r.attempt.slice(0, 10) }) : '',
+      })
+      : r.note || t('core.coreOtpravleno');
     await loadConveyor();
   } catch (e) {
+    if (reference !== currentTaskKey.value) {
+      return;
+    }
+
     const message = launchErrorText(e);
 
     if (objectOrEmpty(objectOrEmpty(e).data).error === 'tombstoned') {
@@ -3452,9 +3664,13 @@ async function doLaunch(payload: unknown) {
       await refreshLaunchOptions();
     }
 
-    err.value = message;
+    if (reference === currentTaskKey.value) {
+      err.value = message;
+    }
   } finally {
-    busy.value = null;
+    if (reference === currentTaskKey.value) {
+      busy.value = null;
+    }
   }
 }
 /**
@@ -3502,17 +3718,26 @@ const sendComment = () => act('comment', async () => {
   loadComments(true);
 });
 /**
- * Принудительное чтение сохраняет выбранную пару карточки.
- * Обсуждение не переходит к другому источнику после ожидания деталей.
+ * Ручной повтор сначала заново подтверждает metadata и только затем снимает read-block.
+ * Каждое продолжение проверяет lifetime и полную ссылку, не повторяя команды записи.
  */
 const refresh = async () => {
-  const id = taskId.value;
   const reference = currentTaskKey.value;
+  const confirmed = await loadMetadata(true, false);
+
+  if (!confirmed || !allowReadRecovery() || currentTaskKey.value !== reference) {
+    return;
+  }
 
   await loadDetail(true);
 
-  if (currentTaskKey.value === reference && isB24Task.value) {
-    board.load(true);
+  if (!allowReadRecovery() || currentTaskKey.value !== reference) {
+    return;
+  }
+
+  void board.load(true);
+
+  if (!comLoading.value) {
     void loadComments(true);
   }
 };
@@ -3546,8 +3771,70 @@ function onTaskDialogOpenChange(open: boolean) {
   }
 }
 
+// Временный offline сохраняет текст, terminal снимает серверный снимок даже после offline.
+// Возврат доступа сначала подтверждает metadata и только затем возобновляет task/page.
+watch([
+  () => readAuth.authenticated,
+  () => readAuth.logReason,
+  () => readShell.status,
+  () => trackers.epoch,
+], () => {
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailAbort?.abort();
+  commentsAbort?.abort();
+  detailRequest += 1;
+  commentsRequest += 1;
+  metadataRequest += 1;
+  loading.value = false;
+  comLoading.value = false;
+
+  const terminal = readAuth.logReason === '401' || (readShell.present
+    && ['revoked', 'unpaired', 'identityMismatch', 'incompatible'].includes(readShell.status));
+
+  if (terminal) {
+    clearCardReadContent();
+    detailReadError.value = t('core.taskReadDenied');
+
+    return;
+  }
+  if (allowMetadataRecovery()) {
+    void loadMetadata(true, false).then(async (confirmed) => {
+      if (!confirmed || !allowReadRecovery()) {
+        return;
+      }
+
+      await loadDetail(true);
+
+      if (allowReadRecovery() && !comLoading.value
+        && (comments.value !== null || mtab.value === 'comments' || trackerCaps.value.tags)) {
+        void loadComments(true);
+      }
+    });
+  } else if (detail.value) {
+    detailReadError.value = t('core.taskReadStale');
+
+    if (commentsReadAt.value) {
+      commentsReadError.value = t('core.taskPageStale');
+    }
+  }
+});
+
 // Открытие/закрытие модалки по taskId.
-watch(() => [taskId.value, taskSource.value], ([id]) => {
+watch(() => [taskId.value, taskSource.value, ui.taskUnavailable], ([id]) => {
+  readBlocked.value = false;
+  pendingCardDriver = null;
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  detailReadError.value = '';
+  metadataReadError.value = '';
+  commentsReadError.value = '';
+  detailReadAt.value = 0;
+  commentsReadAt.value = 0;
+  metadataRequest += 1;
+
   checklistEditing.value = null;
   checklistAdding.value = null;
   checklistCreating.value = false;
@@ -3560,17 +3847,43 @@ watch(() => [taskId.value, taskSource.value], ([id]) => {
   commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
+  triageRequest += 1;
+  clarificationsRequest += 1;
+
+  if (triageTimer) {
+    clearInterval(triageTimer);
+    triageTimer = null;
+  }
+
   comLoading.value = false;
   detail.value = null;
   loading.value = false;
+  busy.value = null;
+  err.value = null;
   closeLaunch();
   acknowledgedShelfTask = '';
   personalTarget = '';
   cancelTaskEdit();
   editMessage.value = null;
 
+  if (id && ui.taskUnavailable) {
+    if (triageTimer) {
+      clearInterval(triageTimer);
+      triageTimer = null;
+    }
+
+    triage.value = null;
+    conveyor.value = null;
+    conveyorGraph.value = null;
+    sandbox.value = null;
+    err.value = t('core.taskNotFound');
+
+    return;
+  }
+
   if (id) {
-    void trackers.load();
+    err.value = null;
+    void loadMetadata();
     detail.value = null;
     launchMsg.value = null;
     sandboxMsg.value = null;
@@ -3660,18 +3973,28 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  readDisposed = true;
+  detailRecovery.reset();
+  metadataRecovery.reset();
+  commentsRecovery.reset();
+  metadataRequest += 1;
   detailAbort?.abort();
   commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
+  triageRequest += 1;
+  clarificationsRequest += 1;
+
+  if (triageTimer) {
+    clearInterval(triageTimer);
+    triageTimer = null;
+  }
+
   stopLaunchEvents();
   closeLaunch();
 
   if (ticker) {
     clearInterval(ticker);
-  }
-  if (triageTimer) {
-    clearInterval(triageTimer);
   }
 
   void dictationLease.release();

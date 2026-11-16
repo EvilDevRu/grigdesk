@@ -10,16 +10,21 @@ import type { DriverInstallJob } from '../shared/driverInstallApi.ts';
 import { decodeInstallVersions, decodeStoredRollback } from '../shared/pluginInstallApi.ts';
 import type { PluginInstallInfo, PluginVersionRef } from '../../../shared/plugins/pluginInstallContracts.ts';
 import { useTrackersStore } from './trackers.ts';
+import { confirmDialog, messageRef } from '../ui.ts';
 
 const ROLLBACK_KEY = 'grigdesk-driver-install-rollback';
 const ACKNOWLEDGED_KEY = 'grigdesk-driver-install-acknowledged';
 
 type RollbackIntent = ReturnType<typeof decodeStoredRollback>;
-type InstallScreen = 'manage' | 'source' | 'version' | 'review' | 'progress' | 'result' | 'rollback';
+export type DriverInstallRequest =
+  | { kind: 'install' | 'resume' }
+  | { kind: 'update' | 'version' | 'restore' | 'rollback'; id: string };
+
+type InstallScreen = 'idle' | 'source' | 'version' | 'review' | 'progress' | 'result' | 'rollback';
 
 export const useDriverInstallStore = defineStore('driver-install', {
   state: () => ({
-    screen: 'manage' as InstallScreen,
+    screen: 'idle' as InstallScreen,
     flow: 'install' as 'install' | 'update' | 'rollback',
     loading: true,
     acknowledgedJobId: '',
@@ -42,6 +47,7 @@ export const useDriverInstallStore = defineStore('driver-install', {
     sourcesLoading: false,
     sourcesError: '',
     busy: false,
+    removing: false,
     error: '',
     recoveryError: '',
     previousUnavailable: false,
@@ -219,7 +225,7 @@ export const useDriverInstallStore = defineStore('driver-install', {
           if (!this.refreshError && (!driver || driver.deleted)) {
             this.pendingRemoval = null;
             this.unknownOutcome = false;
-            this.screen = 'manage';
+            this.screen = 'idle';
           }
         } else {
           const endpoint = this.unknownOutcome && this.job
@@ -249,6 +255,31 @@ export const useDriverInstallStore = defineStore('driver-install', {
           this.tag = this.versions[0]?.tag ?? '';
         }
       });
+    },
+    /**
+     * Удаление выбранного пакета проходит общее подтверждение в настройках драйвера.
+     * Повторный клик блокируется до ответа человека и завершения серверной операции.
+     */
+    async confirmRemove(id: string, name: string) {
+      if (this.removing || this.blocked) {
+        return;
+      }
+
+      this.removing = true;
+
+      try {
+        const accepted = await confirmDialog(messageRef('core.trackerRemoveConfirmation', { name }), {
+          title: messageRef('core.trackerRemoveTitle'),
+          okText: messageRef('core.trackerRemove'),
+          danger: true,
+        });
+
+        if (accepted) {
+          return await this.remove(id);
+        }
+      } finally {
+        this.removing = false;
+      }
     },
     /**
      * Удаление подтверждается сервером и перечитывает каталог с сохранённой tombstone-пометкой.
@@ -372,7 +403,7 @@ export const useDriverInstallStore = defineStore('driver-install', {
           window.sessionStorage.removeItem(ROLLBACK_KEY);
           this.pendingRollback = null;
           this.unknownOutcome = false;
-          this.screen = this.rollbackPreview ? 'rollback' : 'manage';
+          this.screen = this.rollbackPreview ? 'rollback' : 'idle';
         } else {
           this.unknownOutcome = true;
           this.screen = 'progress';

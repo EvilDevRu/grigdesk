@@ -1,4 +1,5 @@
 import { recordOrNull } from '../../shared/lib/objects.ts';
+import { desktopText } from './locale.ts';
 
 export interface SurfaceBounds {
   x: number;
@@ -47,7 +48,7 @@ export function fitSurfaceBounds(saved: SurfaceBounds, areas: readonly SurfaceBo
   const fallback = areas[0];
 
   if (!fallback) {
-    throw new Error('Не найдена рабочая область дисплея.');
+    throw new Error(desktopText('desktop.desktopNeNaydenaRabochayaOblast'));
   }
 
   let chosen = fallback;
@@ -148,7 +149,7 @@ export function placeSurfaceBounds(
     && fitted.y + fitted.height <= value.y + value.height) ?? areas[0];
 
   if (!area) {
-    throw new Error('Не найдена рабочая область дисплея.');
+    throw new Error(desktopText('desktop.desktopNeNaydenaRabochayaOblast'));
   }
 
   const x = Math.min(Math.max(area.x, previous.x + CASCADE_STEP), area.x + area.width - 1);

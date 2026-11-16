@@ -137,6 +137,8 @@ printf '%s\\n' "$result"
   t.after(async () => app.close());
 
   return {
+    config,
+    directory,
     app,
     adapter,
     attempt,
@@ -294,4 +296,154 @@ test('повреждённый hash-chain закрывает actionable bootstra
     await assert.rejects(fx.adapter.readTrustedAttempt(7), /неверн/);
     await rm(filename);
   }
+});
+
+test('PIPE-PRELUDE: ответ bootstrap, чтение identity и отдельный resume одной attempt', async (t) => {
+    const { pipelineFixture } = await import('../tracker/helpers/pipelineFixture.mts');
+    const fx = await fixture(t);
+    const cli = await pipelineFixture(t, async (seen, response) => {
+        const result = await fx.app.inject({
+            method: seen.method,
+            url: seen.url,
+            headers: seen.headers,
+            payload: seen.body.length ? seen.body : undefined,
+        });
+
+        response.statusCode = result.statusCode;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(result.rawPayload);
+    });
+    const before = await cli.run(['state', '7']);
+
+    assert.equal(before.code, 0);
+    assert.equal(JSON.parse(before.stdout).identity, null);
+
+    const answer = ' Выбор\nС TAB\t' + '🚀'.repeat(19000);
+    const saved = await cli.run(['bootstrap-answer', '7'], {
+        profile: 'demo-profile',
+        attempt: fx.attempt,
+        phase: 'bootstrap',
+        node: 'scout',
+        visitId: fx.result.visitId,
+        stopHash: fx.result.recordHash,
+        answer,
+    });
+
+    assert.equal(saved.code, 0, saved.stderr);
+    assert.equal(JSON.parse(saved.stdout).decision.answer, answer);
+    assert.equal((await fx.adapter.readTrustedAttempt('7')).cursor, null);
+
+    const read = await cli.run(['prelude-state', '7']);
+
+    assert.equal(read.code, 0, read.stderr);
+
+    const expectedPrelude = JSON.parse(read.stdout).identity;
+
+    assert.equal(expectedPrelude.attempt, fx.attempt);
+    assert.equal(expectedPrelude.bootstrap.state, 'answered');
+    assert.equal(expectedPrelude.bootstrap.decisionHash, JSON.parse(saved.stdout).decision.recordHash);
+
+    const stop = await cli.run(['stop', '7'], { expectedPrelude });
+
+    assert.equal(stop.code, 0, stop.stderr);
+    assert.equal(JSON.parse(stop.stdout).outcome, 'not_running');
+
+    // Admission проверяется на реальном immutable bootstrap, запуск модели не нужен.
+    // Живость заменяет только внешний process-port, сохраняя guard и HTTP целиком.
+    const wasAlive = fx.adapter.isDaemonAlive;
+
+    fx.adapter.isDaemonAlive = () => true;
+
+    try {
+        const resumed = await cli.run(['resume', '7'], { expectedPrelude });
+
+        assert.equal(resumed.code, 0, resumed.stderr);
+        assert.equal(JSON.parse(resumed.stdout).outcome, 'already_running');
+    } finally {
+        fx.adapter.isDaemonAlive = wasAlive;
+    }
+
+    for (const stale of [
+        { ...expectedPrelude, attempt: 'a_' + 'f'.repeat(32) },
+        { ...expectedPrelude, bootstrap: { ...expectedPrelude.bootstrap, visitId: 'b_' + 'e'.repeat(32) } },
+        { ...expectedPrelude, bootstrap: { ...expectedPrelude.bootstrap, decisionHash: 'd'.repeat(64) } },
+    ]) {
+        const rejected = await cli.run(['resume', '7'], { expectedPrelude: stale });
+
+        assert.equal(rejected.code, 22);
+        assert.match(rejected.stderr, /изменил|состояни/i);
+    }
+
+    assert.equal((await fx.adapter.readTrustedAttempt('7')).attempt, fx.attempt);
+});
+
+test('PIPE-PRELUDE-TERMINAL-LEDGER: abandon до cursor наблюдается как terminal', async (t) => {
+    const { pipelineFixture } = await import('../tracker/helpers/pipelineFixture.mts');
+    const fx = await fixture(t);
+    const cli = await pipelineFixture(t, async (seen, response) => {
+        const result = await fx.app.inject({
+            method: seen.method,
+            url: seen.url,
+            headers: seen.headers,
+            payload: seen.body.length ? seen.body : undefined,
+        });
+
+        response.statusCode = result.statusCode;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(result.rawPayload);
+    });
+    const old = await cli.run(['prelude-state', '7']);
+
+    assert.equal(old.code, 0, old.stderr);
+
+    const expectedPrelude = JSON.parse(old.stdout).identity;
+    const command = [
+        'set -uo pipefail',
+        'source "$FACTORY_HOME/lib/attempt-state.sh" || exit $?',
+        'attempt_state_abandon_v2 7 "$1" "Fixture terminal"',
+    ].join('\n');
+
+    await exec('/bin/bash', [
+        '--noprofile', '--norc', '-c', command, 'pipeline-terminal-fixture', fx.attempt,
+    ], {
+        env: {
+            PATH: process.env.PATH || '/usr/bin:/bin',
+            HOME: fx.directory,
+            NODE_BIN: process.execPath,
+            FACTORY_HOME: fx.config.factoryHome,
+            FACTORY_CONTROL_ROOT: fx.config.factoryControlDir,
+            FACTORY_CONFIG_ROOT: fx.config.factoryConfigRoot,
+            FACTORY_PROFILES_DIR: fx.config.profilesDir,
+            FACTORY_STATE: fx.config.stateDir,
+            STATE_DIR: fx.config.stateDir,
+            FACTORY_TESTING: '1',
+            FACTORY_FORBID_LIVE: '1',
+        },
+        timeout: 15000,
+    });
+
+    const trusted = await fx.adapter.readTrustedAttempt('7');
+
+    assert.equal(trusted.cursor, null);
+    assert.equal(trusted.terminal, 'abandoned');
+
+    const read = await cli.run(['prelude-state', '7']);
+
+    assert.equal(read.code, 0, read.stderr);
+    assert.equal(JSON.parse(read.stdout).identity, null);
+    assert.equal(JSON.parse(read.stdout).terminal, 'abandoned');
+    assert.equal(JSON.parse(read.stdout).attempt, fx.attempt);
+
+    const waited = await cli.run(['wait', '7', fx.attempt], undefined, {
+        sleep: async () => assert.fail('terminal ledger уже подтверждён'),
+        armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
+    });
+
+    assert.equal(waited.code, 0, waited.stderr);
+    assert.equal(JSON.parse(waited.stdout).terminal, 'abandoned');
+    assert.equal(JSON.parse(waited.stdout).attempt, fx.attempt);
+
+    const staleAction = await cli.run(['resume', '7'], { expectedPrelude });
+
+    assert.equal(staleAction.code, 22, 'terminal не получает actionable identity');
 });

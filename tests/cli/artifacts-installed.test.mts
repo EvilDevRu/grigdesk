@@ -61,7 +61,8 @@ for (const language of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
       await session.wait(/GrigDesk 0\.2\.0.*release/u);
       assert.ok(session.output().includes(translate('menuGroups.developer')));
       assert.ok(session.output().includes(translate('artifactsCleanup')));
-      session.write(down.repeat(9) + '\r');
+      // Два relay-пункта из dev стоят перед уборкой: навигация идёт к пункту «Уборка артефактов».
+      session.write(down.repeat(11) + '\r');
       await session.wait(/Отмена|Cancel/u);
       assert.equal(await present(old), true);
 

@@ -1,12 +1,11 @@
 <template>
   <span
     class="task-source-chip"
-    :class="{ 'task-internal-flag': own }"
     v-tooltip="reason || name"
     :aria-label="reason ? `${name}: ${reason}` : name"
   >
     <img v-if="logo && !failed" :src="logo" alt="" @error="failed = true" />
-    <span v-else-if="!own" class="task-source-chip__monogram" aria-hidden="true">{{ name.slice(0, 1) }}</span>
+    <span v-else class="task-source-chip__monogram" aria-hidden="true">{{ name.slice(0, 1) }}</span>
     <span>{{ name }}</span>
     <span v-if="reason">{{ t('core.trackerSourceUnavailable') }}</span>
   </span>
@@ -21,13 +20,11 @@ import { t, vTooltip } from '../ui.ts';
 const props = defineProps<{ source?: string; driverId?: string }>();
 const trackers = useTrackersStore();
 const failed = ref(false);
-const own = computed(() => props.source === 'grigdesk');
 const id = computed(() => props.driverId ?? props.source?.split('@')[0]);
 const driver = computed(() => trackers.catalog?.drivers.find((entry) => entry.id === id.value));
-const name = computed(() => own.value ? 'GrigDesk'
-  : driver.value?.name ?? id.value ?? t('core.boardTrackerSource'));
-const logo = computed(() => own.value ? undefined : driver.value?.logoUrl);
-const reason = computed(() => own.value ? '' : driver.value?.reason
+const name = computed(() => driver.value?.name ?? id.value ?? t('core.boardTrackerSource'));
+const logo = computed(() => driver.value?.logoUrl);
+const reason = computed(() => driver.value?.reason
   ?? (driver.value?.status === 'unavailable' ? t('core.trackerSourceUnavailable') : ''));
 
 watch(logo, () => {

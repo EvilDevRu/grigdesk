@@ -1,8 +1,11 @@
 export const SNAPSHOT_SOURCE = String.raw`(() => {
   const nodes = new Map();
   const elements = [];
+  // Кастомные дропдауны строят пункты на ARIA-ролях без тегов ссылки или кнопки:
+  // без них агент видит меню только текстом и не может выбрать пункт окна/частоты.
   const candidates = document.querySelectorAll(
-    'a,button,input,textarea,select,[role="button"],[contenteditable="true"]'
+    'a,button,input,textarea,select,[role="button"],[role="option"],[role="menuitem"],'
+    + '[role="menuitemcheckbox"],[role="menuitemradio"],[contenteditable="true"]'
   );
   for (const node of candidates) {
     if (elements.length >= 200) break;

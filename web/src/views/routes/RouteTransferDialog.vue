@@ -1,75 +1,58 @@
 <template>
   <section class="route-transfer">
-    <h3>Экспорт и импорт JSON</h3>
-    <p class="muted">Комплект содержит маршруты, разведку и тексты инструкций.
-      Импорт создаёт черновик и не запускает команды или публикацию.</p>
+    <h3>{{ t('core.routeEksportIImportJson') }}</h3>
+    <p class="muted">{{ t('core.routeKomplektSoderzhitMarshrutyRazvedku') }}</p>
     <div class="route-transfer__row">
-      <label>Экспортировать
-        <UiSelect v-model="exportRouteId" data-test="transfer-export-scope">
-          <option value="">Весь каталог</option>
-          <option v-for="routeId in routeIds" :key="routeId" :value="routeId">
-            Только {{ routeId }}
+      <label>{{ t('core.routeEksportirovat') }} <UiSelect v-model="exportRouteId" data-test="transfer-export-scope">
+          <option value="">{{ t('core.routeVesKatalog') }}</option>
+          <option v-for="routeId in routeIds" :key="routeId" :value="routeId"> {{ t('core.routeTolko') }} {{ routeId }}
           </option>
         </UiSelect>
       </label>
-      <UiButton data-test="transfer-export" :disabled="busy || dirty" @click="exportFile">
-        Скачать JSON
-      </UiButton>
+      <UiButton data-test="transfer-export" :disabled="busy || dirty" @click="exportFile"> {{ t('core.routeSkachatJson') }} </UiButton>
     </div>
     <div class="route-transfer__row">
-      <UiFilePicker accept=".json,application/json" label="Выбрать JSON-комплект"
+      <UiFilePicker accept=".json,application/json" :label="t('core.routeVybratJsonKomplekt')"
                     :busy="busy" @change="readFiles" @reset="clearFile" />
     </div>
     <p v-if="error" class="bad" role="alert">{{ error }}</p>
     <template v-if="bundle">
-      <p>Исходный проект: <strong>{{ bundle.sourceProfile }}</strong> · маршруты:
-        {{ Object.keys(bundle.content.routes).join(', ') || 'нет' }}</p>
-      <p v-if="bundle.dependencies.length" class="bad" data-test="transfer-dependencies">
-        Внешние зависимости: {{ bundle.dependencies.join(', ') }}.
-        Их нужно разрешить в целевом каталоге до публикации.
-      </p>
+      <p>{{ t('core.routeIshodnyyProekt') }} <strong>{{ bundle.sourceProfile }}</strong> {{ t('core.routeMarshruty2') }} {{ Object.keys(bundle.content.routes).join(', ') || t('core.routeNet') }}</p>
+      <p v-if="bundle.dependencies.length" class="bad" data-test="transfer-dependencies"> {{ t('core.routeVneshnieZavisimosti') }} {{ bundle.dependencies.join(', ') }}{{ t('core.routeIhNuzhnoRazreshitV') }} </p>
       <div class="route-transfer__row">
-        <label>Целевой проект
-          <UiSelect v-model="targetProfile" data-test="transfer-target-profile">
+        <label>{{ t('core.routeTselevoyProekt') }} <UiSelect v-model="targetProfile" data-test="transfer-target-profile">
             <option v-for="profile in profiles" :key="profile" :value="profile">
               {{ profile }}
             </option>
           </UiSelect>
         </label>
-        <label>Название нового черновика
-          <UiInput v-model="title" data-test="transfer-title" />
+        <label>{{ t('core.routeNazvanieNovogoChernovika') }} <UiInput v-model="title" data-test="transfer-title" />
         </label>
-        <label>Способ импорта
-          <UiSelect v-model="importMode" data-test="transfer-import-mode">
-            <option value="new">Создать новый черновик</option>
+        <label>{{ t('core.routeSposobImporta') }} <UiSelect v-model="importMode" data-test="transfer-import-mode">
+            <option value="new">{{ t('core.routeSozdatNovyyChernovik') }}</option>
             <option v-if="singleRoute && document.state === 'editing'
                       && targetProfile === document.profile"
-                    value="add">Добавить в открытый черновик</option>
+                    value="add">{{ t('core.routeDobavitVOtkrytyyChernovik') }}</option>
           </UiSelect>
         </label>
       </div>
       <div v-if="importMode === 'add' && collision" class="route-transfer__row">
-        <p>Маршрут {{ importedRouteId }} уже есть в черновике. Выберите действие.</p>
-        <label>Совпавший ID
-          <UiSelect v-model="collisionChoice" data-test="transfer-collision">
-            <option value="cancel">Отменить импорт</option>
-            <option value="replace">Заменить маршрут</option>
-            <option value="rename">Переименовать импортируемый</option>
+        <p>{{ t('core.routeMarshrut') }} {{ importedRouteId }} {{ t('core.routeUzheEstVChernovike') }}</p>
+        <label>{{ t('core.routeSovpavshiyId') }} <UiSelect v-model="collisionChoice" data-test="transfer-collision">
+            <option value="cancel">{{ t('core.routeOtmenitImport') }}</option>
+            <option value="replace">{{ t('core.routeZamenitMarshrut') }}</option>
+            <option value="rename">{{ t('core.routePereimenovatImportiruemyy') }}</option>
           </UiSelect>
         </label>
-        <label v-if="collisionChoice === 'rename'">Новый ID
-          <UiInput v-model="newRouteId" data-test="transfer-new-id" />
+        <label v-if="collisionChoice === 'rename'">{{ t('core.routeNovyyId') }} <UiInput v-model="newRouteId" data-test="transfer-new-id" />
         </label>
       </div>
-      <UiButton data-test="transfer-import" :disabled="!canImport" @click="importFile">
-        Импортировать
-      </UiButton>
+      <UiButton data-test="transfer-import" :disabled="!canImport" @click="importFile"> {{ t('core.routeImportirovat') }} </UiButton>
     </template>
     <template v-if="result">
-      <p v-if="result.cancelled">Импорт отменён; черновик не менялся.</p>
-      <p v-else>Черновик сохранён: ревизия {{ result.draft.revision }}.</p>
-      <p v-if="result.unresolvedDependencies.length" class="bad">
-        Неразрешённые ссылки: {{ result.unresolvedDependencies.join(', ') }}.
+      <p v-if="result.cancelled">{{ t('core.routeImportOtmenenChernovikNe') }}</p>
+      <p v-else>{{ t('core.routeChernovikSohranenReviziya') }} {{ result.draft.revision }}.</p>
+      <p v-if="result.unresolvedDependencies.length" class="bad"> {{ t('core.routeNerazreshennyeSsylki') }} {{ result.unresolvedDependencies.join(', ') }}.
       </p>
       <ul v-if="result.issues.length">
         <li v-for="(issue, index) in result.issues" :key="index">
@@ -77,9 +60,7 @@
         </li>
       </ul>
       <UiButton v-if="!result.cancelled && importMode === 'new'"
-                data-test="transfer-open" @click="openImported">
-        Открыть новый черновик
-      </UiButton>
+                data-test="transfer-open" @click="openImported"> {{ t('core.routeOtkrytNovyyChernovik') }} </UiButton>
     </template>
   </section>
 </template>
@@ -98,7 +79,7 @@ import {
   addRouteTransfer, exportRouteTransfer, importRouteTransfer,
 } from '../../actions/routes';
 import { failureText } from '../../shared/apiClient.ts';
-import { UiButton, UiFilePicker, UiInput, UiSelect } from '../../ui';
+import { UiButton, UiFilePicker, UiInput, UiSelect, t } from '../../ui';
 
 const props = defineProps<{
   document: RouteDraft;
@@ -114,7 +95,7 @@ const exportRouteId = ref('');
 const bundle = ref<RouteTransferBundle | null>(null);
 const result = ref<RouteTransferImportResult | null>(null);
 const targetProfile = ref(props.document.profile);
-const title = ref('Импортированный комплект');
+const title = ref(t('core.routeImportirovannyyKomplekt'));
 const importMode = ref<'new' | 'add'>('new');
 const collisionChoice = ref<'cancel' | 'replace' | 'rename'>('cancel');
 const newRouteId = ref('');
@@ -164,7 +145,7 @@ async function readFiles(files: File[]): Promise<void> {
     return;
   }
   if (file.size > ROUTES_EDITOR_LIMITS.importBytes) {
-    error.value = 'JSON-комплект больше 64 МиБ.';
+    error.value = t('core.routeJsonKomplektBolshe64');
 
     return;
   }
@@ -173,15 +154,15 @@ async function readFiles(files: File[]): Promise<void> {
     const raw = await file.text();
 
     if (new TextEncoder().encode(raw).length > ROUTES_EDITOR_LIMITS.importBytes) {
-      error.value = 'JSON-комплект больше 64 МиБ.';
+      error.value = t('core.routeJsonKomplektBolshe64');
 
       return;
     }
 
     bundle.value = parseRouteTransferBundle(JSON.parse(raw));
-    title.value = `Импорт из ${bundle.value.sourceProfile}`;
+    title.value = t('core.routeImportIzSourceprofile', { sourceProfile: bundle.value.sourceProfile });
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось прочитать JSON-комплект.');
+    error.value = failureText(failure, t('core.routeNeUdalosProchitatJson'));
   }
 }
 
@@ -201,7 +182,7 @@ async function exportFile(): Promise<void> {
 
     await saveFile(blob, `routes-${exportRouteId.value || 'catalog'}.json`);
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось экспортировать комплект.');
+    error.value = failureText(failure, t('core.routeNeUdalosEksportirovatKomplekt'));
   } finally {
     busy.value = false;
   }
@@ -231,7 +212,7 @@ async function importFile(): Promise<void> {
         collisionChoice.value === 'rename' ? newRouteId.value.trim() : undefined);
     }
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось импортировать комплект.');
+    error.value = failureText(failure, t('core.routeNeUdalosImportirovatKomplekt'));
   } finally {
     busy.value = false;
   }

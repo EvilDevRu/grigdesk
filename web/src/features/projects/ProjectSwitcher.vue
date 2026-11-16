@@ -1,13 +1,13 @@
 <template>
   <div class="project-switcher">
-    <UiControlGroup v-if="compact" label="Проект" data-context="workspace-project">
-      <UiSelect :model-value="model" aria-label="Проект" data-context="workspace-project"
+    <UiControlGroup v-if="compact" :label="t('core.taskEditProject')" data-context="workspace-project">
+      <UiSelect :model-value="model" :aria-label="t('core.taskEditProject')" data-context="workspace-project"
                 @update:model-value="model = String($event ?? '')">
         <option v-for="project in profiles" :key="project" :value="project">{{ project }}</option>
       </UiSelect>
-      <UiCreateButton label="Новый проект" @click="emit('create')" />
+      <UiCreateButton :label="t('core.projectNovyyProekt')" @click="emit('create')" />
     </UiControlGroup>
-    <UiControlGroup v-else label="Проект">
+    <UiControlGroup v-else :label="t('core.taskEditProject')">
       <UiButton
         v-for="project in profiles"
         :key="project"
@@ -21,14 +21,12 @@
       </UiButton>
 
       <UiCreateButton
-        label="Новый проект"
+        :label="t('core.projectNovyyProekt')"
         @click="emit('create')"
       />
     </UiControlGroup>
     <UiButton v-if="model" variant="ghost" data-context="workspace-toolbar"
-      @click="emit('manage', model)">
-      Управление проектом
-    </UiButton>
+      @click="emit('manage', model)"> {{ t('core.projectUpravlenieProektom') }} </UiButton>
   </div>
 </template>
 
@@ -38,7 +36,7 @@
 // Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
 // в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
 import type { PropType } from 'vue';
-import { UiButton, UiControlGroup, UiCreateButton, UiSelect } from '../../ui';
+import { UiButton, UiControlGroup, UiCreateButton, UiSelect, t } from '../../ui';
 
 defineProps({
   compact: Boolean,

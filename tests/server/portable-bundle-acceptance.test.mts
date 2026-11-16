@@ -15,8 +15,8 @@ const publishedOnly = {
   timeout: 600000,
 };
 const expectedPayload = [
-  'GrigDesk', 'README.md', 'bin/tracker', 'bin/deepseek', 'bin/grigdesk-ctl',
-  'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/lib/runtime-env.sh',
+  'GrigDesk', 'README.md', 'bin/tracker', 'bin/pipeline', 'bin/voice', 'bin/deepseek', 'bin/grigdesk-ctl',
+  'bin/routes', 'bin/grigdesk-relay', 'bin/grigdesk-server', 'bin/lib/runtime-env.sh',
 ].sort();
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');

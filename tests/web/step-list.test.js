@@ -60,6 +60,38 @@ test('StepList раскрывает Bash-команду целиком, не о�
   assert.equal(wrapper.find('.body.command').text(), command);
 });
 
+test('StepList склеивает старые текстовые дельты по capability без изменения истории', async (t) => {
+  const steps = [
+    { k: 'think', text: 'Один' },
+    { k: 'think', text: ' цельный' },
+    { k: 'think', text: ' блок.' },
+    { k: 'text', text: 'Полный' },
+    { k: 'text', text: ' ответ.' },
+    {
+      k: 'think',
+      id: 'new-block-1',
+      text: 'Новый блок.',
+    },
+    {
+      k: 'think',
+      id: 'new-block-2',
+      text: 'Ещё один блок.',
+    },
+  ];
+  const before = JSON.stringify(steps);
+  const wrapper = await mountStepList(t, steps, { legacyTextDeltas: true });
+  const rows = wrapper.findAll('.step');
+
+  assert.equal(rows.length, 4, 'Три старые дельты стали одним блоком, новые id не склеены');
+  assert.equal(wrapper.find('.say').text(), 'Полный ответ.');
+  await rows[0].find('.head').trigger('click');
+  assert.equal(rows[0].find('pre').text(), 'Один цельный блок.');
+  assert.equal(JSON.stringify(steps), before, 'Проекция не переписывает исходные шаги');
+
+  await wrapper.setProps({ legacyTextDeltas: false });
+  assert.equal(wrapper.findAll('.step').length, steps.length, 'Остальные адаптеры сохраняют свой контракт');
+});
+
 test('StepList сохраняет полноширинную компактную строку внутри UiDisclosureButton', async (t) => {
   const [component, actions] = await Promise.all([
     readFile(STEP_LIST_PATH, 'utf8'),

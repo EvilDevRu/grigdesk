@@ -1,11 +1,12 @@
-export type TaskSourceId = 'grigdesk' | `${string}@${string}`;
+export type TaskSourceId = `${string}@${string}`;
 
 export interface TaskReference {
   id: string;
   source?: TaskSourceId;
+  unavailable?: 'legacy-own';
 }
 
-export type TaskPersonalSource = 'tracker' | 'grigdesk';
+export type TaskPersonalSource = 'tracker';
 
 export interface TaskSourceOptions {
   source?: TaskPersonalSource;
@@ -17,8 +18,7 @@ export interface TaskSourceOptions {
  * Прежний vendor-маркер не даёт права сопоставлять запуски по номеру.
  */
 export function isTaskSourceId(value: unknown): value is TaskSourceId {
-  return typeof value === 'string' && (value === 'grigdesk'
-    || /^[a-z0-9][a-z0-9._-]*@[a-f0-9]{64}$/.test(value));
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]*@[a-f0-9]{64}$/.test(value);
 }
 
 /**
@@ -41,7 +41,10 @@ export function parseTaskReference(value: unknown): TaskReference | null {
   if (parts.length === 1) {
     return { id };
   }
-  if (!isTaskSourceId(parts[0]) || (parts[0] === 'grigdesk' && !/^[1-9]\d{11}$/.test(id))) {
+  if (parts[0] === 'grigdesk' && /^[1-9]\d{11}$/.test(id)) {
+    return { id, unavailable: 'legacy-own' };
+  }
+  if (!isTaskSourceId(parts[0])) {
     return null;
   }
 
@@ -53,6 +56,10 @@ export function parseTaskReference(value: unknown): TaskReference | null {
  * Кодирование URL остаётся обязанностью транспорта вызывающей стороны.
  */
 export function formatTaskReference(value: TaskReference): string {
+  if (value.unavailable === 'legacy-own') {
+    return `grigdesk:${value.id}`;
+  }
+
   return value.source ? `${value.source}:${value.id}` : String(value.id);
 }
 
@@ -63,9 +70,11 @@ export function formatTaskReference(value: TaskReference): string {
 export function taskReferenceKey(value: {
   id: string | number;
   source?: unknown;
+  unavailable?: 'legacy-own';
   driverId?: unknown;
 }): string {
-  return JSON.stringify([isTaskSourceId(value.source) ? value.source
+  return JSON.stringify([value.unavailable === 'legacy-own' ? 'legacy-own'
+    : isTaskSourceId(value.source) ? value.source
     : typeof value.driverId === 'string' ? `driver:${value.driverId}` : null, String(value.id)]);
 }
 
@@ -74,5 +83,5 @@ export function taskReferenceKey(value: {
  * Хеш внешней доски никогда не передаётся серверу как выбираемый scope.
  */
 export function taskPersonalSource(source: unknown): TaskPersonalSource {
-  return source === 'grigdesk' ? 'grigdesk' : 'tracker';
+  return 'tracker';
 }

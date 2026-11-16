@@ -69,11 +69,40 @@ export default function createDriver(host) {
     listTasks: async () => [task],
     getDashboard: async () => {
       record('getDashboard', []);
-      if (control().dashboardError) throw new Error(control().dashboardError);
-      return { tasks: [task], toReview: [], created: [], widgets: [] };
+
+      if (control().dashboardError) {
+        throw new Error(control().dashboardError);
+      }
+
+      return {
+        tasks: [{ ...task, ...(control().task ?? {}) }],
+        toReview: [],
+        created: [],
+        widgets: [],
+      };
     },
-    taskDetail: async (id) => { record('taskDetail', [id]); return task; },
-    taskPageData: async (id) => { record('taskPageData', [id]); return { comments: [] }; },
+    taskDetail: async (id) => {
+      record('taskDetail', [id]);
+
+      if (control().detailError) {
+        throw new Error(control().detailError);
+      }
+
+      return task;
+    },
+    taskPageData: async (id) => {
+      record('taskPageData', [id]);
+
+      if (control().pageError) {
+        throw new Error(control().pageError);
+      }
+
+      if (control().hold === 'taskPageData') {
+        await host.fetch('https://held.fixture/taskPageData');
+      }
+
+      return { comments: control().comments || [] };
+    },
     createTask: effect('createTask'),
     updateTask: effect('updateTask'),
     addComment: effect('addComment'),

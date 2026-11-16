@@ -1,8 +1,14 @@
 import { useRoutesStore } from '../../stores/routes.ts';
 import {
+
   authoringDocumentOf, formatJsonDraft, newJsonDraftBuffer, parseJsonDraft,
 } from './jsonDraftBuffer.ts';
 import { applyLocalChange } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 /** Открывает JSON-представление без перезаписи несохранённого raw-текста. */
 /**
@@ -68,7 +74,7 @@ export function formatJsonDraftBuffer(): void {
     buffer.dirty = formatted !== buffer.baselineRaw;
     buffer.error = '';
   } catch (error) {
-    buffer.error = error instanceof Error ? error.message : 'Неверный JSON-документ.';
+    buffer.error = error instanceof Error ? error.message : t('core.routeNevernyyJsonDokument');
   }
 }
 
@@ -94,7 +100,7 @@ export function applyJsonDraftBuffer(): void {
   if (buffer.generation !== store.editGeneration || !baselineStillMatches
     || !store.serverSnapshot
     || (buffer.baselineRevision !== store.serverSnapshot.revision && !serverStillMatches)) {
-    buffer.error = 'Черновик изменился после открытия JSON. Сохраните текст отдельно и перечитайте.';
+    buffer.error = t('core.routeChernovikIzmenilsyaPosleOtkrytiya');
 
     return;
   }
@@ -126,6 +132,6 @@ export function applyJsonDraftBuffer(): void {
     buffer.dirty = false;
     buffer.error = '';
   } catch (error) {
-    buffer.error = error instanceof Error ? error.message : 'Неверный JSON-документ.';
+    buffer.error = error instanceof Error ? error.message : t('core.routeNevernyyJsonDokument');
   }
 }

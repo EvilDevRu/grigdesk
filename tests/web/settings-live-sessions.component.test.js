@@ -34,3 +34,84 @@ test('Процессы: DTO и подтверждение погашения с�
   assert.equal(h.writes()[0].method, 'DELETE');
   assert.equal(h.writes()[0].path, '/api/chat/sessions/sample');
 });
+
+/**
+ * Массовое гашение читает полный ответ сервера: отказ закрытия не выглядит
+ * обычным завершением операции, а список обновляется даже при частичном неуспехе.
+ */
+function bulkCloseHarness(t, bulkResult) {
+  let listCalls = 0;
+
+  return settingsHarness(t, 'system.processes', 'ProcessesPage', {
+    prepare({ control }) {
+      control.handlers['/api/chat/sessions'] = (call) => {
+        if (call.method === 'DELETE') {
+          return Response.json(bulkResult);
+        }
+
+        listCalls += 1;
+
+        return Response.json({
+          maxSessions: 4,
+          idleMs: 1800000,
+          sessions: [{
+            chatKey: 'sample',
+            chatTitle: 'Разбор',
+            executor: 'fixture',
+            pid: 123,
+            running: false,
+          }],
+        });
+      };
+    },
+  }).then((h) => ({ h, listCalls: () => listCalls }));
+}
+
+test('Процессы: частичный отказ массового гашения виден и список обновляется', async (t) => {
+  const { h, listCalls } = await bulkCloseHarness(t, {
+    ok: true,
+    closed: 1,
+    skipped: 0,
+    failed: 1,
+  });
+
+  await h.wrapper.findAll('button').find((item) => item.text() === 'Погасить свободные').trigger('click');
+  await h.flushPromises();
+
+  assert.match(h.wrapper.text(), /Не удалось погасить: 1/);
+  assert.doesNotMatch(h.wrapper.text(), /Занятых пропущено/, 'отказ не выглядит обычным завершением');
+  assert.ok(listCalls() >= 2, 'список процессов обновлён после операции');
+  assert.equal(h.writes()[0].method, 'DELETE');
+  assert.equal(h.writes()[0].path, '/api/chat/sessions');
+});
+
+test('Процессы: полный отказ массового гашения показывает число отказов', async (t) => {
+  const { h, listCalls } = await bulkCloseHarness(t, {
+    ok: true,
+    closed: 0,
+    skipped: 0,
+    failed: 2,
+  });
+
+  await h.wrapper.findAll('button').find((item) => item.text() === 'Погасить свободные').trigger('click');
+  await h.flushPromises();
+
+  assert.match(h.wrapper.text(), /Не удалось погасить процессы: 2/);
+  assert.doesNotMatch(h.wrapper.text(), /Занятых пропущено/);
+  assert.ok(listCalls() >= 2, 'неподтверждённые процессы остались в списке');
+});
+
+test('Процессы: успешное массовое гашение сохраняет обычное сообщение', async (t) => {
+  const { h } = await bulkCloseHarness(t, {
+    ok: true,
+    closed: 2,
+    skipped: 1,
+    failed: 0,
+  });
+
+  await h.wrapper.findAll('button').find((item) => item.text() === 'Погасить свободные').trigger('click');
+  await h.flushPromises();
+
+  assert.match(h.wrapper.text(), /Погашено: 2\. Занятых пропущено: 1/);
+  assert.doesNotMatch(h.wrapper.text(), /Не удалось погасить/);
+});

@@ -22,6 +22,8 @@ import type { RuntimeKind } from '../../lib/runtimePaths.ts';
 import { DESKTOP_RESTART_EXIT_CODE } from '../../lib/desktopParent.ts';
 import type { DesktopParent } from '../../lib/desktopParent.ts';
 import { LauncherError, LauncherService } from '../../lib/launcher.ts';
+import { ENV_FILE_STATE_ERROR_CODES, EnvFileError } from '../../lib/envFile.ts';
+import { VpnGateInputError, VpnGateService } from '../../lib/vpnGate.ts';
 import type { SystemAdapter } from '../../adapters/system.ts';
 
 // Отказ пересборки словами: машинный код для интерфейса и текст человеку.
@@ -69,12 +71,18 @@ interface AutostartRoute {
   Body: { enabled: boolean };
 }
 
+interface VpnGateRoute {
+  Body: { requireVpn: boolean; iface?: string; probe?: string };
+}
+
 // Серверный config в объёме раздела. Полная форма — в config.ts.
 interface SystemModuleConfig {
   rootDir: string;
   grigDeskUpdateStatePath: string;
   port: number;
   cliTokenPath: string;
+  // Машинный .env: в нём живут параметры VPN-ворот для следующего старта.
+  envPath: string;
 }
 
 export interface SystemModuleOptions {
@@ -86,6 +94,8 @@ export interface SystemModuleOptions {
   webRebuilder?: () => Promise<RebuildFailure | null>;
   // Подмена для тестов: systemctl и ярлык в них не трогаем.
   launcher?: LauncherService;
+  // Подмена для тестов: настоящий машинный .env в тестах не читается и не пишется.
+  vpnGate?: VpnGateService;
   serverMode?: () => 'desktop' | 'systemd' | 'manual';
   restartViaScript?: (rootDir: string) => void;
   desktop?: DesktopParent | null;
@@ -582,6 +592,51 @@ async function systemModule(
     try {
       return { shortcut: await launcher.removeShortcut() };
     } catch (error) { return sendLauncherError(reply, error); }
+  });
+
+  // ── Ворота VPN ──
+  // Ворота исполняются до старта сервера, поэтому маршрут показывает сохранённую
+  // конфигурацию отдельно от действующей и не применяет запись к живому процессу.
+  const vpnGate = opts.vpnGate || new VpnGateService({ envPath: config.envPath });
+
+  /**
+   * Отказ настройки ворот наружу: ввод — 400, состояние машинного .env — 409,
+   * чужая ошибка уходит общему обработчику как есть.
+   */
+  function sendVpnGateError(reply: FastifyReply, thrown: unknown) {
+    if (thrown instanceof VpnGateInputError) {
+      return reply.code(400).send({ error: thrown.code, message: thrown.message });
+    }
+    if (thrown instanceof EnvFileError) {
+      return reply.code(ENV_FILE_STATE_ERROR_CODES.has(thrown.code) ? 409 : 400)
+        .send({ error: thrown.code, message: thrown.message });
+    }
+    throw thrown;
+  }
+
+  fastify.get('/api/system/vpn-gate', async () => vpnGate.read());
+
+  fastify.put<VpnGateRoute>('/api/system/vpn-gate', {
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false, required: ['requireVpn'],
+        propertyNames: { enum: ['requireVpn', 'iface', 'probe'] },
+        properties: {
+          requireVpn: { type: 'boolean' },
+          // Пустая строка снимает явное значение; остальное проверяет сервис по правилам скрипта.
+          iface: { type: 'string', pattern: '^(|[A-Za-z0-9_.:+-]{1,15})$' },
+          probe: { type: 'string', pattern: '^(|[A-Za-z0-9.:%-]{1,64})$' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      return await vpnGate.write({
+        requireVpn: request.body.requireVpn,
+        iface: request.body.iface ?? '',
+        probe: request.body.probe ?? '',
+      });
+    } catch (error) { return sendVpnGateError(reply, error); }
   });
 
   // ── Пересборка web-бандла из текущего рабочего дерева ──

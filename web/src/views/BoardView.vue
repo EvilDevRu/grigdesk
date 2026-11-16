@@ -4,48 +4,49 @@
     :data-perf-error="performanceInitialFailure ? '' : undefined" data-ui-workspace :class="{ 'stats-expanded': statsExpanded, 'has-board-pages': phonePages.length > 1 }">
     <UiPaneHeader class="board-heading" data-context="board-heading">
       <template #title>
-        <h2 class="board-title">{{ t('core.board') }}</h2>
+        <h2 class="board-title">{{ translate('core.board') }}</h2>
       </template>
       <template #meta>
         <BoardTrackerSettingsButton v-if="phoneBoard" @click="trackerSettingsOpen = true" />
-        <p v-else-if="data && ownTasks.trackerConfigured !== false" class="board-updated muted"
+        <p v-else-if="data && !noTrackers" class="board-updated muted"
            role="status" data-role="board-snapshot-status">
-          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
-          <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
+          <span v-if="snapshotStale">{{ translate('core.boardSnapshotStale') }} </span>
+          <time :datetime="snapshotDateTime">{{ translate('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
         </p>
       </template>
       <template #actions>
         <UiButton tone="accent" data-context="workspace-toolbar" data-role="board-new-task"
-                  @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
+                  @click="newTaskOpen = true">{{ translate('core.taskFormNewTask') }}</UiButton>
         <BoardTrackerSettingsButton v-if="!phoneBoard" @click="trackerSettingsOpen = true" />
       </template>
     </UiPaneHeader>
     <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen"
-                           @created="ui.openTask($event.id, $event.source)" />
+                           @created="ui.openTask($event.id, $event.source)"
+                           @connect="trackerSettingsOpen = true" />
 
     <div id="board-tracker-panel" class="tracker-board">
-      <div v-if="(!phoneBoard && !data) || ownTasks.trackerConfigured === false || error
+      <div v-if="(!phoneBoard && !data) || noTrackers || error
                  || data?.widgets?.length || activeTasks.length"
            class="board-overview">
-      <div v-if="ownTasks.trackerConfigured === false" class="tracker-setup-banner">
-        <p>{{ t('core.trackerSetupBanner') }}</p>
+      <div v-if="noTrackers" class="tracker-setup-banner">
+        <p>{{ translate('core.trackerSetupBanner') }}</p>
         <UiButton tone="accent" @click="trackerSettingsOpen = true">
-          {{ t('core.trackerSetupAction') }}
+          {{ translate('core.trackerSetupAction') }}
         </UiButton>
       </div>
-    <template v-if="ownTasks.trackerConfigured !== false">
-    <BoardLoading v-if="!phoneBoard && !data && !error" summary-only label="Загрузка доски…" />
+    <template v-if="!noTrackers">
+    <BoardLoading v-if="!phoneBoard && !data && !error" summary-only :label="translate('core.taskZagruzkaDoski')" />
     <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error"
     :data-perf-error="!data && !loading ? '' : undefined">
       <div class="board-tracker-error-heading">
         <strong>{{ trackerUnavailableLabel }}</strong>
         <div class="board-tracker-error-actions">
           <UiButton variant="text" :disabled="loading" :loading="loading" @click="board.load(true)">
-            {{ t('core.boardRetry') }}
+            {{ translate('core.boardRetry') }}
           </UiButton>
           <UiDisclosureButton v-model:open="errorDetailsOpen" :controls="errorDetailsId" density="compact">
-            {{ t('core.boardErrorDetails') }}
+            {{ translate('core.boardErrorDetails') }}
           </UiDisclosureButton>
         </div>
       </div>
@@ -69,12 +70,12 @@
             <span class="active-timers-pulse"></span>
           </span>
           <span class="active-timers-heading">
-            <h2 id="active-timers-title" class="active-timers-title">Активные таймеры</h2>
-            <span class="active-timers-subtitle">Время списывается сейчас</span>
+            <h2 id="active-timers-title" class="active-timers-title">{{ translate('core.taskAktivnyeTaymery') }}</h2>
+            <span class="active-timers-subtitle">{{ translate('core.taskVremyaSpisyvaetsyaSeychas') }}</span>
           </span>
           <span
             class="active-timers-count mono"
-            :aria-label="`Запущено таймеров: ${activeTasks.length}`"
+            :aria-label="translate('core.taskZapuschenoTaymerovLength', { length: activeTasks.length })"
           >
             {{ activeTasks.length }}
           </span>
@@ -88,9 +89,7 @@
             >
               <span class="active-timer-card-head">
                 <span class="active-timer-state">
-                  <span class="active-timer-dot" aria-hidden="true"></span>
-                  таймер идёт
-                </span>
+                  <span class="active-timer-dot" aria-hidden="true"></span> {{ translate('core.taskTaymerIdet') }} </span>
                 <span class="active-timer-time mono">{{ secToHMS(liveElapsed(task)) }}</span>
               </span>
               <span class="active-task-title">{{ task.title }}</span>
@@ -109,13 +108,13 @@
     </template>
       </div>
       <UiTabs v-if="phoneBoard && phonePages.length > 1" class="board-page-nav"
-              data-context="board-page-nav" data-ui-workspace-tabs size="compact" :label="t('core.boardPages')"
+              data-context="board-page-nav" data-ui-workspace-tabs size="compact" :label="translate('core.boardPages')"
               :model-value="activeBoardPage" @update:model-value="selectBoardPage">
         <UiTab v-for="page in phonePages" :id="`${boardPagesId}-tab-${page.id}`" :key="page.id"
                :value="page.id" :controls="`${boardPagesId}-panel-${page.id}`"
-               :aria-label="t('core.boardPageLabel', {
-                 label: page.id === 'related' ? t('core.boardRelatedTitle') : page.label,
-                 count: page.loading ? t('core.loading') : page.count,
+               :aria-label="translate('core.boardPageLabel', {
+                 label: page.id === 'related' ? translate('core.boardRelatedTitle') : page.label,
+                 count: page.loading ? translate('core.loading') : page.count,
                })"
                :data-board-page-tab="page.id" data-context="board-page-tab">
           <span class="board-page-label">{{ page.label }}</span>
@@ -133,18 +132,20 @@
                  :inert="phoneBoard && activeBoardPage !== 'mine' ? true : undefined">
           <div class="colhead">
             <h3 class="h big">
-              <span class="heading-name">Мои задачи</span>
+              <span class="heading-name">{{ translate('core.boardMinePage') }}</span>
               <span class="cnt">
-                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ allTasks.length }}</template>
+                {{ hasListFilters
+                  ? translate('core.boardVisibleTaskCount', { visible: myTasks.length, total: allTasks.length })
+                  : myTasks.length }}
               </span>
             </h3>
             <div class="search" role="search">
               <UiSearchInput
                 ref="taskSearch"
                 v-model="q"
-                aria-label="Поиск по задачам"
-                placeholder="Номер, название, проект…"
-                clear-label="Очистить поиск"
+                :aria-label="translate('core.taskPoiskPoZadacham')"
+                :placeholder="translate('core.taskNomerNazvanieProekt')"
+                :clear-label="translate('core.clearSearch')"
               />
             </div>
             <UiButton
@@ -155,9 +156,9 @@
               :pressed="Boolean(activeFilterCount)"
               :aria-expanded="String(filtersOpen)"
               :aria-label="activeFilterCount
-                ? t('core.boardTaskFiltersActive', { count: activeFilterCount })
-                : t('core.boardTaskFilters')"
-              v-tooltip="t('core.boardTaskFilters')"
+                ? translate('core.boardTaskFiltersActive', { count: activeFilterCount })
+                : translate('core.boardTaskFilters')"
+              v-tooltip="translate('core.boardTaskFilters')"
               aria-controls="board-task-filters"
               @click="filtersOpen = !filtersOpen"
             >
@@ -172,13 +173,13 @@
               >
                 <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
               </svg>
-              <span class="filter-toggle-label">Фильтры</span>
+              <span class="filter-toggle-label">{{ translate('core.taskFiltry') }}</span>
               <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
             </UiButton>
 
           </div>
 
-          <div class="filter-section show-filter" role="group" aria-label="Показать">
+          <div class="filter-section show-filter" role="group" :aria-label="translate('core.taskPokazat')">
             <UiToggleButton
               v-model="favoriteOnly"
               class="favfilter"
@@ -186,7 +187,7 @@
               variant="outline"
               tone="warning"
               :disabled="!favoritesReady"
-              v-tooltip="favoritesReady ? 'Только избранные задачи' : 'Избранное загружается'"
+              v-tooltip="favoritesReady ? translate('core.taskTolkoIzbrannyeZadachi') : translate('core.taskIzbrannoeZagruzhaetsya')"
             >
               <template #leading>
                 <svg
@@ -199,8 +200,7 @@
                 >
                   <path d="m12 2.7 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
                 </svg>
-              </template>
-              Избранные {{ currentFavoriteCount }}
+              </template> {{ translate('core.taskIzbrannye') }} {{ currentFavoriteCount }}
             </UiToggleButton>
             <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
                  ждёт сервер (seen.ready), а не гадает по пустому набору. -->
@@ -211,7 +211,7 @@
               variant="outline"
               tone="accent"
               :disabled="!seenReady"
-              v-tooltip="seenReady ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
+              v-tooltip="seenReady ? translate('core.taskTolkoNovyeTeChto') : translate('core.taskOtmetkiProsmotraZagruzhayutsya')"
             >
               <template #leading>
                 <svg
@@ -224,30 +224,25 @@
                 >
                   <path d="M12 3.4 14 9l5.6 2-5.6 2-2 5.6-2-5.6L4.4 11 10 9z" />
                 </svg>
-              </template>
-              Новые {{ currentNewCount }}
+              </template> {{ translate('core.codeReviewStatusA') }} {{ currentNewCount }}
             </UiToggleButton>
           </div>
 
           <div id="board-task-filters" class="filterbar" :class="{ expanded: filtersOpen }"
-               role="region" aria-label="Фильтры задач">
+               role="region" :aria-label="translate('core.boardTaskFilters')">
             <label class="filter-section sort-filter">
-              <span class="filter-caption">Сортировка</span>
+              <span class="filter-caption">{{ translate('core.taskSortirovka') }}</span>
               <UiSelect v-model="sortBy" class="trisort">
-                <option value="created">{{ t('core.boardCreatedOrder') }}</option>
-                <option v-if="analysisEnabled" value="risk">по риску</option>
-                <option v-if="analysisEnabled" value="complexity">по сложности</option>
-                <option v-if="analysisEnabled" value="size">по размеру</option>
-                <option v-if="analysisEnabled" value="fresh">по свежести оценки</option>
+                <option value="created">{{ translate('core.boardCreatedOrder') }}</option>
+                <option v-if="analysisEnabled" value="risk">{{ translate('core.taskPoRisku') }}</option>
+                <option v-if="analysisEnabled" value="complexity">{{ translate('core.taskPoSlozhnosti') }}</option>
+                <option v-if="analysisEnabled" value="size">{{ translate('core.taskPoRazmeru') }}</option>
+                <option v-if="analysisEnabled" value="fresh">{{ translate('core.taskPoSvezhestiOtsenki') }}</option>
               </UiSelect>
             </label>
 
-            <div class="filter-section" role="group" :aria-label="t('core.boardSourceFilter')">
-              <span class="filter-caption">{{ t('core.boardSourceFilter') }}</span>
-              <UiToggleButton :model-value="selectedSources.includes('grigdesk')"
-                              @update:model-value="toggleSource('grigdesk', $event)">
-                {{ t('core.boardSourceGrigdesk') }}
-              </UiToggleButton>
+            <div class="filter-section" role="group" :aria-label="translate('core.boardSourceFilter')">
+              <span class="filter-caption">{{ translate('core.boardSourceFilter') }}</span>
               <UiToggleButton v-for="driver in sourceDrivers" :key="driver.id"
                               :model-value="selectedSources.includes(driver.id)"
                               @update:model-value="toggleSource(driver.id, $event)">
@@ -255,44 +250,42 @@
               </UiToggleButton>
             </div>
             <label class="filter-section">
-              <span class="filter-caption">{{ t('core.boardProjectFilter') }}</span>
+              <span class="filter-caption">{{ translate('core.boardProjectFilter') }}</span>
               <UiSelect v-model="selectedGroup">
-                <option value="">{{ t('core.boardAllProjects') }}</option>
-                <option value="__none__">{{ t('core.boardNoProject') }}</option>
+                <option value="">{{ translate('core.boardAllProjects') }}</option>
+                <option value="__none__">{{ translate('core.boardNoProject') }}</option>
                 <option v-for="group in groupOptions" :key="group" :value="group">{{ group }}</option>
               </UiSelect>
             </label>
 
             <div v-if="analysisEnabled" class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
-              <span id="board-triage-filter-label" class="filter-caption">Оценка</span>
+              <span id="board-triage-filter-label" class="filter-caption">{{ translate('core.taskDesignAnalysis') }}</span>
               <UiSegmentedControl
                 v-model="triageMode"
                 class="trisegment"
                 data-context="board-triage-mode"
-                label="Режим триажа"
+                :label="translate('core.taskRezhimTriazha')"
                 :options="TRIAGE_OPTIONS"
               />
             </div>
-            <div v-else class="filter-section triage-disabled">Триаж выключен</div>
+            <div v-else class="filter-section triage-disabled">{{ translate('core.taskTriazhVyklyuchen') }}</div>
 
             <div class="filter-actions">
               <UiButton
                 v-if="hasListFilters || activeFilterCount"
                 class="filter-reset"
                 variant="text"
-                v-tooltip="t('core.trackerResetOrder')"
+                v-tooltip="translate('core.trackerResetOrder')"
                 @click="resetTaskFilters"
-              >
-                Сбросить
-              </UiButton>
+              > {{ translate('settings.reset') }} </UiButton>
               <div v-if="analysisEnabled && unrated.length" class="batch-actions" role="group"
-                   aria-label="Массовые действия с задачами">
+                   :aria-label="translate('core.taskMassovyeDeystviyaSZadachami')">
                 <UiButton
                   class="batch-action triage-all"
                   variant="solid"
                   tone="accent"
-                  :aria-label="`Оценить все задачи без оценки: ${unrated.length}`"
-                  v-tooltip="'Поставить все задачи без оценки в очередь триажа'"
+                  :aria-label="translate('core.taskOtsenitVseZadachiBez', { length: unrated.length })"
+                  v-tooltip="translate('core.taskPostavitVseZadachiBez')"
                   @click="analyzeAllUnrated"
                 >
                   <template #leading>
@@ -307,49 +300,42 @@
                     >
                       <path d="M12 3.5 14 9l5.5 2-5.5 2-2 5.5-2-5.5L4.5 11 10 9z" />
                     </svg>
-                  </template>
-                  Оценить все
-                  <template #trailing>
+                  </template> {{ translate('core.taskOtsenitVse') }} <template #trailing>
                     <span class="batch-count mono" aria-hidden="true">{{ unrated.length }}</span>
                   </template>
                 </UiButton>
               </div>
             </div>
           </div>
-          <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
-          <div v-for="issue in ownPersonalIssues" :key="issue.kind" class="faverror" role="alert">
-            <span>{{ issue.message }}</span>
-            <UiButton variant="text" @click="retryOwnPersonal">{{ t('core.boardRetry') }}</UiButton>
-          </div>
           <div v-if="selectedSources.includes('tracker') && favorites.error" class="faverror" role="alert">
-            <span>Избранное: {{ favorites.error }}</span>
+            <span>{{ translate('core.taskIzbrannoe') }} {{ favorites.error }}</span>
             <UiButton
               variant="text"
               tone="accent"
               :disabled="favorites.loading"
               @click="favorites.load(true)"
             >
-              {{ favorites.loading ? 'Повторяю…' : 'Повторить' }}
+              {{ favorites.loading ? translate('core.taskPovtoryayu') : translate('core.pluginNotificationsRetry') }}
             </UiButton>
           </div>
           <!-- Отказ отметок обязан быть виден: молча он читается как «новых задач нет». -->
           <div v-if="selectedSources.includes('tracker') && seen.error" class="faverror" role="alert">
-            <span>Отметки просмотра: {{ seen.error }}</span>
+            <span>{{ translate('core.taskOtmetkiProsmotra') }} {{ seen.error }}</span>
             <UiButton
               variant="text"
               tone="accent"
               :disabled="seen.loading"
               @click="seen.load(true)"
             >
-              {{ seen.loading ? 'Повторяю…' : 'Повторить' }}
+              {{ seen.loading ? translate('core.taskPovtoryayu') : translate('core.pluginNotificationsRetry') }}
             </UiButton>
           </div>
           <div class="list-head"
                :class="{ 'without-analysis': !analysisEnabled, 'without-timer': !supportsTimer }"
                aria-hidden="true">
-            <span class="list-task-label">Задача</span>
-            <span v-if="analysisEnabled">Оценка</span>
-            <span v-if="supportsTimer" class="list-time-label">Учтено</span>
+            <span class="list-task-label">{{ translate('core.chatOptionTask') }}</span>
+            <span v-if="analysisEnabled">{{ translate('core.taskDesignAnalysis') }}</span>
+            <span v-if="supportsTimer" class="list-time-label">{{ translate('core.taskUchteno') }}</span>
           </div>
           <ul ref="taskList" class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="taskReferenceKey(t)" class="trow"
@@ -384,35 +370,32 @@
                   </span>
                   <span v-else class="tstat" :class="{ 'on-shelf': shelfEnabled && shelfState(t).isOnShelf(t.id) }"
                         :style="{ background: dotColor(t) }" v-tooltip="dotTitle(t)"></span>
-                  <span v-if="shelfEnabled && shelfState(t).isOnShelf(t.id)" class="shelf-mark">На полке</span>
+                  <span v-if="shelfEnabled && shelfState(t).isOnShelf(t.id)" class="shelf-mark">{{ translate('core.taskNaPolke') }}</span>
                   <span v-if="isNewTask(t)" class="newbadge" role="img"
-                        aria-label="Новая задача — ещё не открывали"
-                        v-tooltip="'Новая задача — ещё не открывали'">Новая</span>
-                  <span v-if="t.unread" class="badge" :aria-label="`Непрочитанных сообщений: ${t.unread}`">
-                    {{ t.unread }} сообщ.
-                  </span>
+                        :aria-label="translate('core.taskNovayaZadachaEscheNe')"
+                        v-tooltip="translate('core.taskNovayaZadachaEscheNe')">{{ translate('core.taskNovaya') }}</span>
+                  <span v-if="t.unread" class="badge" :aria-label="translate('core.taskNeprochitannyhSoobscheniyUnread', { unread: String(t.unread) })">
+                    {{ t.unread }} {{ translate('core.taskSoobsch') }} </span>
                 </span>
               </UiPressable>
               <div v-if="analysisEnabled" class="task-triage"><TriageBadge :row="triageOf(t)" /></div>
               <span v-if="supportsTimer" class="ttime" :class="{ running: t.timerRunning }">
-                <span v-if="t.personalSource !== 'grigdesk'" class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
-                <span v-if="t.timerRunning" class="time-state">Идёт учёт</span>
+                <span class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
+                <span v-if="t.timerRunning" class="time-state">{{ translate('core.taskIdetUchet') }}</span>
               </span>
             </li>
             <li v-if="!myTasks.length" class="muted empty">
-              <template v-if="!selectedSources.length">{{ t('core.boardNoSourcesSelected') }}</template>
-              <template v-else-if="!allTasks.length">{{ t('core.boardUnifiedEmpty') }}</template>
-              <template v-else-if="favoriteOnly && !currentFavoriteCount">В текущем списке избранных задач нет</template>
-              <template v-else-if="favoriteOnly">Избранные задачи не подходят под поиск или фильтры</template>
-              <template v-else-if="newOnly && !currentNewCount">Новых задач нет — все просмотрены</template>
-              <template v-else-if="newOnly">Новые задачи не подходят под поиск или фильтры</template>
-              <template v-else>Ничего не найдено</template>
+              <template v-if="!selectedSources.length">{{ translate('core.boardNoSourcesSelected') }}</template>
+              <template v-else-if="!allTasks.length">{{ translate('core.boardUnifiedEmpty') }}</template>
+              <template v-else-if="favoriteOnly && !currentFavoriteCount">{{ translate('core.taskVTekuschemSpiskeIzbrannyh') }}</template>
+              <template v-else-if="favoriteOnly">{{ translate('core.taskIzbrannyeZadachiNePodhodyat') }}</template>
+              <template v-else-if="newOnly && !currentNewCount">{{ translate('core.taskNovyhZadachNetVse') }}</template>
+              <template v-else-if="newOnly">{{ translate('core.taskNovyeZadachiNePodhodyat') }}</template>
+              <template v-else>{{ translate('core.inboxNoResults') }}</template>
             </li>
             <li v-else-if="visibleTasks.length < myTasks.length" class="more muted">
-              <span>Показано {{ visibleTasks.length }} из {{ myTasks.length }}</span>
-              <UiButton data-role="board-load-more" variant="text" @click="showMoreTasks">
-                Показать ещё
-              </UiButton>
+              <span>{{ translate('core.taskPokazano') }} {{ visibleTasks.length }} {{ translate('settings.from') }} {{ myTasks.length }}</span>
+              <UiButton data-role="board-load-more" variant="text" @click="showMoreTasks"> {{ translate('core.chatPageMore') }} </UiButton>
             </li>
           </ul>
         </section>
@@ -428,28 +411,26 @@
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 5H5v15h14V5h-3M9 3h6v4H9zM8 12h8M8 16h5" />
             </svg>
-            {{ t('core.boardRelatedTitle') }}
+            {{ translate('core.boardRelatedTitle') }}
           </h3>
-          <UiTabs :model-value="secondaryMode ?? 'review'" class="secondary-tabs" label="Связанные задачи"
+          <UiTabs :model-value="secondaryMode ?? 'review'" class="secondary-tabs" :label="translate('core.taskSvyazannyeZadachi')"
                   @update:model-value="secondaryMode = String($event)">
             <UiTab id="board-review-tab" data-context="board-related-tab"
-                   value="review" controls="board-related-list">
-              Контроль <span class="cnt">{{ data?.toReview!.length }}</span>
+                   value="review" controls="board-related-list"> {{ translate('core.boardRelatedPage') }} <span class="cnt">{{ data?.toReview!.length }}</span>
             </UiTab>
             <UiTab id="board-created-tab" data-context="board-related-tab"
-                   value="created" controls="board-related-list">
-              Поручения <span class="cnt">{{ data?.created!.length }}</span>
+                   value="created" controls="board-related-list"> {{ translate('core.taskPorucheniya') }} <span class="cnt">{{ data?.created!.length }}</span>
             </UiTab>
           </UiTabs>
           <UiSearchInput
             v-model="secondaryQuery"
-            aria-label="Поиск по связанным задачам"
-            placeholder="Поиск в этом списке…"
-            clear-label="Очистить поиск связанных задач"
+            :aria-label="translate('core.taskPoiskPoSvyazannymZadacham')"
+            :placeholder="translate('core.taskPoiskVEtomSpiske')"
+            :clear-label="translate('core.boardViewClearRelatedTaskSearch')"
           />
           <div class="secondary-summary">
-            <span>{{ secondaryMode !== 'created' ? 'Ждут моего контроля' : 'Я поставил задачу' }}</span>
-            <span v-if="secondaryQuery.trim()">{{ relatedTasks.length }} из {{ relatedSource.length }}</span>
+            <span>{{ secondaryMode !== 'created' ? translate('core.taskZhdutMoegoKontrolya') : translate('core.taskYaPostavilZadachu') }}</span>
+            <span v-if="secondaryQuery.trim()">{{ relatedTasks.length }} {{ translate('settings.from') }} {{ relatedSource.length }}</span>
           </div>
           <div
             id="board-related-list"
@@ -480,23 +461,22 @@
                 </UiPressable>
               </li>
               <li v-if="!relatedTasks.length" class="muted empty">
-                {{ secondaryQuery.trim() ? 'Ничего не найдено' : 'В этом списке пока нет задач' }}
+                {{ secondaryQuery.trim() ? translate('core.inboxNoResults') : translate('core.taskVEtomSpiskePoka') }}
               </li>
             </ul>
           </div>
         </section>
       </div>
 
-
       </div>
     </div>
-    <footer v-if="phoneBoard && ownTasks.trackerConfigured !== false" class="board-phone-footer">
+    <footer v-if="phoneBoard && !noTrackers" class="board-phone-footer">
       <p role="status" data-role="board-snapshot-status">
         <template v-if="data">
-          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
-          <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
+          <span v-if="snapshotStale">{{ translate('core.boardSnapshotStale') }} </span>
+          <time :datetime="snapshotDateTime">{{ translate('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
         </template>
-        <span v-else>{{ error ? trackerUnavailableLabel : t('core.loading') }}</span>
+        <span v-else>{{ error ? trackerUnavailableLabel : translate('core.loading') }}</span>
       </p>
     </footer>
   </div>
@@ -510,12 +490,12 @@ import BoardTrackerSettingsButton from './board/BoardTrackerSettingsButton.vue';
 import { useBoardPhonePages } from './board/useBoardPhonePages.ts';
 import type { BoardPhonePage } from './board/useBoardPhonePages.ts';
 import TrackerSettingsDialog from './board/TrackerSettingsDialog.vue';
+import { boardAllRoleTasks } from '../shared/boardTimerTasks.ts';
 import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import { useTrackersStore } from '../stores/trackers.ts';
 import BoardLoading from './BoardLoading.vue';
 
 import NewGrigdeskTaskDialog from './board/NewGrigdeskTaskDialog.vue';
-import { useGrigdeskTasksStore } from '../stores/grigdeskTasks.ts';
 import type { BoardTask } from '../shared/boardContracts.ts';
 import type { UiFieldHandle } from '../ui.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -539,24 +519,13 @@ import {
   boardTaskListResetKey, matchesBoardTask, selectBoardTasks, unifiedBoardTasks, boardComposition,
 } from '../shared/boardTaskList.ts';
 import {
-  t,
-  confirmDialog,
-  UiButton,
-  UiDisclosureButton,
-  UiInlineMessage,
-  UiPaneHeader,
-  UiPressable,
-  UiSearchInput,
-  UiSegmentedControl,
-  UiSelect,
-  UiTab,
-  UiTabs,
-  UiToggleButton,
-  vTooltip,
+  confirmDialog, UiButton, UiDisclosureButton, UiInlineMessage, UiPaneHeader, UiPressable,
+  UiSearchInput, UiSegmentedControl, UiSelect, UiTab, UiTabs, UiToggleButton, vTooltip, t, messageRef,
+  uiLocale,
 } from '../ui';
 
+const translate = t;
 const ui = useUiStore();
-const ownTasks = useGrigdeskTasksStore();
 const newTaskOpen = ref(false);
 const trackerSettingsOpen = ref(false);
 const errorDetailsOpen = ref(false);
@@ -565,17 +534,23 @@ const trackers = useTrackersStore();
 const trackerUnavailableLabel = computed(() => {
   const name = trackers.catalog?.drivers.find((driver) => driver.id === trackers.catalog?.externalId)?.name;
 
-  return name ? t('core.boardNamedTrackerUnavailable', { name }) : t('core.boardTrackerUnavailable');
+  return name
+    ? translate('core.boardNamedTrackerUnavailable', { name })
+    : translate('core.boardTrackerUnavailable');
 });
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
-const performanceInitialFailure = computed(() => (!data.value && !!error.value && !loading.value)
-  || (!ownTasks.loaded && !!ownTasks.error && !ownTasks.loading));
-const performanceInitialPending = computed(() => !performanceInitialFailure.value
-  && ((ownTasks.trackerConfigured !== false && !data.value && !error.value)
-    || (!ownTasks.loaded && !ownTasks.error)));
+const noTrackers = computed(() => !!trackers.catalog && !trackers.error
+  && !(trackers.catalog.enabledIds?.length ?? (trackers.catalog.externalId ? 1 : 0)));
 
+// Пометка устаревания обязана реагировать и на отказ отдельной ветки мультиисточника:
+// общий error остаётся пустым, когда не обновляется только один трекер.
+const snapshotStale = computed(() => !!error.value || !!board.refreshProblem);
+
+const performanceInitialFailure = computed(() => !data.value && !!error.value && !loading.value);
+const performanceInitialPending = computed(() => !performanceInitialFailure.value
+  && !noTrackers.value && !data.value && !error.value);
 
 watch(error, () => {
   errorDetailsOpen.value = false;
@@ -584,7 +559,7 @@ watch(error, () => {
 const snapshotDateTime = computed(() => readAt.value > 0
   ? new Date(readAt.value).toISOString() : undefined);
 const snapshotTime = computed(() => readAt.value > 0
-  ? new Date(readAt.value).toLocaleString() : '—');
+  ? new Date(readAt.value).toLocaleString(uiLocale.value) : '—');
 const now = ref(Date.now());
 const STATUS_COLOR: Record<string, string> = {
   running: 'var(--accent)',
@@ -622,13 +597,8 @@ useSse((name) => {
     trackers.invalidate();
     void trackers.load(true);
     void board.load(true);
-    void ownTasks.load();
     void favorites.load(true);
     void seen.load(true);
-  }
-
-  if (name === 'grigdesk-tasks-changed' || name === 'hello') {
-    void ownTasks.load();
   }
 
   if (name === 'state-change') {
@@ -656,7 +626,9 @@ function dotTitle(t: BoardTask) {
   const k = taskReferenceKey(t);
 
   if (conveyor.value.has(k)) {
-    return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
+    return conveyor.value.get(k)
+      ? translate('core.coreNaKonveyereIdet')
+      : translate('core.coreNaKonveyereStoitZhdet');
   }
 
   return t.statusLabel;
@@ -673,10 +645,12 @@ function taskStateLabel(task: BoardTask) {
   const id = taskReferenceKey(task);
 
   if (conveyor.value.has(id)) {
-    return conveyor.value.get(id) ? 'Конвейер идёт' : 'Конвейер остановлен';
+    return conveyor.value.get(id)
+      ? translate('core.coreKonveyerIdet')
+      : translate('core.pipelineKonveyerOstanovlen');
   }
 
-  return task.overdue ? 'Просрочена' : task.statusLabel || '';
+  return task.overdue ? translate('core.taskOverdue') : task.statusLabel || '';
 }
 
 // Живой тик таймера: считается от timer_started_at из трекера — см. liveTimerSec.
@@ -689,7 +663,7 @@ const supportsTimer = computed(() => data.value?.multiSource
   ? trackers.catalog?.drivers.some((driver) => driver.capabilities.timer) ?? false
   : boardSupportsTimer(data.value));
 const activeTasks = computed(() => supportsTimer.value
-  ? (data.value?.tasks || []).filter((task) => task.timerRunning) : []);
+  ? boardAllRoleTasks(data.value).filter((task) => task.timerRunning) : []);
 // Поиск основного списка независим от поиска контроля и поручений.
 const q = ref('');
 const taskSearch = ref<UiFieldHandle<HTMLInputElement> | null>(null);
@@ -739,20 +713,26 @@ const seen = useTaskSeenStore();
 const newOnly = ref(false);
 const favoriteState = (task: BoardTask) => favorites.forSource?.(
   isTaskSourceId(task.source) ? task.source : undefined,
-) ?? (task.personalSource === 'grigdesk' ? favorites.own : favorites);
+) ?? favorites;
 const seenState = (task: BoardTask) => seen.forSource?.(
   isTaskSourceId(task.source) ? task.source : undefined,
-) ?? (task.personalSource === 'grigdesk' ? seen.own : seen);
+) ?? seen;
 const shelfState = (task: BoardTask) => shelf.forSource?.(
   isTaskSourceId(task.source) ? task.source : undefined,
-) ?? (task.personalSource === 'grigdesk' ? shelf.own : shelf);
+) ?? shelf;
 const isNewTask = (task: BoardTask) => seenState(task).ready && !seenState(task).isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
 const SORT_MODES = new Set(['created', 'risk', 'complexity', 'size', 'fresh']);
 const TRIAGE_OPTIONS = [
-  { value: 'all', label: 'Все' },
-  { value: 'unrated', label: 'Без оценки' },
-  { value: 'needs-info', label: 'Нужны уточнения' },
+  { value: 'all', get label() {
+    return translate('core.selectAllGroups');
+  } },
+  { value: 'unrated', get label() {
+    return translate('core.taskBezOtsenki');
+  } },
+  { value: 'needs-info', get label() {
+    return translate('core.taskNuzhnyUtochneniya');
+  } },
 ];
 /**
  * Сохранённые предпочтения принимаются как неизвестный JSON.
@@ -768,7 +748,7 @@ function readTriagePrefs() {
       // Один режим вместо двух независимых флагов: повреждённое старое значение
       // больше не может одновременно включить «без оценки» и «нужны уточнения».
       sources: Array.isArray(saved.sources) ? [...new Set(saved.sources.filter((source) =>
-        typeof source === 'string'))] : ['tracker', 'grigdesk'],
+        typeof source === 'string' && source !== 'grigdesk'))] : ['tracker'],
       group: typeof saved.group === 'string' ? saved.group : '',
       triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
     };
@@ -776,7 +756,7 @@ function readTriagePrefs() {
     return {
       sortBy: 'created',
       triageMode: 'all',
-      sources: ['tracker', 'grigdesk'],
+      sources: ['tracker'],
       group: ''
     };
   }
@@ -786,14 +766,12 @@ const savedTriage = readTriagePrefs();
 const selectedSources = ref<string[]>(savedTriage.sources);
 const selectedGroup = ref(savedTriage.group);
 const sourceDrivers = computed(() => trackers.catalog?.enabledIds
-  ? trackers.catalog.drivers.filter((driver) => driver.id !== 'grigdesk'
-    && (trackers.catalog!.enabledIds!.includes(driver.id)
+  ? trackers.catalog.drivers.filter((driver) => (trackers.catalog!.enabledIds!.includes(driver.id)
       || data.value?.tasks?.some((task) => task.source?.startsWith(`${driver.id}@`))))
   : [{ id: 'tracker', name: trackerName.value }]);
 
 const allTasks = computed(() => unifiedBoardTasks(
-  data.value?.multiSource || trackers.catalog?.enabledIds ? data.value?.tasks
-    : ownTasks.trackerConfigured === false ? [] : data.value?.tasks, ownTasks.tasks,
+  data.value?.tasks,
 ));
 const groupOptions = computed(() => [...new Set(allTasks.value
   .map((task) => String(task.group || '').trim()).filter(Boolean))].sort());
@@ -805,10 +783,11 @@ const sourceTasks = computed(() => selectBoardTasks({
   // после выбора сортировки; счётчикам сортировать строки незачем.
   sortBy: 'tracker',
 }));
-const showRelated = computed(() => selectedSources.value.some((id) => id !== 'grigdesk')
+const showRelated = computed(() => selectedSources.value.length > 0
   && !!data.value);
 const trackerName = computed(() => trackers.catalog?.drivers
-  .find((driver) => driver.id === trackers.catalog?.externalId)?.name || t('core.boardTrackerSource'));
+  .find((driver) => driver.id === trackers.catalog?.externalId)?.name
+  || translate('core.boardTrackerSource'));
 
 watch(sourceDrivers, (drivers) => {
   if (selectedSources.value.includes('tracker') && trackers.catalog?.enabledIds) {
@@ -817,43 +796,17 @@ watch(sourceDrivers, (drivers) => {
   }
 }, { immediate: true });
 
-const favoritesReady = computed(() => selectedSources.value.every((source) =>
-  (source === 'grigdesk' ? favorites.own : favorites).loaded));
-const seenReady = computed(() => selectedSources.value.every((source) =>
-  (source === 'grigdesk' ? seen.own : seen).ready));
-const ownPersonalIssues = computed(() => {
-  if (!selectedSources.value.includes('grigdesk')) {
-    return [];
-  }
-  if (ownTasks.loaded && ownTasks.personalStateVersion !== 1) {
-    return [{ kind: 'version', message: t('core.boardPersonalUpdateRequired') }];
-  }
-
-  return [favorites.own.error, seen.own.error].filter(Boolean).map((message, index) => ({
-    kind: String(index),
-    message: t('core.boardPersonalError', { source: 'GrigDesk', message: message || '' }),
-  }));
-});
+const favoritesReady = computed(() => favorites.loaded);
+const seenReady = computed(() => seen.ready);
 
 function toggleSource(source: string, enabled: boolean) {
   selectedSources.value = enabled ? [...new Set([...selectedSources.value, source])]
     : selectedSources.value.filter((item) => item !== source);
 }
 
-async function retryOwnPersonal() {
-  await favorites.own.load(true);
-  await ownTasks.markBaselineSeen();
-}
-
-watch(() => ownTasks.personalStateVersion, (version) => {
-  if (version === 1) {
-    void favorites.own.load();
-  }
-}, { immediate: true });
-
-watch(() => [board.sourceKey, ownTasks.revision], () => {
+watch(() => [board.sourceKey, board.readAt], () => {
   if (selectedGroup.value && selectedGroup.value !== '__none__'
-    && ownTasks.loaded && !ownTasks.loading && !error.value && data.value
+    && !loading.value && !error.value && data.value
     && !groupOptions.value.includes(selectedGroup.value)) {
     selectedGroup.value = '';
   }
@@ -877,9 +830,10 @@ watch([sortBy, triageMode, selectedSources, selectedGroup], () => {
   } catch { /* приватный режим/запрет хранилища не должен ронять доску */ }
 });
 
-const numericAllowed = (task: BoardTask) => task.source === 'grigdesk'
-  || task.source === data.value?.source || (!data.value?.multiSource && !isTaskSourceId(task.source));
-const triageOf = (task: BoardTask) => numericAllowed(task) ? analysis.byTask[task.id] || null : null;
+const numericAllowed = (task: BoardTask) => task.source === data.value?.source
+  || (!data.value?.multiSource && !isTaskSourceId(task.source));
+const triageOf = (task: BoardTask) => analysis.byReference?.[taskReferenceKey(task)]
+  || (numericAllowed(task) ? analysis.byTask[task.id] || null : null);
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => allTasks.value.filter((t) => {
   if (!analysisEnabled.value || !numericAllowed(t)) {
@@ -901,9 +855,8 @@ async function analyzeAllUnrated() {
     return;
   }
   if (!(await confirmDialog(
-    `Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, `
-      + 'по несколько минут на задачу.',
-    { title: 'Оценить все задачи без оценки', okText: 'Поставить в очередь' },
+    messageRef('core.taskPostavitVOcheredTriazha', { length: list.length }),
+    { title: translate('core.taskOtsenitVseZadachiBez2'), okText: translate('core.taskPostavitVOchered') },
   ))) {
     return;
   }
@@ -919,7 +872,7 @@ async function analyzeAllUnrated() {
 }
 
 const projectedAnalysis = computed(() => Object.fromEntries(allTasks.value
-  .filter(numericAllowed).map((task) => [taskReferenceKey(task), analysis.byTask[task.id]])));
+  .map((task) => [taskReferenceKey(task), triageOf(task)])));
 
 const myTasks = computed(() => {
   return selectBoardTasks({
@@ -945,14 +898,14 @@ const currentNewCount = computed(() => {
 });
 const activeFilterCount = computed(() => [
   sortBy.value !== 'created',
-  selectedSources.value.length !== 2,
+  sourceDrivers.value.some((driver) => !selectedSources.value.includes(driver.id)),
   !!selectedGroup.value,
   favoriteOnly.value,
   newOnly.value,
   analysisEnabled.value && triageMode.value !== 'all',
 ].filter(Boolean).length);
 const hasListFilters = computed(() => !!q.value.trim()
-  || selectedSources.value.length !== 2 || !!selectedGroup.value
+  || sourceDrivers.value.some((driver) => !selectedSources.value.includes(driver.id)) || !!selectedGroup.value
   || favoriteOnly.value || newOnly.value
   || (analysisEnabled.value && triageMode.value !== 'all'));
 
@@ -963,7 +916,7 @@ const hasListFilters = computed(() => !!q.value.trim()
 async function resetTaskFilters() {
   q.value = '';
   sortBy.value = 'created';
-  selectedSources.value = ['grigdesk', ...sourceDrivers.value.map((driver) => driver.id)];
+  selectedSources.value = sourceDrivers.value.map((driver) => driver.id);
   selectedGroup.value = '';
   triageMode.value = 'all';
   favoriteOnly.value = false;
@@ -1016,20 +969,19 @@ function onTasksScroll(e: Event) {
   }
 }
 
-
 const boardPagesId = `board-pages-${useId()}`;
 const phonePages = computed<BoardPhonePage[]>(() => {
   const pages: BoardPhonePage[] = [{
     id: 'mine',
-    label: t('core.boardMinePage'),
+    label: translate('core.boardMinePage'),
     count: allTasks.value.length,
-    loading: ownTasks.loading && !ownTasks.loaded,
+    loading: loading.value && !data.value,
   }];
 
   if (showRelated.value) {
     pages.push({
       id: 'related',
-      label: t('core.boardRelatedPage'),
+      label: translate('core.boardRelatedPage'),
       count: (data.value?.toReview?.length ?? 0) + (data.value?.created?.length ?? 0),
       loading: false,
     });
@@ -1045,18 +997,10 @@ const {
   onScroll: onBoardPagesScroll,
 } = useBoardPhonePages(phonePages);
 
-
-
 let ticker: ReturnType<typeof setInterval> | null = null;
-
-function refreshOwnTasks() {
-  void ownTasks.load();
-}
 
 onMounted(() => {
   void trackers.load();
-  refreshOwnTasks();
-  window.addEventListener('focus', refreshOwnTasks);
   board.load();
   favorites.load(true);
   seen.load(true);
@@ -1071,7 +1015,6 @@ onMounted(() => {
   }, 1000);
 });
 onUnmounted(() => {
-  window.removeEventListener('focus', refreshOwnTasks);
 
   if (ticker) {
     clearInterval(ticker);
@@ -1545,17 +1488,10 @@ onUnmounted(() => {
 .badge { font-size: 11px; color: var(--accent); }
 /* Метка «новая» — того же синего, что и точка новых задач на чипе «Доска» в навигации:
    человек приходит сюда именно с неё, и цвет должен совпасть. */
-.newbadge,
-.task-internal-flag {
+.newbadge {
   flex: none; font-size: 11px; font-weight: 500; line-height: 1.5;
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 1px 6px;
-}
-.task-internal-flag {
-  background: color-mix(in srgb, var(--ink-mid) 8%, transparent);
-  color: var(--ink-mid);
-  border-radius: 3px;
-  padding: 0 5px;
 }
 .ttime {
   display: flex;

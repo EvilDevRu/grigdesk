@@ -22,23 +22,32 @@ export async function writeHelpResources(input: {
   const bundle = await compileHelpSources(input.sourceRoot, {
     version, commit
   });
+  const englishBundle = await compileHelpSources(input.sourceRoot, {
+    version,
+    commit
+  }, 'en');
   const directory = path.join(input.directory, 'server/help');
 
   await mkdir(directory, {
     recursive: true
   });
   await writeFile(path.join(directory, 'help.json'), JSON.stringify(bundle));
+  await writeFile(path.join(directory, 'help.en.json'), JSON.stringify(englishBundle));
 
   const packages = await site({
     sourceRoot: input.sourceRoot,
 
     output: path.join(directory, 'site'),
-    bundle
+    bundle,
+    englishBundle
   });
-  const published = await readFile(path.join(directory, 'site/help.json'), 'utf8');
 
-  if (published !== JSON.stringify(bundle)) {
-    throw new Error('help_site_mismatch');
+  for (const [name, corpus] of [['help.json', bundle], ['help.en.json', englishBundle]] as const) {
+    const published = await readFile(path.join(directory, 'site', name), 'utf8');
+
+    if (published !== JSON.stringify(corpus)) {
+      throw new Error('help_site_mismatch');
+    }
   }
 
   return packages;

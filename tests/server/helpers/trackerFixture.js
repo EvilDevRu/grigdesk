@@ -8,11 +8,10 @@ import { TrackerCredentialsStore } from '../../../server/src/lib/trackers/creden
 import { createTrackerRuntime } from '../../../server/src/lib/trackers/runtime.ts';
 import trackersModule from '../../../server/src/modules/trackers/index.ts';
 import trackerModule from '../../../server/src/modules/tracker/index.ts';
-import ownModule from '../../../server/src/modules/grigdesk-tasks/index.ts';
 import authPlugin from '../../../server/src/plugins/auth.ts';
 import { SESSION_ONLY_PREFIXES } from '../../../server/src/modules/plugins/installRoutes.ts';
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
-import { tasksFixture } from './grigdesk-tasks.js';
+import { trackerEnvironment } from './trackerEnvironment.js';
 
 const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 
@@ -91,8 +90,8 @@ export async function trackerFixture(t, {
   pluginEnabled = () => false,
 } = {}) {
   const ownCleanups = [];
-  const own = await tasksFixture({ after: (cleanup) => ownCleanups.push(cleanup) });
-  const { config, root } = own;
+  const environment = await trackerEnvironment({ after: (cleanup) => ownCleanups.push(cleanup) });
+  const { config, root } = environment;
   let app = null;
   let runtime = null;
 
@@ -153,7 +152,7 @@ export async function trackerFixture(t, {
   });
 
   const options = {
-    ...own.moduleOptions,
+    ...environment.moduleOptions,
     config,
     credsStore,
     onChanged: () => app.sse.broadcast('trackers-changed', runtime.selection.read()),
@@ -169,12 +168,6 @@ export async function trackerFixture(t, {
   app.decorate('pluginEnabled', pluginEnabled);
   app.decorate('analyzer', { enqueue: async () => {} });
   await app.register(trackerModule, { tracker });
-  await app.register(ownModule, {
-    ...options,
-    tracker,
-    service: runtime?.own
-  });
-
   await register?.({
     app,
     runtime,
@@ -191,7 +184,7 @@ export async function trackerFixture(t, {
   });
 
   return {
-    ...own,
+    ...environment,
     app,
     config,
     credsStore,

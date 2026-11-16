@@ -23,6 +23,11 @@ export interface ChatInTurnRun {
 
 type HistoryMessage = Record<string, unknown>;
 
+type HistoryMessageIndex = {
+  receipts: Map<string, HistoryMessage>;
+  assistants: Map<string, HistoryMessage>;
+};
+
 interface AssistantFinalIdentity {
   runId?: unknown;
   assistantMessageId?: unknown;
@@ -131,12 +136,16 @@ export function mergeInTurnAvailability(
 }
 
 /**
- * Страница дополняет ленту по id, а completeThrough растёт только
- * после страницы, подтвердившей отсутствие хвоста.
+ * Страница всегда обновляет границы журнала, даже если записи уже известны.
+ * Признак изменения позволяет вызывающему пропустить только лишнюю проекцию.
  */
-export function mergeInTurnPage(run: ChatInTurnRun, page: InTurnPage): void {
+export function mergeInTurnPage(run: ChatInTurnRun, page: InTurnPage): boolean {
+  let changed = false;
+
   for (const entry of page.entries || []) {
-    mergeInTurnEntry(run, entry);
+    if (mergeInTurnEntry(run, entry)) {
+      changed = true;
+    }
   }
 
   run.throughSequence = Math.max(run.throughSequence, page.throughSequence || 0);
@@ -145,6 +154,8 @@ export function mergeInTurnPage(run: ChatInTurnRun, page: InTurnPage): void {
   if (page.nextAfterSequence === null) {
     run.completeThrough = Math.max(run.completeThrough, page.throughSequence || 0);
   }
+
+  return changed;
 }
 
 /**
@@ -207,13 +218,43 @@ function reuseHistoryMessage(old: HistoryMessage | undefined, next: HistoryMessa
 }
 
 /**
+ * Один проход по истории заменяет повторный поиск для каждого блока запуска.
+ * В каждой роли сохраняется первое совпадение, как у прежнего Array.find.
+ */
+function indexHistoryMessages(messages: HistoryMessage[], runId: string): HistoryMessageIndex {
+  const receipts = new Map<string, HistoryMessage>();
+  const assistants = new Map<string, HistoryMessage>();
+
+  for (const message of messages) {
+    if (message.runId !== runId) {
+      continue;
+    }
+
+    const messageId = message.messageId;
+    const assistantMessageId = message.assistantMessageId;
+
+    if (typeof messageId === 'string' && !receipts.has(messageId)) {
+      receipts.set(messageId, message);
+    }
+    if (typeof assistantMessageId === 'string' && !assistants.has(assistantMessageId)) {
+      assistants.set(assistantMessageId, message);
+    }
+  }
+
+  return { receipts, assistants };
+}
+
+/**
  * Запись журнала дополняет существующее сообщение, сохраняя метаданные финала.
  * Поля текста, порядка и доставки всегда берутся из подтверждённой записи сервера.
  */
-function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: HistoryMessage[]): HistoryMessage {
+function historyMessage(
+  entry: InTurnEntry,
+  run: ChatInTurnRun,
+  previous: HistoryMessageIndex,
+): HistoryMessage {
   if (isInTurnReceipt(entry)) {
-    const old = previous.find((message) => message.runId === entry.runId
-      && message.messageId === entry.messageId);
+    const old = previous.receipts.get(entry.messageId);
 
     return reuseHistoryMessage(old, {
       ...old,
@@ -231,8 +272,7 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
     });
   }
 
-  const old = previous.find((message) => message.runId === entry.runId
-    && message.assistantMessageId === entry.assistantMessageId);
+  const old = previous.assistants.get(entry.assistantMessageId);
 
   return reuseHistoryMessage(old, {
     ...old,
@@ -251,17 +291,21 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
 
 /**
  * Группа уточнений и завершённых блоков занимает место перед финалом своего запуска.
- * Проекция не меняет исходный массив: стор сам решает, нужна ли запись истории.
+ * Локальный индекс сохраняет прежние сообщения без повторных обходов всей истории.
  */
-export function materializeInTurnMessages(messages: HistoryMessage[], run: ChatInTurnRun): HistoryMessage[] {
-  const group = run.entries
-    .filter((entry) => isInTurnReceipt(entry) || (entry.complete && !!entry.text.trim()))
-    .map((entry) => historyMessage(entry, run, messages));
+export function materializeInTurnMessages(
+  messages: HistoryMessage[],
+  run: ChatInTurnRun,
+): HistoryMessage[] {
+  const entries = run.entries
+    .filter((entry) => isInTurnReceipt(entry) || (entry.complete && !!entry.text.trim()));
 
-  if (!group.length) {
+  if (!entries.length) {
     return messages;
   }
 
+  const previous = indexHistoryMessages(messages, run.runId);
+  const group = entries.map((entry) => historyMessage(entry, run, previous));
   const kept = messages.filter((message) => message.runId !== run.runId
     || (message.kind !== 'in-turn' && message.kind !== 'assistant-block'));
   const parent = kept.findIndex((message) => message.role === 'user'

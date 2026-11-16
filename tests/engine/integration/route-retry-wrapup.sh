@@ -264,4 +264,266 @@ assert_rc 1 "$?" "в строке остановки нет дословного
 owner=$(run_state_verdict_owner failed "$environment_verdict")
 assert_eq environment "$owner" "владелец отказа среды доезжает до вердикта попытки"
 
+# Инъекция находится в уже существующей границе записи, а не в импорте будущего helper.
+eval "$(declare -f attempt_stage_state_commit_v2 | \
+  sed '1s/attempt_stage_state_commit_v2/_commit_without_fault/')"
+attempt_stage_state_commit_v2() {
+  if [[ "${3:-}" == prepare && -f "$TEST_ROOT/commit-fault" ]]; then
+    local mode
+    mode=$(cat "$TEST_ROOT/commit-fault")
+    [[ "$mode" == permanent ]] || rm -f -- "$TEST_ROOT/commit-fault"
+    return 74
+  fi
+  _commit_without_fault "$@"
+}
+
+repair_task=9210
+FAKE_RESULT=done
+FAKE_VERDICT=''
+SILENT_LEFT=0
+repair_attempt=$(begin_attempt "$repair_task" a_92109210921092109210921092109210)
+assert_rc 0 "$?" 'pending: новая attempt подготовлена до I/O fault'
+: >"$RUNS_LOG"
+printf once >"$TEST_ROOT/commit-fault"
+route_v2_dispatch_next "$repair_task" "$repair_attempt" >/dev/null
+assert_rc 0 "$?" 'transient I/O повторяет запись внутри одного посещения'
+assert_eq 1 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'модель выполнена ровно один раз'
+cursor=$(attempt_stage_state_read_v2 "$repair_task" "$repair_attempt")
+assert_eq verify "$(json_field "$cursor" currentNode)" 'переход продвинулся к command verify'
+
+crash_task=9211
+crash_attempt=$(begin_attempt "$crash_task" a_92119211921192119211921192119211)
+: >"$RUNS_LOG"
+printf permanent >"$TEST_ROOT/commit-fault"
+route_v2_dispatch_next "$crash_task" "$crash_attempt" >/dev/null
+assert_rc 74 "$?" 'постоянный отказ записи не выдаётся за успех'
+assert_eq 1 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'повторы I/O не вызывают модель'
+rm -f -- "$TEST_ROOT/commit-fault"
+# Новый Bash загружает модуль заново; только fixture hooks и явное окружение общие.
+export PENDING_TEST_HOOKS="$TEST_ROOT/restart-hooks.sh"
+declare -f route_v2_workspace_roots route_v2_context_for_node run_agent json_field write_context \
+  >"$PENDING_TEST_HOOKS"
+export worktree FIXTURE_CONTEXT RUNS_LOG FAKE_EPOCH FAKE_RESULT FAKE_COMMENT FAKE_VERDICT
+export SILENT_LEFT SILENT_CLASS SILENT_DETAIL
+bash --noprofile --norc -c '
+  source "$FACTORY_HOME/lib/route-runtime.sh" || exit $?
+  source "$1" || exit $?
+  route_v2_dispatch_next "$2" "$3" >/dev/null
+' restart "$PENDING_TEST_HOOKS" "$crash_task" "$crash_attempt"
+assert_rc 0 "$?" 'новая shell-сессия фиксирует сохранённый результат'
+assert_eq 1 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'resume не оплачивает вторую модель'
+cursor=$(attempt_stage_state_read_v2 "$crash_task" "$crash_attempt")
+assert_eq verify "$(json_field "$cursor" currentNode)" 'resume сохраняет правильный next'
+
+# После append сломалась только проекция: второй вызов не исполняет следующую модель.
+projection_task=9212
+projection_attempt=$(begin_attempt "$projection_task" a_92129212921292129212921292129212)
+: >"$RUNS_LOG"
+printf once >"$TEST_ROOT/projection-fault"
+route_v2_project_latest_reset() {
+  if [[ -f "$TEST_ROOT/projection-fault" ]]; then
+    rm -f -- "$TEST_ROOT/projection-fault"
+    return 74
+  fi
+  return 0
+}
+route_v2_dispatch_next "$projection_task" "$projection_attempt" >/dev/null
+assert_rc 74 "$?" 'post-append отказ проекции остаётся видимым'
+first_cursor=$(attempt_stage_state_read_v2 "$projection_task" "$projection_attempt")
+route_v2_dispatch_next "$projection_task" "$projection_attempt" >/dev/null
+assert_rc 0 "$?" 'повтор достраивает проекцию уже записанного перехода'
+assert_eq 1 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'post-append не повторяет runner'
+second_cursor=$(attempt_stage_state_read_v2 "$projection_task" "$projection_attempt")
+assert_eq "$(json_field "$first_cursor" eventSequence)" \
+  "$(json_field "$second_cursor" eventSequence)" 'post-append не пишет второй event'
+unset -f route_v2_project_latest_reset
+
+# Человек явно переигрывает тот же узел: сохранённое старое done не подавляет запуск.
+rewind_task=9213
+rewind_attempt=$(begin_attempt "$rewind_task" a_92139213921392139213921392139213)
+: >"$RUNS_LOG"
+printf permanent >"$TEST_ROOT/commit-fault"
+route_v2_dispatch_next "$rewind_task" "$rewind_attempt" >/dev/null
+assert_rc 74 "$?" 'до rewind исход сохранён, но не зафиксирован'
+rm -f -- "$TEST_ROOT/commit-fault"
+attempt_stage_state_human_rewind_v2 "$rewind_task" "$rewind_attempt" prepare \
+  prepare,verify,retro 'оператор просит новый проход' human >/dev/null
+assert_rc 0 "$?" 'явный rewind записан настоящим stage API'
+route_v2_dispatch_next "$rewind_task" "$rewind_attempt" >/dev/null
+assert_rc 0 "$?" 'после rewind выполняется новое посещение'
+assert_eq 2 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'старый receipt не отменил новую модель'
+
+# Исходники изменены оператором между завершением работы и replay.
+drift_task=9214
+drift_attempt=$(begin_attempt "$drift_task" a_92149214921492149214921492149214)
+: >"$RUNS_LOG"
+printf permanent >"$TEST_ROOT/commit-fault"
+route_v2_dispatch_next "$drift_task" "$drift_attempt" >/dev/null
+assert_rc 74 "$?" 'до drift создан intent'
+rm -f -- "$TEST_ROOT/commit-fault"
+printf 'operator change\n' >>"$worktree/trace.txt"
+route_v2_dispatch_next "$drift_task" "$drift_attempt" >/dev/null
+assert_rc 0 "$?" 'drift требует нового выполнения, а не старого done'
+assert_eq 2 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" 'новые исходники проверяет новая модель'
+printf 'baseline\n' >"$worktree/trace.txt"
+
+# Сторож отвергает запись source самим state-only агентом до создания successful intent.
+guard_task=9215
+guard_attempt=$(begin_attempt "$guard_task" a_92159215921592159215921592159215)
+eval "$(declare -f run_agent | sed '1s/run_agent/_runner_without_source_change/')"
+run_agent() {
+  _runner_without_source_change "$@"
+  printf 'agent changed source\n' >>"$worktree/trace.txt"
+}
+route_v2_dispatch_next "$guard_task" "$guard_attempt" >/dev/null
+assert_rc 75 "$?" 'filesystem guard по-прежнему отвергает запись агента'
+guard_dir="$(attempt_state_v2_task_root "$guard_task")/attempts/$guard_attempt"
+assert_file_missing "$guard_dir/pending-transition.json" 'guard reject не создал intent'
+printf 'baseline\n' >"$worktree/trace.txt"
+unset -f run_agent
+eval "$(declare -f _runner_without_source_change | sed '1s/_runner_without_source_change/run_agent/')"
+
+# Host evidence отменяет красивое done: в ledger не должен появиться done этого узла.
+evidence_task=9216
+evidence_attempt=$(begin_attempt "$evidence_task" a_92169216921692169216921692169216)
+profile_route_node_evidence_check() {
+  printf 'fixture: обязательное свидетельство отсутствует\n' >&2
+  return 78
+}
+route_v2_dispatch_next "$evidence_task" "$evidence_attempt" >/dev/null
+assert_rc 0 "$?" 'отказ evidence фиксируется обычным failed, без приёма done'
+evidence_cursor=$(attempt_stage_state_read_v2 "$evidence_task" "$evidence_attempt")
+assert_eq failed "$(json_field "$evidence_cursor" lastCommit outcome)" \
+  'отклонённое свидетельство не повысилось до done'
+unset -f profile_route_node_evidence_check
+
+# Ошибка после event rename сохраняется до отдельного resume в новой shell-сессии.
+eval "$(declare -f _attempt_stage_state_publish_runtime_locked |   sed '1s/_attempt_stage_state_publish_runtime_locked/_runtime_publish_without_fault/')"
+_attempt_stage_state_publish_runtime_locked() {
+  if [[ -f "$TEST_ROOT/runtime-fault" ]]; then return 74; fi
+  _runtime_publish_without_fault "$@"
+}
+gap_task=9217
+for variant in valid wrong-receipt corrupt-event extra-file; do
+  gap_task=$((gap_task + 1))
+  printf -v gap_id 'a_%032x' "$gap_task"
+  gap_attempt=$(begin_attempt "$gap_task" "$gap_id")
+  assert_rc 0 "$?" "gap $variant: попытка подготовлена"
+  : >"$RUNS_LOG"
+  touch "$TEST_ROOT/runtime-fault"
+  route_v2_dispatch_next "$gap_task" "$gap_attempt" >/dev/null
+  assert_rc 74 "$?" "gap $variant: отказ runtime остаётся видимым"
+  rm -f -- "$TEST_ROOT/runtime-fault"
+  gap_dir="$(attempt_state_v2_task_root "$gap_task")/attempts/$gap_attempt"
+  attempt_stage_state_read_v2 "$gap_task" "$gap_attempt" >/dev/null 2>&1
+  assert_rc 78 "$?" "gap $variant: общий read не обходит torn pointer"
+  gap_event=$(find "$gap_dir/stage-results" -name 'event.*.json' | sort | tail -n 1)
+  before_count=$(find "$gap_dir/stage-results" -name 'event.*.json' | wc -l)
+  case "$variant" in
+    wrong-receipt)
+      chmod 600 "$gap_dir/pending-transition.json"
+      python3 - "$gap_dir/pending-transition.json" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+value = json.loads(path.read_text())
+value['base']['taskId'] = '8'
+path.write_text(json.dumps(value))
+path.chmod(0o400)
+PYCODE
+      ;;
+    corrupt-event)
+      chmod 600 "$gap_event"
+      printf '\n' >>"$gap_event"
+      chmod 400 "$gap_event"
+      ;;
+    extra-file)
+      printf 'unknown\n' >"$gap_dir/stage-results/unknown.json"
+      chmod 400 "$gap_dir/stage-results/unknown.json"
+      ;;
+  esac
+  # F.2 уже сохранил fake runner и profile hooks; новая Bash не наследует функции.
+  export GAP_TASK="$gap_task" GAP_ATTEMPT="$gap_attempt" WORKTREE_FOR_PENDING="$worktree"
+  bash --noprofile --norc -c '
+    set -uo pipefail
+    source "$FACTORY_HOME/lib/route-runtime.sh"
+    source "$PENDING_TEST_HOOKS"
+    worktree=$WORKTREE_FOR_PENDING
+    route_v2_dispatch_next "$GAP_TASK" "$GAP_ATTEMPT" >/dev/null
+  '
+  gap_rc=$?
+  if [[ "$variant" == valid ]]; then
+    assert_rc 0 "$gap_rc" 'exact gap: новая сессия достроила runtime'
+    gap_cursor=$(attempt_stage_state_read_v2 "$gap_task" "$gap_attempt")
+    assert_eq verify "$(json_field "$gap_cursor" currentNode)" 'exact gap: точный следующий узел'
+    assert_file_missing "$gap_dir/pending-transition.json" 'exact gap: receipt погашен'
+  else
+    assert_rc 78 "$gap_rc" "gap $variant: повреждение fail-closed"
+    assert_file_exists "$gap_dir/pending-transition.json" "gap $variant: evidence сохранён"
+  fi
+  assert_eq "$before_count"     "$(find "$gap_dir/stage-results" -name 'event.*.json' | wc -l)" "gap $variant: нет нового event"
+  assert_eq 1 "$(wc -l <"$RUNS_LOG" | tr -d ' ')" "gap $variant: нет второго runner"
+done
+unset -f _attempt_stage_state_publish_runtime_locked
+eval "$(declare -f _runtime_publish_without_fault |   sed '1s/_runtime_publish_without_fault/_attempt_stage_state_publish_runtime_locked/')"
+
+safety_task=9230
+for scenario in no-progress edge-budget target-budget; do
+  for replay_case in normal replay gap; do
+    safety_task=$((safety_task + 1))
+    printf -v safety_id 'a_%032x' "$safety_task"
+    safety_attempt=$(begin_attempt "$safety_task" "$safety_id")
+    assert_rc 0 "$?" "safety $scenario/$replay_case: attempt"
+    typed=$(run_state_verdict_encode failed build 'same-finding=прежний дефект')
+    edge=0; no_progress=0; target=0
+    case "$scenario" in
+      no-progress) no_progress=1; expected_stop=no-progress ;;
+      edge-budget) edge=1; expected_stop=rewind-limit ;;
+      target-budget) target=1; expected_stop=rewind-limit ;;
+    esac
+    attempt_stage_state_commit_v2 "$safety_task" "$safety_attempt" prepare done >/dev/null
+    attempt_stage_state_commit_v2 "$safety_task" "$safety_attempt" verify failed       "$edge" "$typed" "$no_progress" 0 "$target" >/dev/null
+    assert_rc 0 "$?" "safety $scenario: первый возврат"
+    attempt_stage_state_commit_v2 "$safety_task" "$safety_attempt" prepare done >/dev/null
+    _route_v2_load_attempt "$safety_task" "$safety_attempt"
+    before=$(attempt_stage_state_read_v2 "$safety_task" "$safety_attempt")
+    sequence=$(json_field "$before" eventSequence)
+    assert_eq ready "$(json_field "$before" state)" 'перед safety commit cursor ready'
+    assert_eq verify "$(json_field "$before" currentNode)" 'перед safety commit текущий verify'
+    if [[ "$replay_case" == gap ]]; then
+      _attempt_stage_state_publish_runtime_locked() { return 74; }
+    fi
+    if [[ "$replay_case" == replay ]]; then
+      touch "$TEST_ROOT/safety-projection-fault"
+      route_v2_project_latest_reset() {
+        [[ ! -f "$TEST_ROOT/safety-projection-fault" ]] || return 74
+        return 0
+      }
+    fi
+    _route_v2_commit_pending_node "$sequence" "$safety_task" "$safety_attempt" verify failed       "$edge" "$typed" "$no_progress" 0 "$target" '' 0 >/dev/null
+    result=$?
+    if [[ "$replay_case" == gap ]]; then
+      assert_rc 74 "$result" "safety $scenario: опубликован только event"
+      unset -f _attempt_stage_state_publish_runtime_locked
+      eval "$(declare -f _runtime_publish_without_fault | \
+        sed '1s/_runtime_publish_without_fault/_attempt_stage_state_publish_runtime_locked/')"
+      _route_v2_pending_drive "$safety_task" "$safety_attempt" 1 >/dev/null
+      assert_rc 0 "$?" "safety $scenario: exact gap восстановлен"
+    elif [[ "$replay_case" == replay ]]; then
+      assert_rc 74 "$result" "safety $scenario: проекция временно недоступна"
+      rm -f "$TEST_ROOT/safety-projection-fault"
+      _route_v2_pending_drive "$safety_task" "$safety_attempt" 1 >/dev/null
+      assert_rc 0 "$?" "safety $scenario: replay признал exact stop"
+      unset -f route_v2_project_latest_reset
+    else
+      assert_rc 0 "$result" "safety $scenario: штатный commit успешен"
+    fi
+    after=$(attempt_stage_state_read_v2 "$safety_task" "$safety_attempt")
+    assert_eq "$expected_stop" "$(json_field "$after" stop)" "safety $scenario: stop сохранён"
+    assert_eq "$((sequence + 1))" "$(json_field "$after" eventSequence)"       "safety $scenario: ровно одно событие"
+    assert_file_missing "$ROUTE_V2_ATTEMPT_DIR/pending-transition.json"       "safety $scenario: receipt удалён после проекции"
+  done
+done
+
 finish_tests

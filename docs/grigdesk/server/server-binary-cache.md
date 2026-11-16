@@ -73,6 +73,9 @@ Engine, его `FACTORY_HOME`, helper Node и resources берутся из од
 человеку; start и `gate --commit-only` автоматической перепривязки не получают.
 Контракт маркера, коды GLM и граница старых поставок —
 [несовместимость поставки раннера](../pipeline/runner-supply-incompatibility.md).
+Исправное, но отставшее закрепление снимает человек кнопкой
+«Перепривязать рантайм» (`/api/tasks/<id>/runtime-rebind`) —
+[ручная перепривязка](../pipeline/runtime-rebind.md).
 
 Первое безопасное продолжение legacy/source проверяет trusted protocol v2 и checksum identity,
 затем создаёт sidecar через host CAS. Для внешнего legacy R/source packageId=null. Оно не переписывает старые attempt/catalog/route bytes.

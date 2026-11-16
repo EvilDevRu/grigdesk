@@ -15,7 +15,7 @@ interface ExecutorTypeMetadata {
   hint: string;
 }
 
-const BUILTIN_PROVIDERS = new Set(['claude', 'codex', 'deepseek', 'glm', 'kimi', 'tripo']);
+const BUILTIN_PROVIDERS = new Set(['claude', 'codex', 'deepseek', 'glm', 'kimi', 'tripo', 'qwen']);
 
 /**
  * Собственный вопрос поля удерживает ключ до ответа человека в общем диалоге.
@@ -32,6 +32,16 @@ export function providerSettingConfirmation(
   danger?: boolean;
 } | undefined {
   const confirmation = value ? field.confirm?.on : field.confirm?.off;
+
+  if (providerId === 'qwen' && field.id === 'allowHostAccess' && value === true && confirmation) {
+    const message = localeMessage(locale);
+
+    return {
+      ...confirmation,
+      text: message('settings.qwenHostAccessConfirm'),
+      label: message('settings.qwenEnableHostAccess'),
+    };
+  }
 
   if (!confirmation || !BUILTIN_PROVIDERS.has(providerId) || field.id !== 'blockDirectSsh' || value) {
     return confirmation;

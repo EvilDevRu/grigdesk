@@ -16,26 +16,23 @@
         <span class="p-label">{{ t('core.interventionSshTab') }}: </span>
         <strong>{{ req.tab.projectId }} — {{ req.tab.label }}</strong>
       </div>
-      <div>
-        Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
-        <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>root</span>
-        <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>sudo</span>
+      <div> {{ t('core.chatPolzovatel') }} <strong data-ssh-user>{{ req.user }}</strong>
+        <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>{{ 'root' }}</span>
+        <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>{{ 'sudo' }}</span>
       </div>
     </div>
 
     <div v-if="isDb" class="p-db-meta">
       <div>
         <strong data-db-profile>{{ req.profile?.label }} — {{ dbRole }}</strong>
-        <span v-if="req.prod" class="p-db-prod" data-db-prod>прод</span>
+        <span v-if="req.prod" class="p-db-prod" data-db-prod>{{ t('core.chatProd') }}</span>
       </div>
-      <div>Движок: <strong data-db-engine>{{ req.engine?.label || req.engine?.id }}</strong></div>
-      <div>Класс: <strong data-db-class>{{ dbQueryClass }}</strong></div>
-      <div>Таблицы: <span data-db-tables>{{ dbTables }}</span></div>
-      <div v-if="req.rowEstimate != null">
-        Оценка строк: <strong data-db-row-estimate>{{ req.rowEstimate }}</strong>
+      <div>{{ t('core.chatDvizhok') }} <strong data-db-engine>{{ req.engine?.label || req.engine?.id }}</strong></div>
+      <div>{{ t('core.chatKlass') }} <strong data-db-class>{{ dbQueryClass }}</strong></div>
+      <div>{{ t('core.chatTablitsy') }} <span data-db-tables>{{ dbTables }}</span></div>
+      <div v-if="req.rowEstimate != null"> {{ t('core.chatOtsenkaStrok') }} <strong data-db-row-estimate>{{ req.rowEstimate }}</strong>
       </div>
-      <div v-if="dbSpecial" data-db-special>
-        Особые конструкции: <strong>{{ dbSpecial }}</strong>
+      <div v-if="dbSpecial" data-db-special> {{ t('core.chatOsobyeKonstruktsii') }} <strong>{{ dbSpecial }}</strong>
       </div>
       <pre class="p-in cmd" data-db-query>{{ req.query }}</pre>
       <div v-if="req.autoReadReason?.message" class="p-db-reason" data-db-auto-read-reason>
@@ -43,12 +40,9 @@
       </div>
     </div>
 
-    <div v-if="isExternalUrl && externalUrl" class="p-url-host">
-      Внешний сайт: {{ externalHost }}. После завершения вернись и нажми «{{ externalApproveLabel }}».
+    <div v-if="isExternalUrl && externalUrl" class="p-url-host"> {{ t('core.chatVneshniySayt') }} {{ externalHost }}{{ t('core.chatPosleZaversheniyaVernisI') }}{{ externalApproveLabel }}».
     </div>
-    <div v-else-if="isExternalUrl" class="p-url-bad">
-      Ссылка отклонена как небезопасная. Продолжить через неё нельзя.
-    </div>
+    <div v-else-if="isExternalUrl" class="p-url-bad"> {{ t('core.chatSsylkaOtklonenaKakNebezopasnaya') }} </div>
     <div v-if="filePath" class="p-section">
       <div class="p-label">{{ t('core.interventionFile') }}</div>
       <div class="p-path">{{ filePath }}</div>
@@ -65,8 +59,8 @@
 
     <div v-if="diff" class="p-diff">
       <div class="dhead">
-        <span>было</span>
-        <span>стало {{ diff.stat }}</span>
+        <span>{{ t('core.chatBylo') }}</span>
+        <span>{{ t('core.chatStalo') }} {{ diff.stat }}</span>
       </div>
       <div v-for="(row, index) in diff.split" :key="index" class="drow">
         <div class="dcell" :class="row.l?.t || 'nil'">
@@ -101,16 +95,14 @@
     <template #footer>
       <div class="p-footer">
         <div v-if="canRemember" class="p-rem">
-          <UiCheckbox v-model="remember">
-            не спрашивать про «{{ req.tool }}» до конца сессии
-          </UiCheckbox>
+          <UiCheckbox v-model="remember"> {{ t('core.chatNeSprashivatPro') }}{{ req.tool }}{{ t('core.chatDoKontsaSessii') }} </UiCheckbox>
         </div>
 
         <UiChoiceList
           v-if="choices.length"
           v-model="selectedChoice"
           class="p-choices"
-          label="Вариант решения"
+          :label="t('core.chatVariantResheniya')"
           :options="choiceOptions"
           @update:model-value="chooseById"
         />
@@ -139,7 +131,7 @@
           </template>
           <template v-else>
             <UiButton size="compact" tone="neutral" @click="reject()">
-              {{ isPlan ? 'Доработать' : 'Отклонить' }}
+              {{ isPlan ? t('core.chatDorabotat') : t('core.deny') }}
             </UiButton>
             <UiButton
               size="compact"
@@ -147,7 +139,7 @@
               tone="accent"
               @click="emit('answer', true, remember)"
             >
-              {{ isPlan ? 'Утвердить' : 'Разрешить' }}
+              {{ isPlan ? t('core.chatUtverdit') : t('core.allow') }}
             </UiButton>
           </template>
         </UiFormActions>
@@ -201,17 +193,17 @@ const isSsh = computed(() => props.req?.origin === 'ssh');
 const isDb = computed(() => props.req?.origin === 'db');
 const isExternalUrl = computed(() => input.value.kind === 'external_url');
 const isPlan = computed(() => (
-  Boolean(input.value.plan) || props.req?.tool === 'ExitPlanMode'
+  Boolean(input.value.plan) || props.req?.tool === "ExitPlanMode"
 ));
 const title = computed(() => {
   if (isPlan.value) {
     return t('core.interventionPlanTitle');
   }
   if (isSsh.value) {
-    return 'Выполнить команду на сервере?';
+    return t('core.chatVypolnitKomanduNaServere');
   }
   if (isDb.value) {
-    return 'Выполнить запрос к базе?';
+    return t('core.chatVypolnitZaprosKBaze');
   }
 
   return t(isExternalUrl.value ? 'core.interventionExternalTitle' : 'core.interventionPermissionTitle');
@@ -263,9 +255,9 @@ const externalHost = computed(() => {
     return '';
   }
 });
-const externalLinkLabel = computed(() => String(input.value.link_label || 'Открыть страницу'));
-const externalApproveLabel = computed(() => String(input.value.approve_label || 'Готово'));
-const externalRejectLabel = computed(() => String(input.value.reject_label || 'Не открывать'));
+const externalLinkLabel = computed(() => String(input.value.link_label || t('core.chatOtkrytStranitsu')));
+const externalApproveLabel = computed(() => String(input.value.approve_label || t('core.chatSettingsDone')));
+const externalRejectLabel = computed(() => String(input.value.reject_label || t('core.chatNeOtkryvat')));
 const canRemember = computed(() => (
   !isPlan.value
   && !isSsh.value
@@ -273,13 +265,27 @@ const canRemember = computed(() => (
   && !isExternalUrl.value
   && props.req?.canRemember !== false
 ));
-const DB_ROLES: Record<string, string> = { read: 'чтение', write: 'запись' };
+const DB_ROLES: Record<string, string> = { get read() {
+  return t('core.chatChtenie');
+}, get write() {
+  return t('core.chatZapis');
+} };
 const DB_CLASSES: Record<string, string> = {
-  read: 'чтение',
-  write: 'запись',
-  ddl: 'DDL',
-  admin: 'администрирование',
-  unknown: 'неизвестный',
+  get read() {
+    return t('core.chatChtenie');
+  },
+  get write() {
+    return t('core.chatZapis');
+  },
+  get ddl() {
+    return t('core.chatDdl');
+  },
+  get admin() {
+    return t('core.chatAdministrirovanie');
+  },
+  get unknown() {
+    return t('core.chatNeizvestnyy');
+  },
 };
 
 const dbRole = computed(() => (DB_ROLES[props.req?.profile?.role || '']
@@ -288,7 +294,7 @@ const dbQueryClass = computed(() => (DB_CLASSES[props.req?.queryClass || '']
   || String(props.req?.queryClass || '')));
 const dbTables = computed(() => Array.isArray(props.req?.tables) && props.req.tables.length
   ? props.req.tables.join(', ')
-  : 'не определены');
+  : t('core.chatNeOpredeleny'));
 
 // Табличная функция и запрещённая конструкция — единственное в карточке, что говорит
 // о выходе запроса за саму базу; без строки человек увидел бы обычный SELECT.
@@ -416,8 +422,8 @@ async function reject(choice = '') {
   }
 
   const text = await promptDialog({
-    title: isPlan.value ? 'Что доработать в плане?' : 'Почему отклоняете?',
-    placeholder: isSsh.value ? 'Пояснение обязательно' : 'можно оставить пустым',
+    title: isPlan.value ? t('core.chatChtoDorabotatVPlane') : t('core.chatPochemuOtklonyaete'),
+    placeholder: isSsh.value ? t('core.chatPoyasnenieObyazatelno') : t('core.chatMozhnoOstavitPustym'),
   });
 
   if (text === null) {

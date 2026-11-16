@@ -1,5 +1,7 @@
 # Конвейер
 
+- [Qwen Code: внешний npm CLI, каталог, status IPC и границы проверки](../../engine/qwen.md)
+
 Читай при изменении запуска, маршрутов, графа, остановок, триажа и арбитра.
 
 Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
@@ -8,17 +10,23 @@
 
 ## Контракты продукта
 
-- [Схема конвейера](../guide/pipelines.md)
-- [Редактор маршрутов](../guide/routes.md)
-- [Где конвейер спрашивает человека](../guide/gates.md)
-- [Задача: постановка и триаж](../guide/tasks.md)
+- [Схема конвейера](../guide/ru/pipelines.md)
+- [Редактор маршрутов](../guide/ru/routes.md)
+- [Где конвейер спрашивает человека](../guide/ru/gates.md)
+- [Задача: постановка и триаж](../guide/ru/tasks.md)
+
+- [Восстановление сохранённого перехода](pending-transition-recovery.md) — host receipt, runtime gap, exact human projection и журнал для карточки.
 
 ## Устройство
+
+- [pipeline: полный CLI, exact DTO и исходы](agent-cli.md)
+
+- [Доставка объявленных ключей участников маршрута и выбора сервиса Qwen](legacy-credential-delivery.md)
 
 - [Закрепление доступа цепочек исполнителей, identity попытки, паузы и рестарт](access-profile-pins.md)
 
 - [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
-- [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
+- [Адресный preflight и триаж, подтверждённый источник и ограничение одного номера](task-source-index.md)
 - [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
 - [Браузер этапа: pinned authority, CLI/MCP, lifecycle и поставка](browser-transport.md)
@@ -29,6 +37,9 @@
 - [Остановка арбитра кнопкой и перед продолжением прогона](arbiter-cancellation.md)
 - [Ручная остановка конвейера — не сбой](manual-stop-vs-crash.md) — метка
   `STOPPED_SIGNAL` в реестре: остановка кнопкой не звонит «Конвейер оборвался».
+- [Создание конвейера без автоматического старта](held-start.md) — тумблер
+  `pipelineAutoStart`, `start --hold-start`, двухфазный `HELD_START`, ручной старт
+  существующим resume и назначения исполнителей до начала работы.
 - [Арбитр: учёт ответов, короткое продолжение, пустые вопросы и следующий шаг](arbiter-dialog-progress.md)
 - [GLM: обязательные артефакты state-only и граница записи STATE_DIR](glm-state-artifacts.md)
 - [Массовый запуск и остановка: области, гейты и блокировка повторов](bulk-run-controls.md)
@@ -40,14 +51,16 @@
   и отдельная запись приёмки для каждого пункта постановки без явных критериев.
 - [Границы короткого маршрута и сдачи](profile-sample-boundaries.md) — поимённые файлы,
   отказ PR в shared, состав приёмки за 15 минут и допустимые исправления ревью.
-- [Источник собственной задачи: профиль оценки, арбитр, тикет и название](grigdesk-task-source.md)
-- [Сводка конвейера читает собственные названия одним снимком на запрос](task-title-snapshot.md)
-- [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные,
+- [Внешний источник оценки и конвейера, исторический индекс](grigdesk-task-source.md)
+- [Сводка конвейера: названия сохранённых тикетов](task-title-snapshot.md)
+- [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные, — literal metadata API, batch CAS и точная пара исполнителей.
   хуки, исполнители и модели, маршруты, значения по умолчанию и применение изменений.
 - [Покрытие исполнителей по цепочкам узлов](runner-chain-coverage.md) — схема 2,
   область start/resume, объявленный failover и строгая публикация каталога.
 - [Несовместимость поставки раннера](runner-supply-incompatibility.md) — строгий маркер,
   покрытие всех недоступных кандидатов и одна перепривязка рантайма на resume.
+- [Ручная перепривязка рантайма](runtime-rebind.md) — кнопка в диалоге этапа снимает
+  закрепление остановленной попытки: следующий запуск берёт текущую поставку сервера.
 - [Отказ среды не повторяется](environment-failure-stop.md) — failed/environment
   останавливает узел сразу: причина в комментарии и строке остановки, решение у человека.
 
@@ -55,8 +68,10 @@
 - [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)
 - [Бинарный DeepSeek в Factory: descriptor, package coverage, cache и prepared handle](deepseek-binary-factory.md)
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
-- [Авто-шип фабрики](automatic-shipping.md)
+- [Авто-шип фабрики](automatic-shipping.md) — порядок задаёт профиль; адресный tracker,
+  штатное разрешение Git и переиспользование опубликованных результатов при повторе.
 - [Маршруты (modules/routes)](route-management.md)
+- [CLI авторинга маршрутов](routes-cli.md) — пакет routes/, отдельный ELF routes, CAS apply, source и receipts.
 - [Палитра](graph-palette.md)
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
 - [Стадии — глобальный enum (server/src/lib/stages.ts)](stage-catalog.md)
@@ -74,7 +89,7 @@
 
 ### Клиент графа
 
-- [Изоляция действий узла и запоздалых ответов между конвейерами](node-action-isolation.md)
+- [Изоляция действий узла и сохранение исполнителя после закрытия окна](node-action-isolation.md)
 - [Окно узла по образцу задачи: служебная шапка, название, сведения и вкладки](node-dialog-task-layout.md)
 - [Телефон: граф со стрелками, масштаб, обзор и переход к текущему этапу](phone-graph.md)
 - [Телефон: фильтры, управление и подвал вокруг прежней схемы](../web/phone-pipeline-controls.md)
@@ -83,8 +98,8 @@
 - [Одинаковая высота главного и вторичных действий карточки](card-action-height.md)
 - [Подвал карточки: адреса стенда слева, компактные действия справа](card-footer-layout.md)
 - [GLM: единое имя модели, действия wrapper-а и конкретная причина отказа](glm-runner-display.md)
-- [Компактные controls окна узла и общие состояния выбора](node-dialog-controls.md)
-- [Окно узла: новые вкладки, действия и предварительные параметры исполнителей](node-dialog-design.md)
+- [Компактные controls окна узла: список без повторных пояснений и источники в подсказках](node-dialog-controls.md)
+- [Окно узла: вкладки, действия и черновик параметров исполнителей](node-dialog-design.md)
 - [Обсуждение с арбитром: компактное подключение, источник, авторы реплик и ожидание](arbiter-conversation-design.md)
 - [Вкладка «Арбитр» — дополнение окна этапа: результат с причиной и возвратом всегда главная](stage-arbiter-tab.md)
 - [Ответы арбитру: вертикальные варианты, зелёная рекомендация и отдельное поле ответа](arbiter-question-choices.md)
@@ -93,30 +108,33 @@
 - [Раскрытие подробностей сохраняется при обновлении карточки](stop-disclosure-state.md)
 - [Старый формат узлов живого графа](live-graph-legacy-nodes.md)
 - [Петля агентов: круг, этап и видимая передача между ведущим и исполнителем](loop-visualization.md)
+- [Runtime петли: изолированный стенд, финальные команды и ограничения передач](route-loop-runtime-constraints.md)
 - [Работа узла: вращающаяся обводка и синяя стрелка текущего возврата](running-node-outline.md)
 - [Выбор исполнителя на отдельной вкладке без закрытия окна](node-executor-selection.md)
 - [Документ этапа: карта NODE_DOC и список сервера обязаны сходиться](stage-document-mapping.md)
 - [Шапка документа: верхний отступ без щели при прокрутке](stage-document-sticky-header.md)
 - [Клиент (web/src/shared/graphGeom.ts)](graph-client.md)
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
-- [Модель и effort в модалке узла](node-model-and-effort.md)
+- [Модель и effort в модалке узла](node-model-and-effort.md) — сохранение по клику без «Применить»,
+  проекция настройки в граф, exact API, scoped storage, отказ каталога и receipt перезапуска.
+- [Область настройки этапа](stage-runner-settings-scope.md) — локальный выбор и оба режима живого этапа.
 - [Предыдущая раскладка и причины разделения содержимого и решения](stage-dialog-layout.md)
 - [Текст человека в модалке: у ворот и у возврата он разный](gate-and-rewind-comments.md)
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
 
 ## Грабли
 
-- [Изолированный стенд пуст: приёмка редактора упирается в отсутствие данных](stand-empty-editor-acceptance.md)
+- [Тестовый стенд: посев, точные write roots проверяющего и освобождение shared-аренды](stand-empty-editor-acceptance.md)
 - [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)
 - [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
 - [Повтор INSTRUMENT после временного отказа упирался в завершённую транзакцию](instrumentation-retry.md)
-- [Codex на SHIP: native Auto-review, защищённый Git и границы сдачи](codex-delivery-permissions.md)
-- [«SHIP опять вернул решение человеку», а попытка Codex завершилась ok = публикация и не могла случиться: песочница Codex не пишет `.git`; доставка собирается временным клоном, перемотка `dev` — три команды человека](codex-delivery-permissions.md)
+- [Codex на SHIP: защищённый Git, штатный запрос Auto-review и резервная доставка](codex-delivery-permissions.md) —
+  файловый отказ до запроса reviewer, подтверждённая PR-публикация и возврат закреплённой попытки.
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
 - [Подключение раннера: неявный effort, статус, fanout и host-диагностика](runner-extension-boundaries.md)
-- [Не все исполнители видны в узле: отдельный каталог раннеров, цепочка живого переключения и граница GLM](runner-selection-boundaries.md)
+- [Не все исполнители видны в узле: допуск редактора, прежняя цепочка аварийного переключения и граница GLM](runner-selection-boundaries.md)
 - [«Агент пишет» над намертво вставшим агентом = свежесть журнала считали по mtime](agent-activity-freshness.md)
 - [«Блокирующее замечание» проверяющего узла бывает просто отказом прав](reviewer-permission-denials.md)
 - [«Завис — агент молчит», «узел вернул решение человеку» и «исчерпан бюджет повторов» в одной модалке = три захода убиты по лимиту, а туннель терял половину рукопожатий](retry-timeouts-and-tunnel-failures.md)
@@ -139,6 +157,8 @@
 - [Запуск фабрики — ТОЛЬКО в отдельный systemd-scope (иначе рестарт GrigDesk убивает прогоны)](factory-systemd-scope.md)
 - [Каталог маршрутов сверяется внутри движка, а не в HTTP-preflight](route-catalog-pinning.md)
 - [Контракт запуска — по состоянию, не по stdout](launch-state-contract.md)
+- [Повтор после отказа подготовки CLI](cli-preparation-retry.md) — proof до spawn,
+  отсутствие артефактов, исполнитель и выбранная копия в причине отказа.
 - [Лёгкий маршрут сужал задачу молча: пустые критерии + «уже есть в коде»](light-route-scope-loss.md)
 - [Маршрут встал «код 78» на узле, который отработал = вердикт command-узла не по контракту](command-node-verdict-contract.md)
 - [Модалка этапа переживает сам этап — статус в ней обязан идти за графом](stage-dialog-live-status.md)
@@ -180,7 +200,7 @@
 - [Ответы мастера о правах и проблемах этапа](stage-wizard-answers.md)
 - [Где конвейер спрашивает человека — подробный контракт](human-gates.md)
 - [Схема конвейера — подробный контракт](graph-rendering.md)
-- [Редактор маршрутов: черновики через плюс, публикация и откат](route-editor.md)
+- [Редактор маршрутов: черновики через плюс, публикация и откат](route-editor.md) — свободный холст, полный пакет роли, координаты, переходы жестом и атомарный apply до 131 операции.
 - [Задача: постановка и триаж — подробный контракт](task-triage.md)
 
 ## История решений

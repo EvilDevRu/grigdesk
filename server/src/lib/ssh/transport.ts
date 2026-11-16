@@ -12,6 +12,8 @@ export interface SshTransportConnection {
   user?: string;
   username?: string;
   password?: Buffer | string;
+  privateKey?: Buffer | string;
+  passphrase?: string;
   readyTimeout?: number;
   hostVerifier?: (fingerprint: string) => boolean;
 }
@@ -90,7 +92,9 @@ export function createSshTransport(options: SshTransportOptions = {}): SshTransp
       host: connection.host,
       port: Number(connection.port) || 22,
       username: connection.user || connection.username,
-      password,
+      ...(connection.privateKey
+        ? { privateKey: connection.privateKey, passphrase: connection.passphrase }
+        : { password }),
       readyTimeout: Number(connection.readyTimeout) || 20_000,
       ...(verifier
         ? {
@@ -99,17 +103,20 @@ export function createSshTransport(options: SshTransportOptions = {}): SshTransp
         }
         : {}),
     };
+
     await new Promise<void>((resolve, reject) => {
       const onReady = () => {
-        client.off('error', onError);
         resolve();
       };
       const onError = (error: unknown) => {
         client.off('ready', onReady);
+        // ssh2 продолжает выдавать error после ready; соединение закрывается без
+        // необработанного события, даже пока потребитель ещё не получил session.
+        client.destroy?.();
         reject(error);
       };
       client.once('ready', onReady);
-      client.once('error', onError);
+      client.on('error', onError);
       client.connect(connectOptions);
     });
     const emitter = client as EventEmitter;

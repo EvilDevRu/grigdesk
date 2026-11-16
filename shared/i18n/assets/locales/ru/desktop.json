@@ -68,6 +68,7 @@
   "runtimeFileMissing": "В каталоге GrigDesk {root} нет {relative}.",
   "serverPackageDamaged": "Серверный пакет GrigDesk повреждён: {root}.",
   "serverSettingsUnreadable": "Не удалось прочитать настройки сервера: {path}.",
+  "serverSettingsKeyForbidden": "Ключ {key} запрещён в файле настроек.",
   "interfaceMissing": "Нет собранного интерфейса: {path}.",
   "unsupportedNode": "Node {node} недоступен или старше {minimum} (нужно ^{required} || >=24.0.0).",
   "invalidPortValue": "Некорректный порт GrigDesk: {port}.",
@@ -119,5 +120,12 @@
   "exitSettingHint": "Сохраняется сразу для настольного приложения.",
   "exitSaveFailed": "Не удалось сохранить настройку выхода.",
   "exitDeadline": "Истёк срок остановки. Приложение закрывается.",
-  "exitServerStopFailed": "Остановка своего сервера не подтверждена."
+  "exitServerStopFailed": "Остановка своего сервера не подтверждена.",
+  "desktopNekorrektnyyPutPrilozheniyaDlya": "Некорректный путь приложения для ярлыка",
+  "desktopNevernoeDeystvieOkna": "Неверное действие окна.",
+  "desktopNekorrektnyyPutOknaDlya": "Некорректный путь окна для меню приложений",
+  "desktopNeNaydenaRabochayaOblast": "Не найдена рабочая область дисплея.",
+  "desktopOtkrytieOknaPrevysiloSrok": "Открытие окна превысило срок.",
+  "desktopOtkrytieOtmeneno": "Открытие отменено.",
+  "installCorruptedHtml": "<h1>Установка повреждена</h1><p>Переустановите приложение.</p>"
 }

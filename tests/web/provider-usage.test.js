@@ -463,3 +463,14 @@ test('executor without a declared status page gets no invented address', () => {
     null,
   );
 });
+
+test('W0: без измерения ручной режим объясняет действие вместо вечной загрузки', () => {
+  const manual = providerUsageView(undefined, {}, 'ru', { manualOnly: true });
+  const automatic = providerUsageView(undefined, {}, 'ru');
+
+  assert.equal(manual.state, 'unavailable');
+  assert.match(manual.message, /Квота ещё не проверялась.*↻/u);
+  assert.deepEqual(manual.bars, []);
+  assert.equal(manual.measuredAt, null);
+  assert.equal(automatic.state, 'loading');
+});

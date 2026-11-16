@@ -11,6 +11,12 @@
       @click="model = option.value"
     >
       {{ option.label }}
+      <template
+        v-if="option.badge !== undefined && option.badge !== null && option.badge !== ''"
+        #trailing
+      >
+        <span class="ui-segmented-badge">{{ option.badge }}</span>
+      </template>
     </UiButton>
     <slot />
   </div>

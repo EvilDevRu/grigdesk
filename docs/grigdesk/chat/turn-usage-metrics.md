@@ -10,6 +10,7 @@
 | Codex | Прирост `total.outputTokens`; reasoning уже входит в выход | `last.inputTokens`; cached input повторно не прибавляется |
 | Kimi | Сумма `turn.step.completed.usage.output` основного агента; повтор ключа шага заменяет вклад | Слияние частичных `agent.status.updated`: `contextTokens` и `maxContextTokens` |
 | DeepSeek / GLM | Существующая сумма выходов по обращениям DSH | `inputTokens + cacheReadTokens + cacheWriteTokens` последнего обращения |
+| Qwen | Сумма `_meta.usage.outputTokens` обращений основного агента; субагенты не учитываются | `usage_update.used`; окно — `usage_update.size` |
 
 ## Claude
 
@@ -55,5 +56,24 @@ DSH принимает вход только как конечное неотр�
 При ошибке отсутствие контекстных полей не вызывает пустую правку истории. Отказ записи
 замера попадает в журнал сервера и не заменяет исходную ошибку хода в HTTP или pending.
 
+## Qwen
+
+CLI шлёт `session/update` двух видов: `usage_update {used, size}` — последний контекст
+основной сессии и её окно, и пустой `agent_message_chunk` с `_meta.usage`
+(`inputTokens`, `outputTokens`, `cachedReadTokens`) после `executionLifecycle` ended
+каждого обращения. Выход хода — сумма `outputTokens` основного агента; reasoning уже
+входит в `outputTokens`. Кэш последнего обращения: `readTokens = cachedReadTokens`,
+`uncachedTokens = inputTokens - cachedReadTokens`; запись кэша CLI не сообщает,
+и отсутствие поля не выдумывается нулём.
+
+Признак субагента берётся из `executionLifecycle.subagentId` и живёт до следующего
+started: поздние usage и `usage_update` субагента не меняют ни выход, ни контекст,
+ни кэш основного агента. Некорректные числа не обнуляют прежний замер; отсутствующий
+`usage_update` не подменяет контекст нулём. Живой снимок уходит вторым аргументом
+`onProgress`, итог хода сохраняет контекст и кэш для повторного открытия чата.
+Форма событий проверена зондом настоящего CLI на синтетическом API
+(`qwen-cli-contract`), коллектор — `qwen-runtime`.
+
 Проверки: `claude-token-meter`, `chat-live-context`, `kimi-server-turn`, `kimi-runtime`,
-`deepseek-server-thoughts`, `glm-runtime`, `deepseek-vendored-chat`, `chat-provider-routing`.
+`deepseek-server-thoughts`, `glm-runtime`, `deepseek-vendored-chat`, `chat-provider-routing`,
+`qwen-runtime`, `qwen-cli-contract`.

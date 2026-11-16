@@ -341,6 +341,85 @@ assert_eq 3 "$(lifecycle_count node_visit_finished)" \
 
 runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
 
+# Новая часть использует реальные stage/lifecycle API и новый pending wrapper.
+source "$FACTORY_HOME/lib/route-runtime.sh"
+export FACTORY_ROUTE_STATE_DIR="$STATE_DIR"
+_route_v2_load_attempt "$task" "$attempt"
+assert_rc 0 "$?" 'origin: pins загружены'
+pending_before=$(attempt_stage_state_read_v2 "$task" "$attempt")
+pending_sequence=$(jq -r .eventSequence <<<"$pending_before")
+assert_eq check "$(jq -r .currentNode <<<"$pending_before")" 'origin: fixture стоит на check'
+runtime_lifecycle_set_context_v2 "$task" "$attempt" demo-profile debug "$route_hash" \
+  os_77777777777777777777777777777777 >/dev/null
+runtime_lifecycle_session_begin_v2 resume os_66666666666666666666666666666666 >/dev/null
+runtime_lifecycle_node_visit_begin_v2 check CHECK "$pending_sequence" recovery >/dev/null
+origin_visit=$FACTORY_LIFECYCLE_NODE_VISIT_ID
+origin_session=$FACTORY_LIFECYCLE_SESSION_ID
+printf '%s\n' "$pending_before" >"$TEST_ROOT/pending-base.json"
+printf 'postflight fixture\n' >"$TEST_ROOT/pending-tree.tsv"
+pending_dir="$(attempt_state_v2_task_root "$task")/attempts/$attempt"
+pending_verdict=$(run_state_verdict_encode failed environment 'origin-stop=Требуется оператор')
+python3 "$FACTORY_HOME/lib/pending_transition.py" prepare "$pending_dir/pending-transition.json" \
+  "$TEST_ROOT/pending-base.json" "$pending_sequence" "$TEST_ROOT/pending-tree.tsv" \
+  "$task" "$attempt" check failed 0 "$pending_verdict" 0 0 0 '' 0
+assert_rc 0 "$?" 'origin: captured receipt сохранён настоящим CLI'
+attempt_stage_state_commit_v2 "$task" "$attempt" check failed 0 "$pending_verdict" >/dev/null
+assert_rc 0 "$?" 'origin: реальный writer создал human stop'
+pending_after=$(attempt_stage_state_read_v2 "$task" "$attempt")
+origin_hash=$(jq -r .headEventHash <<<"$pending_after")
+runtime_lifecycle_node_visit_finish_v2 failed product_failure attempt_terminal '' "$origin_hash" >/dev/null
+runtime_lifecycle_session_finish_v2 failed unavailable '' >/dev/null
+runtime_lifecycle_set_context_v2 "$task" "$attempt" demo-profile debug "$route_hash" \
+  os_88888888888888888888888888888888 >/dev/null
+runtime_lifecycle_session_begin_v2 resume "$origin_session" >/dev/null
+writer_session=$FACTORY_LIFECYCLE_SESSION_ID
+assert_eq '' "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" 'origin: fresh session не наследует visit'
+
+# Чужой текущий visit не должен подмениться историческим.
+runtime_lifecycle_node_visit_begin_v2 check CHECK "$((pending_sequence + 10))" recovery >/dev/null
+other_visit=$FACTORY_LIFECYCLE_NODE_VISIT_ID
+other_clock=$RUNTIME_LIFECYCLE_VISIT_STARTED_NS
+before_origin_reject=$(lifecycle_rows | sha256sum)
+_route_v2_pending_adopt_origin "$task" "$attempt" "$pending_dir/pending-transition.json"
+assert_rc 78 "$?" 'origin: другой текущий visit отвергнут'
+assert_eq "$other_visit" "$FACTORY_LIFECYCLE_NODE_VISIT_ID" 'origin: текущий visit не затёрт'
+assert_eq "$other_clock" "$RUNTIME_LIFECYCLE_VISIT_STARTED_NS" 'origin: текущие часы сохранены'
+assert_eq "$before_origin_reject" "$(lifecycle_rows | sha256sum)" 'origin: reject не дописал ledger'
+runtime_lifecycle_node_visit_finish_v2 abandoned attempt_terminal attempt_terminal >/dev/null
+runtime_lifecycle_clear_entity_v2
+closed_before=$(lifecycle_count node_visit_finished)
+
+# Уже accepted event не требует workspace roots или нового guard/model call.
+_route_v2_guard_snapshot() { return 91; }
+_route_v2_pending_drive "$task" "$attempt" 2 >/dev/null
+assert_rc 21 "$?" 'origin: replay передал human stop владельцу проекции'
+assert_eq "$origin_visit" "$FACTORY_LIFECYCLE_NODE_VISIT_ID" 'origin: восстановлен exact source visit'
+assert_eq "$writer_session" "$FACTORY_LIFECYCLE_SESSION_ID" 'origin: сохранена новая writer session'
+assert_eq "$closed_before" "$(lifecycle_count node_visit_finished)" 'origin: нет повторного finish'
+assert_file_exists "$pending_dir/pending-transition.json" 'origin: до human projection receipt жив'
+_route_v2_pending_ack_stop "$task" "$attempt"
+assert_rc 78 "$?" 'origin: без human record нельзя погасить receipt'
+assert_file_exists "$pending_dir/pending-transition.json" 'origin: неуспешный ack оставил receipt'
+runtime_lifecycle_human_begin_once_v2 manual_resume_required "$origin_hash" >/dev/null
+assert_rc 0 "$?" 'origin: human привязан к source visit в новой session'
+after_human=$(lifecycle_rows | sha256sum)
+runtime_lifecycle_human_begin_once_v2 manual_resume_required "$origin_hash" >/dev/null
+assert_rc 0 "$?" 'origin: повтор human проекции идемпотентен'
+assert_eq "$after_human" "$(lifecycle_rows | sha256sum)" 'origin: повтор не генерирует event/time'
+lifecycle_last human_intervention_started "$TEST_ROOT/pending-human.json"
+assert_eq "$origin_visit" "$(json_file_value "$TEST_ROOT/pending-human.json" nodeVisitId)" \
+  'origin: human имеет исходный visit'
+assert_eq "$writer_session" "$(json_file_value "$TEST_ROOT/pending-human.json" orchestratorSessionId)" \
+  'origin: human написан текущей session'
+_route_v2_pending_ack_stop "$task" "$attempt"
+assert_rc 0 "$?" 'origin: полная проекция позволяет ack'
+assert_file_missing "$pending_dir/pending-transition.json" 'origin: receipt погашен после human record'
+held_before=$(lifecycle_rows | sha256sum)
+route_v2_recovered_stop_held "$task" "$attempt"
+assert_rc 11 "$?" 'origin: повтор восстановленного human stop удержан'
+assert_eq "$held_before" "$(lifecycle_rows | sha256sum)" 'origin: удержание не дописало историю'
+runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
+
 # Ошибка самого find-open-session должна остаться видна после успешного чтения ledger.
 # Подмена только аналитического помощника отличает этот путь от отказа trusted reader.
 (

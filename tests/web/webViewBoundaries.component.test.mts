@@ -220,6 +220,9 @@ for (const scenario of ['comments', 'lists', 'attachment']) {
     const calls: string[] = [];
 
     viewHarness.stores = {
+      useAuthStore: { authenticated: true, logReason: 'load' },
+      useShellStore: { present: false, status: 'none' },
+
       useTrackersStore: {
         capabilities: {
           comments: true,
@@ -228,6 +231,7 @@ for (const scenario of ['comments', 'lists', 'attachment']) {
           projects: true,
         },
         epoch: 0,
+        readFailure: () => undefined,
         load: async () => {},
       },
       useUiStore: ui,

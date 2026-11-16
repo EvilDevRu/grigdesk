@@ -1,12 +1,12 @@
 <template>
   <section class="document-panel"
     :data-perf-pending="loading ? '' : undefined">
-    <DocumentLoading v-if="loading" label="Открываю документ…"  />
+    <DocumentLoading v-if="loading" :label="t('core.docOtkryvayuDokument')"  />
     <div v-else-if="error" class="state error"
     :data-perf-error="!loading && error ? '' : undefined">
-      <b>Документ не открыт</b>
+      <b>{{ t('core.docDokumentNeOtkryt') }}</b>
       <span>{{ error }}</span>
-      <UiButton @click="load">Повторить</UiButton>
+      <UiButton @click="load">{{ t('core.pluginNotificationsRetry') }}</UiButton>
     </div>
     <div v-else-if="document" class="document-shell">
       <div class="document-meta">
@@ -14,10 +14,10 @@
         <span class="path mono">{{ document.displayPath }}</span>
         <span class="size">{{ formatSize(document.size) }}</span>
         <span v-if="formatTime(document.modifiedAt)" class="modified">{{ formatTime(document.modifiedAt) }}</span>
-        <span v-if="line > 0" class="line">строка {{ line }}</span>
+        <span v-if="line > 0" class="line">{{ t('core.docStroka') }} {{ line }}</span>
         <UiButton v-if="document.format === 'markdown'" variant="ghost" :pressed="showSource"
                   @click="showSource = !showSource">
-          {{ showSource ? 'Предпросмотр' : 'Исходник' }}
+          {{ showSource ? t('core.docPredprosmotr') : t('core.videoIshodnik') }}
         </UiButton>
       </div>
       <article v-if="document.format === 'markdown' && !showSource" ref="contentEl"
@@ -29,7 +29,7 @@
       >{{ value || ' ' }}</span></code></pre>
       <pre v-else ref="contentEl" class="document-body plain"><code>{{ document.content }}</code></pre>
     </div>
-    <div v-else class="state">Документ не выбран.</div>
+    <div v-else class="state">{{ t('core.docDokumentNeVybran') }}</div>
   </section>
 </template>
 
@@ -43,9 +43,7 @@ import { api, failureText } from '../../shared/apiClient.ts';
 import { parseDocumentFile, type DocumentFile } from './contracts.ts';
 import { mdToHtml } from '../../shared/md.ts';
 import { documentRefAssetHref, documentRefRouteHref } from './links.ts';
-import {
-  UiButton,
-} from '../../ui';
+import { UiButton, t, uiLocale } from '../../ui';
 
 const props = defineProps({
   source: { type: String, default: '' },
@@ -172,7 +170,7 @@ async function load() {
     await decorateAndScroll();
   } catch (e) {
     if (generation === loadGeneration) {
-      error.value = failureText(e, 'Не удалось открыть документ');
+      error.value = failureText(e, t('core.docNeUdalosOtkrytDokument'));
     }
   } finally {
     if (generation === loadGeneration) {
@@ -195,16 +193,18 @@ watch(() => [props.anchor, props.line, markdown.value, showSource.value], decora
  */
 function formatSize(bytes: number) {
   if (bytes < 1024) {
-    return `${bytes} Б`;
+    return t('core.docBytesB', { bytes: bytes });
   }
 
-  return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} КБ`;
+  return t('core.docTofixedbytes1024010Kb', { toFixedbytes1024010: (bytes / 1024).toFixed(bytes < 10240
+        ? 1
+        : 0) });
 }
 
 function formatTime(value: string) {
   const date = new Date(value);
 
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ru-RU');
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(uiLocale.value);
 }
 </script>
 

@@ -5,12 +5,13 @@
     controls
     preload="metadata"
     :src="src"
-    :aria-label="label"
+    :aria-label="label ?? t('core.coreZvukStseny')"
   ></audio>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { t } from '../../services/locale.ts';
 
 /**
  * Общий проигрыватель звука. Нативные `controls` оставлены намеренно: они уже
@@ -20,13 +21,10 @@ import { ref } from 'vue';
  * Живёт в примитивах, потому что нативный тег принадлежит им: продуктовый код
  * берёт плеер из общей границы `ui.ts`, а не заводит свой в каждом разделе.
  */
-withDefaults(
-  defineProps<{
-    src: string;
-    label?: string;
-  }>(),
-  { label: 'Звук сцены' },
-);
+defineProps<{
+  src: string;
+  label?: string;
+}>();
 
 const element = ref<HTMLAudioElement | null>(null);
 

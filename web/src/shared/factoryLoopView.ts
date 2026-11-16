@@ -1,4 +1,9 @@
 import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Петлю определяет закреплённый маршрут, а движение — живость демона и текущий узел.
@@ -19,18 +24,24 @@ export function factoryLoopView(graph: FactoryGraphData, reference = false) {
   const maxRounds = reference ? null : graph.loopProgress?.maxRounds ?? null;
   const stage = reference ? null : graph.loopProgress?.stage ?? null;
   const roundLabel = round === null
-    ? 'Круг неизвестен'
-    : round === 0 ? 'До первого круга' : `Круг ${round}${maxRounds ? ` из ${maxRounds}` : ''}`;
-  let activity = 'Петля на паузе';
+    ? translateUi('core.factoryLoopViewRoundUnknown')
+    : round === 0 ? translateUi('core.factoryLoopViewBeforeTheFirstRound')
+      : maxRounds ? translateUi('core.factoryLoopRoundOf', { round, maxRounds })
+        : translateUi('core.factoryLoopViewRound', { round, value: '' });
+  let activity = translateUi('core.factoryLoopViewLoopPaused');
 
   if (activeNode) {
-    const action = activeNode === loop.worker ? 'Выполняет' : round === 0 ? 'Ставит задачу' : 'Проверяет';
+    const action = activeNode === loop.worker
+      ? translateUi('core.factoryLoopViewExecuting')
+      : round === 0
+        ? translateUi('core.factoryLoopViewCreatingATask')
+        : translateUi('core.factoryLoopViewVerifying');
 
     activity = `${action}: ${graph.nodes[activeNode]?.[1] || activeNode}`;
   } else if (['done', 'skip'].includes(statuses[loop.lead] ?? '')) {
-    activity = 'Проверка пройдена · выход из петли';
+    activity = translateUi('core.factoryLoopViewVerificationPassedLeavingTheLoop');
   } else if (graph.stall) {
-    activity = 'Петля остановлена';
+    activity = translateUi('core.factoryLoopViewLoopStopped');
   }
 
   return {

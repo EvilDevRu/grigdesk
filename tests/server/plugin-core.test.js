@@ -360,7 +360,11 @@ test('CORE-01: server.js получает полный набор ядра', asy
   const f = await runtimeFixture(t);
   const core = pluginCore(f);
 
-  for (const method of ['getProviders', 'emit', 'withPathLock', 'acquireKernelFileLock', 'parseByteRange']) {
+  const methods = [
+    'fetch', 'getProviders', 'emit', 'withPathLock', 'acquireKernelFileLock', 'parseByteRange',
+  ];
+
+  for (const method of methods) {
     assert.equal(typeof core[method], 'function', method);
   }
 

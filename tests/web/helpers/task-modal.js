@@ -99,9 +99,14 @@ function favoriteButtonStub(prefix) {
  * TaskModal бандлится через общий TS-aware compiler и настоящий public UI facade.
  * Сеть, stores и дочерние product-компоненты остаются управляемыми каждым тестом.
  */
-export function compileTaskModal(prefix, { stubDialog = false } = {}) {
+export function compileTaskModal(prefix, { stubDialog = false, compilerStubs = {} } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
+      '../stores/auth.ts': `export const useAuthStore = globalThis.${prefix}AuthStore
+        || (() => ({ authenticated: true }));`,
+      '../stores/shell.ts': `export const useShellStore = globalThis.${prefix}ShellStore
+        || (() => ({ present: false, status: 'none' }));`,
+
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
       '../shared/shellClient.ts': [
         'export const isShellState = () => false;',
@@ -194,6 +199,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         '};',
       ].join('\n'),
       './board/TaskFavoriteButton.vue': favoriteButtonStub(prefix),
+      ...compilerStubs,
     },
   });
 }

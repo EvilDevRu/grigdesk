@@ -40,7 +40,7 @@
   поиском по бинарю CLI. Окно берётся из каталога моделей, и выдумывать ему источник
   в потоке не нужно.
 
-Актуальный продуктовый контракт для всех исполнителей: `docs/grigdesk/guide/chat-context.md`.
+Актуальный продуктовый контракт для всех исполнителей: `docs/grigdesk/guide/ru/chat-context.md`.
 
 Проверки — `tests/server/chat-live-context.test.js` (фальшивый CLI: два обращения к модели
 с границей компакта между ними) и `tests/web/chat-live-context.test.js`.
@@ -62,7 +62,7 @@
 Правило: **дуга, процент, цвет и подсказка считаются от одного `ctxLimit`.** Это минимум
 двух применимых границ: поддерживаемого настроенного автосжатия и 80% окна.
 Поддержку объявляет `capabilities.chatAutoCompact`: без неё (Kimi/DeepSeek) настройка
-не участвует в шкале. Полный контракт — `docs/grigdesk/guide/chat-context.md`.
+не участвует в шкале. Полный контракт — `docs/grigdesk/guide/ru/chat-context.md`.
 Выключенное автосжатие
 превращается в `Infinity`, а не в ноль:
 `min(compact > 0 ? compact : Infinity, 0.8 × window)`.

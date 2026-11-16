@@ -158,7 +158,8 @@ test('device: ошибки дают код 1 и русскую подсказк�
   const missing = await f.run(['device', 'list'], { GRIGDESK_WINDOW_KEY_PATH: '/missing-test-window-key' });
 
   assert.equal(missing.code, 1);
-  assert.match(missing.stderr, /Нет ключа окна: команда работает на машине с запущенным сервером/);
+  assert.match(missing.stderr,
+    /Не удалось войти по локальному ключу окна\. Проверьте запущенный домашний сервер\./);
   assert.equal((await f.run(['device', 'add'])).code, 2);
 
   const off = await commandFixture(t, true);

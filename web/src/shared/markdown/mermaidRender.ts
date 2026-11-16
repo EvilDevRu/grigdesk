@@ -1,5 +1,9 @@
 // SVG из изолированного renderer превращается в изображение, а не в DOM приложения.
 import { mermaidThemeVariables } from './mermaidTheme.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 export { mermaidThemeVariables } from './mermaidTheme.ts';
 
@@ -413,7 +417,7 @@ async function fetchRendererSource(url: string, signal: AbortSignal): Promise<st
   const response = await fetch(url, { credentials: 'omit', signal });
 
   if (!response.ok) {
-    throw new Error('Renderer Mermaid недоступен');
+    throw new Error(t('core.mdRendererMermaidNedostupen'));
   }
 
   return response.text();

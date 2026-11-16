@@ -1,6 +1,11 @@
 import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { runtimeOf } from './projectsRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Связи проекта. Раздел «Управление» показывает их перед архивом, чтобы человек видел,
@@ -28,6 +33,8 @@ export async function loadDependencies(id: string): Promise<void> {
     }
 
     store.setDependencies(null);
-    store.setError(projectsFailureText(error, 'Не удалось прочитать связи проекта.'));
+    store.setError(
+      projectsFailureText(error, translateUi('core.loadDependenciesCouldNotReadProjectDependencies')),
+    );
   }
 }

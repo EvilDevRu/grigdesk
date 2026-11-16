@@ -1,6 +1,5 @@
 import { dataHome, dataPath } from './dataHome.ts';
 import type { DataHomeEnv } from './dataHome.ts';
-import { legacyRootProblem } from './legacyBrand.ts';
 
 export interface RuntimeSettingsInput {
   env: DataHomeEnv;
@@ -24,10 +23,11 @@ export interface Settings {
 export function resolveRuntimeSettings(input: RuntimeSettingsInput): Settings {
   const { env, file, home, legacyTokenPath } = input;
 
-  const problem = legacyRootProblem(file, true);
-
-  if (problem) {
-    throw new Error(problem);
+  // Файл настроек не переназначает корни данных: эти ключи читаются только из окружения.
+  for (const reserved of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
+    if (Object.hasOwn(file, reserved)) {
+      throw new Error(`Ключ ${reserved} запрещён в файле настроек.`);
+    }
   }
 
   const value = (key: string) => Object.hasOwn(env, key) ? env[key] : file[key];

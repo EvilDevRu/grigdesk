@@ -105,3 +105,55 @@ test('RE-F1-04: status связан с владельцем; command всегд�
       providerFailure: { attempts: 0, strategy: 'none' } });
     assert.deepEqual(before, makeDraft());
   });
+
+test('RE-G1-01: moveNodePosition сохраняет точку, повтор той же точки не меняет черновик',
+  async () => {
+    const commands = await compileModule(webFile('src/views/routes/routeCommands.ts'));
+    const before = makeDraft();
+    const scope = { kind: 'route', routeId: 'quick' };
+    const result = commands.moveNodePosition(before, scope, 'build', { x: 480, y: 320 });
+
+    assert.notEqual(result.draft, before);
+    assert.deepEqual(result.draft.presentation['r:quick:build'], { x: 480, y: 320 });
+    assert.equal(result.issues.length, 0);
+
+    const again = commands.moveNodePosition(result.draft, scope, 'build', { x: 480, y: 320 });
+
+    assert.equal(again.draft === result.draft, true);
+    assert.equal(again.issues.length, 1);
+  });
+
+test('RE-G1-02: moveNodePosition отвергает неизвестный узел и мусорную точку', async () => {
+  const commands = await compileModule(webFile('src/views/routes/routeCommands.ts'));
+  const before = makeDraft();
+  const scope = { kind: 'route', routeId: 'quick' };
+
+  const missing = commands.moveNodePosition(before, scope, 'ghost', { x: 1, y: 1 });
+  const bad = commands.moveNodePosition(before, scope, 'build', { x: Number.NaN, y: 1 });
+
+  assert.equal(missing.draft === before, true);
+  assert.equal(missing.issues[0].code, 'node_missing');
+  assert.equal(bad.draft === before, true);
+  assert.equal(bad.issues[0].code, 'position_invalid');
+});
+
+test('RE-G1-03: resetScopeLayout снимает координаты только своей области', async () => {
+  const commands = await compileModule(webFile('src/views/routes/routeCommands.ts'));
+  const before = makeDraft();
+
+  // Маршрута other в фикстуре нет — его ключи здесь посторонние и обязаны
+  // остаться: это проверка границы области, «чинить» фикстуру не нужно.
+  before.presentation['r:quick:build'] = { x: 1, y: 2 };
+  before.presentation['r:other:build'] = { x: 3, y: 4 };
+  before.presentation['b:scout'] = { x: 5, y: 6 };
+
+  const result = commands.resetScopeLayout(before, { kind: 'route', routeId: 'quick' });
+
+  assert.equal(Object.hasOwn(result.draft.presentation, 'r:quick:build'), false);
+  assert.deepEqual(result.draft.presentation['r:other:build'], { x: 3, y: 4 });
+  assert.deepEqual(result.draft.presentation['b:scout'], { x: 5, y: 6 });
+
+  const empty = commands.resetScopeLayout(result.draft, { kind: 'route', routeId: 'quick' });
+
+  assert.equal(empty.draft === result.draft, true);
+});

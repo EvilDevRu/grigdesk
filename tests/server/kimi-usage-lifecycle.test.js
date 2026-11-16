@@ -225,6 +225,7 @@ test('закрытие Fastify и drain сервера ждут завершен
         broadcast: (event) => events.push(event),
       });
       await app.register(providersModule, {
+        prefs: { read: () => ({ providerUsageAutoRefresh: true }) },
         config,
         env: {},
         getProviderAdapters: async () => new Map([['fixture', {

@@ -83,3 +83,21 @@ export function messageLabels<T extends Record<string, string>>(
 
   return Object.freeze(Object.defineProperties({}, descriptors)) as Readonly<Record<keyof T, string>>;
 }
+
+/**
+ * Список сохраняет порядок и обычные методы массива, разрешая перевод при чтении.
+ * Переключение языка не меняет индексы анимации и не требует создавать список заново.
+ */
+export function messageList(keys: readonly string[], locale: LocaleSource = 'ru'): readonly string[] {
+  const t = localeTranslator(locale);
+  const labels = keys.map(() => '');
+
+  keys.forEach((key, index) => {
+    Object.defineProperty(labels, index, {
+      enumerable: true,
+      get: () => t(key),
+    });
+  });
+
+  return Object.freeze(labels);
+}

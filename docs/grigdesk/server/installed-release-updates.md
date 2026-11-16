@@ -6,6 +6,15 @@
 локальный сборщик portable-комплекта сохранён без публикации; официальный выпуск
 не создаёт переносимый комплект и не собирает исходники при установке.
 
+Серверный архив включает отдельные `bin/grigdesk-server`, `bin/tracker`, `bin/pipeline`,
+`bin/routes`, `bin/voice`,
+`bin/grigdesk-relay` и `bin/deepseek`. Stage voice собирает самостоятельный SEA без
+речевых моделей; все файлы поколения имеют права 0555 и входят в подписанную опись
+с размером и SHA256. `installationBin` текущего поколения уже входит в PATH агентов,
+поэтому [ядро озвучки](../media/voice-core.md) доступно по имени `voice`,
+а [авторинг маршрутов](../pipeline/routes-cli.md) — по имени `routes`.
+Stage routes вызывает сборщик пакета routes/ и создаёт отдельный ELF routes.
+
 ## Номер и доверие
 
 `VERSION` остаётся базовым X.Y.Z. CI до сборщиков проверяет ref: release требует
@@ -31,6 +40,15 @@ Installer хранит архивы в [потоковом хвосте ELF](ins
 автономность. `--verify --json` проверяет подпись и оба архива без установки.
 
 ## Установка
+
+Server-компонент включает `bin/pipeline` с подписанными size/SHA256 и режимом 0555.
+Установленный `grigdesk-ctl pipeline` через maintenance ctl заново читает проверенные receipt/current,
+выбирает `bin/pipeline` из `current.server` и заменяет процесс через execve.
+Аргументы, stdin/stdio, сигналы и код выхода получает выбранный CLI. Папки данных и env-file
+принадлежат receipt этой установки; явные GRIGDESK_URL/GRIGDESK_TOKEN сохраняют приоритет.
+Следующий вызов после смены current выбирает новое поколение. Remote без server, отсутствующий
+ELF, ссылка или небезопасный executable дают отказ 1 без source/PATH/другого поколения.
+
 
 `install local|remote|server` принимает `--root`, `--data-home`, `--user-data`,
 `--bin-dir`, `--applications-dir`, `--unit-dir`. Значения — абсолютные пути.

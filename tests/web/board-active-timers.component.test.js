@@ -45,3 +45,31 @@ test('BOARD-TIMERS-02: пустой блок таймеров не занима�
 
   assert.equal(wrapper.find('.active-timers').exists(), false);
 });
+
+test('BOARD-TIMERS-04: идущий таймер из контроля виден в блоке активных', async (t) => {
+  const { wrapper } = await mountBoardView(t, {
+    prefix: 'board-active-timers-review',
+    tasks: [
+      {
+        id: 11,
+        title: 'Задача без таймера',
+        timerRunning: false,
+        timerElapsed: 5
+      },
+    ],
+    toReview: [
+      {
+        id: 44,
+        title: 'Таймер из контроля',
+        timerRunning: true,
+        timerElapsed: 44
+      },
+    ],
+  });
+
+  const cards = wrapper.findAll('[data-context="active-timer-card"]');
+
+  assert.equal(cards.length, 1);
+  assert.equal(wrapper.get('.active-timers-count').text(), '1');
+  assert.equal(cards[0].get('.active-task-title').text(), 'Таймер из контроля');
+});

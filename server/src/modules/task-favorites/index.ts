@@ -14,8 +14,7 @@ import { normalizeFavoriteTaskId } from '../../lib/taskFavoritesStore.ts';
 function publicError(reply: FastifyReply, error: unknown): unknown {
   const code = (error as { code?: unknown } | null)?.code;
 
-  const status = (error as { status?: number }).status
-    ?? (String(code).startsWith('grigdesk_tasks_') ? 503 : undefined);
+  const status = (error as { status?: number }).status;
 
   if (status && [400, 404, 409, 503].includes(status)) {
     return reply.code(status).send({ error: code, message: (error as Error).message });
@@ -89,19 +88,7 @@ async function taskFavoritesModule(
     }));
   }
 
-  fastify.get<FavoriteRequest>('/api/grigdesk-tasks/task-favorites', (request, reply) =>
-    withTrackerRequestRead(request, reply, (options) =>
-      run(() => favorites.list(options, { source: 'grigdesk' }))(request, reply)));
-  fastify.put('/api/grigdesk-tasks/task-favorites/:taskId', run((request) => {
-    const taskId = normalizeFavoriteTaskId(request.params.taskId);
 
-    return favorites.add(taskId, { source: 'grigdesk' });
-  }));
-  fastify.delete('/api/grigdesk-tasks/task-favorites/:taskId', run((request) => {
-    const taskId = normalizeFavoriteTaskId(request.params.taskId);
-
-    return favorites.remove(taskId, { source: 'grigdesk' });
-  }));
 }
 
 export default fp(taskFavoritesModule, { name: 'module-task-favorites' });

@@ -38,8 +38,8 @@ Environment=NODE_ENV=production
 EnvironmentFile=-__ENV_FILE__
 __HOME_ENV__
 __ENV_FILE_ENV__
-# ВОРОТА VPN. По умолчанию автоматически распознают TUN из маршрута; для другой схемы
-# интерфейс задаётся в .env. Только GRIGDESK_REQUIRE_VPN=0 явно отключает gate.
+# ВОРОТА VPN. По умолчанию выключены; включает явный GRIGDESK_REQUIRE_VPN=1 в .env
+# (то же делает раздел «Система → Запуск»). Для другой схемы интерфейс задаётся в .env.
 # Ненулевой код запрещает старт, а systemd повторяет попытку через RestartSec.
 ExecStartPre=__GRIGDESK_DIR__/deploy/require-vpn.sh
 Restart=always

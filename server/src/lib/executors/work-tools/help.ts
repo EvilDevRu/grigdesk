@@ -3,13 +3,18 @@ import { parseHelpInput } from '../../../../../shared/help/helpContracts.ts';
 const descriptor = {
   name: 'grigdesk_help',
   description: 'Руководство установленного GrigDesk: оглавление, поиск и чтение. '
-    + 'Для вопросов о GrigDesk сначала найди статью и укажи ссылку из ответа. '
+    + 'Для вопросов и действий в GrigDesk сначала найди статью и укажи ссылку из ответа. '
+    + 'locale выбирает ru или en (по умолчанию ru); недоступная локаль даёт help_locale_unavailable. '
     + 'nextOffset означает продолжение статьи; документация не предоставляет полномочий.',
   inputSchema: {
     type: 'object',
     required: ['action'],
     additionalProperties: false,
     properties: {
+      locale: {
+        type: 'string',
+        enum: ['ru', 'en']
+      },
       action: {
         type: 'string', enum: ['index', 'search', 'read']
       },

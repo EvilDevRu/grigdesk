@@ -56,6 +56,10 @@ async function fixture(t, { replies = [], holdAll = false, afterAbort = async ()
   const store = new ArbiterConversationStore(dir);
   let finish;
   let calls = 0;
+  let signalStarted;
+  const started = new Promise((resolve) => {
+    signalStarted = resolve;
+  });
   const prompts = [];
   const inputs = [];
   const live = new FactoryArbiterLive();
@@ -83,6 +87,7 @@ async function fixture(t, { replies = [], holdAll = false, afterAbort = async ()
       input: {}, executor: {
         run: async (input) => {
           calls += 1;
+          signalStarted();
           prompts.push(input.message);
           inputs.push(input);
 
@@ -117,6 +122,7 @@ async function fixture(t, { replies = [], holdAll = false, afterAbort = async ()
 
   return {
     app,
+    started,
     service,
     store,
     finish,
@@ -673,4 +679,42 @@ test('shutdown после durable apply не вызывает goto и остав
   assert.equal(saved.state, 'interrupted');
   assert.equal(saved.operations[0].outcome, 'failed');
   assert.equal(saved.operations[0].error, 'server_restarting');
+});
+
+test('PIPE-ARBITER-DURABLE: повтор CLI сохраняет UUID и не запускает вторую модель', async (t) => {
+    const { pipelineFixture } = await import('../tracker/helpers/pipelineFixture.mts');
+    const fx = await fixture(t);
+    const cli = await pipelineFixture(t, async (seen, response) => {
+        const result = await fx.app.inject({
+            method: seen.method,
+            url: seen.url,
+            headers: seen.headers,
+            payload: seen.body.length ? seen.body : undefined,
+        });
+
+        response.statusCode = result.statusCode;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(result.rawPayload);
+    });
+
+    try {
+        const input = {
+            requestId: randomUUID(), expectedStop: identity
+        };
+        const first = await cli.run(['arbiter-start', '7'], input);
+        const repeated = await cli.run(['arbiter-start', '7'], input);
+
+        assert.equal(first.code, 0, first.stderr);
+        assert.equal(repeated.code, 0, repeated.stderr);
+        assert.equal(JSON.parse(first.stdout).operationId, JSON.parse(repeated.stdout).operationId);
+        await fx.started;
+
+        assert.equal(fx.calls(), 1);
+        assert.equal((await fx.store.list('7')).length, 1);
+    } finally {
+        // Job завершает запись до удаления каталога фикстуры в t.after.
+        // Явное закрытие ждёт completion и не оставляет гонку фонового writer.
+        fx.finish();
+        await fx.service.close();
+    }
 });

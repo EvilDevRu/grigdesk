@@ -217,12 +217,12 @@ export type WebLogData = {
     ms: number;
   };
   'perf.ready': {
-    tag: 'AGENT-DBG';
+    tag: 'chat-perf';
     longTasks: boolean;
     longFrames: boolean;
   };
   'perf.operation': WebPerformanceCounts & {
-    tag: 'AGENT-DBG';
+    tag: 'chat-perf';
     operation: WebPerformanceOperation;
     view: string;
     ms: number;
@@ -231,7 +231,7 @@ export type WebLogData = {
     count: number;
   };
   'perf.block': {
-    tag: 'AGENT-DBG';
+    tag: 'chat-perf';
     kind: WebPerformanceBlock;
     view: string;
     ms: number;
@@ -903,7 +903,7 @@ const ENUMS: Partial<Record<FieldKind, readonly string[]>> = {
   actionOutcome: ['success', 'error'],
   performanceOperation: WEB_PERFORMANCE_OPERATIONS,
   performanceBlock: ['longtask', 'event-loop', 'animation-frame'],
-  diagnosticTag: ['AGENT-DBG'],
+  diagnosticTag: ['chat-perf'],
 };
 
 /**

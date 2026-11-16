@@ -318,6 +318,7 @@ test('WEB-11: ответ, пришедший синхронизацией в ф�
   const sse = sseOf(chat);
   serveChat({
     ...CHAT,
+    unread: true,
     messages: [
       ...CHAT.messages,
       { role: 'assistant', text: 'Готово на другом устройстве' },
@@ -373,6 +374,7 @@ test('WEB-11b: промежуточная реплика идущего хода
 
     serveChat({
       ...CHAT,
+      unread: true,
       messages: [...CHAT.messages, block, {
         role: 'assistant',
         runId: 'run-1',
@@ -387,7 +389,9 @@ test('WEB-11b: промежуточная реплика идущего хода
       origin: 'сервер',
       at: 11,
     });
-    await new Promise(setImmediate);
+
+    // Повторное событие того же чата склеивается: применяется трейлингом окна.
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
     assert.equal(chatNotifications().length, 1);
     assert.equal(chatNotifications()[0][1], 'Этап готов.');

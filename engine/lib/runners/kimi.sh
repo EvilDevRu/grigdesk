@@ -289,3 +289,10 @@ runner_kimi_interrupt() {
   # хосте живут долгоживущие `kimi acp` процессы чат-рантайма GrigDesk.
   return 0
 }
+
+# Варианты запуска подтверждаются metadata раннера, отдельно от каталога чатов.
+# Callback не вызывает модель и не пишет реестр пользовательских настроек.
+runner_kimi_model_options() {
+  source "$FACTORY_HOME/lib/runner-model-options.sh"
+  _runner_model_options kimi
+}

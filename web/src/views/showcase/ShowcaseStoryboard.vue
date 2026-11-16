@@ -1,5 +1,5 @@
 <template>
-  <ol class="board" aria-label="Сцены ролика">
+  <ol class="board" :aria-label="t('core.showcaseStsenyRolika')">
     <li v-for="(scene, index) in scenes" :key="scene.id">
       <UiSelectableRow
         class="board__row"
@@ -11,19 +11,17 @@
           <span class="board__order">{{ index + 1 }}</span>
           <span class="board__copy">
             <span class="board__line">
-              <strong class="board__title">{{ scene.title || `Сцена ${index + 1}` }}</strong>
+              <strong class="board__title">{{ scene.title || t('core.showcaseStsenaIndex1', { index1: index + 1 }) }}</strong>
               <span class="board__chip" :data-tone="stateOf(scene).tone">{{ stateOf(scene).label }}</span>
-              <span v-if="changedIds.includes(scene.id)" class="board__chip" data-tone="accent">
-                не сохранено
-              </span>
+              <span v-if="changedIds.includes(scene.id)" class="board__chip" data-tone="accent"> {{ t('core.showcaseNeSohraneno') }} </span>
               <span v-if="timeOf(scene)" class="board__time">{{ timeOf(scene) }}</span>
             </span>
             <!-- Что запись покажет на экране: без этой строки человек читал бы только
                  текст диктора и не видел, что все сцены снимают один неподвижный экран. -->
             <span class="board__plan" :data-static="actionsOf(scene) ? 'no' : 'yes'">
-              <span v-if="continuesOf(scene)" class="board__chain">{{ CONTINUATION_LABEL }}</span>
+              <span v-if="continuesOf(scene)" class="board__chain">{{ continuationLabel() }}</span>
               <span class="board__screen">{{ screenTitleOf(scene) }}</span>
-              <span>{{ actionsOf(scene) || 'без действий — неподвижный экран' }}</span>
+              <span>{{ actionsOf(scene) || t('core.showcaseBezDeystviyNepodvizhnyyEkran') }}</span>
             </span>
             <span class="board__text">{{ excerptOf(scene) }}</span>
             <span v-if="warningOf(scene)" class="board__warn">{{ warningOf(scene) }}</span>
@@ -35,11 +33,11 @@
 </template>
 
 <script setup lang="ts">
-import { UiSelectableRow } from '../../ui';
+import { UiSelectableRow, t } from '../../ui';
 import { continuesPrevious } from '../../../../shared/plugins/showcase/showcaseChains';
 import type { ShowcaseScene, ShowcaseScreen } from '../../../../shared/plugins/showcase/showcaseContracts';
 import { plainNarration } from '../../../../shared/plugins/showcase/showcaseNarration';
-import { actionsText, CONTINUATION_LABEL, sceneStateOf, screenLabelOf, timecode } from './sceneText';
+import { actionsText, continuationLabel, sceneStateOf, screenLabelOf, timecode } from './sceneText';
 
 const props = defineProps<{
   // Сцены уже в порядке показа: порядок решает родитель, а не список.
@@ -83,7 +81,7 @@ function excerptOf(scene: ShowcaseScene): string {
   const text = plainNarration(scene.narration).trim();
 
   if (!text) {
-    return 'Текст озвучки пуст.';
+    return t('core.showcaseTekstOzvuchkiPust');
   }
 
   return text.length > EXCERPT_LENGTH ? `${text.slice(0, EXCERPT_LENGTH - 1)}…` : text;
@@ -102,7 +100,9 @@ function timeOf(scene: ShowcaseScene): string {
   }
 
   if (scene.clip?.durationMs) {
-    parts.push(`${(scene.clip.durationMs / 1000).toFixed(1).replace('.', ',')} с`);
+    parts.push(t('core.showcaseValueS', {
+      value: (scene.clip.durationMs / 1000).toFixed(1).replace('.', ','),
+    }));
   }
 
   return parts.join(' · ');
@@ -115,7 +115,7 @@ function warningOf(scene: ShowcaseScene): string {
     item.kind === 'speech' && (item.status === 'warning' || item.status === 'blocked')
   ));
 
-  return check ? `озвучка: ${check.reason}` : '';
+  return check ? t('core.showcaseOzvuchkaReason', { reason: check.reason }) : '';
 }
 </script>
 

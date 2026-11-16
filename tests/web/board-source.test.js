@@ -514,3 +514,55 @@ for (const broken of [
     assert.equal(calls.every((path) => path === '/api/trackers'), true);
   });
 }
+
+test('TARGET-CANCEL: закрытие во время context завершает чтение без task GET', async (t) => {
+  setActivePinia(createPinia());
+
+  const source = `fixture@${'a'.repeat(64)}`;
+  const pending = deferred();
+  const entered = deferred();
+  const controller = new AbortController();
+  const calls = [];
+
+  t.mock.method(api, 'get', async (path, options) => {
+    calls.push(path);
+
+    if (path === '/api/trackers') {
+      return { enabledIds: ['fixture'] };
+    }
+    if (path.endsWith('/context')) {
+      entered.resolve();
+
+      return new Promise((resolve, reject) => {
+        const cancel = () => reject(options.signal.reason);
+
+        options?.signal?.addEventListener('abort', cancel, { once: true });
+        void pending.promise.then(() => {
+          options?.signal?.removeEventListener('abort', cancel);
+          resolve({ source, generation: 1 });
+        });
+      });
+    }
+
+    return { id: 42, title: 'Не должен читаться' };
+  });
+
+  let result;
+  const reading = useTasksStore().load(42, true, controller.signal, source)
+    .then(() => {
+      result = 'success';
+    }, (error) => {
+      result = error.name;
+    });
+
+  try {
+    await entered.promise;
+    controller.abort();
+    await setImmediate();
+    assert.equal(result, 'AbortError');
+    assert.equal(calls.some((path) => path.endsWith('/task/42')), false);
+  } finally {
+    pending.resolve();
+    await reading;
+  }
+});

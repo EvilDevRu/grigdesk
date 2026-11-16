@@ -24,10 +24,11 @@ _routing_chain_split() {
 }
 
 routing_resolve() {
-  local config=$1 task_registry=$2 stage=$3
+  local config=$1 task_registry=$2 stage=$3 ignore_stage=${4:-0}
   profile_config_validate "$config" || return 78
   local stage_key="RUNNER_OVERRIDE_STAGE_${stage}" chain source
   chain=$(_routing_file_get "$task_registry" "$stage_key")
+  [[ "$ignore_stage" != 1 ]] || chain=""
   _routing_chain_valid "$chain" || chain=""
   if [[ -n "$chain" ]]; then
     _routing_chain_split "$chain"

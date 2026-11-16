@@ -80,7 +80,7 @@ test('Узкий route полки объявлен как tool и не созд�
   ]);
 
   assert.deepEqual({
-    route: /path:\s*['"]\/shelf['"][\s\S]*meta:\s*\{[^}]*tool:\s*['"]shelf['"]/.test(router),
+    route: /path:\s*['"]\/shelf['"][\s\S]*meta:[\s\S]*?tool:\s*['"]shelf['"]/.test(router),
     registry: /id:\s*['"]shelf['"][\s\S]*route:\s*['"]\/shelf['"]/.test(catalog),
     separateShelfState: /shelf(?:Dock|Open|Mounted)\s*:/i.test(dock),
   }, {
@@ -197,7 +197,7 @@ test('Code держит рейку разделов и навигатор сле
   assert.match(code, /aria-orientation="vertical"/);
   // Рейка — первая колонка сетки; её ширина одна и та же в CSS-переменной и в расчёте
   // координаты разделителя. Шапка вкладок не держит.
-  assert.match(code, /<aside class="rail" aria-label="Разделы кода">/);
+  assert.match(code, /<aside class="rail" :aria-label="t\('core\.codeRazdelyKoda'\)">/);
   assert.match(code, /const RAIL_WIDTH = 44;/);
   assert.match(code, /'--code-rail-width': `\$\{RAIL_WIDTH\}px`/);
   assert.match(code, /clientX - rect\.left - RAIL_WIDTH/);

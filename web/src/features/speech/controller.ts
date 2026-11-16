@@ -7,6 +7,11 @@ import { isSpeechSettings, type SpeechSettings, type SpeechWindow, type SpeechEr
 import { api as defaultApi, failureText } from '../../shared/apiClient.ts';
 import { createSpeechStream } from '../../shared/speechStream.ts';
 import { browserLocalSpeechAllowed } from './browserSupport.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 const DEFAULT_BROWSER_DRAIN_TIMEOUT_MS = 1800;
 const DEFAULT_LOCAL_STREAM_LAG_NOTICE_MS = 4000;
@@ -109,14 +114,14 @@ function responseSnapshot(response: unknown): SpeechSettings | null {
 
 function browserErrorText(error: string) {
   const texts: Record<string, string> = {
-    'not-allowed': 'Нет доступа к микрофону.',
-    'audio-capture': 'Браузер не нашёл доступный микрофон.',
-    'language-not-supported': 'Браузер не поддерживает выбранный язык.',
-    'service-not-allowed': 'Сервис распознавания браузера недоступен.',
-    network: 'Браузерное распознавание не доступно из-за сети.',
+    'not-allowed': translateUi('core.controllerMicrophoneAccessDenied'),
+    'audio-capture': translateUi('core.controllerTheBrowserCouldNotFindAnAvailable'),
+    'language-not-supported': translateUi('core.controllerTheBrowserDoesNotSupportTheSelected'),
+    'service-not-allowed': translateUi('core.controllerTheBrowserSpeechRecognitionServiceIsUnavailable'),
+    network: translateUi('core.controllerBrowserSpeechRecognitionIsUnavailableBecauseOf'),
   };
 
-  return texts[error] || `Браузерное распознавание завершилось с ошибкой: ${error}.`;
+  return texts[error] || translateUi('core.controllerBrowserSpeechRecognitionFailed', { error: error });
 }
 
 function defaultBrowser() {
@@ -398,7 +403,7 @@ export function createDictationController({
 
     const error: SpeechError = rawError instanceof Error
       ? rawError
-      : speechError(fallbackCode, String(rawError || 'Диктовка завершилась с ошибкой'));
+      : speechError(fallbackCode, String(rawError || translateUi('core.chatDiktovkaZavershilasSOshibkoy')));
 
     if (!error.code) {
       error.code = fallbackCode;
@@ -439,16 +444,22 @@ export function createDictationController({
    */
   function claim(lease: Lease) {
     if (disposed) {
-      throw speechError('speech_disposed', 'Машина диктовки уже остановлена');
+      throw speechError(
+        'speech_disposed',
+        translateUi('core.controllerTheDictationControllerHasAlreadyStopped'),
+      );
     }
     if (lease.released || !leases.has(lease)) {
-      throw speechError('speech_lease_released', 'Владелец диктовки уже освобождён');
+      throw speechError(
+        'speech_lease_released',
+        translateUi('core.controllerTheDictationOwnerHasAlreadyBeenReleased'),
+      );
     }
     if (activeLease && activeLease !== lease) {
-      throw speechError('speech_busy', 'Микрофон уже используется в другом интерфейсе');
+      throw speechError('speech_busy', translateUi('core.controllerTheMicrophoneIsAlreadyInUseBy'));
     }
     if (activeRun) {
-      throw speechError('speech_busy', 'Диктовка уже запущена');
+      throw speechError('speech_busy', translateUi('core.controllerDictationIsAlreadyRunning'));
     }
 
     activeLease = lease;
@@ -728,7 +739,7 @@ export function createDictationController({
 
     if (error === 'phrases-not-supported' && !run.phrasesDisabled) {
       run.phrasesDisabled = true;
-      setNotice(run, 'Этот браузер не применил словарь — продолжаю без подсказок.');
+      setNotice(run, translateUi('core.controllerThisBrowserDidNotApplyTheDictionary'));
       scheduleBrowserRestart(run, 0);
 
       return;
@@ -750,13 +761,16 @@ export function createDictationController({
       run.browserRetries.noSpeech += 1;
 
       if (run.browserRetries.noSpeech <= 2) {
-        setNotice(run, 'Речь не услышана, пробую ещё раз…');
+        setNotice(run, translateUi('core.controllerNoSpeechDetectedTryingAgain'));
         scheduleBrowserRestart(run, run.browserRetries.noSpeech * 250);
 
         return;
       }
 
-      failRun(run, speechError('speech_not_recognized', 'Речь не услышана — попробуй ещё раз'));
+      failRun(
+        run,
+        speechError('speech_not_recognized', translateUi('core.controllerNoSpeechDetectedTryAgain')),
+      );
 
       return;
     }
@@ -805,17 +819,17 @@ export function createDictationController({
           try { recognition.phrases = terms.map((term) => new Phrase(term, 5)); }
           catch {
             run.phrasesDisabled = true;
-            setNotice(run, 'Этот браузер не применил словарь; диктовка продолжается без него.');
+            setNotice(run, translateUi('core.controllerThisBrowserDidNotApplyTheDictionary882333'));
           }
         } else {
           run.phrasesDisabled = true;
-          setNotice(run, 'Словарь не поддерживается этим браузером; диктовка продолжается без него.');
+          setNotice(run, translateUi('core.controllerThisBrowserDoesNotSupportTheDictionary'));
         }
       }
     } catch (error) {
       failRun(run, speechError(
         'speech_prepare_failed',
-        `Не удалось подготовить диктовку: ${failureText(error)}`,
+        translateUi('core.controllerCouldNotPrepareDictation', { error: failureText(error) }),
       ));
 
       return;
@@ -869,8 +883,8 @@ export function createDictationController({
       failRun(run, speechError(
         'speech_browser_start_failed',
         error instanceof Error && error.name === 'InvalidStateError'
-          ? 'Диктовка уже запущена в этом браузере'
-          : `Не удалось запустить диктовку: ${failureText(error)}`,
+          ? translateUi('core.controllerDictationIsAlreadyRunningInThisBrowser')
+          : translateUi('core.controllerCouldNotStartDictation', { error: failureText(error) }),
       ));
     }
   }
@@ -890,7 +904,7 @@ export function createDictationController({
       || !context.browserAutoConsent || !context.revision) {
       failRun(run, speechError(
         'speech_consent_unconfirmed',
-        'Сервер не подтвердил актуальное согласие для браузерной диктовки',
+        translateUi('core.controllerTheServerDidNotConfirmTheCurrent'),
       ));
 
       return false;
@@ -914,7 +928,7 @@ export function createDictationController({
         || candidate.browserProcessing !== 'auto' || candidate.browserAutoConsent !== true) {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+          translateUi('core.controllerSpeechSettingsChangedInAnotherWindowBrowser'),
         ));
 
         return false;
@@ -929,7 +943,7 @@ export function createDictationController({
         || current.browserAutoConsent !== true || !responseMatchesCurrent(response)) {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+          translateUi('core.controllerSpeechSettingsChangedInAnotherWindowBrowser'),
         ));
 
         return false;
@@ -944,8 +958,8 @@ export function createDictationController({
       failRun(run, speechError(
         isRecord(error) && error.status === 409 ? 'speech_settings_stale' : 'speech_consent_check_failed',
         isRecord(error) && error.status === 409
-          ? 'Настройки речи изменились в другом окне — браузерная диктовка не запущена'
-          : 'Не удалось проверить согласие на обработку речи — браузерная диктовка не запущена',
+          ? translateUi('core.controllerSpeechSettingsChangedInAnotherWindowBrowser')
+          : translateUi('core.controllerCouldNotVerifySpeechProcessingConsentBrowser'),
       ));
 
       return false;
@@ -985,7 +999,7 @@ export function createDictationController({
         || current.browserAutoConsent !== true) {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+          translateUi('core.controllerSpeechSettingsChangedInAnotherWindowBrowser'),
         ));
 
         return;
@@ -1006,7 +1020,7 @@ export function createDictationController({
       return;
     }
     if (!browser.isSecureContext()) {
-      fallbackToWhisper(run, 'Браузерная диктовка требует HTTPS.');
+      fallbackToWhisper(run, translateUi('core.controllerBrowserDictationRequiresHTTPS'));
 
       return;
     }
@@ -1014,7 +1028,7 @@ export function createDictationController({
     const Ctor = browser.recognitionCtor();
 
     if (!Ctor) {
-      fallbackToWhisper(run, 'Браузерная диктовка на этом устройстве недоступна.');
+      fallbackToWhisper(run, translateUi('core.controllerBrowserDictationIsUnavailableOnThisDevice'));
 
       return;
     }
@@ -1032,7 +1046,7 @@ export function createDictationController({
         && typeof Ctor.available === 'function';
 
       if (!supportsLocal) {
-        fallbackToWhisper(run, 'Этот браузер не умеет распознавать речь на устройстве.');
+        fallbackToWhisper(run, translateUi('core.controllerThisBrowserCannotRecognizeSpeechOnThe'));
 
         return;
       }
@@ -1047,7 +1061,7 @@ export function createDictationController({
         }
         if (availability === 'downloadable') {
           if (typeof Ctor.install !== 'function') {
-            fallbackToWhisper(run, 'Браузер не умеет устанавливать локальную языковую модель.');
+            fallbackToWhisper(run, translateUi('core.controllerThisBrowserCannotInstallALocalLanguage'));
 
             return;
           }
@@ -1064,14 +1078,14 @@ export function createDictationController({
         }
         if (availability !== 'available' && availability !== true) {
           fallbackToWhisper(run, availability === 'downloading'
-            ? 'Браузер ещё скачивает языковую модель.'
-            : 'Локальная языковая модель браузера недоступна.');
+            ? translateUi('core.controllerTheBrowserIsStillDownloadingTheLanguage')
+            : translateUi('core.controllerTheLocalBrowserLanguageModelIsUnavailable'));
 
           return;
         }
       } catch {
         if (isCurrent(run)) {
-          fallbackToWhisper(run, 'Не удалось проверить локальную модель браузера.');
+          fallbackToWhisper(run, translateUi('core.controllerCouldNotCheckTheLocalBrowserModel'));
         }
 
         return;
@@ -1255,7 +1269,7 @@ export function createDictationController({
       startLocalWarmup(state);
     }
 
-    setNotice(run, 'Live-предпросмотр недоступен — итог распознаю после остановки.');
+    setNotice(run, translateUi('core.controllerLivePreviewIsUnavailableRecognitionWillFinish'));
   }
 
   /**
@@ -1286,8 +1300,13 @@ export function createDictationController({
       const lagMs = Number(event.lagMs);
 
       if (Number.isFinite(lagMs) && lagMs >= limits.localStreamLagNoticeMs) {
-        setNotice(run, `Распознавание отстаёт примерно на ${Math.ceil(lagMs / 1000)} с.`);
-      } else if (run.lease.mutableState.notice.startsWith('Распознавание отстаёт')) {
+        setNotice(
+          run,
+          translateUi('core.controllerRecognitionIsAboutSBehind', { value: Math.ceil(lagMs / 1000) }),
+        );
+      } else if (run.lease.mutableState.notice.startsWith(
+        translateUi('core.controllerRecognitionIsFallingBehind'),
+      )) {
         setNotice(run, '');
       }
     }
@@ -1302,7 +1321,7 @@ export function createDictationController({
       state.livePreflightUnsupported = true;
       markLocalStreamFailure(run, state, speechError(
         'speech_stream_unsupported',
-        'Браузер не поддерживает live AudioWorklet/WebSocket',
+        translateUi('core.controllerTheBrowserDoesNotSupportLiveAudioWorklet'),
       ));
       state.livePromise = Promise.resolve(null);
 
@@ -1390,11 +1409,20 @@ export function createDictationController({
         setNotice(run, '');
         releaseRun(run, { final: true });
       } else {
-        failRun(run, speechError('speech_not_recognized', 'Речь не распознана — попробуй ещё раз'));
+        failRun(
+          run,
+          speechError('speech_not_recognized', translateUi('core.controllerSpeechWasNotRecognizedTryAgain')),
+        );
       }
     } catch (error) {
       if (!controller.signal.aborted && isCurrent(run)) {
-        failRun(run, speechError('speech_transcribe_failed', `Распознавание: ${failureText(error)}`));
+        failRun(
+          run,
+          speechError(
+            'speech_transcribe_failed',
+            translateUi('core.controllerRecognition', { error: failureText(error) }),
+          ),
+        );
       }
     } finally {
       if (run.transcriptionAbort === controller) {
@@ -1439,7 +1467,7 @@ export function createDictationController({
             return;
           }
 
-          setNotice(run, 'Live-результат пуст — перепроверяю полную запись.');
+          setNotice(run, translateUi('core.controllerTheLiveResultIsEmptyCheckingThe'));
         } catch (error) {
           markLocalStreamFailure(run, state, error);
         }
@@ -1497,7 +1525,10 @@ export function createDictationController({
 
       failRun(run, speechError(
         'speech_local_unavailable',
-        `${fallbackReason ? `${fallbackReason} ` : ''}Локальный Whisper недоступен.${why}`.trim(),
+        translateUi(
+          'core.controllerLocalWhisperIsUnavailable',
+          { value: fallbackReason ? `${fallbackReason} ` : '', why: why },
+        ).trim(),
       ));
 
       return;
@@ -1505,7 +1536,7 @@ export function createDictationController({
     if (!browser.isSecureContext() || !media.hasGetUserMedia()) {
       failRun(run, speechError(
         'speech_secure_context_required',
-        'Микрофон требует https или localhost — открой GrigDesk по защищённому адресу',
+        translateUi('core.controllerTheMicrophoneRequiresHTTPSOrLocalhostOpen'),
       ));
 
       return;
@@ -1516,7 +1547,7 @@ export function createDictationController({
     if (!Recorder) {
       failRun(run, speechError(
         'speech_recorder_unsupported',
-        'MediaRecorder не поддерживается этим браузером',
+        translateUi('core.controllerThisBrowserDoesNotSupportMediaRecorder'),
       ));
 
       return;
@@ -1587,8 +1618,10 @@ export function createDictationController({
         if (isCurrent(run)) {
           failRun(run, speechError(
             'speech_microphone_failed',
-            `Микрофон: ${('error' in event && event.error instanceof Error
-              ? event.error.message : '') || 'ошибка записи'}`,
+            translateUi('core.controllerMicrophone', {
+              value: ('error' in event && event.error instanceof Error
+                ? event.error.message : '') || translateUi('core.speechRecordingError'),
+            }),
           ));
         }
 
@@ -1599,7 +1632,7 @@ export function createDictationController({
       setPhase(run, 'recording');
 
       if (fallbackReason) {
-        setNotice(run, `${fallbackReason} Использую локальный Whisper.`);
+        setNotice(run, translateUi('core.controllerUsingLocalWhisper', { fallbackReason: fallbackReason }));
       }
     } catch (error) {
       if (captureState) {
@@ -1608,7 +1641,13 @@ export function createDictationController({
         stopTracks(stream);
       }
       if (isCurrent(run)) {
-        failRun(run, speechError('speech_microphone_failed', `Микрофон: ${failureText(error)}`));
+        failRun(
+          run,
+          speechError(
+            'speech_microphone_failed',
+            translateUi('core.controllerMicrophone955086', { error: failureText(error) }),
+          ),
+        );
       }
     }
   }
@@ -1693,7 +1732,7 @@ export function createDictationController({
         || candidate.browserProcessing !== 'auto' || candidate.browserAutoConsent !== true) {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились в другом окне — запусти диктовку ещё раз',
+          translateUi('core.controllerSpeechSettingsChangedInAnotherWindowStart'),
         ));
 
         return false;
@@ -1704,7 +1743,13 @@ export function createDictationController({
       if (!isCurrent(run) || snapshot.engine !== 'browser'
         || snapshot.browserProcessing !== 'auto' || snapshot.browserAutoConsent !== true
         || !responseMatchesCurrent(response)) {
-        failRun(run, speechError('speech_consent_unconfirmed', 'Сервер не подтвердил согласие'));
+        failRun(
+          run,
+          speechError(
+            'speech_consent_unconfirmed',
+            translateUi('core.controllerTheServerDidNotConfirmConsent'),
+          ),
+        );
 
         return false;
       }
@@ -1735,7 +1780,7 @@ export function createDictationController({
 
           const stale = speechError(
             'speech_settings_stale',
-            'Настройки речи изменились в другом окне — проверь выбор ещё раз',
+            translateUi('core.controllerSpeechSettingsChangedInAnotherWindowCheck'),
           );
 
           publish(lease, { error: stale });
@@ -1747,7 +1792,7 @@ export function createDictationController({
 
       failRun(run, speechError(
         'speech_consent_save_failed',
-        `Не удалось сохранить согласие: ${failureText(error)}`,
+        translateUi('core.controllerCouldNotSaveConsent', { error: failureText(error) }),
       ));
 
       return false;
@@ -1784,7 +1829,7 @@ export function createDictationController({
       if (disposition === 'stale' || candidate?.engine !== 'whisper') {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились в другом окне — запусти диктовку ещё раз',
+          translateUi('core.controllerSpeechSettingsChangedInAnotherWindowStart'),
         ));
 
         return false;
@@ -1793,7 +1838,13 @@ export function createDictationController({
       const snapshot = disposition === 'current' ? speechPrefs() : applySpeechResponse(response);
 
       if (!isCurrent(run) || snapshot.engine !== 'whisper' || !responseMatchesCurrent(response)) {
-        failRun(run, speechError('speech_settings_stale', 'Настройки речи изменились — Whisper не запущен'));
+        failRun(
+          run,
+          speechError(
+            'speech_settings_stale',
+            translateUi('core.controllerSpeechSettingsChangedWhisperWasNotStarted'),
+          ),
+        );
 
         return false;
       }
@@ -1807,7 +1858,7 @@ export function createDictationController({
         run.pendingMutation = false;
         failRun(run, speechError(
           'speech_engine_change_failed',
-          `Не удалось выбрать Whisper: ${failureText(error)}`,
+          translateUi('core.controllerCouldNotSelectWhisper', { error: failureText(error) }),
         ));
       }
 
@@ -1831,7 +1882,7 @@ export function createDictationController({
       || pending.context.engine !== 'browser' || pending.context.browserProcessing !== 'local') {
       failRun(run, speechError(
         'speech_settings_stale',
-        'Настройки речи изменились — локальная модель не будет установлена',
+        translateUi('core.controllerSpeechSettingsChangedTheLocalModelWill'),
       ));
 
       return false;
@@ -1850,13 +1901,13 @@ export function createDictationController({
         || speechPrefs().engine !== 'browser' || speechPrefs().browserProcessing !== 'local') {
         failRun(run, speechError(
           'speech_settings_stale',
-          'Настройки речи изменились — установленная модель не будет запускать старый режим',
+          translateUi('core.controllerSpeechSettingsChangedTheInstalledModelWill'),
         ));
 
         return false;
       }
       if (installed !== true) {
-        fallbackToWhisper(run, 'Браузер не смог установить языковую модель.');
+        fallbackToWhisper(run, translateUi('core.controllerTheBrowserCouldNotInstallTheLanguage'));
 
         return false;
       }
@@ -1868,7 +1919,10 @@ export function createDictationController({
       return true;
     } catch (error) {
       if (isCurrent(run)) {
-        fallbackToWhisper(run, `Не удалось установить языковую модель: ${failureText(error)}.`);
+        fallbackToWhisper(
+          run,
+          translateUi('core.controllerCouldNotInstallTheLanguageModel', { error: failureText(error) }),
+        );
       }
 
       return false;
@@ -1927,7 +1981,10 @@ export function createDictationController({
         void cancelLocalStream(state);
         cancelLocalWarmup(state);
         localRecorderStopped(run, state);
-        failRun(run, speechError('speech_recorder_stop_failed', 'Не удалось завершить запись'));
+        failRun(
+          run,
+          speechError('speech_recorder_stop_failed', translateUi('core.controllerCouldNotFinishRecording')),
+        );
       }
 
       return Promise.resolve(true);
@@ -1996,7 +2053,10 @@ export function createDictationController({
    */
   function acquire(owner: unknown, handlers: LeaseHandlers = {}): Lease {
     if (disposed) {
-      throw speechError('speech_disposed', 'Машина диктовки уже остановлена');
+      throw speechError(
+        'speech_disposed',
+        translateUi('core.controllerTheDictationControllerHasAlreadyStopped'),
+      );
     }
     if (owner === null || owner === undefined) {
       throw new TypeError('Для lease нужен owner');
@@ -2068,7 +2128,7 @@ export function createDictationController({
       return;
     }
 
-    void cancelRun(run, { notice: 'Диктовка остановлена: настройки речи изменились.' });
+    void cancelRun(run, { notice: translateUi('core.controllerDictationStoppedSpeechSettingsChanged') });
   }
 
   /**

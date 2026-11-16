@@ -40,6 +40,39 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     String scan() throws Exception;
     void save(String name, String type, InputStream body) throws Exception;
     void unlock() throws Exception;
+
+    /**
+     * Оповещения необязательны для прежних оболочек: без нативного канала
+     * труба объявляет unsupported, и интерфейс сохраняет браузерное поведение.
+     */
+    default String notifyPermission() throws Exception {
+      return "unsupported";
+    }
+
+    default String requestNotifyPermission() throws Exception {
+      return "unsupported";
+    }
+
+    default boolean notify(String title, String body, String tag, String url) throws Exception {
+      return false;
+    }
+
+    default void cancelNotification(String tag) throws Exception {
+    }
+
+    /**
+     * Фоновая связь сохраняется установкой и управляет foreground-сервисом Android.
+     * Прежние оболочки без нативного канала сохраняют настройку только в снимке.
+     */
+    default void setBackgroundLink(boolean enabled) throws Exception {
+    }
+
+    /**
+     * Виджет конвейера обновляется нативным воркером установки.
+     * Прежние оболочки без виджета сохраняют no-op, запрос не считается ошибкой.
+     */
+    default void refreshWidget() throws Exception {
+    }
   }
 
   /**
@@ -72,6 +105,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   private final Map<String, Integer> attempts = new HashMap<>();
   private final Map<String, Integer> generations = new HashMap<>();
   private final java.util.Set<String> disabled = new java.util.HashSet<>();
+  private final java.util.function.BooleanSupplier backgroundLink;
   private boolean closed;
   private boolean suspended;
 
@@ -103,6 +137,19 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
     Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
     int major, int minor, ShellLocale locale, Gate gate) {
+    this(store, pairing, factory, scheduler, worker, navigate, nativeActions, random, major, minor,
+      locale, gate, null);
+  }
+
+  /**
+   * Фоновая связь разрешает данным жить в свёрнутом приложении и при закрытом gate.
+   * Интерфейс остаётся заблокированным: выбор человека не открывает действия оболочки.
+   * Null сохраняет контракт прежних оболочек без блока настройки и без обхода gate.
+   */
+  public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
+    Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
+    int major, int minor, ShellLocale locale, Gate gate,
+    java.util.function.BooleanSupplier backgroundLink) {
     this.gate = gate;
     this.locale = locale;
     this.store = store;
@@ -115,7 +162,9 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     this.random = random;
     this.major = major;
     this.minor = minor;
-    state = new ShellState(store, major, minor, locale, gate == null ? null : gate::snapshot);
+    this.backgroundLink = backgroundLink;
+    state = new ShellState(store, major, minor, locale, gate == null ? null : gate::snapshot,
+      () -> nativeActions != null, backgroundLink);
   }
 
   /**
@@ -139,11 +188,20 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   }
 
   /**
+   * Прежние оболочки без настройки фоновой связи сохраняют закрытый фон и gate.
+   * Чтение признака не создаёт настройку там, где её нет.
+   */
+  private boolean backgroundLinkEnabled() {
+    return backgroundLink != null && backgroundLink.getAsBoolean();
+  }
+
+  /**
    * Заблокированный gate скрывает все транспорты: труба ответит 423 по статусу недоступности.
    * Открытие gate возвращает прежнюю выдачу без пересоздания соединений.
+   * Включённая фоновая связь сохраняет выдачу данных при закрытом интерфейсе.
    */
   public PipeTransport upstream(String id) {
-    if (gate != null && gate.locked()) {
+    if (gate != null && gate.locked() && !backgroundLinkEnabled()) {
       return null;
     }
 
@@ -233,7 +291,8 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
    * Probe выполняется вне потока HTTP, поэтому недоступная машина не задерживает UI.
    */
   public synchronized void connect(String id, boolean manual) {
-    if (id == null || closed || suspended || gate != null && gate.locked()) {
+    if (id == null || closed || suspended
+      || gate != null && gate.locked() && !backgroundLinkEnabled()) {
       return;
     }
 
@@ -337,6 +396,33 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   }
 
   /**
+   * Отсутствие нативного канала читается как unsupported, а не как отказ разрешения.
+   * Интерфейс отличает такую оболочку от браузера без Notification API.
+   */
+  private String notifyPermission() throws Exception {
+    return nativeActions == null ? "unsupported" : nativeActions.notifyPermission();
+  }
+
+  /**
+   * Поля оповещения принимаются только строками в пределах длины системного показа.
+   * Отсутствующее поле считается пустым, чужой тип отвергается до нативного вызова.
+   */
+  private String notifyText(JSONObject data, String key, int limit) {
+    Object value = data.opt(key);
+
+    if (value == null || value == JSONObject.NULL) {
+      return "";
+    }
+
+    if (!(value instanceof String) || ((String) value).length() > limit) {
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.invalidNotification", "Неверное оповещение."));
+    }
+
+    return (String) value;
+  }
+
+  /**
    * Имена параметров и значения разбираются отдельно без интерпретации пути.
    * Перегрузка с именем кодировки поддерживается начиная с минимального Android API.
    */
@@ -387,8 +473,11 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
     try {
       if (gate != null && gate.locked()) {
+        // Виджет получает только счётчики: обновление разрешено и при закрытом gate,
+        // интерфейс при этом остаётся заблокированным.
         boolean allowed = head.method().equals("GET") && path.equals("/__shell/state")
-          || head.method().equals("POST") && path.equals("/__shell/unlock");
+          || head.method().equals("POST") && path.equals("/__shell/unlock")
+          || head.method().equals("POST") && path.equals("/__shell/widget-refresh");
 
         if (!allowed) {
           return PipeResponse.error(423, "locked");
@@ -427,6 +516,73 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         return PipeResponse.json(200, state.snapshot());
       }
 
+      if (head.method().equals("POST") && path.equals("/__shell/background-link")) {
+        if (data.length() != 1 || !(data.opt("enabled") instanceof Boolean)) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.backgroundLinkInvalid", "Неверные поля фоновой связи."));
+        }
+
+        if (nativeActions != null) {
+          nativeActions.setBackgroundLink(data.getBoolean("enabled"));
+        }
+
+        state.changed();
+
+        return PipeResponse.json(200, state.snapshot());
+      }
+
+      if (path.equals("/__shell/notify-permission") && head.method().equals("GET")) {
+        return PipeResponse.json(200, new JSONObject().put("permission", notifyPermission()));
+      }
+
+      if (path.equals("/__shell/notify-permission") && head.method().equals("POST")) {
+        String permission = nativeActions == null ? "unsupported"
+          : nativeActions.requestNotifyPermission();
+
+        return PipeResponse.json(200, new JSONObject().put("permission", permission));
+      }
+
+      if (path.equals("/__shell/notify") && head.method().equals("POST")) {
+        String title = notifyText(data, "title", 200);
+        String bodyText = notifyText(data, "body", 2000);
+        String tag = notifyText(data, "tag", 200);
+        String url = notifyText(data, "url", 2048);
+
+        if (title.trim().isEmpty()) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.invalidNotification", "Неверное оповещение."));
+        }
+
+        boolean shown = nativeActions != null && nativeActions.notify(title, bodyText, tag, url);
+
+        return PipeResponse.json(200, new JSONObject()
+          .put("shown", shown).put("permission", notifyPermission()));
+      }
+
+      if (path.equals("/__shell/notify-cancel") && head.method().equals("POST")) {
+        String tag = notifyText(data, "tag", 200);
+
+        if (nativeActions != null) {
+          nativeActions.cancelNotification(tag);
+        }
+
+        return PipeResponse.json(200, new JSONObject().put("ok", true));
+      }
+
+      if (path.equals("/__shell/widget-refresh") && head.method().equals("POST")) {
+        if (data.length() != 0) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.widgetRefreshInvalid",
+              "Неверный запрос обновления виджета."));
+        }
+
+        if (nativeActions != null) {
+          nativeActions.refreshWidget();
+        }
+
+        return PipeResponse.json(200, new JSONObject().put("ok", true));
+      }
+
       String navigation = null;
       boolean move = false;
 
@@ -461,6 +617,27 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         move = current;
       } else if (path.startsWith("/__shell/profiles/") && head.method().equals("PATCH")) {
         JSONObject profile = store.get(path.substring("/__shell/profiles/".length()));
+
+        if (data.has("routePairing")) {
+          if (data.length() != 1 || !(data.opt("routePairing") instanceof String)) {
+            throw new IllegalArgumentException(
+              ShellLocale.text(locale, "native.invalidMachineFields", "Неверные поля машины."));
+          }
+
+          if (nativeActions != null) {
+            nativeActions.unlock();
+          }
+
+          pairing.updateRoutes(profile.getString("id"), data.getString("routePairing"));
+          state.changed();
+
+          if (profile.getString("id").equals(store.selected)) {
+            connect(store.selected, true);
+          }
+
+          return PipeResponse.json(200, new JSONObject().put("ok", true));
+        }
+
         String name = data.optString("name", profile.getString("name"));
         String address = data.optString("address", profile.getString("address"));
 
@@ -527,8 +704,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   /**
    * Фон закрывает транспорт, но сохраняет выбранную машину и ручное отключение.
    * Возврат создаёт новые соединения только после проверки срока аутентификации ключа.
+   * Включённая фоновая связь не закрывает транспорт: события продолжают доходить до документа.
    */
   public synchronized void suspend() {
+    if (backgroundLinkEnabled()) {
+      return;
+    }
+
     suspended = true;
     generations.replaceAll((id, generation) -> generation + 1);
 
@@ -548,8 +730,20 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   /**
    * Возврат из фона снимает приостановку, сохраняя ручной запрет соединения.
    * Просроченный доступ требует явной разблокировки вместо автоматического probe.
+   * Фоновая связь уже держит соединение; отсутствующее восстанавливается без пересоздания живых.
    */
   public synchronized void resume(boolean locked) throws Exception {
+    if (backgroundLinkEnabled()) {
+      suspended = false;
+
+      if (store.selected != null && !disabled.contains(store.selected)
+        && transports.get(store.selected) == null) {
+        connect(store.selected, false);
+      }
+
+      return;
+    }
+
     suspended = false;
 
     if (store.selected != null && disabled.contains(store.selected)) {

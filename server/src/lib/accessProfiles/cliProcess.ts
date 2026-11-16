@@ -1,10 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { prepareExternalCliRuntime } from '../providerInstall/externalCliRuntime.ts';
 import { acquireCliLease, type CliLease } from '../providerInstall/leases.ts';
@@ -39,6 +40,54 @@ function safeUrl(value: string, hosts: string[]): string | null {
       && !url.username && !url.password ? url.href : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Неизвестная версия допускается только при идентичном проверенном протоколе:
+ * сервер сам генерирует схемы CLI и сравнивает хэши login-контрактов,
+ * номер версии доказательством не считается. Изменённый протокол — честный отказ.
+ */
+async function protocolSchemasMatch(executable: string, env: NodeJS.ProcessEnv,
+  cli: NonNullable<AccessCapability['cli']>): Promise<boolean> {
+  const sets = cli.protocolSchemas;
+  if (!sets?.length) {
+    return false;
+  }
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'access-protocol-'));
+  try {
+    for (const extra of [['--experimental'], []]) {
+      try {
+        await execute(executable, ['app-server', 'generate-json-schema', ...extra, '--out', dir],
+          { env, timeout: 20_000, maxBuffer: 8192 });
+        break;
+      } catch {
+        // Прежние версии не знают флага; пробуем plain-вариант ниже.
+      }
+    }
+
+    for (const set of sets) {
+      let matched = true;
+      for (const [relative, hash] of Object.entries(set)) {
+        try {
+          const body = await fs.readFile(path.join(dir, relative));
+          if (createHash('sha256').update(body).digest('hex') !== hash) {
+            matched = false;
+            break;
+          }
+        } catch {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        return true;
+      }
+    }
+    return false;
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -99,8 +148,10 @@ async function startManagedLogin(capability: AccessCapability,
     maxBuffer: 8192,
   });
 
-  if (!new RegExp(`(^|[^0-9])${cli.version.replaceAll('.', '\\.')}([^0-9]|$)`, 'u')
-    .test(version.stdout)) {
+  const verifiedVersions = [cli.version, ...(cli.versions ?? [])];
+  const versionKnown = verifiedVersions.some((verified) => new RegExp(`(^|[^0-9])${verified.replaceAll('.', '\\.')}([^0-9]|$)`, 'u')
+    .test(version.stdout));
+  if (!versionKnown && !await protocolSchemasMatch(executable, env, cli)) {
     await callbacks.failed('unsupported');
     await lease?.release();
 

@@ -5,6 +5,9 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { detectStall } from '../../server/src/lib/stall.ts';
+import { parsePipeline } from '../../server/src/lib/pipelineParse.ts';
+import { buildRouteDef } from '../../server/src/lib/routeGraph.ts';
+import { ROUTE_DEFINITIONS } from '../engine/fixtures/routes-catalog-definitions.mjs';
 
 // Остановка `stop: human` — самая частая объявленная остановка маршрутов: замер по всем
 // опубликованным каталогам дал 2785 таких переходов против 184 `done`. При этом до
@@ -31,6 +34,61 @@ test('остановка human называет узел, который вер�
   assert.equal(stall.stage, 'HYPOSKEPTIC');
   assert.equal(stall.kind, 'human');
   assert.equal(stall.title.includes('HYPOSKEPTIC'), true);
+});
+
+// Без входных файлов это только сохранение старого канонического контракта.
+// Обязательный новый RED/GREEN — этот же consumer на настоящих H.7/H.8e артефактах.
+test('восстановленный human сохраняет карточку и узел открытия вопроса', async () => {
+  const paths = [
+    process.env.PENDING_RECOVERY_STAGES_PATH,
+    process.env.PENDING_RECOVERY_PIPELINE_PATH,
+    process.env.PENDING_RECOVERY_MACHINE_PATH,
+  ];
+  const supplied = paths.filter(Boolean).length;
+
+  assert.ok(supplied === 0 || supplied === paths.length, 'нужны все три artifact path');
+
+  let registry;
+  let logText;
+  let machine;
+
+  if (supplied === paths.length) {
+    // Никаких eval, source shell или синтетической замены полученного журнала.
+    logText = await fs.readFile(paths[0], 'utf8');
+    registry = parsePipeline(await fs.readFile(paths[1], 'utf8'));
+    machine = JSON.parse(await fs.readFile(paths[2], 'utf8'));
+  } else {
+    registry = {
+      STALLED_HUMAN: '1',
+      VERIFY: 'done',
+      VERIFY_COMMENT: 'готово',
+    };
+    logText = logOf(line('2026-08-27 18:25:32', 'VERIFY: маршрут остановлен: human'));
+    machine = structuredClone(ROUTE_DEFINITIONS.command.route);
+  }
+
+  assert.equal(registry.STALLED_HUMAN, '1');
+  assert.equal(registry.VERIFY, 'done');
+  assert.equal(registry.VERIFY_COMMENT, 'готово');
+
+  const stall = detectStall({
+    registry,
+    logText,
+    daemonAlive: false,
+  });
+
+  assert.ok(stall);
+  assert.equal(stall.kind, 'human');
+  assert.equal(stall.stage, 'VERIFY');
+  assert.equal(stall.stop, 'human');
+  assert.equal(stall.comment, 'готово');
+  assert.equal(stall.outcome, undefined, 'accepted done не становится failed');
+  assert.equal(stall.title, 'VERIFY: узел вернул решение человеку');
+  assert.equal(stall.hint.includes('не закоммичен'), false);
+
+  const graph = buildRouteDef(machine, 'command', { workspaceMode: 'shared' });
+
+  assert.equal(graph.keys.verify, stall.stage, 'карта интерфейса открывает verify');
 });
 
 // Журналы, написанные до правки движка, узла в строке не несут, и взять его неоткуда.

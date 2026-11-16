@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileTaskModal } from './helpers/task-modal.js';
@@ -40,7 +41,15 @@ async function mountLaunchForm(t, { launchOptions, launch = null }) {
     return () => listeners.delete(handler);
   };
   globalThis.__taskModalLaunchApi = {
+    /**
+     * Возможности карточки подтверждаются синтетическим каталогом независимо от деталей.
+     * Остальные ответы остаются в прежнем сценарии без обращения к реальному трекеру.
+     */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
       return {};
@@ -276,7 +285,15 @@ test('TaskModal выбирает project-beta, перечитывает feature 
   const launchCalls = [];
   globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__taskModalLaunchApi = {
+    /**
+     * Собственная фикстура запуска также подтверждает metadata карточки.
+     * Выбор профиля и ответы launch-options сохраняют прежний независимый сценарий.
+     */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
       return {};

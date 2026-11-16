@@ -12,7 +12,7 @@ import type { AccessProfileService } from './service.ts';
  * Исполнители берутся из эффективных цепочек агентных этапов, включая резервы.
  * Закреплённая попытка использует свой граф; новый start — проверяемый каталог запуска.
  */
-async function routeProviders(config: RouteConfig, task: string, args: string[]): Promise<string[]> {
+export async function routeProviders(config: RouteConfig, task: string, args: string[]): Promise<string[]> {
   const value = (flag: string) => args.includes(flag) ? args[args.indexOf(flag) + 1] ?? '' : '';
   const profile = value('--profile');
   const factory = new FactoryStateAdapter({
@@ -113,6 +113,7 @@ export async function preparePipelineAccess(service: AccessProfileService, confi
   return {
     env,
     environments,
+    providers,
     keys,
     rollback,
   };

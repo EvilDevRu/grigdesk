@@ -106,12 +106,34 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   assert.equal(publish.steps.find((step) => step.name === 'Публикация на сайт').env.RELEASE_SITE_PORT,
     "${{ secrets.RELEASE_SITE_PORT || '22' }}");
 
+  // Зависимости voice готовятся в каждом job до потребления его тестами или bundle.
+  // Outcome обязателен в общем gate, даже при continue-on-error самого шага.
+  for (const job of [server, web, build]) {
+    const install = job.steps.findIndex((step) =>
+      (step.run ?? '').includes('npm --prefix voice ci --include=dev'));
+    const consumer = job.steps.findIndex((step) => job === server ? step.id === 'voice_tests'
+      : job === web ? /npm --prefix web test/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
+
+    assert.ok(install >= 0 && consumer > install);
+  }
+
+  for (const job of [server, web, build]) {
+    const install = job.steps.findIndex((step) =>
+      (step.run ?? '').includes('npm --prefix routes ci --include=dev'));
+    const consumer = job.steps.findIndex((step) => job === server ? step.id === 'routes_tests'
+      : job === web ? /npm --prefix web test/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
+
+    assert.ok(install >= 0 && consumer > install);
+  }
+
   const serverGate = server.steps.find((step) => step.name === 'Подтверждение серверных проверок');
 
   for (const [id, result] of [
     ['server_tests', 'SERVER_RESULT'],
     ['shared_tests', 'SHARED_RESULT'],
     ['guide_tests', 'GUIDE_RESULT'],
+    ['voice_tests', 'VOICE_RESULT'],
+    ['routes_tests', 'ROUTES_RESULT'],
   ]) {
     const step = server.steps.find((entry) => entry.id === id);
 

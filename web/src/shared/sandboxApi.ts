@@ -6,6 +6,11 @@ import {
   parseSandboxJobLog,
   parseSandboxOverview,
 } from '../../../shared/plugins/sandboxes/sandboxContracts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface SandboxRaiseOptions {
   profile: string;
@@ -63,18 +68,30 @@ export const sandboxApi = {
 // отказы он формулирует сам, и вторая формулировка на клиенте разошлась бы с первой
 // (а склейка обеих давала бы «Стенд уже поднят. стенд 990000 уже поднят»).
 const MESSAGES: Record<string, string> = {
-  session_required: 'Песочницами управляет человек: нужен вход в GrigDesk.',
-  bad_profile: 'Профиль выбран неверно.',
-  bad_task: 'Номер стенда должен быть целым числом.',
-  bad_action: 'Действие названо неверно.',
-  sandbox_error: 'Сервер не смог выполнить действие — подробности в журнале GrigDesk.',
+  get session_required() {
+    return translateUi('core.sandboxApiSandboxesRequireAPersonToSignIn');
+  },
+  get bad_profile() {
+    return translateUi('core.sandboxApiInvalidProfileSelection');
+  },
+  get bad_task() {
+    return translateUi('core.sandboxApiTheEnvironmentNumberMustBeAnInteger');
+  },
+  get bad_action() {
+    return translateUi('core.sandboxApiInvalidActionName');
+  },
+  get sandbox_error() {
+    return translateUi('core.sandboxApiTheServerCouldNotPerformTheAction');
+  },
 };
 
 /**
  * Текст отказа для человека. Общий клиент кладёт тело ответа в `data`: текст сервера
  * точнее всего, а карта кодов закрывает те отказы, которые приходят без пояснения.
  */
-export function sandboxErrorMessage(error: unknown, fallback = 'Действие не удалось.'): string {
+export function sandboxErrorMessage(error: unknown, fallback = translateUi(
+  'core.sandboxApiTheActionFailed',
+)): string {
   const data = objectOrEmpty(objectOrEmpty(error).data);
   const detail = typeof data.message === 'string' ? data.message : '';
   const code = typeof data.error === 'string' ? data.error : '';

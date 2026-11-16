@@ -1,31 +1,29 @@
 <template>
-  <section class="route-rebase-dialog" role="dialog" aria-label="Перенос черновика">
-    <h3>Перенос черновика r{{ preview.draftRevision }}</h3>
-    <p>Новое основание: <code>{{ preview.currentCatalogHash.slice(0, 12) }}</code>.
-      Каждый выбор заменяет целый маршрут вместе с инструкциями или всю начальную разведку.</p>
-    <p v-if="!preview.conflicts.length">Пересечений нет. Независимые правки объединятся.</p>
+  <section class="route-rebase-dialog" role="dialog" :aria-label="t('core.routePerenosChernovika')">
+    <h3>{{ t('core.routePerenosChernovikaR') }}{{ preview.draftRevision }}</h3>
+    <p>{{ t('core.routeNovoeOsnovanie') }} <code>{{ preview.currentCatalogHash.slice(0, 12) }}</code>{{ t('core.routeKazhdyyVyborZamenyaetTselyy') }}</p>
+    <p v-if="!preview.conflicts.length">{{ t('core.routePeresecheniyNetNezavisimyePravki') }}</p>
     <div v-for="conflict in preview.conflicts" :key="keyOf(conflict)"
          class="route-rebase-dialog__conflict">
-      <strong>{{ conflict.scope === 'bootstrap' ? 'Начальная разведка' : conflict.routeId }}</strong>
+      <strong>{{ conflict.scope === 'bootstrap' ? t('core.routeNachalnayaRazvedka') : conflict.routeId }}</strong>
       <div class="route-rebase-dialog__versions">
-        <div><span>Основание</span><pre>{{ format(conflict.base) }}</pre></div>
-        <div><span>Моя версия</span><pre>{{ format(conflict.mine) }}</pre></div>
-        <div><span>Текущий каталог</span><pre>{{ format(conflict.current) }}</pre></div>
+        <div><span>{{ t('core.routeOsnovanie') }}</span><pre>{{ format(conflict.base) }}</pre></div>
+        <div><span>{{ t('core.routeMoyaVersiya') }}</span><pre>{{ format(conflict.mine) }}</pre></div>
+        <div><span>{{ t('core.routeTekuschiyKatalog') }}</span><pre>{{ format(conflict.current) }}</pre></div>
       </div>
-      <label>Какую версию оставить
-        <UiSelect :data-test="`rebase-choice-${keyOf(conflict)}`"
+      <label>{{ t('core.routeKakuyuVersiyuOstavit') }} <UiSelect :data-test="`rebase-choice-${keyOf(conflict)}`"
                   :model-value="choices[keyOf(conflict)] ?? ''"
                   @update:model-value="setChoice(conflict, String($event ?? ''))">
-          <option value="">Выберите</option>
-          <option value="mine">Мою</option>
-          <option value="current">Из текущего каталога</option>
+          <option value="">{{ t('core.routeVyberite') }}</option>
+          <option value="mine">{{ t('core.routeMoyu') }}</option>
+          <option value="current">{{ t('core.routeIzTekuschegoKataloga') }}</option>
         </UiSelect>
       </label>
     </div>
     <div class="route-rebase-dialog__actions">
-      <UiButton @click="$emit('cancel')">Отмена</UiButton>
+      <UiButton @click="$emit('cancel')">{{ t('core.cancel') }}</UiButton>
       <UiButton data-test="rebase-confirm" :disabled="busy || !resolved"
-                @click="confirm">Перенести черновик</UiButton>
+                @click="confirm">{{ t('core.routePerenestiChernovik') }}</UiButton>
     </div>
   </section>
 </template>
@@ -34,7 +32,7 @@
 import { computed, reactive, watch } from 'vue';
 import type { RouteRebaseConflict, RouteRebasePreview,
   RouteRebaseResolution } from '../../../../shared/pipeline/routesEditorContracts.ts';
-import { UiButton, UiSelect } from '../../ui';
+import { UiButton, UiSelect, t } from '../../ui';
 
 const props = defineProps<{ preview: RouteRebasePreview; busy: boolean }>();
 const emit = defineEmits<{ confirm: [resolutions: RouteRebaseResolution[]]; cancel: [] }>();

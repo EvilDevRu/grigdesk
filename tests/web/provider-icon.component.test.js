@@ -145,3 +145,25 @@ test('Tripo рисует оба контура оригинала, цвет те
   assert.match(notice, /Copyright \(c\) 2023 LobeHub/);
   assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS"/);
 });
+
+test('знак qwen монохромен в 15 и 19 px', async (t) => {
+  for (const size of [15, 19]) {
+    const wrapper = await mountIcon(t, { id: 'qwen', name: 'Qwen Code' }, size);
+    const svg = wrapper.find('svg');
+
+    assert.ok(svg.exists(), `${size}: Qwen должен показывать собственный SVG`);
+    assert.equal(wrapper.find('.fb').exists(), false);
+    assert.equal(svg.attributes('width'), String(size));
+    assert.equal(svg.attributes('height'), String(size));
+    assert.ok(svg.attributes('viewBox'));
+    assert.ok(svg.element.querySelectorAll('path, polygon, circle').length > 0);
+
+    const paints = [svg.element, ...svg.element.querySelectorAll('*')]
+      .flatMap((element) => ['fill', 'stroke'].map((name) => element.getAttribute(name)))
+      .filter(Boolean);
+
+    assert.ok(paints.includes('currentColor'));
+    assert.ok(paints.every((paint) => ['none', 'currentColor', 'inherit'].includes(paint)),
+      'Знак должен наследовать цвет текста');
+  }
+});

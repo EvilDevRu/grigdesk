@@ -17,10 +17,13 @@
 
 В корне находятся `GrigDesk`, `README.md` и служебный каталог `bin/`:
 
-- `grigdesk-server`, `b24`, `grigdesk-relay`, `deepseek`, `grigdesk-ctl`;
+- `grigdesk-server`, `tracker`, `pipeline`, `routes`, `voice`, `grigdesk-relay`, `deepseek`, `grigdesk-ctl`;
 - `lib/runtime-env.sh` для автономного ctl;
 - `bundle.json`: format 1, kind portable, версия, commit, dirty и список файлов
   с относительным path, size, mode и SHA256.
+
+`bin/pipeline` собирается из tracker/, `bin/routes` — из отдельного routes/.
+Оба входят в payload с собственными размером, SHA256 и правами 0755.
 
 Опись не включает саму себя. Внешний checksum содержит SHA256 архива и
 `release/bin/bundle.json`; из родительского каталога его проверяют командой

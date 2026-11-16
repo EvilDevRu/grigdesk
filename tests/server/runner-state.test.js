@@ -236,6 +236,48 @@ test('runner state falls back from stage policy to project policy', () => {
   assert.equal(resolveRunnerState(profile, {}, 'BUILD').source, 'profile-project');
 });
 
+test('локальная модель и effort не меняют фактический запуск и независимое наследование', () => {
+  const profile = {
+    PROJECT_RUNNER_PRIMARY: 'codex',
+    MODEL_DEFAULT_CODEX_EXACT: 'profile-model',
+    MODEL_DEFAULT_CODEX_EFFORT: 'high',
+  };
+  const registry = {
+    RUNNER_OVERRIDE_STAGE_BUILD: 'claude',
+    RUNNER_ACTUAL_BUILD: 'codex',
+    MODEL_ACTUAL_BUILD: 'running-model',
+    RUNNER_REASON_BUILD: 'primary',
+  };
+  const settings = {
+    selection: {
+      primary: null,
+      parametersFor: 'codex',
+      model: 'next-model',
+      effort: '',
+    },
+    failover: [],
+  };
+  const runner = resolveRunnerState(profile, registry, 'BUILD', [], settings);
+
+  assert.equal(runner.primary, 'codex', 'null снимает прежний stage override');
+  assert.equal(runner.model, 'running-model');
+  assert.equal(runner.models.codex.exact, 'next-model');
+  assert.equal(runner.models.codex.effort, '');
+
+  settings.selection.primary = 'claude';
+  settings.selection.parametersFor = 'claude';
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).switched, false,
+    'настройка следующего запуска не превращает текущего primary в резерв');
+  settings.selection.primary = null;
+  settings.selection.parametersFor = 'codex';
+
+  settings.selection.model = null;
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).models.codex.exact,
+    'profile-model');
+  settings.selection.parametersFor = 'claude';
+  assert.equal(resolveRunnerState(profile, registry, 'BUILD', [], settings).models.codex.effort, 'high');
+});
+
 test('active failover reason comes from completed primary attempt, not stale registry data', () => {
   const runner = {
     primary: 'claude',
@@ -405,4 +447,48 @@ test('runner work time sums process spans instead of gaps between route events',
     ['BUILD', 'LINT'],
     { sinceMs: Date.now() + 60_000 },
   ), null, 'run-каталоги предыдущей attempt не попадают в новый счётчик');
+});
+
+// К4: отсутствие поля в legacy и явно пустой effort запуска различаются.
+test('explicit-empty-effort-is-not-missing', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'stage-empty-effort-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  for (const [id, effort] of [['empty', 'EFFORT=\n'], ['legacy', '']]) {
+    const run = path.join(root, 'logs/runs/t81/PLAN', id);
+
+    await mkdir(run, { recursive: true });
+    await writeFile(path.join(run, 'meta.env'), `RUNNER=codex\nMODEL=model-a\n${effort}`);
+  }
+
+  const attempts = await readRunnerAttempts(root, '81', 'PLAN');
+
+  assert.equal(attempts.find((attempt) => attempt.id === 'empty').effort, '');
+  assert.equal(attempts.find((attempt) => attempt.id === 'legacy').effort, null);
+});
+
+test('legacy-history-does-not-displace-new-epochs-from-recent-attempts', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'stage-legacy-history-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  for (let index = 0; index < 22; index += 1) {
+    const run = path.join(root, 'logs/runs/t81/PLAN', `legacy-${index}`);
+
+    await mkdir(run, { recursive: true });
+    await writeFile(path.join(run, 'meta.env'), 'RUNNER=codex\nMODEL=legacy-model\n');
+  }
+
+  const current = path.join(root, 'logs/runs/t81/PLAN/current-run');
+
+  await mkdir(current, { recursive: true });
+  await writeFile(path.join(current, 'meta.env'), 'RUNNER=codex\nMODEL=current-model\nEPOCH=2\n');
+
+  const attempts = await readRunnerAttempts(root, '81', 'PLAN');
+
+  assert.equal(attempts.length, 20);
+  assert.equal(attempts.at(-1).id, 'current-run');
+  assert.equal(attempts.at(-1).epoch, 2);
+  assert.ok(attempts.some((attempt) => attempt.epoch === null), 'legacy история остаётся доступной');
 });

@@ -11,9 +11,9 @@
 //
 // Токен живёт в URL, поэтому любая ошибка чистится от него перед выбросом:
 // сообщение уедет и в лог, и на экран.
-import { setTimeout as wait } from 'node:timers/promises';
-
 import { maskToken } from './token.ts';
+import { isolatedFetchWithLimits } from '../isolatedFetch.ts';
+import { delayWithAbort } from '../../../../shared/lib/delay.ts';
 
 type Payload = Record<string, unknown>;
 
@@ -21,6 +21,7 @@ type Payload = Record<string, unknown>;
 // повтор только там, где он безопасен, — решает это вызывающий, а не клиент.
 export interface BotApiOptions {
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
   timeoutMs?: number;
   retries?: number;
   limit?: number;
@@ -51,18 +52,39 @@ function apiError(message: string, kind: string, extra: Payload = {}): Error {
  * Отказ самого Телеграма (`kind: 'telegram'`) не повторяется никогда: неверный
  * токен, отсутствие прав и файл сверх предела ожиданием не лечатся.
  */
-async function retryTransport<Result>(attempt: () => Promise<Result>, { retries = 0, sleepImpl = wait }: {
+async function retryTransport<Result>(attempt: () => Promise<Result>, {
+  retries = 0, sleepImpl, signal,
+}: {
   retries?: number;
   sleepImpl?: (ms: number) => Promise<void>;
+  signal?: AbortSignal;
 } = {}): Promise<Result> {
   const allowed = Math.max(0, Math.min(Number(retries) || 0, RETRY_DELAYS_MS.length));
 
   for (let done = 0; ; done += 1) {
     try {
+      if (signal?.aborted) {
+        throw apiError('запрос отменён', 'transport', { code: 'ABORT_ERR' });
+      }
+
       return await attempt();
     } catch (err) {
-      if ((err as { kind?: unknown } | null)?.kind !== 'transport' || done >= allowed) throw err;
-      await sleepImpl(Number(RETRY_DELAYS_MS[done]));
+      if (signal?.aborted || (err as { kind?: unknown } | null)?.kind !== 'transport'
+        || done >= allowed) {
+        throw err;
+      }
+
+      const pause = Number(RETRY_DELAYS_MS[done]);
+
+      try {
+        await (sleepImpl ? sleepImpl(pause) : delayWithAbort(pause, signal));
+      } catch (error) {
+        if (signal?.aborted) {
+          throw apiError('запрос отменён', 'transport', { code: 'ABORT_ERR' });
+        }
+
+        throw error;
+      }
     }
   }
 }
@@ -90,45 +112,96 @@ export async function callBotApi(
   return retryTransport(() => callBotApiOnce(token, method, body, opts), opts);
 }
 
+/**
+ * Deadline охватывает и заголовки, и всё тело ответа. Реальная сеть всегда
+ * принадлежит isolatedFetch; подмена транспорта остаётся доступна тестам.
+ */
+async function request<Result>(
+  token: string,
+  url: string,
+  init: RequestInit,
+  opts: BotApiOptions,
+  timeoutMs: number,
+  maxBytes: number,
+  consume: (response: Response) => Promise<Result>,
+): Promise<Result> {
+  const ac = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal;
+  const timer = setTimeout(() => {
+    ac.abort(new DOMException('Срок запроса истёк.', 'TimeoutError'));
+  }, timeoutMs);
+
+  try {
+    const response = opts.fetchImpl
+      ? await opts.fetchImpl(url, { ...init, signal })
+      : await isolatedFetchWithLimits(url, { ...init, signal }, { timeoutMs, maxBytes });
+
+    return await consume(response);
+  } catch (err) {
+    if ((err as { kind?: unknown })?.kind === 'telegram') {
+      throw err;
+    }
+
+    const failure = err as {
+      message?: unknown;
+      code?: unknown;
+      cause?: { code?: string };
+    };
+
+    if (failure?.cause?.code === 'response_too_large') {
+      throw apiError('ответ больше допустимого предела бота', 'telegram');
+    }
+
+    const why = opts.signal?.aborted
+      ? 'запрос отменён'
+      : ac.signal.aborted
+        ? `нет ответа за ${Math.round(timeoutMs / 1000)} с`
+        : String(failure?.message ?? err);
+
+    throw apiError(scrubToken(why, token), 'transport', {
+      code: signal.aborted ? 'ABORT_ERR' : failure?.code || failure?.cause?.code || 'NETWORK_ERR',
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Одна попытка метода Bot API сохраняет различие сети и отказа Telegram.
+ * Длинный getUpdates получает собственный срок и больший bounded JSON-снимок.
+ */
 async function callBotApiOnce(
   token: string,
   method: string,
   body?: Payload,
   opts: BotApiOptions = {},
 ): Promise<Payload> {
-  const { fetchImpl = fetch, timeoutMs = 15000 } = opts;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  let res: Response;
+  const poll = method === 'getUpdates';
+  const timeoutMs = opts.timeoutMs ?? (poll ? ((Number(body?.timeout) || 0) + 10) * 1000 : 15_000);
 
-  try {
-    res = await fetchImpl(`${BASE}/bot${token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body || {}),
-      signal: ac.signal,
-    });
-  } catch (err) {
-    const failure = err as { message?: unknown; code?: unknown };
-    const why = ac.signal.aborted
-      ? `нет ответа за ${Math.round(timeoutMs / 1000)} с`
-      : String(failure?.message ?? err);
+  return request(token, `${BASE}/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  }, opts, timeoutMs, poll ? 8 * 1024 * 1024 : 2 * 1024 * 1024, async (res) => {
+    let json: Payload = {};
 
-    throw apiError(scrubToken(why, token), 'transport', { code: failure?.code || 'ABORT_ERR' });
-  } finally {
-    clearTimeout(timer);
-  }
+    try {
+      json = await res.json() as Payload;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+    }
 
-  let json: Payload = {};
+    if (!json.ok) {
+      const why = String(json.description || `HTTP ${res.status}`);
 
-  try { json = await res.json() as Payload; } catch { /* пустое тело разберём ниже по коду */ }
-  if (!json.ok) {
-    const why = String(json.description || `HTTP ${res.status}`);
+      throw apiError(scrubToken(why, token), 'telegram', { status: res.status });
+    }
 
-    throw apiError(scrubToken(why, token), 'telegram', { status: res.status });
-  }
-
-  return json.result as Payload;
+    return json.result as Payload;
+  });
 }
 
 /**
@@ -172,42 +245,37 @@ export async function downloadFile(
   return retryTransport(() => downloadFileOnce(token, filePath, opts), opts);
 }
 
+/**
+ * Загрузка ограничена временем и распакованными байтами до буферизации в сервере.
+ * FILE_LIMIT сохраняется независимо от отсутствующего Content-Length.
+ */
 async function downloadFileOnce(
   token: string,
   filePath: string,
   opts: BotApiOptions = {},
 ): Promise<Buffer> {
-  const { fetchImpl = fetch, timeoutMs = 60000, limit = FILE_LIMIT } = opts;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  let res: Response;
+  const { timeoutMs = 60_000, limit = FILE_LIMIT } = opts;
 
-  try {
-    res = await fetchImpl(`${BASE}/file/bot${token}/${filePath}`, { signal: ac.signal });
-  } catch (err) {
-    const failure = err as { message?: unknown; code?: unknown };
-    const why = ac.signal.aborted
-      ? `нет ответа за ${Math.round(timeoutMs / 1000)} с`
-      : String(failure?.message ?? err);
+  return request(token, `${BASE}/file/bot${token}/${filePath}`, {}, opts,
+    timeoutMs, Math.min(limit, FILE_LIMIT), async (res) => {
+      if (!res.ok) {
+        throw apiError(scrubToken(`HTTP ${res.status}`, token), 'telegram', { status: res.status });
+      }
 
-    throw apiError(scrubToken(why, token), 'transport', { code: failure?.code || 'ABORT_ERR' });
-  } finally {
-    clearTimeout(timer);
-  }
+      const declared = Number(res.headers?.get?.('content-length') || 0);
 
-  if (!res.ok) {
-    throw apiError(scrubToken(`HTTP ${res.status}`, token), 'telegram', { status: res.status });
-  }
-  const declared = Number(res.headers?.get?.('content-length') || 0);
-  if (declared > limit) {
-    throw apiError(`файл ${Math.round(declared / 1024 / 1024)} МБ — больше предела бота`, 'telegram');
-  }
+      if (declared > limit) {
+        throw apiError('файл больше предела бота', 'telegram');
+      }
 
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.length > limit) {
-    throw apiError(`файл ${Math.round(buffer.length / 1024 / 1024)} МБ — больше предела бота`, 'telegram');
-  }
-  return buffer;
+      const buffer = Buffer.from(await res.arrayBuffer());
+
+      if (buffer.length > limit) {
+        throw apiError('файл больше предела бота', 'telegram');
+      }
+
+      return buffer;
+    });
 }
 
 /**

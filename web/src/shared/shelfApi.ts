@@ -20,8 +20,7 @@ export interface ShelfPutRequest {
  * Отсутствие полной ссылки сохраняет прежнюю ручку дефолтной доски.
  */
 function shelfUrl(taskId: string, source: TaskPersonalSource, taskSource?: string): string {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
-    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
+  const prefix = taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
 
   return `/api/${prefix}/task-shelf/${encodeURIComponent(taskId)}`;
 }
@@ -34,11 +33,10 @@ function shelfUrl(taskId: string, source: TaskPersonalSource, taskSource?: strin
 export const shelfApi = {
   /**
    * Проверяет владельца адресной ветки до чтения её меток.
-   * Собственный источник не запрашивает внешнюю identity.
+   * Прежний числовой вход использует подключение по умолчанию.
    */
   async list(source: TaskPersonalSource = 'tracker', taskSource?: string): Promise<ShelfState> {
-    const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
-    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
+    const prefix = taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
     const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
     const value: unknown = await api.get(`/api/${prefix}/task-shelf`, target?.options);
 
@@ -62,7 +60,7 @@ export const shelfApi = {
     };
     const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
     const value: unknown = await api.put(shelfUrl(taskId, source, taskSource), body,
-      target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
+      target?.options ?? trackerMutationOptions());
 
     return parseShelfState(value);
   },
@@ -76,7 +74,7 @@ export const shelfApi = {
   ): Promise<ShelfState> {
     const target = taskSource ? await resolveTrackerTarget(taskSource as TaskSourceId, api) : null;
     const value: unknown = await api.del(shelfUrl(taskId, source, taskSource), undefined,
-      target?.options ?? (source === 'tracker' ? trackerMutationOptions() : {}));
+      target?.options ?? trackerMutationOptions());
 
     return parseShelfState(value);
   },

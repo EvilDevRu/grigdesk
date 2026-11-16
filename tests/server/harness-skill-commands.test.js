@@ -8,6 +8,8 @@ import test from 'node:test';
 import { readHarnessSkillCommands } from '../../server/src/lib/deepseek/skillCommands.ts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
+import qwen from '../../server/src/lib/executors/qwen.ts';
+import { resolveQwenSkills } from '../../server/src/lib/qwen/skills.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -86,6 +88,49 @@ test('Harness соблюдает user-invocable и строгую граммат
 
   assert.deepEqual(commands.map((command) => command.cmd), ['/explicit-only', '/human']);
   assert.deepEqual(await readHarnessSkillCommands({ home: path.join(f.home, 'missing') }), []);
+});
+
+test('Qwen публикует общие bundles, ссылки и явные навыки; скрывает flat и model-only', async (t) => {
+  const f = await fixture(t);
+  const previousHome = process.env.HOME;
+
+  process.env.HOME = f.home;
+  t.after(() => {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  });
+
+  await f.write('split-commit', 'name: split-commit\ndescription: Разобрать изменения');
+  await f.write('explicit', 'name: explicit\ndescription: Явный вызов\ndisable-model-invocation: true');
+  await f.write('hidden', 'name: hidden\ndescription: Только модели\nuser-invocable: false');
+  await f.write('broken', 'name: [invalid');
+  await fs.writeFile(path.join(f.skills, 'flat.md'), '---\nname: flat\ndescription: Плоский\n---');
+
+  const linked = path.join(f.home, 'linked-bundle');
+
+  await fs.mkdir(linked);
+  await fs.writeFile(path.join(linked, 'SKILL.md'), '---\nname: linked\ndescription: По ссылке\n---');
+  await fs.symlink(linked, path.join(f.skills, 'linked'));
+  await fs.symlink(path.join(f.home, 'missing'), path.join(f.skills, 'missing'));
+
+  const commands = await qwen.commands({});
+
+  assert.deepEqual(commands.map((entry) => entry.cmd), ['/explicit', '/linked', '/split-commit']);
+  assert.ok(commands.every((entry) => entry.kind === 'skill' && entry.run === 'prompt'));
+  assert.deepEqual(await resolveQwenSkills(), { directories: [f.skills], roots: [f.skills, linked] });
+  assert.deepEqual(await resolveQwenSkills(path.join(f.home, 'missing')), { directories: [], roots: [] });
+
+  const brokenHome = path.join(f.home, 'file-catalog');
+
+  await fs.mkdir(path.join(brokenHome, '.agents'), { recursive: true });
+  await fs.writeFile(path.join(brokenHome, '.agents', 'skills'), 'Это файл, а не каталог');
+  assert.deepEqual(await resolveQwenSkills(brokenHome), { directories: [], roots: [] });
+
+  await fs.rm(path.join(f.skills, 'split-commit'), { recursive: true });
+  assert.deepEqual((await qwen.commands({})).map((entry) => entry.cmd), ['/explicit', '/linked']);
 });
 
 test('Источник grigdesk-connect-project распознаётся меню без запуска сервера', async (t) => {

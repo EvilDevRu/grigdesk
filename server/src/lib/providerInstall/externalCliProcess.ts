@@ -21,6 +21,14 @@ export interface ExternalCliProcessContext {
 const contexts = new AsyncLocalStorage<ExternalCliProcessContext>();
 const leaseJobs = new AsyncLocalStorage<string>();
 
+// Контейнерный launcher удерживает тот же выбор CLI, даже когда запускается bwrap.
+// Копия контекста не позволяет адаптеру заменить окружение соседнего вызова.
+export function currentExternalCliProcess(): ExternalCliProcessContext | undefined {
+  const context = contexts.getStore();
+
+  return context ? { ...context, env: { ...context.env } } : undefined;
+}
+
 /**
  * Открытие живой сессии чата помечает spawns своего вызова разговором.
  * Метка попадает в lease-запись хелпера и позволяет окну установки показать,
@@ -114,6 +122,23 @@ function launchArguments(file: string, rest: unknown[], mode: 'spawn' | 'execFil
     env: launchEnvironment(context, options.env),
     detached: true,
   }, ...tail];
+}
+
+/**
+ * OS-владелец получает ту же команду helper/lease, что обычный spawn выбранного CLI.
+ * Выбор executable, access overlay, identity и метка чата остаются в одном контракте.
+ */
+export function externalCliSpawnSpec(file: string, args: string[], options: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}) {
+  const prepared = launchArguments(file, [args, options]);
+
+  return {
+    command: String(prepared[0]),
+    args: prepared[1] as string[],
+    options: prepared[2] as { cwd: string; env: NodeJS.ProcessEnv },
+  };
 }
 
 /**

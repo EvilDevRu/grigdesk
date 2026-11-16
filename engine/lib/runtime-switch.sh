@@ -120,6 +120,19 @@ runtime_switch_request() {
     pipeline_lock_release "$lock_fd"
     return "$rc"
   }
+  if (( RUNTIME_SWITCH_LIFECYCLE == 1 )); then
+    local settings_identity
+    settings_identity=$(jq -cn --arg task "$task" --arg profile "$FACTORY_LIFECYCLE_PROFILE" \
+      --arg attempt "$FACTORY_LIFECYCLE_ATTEMPT_ID" --arg node "$FACTORY_LIFECYCLE_NODE_ID" \
+      --arg stage "$stage" '{task:$task,profile:$profile,attempt:$attempt,node:$node,stage:$stage}')
+    python3 "$FACTORY_HOME/lib/stage-runner-settings.py" pending \
+      "$(factory_control_root)" "$settings_identity" || {
+      rc=$?
+      rm -f -- "$backup"
+      pipeline_lock_release "$lock_fd"
+      return "$rc"
+    }
+  fi
   tmp=$(mktemp "$(dirname "$request")/.switch.XXXXXX") || {
     rm -f -- "$backup"
     pipeline_lock_release "$lock_fd"

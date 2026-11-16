@@ -330,6 +330,48 @@ test('Исполнители: очередь и исходы общей сесс
     }
   });
 
+  await t.test('ACK выбора не отменяет более свежую смену или удаление доступа', async () => {
+    for (const latest of ['external', null]) {
+      const provider = {
+        id: 'alpha',
+        credentials: [{
+          env: 'SERVICE',
+          kind: 'choice',
+          label: 'Сервис',
+          value: 'previous',
+          set: true,
+          options: ['previous', 'own', 'external'].map((value) => ({ value, label: value })),
+        }],
+      };
+      const port = {
+        providers: [provider],
+        loaded: true,
+        whenRegistryReady: async () => ({ ok: true }),
+        async saveCredentials() {
+          provider.credentials[0].value = latest;
+
+          return { ok: true, savedChoices: { SERVICE: 'own' } };
+        },
+      };
+      const session = createSettingsSession();
+
+      session.begin();
+      session.register(module.createProviderCredentialsAdapter('alpha', port), [{
+        key: 'SERVICE',
+        address: { pageId: 'agents.providers', fieldPath: ['credentials', 'SERVICE'] },
+      }]);
+      await session.load('providerCredentials:alpha');
+      session.setField('providerCredentials:alpha', 'SERVICE', 'own');
+
+      const result = await session.apply();
+
+      assert.equal(result.status, 'success');
+      assert.equal(session.getValue('providerCredentials:alpha', 'SERVICE'), latest);
+      assert.equal(session.getSnapshot().dirtyCount, 0);
+      session.dispose();
+    }
+  });
+
   await t.test('PR11: новая схема после доступа удерживает исчезнувшее dirty без отправки поля', async () => {
     const { store, pinia } = fixture();
     const settings = module.useSettingsStore(pinia);
@@ -390,6 +432,13 @@ test('Исполнители: очередь и исходы общей сесс
     const providers = module.useProvidersStore(pinia);
     const settings = module.useSettingsStore(pinia);
     const calls = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async (url) => {
+      assert.equal(String(url), '/api/settings/prefs');
+
+      return Response.json({ providerUsageAutoRefresh: false, providerUsagePolicyRevision: 0 });
+    };
 
     providers.loaded = true;
     providers.providers = ['alpha', 'beta'].map((id, index) => ({
@@ -442,6 +491,7 @@ test('Исполнители: очередь и исходы общей сесс
     } finally {
       page.unmount();
       settings.dispose();
+      globalThis.fetch = originalFetch;
     }
   });
 

@@ -111,7 +111,8 @@ function instrument(source, id) {
     if (heavyName === 'renderMermaid') {
       const renderer = path.relative(path.dirname(id), rendererPath).split(path.sep).join('/');
 
-      code = replaceOnce(code, "new URL('../../../.generated/markdown/mermaid-renderer.js', import.meta.url)",
+      code = replaceOnce(code,
+        'new URL(' + "'../../../.generated/markdown/mermaid-renderer.js', import.meta.url)",
         `new URL(${JSON.stringify(renderer)}, import.meta.url)`);
     }
 

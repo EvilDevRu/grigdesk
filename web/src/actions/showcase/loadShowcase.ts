@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { runtimeOf } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Обзор раздела. Одновременные вызовы разделяют один запрос: список открывают
@@ -36,7 +41,9 @@ export function loadShowcase(store: ShowcaseStore,
         }
       } catch (error) {
         if (generation === runtime.generation) {
-          store.setError(showcaseErrorMessage(error, 'Не удалось прочитать список роликов.'));
+          store.setError(
+            showcaseErrorMessage(error, translateUi('core.loadShowcaseCouldNotReadTheVideoList')),
+          );
         }
       }
     } while (runtime.refreshPending);

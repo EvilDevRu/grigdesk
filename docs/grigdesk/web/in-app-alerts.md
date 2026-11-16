@@ -32,6 +32,13 @@ SSH- и DB-подтверждения поступают отдельной св
 Исчезновение тоста закрывает системное уведомление с тем же id — через экземпляр
 Notification. Service worker не используется; иконка — встроенный PNG data URL.
 
+В Android-приложении WebView не реализует Notification API: системный показ идёт нативным
+каналом оболочки через трубу (`/__shell/notify`), когда снимок объявляет capability `notify`.
+Браузерный канал с выданным разрешением сохраняет приоритет; без обоих каналов остаётся
+мигание заголовком. Разрешение и тестовый показ запрашивает кнопка в настройках устройства,
+нативные теги гасятся тем же каналом. Контракт и ограничения описаны в
+[системных оповещениях приложения](../mobile/notifications.md).
+
 Быстрое разрешение допустимо только для объекта `kind: 'perm'`, который тост может
 показать целиком. Отклоняются источники SSH и DB; `ExitPlanMode` и запросы с планом;
 непустой `input.kind` (включая внешнюю страницу); непустые варианты выбора и diff;
@@ -100,7 +107,7 @@ Notification. Service worker не используется; иконка — в�
 
 Проверки поведения: `alert-history.test.js`, `alert-history-popover.component.test.js`,
 `ui-toasts.test.js`, `ui-toast-host.component.test.js`,
-`ui-dependency-boundary.test.js`, `device-notify.test.js`, `alert-targets.test.js`,
+`ui-dependency-boundary.test.js`, `device-notify.test.js`, `shell-notify.test.js`, `alert-targets.test.js`,
 `quick-permission.test.js`, `alerts.test.js`, `alert-deep-links.test.js`,
 `chat-store-reveal.test.js`, `chat-layout-resize.component.test.js`,
 `in-app-alerts-wiring.contract.test.js`, `chat-store-alerts.test.js`,

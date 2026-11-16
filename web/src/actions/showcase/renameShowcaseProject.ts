@@ -1,6 +1,11 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { loadShowcase } from './loadShowcase';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Переименование открытого ролика. Имя ему даёт сервер по стенду, но человек вправе
@@ -24,7 +29,9 @@ export async function renameShowcaseProject(store: ShowcaseStore, title: string)
 
     return true;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось переименовать ролик.'));
+    store.setError(
+      showcaseErrorMessage(error, translateUi('core.renameShowcaseProjectCouldNotRenameTheVideo')),
+    );
 
     return false;
   } finally {

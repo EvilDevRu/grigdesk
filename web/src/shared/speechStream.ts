@@ -1,6 +1,11 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { api } from './apiClient.ts';
 import defaultWorkletUrl from './speechPcmWorklet.ts?worker&url';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 interface StreamMessage extends Record<string, unknown> {
   type: string;
@@ -122,7 +127,7 @@ function asError(error: unknown, fallbackCode = 'speech_stream_failed') {
     return error;
   }
 
-  const result: StreamError = new Error(String(error || 'Live-распознавание недоступно'));
+  const result: StreamError = new Error(String(error || t('core.coreLiveRaspoznavanieNedostupno')));
 
   result.code = fallbackCode;
 
@@ -141,7 +146,7 @@ function protocolError(message: string) {
  * Отмена отличается от отказа сервера именем AbortError и стабильным кодом.
  * Эти признаки сохраняются при завершении внутренних ожиданий транспорта.
  */
-function abortError(message = 'Live-распознавание отменено') {
+function abortError(message = t('core.speechLiveCancelled')) {
   const error: StreamError = new Error(message);
 
   error.name = 'AbortError';
@@ -156,7 +161,7 @@ function abortError(message = 'Live-распознавание отменено'
  */
 function parseServerMessage(raw: unknown): StreamMessage {
   if (typeof raw !== 'string') {
-    throw protocolError('Сервер речи прислал не JSON-сообщение');
+    throw protocolError(t('core.coreServerRechiPrislalNe'));
   }
 
   let message: unknown;
@@ -164,11 +169,11 @@ function parseServerMessage(raw: unknown): StreamMessage {
   try {
     message = JSON.parse(raw);
   } catch {
-    throw protocolError('Сервер речи прислал повреждённый JSON');
+    throw protocolError(t('core.coreServerRechiPrislalPovrezhdennyy'));
   }
 
   if (!isStreamMessage(message)) {
-    throw protocolError('В сообщении сервера речи отсутствует type');
+    throw protocolError(t('core.coreVSoobscheniiServeraRechi'));
   }
 
   return message;
@@ -180,13 +185,13 @@ function parseServerMessage(raw: unknown): StreamMessage {
  */
 function validateStart({ mediaStream, sessionId, revision }: StreamOptions) {
   if (!mediaStream || typeof mediaStream !== 'object') {
-    throw new TypeError('Для live-распознавания нужен MediaStream');
+    throw new TypeError(t('core.coreDlyaLiveRaspoznavaniyaNuzhen'));
   }
   if (typeof sessionId !== 'string' || !sessionId.trim()) {
-    throw new TypeError('Для live-распознавания нужен sessionId');
+    throw new TypeError(t('core.coreDlyaLiveRaspoznavaniyaNuzhen2'));
   }
   if (typeof revision !== 'string' || !revision) {
-    throw new TypeError('Для live-распознавания нужна revision настроек речи');
+    throw new TypeError(t('core.coreDlyaLiveRaspoznavaniyaNuzhna'));
   }
 }
 
@@ -204,7 +209,7 @@ function sameAudioContract(audio: unknown) {
  */
 export function encodeSpeechPcmPacket(seq: number, pcm: unknown) {
   if (!Number.isSafeInteger(seq) || seq < 1 || seq > 0xffffffff) {
-    throw new RangeError('seq PCM-кадра вне диапазона uint32');
+    throw new RangeError(t('core.coreSeqPcmKadraVne'));
   }
 
   const bytes = pcm instanceof ArrayBuffer
@@ -214,7 +219,7 @@ export function encodeSpeechPcmPacket(seq: number, pcm: unknown) {
       : null;
 
   if (!bytes || !bytes.byteLength || bytes.byteLength % 2 !== 0) {
-    throw new TypeError('PCM-кадр должен быть непустым набором 16-битных samples');
+    throw new TypeError(t('core.corePcmKadrDolzhenByt'));
   }
 
   const packet = new ArrayBuffer(4 + bytes.byteLength);
@@ -321,7 +326,7 @@ class SpeechStreamSession {
       throw abortError();
     }
     if (typeof WebSocketCtor !== 'function') {
-      throw asError('Браузер не поддерживает WebSocket', 'speech_stream_unsupported');
+      throw asError(t('core.coreBrauzerNePodderzhivaetWebsocket'), 'speech_stream_unsupported');
     }
 
     if (signal) {
@@ -365,17 +370,17 @@ class SpeechStreamSession {
       this.#onSocketMessage(event);
     };
     socket.onerror = () => {
-      this.#fail(asError('Соединение live-распознавания оборвалось'));
+      this.#fail(asError(t('core.coreSoedinenieLiveRaspoznavaniyaOborvalos')));
     };
     socket.onclose = () => {
       if (this.state === 'done' || this.state === 'cancelled' || this.state === 'failed') {
         return;
       }
 
-      this.#fail(asError('Сервер закрыл live-распознавание до результата'));
+      this.#fail(asError(t('core.coreServerZakrylLiveRaspoznavanie')));
     };
     this.readyTimer = setTimeout(() => {
-      this.#fail(asError('Сервер речи не подтвердил готовность вовремя', 'speech_stream_ready_timeout'));
+      this.#fail(asError(t('core.coreServerRechiNePodtverdil'), 'speech_stream_ready_timeout'));
     }, readyTimeoutMs);
 
     try {
@@ -456,13 +461,13 @@ class SpeechStreamSession {
     switch (message.type) {
       case 'ready':
         if (this.state !== 'connecting' || this.ready.settled) {
-          this.#fail(protocolError('Повторное или позднее ready от сервера речи'));
+          this.#fail(protocolError(t('core.corePovtornoeIliPozdneeReady')));
 
           return;
         }
         if (message.protocolVersion !== SPEECH_STREAM_PROTOCOL_VERSION
           || !sameAudioContract(message.audio)) {
-          this.#fail(protocolError('Версия или PCM-контракт сервера речи не совпадает с клиентом'));
+          this.#fail(protocolError(t('core.coreVersiyaIliPcmKontrakt')));
 
           return;
         }
@@ -476,7 +481,7 @@ class SpeechStreamSession {
         return;
       case 'ack': {
         if (!['starting', 'recording', 'stopping'].includes(this.state)) {
-          this.#fail(protocolError('ack получен до ready сервера речи'));
+          this.#fail(protocolError(t('core.coreAckPoluchenDoReady')));
 
           return;
         }
@@ -485,7 +490,7 @@ class SpeechStreamSession {
 
         if (typeof ackSeq !== 'number' || !Number.isSafeInteger(ackSeq)
           || ackSeq < 0 || ackSeq > this.highestSentSeq) {
-          this.#fail(protocolError('Некорректный ackSeq от сервера речи'));
+          this.#fail(protocolError(t('core.coreNekorrektnyyAckseqOtServera')));
 
           return;
         }
@@ -509,12 +514,12 @@ class SpeechStreamSession {
       }
       case 'partial':
         if (!['starting', 'recording', 'stopping'].includes(this.state)) {
-          this.#fail(protocolError('partial получен до ready сервера речи'));
+          this.#fail(protocolError(t('core.corePartialPoluchenDoReady')));
 
           return;
         }
         if (typeof message.text !== 'string') {
-          this.#fail(protocolError('В partial отсутствует текст'));
+          this.#fail(protocolError(t('core.coreVPartialOtsutstvuetTekst')));
 
           return;
         }
@@ -522,7 +527,7 @@ class SpeechStreamSession {
         return;
       case 'final':
         if (this.state !== 'stopping' || this.finalSeen || typeof message.text !== 'string') {
-          this.#fail(protocolError('Некорректный или повторный final сервера речи'));
+          this.#fail(protocolError(t('core.coreNekorrektnyyIliPovtornyyFinal')));
 
           return;
         }
@@ -531,7 +536,7 @@ class SpeechStreamSession {
         return;
       case 'done':
         if (this.state !== 'stopping' || !this.finalSeen || typeof message.text !== 'string') {
-          this.#fail(protocolError('Некорректный done сервера речи'));
+          this.#fail(protocolError(t('core.coreNekorrektnyyDoneServeraRechi')));
 
           return;
         }
@@ -541,7 +546,7 @@ class SpeechStreamSession {
       case 'error': {
         this.#emit(message);
 
-        const error: StreamError = new Error(message.message || 'Сервер не смог распознать речь');
+        const error: StreamError = new Error(message.message || t('core.videoServerNeSmogRaspoznat'));
 
         error.code = message.code || 'speech_stream_server_error';
         this.#fail(error);
@@ -549,7 +554,7 @@ class SpeechStreamSession {
         return;
       }
       default:
-        this.#fail(protocolError(`Неизвестный тип сообщения речи: ${message.type}`));
+        this.#fail(protocolError(t('core.coreNeizvestnyyTipSoobscheniyaRechi', { type: message.type })));
     }
   }
 
@@ -566,7 +571,7 @@ class SpeechStreamSession {
     } = this.config;
 
     if (typeof AudioContextCtor !== 'function' || typeof AudioWorkletNodeCtor !== 'function') {
-      throw asError('Браузер не поддерживает AudioWorklet', 'speech_stream_unsupported');
+      throw asError(t('core.coreBrauzerNePodderzhivaetAudioworklet'), 'speech_stream_unsupported');
     }
 
     let context;
@@ -577,7 +582,7 @@ class SpeechStreamSession {
     this.context = context;
 
     if (!context.audioWorklet?.addModule) {
-      throw asError('Браузер не поддерживает AudioWorklet', 'speech_stream_unsupported');
+      throw asError(t('core.coreBrauzerNePodderzhivaetAudioworklet'), 'speech_stream_unsupported');
     }
 
     await context.audioWorklet.addModule(String(workletUrl));
@@ -653,7 +658,7 @@ class SpeechStreamSession {
 
     if (pendingBytes > this.config.maxBufferedBytes) {
       this.#fail(asError(
-        'Live-распознавание не успевает за записью',
+        t('core.coreLiveRaspoznavanieNeUspevaet'),
         'speech_stream_backpressure',
       ));
 
@@ -747,7 +752,7 @@ class SpeechStreamSession {
 
       const timeout = setTimeout(() => {
         settle(this.workletFlush, 'reject', asError(
-          'AudioWorklet не подтвердил последний PCM-кадр',
+          t('core.coreAudioworkletNePodtverdilPosledniy'),
           'speech_stream_flush_timeout',
         ));
       }, this.config.workletFlushTimeoutMs);
@@ -981,7 +986,7 @@ class SpeechStreamSession {
         throw abortError();
       }
       if (this.state !== 'recording') {
-        throw asError('Live-распознавание ещё не готово', 'speech_stream_not_ready');
+        throw asError(t('core.coreLiveRaspoznavanieEscheNe'), 'speech_stream_not_ready');
       }
 
       this.state = 'stopping';
@@ -1005,7 +1010,7 @@ class SpeechStreamSession {
       this.#maybeSendStop();
       this.drainTimer = setTimeout(() => {
         this.#fail(asError(
-          'Финальное live-распознавание не завершилось вовремя',
+          t('core.coreFinalnoeLiveRaspoznavanieNe'),
           'speech_stream_drain_timeout',
         ));
       }, this.config.drainTimeoutMs);

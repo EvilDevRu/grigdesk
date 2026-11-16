@@ -3,6 +3,11 @@ import { errorMessage } from '../../../../shared/lib/errors.ts';
 
 import { dbApi } from '../../shared/dbApi.ts';
 import { useDbStore } from '../../stores/db.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Согласованный снимок движков, профилей, сессий и ленты загружается вместе.
@@ -34,10 +39,10 @@ export async function loadDb(): Promise<void> {
     });
 
     if (audit.status === 'rejected') {
-      store.setAuditError(errorMessage(audit.reason, 'Не удалось загрузить журнал баз'));
+      store.setAuditError(errorMessage(audit.reason, translateUi('core.loadDbCouldNotLoadTheDatabaseLog')));
     }
   } catch (error) {
-    store.setError(errorMessage(error, 'Не удалось загрузить базы'));
+    store.setError(errorMessage(error, translateUi('core.loadDbCouldNotLoadDatabases')));
   } finally {
     store.setLoading(false);
   }
@@ -66,7 +71,7 @@ export async function loadDbProjects(): Promise<void> {
       return;
     }
 
-    store.setProjectsError(errorMessage(error, 'Не удалось загрузить проекты'));
+    store.setProjectsError(errorMessage(error, translateUi('core.loadDbCouldNotLoadProjects')));
   } finally {
     if (request === runtime.projectsRequest) {
       store.setProjectsLoading(false);
@@ -96,7 +101,7 @@ export async function refreshDbAudit(): Promise<void> {
 
     store.setAudit(page.items, page.skippedRecords ?? 0);
   } catch (error) {
-    store.setAuditError(errorMessage(error, 'Не удалось загрузить журнал баз'));
+    store.setAuditError(errorMessage(error, translateUi('core.loadDbCouldNotLoadTheDatabaseLog')));
   }
 }
 

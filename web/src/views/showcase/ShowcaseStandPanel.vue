@@ -1,29 +1,29 @@
 <template>
   <section class="stand" aria-labelledby="showcase-stand-title">
     <UiDisclosureButton v-model:open="open" controls="showcase-stand-body" density="compact">
-      <span id="showcase-stand-title">{{ open ? 'Скрыть стенд и данные' : 'Стенд и данные' }}</span>
+      <span id="showcase-stand-title">{{ open ? t('core.showcaseSkrytStendIDannye') : t('core.showcaseStendIDannye') }}</span>
     </UiDisclosureButton>
 
     <div v-show="open" id="showcase-stand-body" class="stand__body">
       <dl class="stand__facts">
         <div>
-          <dt>Цель</dt>
-          <dd>{{ scope?.targetLabel ?? 'недоступна' }}</dd>
+          <dt>{{ t('core.showcaseTsel') }}</dt>
+          <dd>{{ scope?.targetLabel ?? t('settings.unavailable3') }}</dd>
         </div>
         <div>
-          <dt>Профиль</dt>
+          <dt>{{ t('core.showcaseProfil') }}</dt>
           <dd>{{ scope?.profile ?? '—' }}</dd>
         </div>
         <div>
-          <dt>Среда</dt>
+          <dt>{{ t('core.showcaseSreda') }}</dt>
           <dd>{{ environmentText }}</dd>
         </div>
         <div>
-          <dt>Экраны в карте</dt>
+          <dt>{{ t('core.showcaseEkranyVKarte') }}</dt>
           <dd>{{ scope ? scope.screens.length : '—' }}</dd>
         </div>
         <div>
-          <dt>Версия данных</dt>
+          <dt>{{ t('core.showcaseVersiyaDannyh') }}</dt>
           <dd>{{ scope?.dataRevision ?? '—' }}</dd>
         </div>
       </dl>
@@ -32,26 +32,16 @@
            него остаётся одна отметка «данные обновлены» — она старит записи всех
            сцен, и прятать её нельзя, но и выпячивать незачем. -->
       <div v-if="seed?.available" class="stand__seed">
-        <p class="stand__note">
-          Профиль объявил рецепт подготовки демо-данных. Он меняет данные стенда,
-          поэтому запускается только по подтверждению; после него все записанные
-          сцены устареют.
-        </p>
-        <UiButton variant="outline" :loading="busy" @click="emit('seed', seed.recipeFingerprint)">
-          Подготовить данные
-        </UiButton>
+        <p class="stand__note"> {{ t('core.showcaseProfilObyavilRetseptPodgotovki') }} </p>
+        <UiButton variant="outline" :loading="busy" @click="emit('seed', seed.recipeFingerprint)"> {{ t('core.showcasePodgotovitDannye') }} </UiButton>
       </div>
       <p v-else class="stand__note">
-        {{ seed?.reason || 'Подготовка данных для этой цели недоступна.' }}
+        {{ seed?.reason || t('core.showcasePodgotovkaDannyhDlyaEtoy') }}
       </p>
 
       <div class="stand__updated">
-        <span class="stand__note">
-          Изменили данные стенда сами — отметьте это, и сцены снимутся заново.
-        </span>
-        <UiButton variant="ghost" :loading="busy" @click="emit('data-updated')">
-          Данные обновлены
-        </UiButton>
+        <span class="stand__note"> {{ t('core.showcaseIzmeniliDannyeStendaSami') }} </span>
+        <UiButton variant="ghost" :loading="busy" @click="emit('data-updated')"> {{ t('core.showcaseDannyeObnovleny') }} </UiButton>
       </div>
     </div>
   </section>
@@ -60,7 +50,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import { UiButton, UiDisclosureButton } from '../../ui';
+import { UiButton, UiDisclosureButton, t } from '../../ui';
 import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { SeedStatus } from '../../actions/showcase';
 
@@ -86,7 +76,9 @@ const environmentText = computed(() => {
     return '—';
   }
 
-  return scope.value.environment === 'isolated-demo' ? 'демо-копия' : 'только чтение';
+  return scope.value.environment === 'isolated-demo'
+    ? t('core.showcaseDemoKopiya')
+    : t('core.showcaseTolkoChtenie');
 });
 </script>
 

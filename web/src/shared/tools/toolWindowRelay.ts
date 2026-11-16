@@ -271,8 +271,13 @@ export function startToolShelfRelay({ role, channel, store, instance }: ShelfRel
       if (message.type === 'shelf-ready') {
         publish();
       } else if (message.type === 'shelf-action' && typeof message.taskId === 'string') {
+        if ((message.source !== undefined && message.source !== 'tracker')
+          || (message.taskSource !== undefined && !isTaskSourceId(message.taskSource))) {
+          return;
+        }
+
         const options = {
-          source: message.source === 'grigdesk' ? 'grigdesk' as const : 'tracker' as const,
+          source: 'tracker' as const,
           ...(isTaskSourceId(message.taskSource) ? { taskSource: message.taskSource } : {}),
         };
         const operation = message.action === 'remove' ? store.remove(message.taskId, options)

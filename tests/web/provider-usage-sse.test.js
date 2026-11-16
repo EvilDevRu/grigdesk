@@ -21,6 +21,8 @@ test('providers-usage входит в единственную SSE-подпис�
   assert.ok((await subscribedSseNames()).has('providers-usage'));
   assert.match(shell, /name === 'providers-usage'/u);
   assert.match(shell, /prov\.applyUsage\(/u);
+  assert.match(shell, /isRecord\(data\) \? data\.autoRefresh/u);
+  assert.match(shell, /isRecord\(data\) \? data\.autoRefreshRevision/u);
 });
 
 test('снимок с сервера ложится в стор и сдвигает троттл loadUsage', async (t) => {
@@ -56,41 +58,181 @@ test('мусор вместо снимка стор не принимает', ()
   assert.deepEqual(Object.keys(providers.usage), ['claude']);
 });
 
-// Кнопка во всплывашке: один POST на все исполнители, ответ ложится в стор тем же путём,
-// что и снимок с фонового тика, а повторный клик во время хода не плодит запросов.
-test('принудительная проверка идёт одним POST и не дублируется, пока идёт', async (t) => {
+test('W1: ручная проверка передаёт исполнителя и не дублируется', async (t) => {
   setActivePinia(createPinia());
 
   const providers = useProvidersStore();
   const calls = [];
   let finish;
 
-  t.mock.method(api, 'post', (url) => {
-    calls.push(url);
+  t.mock.method(api, 'post', (url, body) => {
+    calls.push({ url, body });
 
     return new Promise((resolve) => {
       finish = resolve;
     });
   });
 
-  const pending = providers.refreshUsage();
+  const current = {
+    autoRefresh: false,
+    autoRefreshRevision: 0,
+    usage: {
+      claude: { state: 'ok', bars: [{ key: 'week', pct: 7 }] },
+      codex: { state: 'ok', bars: [{ key: 'week', pct: 22 }] },
+    },
+  };
+  const get = t.mock.method(api, 'get', async () => current);
+  const pending = providers.refreshUsage('claude');
 
-  await providers.refreshUsage();
-  assert.equal(providers.usageRefreshing, true);
-  assert.deepEqual(calls, ['/api/providers/usage/refresh']);
-
-  finish({ usage: { claude: { state: 'ok', bars: [{ key: 'week', pct: 7 }] } } });
+  await providers.refreshUsage('claude');
+  await providers.loadUsage(true);
+  assert.equal(get.mock.callCount(), 0);
+  assert.equal(providers.usageRefreshingId, 'claude');
+  assert.deepEqual(calls, [{
+    url: '/api/providers/usage/refresh', body: { providerId: 'claude' },
+  }]);
+  finish({
+    autoRefresh: false,
+    autoRefreshRevision: 0,
+    usage: {
+      claude: { state: 'ok', bars: [{ key: 'week', pct: 7 }] },
+      codex: { state: 'ok', bars: [{ key: 'week', pct: 22 }] },
+    },
+  });
   await pending;
   assert.equal(providers.usageRefreshing, false);
+  assert.equal(providers.usageRefreshingId, '');
   assert.equal(providers.usage.claude.bars[0].pct, 7);
+  assert.equal(providers.usage.codex.bars[0].pct, 22);
+  assert.equal(providers.usageAutoRefresh, false);
+  assert.equal(get.mock.callCount(), 1);
+  assert.equal(get.mock.calls[0].arguments[0], '/api/providers/usage?cached=1');
+});
+
+test('W1b: отказ адресной проверки виден и освобождает кнопку', async (t) => {
+  setActivePinia(createPinia());
+
+  const providers = useProvidersStore();
+
+  providers.applyUsage({ claude: { state: 'ok', bars: [{ key: 'week', pct: 7 }] } });
+  t.mock.method(api, 'post', async () => {
+    throw new Error('Нет связи с сервером');
+  });
+  await providers.refreshUsage('claude');
+  assert.equal(providers.usageRefreshing, false);
+  assert.equal(providers.usageRefreshingId, '');
+  assert.match(providers.usageTransport.error, /Нет связи/u);
+  assert.equal(providers.usage.claude.bars[0].pct, 7);
+});
+
+test('W2: полный SSE со сменой режима обгоняет старый HTTP', async (t) => {
+  setActivePinia(createPinia());
+
+  const providers = useProvidersStore();
+  let finish;
+
+  t.mock.method(api, 'get', () => new Promise((resolve) => {
+    finish = resolve;
+  }));
+
+  const pending = providers.loadUsage(true);
+
+  providers.applyUsage({ claude: { state: 'ok', bars: [{ key: 'week', pct: 40 }] } }, false, 2);
+  finish({
+    autoRefresh: true,
+    autoRefreshRevision: 1,
+    usage: { claude: { state: 'ok', bars: [] } },
+  });
+  await pending;
+  assert.equal(providers.usageAutoRefresh, false);
+  assert.equal(providers.usage.claude.bars[0].pct, 40);
+});
+
+test('W3: reconnect во время manual сохраняет карту и выполняет один пассивный resync', async (t) => {
+  for (const failed of [false, true]) {
+    await t.test(failed ? 'error' : 'success', async (scenario) => {
+      setActivePinia(createPinia());
+
+      const providers = useProvidersStore();
+      const before = {
+        claude: {
+          state: 'ok',
+          bars: [{ key: 'week', pct: 10 }],
+          dataCheckedAt: 1000,
+        },
+        codex: {
+          state: 'ok',
+          bars: [{ key: 'week', pct: 20 }],
+          dataCheckedAt: 1000,
+        },
+      };
+      const current = {
+        ...before,
+        claude: {
+          ...before.claude,
+          bars: [{ key: 'week', pct: 35 }],
+          dataCheckedAt: 2000,
+        },
+      };
+      let finish;
+      let reject;
+      const usageGets = [];
+
+      providers.applyUsage(before, false, 0);
+      providers.noteUsageConnection(true);
+      scenario.mock.method(api, 'post', () => new Promise((resolve, no) => {
+        finish = resolve;
+        reject = no;
+      }));
+      scenario.mock.method(api, 'get', async (url) => {
+        if (url.startsWith('/api/providers/usage')) {
+          usageGets.push(url);
+
+          return {
+            usage: current,
+            autoRefresh: false,
+            autoRefreshRevision: 0,
+          };
+        }
+
+        return { providers: [] };
+      });
+
+      const pending = providers.refreshUsage('claude');
+
+      providers.noteUsageConnection(false);
+      providers.noteUsageConnection(true);
+      assert.equal(providers.usage.codex.bars[0].pct, 20);
+      assert.equal(providers.usage.codex.dataCheckedAt, 1000);
+      assert.equal(usageGets.length, 0);
+
+      if (failed) {
+        reject(new Error('Результат не доставлен'));
+      } else {
+        finish({
+          usage: current,
+          autoRefresh: false,
+          autoRefreshRevision: 0,
+        });
+      }
+
+      await pending;
+      assert.deepEqual(usageGets, ['/api/providers/usage?cached=1']);
+      assert.equal(providers.usage.claude.bars[0].pct, 35);
+      assert.equal(providers.usage.codex.bars[0].pct, 20);
+      assert.equal(providers.usage.codex.dataCheckedAt, 1000);
+      assert.equal(providers.usageRefreshing, false);
+    });
+  }
 });
 
 test('кнопка проверки стоит в шапке всплывашки и гаснет на паузе вендора', async (t) => {
   const shell = await readFile(SHELL_PATH, 'utf8');
 
   assert.match(shell, /data-context="topbar-popover-refresh"/u);
-  assert.match(shell, /@click="prov\.refreshUsage\(\)"/u);
-  assert.match(shell, /:disabled="!!usagePauseOf\(p\)"/u);
+  assert.match(shell, /@click="prov\.refreshUsage\(p\.id\)"/u);
+  assert.match(shell,
+    /:disabled="!!usagePauseOf\(p\) \|\| prov\.usageRefreshing && prov\.usageRefreshingId !== p\.id"/u);
 
   const h = await shellContractBrowser(t);
 

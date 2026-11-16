@@ -2,7 +2,7 @@
   <div class="docker-exec">
     <div class="docker-exec__bar">
       <span class="docker-exec__status" :class="status" role="status">{{ statusLabel }}</span>
-      <UiButton v-if="status === 'closed'" @click="connect">Переподключить</UiButton>
+      <UiButton v-if="status === 'closed'" @click="connect">{{ t('core.dockerPerepodklyuchit') }}</UiButton>
     </div>
     <div ref="host" class="docker-exec__host" data-escape-owner="docker-exec"></div>
   </div>
@@ -16,7 +16,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { parseDockerExecMessage } from '../../../../shared/plugins/docker/dockerContracts';
 import type { DockerContainer, DockerExecInput } from '../../../../shared/plugins/docker/dockerContracts';
 import { api } from '../../shared/apiClient.ts';
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 
 type ExecStatus = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -39,10 +39,10 @@ let generation = 0;
 let lastSize = '';
 
 const statusLabel = computed(() => ({
-  connecting: 'подключаюсь…',
-  open: `${props.container.name} — оболочка открыта`,
-  closed: 'сессия закрыта',
-  error: 'не удалось запустить оболочку',
+  connecting: t('core.dockerPodklyuchayus'),
+  open: t('core.dockerNameObolochkaOtkryta', { name: props.container.name }),
+  closed: t('core.dockerSessiyaZakryta'),
+  error: t('core.dockerNeUdalosZapustitObolochku'),
 }[status.value]));
 
 function sendInput(message: DockerExecInput): void {

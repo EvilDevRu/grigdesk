@@ -179,6 +179,7 @@ async function serverPackageFixture(t) {
   await symlink('factory', path.join(directory, 'engine/link'));
   await mkdir(path.join(directory, 'server/help/site'), { recursive: true });
   await writeFile(path.join(directory, 'server/help/help.json'), 'HELP-A');
+  await writeFile(path.join(directory, 'server/help/help.en.json'), 'HELP-EN-A');
   await writeFile(path.join(directory, 'server/help/site/index.html'), '<title>Help</title>');
   await writeFile(path.join(directory, 'server/help/site/help.json'), 'HELP-A');
   await makeReadOnlyTree(directory);
@@ -290,4 +291,24 @@ test('SB20: manifest связывает launcher, npm lock, license, native, hel
   assert.notEqual(original.packageId, createServerManifest(payload, {
     ...input, launcherSha256: '0'.repeat(64),
   }).packageId);
+});
+
+
+test('HELP-KEEP-EN-ID: только EN байты меняют packageId, возврат восстанавливает ID', async (t) => {
+  const input = await serverPackageFixture(t);
+  const initial = await packageServerPayload(input);
+  const file = path.join(input.directory, 'server/help/help.en.json');
+
+  await chmod(file, 0o644);
+  await writeFile(file, 'HELP-EN-B');
+  await chmod(file, 0o444);
+
+  const changed = await packageServerPayload(input);
+
+  assert.notEqual(packageIdFor({ payload: changed }), packageIdFor({ payload: initial }));
+  await chmod(file, 0o644);
+  await writeFile(file, 'HELP-EN-A');
+  await chmod(file, 0o444);
+  assert.equal(packageIdFor({ payload: await packageServerPayload(input) }),
+    packageIdFor({ payload: initial }));
 });

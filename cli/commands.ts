@@ -11,7 +11,7 @@ import { dataHome, dataPath, envFilePath } from '../shared/runtime/dataHome.ts';
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../shared/desktop/desktopRuntime.ts';
 import { resolveRuntimeSettings } from '../shared/runtime/runtimeSettings.ts';
 import type { Settings } from '../shared/runtime/runtimeSettings.ts';
-import { HELP_TEXT, parseArgs } from './args.ts';
+import { HELP_TEXT, parseArgs, CliArgumentError } from './args.ts';
 import type { CliArgs } from './args.ts';
 import { insideUnit, insideWindowScope } from './cgroup.ts';
 import { artifactsCleanupCommand } from './artifactsCleanup.ts';
@@ -20,7 +20,9 @@ import { readServer, serverCommand, UNIT } from './server.ts';
 import { collectStatus, printable, renderText, toJson } from './status.ts';
 import { readText, realPath } from './system.ts';
 import { openWindow } from './window.ts';
+import { relaySetup } from './relaySetup.ts';
 import { deviceCommand } from './device.ts';
+import { cliTranslator } from './i18n.ts';
 import { plainOutput } from './output.ts';
 import type { CliOutput } from './output.ts';
 
@@ -89,7 +91,10 @@ export async function runCli(argv: readonly string[], output: CliOutput = plainO
   try {
     args = parseArgs(argv);
   } catch (error) {
-    output.error(printable(error instanceof Error ? error.message : String(error)) + '\n');
+    const message = error instanceof CliArgumentError ? cliTranslator().t(error.message)
+      : error instanceof Error ? error.message : String(error);
+
+    output.error(printable(message) + '\n');
 
     return 2;
   }
@@ -137,6 +142,10 @@ export async function runCli(argv: readonly string[], output: CliOutput = plainO
     }
 
     const { settings } = await readCliContext(root);
+
+    if (args.kind === 'relay' && ['setup', 'restore'].includes(args.action ?? '')) {
+      return await relaySetup(args, settings);
+    }
 
     if (args.kind === 'device') {
       return await deviceCommand(args, settings, output);

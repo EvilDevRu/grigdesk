@@ -1,3 +1,9 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
+
 export interface UiDownloadAdapter {
   available(): boolean;
   save(href: string, name?: string): Promise<void>;
@@ -26,5 +32,5 @@ export function uiDownloadAvailable(): boolean {
  * Ошибку сохранения показывает общий UI без содержимого файла.
  */
 export function saveUiDownload(href: string, name?: string): Promise<void> {
-  return adapter?.save(href, name) || Promise.reject(new Error('Сохранение недоступно.'));
+  return adapter?.save(href, name) || Promise.reject(new Error(t('core.coreSohranenieNedostupno')));
 }

@@ -1,106 +1,97 @@
 <template>
   <UiWorkspacePage
     :data-perf-pending="loading ? '' : undefined">
-      <template #title><h1>GitHub Issues</h1></template>
+      <template #title><h1>{{ t('core.pluginGithub') }}</h1></template>
       <template #actions>
-        <UiIconButton label="Обновить" data-context="workspace-toolbar"
-                      :loading="loading" :disabled="!!busy" loading-label="Обновляю" @click="load">
+        <UiIconButton :label="t('core.trackerUpdate')" data-context="workspace-toolbar"
+                      :loading="loading" :disabled="!!busy" :loading-label="t('core.updating')" @click="load">
           <UiRefreshIcon />
         </UiIconButton>
       </template>
     <div class="github-page">
-    <p class="ui-workspace-intro">Один проверенный репозиторий как канал общего Inbox.</p>
+    <p class="ui-workspace-intro">{{ t('core.githubOdinProverennyyRepozitoriyKak') }}</p>
 
     <section v-if="unavailable" class="card" data-state="plugin-disabled">
-      <h2>GitHub недоступен</h2>
-      <p>Включите плагин GitHub в разделе «Настройки → Плагины».</p>
+      <h2>{{ t('core.githubGithubNedostupen') }}</h2>
+      <p>{{ t('core.githubVklyuchitePlaginGithubV') }}</p>
     </section>
 
     <template v-else>
       <p v-if="error" class="banner bad" role="alert"
     :data-perf-error="!loading && error && !status.connectedAt ? '' : undefined">{{ error }}</p>
       <p v-if="notice" class="banner good" role="status">{{ notice }}</p>
-      <GitHubLoading v-if="loading" label="Проверяю GitHub…"  :failed="Boolean(error)" />
+      <GitHubLoading v-if="loading" :label="t('core.githubProveryayuGithub')"  :failed="Boolean(error)" />
 
       <div v-else class="grid">
         <section class="card connection-card">
-          <h2>Подключение</h2>
+          <h2>{{ t('core.machineConnectionTitle') }}</h2>
           <form v-if="!status.configured" class="form" @submit.prevent="connect">
-            <p class="read-only" data-state="provider-disconnected">
-              GitHub не подключён: новые issues не принимаются. Ранее принятые обращения,
-              если они есть, остаются в общем Inbox только для чтения.
-            </p>
-            <UiField label="Owner" required><UiInput v-model="connectForm.owner" name="owner" autocomplete="off" placeholder="example-org" /></UiField>
-            <UiField label="Repository" required><UiInput v-model="connectForm.repo" name="repo" autocomplete="off" placeholder="grigdesk" /></UiField>
-            <UiField label="Personal access token" required>
-              <UiPasswordInput v-model="connectForm.token" name="token" autocomplete="new-password" spellcheck="false" placeholder="github_pat_…" />
+            <p class="read-only" data-state="provider-disconnected"> {{ t('core.githubGithubNePodklyuchenNovye') }} </p>
+            <UiField :label="t('core.githubOwner')" required><UiInput v-model="connectForm.owner" name="owner" autocomplete="off" :placeholder="'example-org'" /></UiField>
+            <UiField :label="t('core.githubRepository')" required><UiInput v-model="connectForm.repo" name="repo" autocomplete="off" :placeholder="'grigdesk'" /></UiField>
+            <UiField :label="t('core.githubPersonalAccessToken')" required>
+              <UiPasswordInput v-model="connectForm.token" name="token" autocomplete="new-password" spellcheck="false" :placeholder="'github_pat_…'" />
             </UiField>
-            <p class="hint">PAT и webhook secret хранятся только на сервере и не возвращаются в эту форму.</p>
+            <p class="hint">{{ t('core.githubPatIWebhookSecret') }}</p>
             <UiButton class="btn accent" type="submit" tone="accent" :loading="busy === 'connect'"
-                      :disabled="!canConnect && busy !== 'connect'" loading-label="Подключаю">Подключить</UiButton>
+                      :disabled="!canConnect && busy !== 'connect'" :loading-label="t('core.githubPodklyuchayu')">{{ t('core.githubPodklyuchit') }}</UiButton>
           </form>
           <div v-else class="connection">
             <div class="connection-head">
-              <strong>{{ status.fullName || 'Репозиторий проверяется' }}</strong>
+              <strong>{{ status.fullName || t('core.githubRepozitoriyProveryaetsya') }}</strong>
               <span class="pill" :class="status.connection">{{ stateLabel(status.state) }}</span>
             </div>
-            <details><summary>Данные подключения</summary><dl>
-              <template v-if="status.repositoryId"><dt>Repository ID</dt><dd>{{ status.repositoryId }}</dd></template>
+            <details><summary>{{ t('core.githubDannyePodklyucheniya') }}</summary><dl>
+              <template v-if="status.repositoryId"><dt>{{ t('core.githubRepositoryId') }}</dt><dd>{{ status.repositoryId }}</dd></template>
 
-              <template v-if="status.connectedAt"><dt>Подключён</dt><dd>{{ formatTime(status.connectedAt) }}</dd></template>
+              <template v-if="status.connectedAt"><dt>{{ t('settings.connected') }}</dt><dd>{{ formatTime(status.connectedAt) }}</dd></template>
             </dl></details>
-            <p v-if="status.state === 'pending'" class="warn">Привязка уже сохранена, но канал станет active только после signed ping.</p>
-            <p v-if="status.cleanupPending" class="bad">Очистка webhook не завершена. Повторите отключение.</p>
+            <p v-if="status.state === 'pending'" class="warn">{{ t('core.githubPrivyazkaUzheSohranenaNo') }}</p>
+            <p v-if="status.cleanupPending" class="bad">{{ t('core.githubOchistkaWebhookNeZavershena') }}</p>
             <p v-if="status.reason" class="bad">{{ status.reason }}</p>
-            <p v-if="!providerWritable" class="read-only" data-state="provider-read-only">
-              Provider сейчас не готов к записи. Ранее принятые обращения доступны в Inbox только для чтения.
-            </p>
-            <p v-else class="lifecycle-note">
-              Подключение не включает очередь автоматически. Задайте проект и включите приём в <a href="#/inbox">общих Входящих</a>.
+            <p v-if="!providerWritable" class="read-only" data-state="provider-read-only"> {{ t('core.githubProviderSeychasNeGotov') }} </p>
+            <p v-else class="lifecycle-note"> {{ t('core.githubPodklyuchenieNeVklyuchaetOchered') }} <a href="#/inbox">{{ t('core.githubObschihVhodyaschih') }}</a>.
             </p>
             <div class="actions">
               <UiButton class="btn" :loading="busy === 'recheck'" :disabled="!!busy && busy !== 'recheck'"
-                        loading-label="Перепроверяю" @click="recheck">Перепроверить</UiButton>
+                        :loading-label="t('core.githubPereproveryayu')" @click="recheck">{{ t('settings.recheck') }}</UiButton>
               <UiButton class="btn danger" tone="danger" :loading="busy === 'disconnect'"
-                        :disabled="!!busy && busy !== 'disconnect'" loading-label="Отключаю" @click="disconnect">
-                {{ status.cleanupPending ? 'Повторить отключение' : 'Отключить' }}
+                        :disabled="!!busy && busy !== 'disconnect'" :loading-label="t('core.githubOtklyuchayu')" @click="disconnect">
+                {{ status.cleanupPending ? t('core.githubPovtoritOtklyuchenie') : t('core.githubOtklyuchit') }}
               </UiButton>
             </div>
           </div>
         </section>
 
         <section class="card rules-card">
-          <h2>Разрешённые источники Inbox</h2>
-          <p v-if="!verified" class="hint">Сначала подключите и проверьте репозиторий.
-          </p>
-          <UiLoadingState v-else-if="!rulesLoaded" label="Загружаю правило…" variant="inline" />
+          <h2>{{ t('core.githubRazreshennyeIstochnikiInbox') }}</h2>
+          <p v-if="!verified" class="hint">{{ t('core.githubSnachalaPodklyuchiteIProverte') }} </p>
+          <UiLoadingState v-else-if="!rulesLoaded" :label="t('core.githubZagruzhayuPravilo')" variant="inline" />
           <template v-else-if="!rules.length && !editingRule">
             <div class="empty-allowlist" data-state="empty-allowlist">
-              <strong>Allowlist пуст</strong>
-              <p>Issues этого репозитория не попадут в Inbox, пока вы не зададите проект.</p>
+              <strong>{{ t('core.githubAllowlistPust') }}</strong>
+              <p>{{ t('core.githubIssuesEtogoRepozitoriyaNe') }}</p>
             </div>
             <UiButton class="btn accent" tone="accent" :disabled="!providerWritable || !!busy"
-                      @click="editingRule = true">Допустить в Inbox</UiButton>
+                      @click="editingRule = true">{{ t('core.githubDopustitVInbox') }}</UiButton>
           </template>
           <form v-else class="form" @submit.prevent="saveRules([rulePayload()])">
-            <p v-if="!providerWritable" class="read-only">
-              Правило показано без права записи, пока GitHub не переподключён.
-            </p>
-            <UiField label="Проект" required><UiInput v-model="ruleForm.project" name="project" placeholder="grigdesk"
+            <p v-if="!providerWritable" class="read-only"> {{ t('core.githubPraviloPokazanoBezPrava') }} </p>
+            <UiField :label="t('core.taskEditProject')" required><UiInput v-model="ruleForm.project" name="project" :placeholder="'grigdesk'"
                      :disabled="!providerWritable || !!busy" /></UiField>
-            <UiField label="Тип">
-              <UiSelect v-model="ruleForm.kind" name="kind" :disabled="!providerWritable || !!busy"><option value="bug">Ошибка</option><option value="wish">Пожелание</option></UiSelect>
+            <UiField :label="t('core.githubTip')">
+              <UiSelect v-model="ruleForm.kind" name="kind" :disabled="!providerWritable || !!busy"><option value="bug">{{ t('core.error') }}</option><option value="wish">{{ t('core.githubPozhelanie') }}</option></UiSelect>
             </UiField>
             <details>
-              <summary>Поля задачи Битрикс24 (необязательно)</summary>
+              <summary>{{ t('core.githubPolyaZadachiBitriks24Neobyazatelno') }}</summary>
               <div class="b24-grid">
-                <UiField label="Responsible ID" :error="validOptionalId(ruleForm.responsibleId) ? '' : 'Нужно положительное целое число'">
+                <UiField :label="t('core.githubResponsibleId')" :error="validOptionalId(ruleForm.responsibleId) ? '' : t('core.githubNuzhnoPolozhitelnoeTseloeChislo')">
                   <UiInput v-model="ruleForm.responsibleId" inputmode="numeric" name="responsibleId" :disabled="!providerWritable || !!busy" />
                 </UiField>
-                <UiField label="Group ID" :error="validOptionalId(ruleForm.groupId) ? '' : 'Нужно положительное целое число'">
+                <UiField :label="t('core.githubGroupId')" :error="validOptionalId(ruleForm.groupId) ? '' : t('core.githubNuzhnoPolozhitelnoeTseloeChislo')">
                   <UiInput v-model="ruleForm.groupId" inputmode="numeric" name="groupId" :disabled="!providerWritable || !!busy" />
                 </UiField>
-                <UiField label="Приоритет">
+                <UiField :label="t('core.taskEditPriority')">
                   <UiSelect v-model.number="ruleForm.priority" name="priority" :disabled="!providerWritable || !!busy"><option :value="0">0</option><option :value="1">1</option><option :value="2">2</option></UiSelect>
                 </UiField>
               </div>
@@ -108,22 +99,17 @@
             <div v-if="rules.length" class="agent-search-policy">
               <UiCheckbox class="check-row" name="agentSearch" :checked="agentSearchKnown && agentSearch"
                           :disabled="!providerWritable || !agentSearchKnown || !policyFingerprint || !!busy"
-                          @change="changeAgentSearch">Разрешить поиск coding-агентам проекта</UiCheckbox>
-              <p class="hint">
-                Это opt-in будущего внешнего корпуса: человеческий Inbox и его allowlist
-                не расширяются.
-              </p>
-              <p v-if="!agentSearchKnown" class="warn" data-state="agent-search-unknown">
-                Состояние доступа не подтверждено (неизвестно). Обновите правила перед новым изменением.
-              </p>
+                          @change="changeAgentSearch">{{ t('core.githubRazreshitPoiskCodingAgentam') }}</UiCheckbox>
+              <p class="hint"> {{ t('core.githubEtoOptInBuduschego') }} </p>
+              <p v-if="!agentSearchKnown" class="warn" data-state="agent-search-unknown"> {{ t('core.githubSostoyanieDostupaNePodtverzhdeno') }} </p>
             </div>
-            <p class="hint">Новое правило не включает автоматическое создание задач.</p>
+            <p class="hint">{{ t('core.githubNovoePraviloNeVklyuchaet') }}</p>
             <div class="actions">
               <UiButton class="btn accent" type="submit" tone="accent" :loading="busy === 'rules'"
                         :disabled="!providerWritable || !validRule || (!!busy && busy !== 'rules')"
-                        loading-label="Сохраняю">Сохранить</UiButton>
-              <UiButton v-if="rules.length" class="btn danger" tone="danger" :disabled="!providerWritable || !!busy" @click="removeRule">Убрать из Inbox</UiButton>
-              <UiButton v-else class="btn" @click="editingRule = false">Отмена</UiButton>
+                        :loading-label="t('core.githubSohranyayu')">{{ t('core.save') }}</UiButton>
+              <UiButton v-if="rules.length" class="btn danger" tone="danger" :disabled="!providerWritable || !!busy" @click="removeRule">{{ t('core.githubUbratIzInbox') }}</UiButton>
+              <UiButton v-else class="btn" @click="editingRule = false">{{ t('core.cancel') }}</UiButton>
             </div>
           </form>
         </section>
@@ -149,17 +135,8 @@ import type {
   GitHubStatus,
 } from '../../../shared/inbox/githubContracts.ts';
 import {
-  UiButton,
-  UiCheckbox,
-  UiField,
-  UiInput,
-  UiIconButton,
-  UiWorkspacePage,
-  UiRefreshIcon,
-  UiPasswordInput,
-  UiSelect,
-  confirmDialog,
-  UiLoadingState,
+  UiButton, UiCheckbox, UiField, UiInput, UiIconButton, UiWorkspacePage, UiRefreshIcon,
+  UiPasswordInput, UiSelect, confirmDialog, UiLoadingState, t, messageRef, uiLocale
 } from '../ui';
 
 const emptyStatus: GitHubStatus = Object.freeze({
@@ -296,7 +273,7 @@ async function load(): Promise<void> {
       rules.value = [];
       error.value = '';
     } else {
-      error.value = errorMessage(err, 'Не удалось прочитать состояние GitHub.');
+      error.value = errorMessage(err, t('core.coreNeUdalosProchitatSostoyanie'));
     }
   } finally {
     loading.value = false;
@@ -322,10 +299,10 @@ async function connect(): Promise<void> {
       connectForm.token.trim(),
     );
     connectForm.token = '';
-    notice.value = 'Репозиторий проверен; ожидаю signed ping от webhook.';
+    notice.value = t('core.coreRepozitoriyProverenOzhidayuSigned');
     await load();
   } catch (err) {
-    error.value = errorMessage(err, 'GitHub не принял подключение.');
+    error.value = errorMessage(err, t('core.coreGithubNePrinyalPodklyuchenie'));
   } finally {
     busy.value = '';
   }
@@ -346,10 +323,10 @@ async function recheck(): Promise<void> {
 
   try {
     await githubApi.recheck();
-    notice.value = 'Состояние GitHub перепроверено.';
+    notice.value = t('core.coreSostoyanieGithubPereprovereno');
     await load();
   } catch (err) {
-    error.value = errorMessage(err, 'Перепроверка GitHub не выполнена.');
+    error.value = errorMessage(err, t('core.corePereproverkaGithubNeVypolnena'));
   } finally {
     busy.value = '';
   }
@@ -361,9 +338,8 @@ async function recheck(): Promise<void> {
  */
 async function disconnect(): Promise<void> {
   const confirmed = !busy.value && await confirmDialog(
-    'Отключить GitHub? Webhook будет удалён, а секреты стёрты. '
-      + 'Ранее принятые обращения останутся в Inbox для чтения.',
-    { okText: 'Отключить' },
+    messageRef('core.githubOtklyuchitGithubWebhookBudet'),
+    { okText: t('core.githubOtklyuchit') },
   );
 
   if (!confirmed) {
@@ -375,10 +351,10 @@ async function disconnect(): Promise<void> {
 
   try {
     await githubApi.disconnect();
-    notice.value = 'GitHub отключён.';
+    notice.value = t('core.coreGithubOtklyuchen');
     await load();
   } catch (err) {
-    error.value = errorMessage(err, 'Отключение GitHub не завершено.');
+    error.value = errorMessage(err, t('core.coreOtklyuchenieGithubNeZaversheno'));
   } finally {
     busy.value = '';
   }
@@ -444,10 +420,11 @@ async function saveRules(nextRules: GitHubRuleInput[]): Promise<void> {
 
   try {
     await githubApi.saveRules(status.value.repositoryId || '', nextRules);
-    notice.value = nextRules.length ? 'Репозиторий допущен в Inbox.' : 'Allowlist GitHub пуст.';
+    notice.value =
+   nextRules.length ? t('core.coreRepozitoriyDopuschenVInbox') : t('core.coreAllowlistGithubPust');
     await loadRules();
   } catch (err) {
-    error.value = errorMessage(err, 'Правило GitHub не сохранено.');
+    error.value = errorMessage(err, t('core.corePraviloGithubNeSohraneno'));
   } finally {
     busy.value = '';
   }
@@ -478,9 +455,8 @@ async function changeAgentSearch(event: Event): Promise<void> {
   }
 
   const confirmed = !enabled || await confirmDialog(
-    'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? '
-      + 'Человеческий Inbox от этой настройки не изменится.',
-    { okText: 'Разрешить агентам' },
+    messageRef('core.githubRazreshitCodingAgentamVybrannogo'),
+    { okText: t('core.githubRazreshitAgentam') },
   );
 
   if (!confirmed) {
@@ -498,8 +474,8 @@ async function changeAgentSearch(event: Event): Promise<void> {
       enabled,
     );
     notice.value = enabled
-      ? 'Поиск по GitHub Issues разрешён агентам выбранного проекта.'
-      : 'Поиск по GitHub Issues для агентов закрыт.';
+      ? t('core.corePoiskPoGithubIssues')
+      : t('core.corePoiskPoGithubIssues2');
     await loadRules();
   } catch (err) {
     await reportAmbiguousAgentSearch(err, enabled);
@@ -514,30 +490,33 @@ async function changeAgentSearch(event: Event): Promise<void> {
  * могло не примениться, а если не читается и это — состояние неизвестно.
  */
 async function reportAmbiguousAgentSearch(failure: unknown, enabled: boolean): Promise<void> {
-  const mutationMessage = errorMessage(failure, 'Ответ изменения доступа не получен.');
+  const mutationMessage = errorMessage(failure, t('core.coreOtvetIzmeneniyaDostupaNe'));
 
   try {
     await readRulesSnapshot();
     rulesLoaded.value = true;
 
     if (!agentSearchKnown.value) {
-      throw new Error('Сервер не вернул достоверный policy fingerprint.');
+      throw new Error(t('core.githubServerNeVernulDostovernyy'));
     }
 
     const actual = agentSearch.value;
 
     if (actual === enabled) {
       error.value = '';
-      notice.value = `Повторная проверка подтвердила: поиск агентам ${
-        actual ? 'разрешён' : 'закрыт'}.`;
+      notice.value = t('core.corePovtornayaProverkaPodtverdilaPoisk', {
+        actual: actual ? t('core.coreRazreshen') : t('core.routeZakryt'),
+      });
 
       return;
     }
 
     notice.value = '';
-    error.value = `${mutationMessage} Повторная проверка подтвердила: `
-      + `поиск агентам ${actual ? 'разрешён' : 'закрыт'}, `
-      + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+    error.value = t('core.coreMutationmessagePovtornayaProverkaPodtverdila3', {
+      mutationMessage: mutationMessage,
+      actual: actual ? t('core.coreRazreshen') : t('core.routeZakryt'),
+      enabled: enabled ? t('core.coreVklyuchenie') : t('core.coreVyklyuchenie'),
+    });
   } catch (refreshError) {
     // Нельзя позволить повторный CAS со старым отпечатком и нельзя показывать
     // прежний boolean как достоверное состояние после ambiguous commit.
@@ -546,15 +525,17 @@ async function reportAmbiguousAgentSearch(failure: unknown, enabled: boolean): P
     agentSearch.value = false;
     rulesLoaded.value = true;
     notice.value = '';
-    error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-      + `${errorMessage(refreshError, 'правила не удалось перечитать')}`;
+    error.value = t('core.coreMutationmessageSostoyanieDostupaNe', {
+      mutationMessage: mutationMessage,
+      errorMessagerefreshError: errorMessage(refreshError, t('core.corePravilaNeUdalosPerechitat')),
+    });
   }
 }
 
 async function removeRule(): Promise<void> {
   const confirmed = providerWritable.value && await confirmDialog(
-    'Убрать репозиторий из allowlist? Новые issues не будут попадать в Inbox.',
-    { okText: 'Убрать' },
+    messageRef('core.githubUbratRepozitoriyIzAllowlist'),
+    { okText: t('settings.remove') },
   );
 
   if (confirmed) {
@@ -565,15 +546,15 @@ async function removeRule(): Promise<void> {
 function formatTime(value: number): string {
   const date = new Date(value);
 
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(uiLocale.value);
 }
 
 function stateLabel(value: GitHubStatus['state']): string {
   return ({
-    pending: 'Ожидает webhook ping',
-    connected: 'Подключён',
-    cleanup_pending: 'Очистка не завершена',
-  })[String(value)] || 'Не подключён';
+    pending: t('core.coreOzhidaetWebhookPing'),
+    connected: t('settings.connected'),
+    cleanup_pending: t('core.coreOchistkaNeZavershena'),
+  })[String(value)] || t('core.trackerNone');
 }
 
 onMounted(load);

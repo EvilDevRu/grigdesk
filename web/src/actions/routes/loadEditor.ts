@@ -1,6 +1,11 @@
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Загружает состояние источника, каталога и возможностей редактора.
@@ -42,7 +47,7 @@ export async function loadEditor(profile: string): Promise<void> {
     store.editorInfo = structuredClone(info);
   } catch (error) {
     if (request === runtime.editorRequest) {
-      store.error = failureText(error, 'Не удалось открыть редактор маршрутов.');
+      store.error = failureText(error, translateUi('core.loadEditorCouldNotOpenTheRouteEditor'));
     }
   } finally {
     if (request === runtime.editorRequest) {

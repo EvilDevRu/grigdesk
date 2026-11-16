@@ -22,7 +22,7 @@ async function fixture(t, { identity, identityError } = {}) {
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const calls = [];
-  let currentIdentity = identity || { baseUrl: 'https://portal.example.test/', userId: 77 };
+  let currentIdentity = identity || { baseUrl: 'https://portal.example.test', userId: 77 };
   const b24 = {
     async accountIdentity() {
       calls.push('accountIdentity');
@@ -50,7 +50,7 @@ test('API-01: GET возвращает server-derived scope и не раскры
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {
-    scope: favoriteScopeFor({ baseUrl: 'https://portal.example.test/', userId: 77 }),
+    scope: favoriteScopeFor({ baseUrl: 'https://portal.example.test', userId: 77 }),
     revision: 0,
     taskIds: [],
   });
@@ -156,11 +156,11 @@ test('B24 identity кешируется после первого определ
   const { adapter, changeCredentials } = fixture;
 
   assert.deepEqual(await adapter.accountIdentity(), {
-    baseUrl: 'https://portal.example.test/',
+    baseUrl: 'https://portal.example.test',
     userId: '77',
   });
   assert.deepEqual(await adapter.accountIdentity(), {
-    baseUrl: 'https://portal.example.test/',
+    baseUrl: 'https://portal.example.test',
     userId: '77',
   });
   assert.equal(discoveries, 1);

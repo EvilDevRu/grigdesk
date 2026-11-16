@@ -1,10 +1,7 @@
 <template>
   <div class="conflict" data-role="project-conflict">
-    <p class="ttl">Проект изменён в другом окне.</p>
-    <p class="sub">
-      Загрузите версию с сервера или замените её своими изменениями.
-      Текущая версия: {{ conflict.currentRevision }}. Ваши изменения:
-    </p>
+    <p class="ttl">{{ t('core.projectProektIzmenenVDrugom') }}</p>
+    <p class="sub"> {{ t('core.projectZagruziteVersiyuSServera') }} {{ conflict.currentRevision }}{{ t('core.projectVashiIzmeneniya') }} </p>
     <ul class="fields">
       <li v-for="field in labels" :key="field">{{ field }}</li>
     </ul>
@@ -16,18 +13,14 @@
         tone="accent"
         :disabled="busy"
         @click="emit('reload')"
-      >
-        Загрузить версию
-      </UiButton>
+      > {{ t('core.projectZagruzitVersiyu') }} </UiButton>
       <UiButton
         data-role="project-conflict-overwrite"
         data-context="project-conflict-action"
         variant="text"
         :disabled="busy"
         @click="emit('overwrite')"
-      >
-        Заменить моей
-      </UiButton>
+      > {{ t('core.projectZamenitMoey') }} </UiButton>
     </div>
   </div>
 </template>
@@ -39,7 +32,7 @@
 // запутало бы, а выбор «какая версия главнее» человек делает один раз.
 import { computed } from 'vue';
 
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 import type { ProjectConflict } from '../../stores/projects';
 
 const props = defineProps<{
@@ -55,11 +48,21 @@ const emit = defineEmits<{
 // Поля называются по-русски: «defaultRepoKey» человеку ничего не говорит,
 // а «Репозиторий по умолчанию» — говорит.
 const LABELS: Record<string, string> = {
-  title: 'Название',
-  description: 'Описание',
-  tags: 'Метки',
-  repos: 'Репозитории',
-  defaultRepoKey: 'Репозиторий по умолчанию',
+  get title() {
+    return t('core.taskTitle');
+  },
+  get description() {
+    return t('core.taskDescription');
+  },
+  get tags() {
+    return t('core.projectMetki');
+  },
+  get repos() {
+    return t('core.projectRepozitorii');
+  },
+  get defaultRepoKey() {
+    return t('core.projectRepozitoriyPoUmolchaniyu');
+  },
 };
 
 const labels = computed(() => props.conflict.changedFields.map((field) => LABELS[field] ?? field));

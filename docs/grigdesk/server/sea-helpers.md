@@ -20,6 +20,11 @@ Source использует копию `.mts`, пакет — копию соб�
 Guard по `import.meta.url` учтён отдельной helper-точкой в
 `server/build/sea-inventory.json`; каталог helpers не заменяет эту опись.
 
+Qwen helper проверяет доступность `ffmpeg` и `ffprobe` в том же PATH, который получает
+его песочница. Использование `process.execPath` в `qwen/settings.ts` учтено отдельной
+точкой `exec-path` с назначением `helper`; наличие этих программ не добавляет их
+в состав пакета. [Штатные инструменты Qwen](../chat/qwen-native-tools.md).
+
 Сгенерированный вход передаётся через stdin с постоянным sourcefile и разрешением импортов
 от корня исходников. Случайный workDir не попадает в комментарии или байты бандла:
 [детерминированный вход](sea-helper-staging-comments.md).

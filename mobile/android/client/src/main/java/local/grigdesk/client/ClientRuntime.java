@@ -46,7 +46,7 @@ public final class ClientRuntime implements AutoCloseable {
    * Встроенные assets проверяются до открытия WebView, сервер не отдаёт интерфейс.
    */
   public ClientRuntime(Context context, String secret, Set<String> origins, ShellApi.Native nativeActions,
-    BiConsumer<String, Boolean> navigate, AppLock appLock) throws Exception {
+    BiConsumer<String, Boolean> navigate, AppLock appLock, BackgroundLink backgroundLink) throws Exception {
     this.context = context.getApplicationContext();
     this.secret = secret;
     this.origins = origins;
@@ -115,7 +115,7 @@ public final class ClientRuntime implements AutoCloseable {
 
       return () -> future.cancel(false);
     }, worker::execute, this::show, nativeActions, Math::random, major, minor,
-      ClientLocale.initialize(context), appLock);
+      ClientLocale.initialize(context), appLock, backgroundLink::enabled);
   }
 
   /**
@@ -153,6 +153,14 @@ public final class ClientRuntime implements AutoCloseable {
     String key = id == null ? "" : id;
 
     try {
+      // Выбор уже сохранён ShellApi: прежние числа исчезают до перехода на новый origin.
+      // Недоступная новая машина и пустой выбор тоже получают актуальный виджет.
+      try {
+        PipelineWidget.selectionChanged(context);
+      } catch (Exception exception) {
+        android.util.Log.e("GrigDesk", "Не удалось обновить виджет после выбора машины", exception);
+      }
+
       for (String existing : new ArrayList<>(pipes.keySet())) {
         if (!existing.isEmpty() && profiles.profiles.stream()
           .noneMatch(profile -> profile.optString("id").equals(existing))) {

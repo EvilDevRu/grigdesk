@@ -25,10 +25,12 @@ test('TRACKER-SETTINGS-01: настройки без отдельного тре
     assert.equal(secret.element.value, '');
     await secret.setValue('fixture-secret');
 
-    const save = actionButton(card.wrapper, /сохранить|save/iu);
+    const apply = actionButton(card.wrapper, /применить|apply/iu);
 
-    assert.ok(save);
-    await save.trigger('click');
+    assert.ok(apply);
+    assert.equal(apply.attributes('data-variant'), 'outline');
+    assert.equal(apply.attributes('data-tone'), 'neutral');
+    await apply.trigger('click');
     await card.flushPromises();
 
     const writes = card.apiCalls.filter((call) => call.method === 'POST');
@@ -102,7 +104,7 @@ test('TRACKER-SETTINGS-03: шестерёнка сразу показывает 
     }
   });
 
-test('TRACKER-SETTINGS-04: после установки вход открывает параметры, другие действия открывают список',
+test('TRACKER-SETTINGS-04: после установки вход открывает параметры, добавление сразу открывает источники',
   async (t) => {
     const card = await mountTrackerBoard(t);
 
@@ -119,10 +121,11 @@ test('TRACKER-SETTINGS-04: после установки вход открыва
     assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
     assert.equal(card.wrapper.find('[data-role="tracker-install"]').exists(), false);
 
-    await actionButton(card.wrapper, /^Другие действия$/u).trigger('click');
+    assert.equal(Boolean(actionButton(card.wrapper, /^Другие действия$/u)), false);
+    await actionButton(card.wrapper, /^Добавить трекер$/u).trigger('click');
     await card.flushPromises();
     assert.equal(card.wrapper.find('.driver-job').exists(), false);
-    assert.equal(card.wrapper.find('.driver-package').exists(), true);
+    assert.equal(card.wrapper.find('.driver-sources').exists(), true);
     assert.equal(card.state.job.status, 'done');
     assert.equal(card.apiCalls.filter((call) => call.url.endsWith('/apply')).length, 1);
     assert.equal(card.apiCalls.some((call) => call.url.endsWith('/cancel')), false);
@@ -148,8 +151,15 @@ test('TRACKER-SETTINGS-05: медленное чтение не позволяе
 
     assert.equal(dialog.exists(), true);
     assert.equal(dialog.find('[data-ui-loading]').exists(), true);
+    assert.equal(dialog.get('.tracker-settings').attributes('aria-busy'), 'true');
+    assert.equal(dialog.findAll('[data-ui-loading] [role="status"]').length, 1);
+    assert.equal(dialog.find('[data-ui-loading] .tracker-settings__sidebar').exists(), true);
+    assert.equal(dialog.find('[data-ui-loading] .tracker-settings__editor').exists(), true);
+    assert.equal(dialog.find('[data-ui-loading] [data-layout="form"]').exists(), false);
+    assert.equal(dialog.find('[data-ui-loading] input, [data-ui-loading] button').exists(), false);
     assert.equal(dialog.find('select').exists(), false);
     assert.equal(actionButton(dialog, /^Сохранить$/u).element.disabled, true);
+    assert.equal(actionButton(dialog, /^Применить$/u).element.disabled, true);
     assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
     held.resolve();
     await card.flushPromises();
@@ -157,6 +167,7 @@ test('TRACKER-SETTINGS-05: медленное чтение не позволяе
     const loaded = card.wrapper.find('[data-role="tracker-settings"]');
 
     assert.equal(loaded.find('[data-ui-loading]').exists(), false);
+    assert.equal(loaded.get('.tracker-settings').attributes('aria-busy'), 'false');
     assert.equal(loaded.find('select').exists(), true);
     assert.equal(actionButton(loaded, /^Сохранить$/u).element.disabled, false);
   });
@@ -256,3 +267,98 @@ test('TRACKER-SETTINGS-08: ошибка проверки обновлений о
     assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
     assert.equal(card.apiCalls.some((call) => call.url.endsWith('/apply')), false);
   });
+
+test('TRACKER-SETTINGS-09: Сохранить закрывает окно только после успешного ответа', async (t) => {
+  const held = Promise.withResolvers();
+  const card = await mountTrackerBoard(t, {
+    handlers: {
+      post: async (url) => {
+        if (url === '/api/trackers/settings') {
+          await held.promise;
+        }
+      },
+    },
+  });
+
+  t.after(() => held.resolve());
+  await openTrackerSettings(card);
+
+  const footer = card.wrapper.get('.tracker-settings__actions');
+  const buttons = footer.findAll('button');
+
+  assert.deepEqual(buttons.map((button) => button.text()), ['Закрыть', 'Применить', 'Сохранить']);
+  await actionButton(footer, /^Сохранить$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+  assert.equal(actionButton(card.wrapper, /^Применить$/u).element.disabled, true);
+  assert.equal(card.wrapper.get('.tracker-settings__actions button[aria-busy="true"]')
+    .get('.ui-button__label').text(), 'Сохранить');
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
+  assert.equal(card.apiCalls.filter((call) => call.url === '/api/trackers/settings'
+    && call.method === 'POST').length, 1);
+  held.resolve();
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), false);
+});
+
+test('TRACKER-SETTINGS-10: Применить оставляет окно и обновляет базу для следующих изменений', async (t) => {
+  const original = 'https://original.fixture';
+  const card = await mountTrackerBoard(t, {
+    handlers: {
+      get: async (url, state) => {
+        if (url === '/api/trackers/settings') {
+          state.settings.settings['grigdesk-b24'] ??= { baseUrl: original };
+        }
+      },
+    },
+  });
+
+  await openTrackerSettings(card);
+  await card.wrapper.get('input[type="text"]').setValue('https://updated.fixture');
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+  assert.equal(card.wrapper.get('input[type="text"]').element.value, 'https://updated.fixture');
+  assert.match(card.wrapper.text(), /Настройки доски сохранены/u);
+  await card.wrapper.get('input[type="text"]').setValue(original);
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
+  await card.flushPromises();
+
+  const writes = card.apiCalls.filter((call) => call.url === '/api/trackers/settings'
+    && call.method === 'POST');
+
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].payload.expectedRevision, 1);
+  assert.equal(writes[1].payload.expectedRevision, 2);
+  assert.equal(writes[1].payload.settings['grigdesk-b24'].baseUrl, original);
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+  await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
+  await card.flushPromises();
+  assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), false);
+});
+
+test('TRACKER-SETTINGS-11: отказ записи оставляет окно и черновик для обоих действий', async (t) => {
+  for (const label of ['Применить', 'Сохранить']) {
+    await t.test(label, async (subtest) => {
+      const card = await mountTrackerBoard(subtest, {
+        handlers: {
+          post: async (url) => {
+            if (url === '/api/trackers/settings') {
+              throw new migrationHarness.ApiError('Не удалось сохранить настройки', 409);
+            }
+          },
+        },
+      });
+
+      await openTrackerSettings(card);
+      await card.wrapper.get('input[type="text"]').setValue('https://kept.fixture');
+      await actionButton(card.wrapper, new RegExp(`^${label}$`, 'u')).trigger('click');
+      await card.flushPromises();
+      assert.equal(card.wrapper.find('[data-role="tracker-settings"]').exists(), true);
+      assert.equal(card.wrapper.get('input[type="text"]').element.value, 'https://kept.fixture');
+      assert.match(card.wrapper.text(), /Не удалось сохранить настройки/u);
+      assert.equal(actionButton(card.wrapper, /^Применить$/u).element.disabled, false);
+      assert.equal(actionButton(card.wrapper, /^Сохранить$/u).element.disabled, false);
+    });
+  }
+});

@@ -15,7 +15,8 @@ const options = {
   native: ['server/node_modules/native/build/Release/binding.node'],
 };
 const required = [
-  'server/help/help.json', 'server/help/site/index.html', 'server/help/site/help.json',
+  'server/help/help.json', 'server/help/help.en.json', 'server/help/site/index.html',
+  'server/help/site/help.json', 'server/help/site/help.en.json',
   'VERSION', 'runtime/node/bin/node', 'runtime/node/bin/npm',
   'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
   'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
@@ -56,7 +57,7 @@ async function put(root, name) {
 }
 
 test('SB19: пропавшие helper, license, npm, native, schemas и навык запрещают payload', async (t) => {
-  for (const name of required) {
+  for (const name of required.filter((entry) => !entry.endsWith('help.en.json'))) {
     const root = await fixture(t);
 
     await rm(path.join(root, name));
@@ -138,15 +139,23 @@ test('SB19: приватные npm берутся строго по production l
   await assert.rejects(copyProductionDependencies({ sourceRoot, stageRoot }), /lock/);
 });
 
-test('SB19: shared допускает только явную compatibility обёртку legacyBrand', async (t) => {
+test('SB19: shared-исходники в payload запрещены', async (t) => {
   const root = await fixture(t);
-  const wrapper = 'shared/runtime/legacyBrand.ts';
 
-  await put(root, wrapper);
+  await put(root, 'shared/runtime/legacyBrand.ts');
 
-  const files = await auditPayload(root, { ...options, wrappers: [wrapper] }).catch(() => []);
+  await assert.rejects(auditPayload(root,
+    { ...options, wrappers: ['shared/runtime/legacyBrand.ts'] }),
+  /Запрещён корень состава payload|Лишний собственный исходник/u);
+});
 
-  assert.ok(files.some((file) => file.path === wrapper), 'разрешённая compatibility обёртка сохраняется');
-  await put(root, 'shared/runtime/extra.ts');
-  await assert.rejects(auditPayload(root, { ...options, wrappers: [wrapper] }), /исходник/);
+
+test('HELP-PACK-REQUIRED-EN: оба EN ресурса обязательны в готовом payload', async (t) => {
+  for (const name of ['server/help/help.en.json', 'server/help/site/help.en.json']) {
+    const root = await fixture(t);
+
+    await auditPayload(root, options);
+    await rm(path.join(root, name));
+    await assert.rejects(auditPayload(root, options), /обязательного файла/u, name);
+  }
 });

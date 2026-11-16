@@ -2,6 +2,10 @@ import { resolveTrackerTarget } from '../shared/trackerTarget.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { trackerMutationOptions } from '../shared/trackerMutation.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+
 // Серверные отметки двух личных пространств синхронизируются между устройствами.
 // Пока базовой линии нет, давние задачи не объявляются новыми.
 import { defineStore } from 'pinia';
@@ -9,6 +13,8 @@ import type { StoreGeneric } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 function taskKey(value: unknown): string {
   return String(value ?? '').trim();
@@ -20,7 +26,7 @@ function taskKey(value: unknown): string {
  */
 function normalizedSnapshot(value: unknown) {
   if (!isRecord(value)) {
-    throw new Error('Сервер вернул некорректные отметки просмотра');
+    throw new Error(t('core.taskServerVernulNekorrektnyeOtmetki'));
   }
 
   const scope = String(value.scope || '');
@@ -28,7 +34,7 @@ function normalizedSnapshot(value: unknown) {
 
   if (!scope || !Number.isSafeInteger(revision) || revision < 0
     || typeof value.initialized !== 'boolean' || !Array.isArray(value.taskIds)) {
-    throw new Error('Сервер вернул некорректные отметки просмотра');
+    throw new Error(t('core.taskServerVernulNekorrektnyeOtmetki'));
   }
 
   return {
@@ -64,8 +70,7 @@ interface SeenBranch extends Pick<StoreGeneric, '$onAction'> {
 const createTaskSeenStore = (
   storeId: string, source: TaskPersonalSource, taskSource?: string,
 ) => {
-  const prefix = source === 'grigdesk' ? 'grigdesk-tasks'
-    : taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
+  const prefix = taskSource ? `tracker/${encodeURIComponent(taskSource.split('@')[0]!)}` : 'tracker';
   const url = `/api/${prefix}/task-seen`;
 
   return defineStore(storeId, {
@@ -86,7 +91,6 @@ const createTaskSeenStore = (
   }),
   getters: {
     external: (state): SeenBranch[] => state.sources.map((id) => externalBranches.get(id)!()),
-    own: (): SeenBranch => useGrigdeskTaskSeenStore(),
     count: (state) => state.taskIds.length,
     isSeen: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     ready: (state) => state.loaded && state.initialized,
@@ -94,12 +98,9 @@ const createTaskSeenStore = (
   actions: {
     /**
      * Полный источник выбирает независимую ветку личного состояния.
-     * Собственные задачи и прежний default сохраняют свои публичные обращения.
+     * Прежний числовой вход сохраняет обращения к доске по умолчанию.
      */
     forSource(target?: string): SeenBranch {
-      if (target === 'grigdesk') {
-        return useGrigdeskTaskSeenStore();
-      }
       if (!target || !target.includes('@')) {
         return this;
       }
@@ -124,9 +125,6 @@ const createTaskSeenStore = (
     applySnapshot(value: unknown, requestSeq: number | null = null) {
       const snapshot = normalizedSnapshot(value);
 
-      if (source === 'grigdesk' && snapshot.scope !== 'grigdesk') {
-        throw new Error('Некорректный источник личных меток GrigDesk');
-      }
 
       const seq = requestSeq ?? ++this._requestSeq;
 
@@ -152,9 +150,6 @@ const createTaskSeenStore = (
      * Ответ ушедшей эпохи не меняет снимок и флаги аккаунта.
      */
     async load(force = false, options: TaskSourceOptions = {}): Promise<boolean> {
-      if (options.source === 'grigdesk' && source !== 'grigdesk') {
-        return useGrigdeskTaskSeenStore().load(force);
-      }
 
       if (this._inflight) {
         return this._inflight;
@@ -182,7 +177,7 @@ const createTaskSeenStore = (
           return true;
         } catch (error) {
           if (epoch === this._epoch) {
-            this.error = errorMessage(error, 'Отметки просмотра недоступны');
+            this.error = errorMessage(error, t('core.coreOtmetkiProsmotraNedostupny'));
           }
 
           return false;
@@ -209,9 +204,6 @@ const createTaskSeenStore = (
     }: TaskSourceOptions & {
       baseline?: boolean; baselineId?: string;
     } = {}): Promise<boolean> {
-      if (requestedSource === 'grigdesk' && source !== 'grigdesk') {
-        return useGrigdeskTaskSeenStore().markSeen(ids, { baseline, baselineId });
-      }
 
       const taskIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(taskKey).filter(Boolean))];
 
@@ -246,7 +238,7 @@ const createTaskSeenStore = (
         return true;
       } catch (error) {
         if (epoch === this._epoch) {
-          this.error = errorMessage(error, 'Не удалось отметить задачу просмотренной');
+          this.error = errorMessage(error, t('core.coreNeUdalosOtmetitZadachu'));
         }
 
         return false;
@@ -264,10 +256,6 @@ const createTaskSeenStore = (
     clear(options: TaskSourceOptions = {}): void {
       if (!taskSource && source === 'tracker') {
         this.external.forEach((branch) => branch.clear());
-      }
-
-      if (!taskSource && source === 'tracker' && options.source !== 'tracker') {
-        useGrigdeskTaskSeenStore().clear();
       }
 
       this._epoch += 1;
@@ -290,4 +278,3 @@ const createTaskSeenStore = (
 const externalBranches = new Map<string, ReturnType<typeof createTaskSeenStore>>();
 
 export const useTaskSeenStore = createTaskSeenStore('taskSeen', 'tracker');
-export const useGrigdeskTaskSeenStore = createTaskSeenStore('grigdeskTaskSeen', 'grigdesk');

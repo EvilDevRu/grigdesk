@@ -602,6 +602,7 @@ test('SV-17 настоящий Node запускается и останавли
   let child;
   let exited;
   let supervisor;
+  const stopEvents = [];
 
   t.after(async () => {
     await supervisor?.stop();
@@ -686,7 +687,7 @@ test('SV-17 настоящий Node запускается и останавли
     },
     sleep: (ms, signal) => waitFor(ms, undefined, { signal }),
     now: () => Date.now(),
-    log: (message) => assert.fail(message),
+    log: (message) => stopEvents.push(JSON.parse(message)),
   });
 
   await supervisor.ensure({
@@ -696,6 +697,7 @@ test('SV-17 настоящий Node запускается и останавли
   });
   assert.equal(supervisor.ownership, 'owned');
   await supervisor.stop();
+  assert.deepEqual(stopEvents.map((event) => event.event), ['server.stop.start', 'server.stop.end']);
   assert.deepEqual(await exited, [0, null]);
   assert.equal(await probeGrigDesk(runtime.origin), 'refused');
 

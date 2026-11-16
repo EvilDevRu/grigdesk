@@ -3,6 +3,11 @@ import type { DraftCreateRequest } from '../../shared/routesApi.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
 import { cancelDraftSave } from './save.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Создаёт черновик полного каталога и открывает его в редакторе.
@@ -61,7 +66,7 @@ export async function createDraft(profile: string, input: DraftCreateRequest): P
     store.jsonBuffer = null;
   } catch (error) {
     if (request === runtime.openRequest) {
-      store.error = failureText(error, 'Не удалось создать черновик.');
+      store.error = failureText(error, translateUi('core.createDraftCouldNotCreateADraft'));
     }
   } finally {
     if (request === runtime.openRequest) {

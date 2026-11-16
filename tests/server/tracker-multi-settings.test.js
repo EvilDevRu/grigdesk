@@ -22,7 +22,7 @@ test('MD-SELECTION: новый выбор включает A+B, публикуе
   assert.deepEqual(catalog.enabledIds, IDS.slice(0, 2));
   assert.equal(catalog.default, 'fixture-b');
   assert.equal(catalog.externalId, 'fixture-b');
-  assert.deepEqual([...catalog.activeIds].sort(), ['fixture-a', 'fixture-b', 'own']);
+  assert.deepEqual([...catalog.activeIds].sort(), ['fixture-a', 'fixture-b']);
   assert.ok(catalog.drivers.every((entry) => typeof entry.id === 'string'));
   assert.deepEqual(settings.drivers, IDS.slice(0, 2));
   assert.equal(settings.default, 'fixture-b');

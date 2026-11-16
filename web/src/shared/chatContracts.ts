@@ -1,5 +1,5 @@
 import type {
-  ChatCatalogPage, ChatCatalogSummary, ChatHistoryWindow,
+  ChatCatalogPage, ChatCatalogSummary, ChatHistoryWindow, ChatListFilters,
 } from '../../../shared/chat/chatPaging.ts';
 
 import { isChatSpeed } from '../../../shared/chat/chatSpeed.ts';
@@ -20,6 +20,7 @@ import type { InTurnPage, InTurnAvailability, InTurnReceipt, InTurnAssistantBloc
 import type { InTurnAttachment } from '../../../shared/chat/chatInTurnContracts.ts';
 
 const t = localeTranslator(uiLocalePort);
+
 
 export interface ChatAttachment extends Omit<InTurnAttachment, 'mime'> {
   mime?: string;
@@ -427,6 +428,9 @@ export type ChatLoadError = 'network' | 'timeout' | 'server' | 'access';
 
 export interface ChatState {
   pagingEnabled: boolean;
+
+  filtersProtocol: number;
+
   catalogMutationVersion: number;
   catalogPages: Record<string, ChatCatalogPage>;
   catalogSummary: ChatCatalogSummary;
@@ -439,9 +443,15 @@ export interface ChatState {
   messageLoads: Record<string, { state: 'loading' | 'loaded' | 'error'; error: string }>;
   search: {
     query: string;
+
     archived: boolean;
+
+    filters: ChatListFilters;
+
     loading: boolean;
+
     error: string;
+
     matches: Record<string, string>;
   };
   sessions: ChatSession[];
@@ -815,7 +825,7 @@ export function decodeChatHead(value: unknown): ChatSession {
     || (value.lastReply !== null && (!isRecord(value.lastReply)
       || typeof value.lastReply.key !== 'string' || typeof value.lastReply.text !== 'string'))
     || Object.hasOwn(value, 'messages') || Object.hasOwn(value, 'steps')) {
-    throw new Error('Некорректная шапка чата');
+    throw new Error(t('core.coreNekorrektnayaShapkaChata'));
   }
 
   return {
@@ -834,7 +844,7 @@ export function decodeChatList(value: unknown, changes = false) {
     || !Array.isArray(value.sessions) || !Array.isArray(value.archived)
     || (changes && (!Array.isArray(value.gone)
       || !value.gone.every((id) => typeof id === 'string')))) {
-    throw new Error('Ответ списка не содержит каталог чатов');
+    throw new Error(t('core.coreOtvetSpiskaNeSoderzhit'));
   }
 
   const { sessions, archived, ...meta } = value;
@@ -874,6 +884,7 @@ export function decodeChatPage(value: unknown) {
     ...result,
     page: value.page as { nextCursor: string | null; hasMore: boolean },
     summary: value.summary as unknown as ChatCatalogSummary,
+    filtersProtocol: value.filtersProtocol === 1 ? 1 : 0,
   };
 }
 
@@ -910,7 +921,7 @@ export function decodeChatReconcile(value: unknown) {
     || !value.deliveries.every((item) => isRecord(item) && typeof item.chatId === 'string'
       && typeof item.turnId === 'string' && ['unknown', 'accepting'].includes(String(item.state))
       && typeof item.sentAt === 'number')) {
-    throw new Error('Некорректный ответ сверки чатов');
+    throw new Error(t('core.coreNekorrektnyyOtvetSverkiChatov'));
   }
 
   return {

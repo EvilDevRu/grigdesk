@@ -940,7 +940,7 @@ test('ChatSession показывает provider-нейтральный стат�
   assert.equal(ring.classes().includes('hi'), false);
 });
 
-test('ChatSession показывает неподтверждённое окно до первого хода и в picker модели', async (t) => {
+test('ChatSession поясняет неточный контекст в подсказке, сохраняя короткое имя модели', async (t) => {
   const browser = await browserHarness(t);
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -1024,8 +1024,10 @@ test('ChatSession показывает неподтверждённое окно
   const select = wrapper.find('.sel.model .ui-select-wrap');
 
   assert.match(select.attributes('data-ui-tooltip'), /окно не подтверждено/);
+
   const option = wrapper.find('.sel.model option[value="claude-fable-5"]');
-  assert.match(option.text(), /Fable 5 · окно не подтверждено/);
+
+  assert.equal(option.text().trim(), 'Fable 5');
   assert.match(option.attributes('title'), /окно не подтверждено/);
 });
 

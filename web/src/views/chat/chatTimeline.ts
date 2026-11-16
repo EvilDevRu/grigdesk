@@ -329,13 +329,20 @@ function projectTimeline(
       ? messages.findIndex((message) => message.role === 'user'
         && !!run.parentTurnId && message.turnId === run.parentTurnId)
       : -1;
+    let anchor = parent < 0 ? rows.length : parent + 1;
+
+    // Заметки подготовки принадлежат границе перед запуском, даже пока нет ответа.
+    // Иначе растущий ход оставляет плашку новой сессии постоянно под индикатором.
+    while (rows[anchor]?.message.role === 'note' && !rows[anchor]?.message.runId) {
+      anchor += 1;
+    }
 
     turns.set(activeKey, {
       key: activeKey,
       messages: [],
       steps: [],
       live: true,
-      anchor: parent < 0 ? rows.length : parent + 1,
+      anchor,
     });
   }
 

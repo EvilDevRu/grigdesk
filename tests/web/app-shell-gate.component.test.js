@@ -45,6 +45,7 @@ test('оболочка: интерфейс открыт до сервера, м�
       clear: noop,
       stopPoll: noop,
       clearSource: () => {},
+      markTransportUnavailable: noop,
       invalidate: noop,
       close: noop,
     };

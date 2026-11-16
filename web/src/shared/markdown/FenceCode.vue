@@ -6,8 +6,8 @@
       <slot name="tools" />
       <UiIconButton
         role="embedded"
-        :label="copied ? 'Скопировано' : 'Копировать код'"
-        v-tooltip="copied ? 'Скопировано' : 'Копировать код'"
+        :label="copied ? t('core.videoSkopirovano') : t('core.mdKopirovatKod')"
+        v-tooltip="copied ? t('core.videoSkopirovano') : t('core.mdKopirovatKod')"
         data-context="md-fence-copy"
         @click="copy"
       >
@@ -24,7 +24,7 @@
     </div>
     <UiDisclosureButton v-if="long" v-model:open="expanded" density="compact" :controls="bodyId"
                         data-context="md-fence-expand">
-      {{ expanded ? 'Свернуть' : 'Показать полностью' }}
+      {{ expanded ? t('core.mdSvernut') : t('core.mdPokazatPolnostyu') }}
     </UiDisclosureButton>
   </div>
 </template>
@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 
-import { UiDisclosureButton, UiIconButton, vTooltip } from '../../ui';
+import { UiDisclosureButton, UiIconButton, vTooltip, t } from '../../ui';
 import { writeClipboardText } from '../clipboard.ts';
 import { FenceCodeLines } from './fenceCodeLines.ts';
 import { highlightCode } from './codeHighlight.ts';

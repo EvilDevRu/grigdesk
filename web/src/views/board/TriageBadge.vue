@@ -3,15 +3,13 @@
     <span class="dot"></span>{{ busyTitle }}
   </span>
   <span v-else-if="state === 'failed' && !a" class="tri chip bad"
-        v-tooltip="row?.status?.error || 'Не удалось оценить задачу'">
-    Ошибка оценки
-  </span>
+        v-tooltip="row?.status?.error || t('core.taskNeUdalosOtsenitZadachu')"> {{ t('core.taskOshibkaOtsenki') }} </span>
   <UiTooltip v-else-if="a" placement="top-end">
     <template #trigger>
       <span class="tri" tabindex="0">
         <span class="metrics">
-          <span class="chip" :class="tone('cx', a.complexity)">Сложн. {{ a.complexity ?? '—' }}</span>
-          <span class="chip" :class="tone('risk', a.risk)">Риск {{ a.risk ?? '—' }}</span>
+          <span class="chip" :class="tone('cx', a.complexity)">{{ t('core.taskSlozhn') }} {{ a.complexity ?? '—' }}</span>
+          <span class="chip" :class="tone('risk', a.risk)">{{ t('core.taskRisk') }} {{ a.risk ?? '—' }}</span>
           <span class="chip dim">{{ a.diff_size }}</span>
           <svg v-if="total !== null" class="total" :class="`t${total}`" viewBox="0 0 20 20">
             <circle class="trk" cx="10" cy="10" r="8" />
@@ -28,29 +26,27 @@
             </text>
           </svg>
         </span>
-        <span v-if="needsInfo" class="info-needed">Нужны уточнения</span>
+        <span v-if="needsInfo" class="info-needed">{{ t('core.taskNuzhnyUtochneniya') }}</span>
       </span>
     </template>
     <template #tip>
       <span class="tipbody">
-        <span class="trow"><b>Итог {{ total ?? '—' }}/5</b> — максимум из известных сложности и риска</span>
+        <span class="trow"><b>{{ t('core.taskItog') }} {{ total ?? '—' }}/5</b> {{ t('core.taskMaksimumIzIzvestnyhSlozhnosti') }}</span>
         <span class="trow">
-          <b>Сложность {{ a.complexity ?? '—' }}/5</b> — {{ CX_DESC[String(a.complexity)] || '' }}
+          <b>{{ t('core.taskSlozhnost') }} {{ a.complexity ?? '—' }}/5</b> — {{ CX_DESC[String(a.complexity)] || '' }}
         </span>
-        <span class="trow"><b>Риск {{ a.risk ?? '—' }}/5</b> — {{ RISK_DESC[String(a.risk)] || '' }}</span>
-        <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[String(a.diff_size)] || '' }}</span>
-        <span class="trow muted">
-          маршрут: {{ a.route_guess || '—' }}<template v-if="depthLabel"> ({{ depthLabel }})</template>
-          · уверенность: {{ CONF_RU[String(a.confidence)] || a.confidence }}
+        <span class="trow"><b>{{ t('core.taskRisk') }} {{ a.risk ?? '—' }}/5</b> — {{ RISK_DESC[String(a.risk)] || '' }}</span>
+        <span class="trow"><b>{{ t('core.taskDiff') }} {{ a.diff_size }}</b> — {{ SIZE_DESC[String(a.diff_size)] || '' }}</span>
+        <span class="trow muted"> {{ t('core.taskMarshrut') }} {{ a.route_guess || '—' }}<template v-if="depthLabel"> ({{ depthLabel }})</template> {{ t('core.taskUverennost') }} {{ CONF_RU[String(a.confidence)] || a.confidence }}
         </span>
-        <span v-if="a.route_reason" class="trow muted clamp2">почему: {{ a.route_reason }}</span>
+        <span v-if="a.route_reason" class="trow muted clamp2">{{ t('core.taskPochemu') }} {{ a.route_reason }}</span>
         <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
         <span v-for="(q, index) in (a.questions || []).slice(0, 2)" :key="q?.id || index" class="trow q clamp2">? {{ questionText(q) }}</span>
-        <span v-if="(a.questions || []).length > 2" class="trow muted">…ещё {{ (a.questions || []).length - 2 }} — в карточке задачи</span>
+        <span v-if="(a.questions || []).length > 2" class="trow muted">{{ t('core.taskEsche') }} {{ (a.questions || []).length - 2 }} {{ t('core.taskVKartochkeZadachi') }}</span>
       </span>
     </template>
   </UiTooltip>
-  <span v-else class="unrated">Без оценки</span>
+  <span v-else class="unrated">{{ t('core.taskBezOtsenki') }}</span>
 </template>
 
 <script setup lang="ts">
@@ -58,7 +54,7 @@
 // Подробности (расшифровка шкал, резюме, вопросы) — в общем тултипе по ховеру.
 // Пока анализ в очереди/идёт, прежние баллы скрыты и видно название текущего этапа.
 import { computed } from 'vue';
-import { UiTooltip, vTooltip } from '../../ui';
+import { UiTooltip, vTooltip, t } from '../../ui';
 import type { AnalysisQuestion, AnalysisRow } from '../../../../shared/pipeline/analysisContracts.ts';
 
 const props = withDefaults(defineProps<{
@@ -71,9 +67,15 @@ const a = computed(() => props.row?.analysis || null);
 const state = computed(() => props.row?.status?.state || null);
 // Глубину маршрута считает политика сервера по этой же оценке — показываем её словом.
 const DEPTH_RU: Record<string, string> = {
-  light: 'лёгкий',
-  mid: 'средний',
-  full: 'полный',
+  get light() {
+    return t('core.taskLegkiy');
+  },
+  get mid() {
+    return t('core.taskSredniy');
+  },
+  get full() {
+    return t('core.taskPolnyy');
+  },
 };
 const depthLabel = computed(() => DEPTH_RU[String(a.value?.route_depth)] || '');
 const busy = computed(() => state.value === 'queued' || state.value === 'running');
@@ -84,37 +86,71 @@ const busyTitle = computed(() => {
   const again = Boolean(a.value);
 
   if (state.value === 'running') {
-    return again ? 'переоценка идёт' : 'разведка идёт';
+    return again ? t('core.taskPereotsenkaIdet') : t('core.taskRazvedkaIdet');
   }
 
-  return again ? 'переоценка в очереди' : 'в очереди';
+  return again ? t('core.taskPereotsenkaVOcheredi') : t('settings.queued');
 });
 
 // Расшифровки шкал — те же формулировки, что в рубрике промпта триажа.
 const CX_DESC: Record<string, string> = {
-  1: 'точечная правка одного файла',
-  2: 'несколько файлов в одном слое',
-  3: 'сквозная фича по готовым паттернам',
-  4: 'новая подсистема или схема данных',
-  5: 'много точек интеграции, схема/очереди',
+  get 1() {
+    return t('core.taskTochechnayaPravkaOdnogoFayla');
+  },
+  get 2() {
+    return t('core.taskNeskolkoFaylovVOdnom');
+  },
+  get 3() {
+    return t('core.taskSkvoznayaFichaPoGotovym');
+  },
+  get 4() {
+    return t('core.taskNovayaPodsistemaIliShema');
+  },
+  get 5() {
+    return t('core.taskMnogoTochekIntegratsiiShema');
+  },
 };
 const RISK_DESC: Record<string, string> = {
-  1: 'косметика, откат тривиален',
-  2: 'ограниченный охват',
-  3: 'можно сломать заметный сценарий',
-  4: 'массовые данные / деньги',
-  5: 'порча данных, необратимо',
+  get 1() {
+    return t('core.taskKosmetikaOtkatTrivialen');
+  },
+  get 2() {
+    return t('core.taskOgranichennyyOhvat');
+  },
+  get 3() {
+    return t('core.taskMozhnoSlomatZametnyyStsenariy');
+  },
+  get 4() {
+    return t('core.taskMassovyeDannyeDengi');
+  },
+  get 5() {
+    return t('core.taskPorchaDannyhNeobratimo');
+  },
 };
 const SIZE_DESC: Record<string, string> = {
-  S: 'до 50 строк',
-  M: '50–300 строк',
-  L: '300–1000 строк',
-  XL: 'больше 1000 строк',
+  get S() {
+    return t('core.taskDo50Strok');
+  },
+  get M() {
+    return t('core.taskX50300Strok');
+  },
+  get L() {
+    return t('core.taskX3001000Strok');
+  },
+  get XL() {
+    return t('core.taskBolshe1000Strok');
+  },
 };
 const CONF_RU: Record<string, string> = {
-  high: 'высокая',
-  medium: 'средняя',
-  low: 'низкая',
+  get high() {
+    return t('core.taskVysokaya');
+  },
+  get medium() {
+    return t('core.taskSrednyaya');
+  },
+  get low() {
+    return t('core.taskNizkaya');
+  },
 };
 
 /**

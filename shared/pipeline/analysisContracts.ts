@@ -1,3 +1,5 @@
+import { isTaskSourceId } from '../tasks/taskReference.ts';
+import type { TaskSourceId } from '../tasks/taskReference.ts';
 // Контракт триажа задач. Оценку пишет модель, а её файл переживает и рестарт сервера,
 // и обновление GrigDesk: поле, которого в старой оценке не было, — обычное дело, а не
 // повреждённый ответ. Поэтому тело оценки описано необязательными полями, а конверт
@@ -30,7 +32,20 @@ const {
 // сервера, второе — сам агент, и человек решает по ним по-разному.
 const analysisState = oneOf('queued', 'running', 'done', 'failed', 'interrupted');
 
+/**
+ * Источник конверта назначает сервер: произвольная строка модели не адресует задачу.
+ * Старые ответы без поля сохраняют числовую совместимость.
+ */
+function sourceId(value: unknown, path: string): TaskSourceId {
+  if (!isTaskSourceId(value)) {
+    throw new AnalysisContractError(path);
+  }
+
+  return value;
+}
+
 const analysisStatus = objectOf({
+  source: optional(sourceId),
   task: wholeNumber,
   state: analysisState,
   queuedAt: optional(numeric),
@@ -110,6 +125,7 @@ const analysis = objectOf({
 });
 
 const analysisRow = objectOf({
+  source: optional(sourceId),
   task: wholeNumber,
   analysis: optional(analysis),
   status: optional(analysisStatus),
@@ -118,6 +134,7 @@ const analysisRow = objectOf({
 const analysisRows = listOf(analysisRow);
 
 const analysisDetail = objectOf({
+  source: optional(sourceId),
   task: wholeNumber,
   analysis: optional(analysis),
   note: optional(text),
@@ -172,15 +189,18 @@ const arbiterResult = objectOf({
   error: optional(text),
 });
 
+type Sourced<T> = Omit<T, 'source'> & { source?: TaskSourceId | null };
+type AnalysisEnvelope<T> = Omit<Sourced<T>, 'status'> & { status: AnalysisStatus | null };
+
 export type AnalysisState = ReturnType<typeof analysisState>;
-export type AnalysisStatus = ReturnType<typeof analysisStatus>;
+export type AnalysisStatus = Sourced<ReturnType<typeof analysisStatus>>;
 export type AnalysisQuestionOption = ReturnType<typeof questionOption>;
 export type AnalysisQuestion = ReturnType<typeof analysisQuestion>;
 export type AnalysisScope = ReturnType<typeof analysisScope>;
 export type AnalysisMeta = ReturnType<typeof analysisMeta>;
 export type Analysis = ReturnType<typeof analysis>;
-export type AnalysisRow = ReturnType<typeof analysisRow>;
-export type AnalysisDetail = ReturnType<typeof analysisDetail>;
+export type AnalysisRow = AnalysisEnvelope<ReturnType<typeof analysisRow>>;
+export type AnalysisDetail = AnalysisEnvelope<ReturnType<typeof analysisDetail>>;
 export type AnalysisQueueOutcome = ReturnType<typeof enqueueOutcome>;
 export type AnalysisQueueResponse = ReturnType<typeof queueResponse>;
 export type AnalysisClarificationEntry = ReturnType<typeof clarificationEntry>;

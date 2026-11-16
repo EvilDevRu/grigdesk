@@ -5,6 +5,7 @@
 //   • уровни эффорта обнаруживаются динамически (executor.efforts(), например парсинг
 //     `claude --help`) — добавит вендор новый уровень (ultra и т.п.) — подхватится само;
 //   • сортировка по tier (сильнее = больше = выше в списке), тоже данные из файла;
+//     при равном tier выше свежая модель (createdAt сервиса / firstSeen реестра);
 //   • краткий список общий для всех: прежние версии семейства получают `extra`.
 // У каждой модели: id (что передаём CLI), family (долгоживущая policy), name
 // (с версией — для UI), context (окно), efforts (уровни; null = взять обнаруженные
@@ -28,7 +29,9 @@ import type { ExecutorAdapter } from './executors/index.ts';
 // 11: краткий список считает реестр по семействам любого исполнителя, поэтому DeepSeek
 //     и GLM больше не пишут всем моделям общее `family: 'default'`.
 // 12: скорости модели приходят из native metadata, старый допуск не переносится.
-const CATALOG_SCHEMA = 12;
+// 13: нечат-модели каталога получают extra и причину; порядок списка —
+//     tier → свежесть (createdAt сервиса / firstSeen реестра) → id.
+const CATALOG_SCHEMA = 13;
 
 // Запись каталога моделей. Форма открытая: файл редактируется руками, и поля,
 // которых ядро не знает, обязаны переживать мёрж.
@@ -51,6 +54,9 @@ export interface CatalogModel {
   extra?: boolean;
   discovered?: boolean;
   createdAt?: string;
+  firstSeen?: string;
+  nonChat?: boolean;
+  nonChatReason?: string;
   contextUnverified?: boolean;
   contextRuntimeOnly?: boolean;
   nameUnverified?: boolean;
@@ -275,10 +281,19 @@ export async function mergeCatalog(
   return metadataChanged || listChanged;
 }
 
+/**
+ * Сливает живую запись каталога с сохранённой копией реестра.
+ * Момент первого наблюдения переживает пересборки: новая модель встаёт выше
+ * прежних, даже когда сервис не объявляет дату создания.
+ */
 export function mergeCatalogModel(
   model: CatalogModel,
   current: CatalogModel | undefined,
 ): CatalogModel {
+  const firstSeen = typeof current?.firstSeen === 'string' && current.firstSeen
+    ? current.firstSeen
+    : new Date().toISOString();
+
   // Только явно custom-запись перекрывает живой каталог. Обычная сохранённая копия
   // не должна удерживать старый список efforts после обновления CLI.
   if (current?.custom) {
@@ -287,9 +302,11 @@ export function mergeCatalogModel(
       ...current,
       chatSpeedModes: model.chatSpeedModes,
       unknown: false,
+      firstSeen,
     };
   }
-  const merged = { ...model };
+
+  const merged = { ...model, firstSeen };
   // Непроверенные поля не затирают последнюю проверенную metadata. Признаки деградации
   // при этом ОСТАЮТСЯ: старое окно — полезный ориентир, но выдавать его за свежий факт
   // нельзя. Effort ниже дополнительно fail-closed, пока реестр снова не прочитается.
@@ -341,9 +358,29 @@ export function resolveEffortHints(
 }
 
 /**
+ * Свежесть записи: объявленная сервисом дата создания сильнее момента первого
+ * наблюдения реестра; отсутствие обеих не выдумывает дату.
+ */
+function modelFreshness(model: CatalogModel): string {
+  return String(model.createdAt || model.firstSeen || '');
+}
+
+/**
+ * Единый порядок списка: сила (tier), затем свежесть, затем id для детерминизма.
+ * Порядок ответа сервиса больше не определяет положение модели в выборе.
+ */
+function compareCatalogModels(left: CatalogModel, right: CatalogModel): number {
+  return Number(right.tier || 0) - Number(left.tier || 0)
+    || modelFreshness(right).localeCompare(modelFreshness(left))
+    || String(left.id).localeCompare(String(right.id));
+}
+
+/**
  * Готовит копии моделей зарегистрированного исполнителя для runtime-каталога.
  * Семейства и уровни усилия уточняются адаптером, прежние версии семейства уходят
  * в `extra` по общему правилу краткого списка; сохранённые записи не меняются.
+ * Нечат-модель тоже получает `extra`: она видна только под «Показывать все модели»,
+ * а запуск отвергает сервер с причиной из каталога.
  */
 async function resolveRuntimeModels(
   models: CatalogModel[],
@@ -398,11 +435,15 @@ async function resolveRuntimeModels(
       };
     });
 
-  return markSupersededModels(resolved).sort((a, b) => (b.tier || 0) - (a.tier || 0));
+  const marked = markSupersededModels(resolved).map((model) => (
+    model.nonChat ? { ...model, extra: true } : model
+  ));
+
+  return marked.sort(compareCatalogModels);
 }
 
 /**
- * Итоговый реестр: { providerId: [модели с efforts, сортированные по tier desc] }.
+ * Итоговый реестр: { providerId: [модели с efforts, сортированные по tier и свежести] }.
  * Снятые исполнители остаются в файле, но не участвуют в runtime-каталоге.
  *
  * Устаревший реестр отдаётся сразу, а пересборка идёт в фоне, одна на файл: её

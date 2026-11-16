@@ -1,6 +1,11 @@
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 function uncertain(error: unknown): boolean {
   const name = (error as { name?: unknown } | null)?.name;
@@ -50,7 +55,9 @@ export async function checkPublicationOutcome(): Promise<void> {
     store.pendingOperationId = null;
     delete store.pendingOperations[key];
     store.publicationOutcome = receipt.state;
-    store.publicationError = receipt.state === 'committed' ? '' : 'Публикация не выполнена.';
+    store.publicationError = receipt.state === 'committed'
+      ? ''
+      : translateUi('core.publishPublicationWasNotCompleted');
 
     if (receipt.state === 'committed') {
       store.opened = { ...opened, readOnly: true };
@@ -61,7 +68,7 @@ export async function checkPublicationOutcome(): Promise<void> {
     }
 
     store.publicationOutcome = 'unknown';
-    store.publicationError = 'Итог публикации пока неизвестен. Проверьте операцию снова.';
+    store.publicationError = translateUi('core.loadDraftThePublicationOutcomeIsStillUnknownCheck');
   }
 }
 
@@ -88,7 +95,7 @@ export async function publishComparedDraft(comment = ''): Promise<void> {
   const publicationComment = comment.trim();
 
   if (new TextEncoder().encode(publicationComment).length > 2000) {
-    store.publicationError = 'Комментарий публикации слишком длинный (максимум 2000 байт).';
+    store.publicationError = translateUi('core.publishThePublicationCommentIsTooLongMaximum');
 
     return;
   }
@@ -126,14 +133,14 @@ export async function publishComparedDraft(comment = ''): Promise<void> {
       if (receipt.state === 'committed') {
         store.opened = { ...opened, readOnly: true };
       } else {
-        store.publicationError = 'Публикация не выполнена.';
+        store.publicationError = translateUi('core.publishPublicationWasNotCompleted');
       }
     } catch (error) {
       if (identity === runtime.openRequest) {
         if (uncertain(error)) {
           await checkPublicationOutcome();
         } else {
-          store.publicationError = failureText(error, 'Публикация не выполнена.');
+          store.publicationError = failureText(error, translateUi('core.publishPublicationWasNotCompleted'));
           store.pendingOperationId = null;
           delete store.pendingOperations[key];
 

@@ -314,7 +314,8 @@ async function closeOne(item: ProcessView): Promise<void> {
 
 /**
  * Массовая операция подтверждается отдельно и сохраняет занятые ходом процессы.
- * Фактический счётчик берётся из ответа сервера, а не числа строк до запроса.
+ * Фактический счётчик берётся из ответа сервера, а не числа строк до запроса;
+ * отказ закрытия виден отдельным сообщением с числом отказов, список обновляется.
  */
 async function closeFree(): Promise<void> {
   if (busy.value || !freeCount.value || !current()) {
@@ -333,12 +334,29 @@ async function closeFree(): Promise<void> {
       controller?.abort();
       loading.value = false;
 
-      const result = await api.del('/api/chat/sessions') as { closed: number; skipped?: number };
+      const result = await api.del('/api/chat/sessions') as {
+        closed: number;
+        skipped?: number;
+        failed?: number;
+      };
+      const failed = result.failed ?? 0;
 
-      message.value = messageRef('settings.stoppedBusyProcessesSkipped', {
-        resultClosed: result.closed,
-        value2: result.skipped ?? 0,
-      });
+      if (failed > 0) {
+        message.value = '';
+        error.value = result.closed > 0
+          ? messageRef('settings.processesClosePartialFailed', {
+            resultClosed: result.closed,
+            failedCount: failed,
+          })
+          : messageRef('settings.processesCloseAllFailed', { failedCount: failed });
+      } else {
+        error.value = '';
+        message.value = messageRef('settings.stoppedBusyProcessesSkipped', {
+          resultClosed: result.closed,
+          value2: result.skipped ?? 0,
+        });
+      }
+
       await load();
     }
   } catch (cause) {

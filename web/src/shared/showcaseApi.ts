@@ -22,6 +22,11 @@ import type {
   ShowcaseSyncCueKind,
   ShowcaseTargetRef,
 } from '../../../shared/plugins/showcase/showcaseContracts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface ShowcaseSyncCueDraft {
   id?: string | null;
@@ -419,35 +424,93 @@ export const showcaseApi = {
 // Тексты нужны только там, где сервер отвечает ОДНИМ кодом без пояснения: остальные
 // отказы он формулирует сам, и вторая формулировка на клиенте разошлась бы с первой.
 const MESSAGES: Record<string, string> = {
-  plugin_disabled: 'Раздел «Презентации» выключен в настройках плагинов.',
-  session_required: 'Разделом управляет человек: нужен вход в GrigDesk.',
-  bad_target: 'Цель показа выбрана неверно.',
-  bad_profile: 'Профиль выбран неверно.',
-  bad_id: 'Ролик указан неверно.',
-  bad_revision: 'Правка пришла без редакции ролика.',
-  bad_scene: 'Сцена описана неверно: проверьте экран и действия.',
-  bad_order: 'Новый порядок сцен не подошёл.',
-  browser_missing: 'Браузер записи не установлен.',
-  nothing_to_record: 'Все клипы сцен уже свежие — записывать нечего.',
-  scene_not_ready: 'Сцена ещё не готова к сборке.',
-  no_scenes: 'В ролике нет ни одной сцены.',
-  voice_unavailable: 'Голосовой движок недоступен: загрузите готовый звук.',
-  bad_voice_ref: 'Голос указан неверно.',
-  bad_pace: 'Темп указан неверно.',
-  bad_dictionary: 'Словарь ударений приходит текстом.',
-  login_credentials_missing: 'Учётка для входа на стенд не найдена по ссылке из профиля.',
-  nothing_to_synthesize: 'Озвучивать нечего — звук сцен свежий.',
-  empty_narration: 'У сцены нет текста для озвучки.',
-  model_unavailable: 'Модель для брифа и сценария не выбрана в настройках плагина.',
-  unsafe_model_provider: 'У выбранного исполнителя нет безопасного режима для недоверенного текста.',
-  model_reply_invalid: 'Модель ответила не по форме — можно повторить или написать руками.',
-  no_brief: 'Сначала нужен бриф: без него сценарий не о чем.',
-  seed_unavailable: 'Подготовка данных для этой цели недоступна.',
-  seed_decision_stale: 'Стенд или рецепт изменились: нужно подтвердить заново.',
-  target_busy: 'По ролику уже идёт работа — подождите её завершения.',
-  bad_decision: 'Подтверждение пришло без рецепта.',
-  not_recovered: 'GrigDesk ещё сверяет журнал заданий после перезапуска.',
-  showcase_error: 'Сервер не смог выполнить действие — подробности в журнале GrigDesk.',
+  get plugin_disabled() {
+    return translateUi('core.showcaseApiShowcaseIsDisabledInPluginSettings');
+  },
+  get session_required() {
+    return translateUi('core.showcaseApiThisSectionRequiresAPersonToSign');
+  },
+  get bad_target() {
+    return translateUi('core.showcaseApiInvalidDemonstrationTarget');
+  },
+  get bad_profile() {
+    return translateUi('core.sandboxApiInvalidProfileSelection');
+  },
+  get bad_id() {
+    return translateUi('core.showcaseApiInvalidVideoReference');
+  },
+  get bad_revision() {
+    return translateUi('core.showcaseApiTheChangeHasNoVideoRevision');
+  },
+  get bad_scene() {
+    return translateUi('core.showcaseApiInvalidSceneCheckItsScreenAndActions');
+  },
+  get bad_order() {
+    return translateUi('core.showcaseApiTheNewSceneOrderIsInvalid');
+  },
+  get browser_missing() {
+    return translateUi('core.showcaseApiTheRecordingBrowserIsNotInstalled');
+  },
+  get nothing_to_record() {
+    return translateUi('core.showcaseApiAllSceneClipsAreUpToDate');
+  },
+  get scene_not_ready() {
+    return translateUi('core.showcaseApiTheSceneIsNotReadyToBuild');
+  },
+  get no_scenes() {
+    return translateUi('core.showcaseApiTheVideoHasNoScenes');
+  },
+  get voice_unavailable() {
+    return translateUi('core.showcaseApiTheVoiceEngineIsUnavailableUploadAn');
+  },
+  get bad_voice_ref() {
+    return translateUi('core.showcaseApiInvalidVoiceSelection');
+  },
+  get bad_pace() {
+    return translateUi('core.showcaseApiInvalidSpeechPace');
+  },
+  get bad_dictionary() {
+    return translateUi('core.showcaseApiThePronunciationDictionaryMustBeText');
+  },
+  get login_credentials_missing() {
+    return translateUi('core.showcaseApiTheSignInAccountReferencedByThe');
+  },
+  get nothing_to_synthesize() {
+    return translateUi('core.showcaseApiAllSceneAudioIsUpToDate');
+  },
+  get empty_narration() {
+    return translateUi('core.showcaseApiTheSceneHasNoNarrationText');
+  },
+  get model_unavailable() {
+    return translateUi('core.showcaseApiNoBriefAndScriptModelIsSelected');
+  },
+  get unsafe_model_provider() {
+    return translateUi('core.showcaseApiTheSelectedExecutorHasNoSafeMode');
+  },
+  get model_reply_invalid() {
+    return translateUi('core.showcaseApiTheModelReturnedAnInvalidFormatTry');
+  },
+  get no_brief() {
+    return translateUi('core.showcaseApiCreateABriefBeforeGeneratingAScript');
+  },
+  get seed_unavailable() {
+    return translateUi('core.showcasePodgotovkaDannyhDlyaEtoy');
+  },
+  get seed_decision_stale() {
+    return translateUi('core.showcaseApiTheEnvironmentOrRecipeChangedConfirmIt');
+  },
+  get target_busy() {
+    return translateUi('core.showcaseApiWorkOnThisVideoIsAlreadyRunning');
+  },
+  get bad_decision() {
+    return translateUi('core.showcaseApiTheConfirmationHasNoRecipe');
+  },
+  get not_recovered() {
+    return translateUi('core.showcaseApiGrigDeskIsStillReconcilingTheJobLog');
+  },
+  get showcase_error() {
+    return translateUi('core.sandboxApiTheServerCouldNotPerformTheAction');
+  },
 };
 
 /**
@@ -465,7 +528,9 @@ export function showcaseErrorCode(error: unknown): string {
  * Текст отказа для человека. Своя формулировка берётся только тогда, когда сервер
  * ответил голым кодом: свой текст поверх серверного разошёлся бы с ним по смыслу.
  */
-export function showcaseErrorMessage(error: unknown, fallback = 'Действие не удалось.'): string {
+export function showcaseErrorMessage(error: unknown, fallback = translateUi(
+  'core.sandboxApiTheActionFailed',
+)): string {
   const data = objectOrEmpty(objectOrEmpty(error).data);
   const detail = typeof data.message === 'string' ? data.message : '';
   const code = typeof data.error === 'string' ? data.error : '';

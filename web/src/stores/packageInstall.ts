@@ -14,6 +14,11 @@ import {
 } from '../shared/pluginInstallApi.ts';
 import type { PluginVersionRef, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
 import type { PluginInstallInfo } from '../../../shared/plugins/pluginInstallContracts.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 export interface InstallSubject {
   compatibility?: {
@@ -126,7 +131,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
   } catch (cause: unknown) {
     storageError = {
       code: 'protocol_error',
-      message: failureText(cause, 'Не удалось прочитать сохранённое намерение отката.'),
+      message: failureText(cause, translateUi('core.packageInstallCouldNotReadTheSavedRollbackIntent')),
     };
     recoveryError.value = storageError;
   }
@@ -232,7 +237,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       }
     } catch (cause: unknown) {
       if (!disposed && epoch === jobEpoch) {
-        error.value = failureText(cause, 'Не удалось прочитать состояние установки.');
+        error.value = failureText(cause, translateUi('core.packageInstallCouldNotReadInstallationStatus'));
         pollDelay = Math.min(10000, pollDelay * 2);
         authStopped = [401, 403].includes(httpStatus(cause) ?? 0);
 
@@ -275,7 +280,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
 
     if (versionsInputKey.value && (!versionsUrl.value || versionsLoading.value || !versions.value.length
       || input !== versionsInputKey.value && input !== versionsUrl.value)) {
-      versionsError.value = 'Сначала найдите версии для текущего адреса.';
+      versionsError.value = translateUi('core.packageInstallFindVersionsForTheCurrentAddressFirst');
 
       return;
     }
@@ -329,7 +334,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       return true;
     } catch (cause: unknown) {
       if (!disposed) {
-        error.value = failureText(cause, 'Не удалось начать установку.');
+        error.value = failureText(cause, translateUi('core.packageInstallCouldNotStartInstallation'));
 
         const status = httpStatus(cause);
 
@@ -409,12 +414,15 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       return false;
     } catch (cause: unknown) {
       if (!disposed) {
-        error.value = failureText(cause, 'Не удалось уточнить исход операции.');
+        error.value = failureText(
+          cause,
+          translateUi('core.packageInstallCouldNotDetermineTheOperationOutcome'),
+        );
         pollDelay = Math.min(10000, pollDelay * 2);
         authStopped = [401, 403].includes(httpStatus(cause) ?? 0);
 
         if (httpStatus(cause) === 404 && request.jobId) {
-          error.value = 'Результат операции больше недоступен. Каталог обновлён; повтор не выполнялся.';
+          error.value = translateUi('core.packageInstallTheOperationResultIsNoLongerAvailable');
 
           if (!unavailableOutcomes.has(request.jobId)) {
             unavailableOutcomes.add(request.jobId);
@@ -467,7 +475,10 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       return true;
     } catch (cause: unknown) {
       if (!disposed) {
-        error.value = failureText(cause, 'Не удалось уточнить исход отката.');
+        error.value = failureText(
+          cause,
+          translateUi('core.packageInstallCouldNotDetermineTheRollbackOutcome'),
+        );
 
         if (httpStatus(cause) === 409) {
           clearRollback();
@@ -571,7 +582,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
     try {
       sessionStorage.setItem(ROLLBACK_KEY, JSON.stringify(pendingRollback));
     } catch (cause: unknown) {
-      error.value = failureText(cause, 'Не удалось сохранить намерение отката.');
+      error.value = failureText(cause, translateUi('core.packageInstallCouldNotSaveTheRollbackIntent'));
       pendingRollback = null;
 
       return;
@@ -681,7 +692,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       decodeInstallChecks(await api.post(`${basePath}/check`, {}, { signal: controller.signal }));
     } catch (cause: unknown) {
       if (!disposed) {
-        error.value = failureText(cause, 'Не удалось проверить обновления.');
+        error.value = failureText(cause, translateUi('core.packageInstallCouldNotCheckForUpdates'));
       }
     } finally {
       controllers.delete(controller);
@@ -758,7 +769,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
       }
     } catch (error: unknown) {
       if (!disposed && epoch === versionsEpoch) {
-        versionsError.value = failureText(error, 'Не удалось получить версии.');
+        versionsError.value = failureText(error, translateUi('core.packageInstallCouldNotRetrieveVersions'));
       }
     } finally {
       controllers.delete(controller);

@@ -11,7 +11,6 @@ import tls from 'node:tls';
 import { AuthStore } from '../../server/src/lib/authStore.ts';
 import { bindDevice, deviceOf, markRevoked } from '../../server/src/lib/clientAccess/principal.ts';
 import trackerModule from '../../server/src/modules/tracker/index.ts';
-import { ownTask, registerTasksModule, seedTasks, tasksFixture } from './helpers/grigdesk-tasks.js';
 
 import authModule from '../../server/src/modules/auth/index.ts';
 import authPlugin, { isLocalRequest, isSecureRequest } from '../../server/src/plugins/auth.ts';
@@ -306,34 +305,23 @@ test('DEVICE-B24-DETAIL-01: устройство читает карточку �
   assert.equal((await request(fx, '/api/tracker/task/42')).status, 403);
 });
 
-test('LOCAL-DETAIL-03: устройство читает own и прежний Б24 по исходному TLS-транспорту', async (t) => {
-  const storage = await tasksFixture(t, { configured: true });
-  const task = ownTask();
-
-  await seedTasks(storage.config, [task]);
-
+test('LOCAL-DETAIL-03: устройство читает внешний tracker по исходному TLS-транспорту', async (t) => {
   const fx = await principalFixture(t, async (app) => {
-    await registerTasksModule(app, storage.moduleOptions);
     app.decorate('telegramDiscussion', async () => ({
       links: [{ url: 'https://t.me/example_channel/42' }],
     }));
-    await app.register(trackerModule, { tracker: storage.moduleOptions.tracker });
+    await app.register(trackerModule, { tracker: {
+      isConfigured: () => true,
+      taskDetail: async () => ({
+        id: 42,
+        title: 'Задача портала',
+        description: 'Текст',
+      }),
+    } });
   });
-  const missing = await request(fx, '/api/grigdesk-tasks/42');
-
-  assert.equal(missing.status, 404);
-  assert.equal(missing.body.error, 'grigdesk_task_not_found');
-
   const portal = await request(fx, '/api/tracker/task/42');
 
   assert.equal(portal.status, 200);
   assert.equal(portal.body.title, 'Задача портала');
   assert.equal(portal.body.telegram.links.length, 1);
-  storage.portalCalls.length = 0;
-
-  const own = await request(fx, `/api/grigdesk-tasks/${task.id}`);
-
-  assert.equal(own.status, 200);
-  assert.deepEqual(own.body, task);
-  assert.deepEqual(storage.portalCalls, []);
 });

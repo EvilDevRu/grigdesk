@@ -1,11 +1,11 @@
 <template>
   <TopbarActions>
-    <UiIconButton role="rail" label="Назад" v-tooltip="'Назад'" @click="close">←</UiIconButton>
+    <UiIconButton role="rail" :label="t('core.stageWizardBack')" v-tooltip="t('core.stageWizardBack')" @click="close">←</UiIconButton>
     <span class="title" v-tooltip="document?.displayPath || title">{{ title }}</span>
   </TopbarActions>
   <main class="documents-view"
     :data-perf-pending="resolving ? '' : undefined">
-    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
+    <UiLoadingState v-if="resolving" :label="t('core.docProveryayuSsylku')" variant="document" >
       <UiSkeletonLayout layout="text" :header="false" />
     </UiLoadingState>
     <div v-else-if="resolveError" class="resolve-state error"
@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
+import { UiSkeletonLayout, t } from '../ui';
 
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -81,7 +81,7 @@ watch(() => String(route.query.open || ''), async (openPath) => {
     });
   } catch (e) {
     if (generation === resolveGeneration) {
-      resolveError.value = failureText(e, 'Ссылка на документ недоступна');
+      resolveError.value = failureText(e, t('core.coreSsylkaNaDokumentNedostupna'));
     }
   } finally {
     if (generation === resolveGeneration) {
@@ -90,7 +90,7 @@ watch(() => String(route.query.open || ''), async (openPath) => {
   }
 }, { immediate: true });
 
-const title = computed(() => document.value?.name || 'Документ');
+const title = computed(() => document.value?.name || t('core.docDokument'));
 
 function close() {
   if (window.history.length > 1) {

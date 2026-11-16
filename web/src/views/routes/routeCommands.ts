@@ -1,12 +1,23 @@
+import { leftCanvasNeighbour } from './routeCanvasGeometry.ts';
+import type { StageRoleTemplate, StageRoleAnswers }
+  from '../../../../shared/pipeline/routeStageWizardContracts.ts';
+import { buildRouteGraph } from '../../../../shared/pipeline/routeGraphView.ts';
+import type { RouteGraphDef, RouteMachine } from '../../../../shared/pipeline/routeGraphView.ts';
 import type { PreparedStageRole, WizardCapabilities } from './routeWizardTemplates.ts';
-import { stageCommandIdentity } from './routeWizardTemplates.ts';
+import { prepareStageRole, stageCommandIdentity } from './routeWizardTemplates.ts';
 import type {
+
   DraftMachine,
   DraftNode,
   RouteTransitionDoc,
 } from '../../../../shared/pipeline/routeDefinition.ts';
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { stagePromptLimitExceeded } from '../../../../shared/pipeline/routeStageWizardContracts.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export { prepareStageRole } from './routeWizardTemplates.ts';
 
@@ -114,7 +125,7 @@ export function addNode(draft: RouteDraft, scope: RouteCommandScope, executor: N
   const document = documentAt(copy, scope);
 
   if (!document) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const { machine, prompts } = document;
@@ -124,7 +135,7 @@ export function addNode(draft: RouteDraft, scope: RouteCommandScope, executor: N
 
   if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(runKey)
     || machine.nodes.some((node) => node.id === id || node.runKey === runKey || node.key === runKey)) {
-    return unchanged(draft, 'node_id_conflict', 'Ключ этапа уже занят или недопустим.');
+    return unchanged(draft, 'node_id_conflict', t('core.routeKlyuchEtapaUzheZanyat'));
   }
 
   let phase: 'bootstrap' | 'main' | 'tail' = scope.kind === 'bootstrap' ? 'bootstrap' : 'main';
@@ -172,7 +183,7 @@ export function addNode(draft: RouteDraft, scope: RouteCommandScope, executor: N
       && candidate.executor !== 'status');
 
     if (!owner) {
-      return unchanged(draft, 'owner_required', 'Выберите исполняемый этап-владелец статуса.');
+      return unchanged(draft, 'owner_required', t('core.routeVyberiteIspolnyaemyyEtapVladelets'));
     }
 
     phase = owner.phase as 'bootstrap' | 'main' | 'tail';
@@ -186,7 +197,7 @@ export function addNode(draft: RouteDraft, scope: RouteCommandScope, executor: N
     };
     owner.emits = [...(owner.emits ?? []), id];
   } else {
-    return unchanged(draft, 'executor_unavailable', 'Этот тип этапа пока нельзя добавить.');
+    return unchanged(draft, 'executor_unavailable', t('core.routeEtotTipEtapaPoka'));
   }
 
   machine.nodes.push(node);
@@ -217,14 +228,14 @@ export function cloneNodes(draft: RouteDraft, _scope: RouteCommandScope, _nodeId
   const document = documentAt(copy, _scope);
 
   if (!document) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const { machine, prompts } = document;
   const selected = _nodeIds.map((id) => machine.nodes.find((node) => node.id === id));
 
   if (selected.some((node) => !node) || new Set(_nodeIds).size !== _nodeIds.length) {
-    return unchanged(draft, 'node_missing', 'Один из выбранных этапов отсутствует или повторён.');
+    return unchanged(draft, 'node_missing', t('core.routeOdinIzVybrannyhEtapov'));
   }
 
   const usedKeys = new Set(machine.nodes.map((node) => node.runKey ?? node.key ?? ''));
@@ -236,7 +247,7 @@ export function cloneNodes(draft: RouteDraft, _scope: RouteCommandScope, _nodeId
     const id = key.toLowerCase();
 
     if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key) || usedKeys.has(key) || usedIds.has(id)) {
-      return unchanged(draft, 'node_id_conflict', 'Ключ копии уже занят или недопустим.');
+      return unchanged(draft, 'node_id_conflict', t('core.routeKlyuchKopiiUzheZanyat'));
     }
 
     usedKeys.add(key);
@@ -250,7 +261,7 @@ export function cloneNodes(draft: RouteDraft, _scope: RouteCommandScope, _nodeId
   const external = (path: string, target: string): void => {
     issues.push({
       code: 'external_reference',
-      message: `Связь с этапом «${target}» осталась за пределами копии.`,
+      message: t('core.routeSvyazSEtapomTarget', { target }),
       path
     });
   };
@@ -392,7 +403,7 @@ export function changeNodeExecutor(draft: RouteDraft, scope: RouteCommandScope,
   const source = documentAt(draft, scope)?.machine.nodes.find((node) => node.id === nodeId);
 
   if (!source) {
-    return unchanged(draft, 'node_missing', 'Этап отсутствует в черновике.');
+    return unchanged(draft, 'node_missing', t('core.routeEtapOtsutstvuetVChernovike'));
   }
   if (source.executor === executor) {
     return {
@@ -402,7 +413,7 @@ export function changeNodeExecutor(draft: RouteDraft, scope: RouteCommandScope,
     };
   }
   if (source.executor !== 'agent' || executor !== 'command') {
-    return unchanged(draft, 'executor_change_unavailable', 'Смена этого типа этапа пока недоступна.');
+    return unchanged(draft, 'executor_change_unavailable', t('core.routeSmenaEtogoTipaEtapa'));
   }
 
   const prompts = documentAt(draft, scope)!.prompts;
@@ -410,7 +421,7 @@ export function changeNodeExecutor(draft: RouteDraft, scope: RouteCommandScope,
   const issues: RouteCommandIssue[] = [{
     code: 'text_loss',
     path: `nodes.${nodeId}.prompt`,
-    message: `Инструкция будет отсоединена от этапа: ${text}`
+    message: t('core.routeInstruktsiyaBudetOtsoedinenaOt', { text })
   }];
   const defaults = safeExecutionFields();
 
@@ -418,21 +429,21 @@ export function changeNodeExecutor(draft: RouteDraft, scope: RouteCommandScope,
     issues.push({
       code: 'fanout_reset',
       path: `nodes.${nodeId}.fanout`,
-      message: 'parallel и прежние настройки fanout будут сброшены: command исполняется одним процессом.'
+      message: t('core.routeParallelIPrezhnieNastroyki')
     });
   }
   if (source.retry && JSON.stringify(source.retry) !== JSON.stringify(defaults.retry)) {
     issues.push({
       code: 'retry_reset',
       path: `nodes.${nodeId}.retry`,
-      message: 'Повторы будут сброшены: command всегда создаётся с нулевым retry.'
+      message: t('core.routePovtoryBudutSbroshenyCommand')
     });
   }
   if (source.policy?.filesystem === 'transactional-write') {
     issues.push({
       code: 'policy_reset',
       path: `nodes.${nodeId}.policy.filesystem`,
-      message: 'Файловая политика transactional-write будет заменена на state-only.'
+      message: t('core.routeFaylovayaPolitikaTransactionalWrite')
     });
   }
   if (!acceptLoss) {
@@ -482,13 +493,13 @@ export function renameNode(draft: RouteDraft, _scope: RouteCommandScope,
   const machine = documentAt(copy, _scope)?.machine;
 
   if (!machine) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const node = machine.nodes.find((candidate) => candidate.id === _nodeId);
 
   if (!node) {
-    return unchanged(draft, 'node_missing', 'Этап отсутствует в черновике.');
+    return unchanged(draft, 'node_missing', t('core.routeEtapOtsutstvuetVChernovike'));
   }
   if (_nodeId === _nextId) {
     return {
@@ -499,13 +510,13 @@ export function renameNode(draft: RouteDraft, _scope: RouteCommandScope,
   }
   if (!/^[a-z0-9][a-z0-9_-]{0,40}$/.test(_nextId) || _nextId === 'catalog'
     || machine.nodes.some((candidate) => candidate.id === _nextId)) {
-    return unchanged(draft, 'node_id_conflict', 'Новый ID этапа занят или недопустим.');
+    return unchanged(draft, 'node_id_conflict', t('core.routeNovyyIdEtapaZanyat'));
   }
 
   const special = new Set(['ship', 'instrument', 'proof']);
 
   if (special.has(_nodeId) || special.has(_nextId)) {
-    return unchanged(draft, 'semantic_node_id', 'Особый ID этапа нельзя переименовать обычной командой.');
+    return unchanged(draft, 'semantic_node_id', t('core.routeOsobyyIdEtapaNelzya'));
   }
 
   node.id = _nextId;
@@ -547,14 +558,14 @@ export function renameNode(draft: RouteDraft, _scope: RouteCommandScope,
 export function setNodeLabel(draft: RouteDraft, scope: RouteCommandScope,
   nodeId: string, label: string): RouteCommandResult {
   if (label.length > 500) {
-    return unchanged(draft, 'label_too_long', 'Название этапа слишком длинное.');
+    return unchanged(draft, 'label_too_long', t('core.routeNazvanieEtapaSlishkomDlinnoe'));
   }
 
   const copy = structuredClone(draft);
   const node = documentAt(copy, scope)?.machine.nodes.find((candidate) => candidate.id === nodeId);
 
   if (!node) {
-    return unchanged(draft, 'node_missing', 'Этап отсутствует в черновике.');
+    return unchanged(draft, 'node_missing', t('core.routeEtapOtsutstvuetVChernovike'));
   }
 
   node.label = label;
@@ -573,14 +584,14 @@ export function setNodeLabel(draft: RouteDraft, scope: RouteCommandScope,
 export function setNodeDescription(draft: RouteDraft, scope: RouteCommandScope,
   nodeId: string, description: string): RouteCommandResult {
   if (description.length > 4000) {
-    return unchanged(draft, 'description_too_long', 'Описание этапа слишком длинное.');
+    return unchanged(draft, 'description_too_long', t('core.routeOpisanieEtapaSlishkomDlinnoe'));
   }
 
   const copy = structuredClone(draft);
   const node = documentAt(copy, scope)?.machine.nodes.find((item) => item.id === nodeId);
 
   if (!node) {
-    return unchanged(draft, 'node_missing', 'Этап отсутствует в черновике.');
+    return unchanged(draft, 'node_missing', t('core.routeEtapOtsutstvuetVChernovike'));
   }
   if (description) {
     node.description = description;
@@ -607,12 +618,12 @@ export function setNodeRunKey(draft: RouteDraft, scope: RouteCommandScope,
   const node = machine?.nodes.find((item) => item.id === nodeId);
 
   if (!node) {
-    return unchanged(draft, 'node_missing', 'Этап отсутствует в черновике.');
+    return unchanged(draft, 'node_missing', t('core.routeEtapOtsutstvuetVChernovike'));
   }
   if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(runKey)
     || machine?.nodes.some((item) => item.id !== nodeId
       && (item.runKey === runKey || item.key === runKey))) {
-    return unchanged(draft, 'run_key_invalid', 'Ключ запуска недопустим или уже занят.');
+    return unchanged(draft, 'run_key_invalid', t('core.routeKlyuchZapuskaNedopustimIli'));
   }
   if (node.executor === 'status') {
     node.key = runKey;
@@ -639,11 +650,11 @@ export function removeEmitReference(draft: RouteDraft, scope: RouteCommandScope,
   const node = machine?.nodes.find((item) => item.id === nodeId);
 
   if (!node || node.executor === 'status' || !node.emits?.includes(statusId)) {
-    return unchanged(draft, 'emit_missing', 'Ссылка на статус отсутствует.');
+    return unchanged(draft, 'emit_missing', t('core.routeSsylkaNaStatusOtsutstvuet'));
   }
   if (machine?.nodes.some((item) => item.id === statusId && item.owner === nodeId)) {
     return unchanged(draft, 'status_still_owned',
-      'Живой статус принадлежит этому этапу: сначала переназначьте или удалите его.');
+      t('core.routeZhivoyStatusPrinadlezhitEtomu'));
   }
 
   node.emits = node.emits.filter((id) => id !== statusId);
@@ -861,7 +872,7 @@ export function removeNodes(draft: RouteDraft, scope: RouteCommandScope,
   const document = documentAt(copy, scope);
 
   if (!document) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const { machine, prompts } = document;
@@ -869,12 +880,12 @@ export function removeNodes(draft: RouteDraft, scope: RouteCommandScope,
 
   if (selected.size !== nodeIds.length
     || nodeIds.some((id) => !machine.nodes.some((node) => node.id === id))) {
-    return unchanged(draft, 'node_missing', 'Один из выбранных этапов отсутствует или повторён.');
+    return unchanged(draft, 'node_missing', t('core.routeOdinIzVybrannyhEtapov'));
   }
 
   for (const target of Object.values(options.retarget ?? {})) {
     if (selected.has(target) || !machine.nodes.some((node) => node.id === target)) {
-      return unchanged(draft, 'retarget_invalid', 'Новая цель должна существовать вне удаления.');
+      return unchanged(draft, 'retarget_invalid', t('core.routeNovayaTselDolzhnaSuschestvovat'));
     }
   }
 
@@ -908,7 +919,7 @@ export function removeNodes(draft: RouteDraft, scope: RouteCommandScope,
       issues.push({
         code: 'dangling_reference',
         path: reference.path,
-      message: `Связь с удалённым этапом «${reference.target}» требует решения.`
+      message: t('core.routeSvyazSUdalennymEtapom', { target: reference.target })
       });
     }
   });
@@ -920,7 +931,7 @@ export function removeNodes(draft: RouteDraft, scope: RouteCommandScope,
       issues.push({
         code: 'prompt_shared',
         path: file,
-        message: `Файл «${file}» используется другим этапом или не был показан.`
+        message: t('core.routeFaylFileIspolzuetsyaDrugim', { file })
       });
       continue;
     }
@@ -948,11 +959,11 @@ export function setTransition(draft: RouteDraft, scope: RouteCommandScope,
     const expected = modes[0] === 'rewind' ? ['rewind', 'reset'] : modes;
 
     if (modes.length !== 1 || Object.keys(transition).some((key) => !expected.includes(key))) {
-      return unchanged(draft, 'transition_action_invalid', 'Выберите ровно одно действие исхода.');
+      return unchanged(draft, 'transition_action_invalid', t('core.routeVyberiteRovnoOdnoDeystvie'));
     }
     if (transition.stop !== undefined
       && !['human', 'failed', 'done'].includes(transition.stop)) {
-      return unchanged(draft, 'transition_action_invalid', 'Недопустимый вид остановки.');
+      return unchanged(draft, 'transition_action_invalid', t('core.routeNedopustimyyVidOstanovki'));
     }
   }
 
@@ -960,14 +971,14 @@ export function setTransition(draft: RouteDraft, scope: RouteCommandScope,
   const machine = documentAt(copy, scope)?.machine;
 
   if (!machine) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const node = machine.nodes.find((candidate) => candidate.id === nodeId);
 
   if (!node || node.executor === 'status' || !node[group]
     || !Object.hasOwn(node[group], outcome)) {
-    return unchanged(draft, 'outcome_missing', 'Исход отсутствует у выбранного этапа.');
+    return unchanged(draft, 'outcome_missing', t('core.routeIshodOtsutstvuetUVybrannogo'));
   }
 
   let next = transition === null ? null : structuredClone(transition);
@@ -977,7 +988,7 @@ export function setTransition(draft: RouteDraft, scope: RouteCommandScope,
 
     if (!target || target.executor === 'status') {
       return unchanged(draft, target ? 'status_target' : 'target_missing',
-        'Цель перехода должна быть исполняемым этапом.');
+        t('core.routeTselPerehodaDolzhnaByt'));
     }
   }
   if (next?.escalate !== undefined) {
@@ -987,7 +998,7 @@ export function setTransition(draft: RouteDraft, scope: RouteCommandScope,
     if (!Array.isArray(routes) || new Set(routes).size !== routes.length
       || routes.some((routeId) => !allowed.includes(routeId))) {
       return unchanged(draft, 'escalation_route_unavailable',
-        'Цель смены маршрута должна входить в разрешённый список этапа.');
+        t('core.routeTselSmenyMarshrutaDolzhna'));
     }
   }
   if (next?.rewind !== undefined && next.rewind !== '') {
@@ -1001,7 +1012,7 @@ export function setTransition(draft: RouteDraft, scope: RouteCommandScope,
 
     if (from < 0 || to < 0 || from >= to) {
       return unchanged(draft, 'rewind_target_invalid',
-        'Цель возврата должна быть более ранним исполняемым этапом.');
+        t('core.routeTselVozvrataDolzhnaByt'));
     }
 
     next = { rewind: next.rewind, reset: order.slice(from, to + 1) };
@@ -1024,20 +1035,20 @@ export function moveStage(draft: RouteDraft, scope: RouteCommandScope,
   nodeId: string, phase: 'bootstrap' | 'main' | 'tail', index: number): RouteCommandResult {
   if ((scope.kind === 'bootstrap' && phase !== 'bootstrap')
     || (scope.kind === 'route' && phase === 'bootstrap') || !Number.isInteger(index)) {
-    return unchanged(draft, 'phase_invalid', 'Недопустимая фаза или позиция этапа.');
+    return unchanged(draft, 'phase_invalid', t('core.routeNedopustimayaFazaIliPozitsiya'));
   }
 
   const copy = structuredClone(draft);
   const machine = documentAt(copy, scope)?.machine;
 
   if (!machine) {
-    return unchanged(draft, 'route_missing', 'Маршрут отсутствует в черновике.');
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutOtsutstvuetVChernovike'));
   }
 
   const node = machine.nodes.find((candidate) => candidate.id === nodeId);
 
   if (!node || node.executor === 'status') {
-    return unchanged(draft, 'node_missing', 'Исполняемый этап отсутствует.');
+    return unchanged(draft, 'node_missing', t('core.routeIspolnyaemyyEtapOtsutstvuet'));
   }
 
   for (const key of ['bootstrap', 'main', 'tail'] as const) {
@@ -1078,7 +1089,7 @@ export function moveStage(draft: RouteDraft, scope: RouteCommandScope,
           issues.push({
             code: 'next_backwards',
             path: `${prefix}.next`,
-            message: `Переход «${outcome}» теперь направлен назад; выберите новое действие.`
+            message: t('core.routePerehodOutcomeTeperNapravlen', { outcome })
           });
         }
         if (transition.rewind !== undefined) {
@@ -1088,7 +1099,7 @@ export function moveStage(draft: RouteDraft, scope: RouteCommandScope,
             issues.push({
               code: 'rewind_target_invalid',
               path: `${prefix}.rewind`,
-              message: 'После перестановки цель возврата больше не находится раньше источника.'
+              message: t('core.routePoslePerestanovkiTselVozvrata')
             });
           } else {
             transition.reset = order.slice(to, from + 1);
@@ -1115,7 +1126,7 @@ export function setFailureRoutes(draft: RouteDraft, scope: RouteCommandScope,
   const node = documentAt(copy, scope)?.machine.nodes.find((candidate) => candidate.id === nodeId);
 
   if (!node || (node.executor !== 'agent' && node.executor !== 'command')) {
-    return unchanged(draft, 'node_missing', 'Ветки отказов поддерживает только agent или command.');
+    return unchanged(draft, 'node_missing', t('core.routeVetkiOtkazovPodderzhivaetTolko'));
   }
   if (enabled) {
     node.onFailure = Object.fromEntries([
@@ -1142,12 +1153,12 @@ export function setEscalation(draft: RouteDraft, scope: RouteCommandScope,
   const machine = documentAt(copy, scope)?.machine;
 
   if (!machine || !machine.nodes.some((node) => node.id === from && node.executor !== 'status')) {
-    return unchanged(draft, 'node_missing', 'Источник смены маршрута должен исполняться.');
+    return unchanged(draft, 'node_missing', t('core.routeIstochnikSmenyMarshrutaDolzhen'));
   }
   if (new Set(allowedRoutes).size !== allowedRoutes.length
     || allowedRoutes.some((routeId) => !Object.hasOwn(copy.routes, routeId))) {
     return unchanged(draft, 'escalation_route_unavailable',
-      'Разрешённый маршрут должен существовать в черновом каталоге.');
+      t('core.routeRazreshennyyMarshrutDolzhenSuschestvovat'));
   }
 
   const record = {
@@ -1284,7 +1295,7 @@ export function listStageInsertionPlaces(draft: RouteDraft, scope: RouteCommandS
  * Вставляет весь пакет одним независимым снимком и сшивает успешное продолжение.
  * Полный пересчёт возвратов использует ту же семантику, что перестановка этапа.
  */
-export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, afterId: string,
+export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, afterId: string | null,
   prepared: PreparedStageRole, capabilities: WizardCapabilities): RouteCommandResult {
   if (scope.kind !== 'route' || prepared.issues.length || !prepared.nodes.length) {
     return unchanged(draft, 'role_invalid', prepared.issues[0]?.message ?? 'role_invalid');
@@ -1298,22 +1309,33 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   }
 
   const machine = bundle.route;
-  const reason = stagePlaceReason(machine, afterId, prepared, capabilities);
+  const empty = afterId === null && machine.nodes.length === 0;
+
+  if (afterId === null && (!empty || machine.loop
+    || (machine.sequence.main?.length ?? 0) > 0 || (machine.sequence.tail?.length ?? 0) > 0)) {
+    return unchanged(draft, 'empty_scope_invalid', t('core.routePustoyMarshrutNekorrekten'));
+  }
+
+  const reason = empty ? '' : stagePlaceReason(machine, afterId!, prepared, capabilities);
 
   if (reason) {
     return unchanged(draft, reason, reason);
   }
 
-  const after = machine.nodes.find((node) => node.id === afterId)!;
-  const outcome = after.executor === 'gate' ? 'approved' : 'done';
-  const successor = structuredClone(after.on![outcome]!);
-  const phase = after.phase as 'main' | 'tail';
-  const sequence = machine.sequence[phase]!;
-  const position = sequence.indexOf(afterId) + 1;
+  const after = empty ? null : machine.nodes.find((node) => node.id === afterId)!;
+  const outcome = after?.executor === 'gate' ? 'approved' : 'done';
+  const successor = empty ? { stop: 'done' } : structuredClone(after!.on![outcome]!);
+  const phase = empty ? 'main' : after!.phase as 'main' | 'tail';
+  const sequence = machine.sequence[phase] ?? (machine.sequence[phase] = []);
+  const position = empty ? 0 : sequence.indexOf(afterId!) + 1;
   const nodes = structuredClone(prepared.nodes);
   const prompts = { ...prepared.prompts };
   const check = prepared.roleId === 'review'
-    ? findStageReviewCheck(machine, afterId, prepared, capabilities) : null;
+    ? findStageReviewCheck(machine, afterId ?? '', prepared, capabilities) : null;
+
+  if (prepared.roleId === 'review' && !check) {
+    return unchanged(draft, 'recheck_unavailable', 'recheck_unavailable');
+  }
 
   if (check && !machine.nodes.includes(check)) {
     nodes.push(check);
@@ -1354,7 +1376,8 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
       if (check) {
         const file = `prompts/${node.id}.wizard-recheck.md`;
 
-        bundle.prompts[file] = `Перепроверка RECHECK: этап ${check.id}, ключ ${check.runKey}.`;
+        bundle.prompts[file] =
+           t('core.routePereproverkaRecheckEtapId', { id: check.id, runKey: check.runKey });
         node.prompt.blocks.push({ file });
       }
     }
@@ -1365,7 +1388,13 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   const ids = nodes.map((node) => node.id);
 
   sequence.splice(position, 0, ...ids);
-  after.on![outcome] = { next: ids[0]! };
+
+
+  if (empty) {
+    machine.entry = ids[0]!;
+  } else {
+    after!.on![outcome] = { next: ids[0]! };
+  }
 
   for (const [index, node] of nodes.entries()) {
     const done = index + 1 < nodes.length ? { next: ids[index + 1] } : successor;
@@ -1409,4 +1438,224 @@ export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, aft
   }
 
   return { ...recalculated, createdNodeIds: ids };
+}
+
+
+// Точка холста в натуральных координатах схемы. Хранится в представлении черновика,
+// а не в машине: на исполняемый маршрут, проверку и публикацию она не влияет.
+export interface NodeCanvasPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Ключ координат узла в presentation черновика. Формат ключей уже переносится
+ * командами переименования узла и маршрута, поэтому новый формат не заводится.
+ */
+export function nodePositionKey(scope: RouteCommandScope, nodeId: string): string {
+  return scope.kind === 'bootstrap' ? `b:${nodeId}` : `r:${scope.routeId}:${nodeId}`;
+}
+
+/**
+ * Переносит узел холста в новую точку. Отказывает для неизвестного и status-узла:
+ * у служебных узлов нет своего места на схеме. Повторная запись той же точки
+ * не меняет черновик и не занимает шаг истории.
+ */
+export function moveNodePosition(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  nodeId: string,
+  point: NodeCanvasPoint,
+): RouteCommandResult {
+  const machine = documentAt(draft, scope)?.machine;
+  const node = machine?.nodes.find((candidate) => candidate.id === nodeId);
+
+  if (!machine || !node || node.executor === 'status') {
+    return unchanged(draft, 'node_missing', t('core.routeEtapNeNayden'));
+  }
+
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+    || point.x < 0 || point.y < 0 || point.x > 100000 || point.y > 100000) {
+    return unchanged(draft, 'position_invalid', t('core.routeNedopustimayaTochkaShemy'));
+  }
+
+  const key = nodePositionKey(scope, nodeId);
+  const rounded = { x: Math.round(point.x), y: Math.round(point.y) };
+  const current = draft.presentation[key];
+
+  if (current && typeof current === 'object' && !Array.isArray(current)
+    && (current as NodeCanvasPoint).x === rounded.x
+    && (current as NodeCanvasPoint).y === rounded.y) {
+    return unchanged(draft, 'position_same', t('core.routePozitsiyaNeIzmenilas'));
+  }
+
+  const copy = structuredClone(draft);
+
+  copy.presentation[key] = rounded;
+
+  return {
+    draft: copy,
+    issues: [],
+    createdNodeIds: [],
+  };
+}
+
+/**
+ * Снимает ручные координаты одной области (маршрута или разведки): схема
+ * возвращается к автоматической змейке. Остальные области не затрагиваются.
+ */
+export function resetScopeLayout(draft: RouteDraft, scope: RouteCommandScope): RouteCommandResult {
+  const prefix = scope.kind === 'bootstrap' ? 'b:' : `r:${scope.routeId}:`;
+  const keys = Object.keys(draft.presentation).filter((candidate) => candidate.startsWith(prefix));
+
+  if (!keys.length) {
+    return unchanged(draft, 'layout_auto', t('core.routeRaskladkaUzheAvtomaticheskaya'));
+  }
+
+  const copy = structuredClone(draft);
+
+  for (const key of keys) {
+    delete copy.presentation[key];
+  }
+
+  return {
+    draft: copy,
+    issues: [],
+    createdNodeIds: [],
+  };
+}
+
+/**
+ * Читает координаты существующих исполняемых узлов одной области.
+ * Неполный или повреждённый presentation не меняет автоматическую раскладку.
+ */
+export function readNodePositions(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+): Record<string, [number, number]> {
+  const result: Record<string, [number, number]> = {};
+  const machine = documentAt(draft, scope)?.machine;
+
+  for (const node of machine?.nodes ?? []) {
+    const raw = draft.presentation[nodePositionKey(scope, node.id)];
+
+    if (node.executor === 'status' || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      continue;
+    }
+
+    const point = raw as Partial<NodeCanvasPoint>;
+
+    if (typeof point.x === 'number' && typeof point.y === 'number'
+      && Number.isFinite(point.x) && Number.isFinite(point.y)
+      && point.x >= 0 && point.y >= 0 && point.x <= 100000 && point.y <= 100000) {
+      result[node.id] = [point.x, point.y];
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Единственная проекция черновика в показанную схему редактора.
+ * Временная точка drag перекрывает сохранённую; порядок runtime не меняется.
+ */
+export function canvasGraph(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  preview: Record<string, [number, number]> = {},
+): RouteGraphDef | null {
+  const source = documentAt(draft, scope)?.machine;
+
+  if (!source) {
+    return null;
+  }
+
+  const bootstrap = scope.kind === 'bootstrap';
+  const machine: RouteMachine = {
+    entry: source.entry ?? undefined,
+    loop: bootstrap ? undefined : source.loop,
+    sequence: {
+      main: (bootstrap ? source.sequence.bootstrap : source.sequence.main) ?? [],
+      tail: bootstrap ? [] : source.sequence.tail ?? [],
+    },
+    nodes: source.nodes,
+  };
+
+  return buildRouteGraph(machine, scope.kind === 'route' ? scope.routeId : 'bootstrap', {
+    workspaceMode: 'shared',
+    outcomeLabels: bootstrap ? 'minimal' : 'all',
+    routeChoices: bootstrap,
+    nodeIds: true,
+    positions: { ...readNodePositions(draft, scope), ...preview },
+  });
+}
+
+/**
+ * Добавляет полный подготовленный пакет в показанную точку, сохраняя роль и инструкции.
+ * Любой отказ пакета или координаты возвращает исходный документ без частичной вставки.
+ */
+export function addNodeAtPoint(
+  draft: RouteDraft,
+  scope: RouteCommandScope,
+  point: NodeCanvasPoint,
+  template: StageRoleTemplate,
+  answers: StageRoleAnswers,
+  capabilities: WizardCapabilities,
+): RouteCommandResult {
+  if (scope.kind !== 'route') {
+    return unchanged(draft, 'scope_unsupported', t('core.routeRazvedkaDobavlyaetsyaSpiskom'));
+  }
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+    || point.x < 0 || point.y < 0 || point.x > 100000 || point.y > 100000) {
+    return unchanged(draft, 'position_invalid', t('core.routeNedopustimayaTochkaShemy'));
+  }
+
+  const bundle = draft.routes[scope.routeId];
+
+  if (!bundle) {
+    return unchanged(draft, 'route_missing', t('core.routeMarshrutNeNayden'));
+  }
+
+  const prepared = prepareStageRole(template, answers, capabilities);
+
+  if (prepared.issues.length || !prepared.nodes.length) {
+    return unchanged(draft, 'role_invalid', prepared.issues[0]?.message ?? 'role_invalid');
+  }
+
+  const graph = canvasGraph(draft, scope);
+  const empty = bundle.route.nodes.length === 0;
+  const afterId = empty || !graph ? null : leftCanvasNeighbour(graph, point);
+
+  if (!empty && !afterId) {
+    return unchanged(draft, 'left_neighbor_missing', t('core.routeNetEtapaSleva'));
+  }
+
+  const inserted = insertStageRole(draft, scope, afterId, prepared, capabilities);
+
+  if (inserted.issues.length || !inserted.createdNodeIds.length) {
+    return inserted;
+  }
+
+  let current = inserted.draft;
+
+  for (const [index, nodeId] of inserted.createdNodeIds.entries()) {
+    const placed = moveNodePosition(current, scope, nodeId,
+      { x: point.x + index * 340, y: point.y });
+
+    if (placed.issues.length && placed.issues[0]?.code !== 'position_same') {
+      return {
+        draft,
+        issues: placed.issues,
+        createdNodeIds: []
+      };
+    }
+
+    current = placed.draft;
+  }
+
+  return {
+    draft: current,
+    issues: [],
+    createdNodeIds: inserted.createdNodeIds
+  };
 }

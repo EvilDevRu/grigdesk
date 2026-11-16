@@ -1,13 +1,12 @@
 <template>
   <section class="route-bootstrap-editor">
     <header>
-      <strong>Начальная разведка</strong>
-      <span class="muted">Отдельная машина каталога: её Scout выбирает маршрут до запуска.</span>
+      <strong>{{ t('core.routeNachalnayaRazvedka') }}</strong>
+      <span class="muted">{{ t('core.routeOtdelnayaMashinaKatalogaEe') }}</span>
     </header>
-    <label>Начальный этап
-      <UiSelect data-test="bootstrap-entry" :model-value="document.bootstrap.entry ?? ''"
+    <label>{{ t('core.routeNachalnyyEtap') }} <UiSelect data-test="bootstrap-entry" :model-value="document.bootstrap.entry ?? ''"
                 @update:model-value="changeEntry(String($event ?? ''))">
-        <option value="">Не выбран</option>
+        <option value="">{{ t('core.routeNeVybran') }}</option>
         <option v-for="node in executableNodes" :key="node.id" :value="node.id">
           {{ node.label || node.id }}
         </option>
@@ -45,7 +44,7 @@ import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.t
 import type { RouteDraft, RouteEditorInfo,
   RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteCommandScope } from './routeCommands.ts';
-import { UiSelect } from '../../ui';
+import { UiSelect, t } from '../../ui';
 import RouteCanvas from './RouteCanvas.vue';
 import RouteStageList from './RouteStageList.vue';
 import RouteNodeInspector from './RouteNodeInspector.vue';

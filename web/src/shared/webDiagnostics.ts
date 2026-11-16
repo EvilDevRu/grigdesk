@@ -1,6 +1,7 @@
 import type { SafeError, WebLogData, WebLogEvent } from '../../../shared/web-log/webLogContracts.ts';
 import { sanitizeWebLogError } from '../../../shared/web-log/webLogContracts.ts';
 
+
 type Sink = <Event extends WebLogEvent>(event: Event, data: WebLogData[Event]) => unknown;
 
 let sink: Sink | null = null;

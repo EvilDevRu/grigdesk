@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Монохромный знак GrigDesk для статус-бара: белая литера из мастера иконки. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:scaleX="0.0758" android:scaleY="0.0758"
+        android:translateY="2.46">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M316.61 4.15H82.75C37.05 4.15 0 41.2 0 86.9V168.93C0 214.64 37.05 251.68 82.75 251.68H233.86C279.56 251.68 316.61 214.64 316.61 168.93V109.93H149.31V161.74H242.49V179.73C242.49 189.66 234.44 197.72 224.5 197.72H92.1C82.17 197.72 74.11 189.66 74.11 179.73V76.11C74.11 66.17 82.17 58.12 92.1 58.12H316.61Z" />
+    </group>
+</vector>

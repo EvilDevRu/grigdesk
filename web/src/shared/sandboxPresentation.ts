@@ -1,6 +1,11 @@
 import type { SandboxEntry, SandboxJob } from '../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import { pipelineTopbarItems } from './pipelineNavBadge.ts';
 import type { SandboxPipelineSnapshot } from './sandboxPipelineSnapshot.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export type SandboxCategory = 'running' | 'waiting' | 'error' | 'manual' | 'inactive' | 'unknown';
 
@@ -22,18 +27,33 @@ export interface SandboxRow {
 }
 
 export const SANDBOX_STATES = [
-  { value: 'all', label: 'Все стенды' },
-  { value: 'running', label: 'Идёт работа' },
-  { value: 'waiting', label: 'Ждёт решения' },
-  { value: 'error', label: 'Встал' },
-  { value: 'manual', label: 'Ручные стенды' },
-  { value: 'inactive', label: 'Неактивен' },
-  { value: 'unknown', label: 'Состояние неизвестно' },
-  { value: 'pipeline', label: 'Все конвейерные' },
+  { value: 'all', get label() {
+    return t('core.sandboxVseStendy');
+  } },
+  { value: 'running', get label() {
+    return t('core.sandboxIdetRabota');
+  } },
+  { value: 'waiting', get label() {
+    return t('core.awaitingDecision2');
+  } },
+  { value: 'error', get label() {
+    return t('core.stalled');
+  } },
+  { value: 'manual', get label() {
+    return t('core.sandboxRuchnyeStendy');
+  } },
+  { value: 'inactive', get label() {
+    return t('core.sandboxNeaktiven');
+  } },
+  { value: 'unknown', get label() {
+    return t('settings.unknownStatus');
+  } },
+  { value: 'pipeline', get label() {
+    return t('core.sandboxVseKonveyernye');
+  } },
 ];
 
 const DAY = 24 * 60 * 60 * 1000;
-const ESTIMATE = 'Оценка по обновлению записи о стенде; точная дата подъёма неизвестна';
 export const NO_PROFILE = '__without_profile__';
 
 /**
@@ -51,21 +71,27 @@ function standAge(entry: SandboxEntry | null, job: SandboxJob | null, now: numbe
 
   if (!Number.isFinite(timestamp) || elapsed < 0) {
     return {
-      label: 'Давность неизвестна',
-      hint: 'Дата подъёма неизвестна',
+      label: t('core.sandboxDavnostNeizvestna'),
+      hint: t('core.sandboxDataPodemaNeizvestna'),
       old: false,
     };
   }
 
-  const duration = elapsed >= DAY ? `${Math.floor(elapsed / DAY)} дн`
-    : elapsed >= 3600000 ? `${Math.floor(elapsed / 3600000)} ч`
-      : `${Math.floor(elapsed / 60000)} мин`;
+  const duration = elapsed >= DAY
+    ? t('core.coreFloorelapseddayDn', { floorelapsedDAY: Math.floor(elapsed / DAY) })
+
+    : elapsed >= 3600000
+      ? t('core.coreFloorelapsed3600000Ch', { floorelapsed3600000: Math.floor(elapsed / 3600000) })
+
+      : t('core.coreFloorelapsed60000Min', { floorelapsed60000: Math.floor(elapsed / 60000) });
   const old = elapsed >= 7 * DAY;
-  const hint = exact ? (entry ? 'От начала подъёма стенда' : 'От начала текущего подъёма') : ESTIMATE;
+  const hint = exact
+    ? (entry ? t('core.sandboxOtNachalaPodemaStenda') : t('core.sandboxOtNachalaTekuschegoPodema'))
+    : t('core.sandboxOtsenkaPoObnovleniyuZapisi');
 
   return {
-    label: `${exact ? '' : '≈ '}${duration}`,
-    hint: old ? `${hint}. Давно стоит: не менее семи суток` : hint,
+    label: t('core.sandboxExactDuration', { exact: exact ? '' : '≈ ', duration }),
+    hint: old ? t('core.sandboxHintDavnoStoitNe', { hint }) : hint,
     old,
   };
 }
@@ -80,9 +106,9 @@ function jobStep(job: SandboxJob | null) {
   }
 
   const defaults = {
-    up: 'Идёт подъём',
-    down: 'Идёт снос',
-    run: 'Идёт прогон',
+    up: t('core.sandboxIdetPodem2'),
+    down: t('core.sandboxIdetSnos2'),
+    run: t('core.sandboxIdetProgon2'),
   };
   const label = job.label || defaults[job.action];
 
@@ -116,28 +142,28 @@ export function sandboxRows(
     const item = metadata ? classified.get(task) : null;
     const observed = snapshot.observedByTask[task];
     let category: SandboxCategory = 'unknown';
-    let stateLabel = 'Состояние неизвестно';
+    let stateLabel = t('settings.unknownStatus');
     let detail = '';
 
     if (entry.owner === 'manual') {
       category = 'manual';
-      stateLabel = 'Ручной';
+      stateLabel = t('core.sandboxManualLabel');
     } else if (metadata && snapshot.loadedAt) {
       if (metadata.readOnly) {
         category = 'inactive';
-        stateLabel = 'Неактивен';
-        detail = 'Только чтение';
+        stateLabel = t('core.sandboxNeaktiven');
+        detail = t('core.sandboxReadOnlyDetail');
       } else if (item) {
         category = item.kind as SandboxCategory;
         stateLabel = item.kind === 'error'
-          ? (snapshot.stalled.some((notice) => notice.task === task) ? 'Встал' : 'Молчит')
-          : item.kind === 'waiting' ? 'Ждёт решения' : 'Идёт работа';
+          ? (snapshot.stalled.some((notice) => notice.task === task) ? t('core.stalled') : t('core.silent'))
+          : item.kind === 'waiting' ? t('core.awaitingDecision2') : t('core.sandboxIdetRabota');
         detail = item.detail;
       } else if (observed?.gateKnown) {
         category = 'inactive';
-        stateLabel = 'Неактивен';
-        detail = metadata.result === 'stopped' ? 'Попытка остановлена'
-          : metadata.result ? 'Попытка завершена' : 'Нет активной работы';
+        stateLabel = t('core.sandboxNeaktiven');
+        detail = metadata.result === 'stopped' ? t('core.corePopytkaOstanovlena')
+          : metadata.result ? t('core.corePopytkaZavershena') : t('core.coreNetAktivnoyRaboty');
       }
     }
 
@@ -149,7 +175,9 @@ export function sandboxRows(
       entry,
       job,
       title: metadata?.title?.trim()
-        || (entry.owner === 'manual' ? 'Ручной стенд' : 'Название задачи неизвестно'),
+        || (entry.owner === 'manual'
+          ? t('core.sandboxRuchnoyStend')
+          : t('core.sandboxNazvanieZadachiNeizvestno')),
       category,
       stateLabel,
       detail,
@@ -172,9 +200,9 @@ export function sandboxRows(
       profile: job.profile,
       entry: null,
       job,
-      title: 'Ручной стенд',
+      title: t('core.sandboxRuchnoyStend'),
       category: 'manual',
-      stateLabel: 'Ручной · Подготовка идёт',
+      stateLabel: t('core.coreRuchnoyPodgotovkaIdet'),
       detail: '',
       step: jobStep(job),
       age: standAge(null, job, now),
@@ -227,7 +255,7 @@ export function sandboxGroups(visible: SandboxRow[], all: SandboxRow[]) {
 
   return profiles.map((profile) => ({
     profile,
-    label: profile === NO_PROFILE ? 'Без профиля' : profile,
+    label: profile === NO_PROFILE ? t('core.sandboxBezProfilya') : profile,
     slots: [...new Set(all.filter((row) => sandboxProfileKey(row) === profile)
       .flatMap((row) => row.entry?.slot != null ? [row.entry.slot] : []))].sort((a, b) => a - b),
     rows: visible.filter((row) => sandboxProfileKey(row) === profile).sort((left, right) => {

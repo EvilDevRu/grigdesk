@@ -13,6 +13,13 @@ const seconds: Record<string, number> = {
   'web.build': 45,
   'window.package': 180,
   'window.install': 10,
+  'tracker.deps': 120,
+  'tracker.build': 90,
+  'pipeline.build': 90,
+  'routes.deps': 120,
+  'routes.build': 90,
+  'voice.deps': 120,
+  'voice.build': 90,
   'apk.build': 180,
   'deepseek.deps': 120,
   'deepseek.prepare': 60,
@@ -76,9 +83,17 @@ export function buildStepIds(variant: string): string[] {
       'deepseek.smoke-coding-plan', 'deepseek.install', 'deepseek.prune'];
   }
 
+  // all собирает сервер, окно, tasks и voice параллельными цепочками, поэтому стадии CLI
+  // идут после упаковки окна; установка окна — строго последней, после сервера.
+  if (variant === 'all') {
+    return ['server.node', 'server.build', 'server.install', 'web.dependencies', 'web.build',
+      'window.package', 'tracker.deps', 'tracker.build', 'pipeline.build', 'routes.deps', 'routes.build',
+      'voice.deps', 'voice.build', 'window.install'];
+  }
+
   return [
-    ...['all', 'server'].includes(variant) ? ['server.node', 'server.build', 'server.install'] : [],
-    ...['all', 'web', 'window'].includes(variant) ? ['web.dependencies', 'web.build'] : [],
-    ...['all', 'window'].includes(variant) ? ['window.package', 'window.install'] : [],
+    ...variant === 'server' ? ['server.node', 'server.build', 'server.install'] : [],
+    ...['web', 'window'].includes(variant) ? ['web.dependencies', 'web.build'] : [],
+    ...variant === 'window' ? ['window.package', 'window.install'] : [],
   ];
 }

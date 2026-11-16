@@ -7,12 +7,13 @@
     preload="metadata"
     :src="src"
     :poster="poster || undefined"
-    :aria-label="label"
+    :aria-label="label ?? t('core.videoGotovyyRolik')"
   ></video>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { t } from '../../services/locale.ts';
 
 /**
  * Общий проигрыватель видео. Как и у звука, нативные `controls` оставлены
@@ -28,7 +29,7 @@ withDefaults(
     poster?: string;
     label?: string;
   }>(),
-  { poster: '', label: 'Готовый ролик' },
+  { poster: '' },
 );
 
 const element = ref<HTMLVideoElement | null>(null);

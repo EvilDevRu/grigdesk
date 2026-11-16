@@ -1,15 +1,15 @@
 <template>
   <div class="picker">
-    <UiLoadingState v-if="!loaded && (loading || !error)" label="Ищем доступные стенды…"
-      description="Постоянные стенды и поднятые песочницы появятся здесь сами." :failed="Boolean(error)" >
+    <UiLoadingState v-if="!loaded && (loading || !error)" :label="t('core.showcaseIschemDostupnyeStendy')"
+      :description="t('core.showcasePostoyannyeStendyIPodnyatye')" :failed="Boolean(error)" >
       <UiSkeletonLayout layout="list" :header="false" />
     </UiLoadingState>
 
     <div v-else-if="!loaded" class="picker__state" role="status">
       <span class="picker__mark" aria-hidden="true">!</span>
       <div class="picker__state-copy">
-        <strong>Не удалось загрузить стенды</strong>
-        <p>Проверьте сообщение выше и нажмите «Обновить», чтобы повторить.</p>
+        <strong>{{ t('core.showcaseNeUdalosZagruzitStendy') }}</strong>
+        <p>{{ t('core.showcaseProverteSoobschenieVysheI') }}</p>
       </div>
     </div>
 
@@ -22,11 +22,8 @@
           </svg>
         </span>
         <div class="picker__state-copy">
-          <strong>{{ targets.length ? 'Стенды сейчас недоступны' : 'Нет стендов для записи' }}</strong>
-          <p>
-            Поднимите песочницу задачи или запустите постоянный стенд — адрес и профиль
-            подставятся сами.
-          </p>
+          <strong>{{ targets.length ? t('core.showcaseStendySeychasNedostupny') : t('core.showcaseNetStendovDlyaZapisi') }}</strong>
+          <p> {{ t('core.showcasePodnimitePesochnitsuZadachiIli') }} </p>
         </div>
       </div>
 
@@ -53,8 +50,7 @@
                 class="picker__link"
                 :href="urlOf(target) ?? ''"
                 variant="ghost"
-              >
-                Открыть стенд <span aria-hidden="true">↗</span>
+              > {{ t('core.showcaseOtkrytStend') }} <span aria-hidden="true">↗</span>
               </StandLink>
               <!-- Ролик без запуска: человек сначала отмечает, о чём рассказать, —
                    коммиты, незакоммиченное, своё пожелание — и снимает из блока. -->
@@ -63,9 +59,7 @@
                 :data-testid="`showcase-configure-${choiceKey(target)}`"
                 :disabled="busy"
                 @click="emit('configure', { ref: { ...target.ref } })"
-              >
-                Выбрать, о чём…
-              </UiButton>
+              > {{ t('core.showcaseVybratOChem') }} </UiButton>
               <!-- Ролик про этот стенд уже есть: главное действие — открыть его,
                    а не завести второй такой же; второй остаётся тихой кнопкой. -->
               <template v-if="existingOf(target)">
@@ -74,17 +68,13 @@
                   :data-testid="`showcase-create-${choiceKey(target)}`"
                   :loading="busy"
                   @click="emit('create', { ref: { ...target.ref } })"
-                >
-                  Снять новый
-                </UiButton>
+                > {{ t('core.showcaseSnyatNovyy') }} </UiButton>
                 <UiButton
                   variant="solid"
                   tone="accent"
                   :data-testid="`showcase-open-${choiceKey(target)}`"
                   @click="emit('open', existingOf(target)?.id ?? '')"
-                >
-                  Открыть ролик
-                </UiButton>
+                > {{ t('core.showcaseOtkrytRolik') }} </UiButton>
               </template>
               <UiButton
                 v-else
@@ -93,9 +83,7 @@
                 :data-testid="`showcase-create-${choiceKey(target)}`"
                 :loading="busy"
                 @click="emit('create', { ref: { ...target.ref } })"
-              >
-                Снять ролик
-              </UiButton>
+              > {{ t('core.showcaseSnyatRolik') }} </UiButton>
             </div>
           </div>
 
@@ -104,14 +92,8 @@
             class="picker__limits"
             data-testid="showcase-create-screens-warning"
           >
-            <template v-if="target.profileBinding === 'inferred'">
-              Привязка профиля к песочнице не подтверждена. Можно безопасно записать
-              начальный экран; вход, переходы, действия и подготовка данных отключены.
-            </template>
-            <template v-else>
-              Карта экранов не настроена. Можно записать начальный экран; переходы и
-              автоматические действия пока недоступны.
-            </template>
+            <template v-if="target.profileBinding === 'inferred'"> {{ t('core.showcasePrivyazkaProfilyaKPesochnitse') }} </template>
+            <template v-else> {{ t('core.showcaseKartaEkranovNeNastroena') }} </template>
           </p>
         </li>
       </ul>
@@ -121,12 +103,12 @@
       <ul v-if="blockedTargets.length" class="picker__blocked" role="status">
         <li v-for="target in blockedTargets" :key="choiceKey(target)">
           <strong>{{ target.label }}</strong>
-          <span>{{ target.reason || 'Цель сейчас недоступна.' }}</span>
+          <span>{{ target.reason || t('core.showcaseTselSeychasNedostupna') }}</span>
         </li>
       </ul>
 
       <div class="picker__foot">
-        <UiActionLink href="#/sandboxes" variant="ghost">Открыть песочницы</UiActionLink>
+        <UiActionLink href="#/sandboxes" variant="ghost">{{ t('core.showcaseOtkrytPesochnitsy') }}</UiActionLink>
       </div>
     </template>
   </div>
@@ -134,7 +116,7 @@
 
 <script setup lang="ts">
 import StandLink from '../../shared/browser/StandLink.vue';
-import { UiSkeletonLayout } from '../../ui';
+import { UiSkeletonLayout, t } from '../../ui';
 
 import { computed } from 'vue';
 
@@ -171,8 +153,12 @@ const emit = defineEmits<{
 }>();
 
 const KIND_TEXT: Record<TargetChoice['ref']['kind'], string> = {
-  project: 'постоянный стенд',
-  sandbox: 'песочница',
+  get project() {
+    return t('core.showcasePostoyannyyStend');
+  },
+  get sandbox() {
+    return t('settings.sandbox');
+  },
 };
 
 interface FilmChip {
@@ -183,14 +169,26 @@ interface FilmChip {
 // Состояние ролика словами списка роликов: чип у стенда и чип у ролика обязаны
 // называть одно и то же одинаково.
 const FILM_STATE: Record<ShowcaseProjectSummary['state'], FilmChip> = {
-  draft: { tone: 'warn', label: 'ролик без сцен' },
-  ready: { tone: 'good', label: 'сцены готовы' },
-  building: { tone: 'accent', label: 'идёт сборка' },
-  blocked: { tone: 'warn', label: 'ролику нужен человек' },
-  done: { tone: 'good', label: 'ролик собран' },
+  draft: { tone: 'warn', get label() {
+    return t('core.showcaseRolikBezStsen');
+  } },
+  ready: { tone: 'good', get label() {
+    return t('core.showcaseStsenyGotovy');
+  } },
+  building: { tone: 'accent', get label() {
+    return t('core.showcaseIdetSborka');
+  } },
+  blocked: { tone: 'warn', get label() {
+    return t('core.showcaseRolikuNuzhenChelovek');
+  } },
+  done: { tone: 'good', get label() {
+    return t('core.showcaseRolikSobran');
+  } },
 };
 
-const NO_FILM: FilmChip = { tone: 'none', label: 'ролика нет' };
+const NO_FILM: FilmChip = { tone: 'none', get label() {
+  return t('core.showcaseRolikaNet');
+} };
 
 const supportedTargets = computed(() => props.targets.filter((target) => (
   target.ref.kind === 'project' || target.ref.kind === 'sandbox'
@@ -229,14 +227,18 @@ function titleOf(target: TargetChoice): string {
  */
 function metaOf(target: TargetChoice): string {
   const screens = target.screenCount
-    ? `карта: ${target.screenCount} экр.`
-    : 'только начальный экран';
+    ? t('core.showcaseKartaScreencountEkr', { screenCount: target.screenCount })
+    : t('core.showcaseTolkoNachalnyyEkran');
 
   if (target.taskTitle) {
     return `${target.label} · ${screens}`;
   }
 
-  return `${KIND_TEXT[target.ref.kind]} · профиль ${target.profile} · ${screens}`;
+  return t('core.showcaseKindProfilProfileScreens', {
+   kind: KIND_TEXT[target.ref.kind],
+   profile: target.profile,
+   screens: screens,
+ });
 }
 
 function existingOf(target: TargetChoice): ShowcaseProjectSummary | null {

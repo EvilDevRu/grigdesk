@@ -266,6 +266,81 @@ def find_lifecycle_run(path: str, run_id: str, epoch_raw: str) -> dict[str, Any]
     return matches[0]
 
 
+def find_human_stop(path: str, evidence: str, reason: str) -> dict[str, Any]:
+    """Находит уже записанное ожидание exact visit и stage event, независимо от writer session.
+    Это проекция, а не принятие результата; отсутствие отличается от конфликта scope.
+    """
+    if not re.fullmatch(r'[a-f0-9]{64}', evidence):
+        fail('invalid human stage evidence', 78)
+    names = {
+        'taskId': 'TASK_ID', 'attemptId': 'ATTEMPT_ID', 'profile': 'PROFILE',
+        'routeId': 'ROUTE_ID', 'routeHash': 'ROUTE_HASH', 'nodeVisitId': 'NODE_VISIT_ID',
+        'nodeId': 'NODE_ID', 'runKey': 'RUN_KEY',
+    }
+    expected = {field: os.environ.get('FACTORY_LIFECYCLE_' + name) for field, name in names.items()}
+    if not all(expected.values()):
+        fail('human lookup requires exact lifecycle context', 78)
+    rows = list(lifecycle_rows(path))
+    matches = [row for row in rows
+               if row.get('kind') == 'human_intervention_started'
+               and row.get('nodeVisitId') == expected['nodeVisitId']]
+    if not matches:
+        fail('human projection is absent', 3)
+    if len(matches) != 1:
+        fail('human projection is ambiguous', 78)
+    row = matches[0]
+    if (any(row.get(k) != value for k, value in expected.items())
+            or row.get('details', {}).get('evidenceSha256') != evidence
+            or row.get('details', {}).get('reasonCode') != reason):
+        fail('human projection scope/evidence conflict', 78)
+    if any(item.get('kind') == 'human_intervention_resolved'
+           and item.get('spanId') == row.get('spanId') for item in rows):
+        fail('exact stop intervention is already resolved', 78)
+    return row
+
+
+def find_recovered_stop(path: str, task: str, attempt: str, profile: str, route: str,
+                        route_hash: str, node: str, sequence: str, evidence: str) -> dict[str, Any]:
+    """Доказывает, что exact stop уже допроецирован в другой writer session.
+    Это позволяет удержать повтор resume без новой сессии и без закрытия вопроса.
+    """
+    if not re.fullmatch(r'[1-9][0-9]*', sequence):
+        fail('invalid recovered stop sequence', 78)
+    rows = list(lifecycle_rows(path))
+    humans = [row for row in rows if row.get('kind') == 'human_intervention_started'
+              and row.get('details', {}).get('evidenceSha256') == evidence]
+    if not humans:
+        fail('recovered stop is absent', 3)
+    if len(humans) != 1:
+        fail('recovered stop is ambiguous', 78)
+    human = humans[0]
+    origins = [row for row in rows if row.get('kind') == 'node_visit_started'
+               and row.get('nodeVisitId') == human.get('nodeVisitId')]
+    if len(origins) != 1:
+        fail('recovered stop origin is ambiguous', 78)
+    origin = origins[0]
+    expected = {'taskId': 't' + task, 'attemptId': attempt, 'profile': profile,
+                'routeId': route, 'routeHash': route_hash, 'nodeId': node, 'runKey': node.upper()}
+    if (any(row.get(k) != value for row in (origin, human) for k, value in expected.items())
+            or origin.get('details', {}).get('cursorOrdinal') != int(sequence) - 1):
+        fail('recovered stop identity conflict', 78)
+    if any(row.get('kind') == 'human_intervention_resolved'
+           and row.get('spanId') == human.get('spanId') for row in rows):
+        fail('the human intervention is already resolved', 3)
+    if origin['orchestratorSessionId'] != human['orchestratorSessionId']:
+        return human
+    # Human append мог успеть в source session до сбоя. Новая host session
+    # подтверждает повтор ожидания, не переисполняя завершённый visit.
+    scope = {key: value for key, value in expected.items() if key not in {'nodeId', 'runKey'}}
+    confirmations = [row for row in rows if row.get('kind') == 'orchestrator_session_started'
+                     and row.get('sequence', 0) > human.get('sequence', 0)
+                     and row.get('details', {}).get('previousSessionId') == origin['orchestratorSessionId']
+                     and all(row.get(k) == value for k, value in scope.items())]
+    if not confirmations:
+        fail('ordinary stop is not a recovered stop', 3)
+    return human
+
+
 def find_open_span(path: str, started_kind: str, finished_kind: str, node_id: str) -> dict[str, Any]:
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", started_kind):
         fail("invalid started kind")
@@ -687,6 +762,14 @@ def main() -> None:
         if len(args) != 3:
             fail("find-run requires LEDGER RUN EPOCH")
         print(canonical(find_lifecycle_run(*args)))
+    elif operation == 'find-human-stop':
+        if len(args) != 3:
+            fail('find-human-stop requires LEDGER EVIDENCE REASON')
+        print(canonical(find_human_stop(*args)))
+    elif operation == 'find-recovered-stop':
+        if len(args) != 9:
+            fail('find-recovered-stop requires LEDGER TASK ATTEMPT PROFILE ROUTE HASH NODE SEQ EVIDENCE')
+        print(canonical(find_recovered_stop(*args)))
     elif operation == "find-open-span":
         if len(args) not in {3, 4}:
             fail("find-open-span requires LEDGER STARTED FINISHED [NODE]")

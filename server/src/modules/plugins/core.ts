@@ -6,6 +6,7 @@ import { getProviderAdapters } from '../../lib/executors/index.ts';
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
 import { withPathLock } from '../../lib/pathLock.ts';
 import { parseByteRange } from '../../lib/httpRange.ts';
+import { isolatedFetch } from '../../lib/isolatedFetch.ts';
 import { createProviderCapabilities } from './providerCapabilities.ts';
 import { decodePluginNotification } from '../../../../shared/plugins/pluginNotifications.ts';
 
@@ -29,6 +30,7 @@ export function createPluginCore(
 
   return Object.freeze({
     ...runtime,
+    fetch: isolatedFetch,
     ...(runtime ? {
       modelText: (input: Parameters<PluginRuntimeServices['modelText']>[0]) => runtime.modelText({
         ...input,

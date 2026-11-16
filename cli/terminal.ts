@@ -123,6 +123,15 @@ function darkLine(line: TerminalLine, columns: number): string {
   return rendered + base + ' '.repeat(remaining) + '\x1b[0m';
 }
 
+/**
+ * Сигнальные ключи приходят от сигналов процесса и конца stdin, а не от клавиш
+ * вложенного мастера. Их доставка после suspend/resume и есть отмена, поэтому
+ * при очистке очереди они сохраняются, а реплей настоящих нажатий отбрасывается.
+ */
+function signalKeysOnly(queue: TerminalKey[]): TerminalKey[] {
+  return queue.filter((key) => ['interrupt', 'terminate', 'eof'].includes(key.name));
+}
+
 export class TerminalSession {
   input: ReadStream;
   output: WriteStream;
@@ -131,6 +140,7 @@ export class TerminalSession {
   private raw = false;
   private paused = true;
   private active = false;
+  private attached = false;
   private onResize: (() => void) | undefined;
   private previousFrame: TerminalFrame | undefined;
 
@@ -191,6 +201,7 @@ export class TerminalSession {
     this.paused = this.input.readableFlowing !== true;
     emitKeypressEvents(this.input);
     this.input.on('keypress', this.keypress);
+    this.attached = true;
     this.input.on('end', this.end);
     this.output.on('resize', this.resize);
     process.on('SIGINT', this.interrupt);
@@ -202,6 +213,7 @@ export class TerminalSession {
       return await action();
     } finally {
       this.active = false;
+      this.attached = false;
       this.input.setRawMode?.(this.raw);
       this.input.removeListener('keypress', this.keypress);
       this.input.removeListener('end', this.end);
@@ -221,10 +233,19 @@ export class TerminalSession {
 
   /**
    * Внешняя команда получает обычный ввод и видимый курсор.
+   * Слушатель клавиш снимается: вложенный мастер не должен делить нажатия с меню.
+   * Нажатия отбрасываются, сигналы отмены сохраняются для доставки после возврата.
    * После её вывода сохранённые позиции строк больше не считаются достоверными.
    */
   suspend(): void {
     this.previousFrame = undefined;
+    const pending = this.reader;
+
+    this.reader = undefined;
+    pending?.({ name: '', text: '' });
+    this.queue = signalKeysOnly(this.queue);
+    this.input.removeListener('keypress', this.keypress);
+    this.attached = false;
     this.input.setRawMode?.(this.raw);
     this.input.pause();
 
@@ -235,10 +256,19 @@ export class TerminalSession {
 
   /**
    * Возобновление возвращает только ввод меню после завершения обычной команды.
+   * Очередь нажатий внешней команды отбрасывается: реплей клавиш недопустим.
+   * Сохраняются только сигнальные ключи: отмена дошла и без участия пользователя.
    * Скрытие курсора не применяется к терминалам без управления позиционированием.
    */
   resume(): void {
     if (this.active) {
+      // Слушатель добавляется один раз: повторный add дублировал бы каждое нажатие.
+      if (!this.attached) {
+        this.queue = signalKeysOnly(this.queue);
+        this.input.addListener('keypress', this.keypress);
+        this.attached = true;
+      }
+
       this.input.setRawMode?.(true);
       this.input.resume();
 
@@ -246,6 +276,17 @@ export class TerminalSession {
         this.output.write('\x1b[?25l');
       }
     }
+  }
+
+  /**
+   * Освобождает подвешенного читателя без потери будущего SIGINT.
+   * Пустое имя не выполняет никаких веток и только закрывает осиротевший промис.
+   */
+  cancelReader(): void {
+    const pending = this.reader;
+
+    this.reader = undefined;
+    pending?.({ name: '', text: '' });
   }
 
   nextKey(): Promise<TerminalKey> {

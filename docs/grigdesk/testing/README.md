@@ -8,6 +8,8 @@
 
 ## Грабли
 
+- [Тестовый конвейер: Bash/systemd, управляемый CLI, права проверяющего и аренды](../pipeline/stand-empty-editor-acceptance.md)
+- [JVM смены маршрута: стандартное окружение, честный skip и обязательный Java-прогон](relay-route-jvm-launcher.md)
 - [Happy-dom: отключённый CSS посылает преждевременный error](happy-dom-disabled-css-transport.md) — проверяемый HTTP receipt перед load/error.
 - [Happy DOM: условие после :root применяется без проверки атрибута](happy-dom-root-selector.md)
 - [Navigator.locks Node и удержанный ответ фикстуры окна](node-navigator-locks.md)
@@ -94,7 +96,7 @@
 - [Сторож, читающий текст задачи, ловит фикстуру, а не страницу](fixture-text-false-positives.md)
 - [Тест прошёл по другой причине — правило не проверено вовсе](behavioral-test-coverage.md)
 - [Новый импорт в экране валит весь его тест = подмена модуля не экспортирует это имя](view-stub-exports.md)
-- [Проверки после перевода интерфейса: подмены UI, descriptors, flex-текст и heap инвентаризации](translated-ui-contracts.md)
+- [Проверки после перевода интерфейса: подмены UI и диалогов, descriptors, имена вкладок, flex-текст и heap инвентаризации](translated-ui-contracts.md)
 - [Фикстуры App и настроек: lazy-модули, UI-фасад, stores и clientScope](settings-window-test-stubs.md)
 - [Двойник dock store включает ограничение ширины](tool-host-test-store.md)
 - [Однострочные пояснения функций прошли незамеченными = сторож читаемости видел только TS в web/](readability-guard-scope.md)

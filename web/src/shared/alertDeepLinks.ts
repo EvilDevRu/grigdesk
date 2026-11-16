@@ -1,4 +1,4 @@
-import { parseTaskReference } from '../../../shared/tasks/taskReference.ts';
+import { formatTaskReference, parseTaskReference } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { watch } from 'vue';
 import type { LocationQueryRaw } from 'vue-router';
@@ -106,7 +106,7 @@ export function installAlertDeepLinks(deps: AlertLinkDeps): () => void {
       const reference = parseTaskReference(taskId);
 
       if (reference) {
-        deps.ui.openTask(reference.id, reference.source);
+        deps.ui.openTask(formatTaskReference(reference));
       }
     }
   }, {

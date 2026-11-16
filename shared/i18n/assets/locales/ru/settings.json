@@ -290,7 +290,7 @@
   "test": "Проверить",
   "enableAndTest": "Включить и проверить",
   "notificationsAreAllowedOnThisDevice": "Оповещения разрешены на этом устройстве.",
-  "systemNotificationsAreUnavailableInThisBrowser": "Системные оповещения недоступны в этом браузере.",
+  "systemNotificationsAreUnavailableInThisBrowser": "Системные оповещения здесь недоступны.",
   "pluginDisabledShortcutInactive": "Плагин выключен, сочетание клавиш не действует.",
   "pluginStatusNotReceivedYet": "Состояние плагина ещё не получено.",
   "pluginStatusesNotReceivedYet": "Состояние плагинов ещё не получено: сочетания их инструментов заработают после загрузки.",
@@ -366,6 +366,8 @@
   "processFactLimit": "Лимит пула",
   "processFactLimitValue": "{count}, автогашение через {minutes} мин простоя",
   "stoppedBusyProcessesSkipped": "Погашено: {resultClosed}. Занятых пропущено: {value2}.",
+  "processesClosePartialFailed": "Погашено: {resultClosed}. Не удалось погасить: {failedCount}. Эти процессы не подтвердили завершение и остались в списке.",
+  "processesCloseAllFailed": "Не удалось погасить процессы: {failedCount}. Они не подтвердили завершение и остались в списке.",
   "processActionsTakeEffectImmediately": "Операции с процессами выполняются сразу.",
   "loadingProcesses": "Загружаем процессы…",
   "inPool": "В пуле:",
@@ -419,6 +421,16 @@
   "commandLine": "Командная строка",
   "developer": "Разработчик",
   "setupRequired": "Требуется настройка",
+  "providerChatNotInstalled": "Не установлен",
+  "providerChatInstallHint": "Установите исполнителя на вкладке «Обзор», чтобы начать разговор.",
+  "providerChatAccessHint": "Настройте подключение на вкладке «Доступ», затем нажмите «Перепроверить».",
+  "providerChatNoModels": "Нет моделей",
+  "providerChatNoModelsHint": "Список моделей пуст. Нажмите «Перепроверить». Если модели не появились, проверьте подключение на вкладке «Доступ».",
+  "providerChatUnavailableHint": "Исполнитель появится в выборе модели чата после успешной настройки и загрузки моделей.",
+  "providerChatConfigureAccess": "Настроить доступ",
+  "providerAccessUnconfirmed": "Не удалось подтвердить сохранение доступа. Перепроверьте подключение перед повторным вводом.",
+  "providerAccessPending": "Сохраните подключение",
+  "providerAccessPendingHint": "Нажмите «Применить», чтобы загрузить модели выбранного сервиса. До сохранения «Перепроверить» использует прежнее подключение.",
   "installationIsAvailableConnectionToChatsIs": "Установка доступна; подключение к чатам пока не включено.",
   "buildReady": "Сборка готова",
   "buildUnavailable": "Сборка недоступна",
@@ -625,6 +637,8 @@
   "separateThresholdForPipelineStagesLetThe": "Отдельный порог для этапов конвейера. 0 — оставить сжатие исполнителю.",
   "refreshRepositoriesBeforeStarting": "Обновлять репозитории перед запуском",
   "appliesToNewTriageAndPipelineRuns": "Действует на новые запуски триажа и конвейера.",
+  "automaticallyStartThePipelineOnCreation": "Автоматически стартовать конвейер при создании",
+  "disabledThePipelineIsCreatedAndWaits": "Выключено: конвейер создаётся и ждёт ручного старта — исполнителей на узлах можно назначить до начала работы. Автозапуски по правилам не затрагивает.",
   "turnSilenceThresholdMinutes": "Порог молчания хода, минуты",
   "disableAlertsForAStalledPipelineTurn": "0 — выключить оповещение о зависшем ходе конвейера.",
   "analyzeAutomatically": "Разбирать автоматически",
@@ -743,7 +757,7 @@
   "parameterUnavailableReloadTheProviderRegistry": "Параметр недоступен; перечитайте реестр исполнителя",
   "fieldNoLongerAvailableRecheckTheRegistry": "Поле больше недоступно; перепроверьте реестр",
   "checkTheAccessFieldAndSelectedMode": "Проверьте поле доступа и выбранный режим",
-  "keysSavedReloadTheProviderRegistry": "Ключи сохранены; перечитайте реестр исполнителя",
+  "keysSavedReloadTheProviderRegistry": "Доступ сохранён. Не удалось обновить список исполнителей. Нажмите «Перепроверить»; повторно вводить ключ не нужно.",
   "pipeline": "конвейер",
   "sandbox": "песочница",
   "gate": "ворота",
@@ -832,6 +846,8 @@
   "blockDirectSshHint": "Закрывает прямой SSH для кооперативного агента; это не same-uid изоляция.",
   "allowDirectSsh": "Разрешить прямой SSH",
   "allowDirectSshConfirm": "Агент сможет запускать прямые SSH-клиенты с правами процесса GrigDesk. Режим прав Bash не заменяет этот запрет. Подтверждений и журнала SSH-инструмента не будет.",
+  "qwenHostAccessConfirm": "Qwen получит доступ к Docker, процессам и файлам с правами пользователя сервера. Подтверждения и запрет прямого SSH сохраняются. Изменение применяется к следующему ходу; текущий процесс закрывается отдельно.",
+  "qwenEnableHostAccess": "Включить режим «Хост»",
   "installStage": {
     "fetching": "Скачивание из источника",
     "validating": "Проверка пакета",
@@ -1223,6 +1239,62 @@
         "chinaKeyConfigured": "Ключ задан · Китай",
         "chinaKeyMissing": "Ключ не задан · Китай"
       }
+    },
+    "qwen": {
+      "auth": {
+        "configured": "Ключ API настроен.",
+        "missing": "Настройте API-ключ.",
+        "settingsFailed": "Qwen: не удалось прочитать настройки моделей. Проверьте конфигурацию Qwen Code.",
+        "incompatible": "Qwen Code несовместим с GrigDesk. Обновите или переустановите Qwen Code в разделе «Обзор».",
+        "sandboxMissing": "Qwen: недоступна песочница для запуска. На сервере Linux требуется установленный bwrap.",
+        "catalogFailed": "Qwen Code не смог загрузить модели. Нажмите «Перепроверить». Если ошибка повторится, обновите или переустановите Qwen Code в разделе «Обзор».",
+        "catalogEmpty": "Qwen Code не вернул модели. Проверьте сервис и ключ на вкладке «Доступ», затем нажмите «Перепроверить»."
+      },
+      "credentials": {
+        "GRIGDESK_QWEN_SERVICE": {
+          "label": "Сервис API и регион",
+          "hint": "Выберите сервис, выдавший ключ. Без выбора используется Alibaba Model Studio в Сингапуре.",
+          "options": {
+            "dashscope-intl": {
+              "label": "Alibaba Model Studio — Сингапур (по умолчанию)"
+            },
+            "dashscope-china": {
+              "label": "Alibaba Model Studio — Китай"
+            },
+            "dashscope-us": {
+              "label": "Alibaba Model Studio — США"
+            },
+            "qwencloud-intl": {
+              "label": "QwenCloud — Сингапур"
+            },
+            "coding-intl": {
+              "label": "Alibaba Coding Plan — международный",
+              "hint": "Подписка Alibaba Cloud. Для Individual Plan на qwencloud.com выберите QwenCloud Token Plan."
+            },
+            "coding-china": {
+              "label": "Alibaba Coding Plan — Китай",
+              "hint": "Подписка Alibaba Cloud. Для Individual Plan на qwencloud.com выберите QwenCloud Token Plan."
+            },
+            "qwencloud-token": {
+              "label": "QwenCloud Token Plan — Сингапур",
+              "hint": "Individual Plan и Team Plan на qwencloud.com. Используйте ключ из кабинета QwenCloud."
+            },
+            "openrouter": {
+              "label": "OpenRouter"
+            }
+          }
+        },
+        "DASHSCOPE_API_KEY": {
+          "label": "Ключ API",
+          "hint": "Ключ API сервиса модели."
+        }
+      },
+      "settings": {
+        "allowHostAccess": {
+          "label": "Режим «Хост»",
+          "hint": "Docker, процессы и файлы пользователя сервера. Нужны живые сессии чата и user systemd приложения."
+        }
+      }
     }
   },
   "invalidPluginCatalog": "Сервер вернул некорректный каталог плагинов.",
@@ -1233,10 +1305,10 @@
   "wakeLockDenied": "Система не разрешила удерживать экран. Проверь режим энергосбережения.",
   "wakeLockFailed": "Не удалось удерживать экран включённым.",
   "notificationDenied": "Оповещения заблокированы. Разреши их в системных настройках приложения или браузера.",
-  "notificationNotGranted": "Браузер не выдал разрешение на оповещения.",
+  "notificationNotGranted": "Разрешение на оповещения не выдано.",
   "notificationTestTitle": "Оповещения работают",
   "notificationTestBody": "GrigDesk сообщит, когда агент ответит или работа потребует тебя.",
-  "notificationTestFailed": "Браузер не смог показать тестовое оповещение.",
+  "notificationTestFailed": "Не удалось показать тестовое оповещение.",
   "providerSettingsFailure": "Не удалось получить настройки",
   "providerWriteCancelled": "Запись отменена из-за конфликта; проверьте и повторите выбор",
   "providerReloadCatalog": "Сначала перечитайте каталог настроек",
@@ -1398,6 +1470,11 @@
       "containedSsh": "Contained-режим закрывает SSH сетевой песочницей независимо от тумблера.",
       "containedMcp": "Contained-режим изолирует пользовательские и проектные MCP-серверы.",
       "savedMcp": "Показана конфигурация mcp.json; живость Kimi проверяет в новой сессии."
+    },
+    "qwen": {
+      "guard": "Проверка перед исполнением инструмента.",
+      "mcp": "MCP выдаётся сервером для каждого хода.",
+      "quotaUnsupported": "Получение квот Qwen пока не поддерживается в GrigDesk."
     }
   },
   "kimiDirectSshExtraConfirmation": "При будущей смене contained на host разрешение останется снятым.",
@@ -1831,6 +1908,79 @@
   "appUpdateNextActionCheck": "Обновление откачено к прежнему выпуску. Проверьте обновления, когда причина будет устранена.",
   "appUpdateCheckedAt": "Последняя проверка: {time}. Результат может устареть.",
   "appUpdateLogDrainTimeout": "Не удалось подтвердить слив журнала сервера. Обновление сохранено; повторите после завершения сервера.",
+  "remoteAccess": "Удалённый доступ",
+  "remotePlatform": "Ubuntu/Debian x64 с systemd. Установка проверенного файла без Docker и Node.",
+  "remoteHome": "Домашний сервер",
+  "remoteThisServer": "Этот компьютер",
+  "remoteSetup": "Создать удалённый доступ",
+  "remoteResume": "Продолжить настройку",
+  "remoteRestore": "Восстановить на новом сервере",
+  "remoteDelete": "Удалить доступ",
+  "remoteOnline": "На связи",
+  "remoteOffline": "Нет связи",
+  "remoteRouteUpdate": "На телефоне откройте «Параметры подключения → Изменить адрес → Обновить маршрут». Ключ и доверие сохраняются. Если действия нет, обновите приложение поверх установки без удаления данных.",
+  "remoteLoadFailed": "Не удалось загрузить задания. Повторите загрузку.",
+  "remoteName": "Имя подключения",
+  "remoteSshHost": "SSH-адрес сервера",
+  "remoteSshUser": "Пользователь SSH",
+  "remoteAdvanced": "Дополнительные параметры",
+  "remoteSshPort": "Порт SSH",
+  "remotePublicHost": "Публичный адрес ретранслятора",
+  "remotePublicPort": "Публичный порт ретранслятора",
+  "remoteCandidateHost": "Адрес проверки нового VPS",
+  "remoteCheck": "Проверить",
+  "remoteTrust": "Подтвердить отпечаток SSH",
+  "remoteUseKey": "Использовать приватный ключ вместо пароля",
+  "remoteKeyFile": "Выбрать файл приватного ключа",
+  "remoteSecretRequired": "Введите пароль либо выберите файл приватного ключа.",
+  "remoteInvalidPort": "Порт должен быть целым числом от 1 до 65535.",
+  "remotePassphrase": "Парольная фраза ключа",
+  "remotePassword": "Пароль SSH",
+  "remotePreview": "Предстоящие изменения: отдельный пользователь и системная служба. Проверьте отпечаток и параметры.",
+  "remoteInstall": "Начать установку",
+  "remoteReady": "Канал GrigDesk — ретранслятор проверен.",
+  "remotePhonePending": "Телефон ещё не подтверждён. Подключение подтвердит authenticated hello телефона.",
+  "remoteQr": "QR для телефона",
+  "remoteDns": "Обновите DNS на новый VPS и проверьте снова. Старый маршрут сохранён.",
+  "remoteVpn": "Дома нужен VPN для публичного ретранслятора. Включите его и проверьте снова.",
+  "remoteRetry": "Повторить с новым SSH-доступом",
+  "remoteWorking": "Сервер выполняет задание. Окно можно закрыть.",
+  "remotePortBusy": "Порт занят. Выберите свободный порт; чужая служба не изменена.",
+  "remoteFailure": "Не удалось завершить действие. Проверьте SSH-доступ, права, DNS и порт. Сохранённые подключения не удалены. После обрыва SSH проверьте состояние службы на VPS в задании.",
+  "remotePreviousRestored": "Прежняя служба VPS восстановлена после отказа проверки. Исправьте связь и повторите восстановление с SSH-доступом.",
+  "remoteRollbackFailed": "Откат на VPS не подтверждён. Проверьте состояние службы и повторите восстановление с SSH-доступом.",
+  "remoteCancelWait": "Завершить ожидание",
+  "remoteCancelHint": "Текущая попытка ещё не начала установку на VPS. Завершить ожидание и освободить подключение для другого сервера? Сохранённые ключи и устройства останутся на месте.",
+  "remoteCancelled": "Ожидание завершено. Можно указать новый VPS или повторить эту попытку. Сохранённые ключи и устройства не удалены.",
+  "remoteDeleteHint": "Удалить сохранённый маршрут и личность ретранслятора? Восстановить его без этих ключей будет нельзя. Привязанные устройства сохраняются.",
+  "remoteAuthFailed": "SSH не принял пароль или ключ. Проверьте пользователя, секрет и отпечаток; повторите ввод.",
+  "remotePlatformFailed": "VPS не поддерживается: нужны Ubuntu/Debian x64, glibc не ниже 2.28 и необходимые библиотеки.",
+  "remotePreflightFailed": "Предпроверка не пройдена. Проверьте systemd, библиотеки, root или sudo -n и свободный порт. Изменений на VPS нет.",
+  "remoteChangedKey": "SSH-ключ изменился. Сверьте новый отпечаток с владельцем VPS перед явной заменой доверия.",
+  "remoteChangeBinary": "Установить проверенный файл ретранслятора",
+  "remoteChangeUser": "Создать отдельного непривилегированного пользователя",
+  "remoteChangeConfig": "Записать защищённый relay.env с правами 0600",
+  "remoteChangeService": "Включить ограниченную службу systemd с автозапуском",
+  "remoteStepPreflight": "Предпроверка",
+  "remoteStepInstall": "Установка",
+  "remoteStepChannel": "Канал GrigDesk — ретранслятор",
+  "remoteStepRollback": "Восстановление прежней службы",
+  "remoteStepCompleted": "выполнено",
+  "remoteStepFailed": "отказ",
+  "remoteStepRunning": "выполняется",
+  "remoteServiceResult": "Результат проверки службы",
+  "remoteServiceRunning": "запуск проверен",
+  "remoteServiceUnverified": "запуск не подтверждён",
+  "accessProfilesConnection": "Подключение",
+  "accessProfilesConnections": "Сохранённые подключения",
+  "accessProfilesChoose": "Выберите профиль",
+  "accessProfilesManage": "Управление подключениями",
+  "accessProfilesMore": "Другие подключения",
+  "accessProfilesSwitchBusy": "Переключение доступно после завершения диалогов и конвейеров этого исполнителя.",
+  "accessProfilesApiKey": "API-ключ",
+  "accessProfilesCli": "Вход через CLI",
+  "accessProfilesScope": "Активное подключение используется в чатах и конвейерах.",
+  "accessProfilesImmediate": "Изменения сохраняются сразу.",
   "accessProfilesAdd": "Добавить профиль",
   "accessProfilesRetry": "Повторить",
   "accessProfilesLoading": "Загрузка профилей…",
@@ -1870,5 +2020,24 @@
   "accessProfilesChanged": "Профиль или шаг изменён в другом окне. Обновите состояние и повторите вход.",
   "accessProfilesBusy": "Исполнитель занят. Дождитесь завершения его работы и повторите вход.",
   "accessProfilesSaveFailed": "Не удалось сохранить профиль. Проверьте хранилище и повторите вход.",
-  "accessProfilesFailed": "Не удалось завершить вход. Начните новую попытку."
+  "accessProfilesFailed": "Не удалось завершить вход. Начните новую попытку.",
+  "vpnGateSection": "Ворота VPN",
+  "vpnGateSectionDescription": "Запуск дожидается, пока маршрут до адреса пробы не пойдёт через туннель. По умолчанию выключены.",
+  "vpnGateRequire": "Требовать VPN при запуске",
+  "vpnGateRequireHint": "Ворота исполняются перед стартом сервера: без маршрута через туннель запуск ждёт его появления.",
+  "vpnGateIface": "Интерфейс VPN",
+  "vpnGateIfaceHint": "Пусто — автоопределение по маршруту. Задайте имя для схем без tun_flags, например wg0.",
+  "vpnGateIfacePlaceholder": "wg0",
+  "vpnGateProbe": "Адрес пробы",
+  "vpnGateProbeHint": "Маршрут до этого адреса обязан идти через туннель. Пусто — 1.1.1.1.",
+  "vpnGateSave": "Сохранить",
+  "vpnGateSaved": "Настройки ворот сохранены.",
+  "vpnGateRestartPending": "Сохранённая конфигурация отличается от действующей — применится после перезапуска сервера.",
+  "vpnGateRestartNote": "Ворота проверяются перед стартом сервера, поэтому изменения вступают в силу только после перезапуска.",
+  "vpnGateActiveRequire": "Действуют с момента старта",
+  "vpnGateActiveIface": "Интерфейс с момента старта",
+  "vpnGateOn": "включены",
+  "vpnGateOff": "выключены",
+  "providerUsageAutoRefresh": "Автообновление квот",
+  "providerUsageAutoRefreshHint": "Для всех исполнителей на этом сервере. Если выключено, квоты проверяются только кнопкой ↻."
 }

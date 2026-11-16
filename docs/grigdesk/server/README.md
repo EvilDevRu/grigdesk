@@ -12,6 +12,10 @@
 
 ## Устройство
 
+- [Серверное задание relay: общий API, выбор и отмена ожидания, SSH, порт и откат VPS](relay-setup.md)
+
+- [Остановка до выхода ОС: независимые сторожа worker, потеря launcher, код 75 и поэтапный журнал](shutdown-watchdogs.md)
+- [Изоляция статистики и Telegram: отдельный Node, сроки, лимиты и освобождение DNS](isolated-statistics-fetch.md)
 - [Ротация stdout/stderr, gzip-архивы и чтение всех частей журнала окна](log-rotation.md)
 - [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
@@ -21,11 +25,11 @@
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Автономный установщик: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
-- [Подписанный канал сайта: CI, статические маршруты origin, публикация и восстановление](site-release-channel.md)
+- [Подписанный канал сайта: CI, публикация обеих редакций справки RU/EN и восстановление](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)
-- [Release workflow: ручной full/skip, этапы, логи, явные install-скрипты и проверенные загрузки](release-workflow-validation.md)
+- [Release workflow: ручной full/skip, этапы, обязательные voice_tests/routes_tests, логи, явные install-скрипты и проверенные загрузки](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, проверка пакетов и сверка Git-дерева](release-validation-reuse.md)
-- [Фоновый реестр исполнителей: бюджет 1,2 с, общий сбор, явные wait и refresh](providers-background-read.md)
+- [Фоновый реестр исполнителей: бюджет 1,2 с, сохранение карточек при переименовании, wait и refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
 - [Терминальное меню CLI: язык, прогресс, уборка с подтверждением и прерывание](cli-terminal-menu.md)
@@ -34,7 +38,7 @@
 - [Общие экраны консоли: состояния, команды, ввод, QR, журналы и сборка](cli-terminal-screens.md)
 - [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
 - [Каталог плагинов: автоматический выбор сайта и закрытый локальный API](../plugins/plugin-marketplace.md)
-- [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
+- [Сборка из исходников: сверка npm-зависимостей, сервер, веб, окно, агентские CLI и четвёртый трек voice](ctl-build.md)
 - [Android APK в меню сборки и отдельной команде, пути и ошибки](ctl-build-apk.md)
 - [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
 - [E0 без baseline: функциональные ворота, cold-порог и приватный HOME независимо от umask](server-binary-smoke-baseline.md)
@@ -44,7 +48,7 @@
 - [Пересборка проверяет совместимость сервера с установленными DeepSeek/GLM до замены](server-executor-install-guard.md)
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
 - [Движок поставки и физические профили одиночного ELF](server-binary-factory.md)
-- [Factory helpers: статусный протокол payload и engine-пути от runtimeRoot](server-binary-factory-helpers.md)
+- [Factory helpers: metadata моделей, статусный протокол и engine-пути от runtimeRoot](server-binary-factory-helpers.md)
 - [Host hooks DeepSeek и GLM в payload](server-binary-hooks.md)
 - [Guard данных и внешние команды payload](server-binary-placement.md)
 - [CJS payload и ленивый запуск приложения](server-binary-entry.md)
@@ -61,7 +65,7 @@
 - [Переход на GrigDesk: подготовка, brandMove, журнал, откат и второй этап](brand-migration.md)
 - [Node SEA: готовый Linux-комплект, проверка, данные и ручной выбор версии](node-sea.md)
 - [SEA и единое приложение: труба UI, TLS-вход, устройства и общий модал настроек](sea-unified-client.md)
-- [Сборка ESM-помощников: контекст, явный вход, self-fork и worker ветки в CJS payload](sea-helpers.md)
+- [Сборка ESM-помощников: контекст, вход, self-fork, worker ветки и проверка media PATH Qwen](sea-helpers.md)
 - [Состав серверного комплекта: ресурсы и PTY входа, production npm, native ABI и лицензии](sea-package.md)
 - [Выпуск серверного SEA: сборка, manifest, атомарная публикация и проверка архива](sea-release.md)
 - [Обновление SEA-пакета: manifest status, ранние отказы и отделение source updater](sea-update-mode.md)
@@ -89,12 +93,14 @@
 
 ## Грабли
 
+- [Зависший TCP DNS удерживает process.exit: нативный стек, повторение и границы диагноза](shutdown-dns-threadpool.md)
+- [Версия продукта не закрепляется в host-скрипте: формат stable/dev и совместимость ELF](runtime-env-version-sync.md)
 - [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)
-- [Ворота VPN проверяют маршрут, а не конкретный клиент](vpn-route-check.md)
+- [Ворота VPN: маршрут, общий черновик и сохранение через «Применить»](vpn-route-check.md)
 - [Вход в GrigDesk: один пользователь, сессионная cookie, гард на ВЕСЬ /api](session-authentication.md)
-- [Владельцы порта: служба, ручной запуск и дочерний сервер приложения](server-port-ownership.md)
+- [Владельцы порта и сокета браузера: служба, ручной запуск, приложение и зависшая остановка](server-port-ownership.md)
 - [Браузерный удалённый доступ снят; приложение использует отдельный туннель](remote-access-options.md)
 - [Машинные переменные — .env в папке данных, общий для всех способов запуска](machine-environment.md)
 - [Первичная настройка пароля снята](local-password-bootstrap.md)
@@ -108,4 +114,4 @@
 
 - [История: Исторический embedded переход DeepSeek: публикация и восстановление](deepseek-release-transition.md)
 
-- [Обычная установка, подписанный v2, внешний worker, применение до обычного Stop и восстановление](installed-release-updates.md)
+- [Обычная установка, подписанный v2 с bin/voice и bin/pipeline, внешний worker, применение до обычного Stop и восстановление](installed-release-updates.md)

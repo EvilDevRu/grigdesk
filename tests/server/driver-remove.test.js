@@ -48,7 +48,7 @@ test('DRIVER-REMOVE-01: свободный пакет удаляется, рек
   assert.equal(descriptor.deleted, true);
   assert.equal(descriptor.status, 'restartRequired');
   assert.equal(descriptor.configured, false);
-  assert.deepEqual(fixture.runtime.registry.activeIds, ['own']);
+  assert.deepEqual(fixture.runtime.registry.activeIds, []);
   assert.equal(fixture.events.filter((event) => event.name === 'trackers-changed').length, 1);
   assert.equal((await fixture.request('POST', removeUrl(), {})).statusCode, 404);
 });
@@ -109,7 +109,7 @@ test('DRIVER-REMOVE-02: выбранный пакет ждёт вызов, за�
       revision: revision + 1,
     },
   }]);
-  assert.equal((await fixture.request('GET', '/api/grigdesk-tasks')).json().trackerConfigured, false);
+  assert.equal((await fixture.request('GET', '/api/grigdesk-tasks')).statusCode, 404);
   assert.deepEqual(fixture.credsStore.readFor(driverId), { token: 'fixture-owner-secret' });
 
   const invalid = await fixture.request('POST', '/api/trackers/settings', {

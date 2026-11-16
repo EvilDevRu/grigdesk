@@ -80,7 +80,7 @@ async function generate(directory: string, cn: string) {
  * Читает существующую пару, различая отсутствие и неполное/повреждённое состояние.
  * Неисправная личность не заменяется новой, иначе телефоны потеряют доверенный пин.
  */
-async function readIdentity(keyFile: string, certFile: string) {
+export async function readIdentity(keyFile: string, certFile: string) {
   const values = await Promise.all(
     [keyFile, certFile].map(async (file) => {
       try {

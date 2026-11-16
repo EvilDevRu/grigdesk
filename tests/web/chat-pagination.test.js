@@ -497,6 +497,15 @@ test('PAGE-EXPIRED: refresh после410 читает первую страни
   assert.deepEqual(view.chat.list('').map((row) => row.id), ids);
   assert.equal(view.chat.pageFor('', false).needsRefresh, true);
 
+  // Автовосстановление уже пробует перечитать список само; при вечно истекающем
+  // cursor оно оставляет кнопку, не отправляя протухший cursor повторно.
+  const pageState = () => view.chat.pageFor('', false);
+
+  for (let i = 0; i < 300 && pageState().loading; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
   const before = requested.length;
 
   await view.chat.refreshChatPage('', false);
@@ -505,6 +514,49 @@ test('PAGE-EXPIRED: refresh после410 читает первую страни
   expire = false;
   await view.chat.loadChatPage('', false);
   assert.equal(view.chat.list('').length, 80);
+});
+
+test('PAGE-EXPIRED-AUTO: истёкший cursor перечитывается сам и возвращает глубину списка', async (t) => {
+  const world = await serverWorld(t, chats());
+  const network = windowApi(world.app);
+  const get = network.api.get;
+  let expireNextCursor = false;
+  const requested = [];
+
+  network.api.get = async (url) => {
+    requested.push(url);
+
+    if (expireNextCursor && url.includes('cursor=')) {
+      expireNextCursor = false;
+
+      throw Object.assign(new Error('Истёк список'), {
+        status: 410, data: { error: 'chat_page_expired' },
+      });
+    }
+
+    return get(url);
+  };
+
+  const view = await world.open(network);
+
+  await view.chat.loadChatPage('', false);
+  assert.equal(view.chat.list('').length, 80);
+
+  // Продолжение упирается в истёкший cursor: восстановление запускается само.
+  expireNextCursor = true;
+  await view.chat.loadChatPage('', false);
+
+  const pageState = () => view.chat.pageFor('', false);
+
+  for (let i = 0; i < 300 && (pageState().needsRefresh || pageState().loading
+    || pageState().ids.length < 80); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.equal(pageState().needsRefresh, false,
+    'кнопка «Обновить» не требуется: список восстановился сам');
+  assert.equal(view.chat.list('').length, 80, 'прежняя глубина показанных карточек вернулась');
+  assert.equal(pageState().error, '', 'ошибка истёкшего cursor не осталась');
 });
 
 test('PAGE-OLDER-DIRTY-NEIGHBOR: чтение A не подтверждает несохранённый B', async (t) => {

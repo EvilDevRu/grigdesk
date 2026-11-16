@@ -1,14 +1,14 @@
 <template>
   <section class="route-prompt-editor">
     <template v-if="bundle && node?.prompt">
-      <header><strong>Инструкция: {{ node.label || node.id }}</strong></header>
+      <header><strong>{{ t('core.routeInstruktsiya2') }} {{ node.label || node.id }}</strong></header>
       <RoutePromptBlocks :blocks="node.prompt.blocks" :selected="selectedIndex"
                          @select="selectedIndex = $event" @move="moveBlock" />
       <template v-if="selectedBlock">
         <p class="muted mono">{{ selectedBlock.file }}</p>
         <div v-if="consumers.length > 1" class="route-prompt-shared">
-          <span>Используют: {{ consumers.join(', ') }}</span>
-          <UiButton data-test="copy-shared-block" @click="copySelectedBlock">Отдельная копия</UiButton>
+          <span>{{ t('core.routeIspolzuyut2') }} {{ consumers.join(', ') }}</span>
+          <UiButton data-test="copy-shared-block" @click="copySelectedBlock">{{ t('core.routeOtdelnayaKopiya') }}</UiButton>
         </div>
         <RouteMarkdownInput ref="markdownInput" :model-value="selectedText" @update:model-value="changeText"
                             @save="$emit('save')" @blur="$emit('end-history-group')" />
@@ -16,13 +16,13 @@
                             :when="selectedBlock.when"
                             @update:required-context="changeRequiredContext"
                             @update:when="changeWhen" />
-        <details open><summary>Предпросмотр Markdown</summary>
+        <details open><summary>{{ t('core.routePredprosmotrMarkdown') }}</summary>
           <div class="route-prompt-preview" v-html="preview"></div>
         </details>
       </template>
-      <p v-else class="muted">Добавьте блок инструкции.</p>
+      <p v-else class="muted">{{ t('core.routeDobavteBlokInstruktsii') }}</p>
     </template>
-    <p v-else class="muted">Выбранный этап не содержит инструкции.</p>
+    <p v-else class="muted">{{ t('core.routeVybrannyyEtapNeSoderzhit') }}</p>
   </section>
 </template>
 
@@ -32,7 +32,7 @@ import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.t
 import type { RouteWhen } from '../../../../shared/pipeline/routeDefinition.ts';
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { mdToHtml } from '../../shared/md.ts';
-import { UiButton } from '../../ui';
+import { UiButton, t } from '../../ui';
 import RoutePromptBlocks from './RoutePromptBlocks.vue';
 import RouteMarkdownInput from './RouteMarkdownInput.vue';
 import RouteContextFields from './RouteContextFields.vue';

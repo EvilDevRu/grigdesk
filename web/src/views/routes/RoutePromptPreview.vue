@@ -1,27 +1,23 @@
 <template>
   <section class="route-prompt-preview">
-    <h3>Предпросмотр инструкции</h3>
-    <p>Введите синтетический JSON-контекст. Команды завершения движок добавит только при
-      реальном запуске; здесь не используются данные задачи или вызовы ИИ.</p>
-    <label>Контекст
-      <UiTextarea v-model="contextText" data-test="preview-context" />
+    <h3>{{ t('core.routePredprosmotrInstruktsii') }}</h3>
+    <p>{{ t('core.routeVvediteSinteticheskiyJsonKontekst') }}</p>
+    <label>{{ t('core.chatContextLabel') }} <UiTextarea v-model="contextText" data-test="preview-context" />
     </label>
     <p v-if="inputError" class="bad" role="alert">{{ inputError }}</p>
-    <UiButton data-test="preview-run" :disabled="busy" @click="requestPreview">
-      Показать инструкцию
-    </UiButton>
-    <p v-if="stale" class="bad">Предпросмотр устарел после правки черновика.</p>
+    <UiButton data-test="preview-run" :disabled="busy" @click="requestPreview"> {{ t('core.routePokazatInstruktsiyu') }} </UiButton>
+    <p v-if="stale" class="bad">{{ t('core.routePredprosmotrUstarelPoslePravki') }}</p>
     <template v-if="result">
       <div v-if="result.includedBlocks.length">
-        <strong>Включены блоки</strong>
+        <strong>{{ t('core.routeVklyuchenyBloki') }}</strong>
         <ul><li v-for="file in result.includedBlocks" :key="file">{{ file }}</li></ul>
       </div>
       <div v-if="result.excludedBlocks.length">
-        <strong>Выключены блоки</strong>
+        <strong>{{ t('core.routeVyklyuchenyBloki') }}</strong>
         <ul><li v-for="file in result.excludedBlocks" :key="file">{{ file }}</li></ul>
       </div>
       <div v-if="result.issues.length" role="alert">
-        <strong>Недостающие секции и проблемы</strong>
+        <strong>{{ t('core.routeNedostayuschieSektsiiIProblemy') }}</strong>
         <ul><li v-for="(issue, index) in result.issues" :key="index">
           {{ issue.path }}: {{ issue.message }}
         </li></ul>
@@ -33,7 +29,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { UiButton, UiTextarea } from '../../ui';
+import { UiButton, UiTextarea, t } from '../../ui';
 
 defineProps<{
   result: {
@@ -63,7 +59,7 @@ function requestPreview(): void {
     const context: unknown = JSON.parse(contextText.value);
 
     if (!context || typeof context !== 'object' || Array.isArray(context)) {
-      inputError.value = 'Контекст должен быть JSON-объектом.';
+      inputError.value = t('core.routeKontekstDolzhenBytJson');
 
       return;
     }
@@ -71,7 +67,7 @@ function requestPreview(): void {
     inputError.value = '';
     emit('request', context as Record<string, unknown>);
   } catch {
-    inputError.value = 'Исправьте синтаксис JSON-контекста.';
+    inputError.value = t('core.routeIspravteSintaksisJsonKonteksta');
   }
 }
 </script>

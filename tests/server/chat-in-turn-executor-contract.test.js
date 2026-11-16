@@ -3,6 +3,8 @@
 // Порт обязан доходить до адаптера одинаково в обоих режимах, а видимый ответ — становиться
 // durable-записью с общим sequence. Проверяем настоящий модуль чата, а не отдельную функцию.
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import { parseInTurnCapability } from '../../shared/chat/chatInTurnContracts.ts';
@@ -254,3 +256,79 @@ test('capability канала публикуется только из разо�
   assert.equal(parseInTurnCapability('да'), null);
   assert.equal(parseInTurnCapability(null), null);
 });
+
+for (const bound of [false, true]) {
+  test(`живой caller: trusted marker и новая картинка второго send, binding=${bound}`, async (t) => {
+    const opened = [];
+    const sent = [];
+    const executor = {
+      id: 'test-provider',
+      ...(bound ? { sessionBinding: {
+        authProfileId: () => 'synthetic-auth',
+        securityProfile: () => 'synthetic-security',
+      } } : {}),
+      session: {
+        mode: 'persistent',
+        restartOn: ['model', 'permissionMode', 'cwd', 'workToolScopeKey'],
+        async open(spec) {
+          opened.push(spec);
+
+          return {
+            alive: true,
+            async send(turn) {
+              sent.push(turn);
+              await turn.onSessionCreated?.('live-caller-native');
+
+              return {
+                sessionId: 'live-caller-native',
+                reply: 'Готово',
+                steps: [],
+              };
+            },
+            interrupt: async () => {},
+            close: async () => {},
+          };
+        },
+      },
+    };
+    const { app, config } = await chatAppFixture(t, { executor });
+    const directory = path.join(config.chatsDir, 'attachments');
+    const file = path.join(directory, '1700000000000-second.png');
+
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(file, 'synthetic-image-bytes');
+    await saveChat(app, 'chat-fixture');
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: turnBody('chat-fixture', 'turn-caller-0001', 'Первый.', {
+        sessionIdAuthoritative: !bound,
+      }),
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    await waitFor(() => sent.length === 1, { what: 'первый живой send' });
+    await waitFor(async () => !await activeRun(app), { what: 'конец первого хода' });
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: turnBody('chat-fixture', 'turn-caller-0002', 'Второй.', {
+        attachments: [{
+          file: '1700000000000-second.png',
+          name: 'second.png',
+        }],
+      }),
+    });
+
+    assert.equal(second.statusCode, 202, second.body);
+    await waitFor(() => sent.length === 2, { what: 'второй живой send' });
+    assert.equal(opened.length, 1, 'Картинка не поднимает новый процесс');
+    assert.equal(opened[0].sessionIdAuthoritative, bound, 'Маркер задан сервером, не body');
+    assert.deepEqual(sent[1].attachmentPaths, [await fs.realpath(file)]);
+    assert.equal(sent[1].attachmentsDir, directory);
+    assert.ok(sent[1].signal instanceof AbortSignal);
+    assert.notEqual(sent[0].signal, sent[1].signal, 'Каждый send получает текущую отмену');
+  });
+}

@@ -94,7 +94,7 @@ function generationFields(source: 'text' | 'image' | 'views'): OperationField[] 
       visibleWhen: [ON_TEXTURE]
     }),
     field('texture_version', 'select', 'Версия текстуры', {
-      default: TEXTURE_V3,
+      default: TEXTURE_V35,
       advanced: true,
       options: [
         option(TEXTURE_V3, 'v3.0'),
@@ -612,7 +612,7 @@ export function tripoOperations(context: InputContext): ProviderOperation[] {
       operation: 'retexture',
       fields: [
         field('model', 'select', 'Версия текстуры', {
-          default: TEXTURE_V3,
+          default: TEXTURE_V35,
           options: [
             option(TEXTURE_V3, 'v3.0'),
             option(TEXTURE_V35, 'v3.5', 'Быстрое качество и снятие света.'),

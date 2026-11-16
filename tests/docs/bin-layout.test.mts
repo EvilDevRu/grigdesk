@@ -16,15 +16,22 @@ const REPO = new URL('../../', import.meta.url);
 // команда, иконка ярлыка и собранные файлы (tracker, посредник и установленное окно), которые в git
 // не попадают.
 const COMMANDS = ['grigdesk-ctl'];
-const BUILT = ['tracker', 'deepseek', 'grigdesk-relay', 'grigdesk-app', 'grigdesk-server'];
+const BUILT = [
+  'tracker', 'pipeline', 'routes', 'voice', 'deepseek',
+  'grigdesk-relay', 'grigdesk-app', 'grigdesk-server',
+];
 const RECEIPTS = {
   'deepseek.grigdesk-deepseek.json': 'DeepSeek',
   'grigdesk-server.grigdesk-server.json': 'сервера',
 };
-const ALLOWED = new Set([...COMMANDS, ...BUILT, 'grigdesk.png', ...Object.keys(RECEIPTS)]);
+const ALLOWED = new Set([
+  ...COMMANDS, ...BUILT, 'grigdesk.png', ...Object.keys(RECEIPTS),
+]);
 
 // ELF сборки имеет 0755; установленный DeepSeek публикуется без записи, с правами 0555.
-const ELF_BUILT = ['tracker', 'deepseek', 'grigdesk-app', 'grigdesk-server'];
+const ELF_BUILT = [
+  'tracker', 'pipeline', 'routes', 'voice', 'deepseek', 'grigdesk-app', 'grigdesk-server',
+];
 
 // Скрипты, которым bin/grigdesk-ctl передаёт `desktop`, `mobile` и `release`. Им нужен
 // бит исполнения: команда зовёт их через exec, а не через bash. tracker — собранный файл или исходник.
@@ -105,6 +112,33 @@ test('в bin/ только команды на PATH, иконка и собра�
   assert.deepEqual(binProblems(fileURLToPath(new URL('bin/', REPO))), []);
 });
 
+test('BD-ROUTES: авторинг допускается только как игнорируемый обычный ELF 0755', (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'routes-bin-layout-'));
+  const binary = path.join(directory, 'routes');
+  const cwd = fileURLToPath(REPO);
+
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  assert.deepEqual(binProblems(directory), []);
+  writeFileSync(binary, '#!/usr/bin/env node\n', { mode: 0o755 });
+  assert.deepEqual(binProblems(directory), ['routes не ELF']);
+  writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+  assert.deepEqual(binProblems(directory), []);
+  chmodSync(binary, 0o644);
+  assert.deepEqual(binProblems(directory), ['routes без прав 0755']);
+  rmSync(binary);
+  symlinkSync('missing-ELF', binary);
+  assert.deepEqual(binProblems(directory), ['routes не обычный ELF']);
+
+  for (const relative of ['bin/routes', 'bin/.routes-Ab12Cd.tmp']) {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', relative], { cwd });
+    assert.equal(execFileSync('git', ['ls-files', '--', relative], { cwd }).length, 0);
+  }
+
+  writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}\n');
+  assert.ok(binProblems(directory).includes('лишний файл package.json'));
+});
+
 test('BD-01: tracker отсутствует до сборки и допустим только как собранный ELF после неё', () => {
   // Отдельный каталог bin во временной папке: настоящий bin/ этого дерева не меняется.
   // Без аргумента tracker отсутствует, иначе записываются заданные байты и права.
@@ -135,6 +169,24 @@ test('BD-01: tracker отсутствует до сборки и допусти�
     bytes: elf,
     mode: 0o644,
   })), ['tracker без прав 0755']);
+});
+
+test('BD-VOICE: команда допускает только обычный ELF 0755', (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'voice-bin-layout-'));
+  const binary = path.join(directory, 'voice');
+
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  assert.deepEqual(binProblems(directory), []);
+  writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o644 });
+  assert.deepEqual(binProblems(directory), ['voice без прав 0755']);
+  chmodSync(binary, 0o755);
+  assert.deepEqual(binProblems(directory), []);
+  writeFileSync(binary, '#!/bin/bash\n');
+  assert.deepEqual(binProblems(directory), ['voice не ELF']);
+  rmSync(binary);
+  symlinkSync('missing-ELF', binary);
+  assert.deepEqual(binProblems(directory), ['voice не обычный ELF']);
 });
 
 test('BD-02: окно в bin/ допустимо только как ELF с правами 0755, временная копия — лишняя', () => {

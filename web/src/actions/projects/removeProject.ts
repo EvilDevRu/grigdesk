@@ -4,6 +4,11 @@ import { loadDependencies } from './loadDependencies';
 import { loadProjects } from './loadProjects';
 import { forgetProject } from './projectsRuntime';
 import type { ProjectLifecycleResult } from './changeLifecycle';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 
 /**
  * Успех удаления наступает только после подтверждённого DELETE, включая повтор.
@@ -19,7 +24,10 @@ export async function removeProject(
     await projectsApi.remove(id, expectedRevision);
   } catch (error) {
     const body = projectsErrorData(error);
-    const message = projectsFailureText(error, 'Не удалось удалить регистрацию проекта.');
+    const message = projectsFailureText(
+      error,
+      translateUi('core.removeProjectCouldNotRemoveTheProjectRegistration'),
+    );
 
     if (body?.error === 'has_dependencies' || body?.error === 'dependency_check_failed') {
       await loadDependencies(id);

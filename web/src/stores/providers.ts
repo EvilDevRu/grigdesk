@@ -103,6 +103,12 @@ export const useProvidersStore = defineStore('providers', {
     updateResults: {} as Record<string, UpdateResult | null>,
     // Идёт принудительная проверка лимитов по кнопке: ход один на все всплывашки.
     usageRefreshing: false,
+    usageRefreshingId: '',
+    usageReloadPending: false,
+    usageRefreshErrorId: '',
+    usageRefreshError: '',
+    usageAutoRefresh: null as boolean | null,
+    usagePolicyRevision: -1,
   }),
   getters: {
     /**
@@ -134,11 +140,13 @@ export const useProvidersStore = defineStore('providers', {
     },
     /**
      * Модели исполнителя, которые видно в выборе. Правило одно на весь GrigDesk: краткий
-     * список = только свежие версии, `extra` (старые версии) — под настройкой; выбранную
-     * сейчас модель показываем всегда, иначе селект потеряет значение.
+     * список = только свежие версии, `extra` (старые версии) — под настройкой; нечат-модели
+     * не выводятся вовсе. Выбранную сейчас модель показываем всегда, иначе селект потеряет
+     * значение: сохранённый нечат-выбор остаётся запрещённым вариантом с причиной.
      */
     visibleModels: (state) => (provider: RegistryProvider | null, selectedId: string | null = null) =>
-      (provider?.models || []).filter((m) => state.showAllModels || !m.extra || m.id === selectedId),
+      (provider?.models || []).filter((m) => m.id === selectedId
+        || ((state.showAllModels || !m.extra) && !m.nonChat)),
     /**
      * Сохранённый выбор → реальная модель. Алиас CLI (`opus`, `sonnet`, `haiku`) отдельным
      * пунктом не показывается: он привязан к модели, в которую резолвится (`aliases`).
@@ -231,6 +239,22 @@ export const useProvidersStore = defineStore('providers', {
     },
   },
   actions: {
+    /**
+     * Общая ревизия упорядочивает выбор между prefs ACK и потоком квот разных окон.
+     * Повтор допускается, более старый выбор и недоверенная форма отвергаются.
+     */
+    applyUsagePolicy(enabled: unknown, revision: unknown): boolean {
+      if (typeof enabled !== 'boolean' || !Number.isSafeInteger(revision)
+        || Number(revision) < 0 || Number(revision) < this.usagePolicyRevision) {
+        return false;
+      }
+
+      this.usagePolicyRevision = Number(revision);
+      this.usageAutoRefresh = enabled;
+
+      return true;
+    },
+
     /**
      * Читатели одной версии разделяют GET; монтирование использует готовый снимок.
      * SSE/credentials инвалидируют летящий ответ, а явный refresh сильнее обычного чтения.
@@ -404,25 +428,36 @@ export const useProvidersStore = defineStore('providers', {
       this.usageAt = 0;
       this.usageTransport.error = '';
 
+      if (this.usageRefreshErrorId === providerId) {
+        this.usageRefreshErrorId = '';
+        this.usageRefreshError = '';
+      }
+
       return Promise.all([this.load(false, { reason: 'credentials' }), this.loadUsage(true)]);
     },
     /**
      * Использует существующий минутный GET; компоненты читают единый снимок.
      * Транспортный отказ завершается явно и не означает разлогин у исполнителя.
      */
-    async loadUsage(force = false) {
+    async loadUsage(force = false, cached = false) {
+      if (this.usageRefreshing) {
+        this.usageReloadPending ||= force;
+
+        return;
+      }
+
       if (!force && Date.now() - this.usageAt < 60_000) {
         return;
       }
 
       this.usageAt = Date.now();
-      await this._requestUsage(false);
+      await this._requestUsage(false, undefined, cached);
     },
     /**
      * SSE и HTTP конкурируют за один снимок. Событие либо более новый запрос
      * инвалидируют результат уже летящего GET/refresh вместе с его ошибкой.
      */
-    async _requestUsage(refresh: boolean) {
+    async _requestUsage(refresh: boolean, providerId?: string, cached = false) {
       const request = ++this.usageRequest;
       const version = this.usageVersion;
 
@@ -430,16 +465,23 @@ export const useProvidersStore = defineStore('providers', {
 
       try {
         const response = refresh
-          ? await api.post('/api/providers/usage/refresh')
-          : await api.get('/api/providers/usage');
+          ? await api.post('/api/providers/usage/refresh', { providerId })
+          : await api.get(cached ? '/api/providers/usage?cached=1' : '/api/providers/usage');
 
         if (request !== this.usageRequest || version !== this.usageVersion) {
           return;
         }
-        if (!this.applyUsage(isRecord(response) ? response.usage : undefined)) {
+        if (!this.applyUsage(isRecord(response) ? response.usage : undefined,
+          isRecord(response) ? response.autoRefresh : undefined,
+          isRecord(response) ? response.autoRefreshRevision : undefined)) {
           throw new Error(t('settings.usageSnapshotMissing'));
         }
       } catch (error) {
+        if (refresh && this.usageRefreshingId === providerId) {
+          this.usageRefreshErrorId = providerId ?? '';
+          this.usageRefreshError = failureText(error) || t('settings.usageLoadFailure');
+        }
+
         if (request !== this.usageRequest || version !== this.usageVersion) {
           return;
         }
@@ -454,10 +496,17 @@ export const useProvidersStore = defineStore('providers', {
      * Принятый снимок снимает ошибку доставки и сдвигает троттл обычного GET.
      * При разорванном SSE HTTP обновляет числа, сохраняя недоступность живого обновления.
      */
-    applyUsage(usage: unknown) {
+    applyUsage(usage: unknown, autoRefresh?: unknown, policyRevision?: unknown) {
       if (!isUsageSnapshot(usage)) {
         return false;
       }
+
+      if (typeof autoRefresh === 'boolean' && Number.isSafeInteger(policyRevision)
+        && Number(policyRevision) < this.usagePolicyRevision) {
+        return true;
+      }
+
+      this.applyUsagePolicy(autoRefresh, policyRevision);
 
       const next: Record<string, UsageEntry> = {};
 
@@ -513,7 +562,6 @@ export const useProvidersStore = defineStore('providers', {
       transport.everConnected ||= connected;
 
       if (reconnect) {
-        this.usage = {};
         this.usageVersion += 1;
         this.usageRequest += 1;
         this.registryVersion += 1;
@@ -523,20 +571,29 @@ export const useProvidersStore = defineStore('providers', {
       }
     },
     /**
-     * Проверка по кнопке остаётся общей для всех всплывашек.
-     * Защита от позднего ответа совпадает с обычным GET, новый опрос не появляется.
+     * Один ручной запрос окна принадлежит выбранному исполнителю и общему серверу.
+     * Соседние таймеры не вытесняют ответ; все выходы освобождают состояние кнопки.
      */
-    async refreshUsage() {
-      if (this.usageRefreshing) {
+    async refreshUsage(providerId: string) {
+      if (this.usageRefreshing || !providerId) {
         return;
       }
 
       this.usageRefreshing = true;
+      this.usageRefreshingId = providerId;
+      this.usageRefreshErrorId = '';
+      this.usageRefreshError = '';
 
       try {
-        await this._requestUsage(true);
+        await this._requestUsage(true, providerId);
       } finally {
         this.usageRefreshing = false;
+        this.usageRefreshingId = '';
+
+        if (this.usageReloadPending) {
+          this.usageReloadPending = false;
+          await this.loadUsage(true, true);
+        }
       }
     },
     /**
@@ -618,7 +675,8 @@ export const useProvidersStore = defineStore('providers', {
     /**
      * Ключи доступа исполнителя (окно «Ключи доступа»): values — имя переменной → значение
      * или null для удаления. Сервер пишет их в корневой .env; каталог моделей он перечитывает
-     * в фоне и сообщает о нём событием providers-update, поэтому здесь refresh не нужен.
+     * в фоне и сообщает о нём событием providers-update. Несекретные choice из ACK
+     * возвращаются координатору, но не перезаписывают более новый снимок всего store.
      */
     async saveCredentials(providerId: string, values: Record<string, string | null>) {
       try {
@@ -638,7 +696,14 @@ export const useProvidersStore = defineStore('providers', {
 
         void this.invalidateCredentials(providerId);
 
-        return { ok: true };
+        const choices = Array.isArray(r.credentials) ? r.credentials.filter((field) => isRecord(field)
+          && field.kind === 'choice' && typeof field.env === 'string'
+          && (typeof field.value === 'string' || field.value === null)) : [];
+        const savedChoices: Record<string, string | null> = Object.fromEntries(
+          choices.map((field) => [field.env, field.value]),
+        );
+
+        return { ok: true, ...choices.length ? { savedChoices } : {} };
       } catch (e) {
         const result = classifyWriteError(e, uiLocale);
 

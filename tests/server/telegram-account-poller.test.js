@@ -145,14 +145,21 @@ test('network result старой generation отбрасывается до app
   assert.equal(f.releases(), 1);
 });
 
-test('stop ждёт начатый long poll', async () => {
+test('stop ждёт завершения отмены начатого long poll', async () => {
   const gate = deferred();
-  const f = fixture({ call: async () => { await gate.promise; return []; } });
+  const started = deferred();
+  const f = fixture({ call: async (_token, _method, _body, { signal }) => {
+    started.resolve(signal);
+    await gate.promise;
+
+    return [];
+  } });
   const tick = f.poller.tick();
-  await Promise.resolve();
-  await Promise.resolve();
+  const signal = await started.promise;
   let stopped = false;
   const stopping = f.poller.stop().then(() => { stopped = true; });
+
+  assert.equal(signal.aborted, true);
   await Promise.resolve();
   assert.equal(stopped, false);
   gate.resolve();
@@ -160,6 +167,65 @@ test('stop ждёт начатый long poll', async () => {
   await stopping;
   assert.equal(stopped, true);
   assert.equal(f.releases(), 1);
+});
+
+test('stop отменяет сеть, пропускает queued ticks и не меняет offset', async () => {
+  const started = deferred();
+  let calls = 0;
+  const f = fixture({ call: async (_token, _method, _body, { signal }) => {
+    calls += 1;
+    started.resolve();
+
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  } });
+  const first = f.poller.tick();
+
+  await started.promise;
+
+  const queued = f.poller.tick();
+
+  await f.poller.stop();
+  await Promise.all([first, queued]);
+  assert.equal(calls, 1);
+  assert.deepEqual(f.writes, []);
+  assert.equal(f.poller.lastError, null, 'Остановка не становится сетевой ошибкой');
+  assert.equal(f.releases(), 1);
+});
+
+test('stop посреди updates сохраняет обработанный префикс без второго callback', async () => {
+  const entered = deferred();
+  const release = deferred();
+  const handled = [];
+  const message = (id) => ({
+    update_id: id,
+    message: {
+      message_id: id,
+      date: 100,
+      chat: { id: 42, type: 'private' },
+      text: 'синтетика',
+    },
+  });
+  const f = fixture({
+    updates: [message(8), message(9)],
+    onMessage: async (value) => {
+      handled.push(value);
+      entered.resolve();
+      await release.promise;
+    },
+  });
+  const tick = f.poller.tick();
+
+  await entered.promise;
+
+  const stopping = f.poller.stop();
+
+  release.resolve();
+  await stopping;
+  await tick;
+  assert.equal(handled.length, 1);
+  assert.equal(f.writes[0].offset, 9, 'Успешный callback не будет исполнен повторно');
 });
 
 test('409 Bot API становится безопасной poll_conflict диагностикой', async () => {

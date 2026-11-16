@@ -131,6 +131,27 @@ test('AP23_store: потерянный ACK удерживает operationId до
   assert.equal(f.posts.length, 1);
 });
 
+test('переключение требует явного серверного допуска и успешного чтения', async (t) => {
+  const f = await storeFixture(t);
+
+  f.control.online = true;
+  await f.store.load('fixture');
+  await f.store.activate('fixture', 'another');
+  assert.equal(f.posts.length, 0, 'Отсутствующий допуск не разрешает переключение');
+  f.list.switchAllowed = false;
+  await f.store.load('fixture');
+  await f.store.activate('fixture', 'another');
+  assert.equal(f.posts.length, 0);
+  f.list.switchAllowed = true;
+  await f.store.load('fixture');
+  f.store.errors.fixture = 'Нет связи';
+  await f.store.activate('fixture', 'another');
+  assert.equal(f.posts.length, 0, 'Старое разрешение не действует после отказа чтения');
+  await f.store.load('fixture');
+  await f.store.activate('fixture', 'another');
+  assert.equal(f.posts.length, 1);
+});
+
 test('AP23_store: неизвестный 404 допускает явный повтор только с прежним operationId', async (t) => {
   const f = await storeFixture(t);
   const body = { name: 'Подключение', methodId: 'api-key' };
@@ -227,6 +248,10 @@ test('AP23_panel: reload неизвестного create открывает то
     stubs: {
       '../ui.ts': `
         export const UiButton = {};
+        export const UiIconButton = {};
+        export const UiInlineMessage = {};
+        export const UiRefreshIcon = {};
+        export const vTooltip = {};
         export const confirmDialog = async () => true;
         export const promptDialog = async () => '';
         export const t = key => key;

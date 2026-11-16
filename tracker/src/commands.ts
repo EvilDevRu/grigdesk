@@ -1,3 +1,4 @@
+import { isTaskSourceId } from '../../shared/tasks/taskReference.ts';
 import type { ApiCommand } from './args.ts';
 import type { Connection } from './config.ts';
 import { B24Error } from './errors.ts';
@@ -38,7 +39,8 @@ async function stdinBody(io: CommandIO): Promise<Uint8Array> {
  * POST без тела не получает JSON-заголовок и пустой объект.
  */
 async function specOf(
-  command: Exclude<ApiCommand, { kind: 'start' | 'boards' }>, io: CommandIO,
+  command: Exclude<ApiCommand, { kind: 'start' | 'boards' | 'analyze' | 'launch-options' | 'launch' }>,
+  io: CommandIO,
 ): Promise<RequestSpec> {
   switch (command.kind) {
     case 'dashboard':
@@ -89,6 +91,80 @@ async function specOf(
 }
 
 /**
+ * Новые операции конвейера подтверждают полный источник выбранной доски.
+ * JSON запуска читается один раз; противоречие источников запрещено до POST.
+ */
+async function runPipelineCommand(
+  command: {
+    kind: 'analyze' | 'launch-options' | 'launch';
+    id: string;
+    board?: string;
+  },
+  connection: Connection,
+  io: CommandIO,
+): Promise<Uint8Array> {
+  let body: Record<string, unknown> = {};
+
+  if (command.kind === 'launch') {
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(await io.readStdin()));
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error();
+      }
+
+      body = parsed as Record<string, unknown>;
+    } catch {
+      throw new B24Error(2, 'Запуск принимает JSON-объект из stdin.');
+    }
+  }
+
+  let source: string | undefined;
+
+  if (command.board !== undefined) {
+    const bytes = await io.request(connection, {
+      method: 'GET',
+      path: `${trackerPath(command.board)}/context`,
+    });
+    let context: { source?: unknown };
+
+    try {
+      context = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      throw new B24Error(22, 'Неверный ответ подключения доски.');
+    }
+
+    if (!isTaskSourceId(context?.source) || context.source.split('@')[0] !== command.board) {
+      throw new B24Error(22, 'Не удалось подтвердить источник доски.');
+    }
+
+    source = context.source;
+
+    if (body.source !== undefined && body.source !== source) {
+      throw new B24Error(2, 'Источник stdin противоречит --board.');
+    }
+
+    body.source = source;
+  }
+
+  const path = `/api/tasks/${encodeURIComponent(command.id)}/${command.kind}`;
+
+  if (command.kind === 'launch-options') {
+    return io.request(connection, {
+      method: 'GET',
+      path: source ? `${path}?${new URLSearchParams({ source })}` : path,
+    });
+  }
+
+  return io.request(connection, {
+    method: 'POST',
+    path,
+    body: JSON.stringify(body),
+    json: true,
+  });
+}
+
+/**
  * Выполняет команду API и возвращает тело последнего успешного ответа.
  * start последовательно делает renew, глотает его HTTP/сетевой отказ и один раз запускает таймер.
  */
@@ -114,6 +190,10 @@ export async function runCommand(
     });
 
     return new TextEncoder().encode(JSON.stringify(boards));
+  }
+
+  if (command.kind === 'analyze' || command.kind === 'launch-options' || command.kind === 'launch') {
+    return runPipelineCommand(command, connection, io);
   }
 
   if (command.kind !== 'start') {

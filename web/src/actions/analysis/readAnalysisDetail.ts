@@ -7,7 +7,7 @@ import type { AnalysisDetail } from '../../../../shared/pipeline/analysisContrac
  * заново и в кеш доски не кладётся — карточку открывают, чтобы свериться с текущим
  * состоянием, а не с тем, что успело осесть в бейдже.
  */
-export async function readAnalysisDetail(id: string | number): Promise<AnalysisDetail> {
+export async function readAnalysisDetail(id: string | number, source?: string): Promise<AnalysisDetail> {
   const store = useAnalysisStore();
 
   if (store.disabled) {
@@ -20,5 +20,5 @@ export async function readAnalysisDetail(id: string | number): Promise<AnalysisD
     };
   }
 
-  return analysisApi.detail(id);
+  return analysisApi.detail(id, source);
 }

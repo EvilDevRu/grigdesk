@@ -368,7 +368,8 @@ function assertWorkspaceVisible(measured, width) {
     `схема и поле в соседних колонках при ${width}`);
   assert.ok(Math.min(measured.graph.bottom, measured.input.bottom)
     > Math.max(measured.graph.top, measured.input.top), 'схема и поле пересекаются по вертикали');
-  assert.ok(measured.graph.height >= (width === 1280 ? 150 : 200), 'высота схемы не ужата');
+  assert.ok(measured.graph.height >= (width === 1280 ? 150 : 200),
+    `высота схемы не ужата: ${JSON.stringify(measured)}`);
   assert.ok(measured.listVisible >= 90, 'у списка этапов есть видимая область');
 }
 
@@ -385,6 +386,10 @@ for (const [width, height] of [[1440, 900], [1280, 800]]) {
 
       await page.locator('.route-canvas__graph svg').waitFor();
       await page.locator('[data-test="node-label"]').waitFor({ state: 'attached' });
+
+      // Свободный холст сохраняет расстояния построителя. Масштаб даёт место
+      // второму узлу для настоящего клика в узкой колонке редактора.
+      await page.locator('[data-test="fit-all"]').click();
 
       const before = await workspaceGeometry(page);
 

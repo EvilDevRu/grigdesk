@@ -1,8 +1,15 @@
 import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 // Локальные возможности текущего устройства: уведомления и удержание экрана.
-import { defineStore } from 'pinia';
-import { ensureNotifyPermission, notify } from '../shared/notify.ts';
+import { defineStore, getActivePinia } from 'pinia';
+import { watch } from 'vue';
+import {
+  ensureNotifyPermission,
+  notify,
+  readShellNotifyPermission,
+  shellNotifySupported,
+} from '../shared/notify.ts';
+import { useShellStore } from './shell.ts';
 
 interface DeviceState {
   wakeLockEnabled: boolean;
@@ -27,6 +34,8 @@ export const WAKE_LOCK_KEY = 'grigdesk-screen-wake-lock';
 // а initWakeLock() защищён от повторной подписки.
 let wakeLockSentinel: WakeLockSentinel | null = null;
 let wakeLockRequest: Promise<boolean> | null = null;
+// Номер чтения нативного разрешения: поздний ответ не перетирает более свежий.
+let notifySyncTicket = 0;
 
 /**
  * Настройка удержания экрана принадлежит текущему устройству.
@@ -57,13 +66,25 @@ function wakeLockSupported(): boolean {
 }
 
 function notificationSupported(): boolean {
+  return browserNotificationSupported() || shellNotifySupported();
+}
+
+function browserNotificationSupported(): boolean {
   return typeof window !== 'undefined'
     && window.isSecureContext !== false
     && 'Notification' in window;
 }
 
+/**
+ * До первого чтения нативного разрешения оболочка считается ещё не спросившей.
+ * Обычный браузер без Notification API и без канала оболочки остаётся unsupported.
+ */
 function notificationPermission(): NotificationPermission | 'unsupported' {
-  return notificationSupported() ? window.Notification.permission : 'unsupported';
+  if (browserNotificationSupported()) {
+    return window.Notification.permission;
+  }
+
+  return shellNotifySupported() ? 'default' : 'unsupported';
 }
 
 export const useDeviceStore = defineStore('device', {
@@ -249,7 +270,8 @@ export const useDeviceStore = defineStore('device', {
     },
 
     // После возврата из системных настроек перечитываем permission: пользователь мог
-    // разрешить или запретить уведомления снаружи окна.
+    // разрешить или запретить уведомления снаружи окна. Обнаруженная оболочка добавляет
+    // нативный канал: его разрешение читается асинхронно и обновляет настройку.
     initNotifications(): void {
       if (this.notificationInitialized || typeof document === 'undefined') {
         return;
@@ -257,18 +279,46 @@ export const useDeviceStore = defineStore('device', {
 
       this.notificationInitialized = true;
 
-      this.syncNotificationPermission();
+      void this.syncNotificationPermission();
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          this.syncNotificationPermission();
+          void this.syncNotificationPermission();
         }
       });
+
+      const pinia = getActivePinia();
+
+      if (pinia) {
+        const shell = useShellStore(pinia);
+
+        watch(() => shell.capabilities.includes('notify'), () => {
+          void this.syncNotificationPermission();
+        });
+      }
     },
 
-    syncNotificationPermission(): void {
+    /**
+     * Синхронизация переживает гонку: поздний ответ старого чтения не перетирает свежий.
+     * Браузерное разрешение читается сразу, нативное — запросом к оболочке.
+     */
+    async syncNotificationPermission(): Promise<void> {
       this.notificationSupported = notificationSupported();
-      this.notificationPermission = notificationPermission();
+
+      if (browserNotificationSupported()) {
+        this.notificationPermission = window.Notification.permission;
+      } else if (shellNotifySupported()) {
+        const ticket = ++notifySyncTicket;
+        const permission = await readShellNotifyPermission();
+
+        if (ticket !== notifySyncTicket) {
+          return;
+        }
+
+        this.notificationPermission = permission;
+      } else {
+        this.notificationPermission = 'unsupported';
+      }
 
       if (this.notificationPermission === 'granted') {
         this.notificationIssue = '';
@@ -286,7 +336,7 @@ export const useDeviceStore = defineStore('device', {
       try {
         const granted = await ensureNotifyPermission();
 
-        this.syncNotificationPermission();
+        await this.syncNotificationPermission();
 
         if (!granted) {
           this.notificationIssue = this.notificationPermission === 'denied'

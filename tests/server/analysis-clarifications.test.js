@@ -7,7 +7,6 @@ import path from 'node:path';
 
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 import analysisModule from '../../server/src/modules/analysis/index.ts';
-import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -302,49 +301,4 @@ test('human_required арбитра остаётся видимым требов
     verdict: true,
     open: ['Как показывать стоимость?'],
   });
-});
-
-test('ответ арбитра со старым именем читается как grigdesk-arbiter', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-clarification-legacy-'));
-  const entry = {
-    id: 'answer-legacy',
-    questionId: 'q-code',
-    actor: LEGACY_VALUES.arbiterActor,
-    status: 'answered',
-    selection: [],
-    text: 'Поле уже есть.',
-    attachments: [],
-    proof: [],
-  };
-  const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
-
-  await writeFile(path.join(dir, 't42.clarify.md'), [
-    '## Разбор арбитра — машинный',
-    'Поле уже есть.',
-    `<!-- grigdesk-clarification:v1 ${marker} -->`,
-    '',
-  ].join('\n'));
-
-  const analyzer = new Analyzer({
-    config: { analysisDir: dir },
-    claudeAuth: null,
-    tracker: null,
-    factoryState: {},
-    log: null,
-  });
-
-  await analyzer._ready;
-
-  const app = Fastify({ logger: false });
-
-  app.decorate('pluginEnabled', () => true);
-  await app.register(analysisModule, { analyzer });
-  t.after(async () => {
-    await app.close();
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  const response = await app.inject({ method: 'GET', url: '/api/tasks/42/clarifications' });
-
-  assert.equal(response.json().entries[0].actor, 'grigdesk-arbiter');
 });

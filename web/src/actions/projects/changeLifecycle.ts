@@ -4,6 +4,11 @@ import { useProjectsStore } from '../../stores/projects';
 import { createDraft } from '../../views/projects/projectDraft';
 import { loadDependencies } from './loadDependencies';
 import { loadProjects } from './loadProjects';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export interface ProjectLifecycleResult {
   ok: boolean;
@@ -61,7 +66,7 @@ export async function changeLifecycle(
     const body = projectsErrorData(error);
     const message = projectsFailureText(
       error,
-      action === 'archive' ? 'Не удалось убрать проект в архив.' : 'Не удалось вернуть проект.',
+      action === 'archive' ? t('core.projectNeUdalosUbratProekt') : t('core.projectNeUdalosVernutProekt'),
     );
 
     // Свежая сводка объясняет отказ: сервер отказал по связям, и человеку нужен их список.

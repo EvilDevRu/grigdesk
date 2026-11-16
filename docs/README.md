@@ -42,10 +42,10 @@
 
 ## Работа с GrigDesk
 
-- [guide/tasks.md](grigdesk/guide/tasks.md) — как оформить задачу и что с ней делает триаж.
-- [guide/gates.md](grigdesk/guide/gates.md) — где конвейер останавливается и чего ждёт от человека.
-- [guide/projects.md](grigdesk/guide/projects.md) — паспорт проекта, его репозитории и API раздела.
-- [guide/routes.md](grigdesk/guide/routes.md) — черновики маршрутов, проверка, публикация и откат.
+- [guide/ru/tasks.md](grigdesk/guide/ru/tasks.md) — как оформить задачу и что с ней делает триаж.
+- [guide/ru/gates.md](grigdesk/guide/ru/gates.md) — где конвейер останавливается и чего ждёт от человека.
+- [guide/ru/projects.md](grigdesk/guide/ru/projects.md) — паспорт проекта, его репозитории и API раздела.
+- [guide/ru/routes.md](grigdesk/guide/ru/routes.md) — черновики маршрутов, проверка, публикация и откат.
 - [reference/runtime-contracts.md](grigdesk/reference/runtime-contracts.md) — SSH-плагин, надзорный
   доступ к базам и Telegram-пульт.
 
@@ -55,7 +55,8 @@
 - [ENGINE.md](engine/ENGINE.md) — архитектура движка, инварианты и проверки.
 - [KIMI.md](engine/KIMI.md) — Kimi runner, классификация отказов и contract-based совместимость CLI.
 - [GLM.md](engine/GLM.md) — GLM runner этапов поверх DSH ELF: допуск, каталог, fail-closed классификатор.
-- [ADDING-RUNNER.md](engine/ADDING-RUNNER.md) — подключение нового provider runner.
+- [ADDING-RUNNER.md](engine/ADDING-RUNNER.md) — подключение runner и metadata model_options.
+- [Модель и effort этапа](grigdesk/pipeline/node-model-and-effort.md) — scoped policy, exact CLI/API и restart.
 - [PROFILE-CONTRACT.md](engine/PROFILE-CONTRACT.md) — контракт проектного профиля.
 - [Профили конвейера](grigdesk/pipeline/project-profiles.md) — устройство и справочник
   параметров файлов, хуков, исполнителей, моделей и маршрутов.

@@ -414,6 +414,9 @@ export interface ExecutorAdapter {
   compaction?: Record<string, unknown>;
   usageActions?: Record<string, (input: Record<string, unknown>) => Promise<unknown>>;
   untrustedInput?: { text?: boolean };
+  // Старые ленты адаптера содержат текстовые дельты без id вместо готовых блоков.
+  // Окно склеивает только такие соседние шаги, сохраняя новые блоки с id отдельно.
+  legacyTextStepDeltas?: boolean;
   // Подробный контракт канала ввода в активный ход; отсутствие поля — честное «не умею».
   inTurnInput?: InTurnCapability;
   bin: (config: unknown) => unknown;

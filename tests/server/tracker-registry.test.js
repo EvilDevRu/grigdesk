@@ -11,27 +11,27 @@ const pair = async (config) => {
   await writeTracker(config, 'fixture-b');
 };
 
-test('TRACKER-REGISTRY-01: own постоянно активен, прежний выбор B сохраняет включённый A', async (t) => {
+test('OWN-REMOVED-CATALOG: пустой runtime и выбранные A/B не публикуют own', async (t) => {
   const fixture = await trackerFixture(t, { setup: pair });
   const initial = await fixture.request('GET', '/api/trackers');
 
   assert.equal(initial.statusCode, 200);
   assert.equal((await fixture.request('GET', '/api/b24/dashboard')).statusCode, 404);
-  assert.deepEqual(initial.json().activeIds, ['own']);
+  assert.deepEqual(initial.json().activeIds, []);
   assert.equal(initial.json().externalId, null);
   assert.deepEqual(initial.json().drivers.map((driver) => driver.id).sort(),
-    ['fixture-a', 'fixture-b', 'own']);
+    ['fixture-a', 'fixture-b']);
 
   await selectTracker(fixture, 'fixture-a');
   await selectTracker(fixture, 'fixture-b');
 
   const selected = (await fixture.request('GET', '/api/trackers')).json();
 
-  assert.deepEqual([...selected.activeIds].sort(), ['fixture-a', 'fixture-b', 'own']);
+  assert.deepEqual([...selected.activeIds].sort(), ['fixture-a', 'fixture-b']);
   assert.equal(selected.externalId, 'fixture-b');
 });
 
-test('TRACKER-REGISTRY-01: внутренний registry допускает own+A+B и TaskRef различает id', async (t) => {
+test('TRACKER-REGISTRY-01: registry допускает A+B и TaskRef различает id', async (t) => {
   const fixture = await trackerFixture(t, { setup: pair });
   const catalog = await fixture.request('GET', '/api/trackers');
 
@@ -47,7 +47,7 @@ test('TRACKER-REGISTRY-01: внутренний registry допускает own+
 
   assert.equal(a.title, 'fixture-a');
   assert.equal(b.title, 'fixture-b');
-  assert.ok(registry.activeIds.includes('own'));
+  assert.equal(registry.activeIds.includes('own'), false);
   assert.ok(registry.activeIds.includes('fixture-a'));
   assert.ok(registry.activeIds.includes('fixture-b'));
 });
@@ -80,8 +80,8 @@ test('TRACKER-REGISTRY-02 / B-MIGRATION-01: старый файл реквизи
 
     assert.equal(catalog.statusCode, 200);
     assert.equal(catalog.json().externalId, null);
-    assert.deepEqual(catalog.json().activeIds, ['own']);
-    assert.deepEqual(catalog.json().drivers.map((driver) => driver.id).sort(), ['own']);
+    assert.deepEqual(catalog.json().activeIds, []);
+    assert.deepEqual(catalog.json().drivers.map((driver) => driver.id).sort(), []);
 
     const dashboard = await fixture.request('GET', '/api/tracker/dashboard');
 
@@ -97,7 +97,7 @@ test('TRACKER-REGISTRY-02 / B-MIGRATION-01: старый файл реквизи
   });
 
 for (const kind of ['corrupt', 'contract', 'duplicate', 'shadow', 'symlink']) {
-  test(`TRACKER-REGISTRY-02: ${kind} не исполняется и не отключает own`, async (t) => {
+  test(`TRACKER-REGISTRY-02: ${kind} не исполняется и не публикуется`, async (t) => {
     const fixture = await trackerFixture(t, {
       setup: async (config) => {
         const id = kind === 'shadow' ? 'own' : 'invalid-driver';
@@ -129,7 +129,7 @@ for (const kind of ['corrupt', 'contract', 'duplicate', 'shadow', 'symlink']) {
     const catalog = await fixture.request('GET', '/api/trackers');
 
     assert.equal(catalog.statusCode, 200);
-    assert.ok(catalog.json().activeIds.includes('own'));
+    assert.equal(catalog.json().activeIds.includes('own'), false);
 
     if (kind !== 'shadow') {
       const externalId = kind === 'symlink' ? 'linked' : 'invalid-driver';
@@ -159,43 +159,6 @@ for (const kind of ['corrupt', 'contract', 'duplicate', 'shadow', 'symlink']) {
       headers: fixture.headers,
     });
 
-    assert.equal(own.statusCode, 200);
-    assert.deepEqual(own.json().tasks, []);
+    assert.equal(own.statusCode, 404);
   });
 }
-
-test('TRACKER-NUMBER-01: missing selected driver не доказывает отсутствие номера', async (t) => {
-  const fixture = await trackerFixture(t, {
-    setup: async (config) => {
-      await mkdir(path.dirname(config.trackerSettingsPath), { recursive: true });
-      await writeFile(config.trackerSettingsPath, JSON.stringify({
-        externalId: 'missing-driver',
-        revision: 1,
-      }));
-    },
-  });
-  const catalog = await fixture.request('GET', '/api/trackers');
-
-  assert.equal(catalog.statusCode, 200);
-
-  const response = await fixture.request('POST', '/api/grigdesk-tasks', {
-    title: 'Своя задача',
-    description: 'Текст',
-    projectId: 'beta',
-    clientOrigin: 'http://client.test',
-  });
-
-  assert.equal(response.statusCode, 503);
-  assert.equal(response.json().error, 'task_number_unverified');
-
-  await selectTracker(fixture, null);
-
-  const local = await fixture.request('POST', '/api/grigdesk-tasks', {
-    title: 'Своя задача',
-    description: 'Текст',
-    projectId: 'beta',
-    clientOrigin: 'http://client.test',
-  });
-
-  assert.equal(local.statusCode, 201);
-});

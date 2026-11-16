@@ -32,7 +32,7 @@ test('I18N-D01: явный EN переводит меню, сохраняя ро
     opens += 1; 
   } }, 'en');
 
-  assert.deepEqual(en.map((item) => item.label), ['File', 'Edit', 'View']);
+  assert.deepEqual(en.map((item) => item.label), ['File', 'Edit', 'View', 'Help']);
   assert.deepEqual(en.slice(1).map((group) => group.submenu.map((item) => item.role || item.type)),
     ru.slice(1).map((group) => group.submenu.map((item) => item.role || item.type)));
   assert.equal(en[0].submenu[0].accelerator, ru[0].submenu[0].accelerator);
@@ -47,7 +47,7 @@ test('I18N-D01: явный EN переводит меню, сохраняя ро
 
   assert.equal(context[0].label, 'Copy');
   assert.equal(context.at(-1).label, 'Copy link address');
-  assert.deepEqual(ru.map((item) => item.label), ['Файл', 'Правка', 'Вид']);
+  assert.deepEqual(ru.map((item) => item.label), ['Файл', 'Правка', 'Вид', 'Справка']);
 });
 
 test('I18N-D01: чистый desktop-контекст выбирает preferred system language и явный язык', async () => {

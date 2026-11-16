@@ -22,8 +22,8 @@
         </div>
         <UiIconButton
           role="embedded"
-          label="Закрыть документ"
-          v-tooltip="'Закрыть (Esc)'"
+          :label="t('core.docZakrytDokument')"
+          v-tooltip="t('core.docZakrytEsc')"
           @click="close('action')"
         >
           <svg
@@ -40,7 +40,7 @@
       </div>
     </template>
 
-    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
+    <UiLoadingState v-if="resolving" :label="t('core.docProveryayuSsylku')" variant="document" >
       <UiSkeletonLayout layout="text" :header="false" />
     </UiLoadingState>
     <div v-else-if="resolveError" class="document-state error"
@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
+import { UiSkeletonLayout, t } from '../ui';
 
 import { computed, ref, watch } from 'vue';
 import {
@@ -96,7 +96,7 @@ const title = computed(
   () =>
     documentValue.value?.name ||
     documentPath.value.split('/').filter(Boolean).at(-1) ||
-    'Документ',
+    t('core.docDokument'),
 );
 
 /**
@@ -127,7 +127,7 @@ watch(
     const target = parseDocumentRouteHref(href);
 
     if (!target) {
-      resolveError.value = 'Некорректная ссылка на документ';
+      resolveError.value = t('core.coreNekorrektnayaSsylkaNaDokument');
 
       return;
     }
@@ -158,7 +158,7 @@ watch(
         resolveError.value =
           error instanceof Error
             ? error.message
-            : 'Ссылка на документ недоступна';
+            : t('core.coreSsylkaNaDokumentNedostupna');
       }
     } finally {
       if (currentGeneration === generation) {

@@ -244,6 +244,40 @@ public final class ProfileStore {
   }
 
   /**
+   * Сеть проверяется вне блокировки, поэтому перед записью сверяется весь исходный профиль.
+   * Файл заменяется до памяти: отказ сохранения оставляет прежние маршруты в обоих местах.
+   */
+  public synchronized void updateRoutes(JSONObject expected, JSONArray direct, JSONObject relay,
+    String deviceId) throws Exception {
+    JSONObject current = get(expected.getString("id"));
+
+    if (!current.toString().equals(expected.toString())) {
+      throw new IllegalStateException(
+        ShellLocale.text(locale, "native.profileChanged", "Машина изменена. Повторите обновление."));
+    }
+
+    PhonePairingPayload.routes(direct, relay);
+    JSONObject updated = new JSONObject(current.toString());
+    String address = direct.length() == 0 ? "" : "https://"
+      + direct.getJSONObject(0).getString("host") + ":" + direct.getJSONObject(0).getInt("port");
+
+    updated.put("direct", direct).put("address", address).put("deviceId", deviceId);
+
+    if (relay == null) {
+      updated.remove("relay");
+    } else {
+      updated.put("relay", relay);
+    }
+
+    List<JSONObject> candidate = new ArrayList<>(profiles);
+    int index = profiles.indexOf(current);
+
+    candidate.set(index, updated);
+    save(candidate);
+    profiles.set(index, updated);
+  }
+
+  /**
    * Выбор допускает только существующую машину либо пустой экран подключения.
    * Изменение сохраняется до навигации, чтобы следующий запуск открыл тот же профиль.
    */
@@ -292,11 +326,19 @@ public final class ProfileStore {
    * Неудача не оставляет половину JSON вместо ранее сохранённых машин.
    */
   private void save() throws Exception {
+    save(profiles);
+  }
+
+  /**
+   * Кандидат записывается без публикации в общей коллекции профилей.
+   * Обычные операции используют тот же приватный atomic rename.
+   */
+  private void save(List<JSONObject> candidate) throws Exception {
     JSONObject data = new JSONObject();
 
     data.put("version", 1);
     data.put("selected", selected == null ? JSONObject.NULL : selected);
-    data.put("profiles", new JSONArray(profiles));
+    data.put("profiles", new JSONArray(candidate));
 
     File pending = File.createTempFile("profiles-", ".json", file.getParentFile());
 

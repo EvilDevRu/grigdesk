@@ -57,6 +57,7 @@
 | `i18n/` | Чистый переводчик, descriptors, каталоги RU/EN, LocaleSource и Intl; [контракт](../web/interface-language.md) | Node, браузер |
 | `browser/` | Настройки и URL, action decoder и descriptor grigdesk_browser; [контракт](../web/browser-workspace.md) | Node, браузер |
 | `client/` | Подключение приложений: версия API, строка привязки, API оболочки | Node, браузер |
+| `mobile/` | DTO и проверка публичных параметров задания установки ретранслятора | Node, браузер |
 | `help/` | Корпус справки, ограниченный поиск, порционное чтение и контекстные ссылки | Node, браузер |
 | `runtime/` | Папка данных, настройки, готовность, проекты, обновление и версии интерфейса | Node, браузер |
 | `web-log/` | Контракты журнала, шаблоны API-маршрутов и уровни диагностики | Node, браузер |
@@ -65,14 +66,22 @@
 
 ## Общие модули
 
+Для небольших HTTP(S)-ответов статистики используется `server/src/lib/isolatedFetch.ts`:
+одноразовый Node, отмена с завершением процесса, 15 секунд и предел 2 МиБ.
+Плагинам тот же транспорт доступен как `options.core.fetch`.
+
 | Модуль | Назначение |
 |---|---|
 | `web/src/shared/providerModelSelect.ts` | Допуск доступного исполнителя и непрозрачные значения селекта; `ProviderModelSelect.vue` объединяет представление моделей чата, арбитра и плагинов |
-| `web/src/features/providers/providerLocale.ts:providerAvailability` | Общие доступность и подпись сервиса для мастера и настроек; отдельный чатовый допуск вызывает существующий селектор моделей |
+| `web/src/features/providers/providerLocale.ts:providerAvailability`, `providerChatReadiness` | Статус подключения и отдельная готовность чата по установке, доступу и моделям; настройки и подвал выбора модели используют общую проекцию |
+| `server/src/lib/qwen/modelMetadata.ts:qwenEffortOption` | Native-ступени выбранной модели, включая группы ACP и `default`; единый разбор для каталога и подтверждения усилия до prompt |
+| `server/src/lib/qwen/workspace.ts:resolveQwenWorkspace` | Общая для адаптера и runtime проверка физических рабочих корней Qwen, сортировка и удаление повторов, отказ корня внутри скрываемых `.env`/`.qwen` |
+| `server/src/lib/qwen/steps.ts:createQwenSteps`, `createQwenTextSteps` | Раздельные буферы участников, parent инструментов, id смыслового блока и однократный flush при границе/выходе; общий `foldChatSteps` отображает legacy-дельты по capability адаптера |
 | `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts`, `browser/browserLimits.ts` | Безопасные defaults/URL, распознавание адресной строки и поиск, закрытые actions, provider-neutral tool schema и срок простоя агентских вкладок |
 | `plugins/providerUsageResources.ts` | Проверка JSON-ресурсов фонового плагина, безопасных ссылок и собственных переводов для всплывашки исполнителя |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |
 | `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
+| `pipeline/stageRunnerSettings.ts` | Строгие exact DTO редактора этапа и общая проверка пары model/effort | Node, браузер |
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |
 | `server/src/lib/executors/scopedDsh.ts`, `server/src/lib/deepseek/abortableOperation.ts` | Общий одноразовый профиль DSH для scoped triage и отдельного текстового model-only; proof, cleanup и отмена ожидания caller без остановки shared metadata probe ([контракт](../chat/dsh-model-only.md)) |
 | `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |
@@ -85,6 +94,8 @@
 | `node/files.ts` | ENOENT→null, временная папка, fsync; read-only modes готового дерева без обхода symlinks |
 | `node/logArchives.ts` | Потоковый gzip, восстановление raw, импорт прежнего .1 и снимки чтения по inode |
 | `node/rotatingLog.ts` | Общий Writable для stdout/stderr: ротация по размеру и пределы числа, возраста и объёма архивов |
+| `node/cliSeaBuild.ts` | Общая сборка CLI tracker/pipeline/routes: bundle через переданную зависимость пакета, SEA, проверка версии и атомарная публикация |
+| `node/cliBuildArgs.ts` | Разбор каталогов сборки CLI с собственным package/cache и проверкой до эффектов |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
 | `node/nodeRuntime.ts` | Манифест Node 24, кэш архива с SHA256, `SEA_FUSE`, запрет tracked output и атомарная публикация файла Б24/DeepSeek/посредника/сервера; шаги конкретного сборщика остаются у пакета |
 | `node/seaRuntime.ts` | Проверка готового R без boot: startup для окна, полный хеш для выбора пакета |
@@ -100,6 +111,7 @@
 | `lib/shellQuote.ts` | Один буквальный shell-аргумент для команд, включая транзакцию публикации |
 | `plugins/ssh/sessionLabels.ts` | Одинаковые подписи SSH-вкладок в панели и подтверждениях чата |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
+| `node/factorySnapshotHash.ts` | Прежний fingerprint factory: SHA256 JSON с рекурсивной сортировкой ключей через localeCompare и сохранением порядка массивов; общий для сервера и pipeline |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
 | `node/installerArchiveTail.ts` | Потоковое размещение и чтение архивов за ELF установщика: подписанные размеры/SHA, O_NOFOLLOW и эксклюзивная копия |

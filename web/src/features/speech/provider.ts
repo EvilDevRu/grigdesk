@@ -1,6 +1,7 @@
 import type { InjectionKey } from 'vue';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import {
+
   defineComponent,
   inject,
   onUnmounted,
@@ -13,6 +14,11 @@ import {
   createDictationController,
   speechExecutionFingerprint,
 } from './controller.ts';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 export const DICTATION_CONTROLLER_KEY: InjectionKey<ReturnType<typeof createDictationController>>
   = Symbol('grigdesk-dictation-controller');
@@ -77,7 +83,7 @@ export function useDictationController() {
   const controller = inject(DICTATION_CONTROLLER_KEY, null);
 
   if (!controller) {
-    throw new Error('Dictation controller доступен только внутри authenticated SpeechProvider');
+    throw new Error(t('core.videoDictationControllerDostupenTolko'));
   }
 
   return controller;

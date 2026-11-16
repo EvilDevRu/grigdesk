@@ -75,7 +75,7 @@
    Сервер передаёт дополнительные корни в contained runtime, маскируя control state.
    Общая настройка доверенных каталогов удалена; host-профиль остаётся single-root.
 
-Связанные документы: [папка чата](../guide/chat-workdir.md),
+Связанные документы: [папка чата](../guide/ru/chat-workdir.md),
 [kimi-runtime-security.md](kimi-runtime-security.md) («Границы contained runtime»).
 
 ## Почему не --add-dir

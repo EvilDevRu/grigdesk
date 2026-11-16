@@ -1,11 +1,17 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
 import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
 import {
+
   normalizeStallText,
   readStallPresentation,
 } from '../../../shared/pipeline/stallPresentation.ts';
 import { runnerModelLabel, runnerNodeLabel } from './runnerDisplay.ts';
 import type { RunnerState } from './runnerDisplay.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
+
 
 type StallGraph = Partial<Pick<FactoryGraphData, 'nodes' | 'stall' | 'nodeOrigins'>> & {
   keys?: Record<string, string>;
@@ -55,7 +61,9 @@ export function graphStallView(graph: StallGraph | null | undefined, input: unkn
 
   const node = stallNode(graph, input);
   const stage = typeof input.stage === 'string' ? input.stage : null;
-  const title = typeof input.title === 'string' && input.title ? input.title : 'Конвейер остановлен';
+  const title = typeof input.title === 'string' && input.title
+    ? input.title
+    : t('core.pipelineKonveyerOstanovlen');
   const hint = typeof input.hint === 'string' ? input.hint : '';
   const presentation = readStallPresentation(input.presentation);
   const reason = normalizeStallText(stage && title.startsWith(`${stage}: `)
@@ -67,7 +75,7 @@ export function graphStallView(graph: StallGraph | null | undefined, input: unkn
   return {
     node,
     stage,
-    nodeLabel: cleanNodeLabel(node ? graph?.nodes?.[node]?.[1] : '') || 'Конвейер',
+    nodeLabel: cleanNodeLabel(node ? graph?.nodes?.[node]?.[1] : '') || t('core.pipeline'),
     title,
     hint,
     fails: typeof input.fails === 'number' && Number.isFinite(input.fails) ? input.fails : null,

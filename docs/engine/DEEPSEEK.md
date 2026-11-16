@@ -17,7 +17,7 @@ cancel/resume, обновление и совместимый откат. Эти
 [переход updater](../grigdesk/server/deepseek-binary-update.md).
 
 Инструкция оператора по установке, режимам и откату:
-[guide/deepseek.md](../grigdesk/guide/deepseek.md).
+[guide/ru/deepseek.md](../grigdesk/guide/ru/deepseek.md).
 
 Текущий способ доставки — независимый `bin/deepseek` с bundled Node. Resolver и Factory
 не выбирают stock `dsh`, `installed` или `embedded`; явный override тоже проходит metadata.

@@ -7,4 +7,4 @@
 - `/routes` позволяет править структуру графа, исходы, status/owner, Scout, инструкции и контекст через формы, SVG и JSON. Есть автосохранение, undo/redo, конфликт вкладок, история ревизий и откат. Валидация, preview и симуляция не вызывают ИИ и профильные команды; команды и секции контекста объявляет `routes/editor-capabilities.json` профиля.
 - `buildRouteDef` — проекция для просмотра опубликованной схемы и конвейера на основе общей семантической проекции. Источник редактора — полные route/catalog bundles с промптами, а не SVG или просмотровая схема.
 
-Канон: docs/grigdesk/guide/routes.md; docs/engine/ENGINE.md; docs/engine/PROFILE-CONTRACT.md.
+Канон: docs/grigdesk/guide/ru/routes.md; docs/engine/ENGINE.md; docs/engine/PROFILE-CONTRACT.md.

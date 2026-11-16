@@ -1,3 +1,4 @@
+import { trackerMetadata } from './helpers/trackerCard.js';
 // Проверяет, как поставщики UI-контекста страницы регистрируются, обновляются и передают снимки.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -298,6 +299,10 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
      * Остальные запросы не создают рабочую активность в фикстуре.
      */
     async get(url) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks?sources=1') {
         return { tasks: [] };

@@ -1,5 +1,6 @@
 import type { BrowserHostIdentity } from './browserHost.ts';
 
+
 /**
  * Host token передаётся только заголовком выбранному same-origin backend.
  * Все ожидания ограничены; ошибка POST не порождает повтор побочного действия.

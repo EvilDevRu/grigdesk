@@ -4,18 +4,18 @@ import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
-import { isRecord } from '../../../shared/lib/objects.ts';
-import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Кеш деталей B24 и действия через GrigDesk без открытия стороннего портала.
 // Подтверждённые мутации обновляют доску прежним порядком.
 import { defineStore } from 'pinia';
-import { api, ApiError } from '../shared/apiClient.ts';
+import { api } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.ts';
 import { useTrackersStore } from './trackers.ts';
 import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
 import type { TaskDetail } from '../shared/boardContracts.ts';
+import { decodeStageRunnerOptions } from '../../../shared/pipeline/stageRunnerSettings.ts';
+import type { StageRunnerApply, StageRunnerIdentity } from '../../../shared/pipeline/stageRunnerSettings.ts';
 
 const t = localeTranslator(uiLocalePort);
 
@@ -40,8 +40,7 @@ export const useTasksStore = defineStore('tasks', {
     },
     /**
      * Детали используют прежний кеш на тридцать секунд с принудительным обновлением.
-     * Номера вне диапазона собственных задач читаются прежним запросом Б24.
-     * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
+     * Все номера читаются через внешний трекер; ответ проверяется до замены кеша.
      */
     async load(id: TaskId, force = false, signal?: AbortSignal, source?: TaskSourceId): Promise<TaskDetail> {
       const epoch = this.epoch;
@@ -53,46 +52,24 @@ export const useTasksStore = defineStore('tasks', {
       const legacySource = source && board.data?.source === source
         && !board.data?.multiSource && !catalog?.enabledIds;
 
-      if (cached?.target?.prefix === '/api/tracker' && source && source !== 'grigdesk'
+      if (cached?.target?.prefix === '/api/tracker' && source
         && !catalog?.enabledIds && board.data?.source !== source) {
         throw new Error(t('core.taskSourceMismatch'));
       }
 
-      const target = source === 'grigdesk' ? null : (!source || legacySource) ? {
+      const target = (!source || legacySource) ? {
         prefix: '/api/tracker',
         source,
         options: useTrackersStore().mutationOptions(),
-      } : await resolveTrackerTarget(source, api, catalog ?? undefined);
-
-      if (source === 'grigdesk' && !/^[1-9]\d{11}$/.test(String(id))) {
-        throw new Error(t('core.taskSourceUnsupported'));
-      }
+      } : await resolveTrackerTarget(source, api, catalog ?? undefined, { signal });
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
         return cached.data;
       }
 
-      let response: unknown;
-      let portal = source ? source !== 'grigdesk' : !/^[1-9]\d{11}$/u.test(String(id));
-
-      if (!portal) {
-        try {
-          response = await api.get(`/api/grigdesk-tasks/${id}`, { signal });
-        } catch (error) {
-          if (source === 'grigdesk' || !(error instanceof ApiError) || error.status !== 404
-            || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
-            throw error;
-          }
-
-          portal = true;
-        }
-      }
-
-      const data = portal
-        ? decodeTaskDetail(await api.get(`${target!.prefix}/task/${id}`, {
-          signal, ...target!.options,
-        }))
-        : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
+      const data = decodeTaskDetail(await api.get(`${target.prefix}/task/${id}`, {
+        signal, ...target.options,
+      }));
 
       signal?.throwIfAborted();
 
@@ -160,16 +137,20 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
-     * Таймер адресуется полному источнику независимо от дефолта.
-     * Повтор после отказа остаётся явным действием пользователя.
+     * Подтверждённая пауза адресована источнику и не считается случайным пропуском CRM.
+     * Ошибка POST и поздний ответ прежнего владельца не меняют состояние удержания.
      */
     async timer(id: TaskId, action: string, source?: TaskSourceId) {
       const target = await this.target(id, source);
+      const board = useBoardStore();
+      const epoch = board.sourceEpoch;
+      const timerSource = source ?? board.data?.source;
 
       await api.post(
         `${target.prefix}/task/${id}/timer/${action}`, undefined, target.options,
       );
-      await useBoardStore().load(true);
+      board.confirmTimerAction(id, action, timerSource, epoch);
+      await board.load(true);
     },
 
     /**
@@ -313,8 +294,16 @@ export const useTasksStore = defineStore('tasks', {
       await api.post(`${target.prefix}/task/${id}/comment`, { text }, target.options);
     },
 
-    async launchOptions(id: TaskId, profile = '') {
-      const query = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    /**
+     * Форма получает подсказки той же задачи, которую человек открыл в карточке.
+     * Старые вызовы без source сохраняют прежний адрес и выбор профиля.
+     */
+    async launchOptions(id: TaskId, profile = '', source?: TaskSourceId) {
+      const params = new URLSearchParams({
+        ...(profile ? { profile } : {}),
+        ...(source ? { source } : {}),
+      });
+      const query = params.size ? `?${params}` : '';
 
       return decodeTaskLaunchOptions(await api.get(`/api/tasks/${id}/launch-options${query}`));
     },
@@ -325,6 +314,31 @@ export const useTasksStore = defineStore('tasks', {
 
     async setStageRunner(id: TaskId, stage: string, primary: string) {
       return api.post(`/api/tasks/${id}/runner/override`, { stage, primary });
+    },
+
+    /**
+     * Ленивый каталог принадлежит exact узлу, а не общей телеметрии графа.
+     * Параметры передаются без изменения идентификаторов и без собственного SSE.
+     */
+    async getStageRunnerOptions(
+      task: TaskId, fields: Omit<StageRunnerIdentity, 'task'> & { provider?: string },
+    ) {
+      const { provider, ...identity } = fields;
+      const query = new URLSearchParams(identity);
+
+      if (provider !== undefined) {
+        query.set('provider', provider);
+      }
+
+      return decodeStageRunnerOptions(await api.get(`/api/tasks/${task}/runner/options?${query}`));
+    },
+
+    /**
+     * Выбор человека сохраняется одной согласованной мутацией всей связки.
+     * Receipt подтверждает отдельно сохранение и результат возможного перезапуска.
+     */
+    async applyStageRunnerSettings(task: TaskId, payload: StageRunnerApply) {
+      return decodeStageRunnerOptions(await api.post(`/api/tasks/${task}/runner/settings`, payload));
     },
 
     async resume(id: TaskId) {

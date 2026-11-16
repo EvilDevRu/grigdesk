@@ -112,7 +112,7 @@ async function fixture(t, initial) {
     await page.locator('[data-test="stage-add"]').waitFor({ state: 'attached' });
 
     if (width <= 1000) {
-      await page.getByRole('tab', { name: 'Маршрут', exact: true }).click();
+      await page.getByRole('tab', { name: language === 'en' ? 'Route' : 'Маршрут', exact: true }).click();
     }
 
     await page.locator('.route-stage-list__manage > summary').click();

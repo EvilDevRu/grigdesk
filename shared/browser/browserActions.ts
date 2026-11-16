@@ -1,8 +1,9 @@
 import { isPlainRecord } from '../lib/objects.ts';
 import { browserUrl } from './browserContract.ts';
+import { BROWSER_RESIZE_MAX, BROWSER_RESIZE_MIN } from './browserLimits.ts';
 
 const READ = Object.freeze(['list', 'snapshot', 'screenshot', 'console']);
-const ALL = Object.freeze([...READ, 'open', 'click', 'fill', 'scroll', 'close']);
+const ALL = Object.freeze([...READ, 'open', 'click', 'fill', 'scroll', 'resize', 'close']);
 
 export type BrowserAction = {
   action: string;
@@ -12,6 +13,8 @@ export type BrowserAction = {
   ref?: string;
   text?: string;
   deltaY?: number;
+  width?: number;
+  height?: number;
 };
 
 /**
@@ -41,6 +44,7 @@ export function parseBrowserAction(value: unknown): BrowserAction {
     click: ['action', 'tabId', 'pageEpoch', 'ref'],
     fill: ['action', 'tabId', 'pageEpoch', 'ref', 'text'],
     scroll: ['action', 'tabId', 'pageEpoch', 'deltaY'],
+    resize: ['action', 'tabId', 'width', 'height'],
   };
 
   if (Object.keys(value).some((key) => !keys[value.action as string]!.includes(key))) {
@@ -60,6 +64,19 @@ export function parseBrowserAction(value: unknown): BrowserAction {
   }
 
   const action: BrowserAction = { action: value.action, tabId: value.tabId };
+
+  if (value.action === 'resize') {
+    if (!['width', 'height'].every((key) => Number.isSafeInteger(value[key])
+      && Number(value[key]) >= BROWSER_RESIZE_MIN && Number(value[key]) <= BROWSER_RESIZE_MAX)) {
+      throw new Error('browser_action_invalid');
+    }
+
+    return {
+      ...action,
+      width: Number(value.width),
+      height: Number(value.height),
+    };
+  }
 
   if (!['click', 'fill', 'scroll'].includes(value.action)) {
     return action;

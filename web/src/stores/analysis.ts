@@ -1,3 +1,4 @@
+import { isTaskSourceId, taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 // Кеш триажа задач: оценки сложности/риска для бейджей доски и статусы очереди.
 // Стор хранит только состояние: запросы, поллинг и разбор отказов живут в операциях
 // раздела (web/src/actions/analysis/), а сюда приходит уже проверенный контрактом снимок.
@@ -8,6 +9,7 @@ import { usePluginsStore } from './plugins.ts';
 
 export interface AnalysisStoreState {
   byTask: Record<string, AnalysisRow>;
+  byReference: Record<string, AnalysisRow>;
   loadedAt: number;
   error: string | null;
 }
@@ -22,6 +24,7 @@ const ATTENTION_STATES = ['interrupted', 'failed'];
 export const useAnalysisStore = defineStore('analysis', {
   state: (): AnalysisStoreState => ({
     byTask: {},
+    byReference: {},
     loadedAt: 0,
     error: null,
   }),
@@ -36,7 +39,7 @@ export const useAnalysisStore = defineStore('analysis', {
 
       return manifest ? manifest.enabled === false : false;
     },
-    active: (state) => Object.values(state.byTask)
+    active: (state) => Object.values({ ...state.byTask, ...state.byReference })
       .some((row) => ACTIVE_STATES.includes(String(row.status?.state))),
     /**
      * Требуют внимания человека: прерваны рестартом сервера или упали. Авто-перезапуска
@@ -47,7 +50,7 @@ export const useAnalysisStore = defineStore('analysis', {
         return [];
       }
 
-      return Object.values(state.byTask)
+      return Object.values({ ...state.byTask, ...state.byReference })
         .filter((row) => ATTENTION_STATES.includes(String(row.status?.state)))
         .sort((a, b) => b.task - a.task);
     },
@@ -59,12 +62,18 @@ export const useAnalysisStore = defineStore('analysis', {
      */
     setRows(rows: AnalysisRow[]) {
       const map: Record<string, AnalysisRow> = {};
+      const references: Record<string, AnalysisRow> = {};
 
       for (const row of rows) {
-        map[String(row.task)] = row;
+        if (row.source) {
+          references[taskReferenceKey({ id: row.task, source: row.source })] = row;
+        } else {
+          map[String(row.task)] = row;
+        }
       }
 
       this.byTask = map;
+      this.byReference = references;
       this.loadedAt = Date.now();
       this.error = null;
     },
@@ -77,18 +86,20 @@ export const useAnalysisStore = defineStore('analysis', {
      * Задача принята очередью. Статус показывается сразу, не дожидаясь опроса: между
      * нажатием и первым ответом сервера человек иначе видит кнопку без последствий.
      */
-    markQueued(id: string | number) {
-      const key = String(id);
-      const current = this.byTask[key] || {
+    markQueued(id: string | number, source?: string) {
+      const map = source ? 'byReference' : 'byTask';
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
+      const current = this[map][key] || {
         task: Number(id),
         analysis: null,
         status: null,
       };
 
-      this.byTask = {
-        ...this.byTask,
+      this[map] = {
+        ...this[map],
         [key]: {
           ...current,
+          ...(isTaskSourceId(source) ? { source } : {}),
           status: {
             task: Number(id),
             state: 'queued',
@@ -103,16 +114,21 @@ export const useAnalysisStore = defineStore('analysis', {
       };
     },
 
-    /** Скрыть статус, оставив саму оценку: человек решил не перезапускать разбор. */
-    dropStatus(id: string | number) {
-      const key = String(id);
-      const { [key]: row, ...rest } = this.byTask;
+    /**
+     * Скрытие статуса сохраняет оценку той же пары источника и номера.
+     * Соседняя доска с одинаковым номером не меняется.
+     */
+    dropStatus(id: string | number, source?: string) {
+      const map = source ? 'byReference' : 'byTask';
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
+      const { [key]: row, ...rest } = this[map];
 
-      this.byTask = row?.analysis
+      this[map] = row?.analysis
         ? {
           ...rest,
           [key]: {
             task: row.task,
+            source: row.source,
             analysis: row.analysis,
             status: null,
           },

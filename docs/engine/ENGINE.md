@@ -18,7 +18,8 @@
 7. Offline tests не запускают GrigDesk и не выполняют model call.
 8. Опубликованный route v2 bundle проверяется engine независимо от server-а; изменение
    `current` не меняет уже закреплённую ревизию.
-9. Model/provider/effort отсутствуют в route schema и остаются только в `runners.env`.
+9. Model/provider/effort отсутствуют в route schema; профильная политика живёт в `runners.env`,
+    локальная настройка узла — в защищённом sidecar текущей attempt.
 10. Guard, locks, capabilities и состояние v2 лежат в `FACTORY_CONTROL_ROOT`, который
     не пересекается с provider-writable `STATE_DIR`.
 11. Delivery выводится из закреплённой топологии: нет канонического `ship` — нет delivery
@@ -50,6 +51,7 @@
 | `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
 | `lib/runners/gigacode.sh.disabled` | [Временно отключённый GigaCode](GIGACODE.md); исходники сохранены, в реестре его нет |
 | `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
+| `lib/runners/qwen.sh` | внешний npm CLI, живой каталог и host-wrapper ([qwen.md](qwen.md)) |
 | `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
 | `lib/coverage.sh`, `lib/profile-preflight.sh` | readiness/capability artifacts |
 | `lib/pipeline-store.sh` | locked/atomic pipeline storage |
@@ -619,6 +621,23 @@ trap, затем через trusted runner identity останавливает e
 resume/gate и recovery; не-graceful смерть (SIGKILL по таймауту, oom) метки не получает
 и по-прежнему показывается как обрыв.
 
+**Создание без старта (`start --hold-start`).** Режим только новой попытки: вся
+подготовка выполняется штатно (попытка, pins, lifecycle, identity-проекция, контракты,
+ticket, подъём стенда), но bootstrap-разведка и основной диспетчер пропускаются, курсор
+не инициализируется. Реестр получает двухфазный маркер `HELD_START`: `pending` сразу
+после полной identity-проекции, `1` — только после полного `v2_sandbox_bootstrap_wait`
+(выход раньше готовности стенда запрещён: EXIT-trap убивает незавершённый `up.sh` и
+оставляет частичную песочницу, тупик 75 на resume). Команда выходит с 0; демон штатно
+завершается и `ORCH_PID` очищается. Ручной старт — обычный resume: он сам выполняет
+разведку при отсутствии `artifacts/bootstrap.json` и идемпотентно создаёт курсор
+(отсутствие курсора прощают held-проверки recover-пути). Маркер снимает любой новый
+заход движка, как `STOPPED_SIGNAL`. GrigDesk подтверждает создание по
+`heldRegistryIdentity` без живого демона и отвечает `outcome: 'created'`; `detectStall`
+при `HELD_START=1` не считает попытку обрывом. Стенд и слот (в shared — lease профиля)
+остаются зарезервированными до старта или abandon. Контракт продукта —
+[создание без старта](../grigdesk/pipeline/held-start.md); барьеры —
+`tests/engine/integration/route-held-start.sh` и `tests/server/factory-launch-held.test.js`.
+
 **Trusted identity раннера.** Публичная идентичность живого запуска — файл
 `${FACTORY_CONTROL_ROOT}/runner-processes/t<TASK>.active` (SCHEMA=1, ровно 11 строк:
 TASK/STAGE/RUN_ID/EPOCH/RUNNER/PID/PGID/SESSION/STARTTIME/STATE). Публикация требует
@@ -1011,9 +1030,10 @@ Committed `failed` повторяется только в пределах `prod
 после первого такого вердикта, пишет в комментарий узла машинную причину
 («отказ среды: …» — смени исполнителя узла или исправь среду, затем «перейти сюда»)
 поверх дословного отчёта агента и повторяет её суффиксом в строке остановки;
-`productFailure` не тратится. Продолжение — только через `goto` человека
-(`route_v2_failed_stop_held` удерживает resume), потому что только человек решает:
-менять ли исполнителя узла, ослаблять ли среду или требовать другой подход.
+`productFailure` не тратится. Дальнейший переход выбирает `onFailure.environment`
+закреплённого маршрута. Обычный `stop: human` удерживает resume до `goto` человека;
+маршрут может вместо этого вернуть в ограниченную профильную command проверки/ремонта.
+Это не повтор модели через productFailure и не выдача инфраструктурных прав агенту.
 Контракт для GrigDesk — [останов по отказу среды](../grigdesk/pipeline/environment-failure-stop.md).
 
 **Повтор без результата — закрывающий заход, а не слепой повтор.** Заход получает в
@@ -1633,7 +1653,7 @@ Routing не имеет запасного provider-а вне canonical policy.
 Приоритет модели:
 
 ```text
-stage/provider policy → DEFAULT/provider policy → provider default family
+attempt/node selection → stage/provider policy → DEFAULT/provider policy → provider default family
 ```
 
 Поля:
@@ -1663,6 +1683,30 @@ Opaque DeepSeek model id берётся только из trusted catalog; pin �
 в [DEEPSEEK.md](DEEPSEEK.md).
 
 Exact id допустим, если он подтверждён каталогом/coverage. Молчаливого downgrade нет.
+
+Локальная настройка хранит целую selection в `runner-settings/<node>.json` trusted attempt.
+Модель и effort с null независимо читают действующую политику; резерв не получает пару
+основного. Изменение primary сохраняет прежний резерв при том же исполнителе; сброс primary
+возвращает task/profile policy для этого node, не удаляя legacy stage override у соседей.
+Источник явного локального primary передаётся диспетчеру как `task-stage`, включая
+повтор admission: именной выбор человека обходит сохранённый breaker только для основного.
+При null восстанавливается источник унаследованной цепочки; резерв сохраняет свой допуск.
+
+`factory TASK runner settings show|options|apply --profile PROFILE --attempt ATTEMPT
+--node NODE --stage STAGE` проверяет immutable pin, точный agent-node/runKey и CAS.
+Options принимает provider, apply — целый JSON payload. Callback `model_options` подтверждает
+per-model efforts; неподтверждённая пара не заменяется молча. Capability редактора —
+`stage-runner-settings-v1`; сервер обращается только к закреплённой поставке.
+
+Admission под pipeline/task lock сверяет тот же снимок настроек и создаёт run без окна
+между CAS и capability. Restart атомарно сохраняет future и immutable intent, публикует
+стабильный lifecycle draft, останавливает trusted session, затем однократно consumes intent.
+Новый запуск использует замороженную пару, fresh provider session и новую epoch; ошибка
+после accept сохраняет selection с отдельным receipt. Контракт —
+[настройки модели и effort](../grigdesk/pipeline/node-model-and-effort.md).
+Receipt получает итог всей restart-цепочки, включая отказ до launcher и успешный резерв.
+Запоздалый отказ interrupt не понижает consumed/started запрос. Read-only `show` читает
+сохранённый выбор и при недоступном coverage; строгий допуск остаётся в options/apply/launch.
 
 ## Ошибки и failover
 
@@ -1927,7 +1971,7 @@ policy revision/coverage.
 и журнала браузерного окна. Профильный и задачный override на них не распространяется
 и не может включить trace фабрики поверх глобального `off`.
 Короткий обязательный audit фабрики остаётся отдельным от debug trace. Правила
-событий окна и поведение уровней описаны в `../grigdesk/guide/web-log.md`.
+событий окна и поведение уровней описаны в `../grigdesk/guide/ru/web-log.md`.
 
 ## Историческое состояние
 
@@ -1972,7 +2016,7 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check --host-preflight
 
 - `profile.sh` перечитывается перед этапом;
 - `runners.env` читается при каждом routing decision;
-- task override читается из pipeline;
+- legacy task override читается из pipeline; настройка attempt/node — из trusted sidecar;
 - server/web код требует обычного рестарта соответствующего процесса;
 - уже запущенная provider attempt не меняет модель посередине; switch создаёт новую attempt;
 - промпты и схема v2 требуют публикации И новой попытки: примороженный бандл не меняется
@@ -2017,3 +2061,12 @@ bash держит скрипт на fd 255. Ссылка с `(deleted)` и inode
 (`stat -c %i bin/factory`), означают, что прогон в безопасности. Совпадающий inode — правка
 уже под ногами демона, и лучше снять прогон самому, чем ждать случайного `exit 2`.
 На гарантию способа записи не полагайся: правило «не править при живом прогоне» остаётся.
+
+## Долговечный host intent перехода
+
+После успешных guard/evidence agent/command сохраняет optional receipt и повторяет только
+запись перехода при I/O. Узкий task-locked reconcile закрывает exact event/runtime gap до
+preflight; обычный reader остаётся строгим. Exact source visit и human begin-once/ack
+позволяют закончить ожидание после restart без второй модели или нового вопроса.
+Gate/SCOUT не меняются; новый узел/профильный ремонт требуют нового published pin.
+Контракт и адресные проверки: [восстановление перехода](../grigdesk/pipeline/pending-transition-recovery.md).

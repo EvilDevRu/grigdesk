@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { runKimiServerTurn } from '../../server/src/lib/kimi/serverTurn.ts';
+import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
 import { kimiUsageWire } from '../helpers/kimiUsageWire.mjs';
 import { compileVue, webFile } from '../web/helpers/compile-vue.js';
 import { createUiBrowser } from '../web/helpers/ui-components.js';
@@ -361,6 +362,96 @@ test('К2, К5: путь в подробностях и diff сохраняет 
     assert.deepEqual(step.files, [path]);
     assert.equal(step.changes[0].path, path);
     assert.deepEqual(step.changes[0].diff, { old: 'до', new: 'после' });
+  }
+});
+
+test('К: итог инструмента обрезан и не показывает object Object', async (t) => {
+  const outputs = [
+    {
+      output: 'я'.repeat(5000) + '\nхвост',
+      text: 'я'.repeat(400) + '…',
+      lines: 2,
+    },
+    {
+      output: 'о'.repeat(5000) + '\nошибка',
+      text: 'о'.repeat(600) + '…',
+      lines: 2,
+      is_error: true,
+    },
+    {
+      output: [{ type: 'content', content: { type: 'text', text: 'Готово' } }],
+      text: 'Готово',
+      lines: 1,
+    },
+    {
+      output: { type: 'text', text: 'Одиночный блок' },
+      text: 'Одиночный блок',
+      lines: 1,
+    },
+    {
+      output: { content: [{ type: 'text', text: 'Внутри content' }] },
+      text: 'Внутри content',
+      lines: 1,
+    },
+    {
+      output: { answer: 42 },
+      text: '{"answer":42}',
+      lines: 1,
+    },
+    {
+      output: {
+        type: 'image',
+        data: 'QUJDRA==',
+        mimeType: 'image/png',
+      },
+      text: STEP_IMAGE_TEXT,
+      lines: 1,
+    },
+    {
+      output: 0,
+      text: '0',
+      lines: 1,
+    },
+    {
+      output: false,
+      text: 'false',
+      lines: 1,
+    },
+    {
+      output: null,
+      text: '',
+      lines: 0,
+    },
+  ];
+  const frames = outputs.flatMap((entry, index) => [
+    {
+      type: 'tool.call.started',
+      toolCallId: `r${index}`,
+      name: 'Mcp',
+      args: {},
+    },
+    {
+      type: 'tool.result',
+      toolCallId: `r${index}`,
+      output: entry.output,
+      is_error: entry.is_error === true,
+    },
+  ]);
+  const outcome = await collect(t, (send) => [...frames, ending].forEach(send));
+  const results = outcome.steps.filter((step) => step.k === 'res');
+
+  assert.equal(outcome.error, undefined);
+  assert.equal(results.length, outputs.length);
+
+  for (const [index, expected] of outputs.entries()) {
+    const actual = results[index];
+
+    assert.equal(actual.id, `r${index}`);
+    assert.equal(actual.text, expected.text);
+    assert.equal(actual.lines, expected.lines);
+    assert.equal(actual.ok, expected.is_error !== true);
+    assert.equal(actual.text.includes('[object Object]'), false);
+    assert.equal(JSON.stringify(actual).includes('QUJDRA=='), false);
   }
 });
 

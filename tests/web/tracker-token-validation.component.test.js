@@ -125,7 +125,7 @@ test('Чип показывает сохранённый драйвер неза
     .exists(), false);
   assert.equal(card.wrapper.find('[data-role="tracker-editor-in-use"]').exists(), false);
   assert.equal(card.wrapper.find('[data-role="tracker-editor-enabled"]').exists(), false);
-  await actionButton(card.wrapper, /^Сохранить$/u).trigger('click');
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
   await card.flushPromises();
   assert.equal(card.wrapper.find('[data-driver="grigdesk-b24"] [data-role="tracker-in-use"]')
     .exists(), false);

@@ -64,42 +64,37 @@ test('BOARD-PAGES: общий список и внешние роли сохра
   Object.defineProperty(track.element, 'clientWidth', { value: 390, configurable: true });
   assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 2);
   assert.equal(wrapper.find('[data-board-page-tab="own"]').exists(), false);
-  assert.equal(wrapper.findAll('.col.primary .trow').length, 3);
-  await wrapper.get('.col.primary input[type="search"]').setValue('Своя');
+  assert.equal(wrapper.findAll('.col.primary .trow')
+    .filter((row) => /Первая задача|Вторая задача/u.test(row.text())).length, 2);
+  await wrapper.get('.col.primary input[type="search"]').setValue('Первая');
   await wrapper.get('[data-board-page-tab="related"]').trigger('click');
   assert.equal(primary.hasAttribute('inert'), true);
   assert.equal(track.element.scrollLeft, 390);
   track.element.scrollLeft = 0;
   await track.trigger('scroll');
   assert.equal(primary.hasAttribute('inert'), false);
-  assert.equal(wrapper.get('.col.primary input[type="search"]').element.value, 'Своя');
+  assert.equal(wrapper.get('.col.primary input[type="search"]').element.value, 'Первая');
   assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
 });
 
-test('BOARD-PAGES: own виден при загрузке и после отключения внешнего трекера', async (t) => {
-  const { wrapper, browser, flushPromises } = await fixture(t, { pending: true });
+for (const width of [390, 1280]) {
+  test(`OWN-REMOVED-BOARD: ширина ${width}, внешние роли и настройки без own`, async (t) => {
+    const { wrapper, browser, flushPromises } = await fixture(t);
 
-  assert.equal(wrapper.find('[data-loading-region="summary"]').exists(), true);
-  assert.equal(wrapper.find('[data-loading-region="primary"]').exists(), false);
-  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
-
-  const primary = wrapper.get('.col.primary').element;
-
-  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
-  await flushPromises();
-  assert.equal(wrapper.find('[data-ui-skeleton]').exists(), false);
-  assert.ok(wrapper.get('.col.primary').element === primary);
-  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
-  assert.equal(wrapper.find('.board-page-nav').exists(), false);
-
-  const ownStore = wrapper.vm.$pinia._s.get('grigdesk-tasks');
-
-  ownStore.trackerConfigured = false;
-  await flushPromises();
-  assert.equal(wrapper.find('.col.primary').exists(), true);
-  assert.equal(wrapper.find('.col.secondary').exists(), false);
-  assert.equal(wrapper.find('.tracker-setup-banner').exists(), true);
-});
+    browser.happyDOM.setWindowSize({ width, height: 900 });
+    await flushPromises();
+    assert.doesNotMatch(wrapper.text(), /Своя задача|Проект Бета/u);
+    assert.equal(wrapper.find('.task-internal-flag').exists(), false);
+    assert.equal(wrapper.find('[data-board-page-tab="own"]').exists(), false);
+    assert.equal(wrapper.find('[data-option-value="grigdesk"]').exists(), false);
+    assert.equal(wrapper.findAll('.col.primary .trow').length, 2);
+    assert.equal(wrapper.find('[data-board-page-tab="related"]').exists(), width <= 600);
+    assert.equal(wrapper.find('.col.secondary').exists(), true);
+    await wrapper.get('#board-created-tab').trigger('click');
+    assert.match(wrapper.get('.col.secondary').text(), /Связанная задача/u);
+    assert.equal(wrapper.find('[aria-label="Настройки трекеров"]').exists(), true);
+  });
+}
 
 test('BOARD-PAGES: CSS оставляет вертикальную прокрутку внутри страницы и desktop-раскладку', async (t) => {
   const { wrapper, browser, flushPromises } = await fixture(t);

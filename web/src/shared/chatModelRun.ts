@@ -1,3 +1,9 @@
+
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const translateUi = localeTranslator(uiLocalePort);
+
 interface ModelRun {
   role?: string;
   actualModel?: unknown;
@@ -38,7 +44,9 @@ export function modelRunView(run: ModelRun | null | undefined) {
   return {
     model,
     requested,
-    source: actual ? 'факт' : (requested ? 'запрошено' : ''),
+    source: actual
+      ? translateUi('core.chatModelRunActual')
+      : (requested ? translateUi('core.chatModelRunRequested') : ''),
     actual: !!actual,
     mismatch,
   };

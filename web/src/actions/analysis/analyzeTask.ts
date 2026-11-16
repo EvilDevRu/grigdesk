@@ -29,7 +29,7 @@ async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | T
     const shelf = useTaskShelfStore();
     const branch = isTaskSourceId(source) ? shelf.forSource(source) : shelf;
 
-    await branch.autoAdd(id, { source: source === 'grigdesk' ? 'grigdesk' : 'tracker' });
+    await branch.autoAdd(id, { source: 'tracker' });
   } catch {
     /* запуск оценки уже принят */
   }
@@ -52,11 +52,11 @@ export async function analyzeTask(
     return { outcome: 'plugin_disabled', position: null };
   }
 
-  const target = isTaskSourceId(source) && source !== 'grigdesk'
+  const target = isTaskSourceId(source)
     ? await resolveTrackerTarget(source) : null;
   const result = await analysisApi.enqueue(id, isTaskSourceId(source) ? source : undefined, target?.options);
 
-  store.markQueued(id);
+  store.markQueued(id, isTaskSourceId(source) ? source : undefined);
 
   await shelveAnalyzed(id, source);
 

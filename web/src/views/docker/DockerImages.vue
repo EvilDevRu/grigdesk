@@ -4,45 +4,44 @@
       <div class="docker-images__search">
         <UiSearchInput
           v-model="query"
-          placeholder="Найти по имени, тегу или ID"
-          aria-label="Поиск образа"
+          :placeholder="t('core.dockerNaytiPoImeniTegu')"
+          :aria-label="t('core.dockerPoiskObraza')"
         />
       </div>
       <div class="docker-images__filter-options">
-        <UiCheckbox v-model="onlyUnused">Только неиспользуемые</UiCheckbox>
+        <UiCheckbox v-model="onlyUnused">{{ t('core.dockerTolkoNeispolzuemye') }}</UiCheckbox>
         <span class="docker-images__caption">{{ t('core.dockerUnusedImagesCount', { count: unusedCount }) }}</span>
       </div>
     </div>
 
     <p v-if="!visible.length" class="docker-images__empty">
-      {{ store.images.length ? 'По этим условиям образы не найдены.' : 'Локальных образов пока нет.' }}
+      {{ store.images.length ? t('core.dockerPoEtimUsloviyamObrazy') : t('core.dockerLokalnyhObrazovPokaNet') }}
     </p>
 
-    <ul v-else class="docker-list" aria-label="Локальные образы">
+    <ul v-else class="docker-list" :aria-label="t('core.dockerLokalnyeObrazy')">
       <li v-for="image in visible" :key="image.id" class="docker-image">
         <div class="docker-image__main">
           <strong v-tooltip="formatTags(image)">{{ formatTags(image) }}</strong>
           <div class="docker-image__meta">
             <span class="docker-image__id">{{ image.shortId }}</span>
-            <span>создан {{ formatAge(image.createdAt) }} назад</span>
-            <span v-if="image.inUse" class="docker-image__used" v-tooltip="image.usedBy.join(', ')">
-              Контейнеры: {{ image.usedBy.join(', ') }}
+            <span>{{ t('core.dockerSozdan') }} {{ formatAge(image.createdAt) }} {{ t('core.dockerNazad') }}</span>
+            <span v-if="image.inUse" class="docker-image__used" v-tooltip="image.usedBy.join(', ')"> {{ t('core.dockerKonteynery') }} {{ image.usedBy.join(', ') }}
             </span>
           </div>
         </div>
 
         <div class="docker-image__details">
           <span class="docker-image__size">{{ formatSize(image.size) }}</span>
-          <span v-if="image.inUse" class="docker-image__tag is-used">используется</span>
-          <span v-else-if="image.dangling" class="docker-image__tag is-dangling">без тега</span>
-          <span v-else class="docker-image__tag">не используется</span>
+          <span v-if="image.inUse" class="docker-image__tag is-used">{{ t('core.dockerIspolzuetsya') }}</span>
+          <span v-else-if="image.dangling" class="docker-image__tag is-dangling">{{ t('core.dockerBezTega') }}</span>
+          <span v-else class="docker-image__tag">{{ t('core.dockerNeIspolzuetsya') }}</span>
         </div>
 
         <UiIconButton
           role="embedded"
           data-context="workspace-toolbar"
-          :label="`Удалить образ ${formatTags(image)}`"
-          v-tooltip="image.inUse ? 'Образ используется контейнером' : 'Удалить образ'"
+          :label="t('core.dockerUdalitObrazFormattagsimage', { formatTagsimage: formatTags(image) })"
+          v-tooltip="image.inUse ? t('core.dockerObrazIspolzuetsyaKonteynerom') : t('core.dockerUdalitObraz')"
           tone="danger"
           :disabled="image.inUse"
           :loading="store.isBusy(image.id)"
@@ -77,6 +76,7 @@ import type { DockerImage } from '../../../../shared/plugins/docker/dockerContra
 import { useDockerStore } from '../../stores/docker';
 import {
   UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, t, vTooltip,
+  messageRef,
 } from '../../ui';
 import { formatAge, formatSize, formatTags } from './format';
 
@@ -114,11 +114,13 @@ async function removeOne(image: DockerImage): Promise<void> {
   }
 
   const accepted = await confirmDialog(
-    `Удалить образ «${formatTags(image)}»?\n\nРазмер образа: ${formatSize(image.size)}.`
-      + '\nСлои, используемые другими образами, сохранятся.',
+    messageRef('core.dockerUdalitObrazFormattagsimageRazmer', {
+      formatTagsimage: formatTags(image),
+      size: formatSize(image.size),
+    }),
     {
-      title: 'Удаление образа',
-      okText: 'Удалить',
+      title: t('core.dockerUdalenieObraza'),
+      okText: t('core.taskDelete'),
       danger: true,
     },
   );
@@ -130,8 +132,8 @@ async function removeOne(image: DockerImage): Promise<void> {
   const result = await store.removeImage(image.id);
 
   message.value = result.ok
-    ? { tone: 'success', text: 'Образ удалён' }
-    : { tone: 'danger', text: result.message || 'Демон отклонил удаление' };
+    ? { tone: 'success', text: t('core.dockerObrazUdalen') }
+    : { tone: 'danger', text: result.message || t('core.dockerDemonOtklonilUdalenie') };
 
   clearTimeout(messageTimer);
   messageTimer = setTimeout(() => {

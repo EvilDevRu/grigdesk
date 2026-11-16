@@ -68,17 +68,28 @@ export class ChatListPager {
 
       snapshot = known;
     } else {
-      while (this.snapshots.size >= 16) {
-        this.snapshots.delete(this.snapshots.keys().next().value!);
-      }
+      const ids = heads.map((head) => head.id);
+      const reusable = [...this.snapshots].find(([, candidate]) => candidate.scope === scope
+        && candidate.ids.length === ids.length
+        && candidate.ids.every((id, index) => id === ids[index]));
 
-      key = randomUUID();
-      snapshot = {
-        ids: heads.map((head) => head.id),
-        scope,
-        until: this.now() + 600000
-      };
-      this.snapshots.set(key, snapshot);
+      if (reusable) {
+        // Одинаковый порядок не требует снимка на каждое подключённое приложение.
+        // Cursor неизменяем: общий snapshot не смешивает позиции разных читателей.
+        [key, snapshot] = reusable;
+      } else {
+        while (this.snapshots.size >= 16) {
+          this.snapshots.delete(this.snapshots.keys().next().value!);
+        }
+
+        key = randomUUID();
+        snapshot = {
+          ids,
+          scope,
+          until: this.now() + 600000
+        };
+        this.snapshots.set(key, snapshot);
+      }
     }
 
     const current = new Map(heads.map((head) => [head.id, head]));

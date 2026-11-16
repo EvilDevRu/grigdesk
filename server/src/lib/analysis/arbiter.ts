@@ -1,3 +1,5 @@
+import type { TaskTargetOptions } from '../trackers/taskTarget.ts';
+import { taskReferenceKey } from '../../../../shared/tasks/taskReference.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -74,25 +76,38 @@ export class AnalysisArbiter {
     this.locks = new Map();
   }
 
+  /**
+   * Повторный разбор сериализуется внутри одной пары источника и номера.
+   * Другая доска с тем же номером имеет независимые вопросы и блокировку.
+   */
   async arbitrate(
     id: string | number,
-    { automatic = false }: { automatic?: boolean } = {},
+    { automatic = false, ...options }: TaskTargetOptions & { automatic?: boolean } = {},
   ): Promise<ArbiterResult> {
     const taskId = String(id);
-    const previous = this.locks.get(taskId) || Promise.resolve();
-    const run = previous.then(() => this._arbitrate(taskId, { automatic }));
+    const key = taskReferenceKey({ id, source: options.source });
+    const previous = this.locks.get(key) || Promise.resolve();
+    const run = previous.then(() => this._arbitrate(taskId, { automatic, ...options }));
     const guarded = run.catch(() => {});
-    this.locks.set(taskId, guarded);
+
+    this.locks.set(key, guarded);
+
     try {
       return await run;
     } finally {
-      if (this.locks.get(taskId) === guarded) {
-        this.locks.delete(taskId);
+      if (this.locks.get(key) === guarded) {
+        this.locks.delete(key);
       }
     }
   }
 
-  async _arbitrate(id: string, { automatic }: { automatic: boolean }): Promise<ArbiterResult> {
+  /**
+   * Все чтения, ответы и повторная оценка сохраняют исходный source.
+   * Машинный ответ по-прежнему не закрывает продуктовые решения за человека.
+   */
+  async _arbitrate(
+    id: string, { automatic, ...options }: TaskTargetOptions & { automatic: boolean },
+  ): Promise<ArbiterResult> {
     if (!this.pluginEnabled('analysis')) {
       return { ok: false, error: 'plugin_disabled' };
     }
@@ -101,11 +116,11 @@ export class AnalysisArbiter {
       return { ok: true, outcome: 'auto_disabled', answered: 0 };
     }
 
-    const detail = await this.analyzer.get(id);
+    const detail = await this.analyzer.get(id, options);
     // Разобранным вопрос считается и по идентификатору, и по смыслу текста: следующий
     // заход триажа пишет questions[] заново, и по одному id арбитр брался за тот же
     // вопрос повторно — поверх уже полученного ответа человека.
-    const entries = await this.analyzer.readClarificationEntries(id);
+    const entries = await this.analyzer.readClarificationEntries(id, options);
     const handledIds = new Set(entries.map((entry) => entry.questionId));
     const handledKeys = new Set(
       entries.map((entry) => questionKey(entry.questionText)).filter(Boolean),
@@ -136,7 +151,7 @@ export class AnalysisArbiter {
     const effort = efforts.includes(triageModel?.effort)
       ? triageModel?.effort
       : null;
-    const profile = await this.analyzer.profile(id);
+    const profile = await this.analyzer.profile(id, options);
     let lease: TriageSourceLease | null = null;
     let staging = '';
 
@@ -224,14 +239,16 @@ export class AnalysisArbiter {
 
       const appended = await this.analyzer.appendClarificationBatch(id, answers, {
         actor: 'grigdesk-arbiter',
+        ...options,
       });
       if (!appended.ok) {
         return appended;
       }
       const answered = (appended.entries || [])
         .filter((entry) => entry.status === 'answered').length;
+
       if (answered > 0) {
-        await this.analyzer.enqueue(id);
+        await this.analyzer.enqueue(id, options);
       }
       return { ok: true, outcome: answered ? 'answered' : 'human_required', answered };
     } catch (error) {

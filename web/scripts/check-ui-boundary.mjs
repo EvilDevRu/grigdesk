@@ -50,12 +50,20 @@ const SVG_PRESSABLE_CONSUMERS = new Set([
 ]);
 
 const NON_ACTIVATION_HANDLERS = new Set([
+  // Фон сцены открывает роль; для клавиатуры рядом есть UiButton добавления.
+  'web/src/views/routes/RouteCanvas.vue|div|click|addAtEmpty',
+  // Capture подавляет ложный click дочернего control после переноса узла.
+  'web/src/views/routes/RouteCanvas.vue|div|click|guardCanvasClick',
   // Делегирование кликов по настоящим ссылкам внутри v-html/markdown.
   'web/src/views/DocumentModal.vue|section|click|onDocumentClick',
   'web/src/views/chat/ChatSession.vue|div|click|onMarkdownClick',
   'web/src/features/help/HelpBrowser.vue|article|click|followLink',
   // Карточка не активируется: capture отменяет ложный click после свайпа закрытия.
   'web/src/components/feedback/UiToastCard.vue|article|click|onClick',
+  // Сцена картинки обрабатывает жест увеличения и закрытие по свободному фону.
+  // Клавиатурные альтернативы остаются в controls масштаба и закрытия, а также Escape.
+  'web/src/views/MediaViewer.vue|div|dblclick|zoom.doubleClick',
+  'web/src/views/MediaViewer.vue|div|click|onStageClick',
   // Доступные split-resizer: pointer drag дополняют keyboard и exact dblclick reset.
   'web/src/views/ChatsView.vue|div|dblclick|resetListWidth',
   'web/src/views/chat/ChatSession.vue|div|dblclick|resetComposerHeight',

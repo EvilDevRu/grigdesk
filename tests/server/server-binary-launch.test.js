@@ -78,7 +78,7 @@ async function fixture(t) {
     'exec "$FIXTURE_NODE" "$@"',
   ].join('\n'), { mode: 0o555 });
 
-  for (const id of ['grigdesk-cli', 'data-home-check', 'legacy-brand']) {
+  for (const id of ['grigdesk-cli', 'data-home-check']) {
     await buildHelper({
       root: SOURCE,
       manifestPath: path.join(SOURCE, 'server/build/helpers.json'),
@@ -344,6 +344,7 @@ test('SB28-vpn: ExecStartPre не пропускает маршрут мимо T
     GRIGDESK_VPN_SYS_CLASS_NET: sys,
     GRIGDESK_IP_BIN: ip,
     GRIGDESK_VPN_IFACE: 'tun0',
+    GRIGDESK_REQUIRE_VPN: '1',
   };
   const blocked = await box.run('deploy/require-vpn.sh', [], env);
 

@@ -116,7 +116,6 @@ install_desktop() {
     return 1
   fi
 
-  grigdesk_migrate_desktop_profile || return $?
 
   # Версия 1 совместима с установленным окном и пишется перед заменой AppImage.
   # Версия 2 становится доступна только после установки окна, умеющего читать home.

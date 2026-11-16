@@ -68,7 +68,7 @@ set -a; . ./relay.env; set +a; ./grigdesk-relay
 
 Отдельный workflow `relay-release.yml` снят. Новые версии посредника раздаются
 внутри [подписанного комплекта GrigDesk с сайта](../server/site-release-channel.md):
-файл находится в `release/bin/grigdesk-relay`. Прежние GitHub Releases остаются
+файл находится в `bin/grigdesk-relay` внутри подписанного `server.tar.gz`. Прежние GitHub Releases остаются
 историческими выпусками, новая отдельная раздача через них не выполняется.
 
 Общий workflow «Релиз GrigDesk» собирает посредник вместе с остальными частями.

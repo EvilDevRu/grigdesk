@@ -83,7 +83,10 @@ function serverCode(cause: unknown): string {
 export const usePhoneAccessStore = defineStore('phoneAccess', () => {
   const shell = useShellStore();
   const auth = useAuthStore();
-  const owner = computed(() => `${shell.profile?.id ?? 'origin'}:${auth.clientScope}`);
+  const owner = computed(() => t('core.coreIdoriginClientscope', {
+    idorigin: shell.profile?.id ?? 'origin',
+    clientScope: auth.clientScope,
+  }));
   const open = ref(false);
   const status = ref<PhoneAccessStatus | null>(null);
   const code = ref<PhoneCode | null>(null);
@@ -268,7 +271,7 @@ export const usePhoneAccessStore = defineStore('phoneAccess', () => {
    * Открытие явно выпускает код только при готовом пути выбранного сервера.
    * Выключенный вход сначала показывает управляемое включение, без пустого POST.
    */
-  async function start(): Promise<void> {
+  async function start(selection: { relayId?: string } = {}): Promise<void> {
     close();
     open.value = true;
     busy.value = true;
@@ -281,7 +284,7 @@ export const usePhoneAccessStore = defineStore('phoneAccess', () => {
 
       if (current(epoch) && (status.value?.direct.state === 'online'
         || status.value?.relays.some(phoneRelayReady))) {
-        await issue();
+        await issue(selection);
       }
     } catch (cause) {
       if (current(epoch)) {

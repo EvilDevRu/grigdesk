@@ -96,7 +96,7 @@
           </UiButton>
           <form class="workdir-form" @submit.prevent="choosePath">
             <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
-              <UiInput ref="pathField" v-model="pathInput" placeholder="/home/user/project" :disabled="busy"
+              <UiInput ref="pathField" v-model="pathInput" :placeholder="'/home/user/project'" :disabled="busy"
                        autocomplete="off" autocapitalize="off" :spellcheck="false" />
             </UiField>
             <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()">
@@ -133,32 +133,25 @@
   <UiDialog
     :open="Boolean(proposal)"
     layer="confirm"
-    title="Смена рабочей папки"
+    :title="t('core.chatSmenaRabocheyPapki')"
     :busy="Boolean(session?.workdirChanging)"
     @close="cancel"
   >
-    <p>Работаем в: {{ proposal?.preview.target?.cwd }}</p>
-    <p v-if="retrying">
-      Сервер не подтвердил переход. «Повторить» отправит тот же запрос — второй выжимки и
-      второго сброса памяти не будет.
-    </p>
-    <p v-else>Исполнитель начнёт новую сессию. Можно сохранить выжимку разговора или сбросить память.</p>
+    <p>{{ t('core.chatRabotaemV') }} {{ proposal?.preview.target?.cwd }}</p>
+    <p v-if="retrying"> {{ t('core.chatServerNePodtverdilPerehod') }} </p>
+    <p v-else>{{ t('core.chatIspolnitelNachnetNovuyuSessiyu') }}</p>
     <UiInlineMessage v-if="session?.error" tone="danger">{{ session.error }}</UiInlineMessage>
     <template #footer>
-      <UiButton v-if="retrying" :disabled="session?.workdirChanging" @click="retry">Повторить</UiButton>
+      <UiButton v-if="retrying" :disabled="session?.workdirChanging" @click="retry">{{ t('core.pluginNotificationsRetry') }}</UiButton>
       <template v-else>
         <UiButton
           :disabled="session?.workdirChanging || !proposal?.preview.summaryAvailable
             || proposal?.preview.transfer === 'unavailable'"
           @click="chat.commitWorkdir(sid, 'summary')"
-        >
-          Сжать разговор и перейти
-        </UiButton>
-        <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')">
-          Перейти без выжимки
-        </UiButton>
+        > {{ t('core.chatSzhatRazgovorIPereyti') }} </UiButton>
+        <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')"> {{ t('core.chatPereytiBezVyzhimki') }} </UiButton>
       </template>
-      <UiButton variant="text" :disabled="session?.workdirChanging" @click="cancel">Отмена</UiButton>
+      <UiButton variant="text" :disabled="session?.workdirChanging" @click="cancel">{{ t('core.cancel') }}</UiButton>
     </template>
   </UiDialog>
 </template>

@@ -27,6 +27,8 @@ public class MainActivity extends AppCompatActivity {
   private static final int FILE_REQUEST = 1201;
   private static final int AUDIO_REQUEST = 1202;
   private static final int CAMERA_REQUEST = 1203;
+  private static final int NOTIFY_REQUEST = 1204;
+  public static final String NOTIFY_URL_EXTRA = "grigdesk_notify_url";
   private static volatile java.lang.ref.WeakReference<MainActivity> current =
     new java.lang.ref.WeakReference<>(null);
   private static final PendingNavigation navigation = new PendingNavigation();
@@ -55,6 +57,10 @@ public class MainActivity extends AppCompatActivity {
   private static volatile boolean starting;
   private static PermissionRequest audio;
   private static ValueCallback<Uri[]> files;
+  private static volatile java.util.concurrent.CompletableFuture<String> notifyPermission;
+  // Адрес цели переживает холодный старт и блокировку: применяется после загрузки документа.
+  private static volatile String pendingNotifyUrl;
+  private static volatile boolean pageLoaded;
 
   /**
    * Секрет создаётся один раз на процесс и разделяется всеми origin установки.
@@ -120,6 +126,13 @@ public class MainActivity extends AppCompatActivity {
       }
     });
 
+    captureNotifyUrl(getIntent());
+
+    // Сохранённая фоновая связь поднимает сервис при каждом старте видимой Activity.
+    if (((ClientApplication) getApplication()).backgroundLink.enabled()) {
+      LinkService.start(this);
+    }
+
     PendingNavigation.Entry waiting = navigation.peek();
 
     if (waiting != null) {
@@ -131,7 +144,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     synchronized (MainActivity.class) {
-      if (starting || runtime != null) {
+      if (runtime != null) {
+        applyNotifyUrl();
+        return;
+      }
+
+      if (starting) {
         return;
       }
 
@@ -142,14 +160,16 @@ public class MainActivity extends AppCompatActivity {
       try {
         if (runtime == null) {
           runtime = new ClientRuntime(getApplicationContext(), SECRET, ORIGINS,
-            new AndroidActions(getApplicationContext(), () -> current.get()), (origin, reset) -> {
+            new AndroidActions(getApplicationContext(), () -> current.get(),
+              ((ClientApplication) getApplication()).backgroundLink), (origin, reset) -> {
               PendingNavigation.Entry entry = navigation.put(origin, reset);
               MainActivity visible = current.get();
 
               if (visible != null) {
                 visible.showOrigin(entry);
               }
-            }, ((ClientApplication) getApplication()).appLock);
+            }, ((ClientApplication) getApplication()).appLock,
+            ((ClientApplication) getApplication()).backgroundLink);
         }
 
         runtime.start(!((ClientApplication) getApplication()).lifecycle.isBackground());
@@ -278,6 +298,8 @@ public class MainActivity extends AppCompatActivity {
       if (entry.reset) {
         android.webkit.WebStorage.getInstance().deleteOrigin(entry.origin);
       }
+
+      pageLoaded = false;
 
       CookieManager cookies = CookieManager.getInstance();
 
@@ -410,10 +432,99 @@ public class MainActivity extends AppCompatActivity {
   }
 
   /**
+   * Системный запрос оповещений запускает кнопка настроек через трубу.
+   * Повторный запрос присоединяется к ожидающему результату, а не открывает второй диалог.
+   */
+  public java.util.concurrent.CompletableFuture<String> requestNotifyPermission() {
+    java.util.concurrent.CompletableFuture<String> result = new java.util.concurrent.CompletableFuture<>();
+
+    runOnUiThread(() -> {
+      Notifications.markAsked(this);
+
+      if (android.os.Build.VERSION.SDK_INT < 33
+        || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+          == PackageManager.PERMISSION_GRANTED) {
+        result.complete(Notifications.permission(this));
+
+        return;
+      }
+
+      if (notifyPermission != null) {
+        result.completeExceptionally(new IllegalStateException(ClientLocale.text("notifyRequestOpen")));
+
+        return;
+      }
+
+      notifyPermission = result;
+      ((ClientApplication) getApplication()).nativeFlow(true);
+      requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, NOTIFY_REQUEST);
+    });
+
+    return result;
+  }
+
+  /**
+   * Тап по оповещению возвращает существующую задачу и передаёт адрес цели.
+   * Новый Intent не перегружает документ: переход применяется к живому WebView.
+   */
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    captureNotifyUrl(intent);
+    applyNotifyUrl();
+  }
+
+  private static void captureNotifyUrl(Intent intent) {
+    String url = intent == null ? null : intent.getStringExtra(NOTIFY_URL_EXTRA);
+
+    if (url != null && !url.isEmpty()) {
+      pendingNotifyUrl = url;
+    }
+  }
+
+  /**
+   * Переход доверяет только относительному адресу или origin открытой трубы.
+   * До готовности/разблокировки адрес сохраняется; после потребления гасится также
+   * extra Intent, чтобы поворот не повторял уже использованную цель виджета или оповещения.
+   */
+  private void applyNotifyUrl() {
+    String url = pendingNotifyUrl;
+
+    if (url == null || web == null || !pageLoaded || appLock != null && appLock.locked()) {
+      return;
+    }
+
+    String target = url.startsWith("/") || url.startsWith("#") || policy.navigation(url) ? url : null;
+    Intent intent = getIntent();
+
+    pendingNotifyUrl = null;
+
+    if (intent != null) {
+      intent.removeExtra(NOTIFY_URL_EXTRA);
+    }
+
+
+    if (target != null) {
+      web.evaluateJavascript("window.location.href = " + org.json.JSONObject.quote(target), null);
+    }
+  }
+
+  /**
    * Внешняя навигация требует явного жеста в главном фрейме и метода GET.
    * Файловые схемы и автоматические перенаправления не передаются другой Activity.
    */
   private final class Navigation extends WebViewClient {
+    /**
+     * Готовность документа открывает применение адреса из оповещения.
+     * Смена origin сбрасывает отметку в showOrigin до загрузки новой машины.
+     */
+    @Override
+    public void onPageFinished(WebView view, String url) {
+      pageLoaded = true;
+      applyNotifyUrl();
+    }
+
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
       String url = request.getUrl().toString();
@@ -529,6 +640,12 @@ public class MainActivity extends AppCompatActivity {
 
       audio = null;
     }
+
+    if (code == NOTIFY_REQUEST && notifyPermission != null) {
+      notifyPermission.complete(Notifications.permission(this));
+      notifyPermission = null;
+      ((ClientApplication) getApplication()).nativeFlow(false);
+    }
   }
 
   /**
@@ -628,6 +745,7 @@ public class MainActivity extends AppCompatActivity {
       visible.runOnUiThread(() -> {
         if (current.get() == visible && visible.appLockScreen != null && !visible.isDestroyed()) {
           visible.appLockScreen.refresh();
+          visible.applyNotifyUrl();
         }
       });
     }

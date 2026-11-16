@@ -69,7 +69,9 @@ function timerSnapshot(card) {
  * Страница получает три фабричные карточки и один внешний таймер через те же store/API
  * границы, что и в приложении. Часы и единственный секундный interval управляются тестом.
  */
-async function mountScenario(t, { own = false } = {}) {
+async function mountScenario(t, {
+  external = false, boardTasksOverride = null, boardToReview = [], boardExtra = {},
+} = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   const browserGlobals = {
@@ -105,8 +107,11 @@ async function mountScenario(t, { own = false } = {}) {
     factoryTask(303, 'Ручной тикет'),
   ];
 
-  if (own) {
-    tasks.push({ ...factoryTask('100000000001', 'Своя задача'), source: 'grigdesk' });
+  if (external) {
+    tasks.push({
+      ...factoryTask('100000000001', 'Внешняя задача'),
+      source: `fixture-a@${'a'.repeat(64)}`,
+    });
   }
 
   const graphs = new Map([
@@ -120,7 +125,7 @@ async function mountScenario(t, { own = false } = {}) {
     [303, graph()],
     [100000000001, graph()],
   ]);
-  const boardTasks = [
+  const boardTasks = boardTasksOverride ?? [
     {
       id: '101',
       title: 'Идущий B24-таймер',
@@ -195,13 +200,17 @@ async function mountScenario(t, { own = false } = {}) {
       async load(id) {
         loadedTasks.push(String(id));
       },
-      title() {
-        return null;
+      title(id) {
+        return external && String(id) === '100000000001' ? 'Внешняя задача' : null;
       },
     },
   });
   globalThis.__pipelineB24BoardStore = defineStore('pipeline-b24-board', {
-    state: () => ({ data: { tasks: boardTasks } }),
+    state: () => ({ data: {
+      ...boardExtra,
+      tasks: boardTasks,
+      toReview: boardToReview
+    } }),
     actions: {
       async load() {
         boardLoads += 1;
@@ -396,17 +405,17 @@ test('карточки конвейера различают три состоя
   });
 });
 
-test('LOCAL-PIPELINE-01: собственное название открывает карточку без гидратации Б24', async (t) => {
-  const fx = await mountScenario(t, { own: true });
+test('EXTERNAL-PIPELINE-01: внешнее название открывает карточку с гидратацией трекера', async (t) => {
+  const fx = await mountScenario(t, { external: true });
   const card = cardByTask(fx.wrapper, '100000000001');
 
-  assert.ok(card, 'Собственная задача видна в смешанном списке');
-  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+  assert.ok(card, 'Внешняя задача видна в списке конвейера');
+  assert.equal(fx.loadedTasks.includes('100000000001'), true);
 
   const title = card.find('[data-role="pipeline-title"]');
 
-  assert.ok(title.exists(), 'Название собственной задачи доступно как действие');
-  assert.equal(title.text(), 'Своя задача');
+  assert.ok(title.exists(), 'Название внешней задачи доступно как действие');
+  assert.equal(title.text(), 'Внешняя задача');
   await title.trigger('click');
   assert.deepEqual(fx.openedTasks, ['100000000001']);
   assert.equal(cardByTask(fx.wrapper, 303).find('[data-role="pipeline-title"]').exists(), false);
@@ -417,6 +426,51 @@ test('LOCAL-PIPELINE-01: собственное название открыва�
   globalThis.__pipelineB24SseHandler('state-change', {});
   t.mock.timers.tick(1000);
   await fx.flushPromises();
-  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+  assert.equal(fx.loadedTasks.includes('100000000001'), true);
   assert.ok(fx.getCalls.filter((url) => url === '/api/tasks?sources=1').length >= 2);
+});
+
+test('таймер из контроля попадает в блок «вне фабрики»', async (t) => {
+  const scenario = await mountScenario(t, {
+    boardTasksOverride: [
+      {
+        id: '101',
+        title: 'Идущий B24-таймер',
+        timerRunning: false,
+        timerStartedAt: START_MS / 1000 - 65,
+        timerElapsed: 777
+      },
+    ],
+    boardToReview: [
+      {
+        id: '404',
+        title: 'Таймер вне фабрики из контроля',
+        timerRunning: true,
+        timerStartedAt: START_MS / 1000 - 7,
+        timerElapsed: 999
+      },
+    ],
+  });
+  const { wrapper } = scenario;
+  const outside = wrapper.findAll('.orow');
+
+  assert.equal(outside.length, 1);
+  assert.match(outside[0].text(), /Таймер вне фабрики из контроля/u);
+});
+
+test('таймер другой ветки виден при default без timer capability', async (t) => {
+  const { wrapper } = await mountScenario(t, {
+    boardTasksOverride: [],
+    boardExtra: { multiSource: true, capabilities: { timer: false } },
+    boardToReview: [{
+      id: '404',
+      title: 'Активная другая ветка',
+      timerRunning: true
+    }],
+  });
+
+  const outside = wrapper.findAll('.orow');
+
+  assert.equal(outside.length, 1);
+  assert.match(outside[0].text(), /Активная другая ветка/u);
 });

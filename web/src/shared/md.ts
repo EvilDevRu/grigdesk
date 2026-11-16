@@ -4,6 +4,10 @@
 import { marked, Renderer } from 'marked';
 import { measureChatPerformance, startChatPerformance } from './chatPerformance.ts';
 import type { Token, Tokens } from 'marked';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 // Расширение ссылок вызывающим кодом. Строгий `false` — вердикт «ведёт в никуда»:
 // такую ссылку рендерим текстом, чтобы синий цвет не обещал открытие.
@@ -130,11 +134,21 @@ function linkAttributes(href: string): string {
 }
 
 const ALERT_TITLES: Record<string, string> = {
-  note: 'Заметка',
-  tip: 'Совет',
-  important: 'Важно',
-  warning: 'Внимание',
-  caution: 'Осторожно',
+  get note() {
+    return t('core.mdZametka');
+  },
+  get tip() {
+    return t('core.mdSovet');
+  },
+  get important() {
+    return t('core.mdVazhno');
+  },
+  get warning() {
+    return t('core.mdVnimanie');
+  },
+  get caution() {
+    return t('core.mdOstorozhno');
+  },
 };
 
 /**

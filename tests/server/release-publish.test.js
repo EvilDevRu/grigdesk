@@ -104,6 +104,7 @@ test('RP-2: без окружения отказ с перечнем перем�
 const { installedBuild, loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
 const { isolatedEnvironment } = await import('../helpers/installedUpdateFixture.mjs');
 const { compileHelpSources } = await import('../../shared/node/helpSources.ts');
+const { HELP_LOCALES, helpResourceFile } = await import('../../shared/help/helpContracts.ts');
 
 /**
  * Синтетический builder выдаёт исполняемый серверный контракт, содержащий настоящий help.
@@ -115,6 +116,7 @@ async function installedPublicationFixture(t, channel) {
   const site = path.join(temporary, 'site');
   const mirror = path.join(temporary, 'mirror');
   const preparedRoot = path.join(temporary, 'runtime', 'b'.repeat(64));
+  let englishBytes = '';
 
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   await fs.mkdir(bins, { recursive: true });
@@ -122,14 +124,23 @@ async function installedPublicationFixture(t, channel) {
 
   const built = await installedBuild(t, channel, {
     serverSource: async (input, metadata) => {
-      const bundle = await compileHelpSources(repository, {
-        version: input.env.GRIGDESK_RELEASE_VERSION,
-        commit: input.env.GRIGDESK_RELEASE_COMMIT,
-      });
       const help = path.join(preparedRoot, 'server/help');
 
-      await fs.writeFile(path.join(help, 'help.json'), JSON.stringify(bundle));
-      await fs.writeFile(path.join(help, 'site/help.json'), JSON.stringify(bundle));
+      for (const locale of HELP_LOCALES) {
+        const bundle = await compileHelpSources(repository, {
+          version: input.env.GRIGDESK_RELEASE_VERSION,
+          commit: input.env.GRIGDESK_RELEASE_COMMIT,
+        }, locale);
+        const file = helpResourceFile(locale);
+        const bytes = JSON.stringify(bundle);
+
+        await fs.writeFile(path.join(help, file), bytes);
+        await fs.writeFile(path.join(help, 'site', file), bytes);
+
+        if (locale === 'en') {
+          englishBytes = bytes;
+        }
+      }
 
       for (const name of ['index.html', 'latest.html', 'latest.js']) {
         await fs.writeFile(path.join(help, 'site', name), `ресурс:${name}`);
@@ -218,8 +229,10 @@ async function installedPublicationFixture(t, channel) {
     built,
     site,
     mirror,
+    preparedRoot,
     targets,
     publishInstalledRelease,
+    englishBytes,
   };
 }
 
@@ -233,19 +246,51 @@ for (const channel of ['release', 'dev']) {
     await fs.writeFile(path.join(box.built.directory, `grigdesk_${version}_amd64.deb`),
       'DEB-PAYLOAD', { mode: 0o644 });
 
+    const translatedSite = path.join(box.preparedRoot, 'server/help/site/help.en.json');
+    const translatedBytes = await fs.readFile(translatedSite);
+
+    await fs.rm(translatedSite);
+    await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets),
+      /help_site_mismatch/u);
+    assert.equal(await fs.readFile(latest, 'utf8'), 'OLD');
+    await fs.writeFile(translatedSite, translatedBytes);
+
     isolatedEnvironment(t, { PUBLISH_FAIL_SCP: '1' });
     await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets));
     assert.equal(await fs.readFile(latest, 'utf8'), 'OLD');
     delete process.env.PUBLISH_FAIL_SCP;
 
     await box.publishInstalledRelease(box.built.directory, box.targets);
+
+    // HELP-KEEP-PUBLISH-EN: publisher копирует добавочный EN ресурс без изменения байтов.
+    for (const site of [box.site, box.mirror]) {
+      assert.equal(await fs.readFile(path.join(site, 'help', version, 'help.en.json'), 'utf8'),
+        box.englishBytes);
+    }
+
     assert.deepEqual(JSON.parse(await fs.readFile(latest, 'utf8')), box.built.index);
     assert.equal(await fs.readFile(other, 'utf8'), 'OTHER');
     assert.equal(await fs.readFile(path.join(box.site, 'releases', version,
       `grigdesk_${version}_amd64.deb`), 'utf8'), 'DEB-PAYLOAD');
-    assert.equal(await fs.stat(path.join(box.site, 'help', box.built.index.latest.payload.version,
-      'help.json')).then(() => true), true);
+
+    for (const locale of HELP_LOCALES) {
+      for (const site of [box.site, box.mirror]) {
+        const bundle = JSON.parse(await fs.readFile(path.join(site, 'help', version,
+          helpResourceFile(locale)), 'utf8'));
+
+        assert.equal(bundle.locale, locale);
+        assert.deepEqual(bundle, JSON.parse(await fs.readFile(path.join(box.preparedRoot,
+          'server/help', helpResourceFile(locale)), 'utf8')));
+      }
+    }
+
     await box.publishInstalledRelease(box.built.directory, box.targets);
+
+    const immutableEnglish = path.join(box.site, 'help', version, 'help.en.json');
+
+    await fs.writeFile(immutableEnglish, '{}');
+    await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets));
+    await fs.writeFile(immutableEnglish, translatedBytes);
     isolatedEnvironment(t, { PUBLISH_FAIL_MIRROR: '1' });
     await box.publishInstalledRelease(box.built.directory, box.targets);
     assert.deepEqual(JSON.parse(await fs.readFile(latest, 'utf8')), box.built.index);

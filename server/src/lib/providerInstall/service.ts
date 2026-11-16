@@ -1278,6 +1278,7 @@ export class ProviderInstallService {
 
   /**
    * Код собственной причины не маскируется под общий отказ HTTP.
+   * Проверенные коды графа используют перевод клиента; сторонний текст скрывается.
    * Неизвестная ошибка остаётся installation_failed без текста чужих данных.
    */
   private lifecycleFailure(error: unknown): ProviderInstallError {
@@ -1289,8 +1290,11 @@ export class ProviderInstallService {
     }
     if (error instanceof Error && typeof (error as Error & { code?: unknown }).code === 'string'
       && /^[a-z][a-z0-9_]{1,63}$/u.test((error as Error & { code: string }).code)) {
-      return new ProviderInstallError(409, (error as Error & { code: string }).code,
-        'Подготовка операции не удалась');
+      const code = (error as Error & { code: string }).code;
+      const message = code === 'installer_strategy_unverified' || code === 'npm_graph_invalid'
+        ? '' : 'Подготовка операции не удалась';
+
+      return new ProviderInstallError(409, code, message);
     }
 
     return new ProviderInstallError(500, 'installation_failed', 'Операция не завершена');

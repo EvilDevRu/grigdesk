@@ -3,14 +3,18 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
 
-import { readInstallation, readInstalledPointer } from '../shared/node/installedLayout.ts';
+import {
+  readInstallation, readInstalledPointer, assertInstallationPath,
+} from '../shared/node/installedLayout.ts';
 import { InstalledUpdateService } from '../shared/node/installedUpdateService.ts';
 import { inspectInstalledServer, startInstalledServer, stopInstalledServer }
   from '../shared/node/installedServer.ts';
 import { installedServerUnit, INSTALLED_SERVER_UNIT } from '../shared/node/installedServer.ts';
 import { readInstalledUpdate } from '../shared/node/installedUpdateState.ts';
 import { runInstalledUpdateWorker } from '../shared/node/installedUpdateWorker.ts';
-import { HELP_TEXT, parseArgs } from './args.ts';
+import { serverSettings } from '../shared/node/installedServer.ts';
+import { relaySetup } from './relaySetup.ts';
+import { HELP_TEXT, parseArgs, CliArgumentError } from './args.ts';
 import { artifactsCleanupCommand } from './artifactsCleanup.ts';
 import { runArtifactsCleanupMenu } from './artifactsCleanupMenu.ts';
 import { runUpdateCommand } from './updates.ts';
@@ -29,7 +33,8 @@ async function runInstalledMenu(root: string): Promise<number> {
   const session = new TerminalSession();
   const { t } = cliTranslator();
   const items = ['check-updates', 'update', 'update-status', 'resume-update',
-    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'artifactsCleanup', 'exit'];
+    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'relay-setup', 'relay-restore',
+    'artifactsCleanup', 'exit'];
   let selected = 0;
   let status = await service.status();
   let closed = false;
@@ -111,7 +116,8 @@ async function runInstalledMenu(root: string): Promise<number> {
           session.suspend();
 
           try {
-            const command = action.startsWith('channel-')
+            const command = action.startsWith('relay-') ? ['relay', action.slice(6)]
+              : action.startsWith('channel-')
               ? ['server', 'update-channel', action.slice('channel-'.length)] : ['server', action];
             const code = await runInstalledCli(root, command);
 
@@ -144,11 +150,76 @@ async function followInstalledCommand(command: string, args: string[]): Promise<
 }
 
 /**
+ * Запускает только CLI выбранного server-поколения проверенной установки.
+ * Execve сохраняет stdio, сигналы и exit; отсутствие бинарника не разрешает другой источник.
+ */
+async function runInstalledPipeline(root: string, argv: string[]): Promise<never> {
+    const receipt = await readInstallation(root);
+    const current = await readInstalledPointer(receipt);
+
+    if (!current.server) {
+        throw new Error('pipeline_installed_server_missing');
+    }
+
+    let executable: string;
+
+    try {
+        executable = await assertInstallationPath(root, current.server + '/bin/pipeline');
+    }
+    catch (error) {
+        // Ошибки файловой системы (ENOENT и т.п.) не раскрывают локальный путь
+        // в stderr и получают устойчивый код, как остальные отказы входа.
+        if ((error as NodeJS.ErrnoException).code !== undefined) {
+            throw new Error('pipeline_installed_executable_invalid');
+        }
+
+        throw error;
+    }
+
+    const stat = await fs.lstat(executable).catch(() => null);
+
+    if (!stat || !stat.isFile() || (stat.mode & 0o100) === 0) {
+        throw new Error('pipeline_installed_executable_invalid');
+    }
+
+    const env = Object.fromEntries(Object.entries(process.env)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+
+    env.GRIGDESK_HOME = receipt.dataHome;
+    env.GRIGDESK_DESKTOP_DATA_DIR = receipt.userData;
+    env.GRIGDESK_ENV_FILE = path.join(receipt.dataHome, '.env');
+
+    for (const key of ['APPIMAGE', 'APPDIR', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE']) {
+        delete env[key];
+    }
+
+    if (!process.execve) {
+        throw new Error('maintenance_runtime_incompatible');
+    }
+
+    process.execve(executable, [executable, ...argv], env);
+
+    throw new Error('maintenance_exec_failed');
+}
+
+/**
  * Отдельный ctl управляет только проверенной установкой и известными каноническими launchers.
  * Стоп из app/server cgroup требует явного --force, не обходящего trust или права.
  */
 export async function runInstalledCli(root: string, argv: string[]): Promise<number> {
   const { t } = cliTranslator();
+
+    if (argv[0] === 'pipeline') {
+        try {
+            return await runInstalledPipeline(root, argv.slice(1));
+        } catch (error) {
+            process.stderr.write(t('updates.failure', {
+                code: error instanceof Error ? error.message : 'pipeline_launch_failed',
+            }) + '\n');
+
+            return 1;
+        }
+    }
 
   if (!argv.length && process.stdin.isTTY && process.stdout.isTTY) {
     return runInstalledMenu(root);
@@ -159,7 +230,10 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
   try {
     args = parseArgs(argv);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : 'invalid_arguments'}\n`);
+    const message = error instanceof CliArgumentError ? t(error.message)
+      : error instanceof Error ? error.message : 'invalid_arguments';
+
+    process.stderr.write(message + '\n');
 
     return 2;
   }
@@ -182,6 +256,10 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
         || /^app-grigdesk-\d+\.scope$/u.test(part))) {
         throw new Error('release_command_inside_owner_use_force');
       }
+    }
+
+    if (args.kind === 'relay' && ['setup', 'restore'].includes(args.action ?? '')) {
+      return await relaySetup(args, await serverSettings(receipt));
     }
 
     if (args.kind === 'help') {

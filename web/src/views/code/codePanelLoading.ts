@@ -1,6 +1,10 @@
 // Синхронный каркас для lazy CodePanel. Здесь намеренно нет импорта Monaco:
 // компонент должен появиться сразу, пока тяжёлый chunk ещё только загружается.
 import { defineComponent, h } from 'vue';
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../../shared/uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 const navigatorIcon = () => h('svg', {
   viewBox: '0 0 20 20',
@@ -47,11 +51,11 @@ export default defineComponent({
     return () => h('div', {
       class: ['code-panel-loading', { compact: props.compact }],
       role: 'status',
-      'aria-label': 'Загрузка кода',
+      'aria-label': t('core.codeZagruzkaKoda2'),
       'aria-busy': 'true',
     }, [
       h('header', { class: 'code-loading-head' }, [
-        h('strong', 'Код'),
+        h('strong', t('core.code')),
         h('span', { class: 'code-loading-grow' }),
         h('span', { class: 'code-loading-navigator', 'aria-hidden': 'true' }, [navigatorIcon()]),
       ]),
@@ -70,7 +74,7 @@ export default defineComponent({
         h('div', { class: 'code-loading-split', 'aria-hidden': 'true' }, [h('span')]),
         h('section', { class: 'code-loading-editor', 'aria-hidden': 'true' }, [
           h('div', { class: 'code-loading-editor-head' }, [h('span')]),
-          h('div', { class: 'code-loading-editor-body' }, 'Загрузка кода…'),
+          h('div', { class: 'code-loading-editor-body' }, t('core.codeZagruzkaKoda')),
         ]),
       ]),
     ]);

@@ -15,6 +15,7 @@ import type { SseEventName } from '../composables/useSse.ts';
 
 const t = localeTranslator(uiLocalePort);
 
+
 interface PendingIntent {
   id: string | null;
   kind: string;
@@ -456,7 +457,7 @@ export const useArbiterConversationsStore = defineStore('arbiterConversations', 
 
       if (saved) {
         if (saved.length > 2 * 1024 * 1024) {
-          throw new Error('Слишком большое browser storage.');
+          throw new Error(t('core.pipelineSlishkomBolshoeBrowserStorage'));
         }
 
         const value = JSON.parse(saved);
@@ -466,7 +467,7 @@ export const useArbiterConversationsStore = defineStore('arbiterConversations', 
           || typeof value.pending !== 'object' || typeof value.drafts !== 'object'
           || Object.values(value.pending).some((intent: unknown) => !validPending(intent))
           || Object.values(value.drafts).some((draft: unknown) => !validDraft(draft))) {
-          throw new Error('Некорректное browser storage.');
+          throw new Error(t('core.pipelineNekorrektnoeBrowserStorage'));
         }
 
         pending.value = value.pending;
