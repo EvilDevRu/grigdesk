@@ -588,6 +588,10 @@ export class FactoryStateAdapter {
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
       daemonAlive,
+      // Создание без старта: 1 — конвейер готов и ждёт ручного запуска, pending —
+      // попытка создана, стенд ещё поднимается. Витрина отличает это от обрыва.
+      held: registry.HELD_START === '1',
+      holdPending: registry.HELD_START === 'pending',
       needsRun: registry.NEEDS_RUN === '1',
       stalledHuman: trusted?.bootstrapStop?.state === 'waiting' || registry.STALLED_HUMAN === '1',
       bootstrapStop: trusted?.terminal ? null : trusted?.bootstrapStop || null,
@@ -814,7 +818,13 @@ export class FactoryStateAdapter {
     if (stallNode && stall) statuses[stallNode] = stall.kind === 'human' ? 'stall' : 'fail';
     if ('sandbox' in def.pos) {
       if (env.FE_PORT) statuses.sandbox = 'done';
-      else if (sandbox) statuses.sandbox = alive ? 'run' : 'fail';
+      else if (sandbox) {
+        // Созданный без старта конвейер держит готовый стенд (маркер ставится только
+        // после полной готовности): ромб готов, а не провален мёртвым демоном.
+        if (alive) statuses.sandbox = 'run';
+        else if (registry.HELD_START === '1') statuses.sandbox = 'done';
+        else statuses.sandbox = 'fail';
+      }
       // Файла прогресса может не быть вовсе (его затирали битой ссылкой — см.
       // отдельный sidecar связи в профиле). Тогда решает журнал: раз конвейер встал
       // на подъёме стенда, ромб обязан гореть провалом. Без этой ветки статус падал
@@ -940,6 +950,10 @@ export class FactoryStateAdapter {
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
       daemonAlive: alive,
+      // Создание без старта: готовая попытка ждёт ручного запуска (held) либо
+      // ещё поднимает стенд (holdPending). Демон при этом штатно завершён.
+      held: registry.HELD_START === '1',
+      holdPending: registry.HELD_START === 'pending',
       stall,
       fePort: env.FE_PORT || null,
       apiPort: env.API_PORT || null,

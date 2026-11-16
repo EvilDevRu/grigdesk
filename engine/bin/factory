@@ -43,7 +43,7 @@ usage() {
                    [--diagnosis-signal TEXT]
                    [--backend-base REF] [--frontend-base REF]
                    [--delivery-target repo=branch]...
-                   [--task-comment]
+                   [--task-comment] [--hold-start]
 
   factory TASK resume --attempt a_<32hex> [те же общие пути]
 
@@ -90,6 +90,13 @@ capability "route-v2" в graph.json и реализовать route-хуки к�
 task-level override в реестр и выигрывает у project policy профиля, а failover
 берётся из PROJECT_RUNNER_FAILOVER профиля с убранным выбранным id. Без флага
 цепочка исполнителей живёт только в runners.env профиля.
+
+--hold-start создаёт конвейер БЕЗ старта: попытка, контракты, ticket и полностью
+готовый стенд поднимаются штатно, но ни один узел (включая разведку) не
+диспетчеризуется. В реестре остаётся метка HELD_START=1, команда выходит с 0.
+Человек назначает исполнителей на узлах и стартует прогон обычным resume: он сам
+выполнит разведку и создаст курсор. Метку снимает любой следующий заход движка.
+Стенд и слот остаются зарезервированными до старта или abandon.
 
 Abandon закрывает АКТИВНУЮ попытку терминалом abandoned (штатный выход из
 заклинившего прогона). Recover создаёт из abandoned-терминала НОВУЮ попытку
@@ -276,6 +283,7 @@ GATE_COMMIT_ONLY=0
 BE_BASE_REF=""
 FE_BASE_REF=""
 TASK_COMMENT=0
+HOLD_START=0
 declare -a INSTRUMENTATION_SPECS=()
 declare -a DELIVERY_TARGETS=()
 
@@ -457,6 +465,10 @@ while (( $# > 0 )); do
       GATE_COMMIT_ONLY=1
       shift
       ;;
+    --hold-start)
+      HOLD_START=1
+      shift
+      ;;
     --instrumentation-file)
       (( $# >= 2 )) || die "после --instrumentation-file нужен repo:path"
       INSTRUMENTATION_SPECS+=("$2")
@@ -527,6 +539,10 @@ fi
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
   die "--runner-primary допустим только при start"
+# Создание без старта — режим только новой попытки: resume/gate ведут уже
+# созданную попытку, у которой решение о старте принял человек.
+[[ "$MODE" == start || "$HOLD_START" == 0 ]] ||
+  die "--hold-start допустим только при start"
 [[ "$MODE" == check || "$MODE" == start || -z "$EXPECTED_CATALOG_HASH" ]] ||
   die "--expected-catalog-hash допустим только при check или start"
 [[ "$MODE" == start || -z "$QUEUE_DISPATCH_ID" ]] ||
@@ -3103,7 +3119,7 @@ v2_main() {
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
       PROFILE "$PROFILE" \
       ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
-      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 HELD_START 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
       RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
@@ -3252,9 +3268,16 @@ v2_main() {
   fi
 
   # Любой новый заход движка стирает метку штатной остановки: после старта демона
-  # мёртвый процесс снова означает обрыв, а не решение человека.
-  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 \
+  # мёртвый процесс снова означает обрыв, а не решение человека. Метка создания
+  # без старта снимается тем же заходом: resume принял решение человека стартовать.
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 STOPPED_SIGNAL 0 HELD_START 0 \
     DELIVERY_MODE "$V2_DELIVERY_MODE" INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
+
+  # Создание без старта фиксируется ДО подъёма стенда: витрина показывает «создаётся»,
+  # пока среда поднимается, а полный маркер HELD_START=1 появится после её готовности.
+  if [[ "$HOLD_START" == 1 ]]; then
+    set_st "$TASK" HELD_START pending || return
+  fi
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
     CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
@@ -3298,6 +3321,23 @@ v2_main() {
   export PROFILE_AGENT_CWD="$V2_PRIMARY_WORKTREE"
   export PROFILE_AGENT_DIRS="$V2_AGENT_DIRS"
   export ROUTE_V2_INSTRUMENTATION_SCOPE_FILE="$V2_SCOPE_FILE"
+
+  # Создание без старта: попытка, контракты и стенд уже на месте, но ни один узел
+  # (включая разведку) не диспетчеризуется — человек назначает исполнителей и
+  # стартует прогон штатным resume, который сам выполнит bootstrap и создаст курсор.
+  # Выход допустим только после ПОЛНОГО ожидания стенда: EXIT-trap убивает
+  # незавершённый up.sh и оставляет частичную песочницу (тупик 75 на resume).
+  if [[ "$HOLD_START" == 1 ]]; then
+    v2_sandbox_bootstrap_wait || {
+      rc=$?
+      set_st "$TASK" STALLED_HUMAN 1
+      v2_log "среда профиля не готова для создания без старта (код $rc)"
+      return "$rc"
+    }
+    set_st "$TASK" HELD_START 1 || return
+    v2_log "конвейер создан без старта: ожидает ручного запуска"
+    return 0
+  fi
 
   _route_v2_load_attempt "$TASK" "$attempt" || return
   route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
@@ -3725,7 +3765,7 @@ v2_admin_main() {
         loop_reset=(LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" LOOP_STAGE "" LOOP_REPORT "")
     done
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
-      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered ATTEMPT_ID "$out" \
+      STALLED_HUMAN 0 STOPPED_SIGNAL 0 RESULT recovered HELD_START 0 ATTEMPT_ID "$out" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
       QUEUE_DISPATCH_ID "" \

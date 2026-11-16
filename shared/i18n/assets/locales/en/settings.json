@@ -637,6 +637,8 @@
   "separateThresholdForPipelineStagesLetThe": "Separate threshold for pipeline stages. 0 — let the provider handle compaction.",
   "refreshRepositoriesBeforeStarting": "Refresh repositories before starting",
   "appliesToNewTriageAndPipelineRuns": "Applies to new triage and pipeline runs.",
+  "automaticallyStartThePipelineOnCreation": "Automatically start the pipeline on creation",
+  "disabledThePipelineIsCreatedAndWaits": "Disabled: the pipeline is created and waits for a manual start — assign executors per node before work begins. Rule-based auto-launches are not affected.",
   "turnSilenceThresholdMinutes": "Turn silence threshold, minutes",
   "disableAlertsForAStalledPipelineTurn": "0 — disable alerts for a stalled pipeline turn.",
   "analyzeAutomatically": "Analyze automatically",

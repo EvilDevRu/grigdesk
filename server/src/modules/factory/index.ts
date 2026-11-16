@@ -64,7 +64,7 @@ import {
 import {
   confirmRouteResume, logLength, readLogSince,
   runRouteEngine, runRouteDecision, ROUTE_DECISION_TIMEOUT_MS, spawnRouteEngine, routeUnitActive,
-  routeFailure, startRegistryIdentity, stopRouteOrchestrator,
+  routeFailure, startRegistryIdentity, heldRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
   routeFindingsArgs,
   routeBootstrapAnswerArgs,
@@ -152,6 +152,10 @@ interface LaunchOptions {
   instrumentationFiles?: unknown[];
   diagnosisKind?: string;
   diagnosisSignal?: string;
+  // Явный отказ от автоматического старта: карточка задачи шлёт false, когда
+  // глобальная настройка pipelineAutoStart выключена. Отсутствие поля = старт сразу,
+  // поэтому CLI, мобильный фасад и автозапуски сохраняют прежнее поведение.
+  autoStart?: boolean;
 }
 
 type HumanComment = { ok: true; value: string } | { ok: false; message: string };
@@ -691,6 +695,12 @@ async function factoryModule(
       ...(extended ? { sourcesVersion: 1 } : {}),
       silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0)
     };
+  });
+
+  // Компактная сводка конвейера для виджета главного экрана: только счётчики.
+  // Текст задач не покидает сервер; виджет опрашивает сводку редко и по событиям.
+
+    return { ...counters, at: new Date().toISOString() };
   });
 
   // Деталь одной задачи: реестр + карта этапов + таймлайн.
@@ -1482,6 +1492,11 @@ async function factoryModule(
       profile, route: wanted, runnerPrimary, catalogHash, launchInputs, ticket: built,
     } = prepared.value;
 
+    // Создание без старта решает только явное поле вызывающего: отсутствие = старт
+    // сразу. Настройку читает веб-карточка, сервер не подмешивает её сам, чтобы
+    // CLI, мобильный фасад и автозапуски не зависели от чужого prefs.
+    const holdStart = options.autoStart === false;
+
     if (prepared.value.sourceContext) {
       prepared.value.sourceTracker?.assertContext?.(prepared.value.sourceContext);
     }
@@ -1539,6 +1554,7 @@ async function factoryModule(
           queueDispatchId: dispatchId,
           runnerPrimary,
           expectedCatalogHash: catalogHash,
+          holdStart,
           ...launchInputs,
         }),
         extraEnv: {
@@ -1596,14 +1612,19 @@ async function factoryModule(
       let registry: Registry | null = null;
       try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* реестр ещё пишется */ }
 
-      const identity = startRegistryIdentity(registry, {
+      const identityArgs = {
         profile,
         route: wanted,
         expectedCatalogHash: catalogHash,
         queueDispatchId: dispatchId,
         runnerPrimaryOverride: runnerPrimary,
-      });
-      if (identity && registry && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+      };
+      // Создание без старта не требует живого демона: движок пишет полную проекцию
+      // попытки и штатно завершается, а маркер HELD_START доказывает режим захода.
+      const identity = holdStart
+        ? heldRegistryIdentity(registry, identityArgs)
+        : startRegistryIdentity(registry, identityArgs);
+      if (identity && registry && (holdStart || factoryState.isDaemonAlive(registry.ORCH_PID, id))) {
         if (identity === launchIdentity) launchConfirmations += 1;
         else { launchIdentity = identity; launchConfirmations = 1; }
       } else {
@@ -1628,7 +1649,7 @@ async function factoryModule(
         return {
           status: null,
           body: {
-            outcome: 'launched',
+            outcome: holdStart ? 'created' : 'launched',
             profile,
             route: wanted,
             attempt: registry.ATTEMPT_ID || null,
@@ -1645,7 +1666,9 @@ async function factoryModule(
           },
         };
       }
-      if (launch.unit && !(await routeUnitActive(id))) {
+      // Hold-юнит завершается штатно: мёртвый юнит с полной held-identity — не отказ,
+      // а нормальный путь к подтверждению. Без identity быстрый выход = отказ создания.
+      if (launch.unit && !(await routeUnitActive(id)) && !(holdStart && identity)) {
         if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
         const tail = await readLogSince(launch.logFile, launch.logOffset, { lines: 10, limit: 2000 });
         const failure = routeFailure(tail);
@@ -1673,7 +1696,9 @@ async function factoryModule(
         route: wanted,
         gitRefresh,
         slot: slotInfo,
-        note: 'демон не подтвердил PID за 10с — проверь конвейер',
+        note: holdStart
+          ? 'конвейер ещё создаётся — статус появится в карточке'
+          : 'демон не подтвердил PID за 10с — проверь конвейер',
       },
     };
   }
@@ -1936,7 +1961,8 @@ async function factoryModule(
       // Marker остаётся до точного proof или явного lifecycle-разрешения человеком.
       throw err;
     }
-    const provenVisible = result.status === null && result.body?.outcome === 'launched';
+    const provenVisible = result.status === null
+      && (result.body?.outcome === 'launched' || result.body?.outcome === 'created');
     // `runner_preflight_unavailable` тоже доказан: движок печатает этот маркер в конце
     // ПОЛНОСТЬЮ отработавшего preflight, а создание попытки идёт строго после него —
     // ни attempt, ни реестра, ни занятых ресурсов не появляется (проверено: после такого
@@ -3091,6 +3117,14 @@ async function factoryModule(
       return reply.code(409).send({
         error: 'bootstrap_answer_required',
         message: 'Сначала ответь на вопрос разведки SCOUT.',
+      });
+    }
+    // Создание без старта ещё поднимает стенд: resume сейчас упёрся бы в частично
+    // созданную песочницу. Полный маркер HELD_START=1 означает готовность к старту.
+    if (registry.HELD_START === 'pending') {
+      return reply.code(409).send({
+        error: 'hold_pending',
+        message: 'Конвейер ещё создаётся — стенд поднимается. Старт станет доступен после готовности.',
       });
     }
     if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {

@@ -21,6 +21,10 @@ export interface PipelineTask extends Record<string, unknown> {
   arbitrating?: import('../../../shared/pipeline/factoryGraphContracts.ts').ArbiterRun | null;
   attempt?: string | number | null;
   daemonAlive?: boolean;
+  // Создание без старта: held — конвейер готов и ждёт ручного запуска,
+  // holdPending — попытка создана, стенд ещё поднимается.
+  held?: boolean;
+  holdPending?: boolean;
   result?: string | null;
   silence?: AgentSilence | null;
   stall?: {
@@ -86,6 +90,8 @@ function isPipelineTask(value: unknown): value is PipelineTask {
     && (value.source == null || isTaskSourceId(value.source))
     && (value.title == null || typeof value.title === 'string')
     && (value.daemonAlive == null || typeof value.daemonAlive === 'boolean')
+    && (value.held == null || typeof value.held === 'boolean')
+    && (value.holdPending == null || typeof value.holdPending === 'boolean')
     && (value.attempt == null || ['string', 'number'].includes(typeof value.attempt))
     && (value.result == null || typeof value.result === 'string')
     && (value.silence == null || isRecord(value.silence))
@@ -223,6 +229,8 @@ export interface PipelineViewGraphSource extends LiveGraph {
   arbiterLog?: ArbiterCard[];
   arbiterConversations?: ArbiterConversationSummary[];
   daemonAlive?: boolean;
+  held?: boolean;
+  holdPending?: boolean;
   readOnly?: boolean;
   halted?: string | null;
   runnerPolicy?: import('./runnerDisplay.ts').RunnerState;

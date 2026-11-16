@@ -202,6 +202,20 @@ async function wait(values: Record<string, string>, base: PipelineContext): Prom
                     }
                 };
             }
+
+            // Создание без старта: попытка готова и ждёт ручного запуска, демон
+            // штатно завершён. Это решение человека, а не обрыв — wait не должен
+            // доводить его до timeout.
+            if (registry.HELD_START === '1') {
+                return {
+                    output: {
+                        outcome: 'stopped',
+                        task: values.task,
+                        attempt: values.attempt,
+                        identity
+                    }
+                };
+            }
         }
 
         const remaining = deadline - now();

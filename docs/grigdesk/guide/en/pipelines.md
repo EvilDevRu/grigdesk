@@ -40,6 +40,25 @@ Resuming may call a model and closes the back option after new writes.
 Executor memory support follows its own contract; temporary-data migration checks do not prove real authentication
 or executor compatibility.
 
+## Creation without automatic start
+
+To assign executors per node before work begins, turn off "Automatically start the
+pipeline on creation" in [settings](settings.md) (Automation → Launch). The "to
+pipeline" button then creates the pipeline without running any node, including scouting:
+
+1. Confirm the launch in the task card. "Created, awaiting start" means the attempt
+   exists; while the stand provisions, the card shows "creating".
+2. Open Pipeline: the card is "awaiting start", the route graph is visible, no node
+   has run yet. The stand and slot stay reserved until start.
+3. Open the nodes and assign executors, models and effort on the Executors tab.
+   Choices save immediately and apply from the first node after start.
+4. Press "▶ start run" on the card and confirm. The pipeline runs scouting and
+   follows the route with the assigned parameters.
+
+The toggle affects only the manual launch from the task card: Telegram rule
+auto-launches and bulk start work as before. The enabled toggle (default) keeps the
+ordinary immediate launch.
+
 ## Stage executor, model and effort
 
 Open a node's Executors tab. Select an executor, available model and compatible effort.

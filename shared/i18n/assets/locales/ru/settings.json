@@ -637,6 +637,8 @@
   "separateThresholdForPipelineStagesLetThe": "Отдельный порог для этапов конвейера. 0 — оставить сжатие исполнителю.",
   "refreshRepositoriesBeforeStarting": "Обновлять репозитории перед запуском",
   "appliesToNewTriageAndPipelineRuns": "Действует на новые запуски триажа и конвейера.",
+  "automaticallyStartThePipelineOnCreation": "Автоматически стартовать конвейер при создании",
+  "disabledThePipelineIsCreatedAndWaits": "Выключено: конвейер создаётся и ждёт ручного старта — исполнителей на узлах можно назначить до начала работы. Автозапуски по правилам не затрагивает.",
   "turnSilenceThresholdMinutes": "Порог молчания хода, минуты",
   "disableAlertsForAStalledPipelineTurn": "0 — выключить оповещение о зависшем ходе конвейера.",
   "analyzeAutomatically": "Разбирать автоматически",

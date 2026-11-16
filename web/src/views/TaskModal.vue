@@ -3613,6 +3613,9 @@ function launchErrorText(e: unknown) {
 /**
  * Команда запуска отправляется один раз из уже проверенной формы.
  * Сообщение результата строится из ACK, затем перечитывается состояние конвейера.
+ * Глобальная настройка автостарта читается свежим запросом: выключенная просит
+ * сервер создать конвейер без запуска узлов. Отказ чтения настройки не меняет
+ * прежнего поведения — конвейер стартует сразу.
  */
 async function doLaunch(payload: unknown) {
   if (busy.value) {
@@ -3627,9 +3630,12 @@ async function doLaunch(payload: unknown) {
   err.value = null;
 
   try {
+    const prefs = await api.get('/api/settings/prefs').catch(() => null);
+    const autoStart = objectOrEmpty(prefs).pipelineAutoStart !== false;
     const r = await tasks.launch(id, {
       ...objectOrEmpty(payload),
       ...(source ? { source } : {}),
+      ...(autoStart ? {} : { autoStart: false }),
     });
 
     if (reference !== currentTaskKey.value) {
@@ -3638,6 +3644,7 @@ async function doLaunch(payload: unknown) {
 
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? t('core.coreUzheIdetNaKonveyere')
+      : r.outcome === 'created' ? t('core.coreSozdanOzhidaetStarta')
       : r.outcome === 'launched' ? t('core.coreZapuschenoProfilProfileRoute', {
         profile: r.profile,
         route: r.route ? t('core.coreMarshrutRoute', { route: r.route }) : '',

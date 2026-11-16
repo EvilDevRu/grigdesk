@@ -74,6 +74,13 @@ const PREFERENCE_DEFINITIONS = [
     translator.t('ru', 'settings.appliesToNewTriageAndPipelineRuns'),
   ],
   [
+    'automation.launch',
+    'pipelineAutoStart',
+    'switch',
+    translator.t('ru', 'settings.automaticallyStartThePipelineOnCreation'),
+    translator.t('ru', 'settings.disabledThePipelineIsCreatedAndWaits'),
+  ],
+  [
     'automation.monitoring',
     'runSilenceWindow',
     'number',
@@ -901,6 +908,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   "prefs:gitRefreshBeforeRun": {
     "label": "settings.refreshRepositoriesBeforeStarting",
     "description": "settings.appliesToNewTriageAndPipelineRuns",
+    "scope": "settings.allDevices"
+  },
+  "prefs:pipelineAutoStart": {
+    "label": "settings.automaticallyStartThePipelineOnCreation",
+    "description": "settings.disabledThePipelineIsCreatedAndWaits",
     "scope": "settings.allDevices"
   },
   "prefs:runSilenceWindow": {

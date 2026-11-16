@@ -6,6 +6,7 @@ import type { FieldIntent, JsonValue, ResourceAdapter } from '../contracts.ts';
 
 const BOOLEANS = [
   'gitRefreshBeforeRun',
+  'pipelineAutoStart',
   'providerUsageAutoRefresh',
   'showAllModels',
   'chatLiveSessions',
@@ -34,7 +35,8 @@ export function preferencesValues(payload: unknown, defaults = false,
     if (typeof payload[key] === 'boolean') {
       values[key] = payload[key];
     } else if (defaults) {
-      values[key] = key === 'chatLiveSessions' || key === 'chatAutoContinue';
+      values[key] = key === 'chatLiveSessions' || key === 'chatAutoContinue'
+        || key === 'pipelineAutoStart';
     }
   }
 

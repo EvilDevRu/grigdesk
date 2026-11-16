@@ -201,7 +201,7 @@ export function routeStartArgs(config: RouteConfig, {
   runnerPrimary = '',
   expectedCatalogHash = '', queueDispatchId = '',
   instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
-  deliveryTargets = [], taskComment = false,
+  deliveryTargets = [], taskComment = false, holdStart = false,
 }: {
   task: string | number;
   profile: string;
@@ -215,6 +215,7 @@ export function routeStartArgs(config: RouteConfig, {
   diagnosisSignal?: string;
   deliveryTargets?: readonly string[];
   taskComment?: boolean;
+  holdStart?: boolean;
 }): string[] {
   const args = [String(task), 'start', '--profile', profile, '--route', route,
     '--ticket-json', ticketFile];
@@ -244,6 +245,9 @@ export function routeStartArgs(config: RouteConfig, {
   // Комментарий со ссылками на PR во внешней задаче — отдельное immutable-действие
   // `task-comment` в delivery contract попытки; без флага движок его не выдаёт.
   if (taskComment) args.push('--task-comment');
+  // Создание без старта добавляется последним: порядок прежних аргументов стабилен,
+  // на него смотрят контрактные тесты запуска.
+  if (holdStart) args.push('--hold-start');
   return args;
 }
 
@@ -391,6 +395,48 @@ export function startRegistryIdentity(registry: Record<string, string | undefine
   return expectedCatalogHash || queueDispatchId || runnerPrimaryOverride
     ? `${base}:${registry.CATALOG_HASH || ''}:${registry.QUEUE_DISPATCH_ID || ''}:${registry.RUNNER_OVERRIDE_PRIMARY || ''}`
     : base;
+}
+
+/**
+ * Identity создания без старта: движок пишет полную проекцию попытки и штатно
+ * завершается, поэтому живого ORCH_PID здесь нет и быть не должно. Маркер
+ * HELD_START доказывает, что заход был именно созданием без старта: pending —
+ * стенд ещё поднимается, 1 — конвейер готов к ручному запуску. Остальные ключи
+ * сверяются так же строго, как у обычного запуска.
+ */
+export function heldRegistryIdentity(registry: Record<string, string | undefined> | null, {
+  profile,
+  route,
+  expectedCatalogHash = '',
+  queueDispatchId = '',
+  runnerPrimaryOverride = '',
+}: {
+  profile: string;
+  route: string;
+  expectedCatalogHash?: string;
+  queueDispatchId?: string;
+  runnerPrimaryOverride?: string;
+}): string | null {
+  if (!registry || typeof registry !== 'object') return null;
+  const attempt = String(registry.ATTEMPT_ID || '');
+  const routeHash = String(registry.ROUTE_HASH || '');
+  const held = String(registry.HELD_START || '');
+  if (!/^a_[a-f0-9]{32}$/.test(attempt)
+    || !/^[a-f0-9]{64}$/.test(routeHash)
+    || !['pending', '1'].includes(held)
+    || registry.PROFILE !== profile
+    || registry.ROUTE !== route
+    || (expectedCatalogHash && registry.CATALOG_HASH !== expectedCatalogHash)
+    || (registry.QUEUE_DISPATCH_ID || '') !== queueDispatchId
+    || (registry.RUNNER_OVERRIDE_PRIMARY || '') !== runnerPrimaryOverride
+    || registry.RUN_PROTOCOL !== '2'
+    || registry.CATALOG_PROTOCOL !== 'route-v2'
+    || !['publish', 'disabled'].includes(String(registry.DELIVERY_MODE))
+    || registry.STALLED_HUMAN === '1') return null;
+  // Значение маркера в строку не входит: переход pending→1 при готовности стенда
+  // не должен сбрасывать счётчик последовательных подтверждений.
+  return `${attempt}:${routeHash}:${registry.CATALOG_HASH || ''}`
+    + `:${registry.QUEUE_DISPATCH_ID || ''}:${registry.RUNNER_OVERRIDE_PRIMARY || ''}`;
 }
 
 /**

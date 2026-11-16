@@ -374,7 +374,7 @@
         <span v-else class="ctitle pipeline-title-static muted">
           <UiSpinner decorative /> {{ translate('core.pipelineZagruzkaNazvaniya') }} </span>
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
-          {{ t.readOnly ? translate('core.pipelineTolkoChtenie') : t.stall ? (t.stall.kind === 'crashed' ? translate('core.pipelineOborvalas') : translate('core.pipelineVstala')) : (t.daemonAlive ? translate('core.pipelineIdet') : translate('core.pipelineStoit')) }}
+          {{ t.readOnly ? translate('core.pipelineTolkoChtenie') : t.holdPending ? translate('core.coreSozdayotsya') : t.held ? translate('core.coreOzhidaetStarta') : t.stall ? (t.stall.kind === 'crashed' ? translate('core.pipelineOborvalas') : translate('core.pipelineVstala')) : (t.daemonAlive ? translate('core.pipelineIdet') : translate('core.pipelineStoit')) }}
         </span>
         <span
           v-if="trackerTimerState(t)"
@@ -3410,8 +3410,10 @@ async function stopArbiter(task: PipelineViewTask) {
 
 // Оборвавшийся прогон продолжает человек кнопкой: новый start движок отклонит,
 // пока у задачи есть открытая попытка. Исторические записи остаются только чтением.
+// Созданный без старта конвейер ждёт той же кнопки, но пока стенд поднимается
+// (holdPending), старт недоступен: resume упёрся бы в частичную песочницу.
 function canResume(t: PipelineViewTask) {
-  return !t.readOnly && !t.daemonAlive && !!t.attempt
+  return !t.readOnly && !t.daemonAlive && !t.holdPending && !!t.attempt
     && !['completed', 'abandoned'].includes(t.result || '');
 }
 
@@ -3504,10 +3506,19 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
   }
 
   if (canResume(t)) {
-    add(
-      'resume', translate('core.coreProdolzhitProgon'), translate('core.coreTaZhePopytkaPoedet'),
-      translate('core.coreProdolzhayuProgon'), 'sbresume',
-    );
+    // Созданный без старта конвейер человек запускает явно: действие то же (resume),
+    // но подпись и подсказка говорят о старте, а не о продолжении оборванного.
+    if (t.held) {
+      add(
+        'resume', translate('core.coreZapustitProgon'), translate('core.coreKonveyerSozdanBezZapuska'),
+        translate('core.coreZapuskayuProgon'), 'sbresume',
+      );
+    } else {
+      add(
+        'resume', translate('core.coreProdolzhitProgon'), translate('core.coreTaZhePopytkaPoedet'),
+        translate('core.coreProdolzhayuProgon'), 'sbresume',
+      );
+    }
   }
 
   if (canStop(t)) {
@@ -3551,7 +3562,7 @@ function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
     arbitrate: () => arbitrate(t.task),
     stopArbiter: () => stopArbiter(t),
     retry: () => sandboxRetry(t.task),
-    resume: () => resumeRun(t.task),
+    resume: () => resumeRun(t.task, t.held === true),
     stop: () => stopRun(t.task),
     down: () => sandboxDown(t.task),
     close: () => closeTask(t),
@@ -3563,14 +3574,18 @@ function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
 /**
  * Продолжает оборвавшийся прогон после подтверждения человека.
  * Повторная команда блокируется до завершения запроса и обновления списка.
+ * Созданный без старта конвейер тем же действием стартует впервые: подтверждение
+ * говорит о запуске и назначенных исполнителях, а не о продолжении обрыва.
  */
-async function resumeRun(task: TaskId) {
+async function resumeRun(task: TaskId, held = false) {
   if (pendingCardActions.value.has(task)) {
     return;
   }
   if (!await confirmDialog(
-    messageRef('core.pipelineProdolzhitProgonZadachiTask', { task }),
-    { okText: translate('core.browserResume') },
+    held
+      ? messageRef('core.pipelineZapustitSozdannyyKonveyerTask', { task })
+      : messageRef('core.pipelineProdolzhitProgonZadachiTask', { task }),
+    { okText: held ? translate('core.coreZapustit') : translate('core.browserResume') },
   )) {
     return;
   }

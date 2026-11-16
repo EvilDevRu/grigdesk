@@ -31,6 +31,13 @@ swiping neither approves a request nor opens its target. The notification remain
 Touch and focus pause its timer. On phones, searchable menu input keeps ordinary field text size;
 type part of a name and select a result.
 
+Automatic pipeline start on creation is configured under Automation → Launch. The enabled
+toggle (default) starts the pipeline right after confirmation in the task card. The disabled
+one creates the pipeline without running nodes: the card shows "awaiting start", executors
+can be assigned per node before work begins, and the start is performed by the "start run"
+button on the pipeline card. The setting applies to all devices and affects only the manual
+launch from the task card — rule-based auto-launches and bulk start work as before.
+Scenario: [pipeline launch and operation](pipelines.md).
 ## Result
 
 Confirmed settings are saved. Closing with unapplied changes offers an explicit choice.

@@ -621,6 +621,23 @@ trap, затем через trusted runner identity останавливает e
 resume/gate и recovery; не-graceful смерть (SIGKILL по таймауту, oom) метки не получает
 и по-прежнему показывается как обрыв.
 
+**Создание без старта (`start --hold-start`).** Режим только новой попытки: вся
+подготовка выполняется штатно (попытка, pins, lifecycle, identity-проекция, контракты,
+ticket, подъём стенда), но bootstrap-разведка и основной диспетчер пропускаются, курсор
+не инициализируется. Реестр получает двухфазный маркер `HELD_START`: `pending` сразу
+после полной identity-проекции, `1` — только после полного `v2_sandbox_bootstrap_wait`
+(выход раньше готовности стенда запрещён: EXIT-trap убивает незавершённый `up.sh` и
+оставляет частичную песочницу, тупик 75 на resume). Команда выходит с 0; демон штатно
+завершается и `ORCH_PID` очищается. Ручной старт — обычный resume: он сам выполняет
+разведку при отсутствии `artifacts/bootstrap.json` и идемпотентно создаёт курсор
+(отсутствие курсора прощают held-проверки recover-пути). Маркер снимает любой новый
+заход движка, как `STOPPED_SIGNAL`. GrigDesk подтверждает создание по
+`heldRegistryIdentity` без живого демона и отвечает `outcome: 'created'`; `detectStall`
+при `HELD_START=1` не считает попытку обрывом. Стенд и слот (в shared — lease профиля)
+остаются зарезервированными до старта или abandon. Контракт продукта —
+[создание без старта](../grigdesk/pipeline/held-start.md); барьеры —
+`tests/engine/integration/route-held-start.sh` и `tests/server/factory-launch-held.test.js`.
+
 **Trusted identity раннера.** Публичная идентичность живого запуска — файл
 `${FACTORY_CONTROL_ROOT}/runner-processes/t<TASK>.active` (SCHEMA=1, ровно 11 строк:
 TASK/STAGE/RUN_ID/EPOCH/RUNNER/PID/PGID/SESSION/STARTTIME/STATE). Публикация требует
