@@ -57,4 +57,18 @@
   "linkChannelDescription": "Постоянное уведомление о работе приложения в фоне.",
   "linkServiceTitle": "GrigDesk на связи",
   "linkServiceText": "Оповещения приходят, пока приложение свёрнуто.",
+  "widgetRefreshInvalid": "Неверный запрос обновления виджета.",
+  "widgetTitle": "Конвейер",
+  "widgetRunning": "В работе",
+  "widgetWaiting": "Ждут вас",
+  "widgetStalled": "Остановлены",
+  "widgetUpdated": "обновлено",
+  "widgetStateOffline": "Нет связи",
+  "widgetStateLocked": "Нужна разблокировка",
+  "widgetStateNoMachine": "Нет машины",
+  "widgetStateUnpaired": "Нужна привязка",
+  "widgetUpdating": "Обновление…",
+  "widgetRefresh": "Обновить",
+  "widgetStateClientUpgrade": "Обновите приложение",
+  "widgetStateServerUpgrade": "Обновите сервер"
 }

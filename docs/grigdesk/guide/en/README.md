@@ -50,6 +50,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Tasks and triage: stale data, recovery and unknown action outcomes](tasks.md)
 - [Inbox, Telegram and GitHub](incoming.md)
 - [Starting and running pipelines](pipelines.md)
+- [Pipeline widget on your phone](pipeline-widget.md)
 - [Human decisions and stops](gates.md)
 - [Route editor](routes.md)
 - [Plugins](plugins.md)

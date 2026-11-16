@@ -73,6 +73,16 @@ public final class AndroidActions implements ShellApi.Native {
       LinkService.stop(context);
     }
   }
+
+  /**
+   * Запрос обновления виджета не ждёт воркера: труба отвечает сразу,
+   * счётчики доезжают до главного экрана после фонового запроса.
+   */
+  @Override
+  public void refreshWidget() {
+    PipelineWidget.refreshNow(context);
+  }
+
   /**
    * Файл становится виден в Загрузках только после успешной потоковой записи.
    * Ошибка удаляет незавершённую запись, а имя не может содержать путь.

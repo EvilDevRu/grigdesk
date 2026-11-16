@@ -57,4 +57,18 @@
   "linkChannelDescription": "Persistent notification while the app works in the background.",
   "linkServiceTitle": "GrigDesk is connected",
   "linkServiceText": "Alerts arrive while the app is minimized.",
+  "widgetRefreshInvalid": "Invalid widget refresh request.",
+  "widgetTitle": "Pipeline",
+  "widgetRunning": "Running",
+  "widgetWaiting": "Waiting for you",
+  "widgetStalled": "Stalled",
+  "widgetUpdated": "updated",
+  "widgetStateOffline": "Offline",
+  "widgetStateLocked": "Unlock needed",
+  "widgetStateNoMachine": "No machine",
+  "widgetStateUnpaired": "Pairing needed",
+  "widgetUpdating": "Updating…",
+  "widgetRefresh": "Refresh",
+  "widgetStateClientUpgrade": "Update the app",
+  "widgetStateServerUpgrade": "Update the server"
 }

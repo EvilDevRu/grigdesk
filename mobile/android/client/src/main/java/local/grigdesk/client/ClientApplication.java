@@ -72,6 +72,15 @@ public final class ClientApplication extends Application implements Application.
 
     // Фоновая связь читается до runtime: сохранённый выбор определяет жизнь трубы в фоне.
     backgroundLink = new BackgroundLink(new File(getFilesDir(), "background-link.json"));
+
+    // Виджет конвейера обновляется по расписанию даже без открытого приложения.
+    // Отказ планирования не мешает запуску: периодика восстановится следующим стартом.
+    try {
+      PipelineWidget.schedulePeriodic(this);
+    } catch (Exception exception) {
+      android.util.Log.e("GrigDesk", "Не удалось запланировать обновление виджета", exception);
+    }
+
     // Gate создаётся до любых Activity: холодный запуск с включённой блокировкой закрыт.
     // Таймер фона живёт на главном цикле и переживает смену Activity.
     appLock = new AppLock(new File(getFilesDir(), "app-lock.json"),

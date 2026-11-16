@@ -4001,6 +4001,7 @@
   ],
   "nativeFiles": [
     "mobile/android/client/src/main/java/local/grigdesk/client/MainActivity.java",
+    "mobile/android/client/src/main/java/local/grigdesk/client/PipelineWidgetProvider.java",
     "mobile/android/client/src/main/java/local/grigdesk/client/AndroidActions.java",
     "mobile/android/client/src/main/java/local/grigdesk/client/ClientRuntime.java",
     "mobile/android/client/src/main/java/local/grigdesk/client/ClientApplication.java",

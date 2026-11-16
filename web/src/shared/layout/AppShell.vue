@@ -529,6 +529,7 @@ import { localizePluginCategory } from '../../features/settings/metadataLocale.t
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
+import { refreshPipelineWidget, disposePipelineWidgetRefresh } from '../widgetRefresh.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
 import { useGrigDeskUpdateStore } from '../../stores/grigdeskUpdate.ts';
 import { useApplicationUpdateStore } from '../../stores/applicationUpdate.ts';
@@ -807,6 +808,7 @@ let stopAlertLinks: (() => void) | null = null;
 
 setAlertTargetOpener((target) => openAlertTarget(target, alertLinkDeps));
 onUnmounted(() => {
+  disposePipelineWidgetRefresh();
   stopAlertLinks?.();
   setAlertTargetOpener(null);
 });
@@ -936,6 +938,7 @@ watch(() => props.active, (active) => {
   void prov.load(false, { reason: 'startup' });
   void prov.loadUsage();
   notifyWatch.start();
+  refreshPipelineWidget();
 }, { immediate: true });
 
 const pipelineTopbar = computed(() => {
@@ -1178,6 +1181,7 @@ const { connected } = useSse((name, data) => {
 
   if (name === 'state-change') {
     notifyWatch.check();
+    refreshPipelineWidget();
   }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
   if (name === 'providers-update') {

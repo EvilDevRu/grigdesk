@@ -196,6 +196,19 @@
     ]
   },
   {
+    "file": "pipeline-widget.md",
+    "id": "pipeline-widget",
+    "title": "Pipeline widget on your phone",
+    "section": "Pipelines",
+    "keywords": [
+      "widget",
+      "home screen",
+      "phone",
+      "counters",
+      "android"
+    ]
+  },
+  {
     "file": "gates.md",
     "id": "gates",
     "title": "Human decisions and stops",

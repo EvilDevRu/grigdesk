@@ -202,6 +202,19 @@
     ]
   },
   {
+    "file": "pipeline-widget.md",
+    "id": "pipeline-widget",
+    "title": "Виджет «Конвейер» на телефоне",
+    "section": "Конвейер",
+    "keywords": [
+      "виджет",
+      "главный экран",
+      "телефон",
+      "счётчики",
+      "android"
+    ]
+  },
+  {
     "file": "gates.md",
     "id": "gates",
     "title": "Решения человека и остановки",

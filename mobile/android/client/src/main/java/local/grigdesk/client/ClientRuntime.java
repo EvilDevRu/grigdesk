@@ -153,6 +153,14 @@ public final class ClientRuntime implements AutoCloseable {
     String key = id == null ? "" : id;
 
     try {
+      // Выбор уже сохранён ShellApi: прежние числа исчезают до перехода на новый origin.
+      // Недоступная новая машина и пустой выбор тоже получают актуальный виджет.
+      try {
+        PipelineWidget.selectionChanged(context);
+      } catch (Exception exception) {
+        android.util.Log.e("GrigDesk", "Не удалось обновить виджет после выбора машины", exception);
+      }
+
       for (String existing : new ArrayList<>(pipes.keySet())) {
         if (!existing.isEmpty() && profiles.profiles.stream()
           .noneMatch(profile -> profile.optString("id").equals(existing))) {

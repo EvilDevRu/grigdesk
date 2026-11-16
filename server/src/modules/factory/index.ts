@@ -36,6 +36,7 @@ import {
   factoryMobileIdentity, factoryPreludeIdentity, factorySnapshotHash, sameFactoryIdentity,
 } from '../../lib/mobile/factoryIdentity.ts';
 import { STAGES, StageKind } from '../../lib/stages.ts';
+import { factoryWidgetCounters } from '../../lib/factoryWidget.ts';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factoryCli.ts';
 import { taskDiff } from '../../lib/git.ts';
 import { refreshRepos } from '../../lib/gitRefresh.ts';
@@ -699,6 +700,8 @@ async function factoryModule(
 
   // Компактная сводка конвейера для виджета главного экрана: только счётчики.
   // Текст задач не покидает сервер; виджет опрашивает сводку редко и по событиям.
+  fastify.get<FactoryRoute>('/api/factory/widget-summary', async () => {
+    const counters = factoryWidgetCounters(await factoryState.listTasks());
 
     return { ...counters, at: new Date().toISOString() };
   });

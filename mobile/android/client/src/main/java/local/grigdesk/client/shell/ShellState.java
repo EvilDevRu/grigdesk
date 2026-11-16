@@ -155,7 +155,11 @@ public final class ShellState {
     result.put("serverApi", connection == null ? JSONObject.NULL : connection.get("serverApi"));
     result.put("appApi", new JSONObject().put("major", major).put("minor", minor));
     result.put("localAvailable", false);
-    JSONArray capabilities = new JSONArray(new String[] { "scan", "save", "unlock", "routeUpdate" });
+
+    // Виджет конвейера собирается вместе с трубой: отдельный признак не нужен,
+    // прежние оболочки без этого кода capability не объявляют.
+    JSONArray capabilities = new JSONArray(new String[] { "scan", "save", "unlock", "routeUpdate",
+      "widget" });
 
     if (notify.getAsBoolean()) {
       capabilities.put("notify");

@@ -66,6 +66,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
      */
     default void setBackgroundLink(boolean enabled) throws Exception {
     }
+
+    /**
+     * Виджет конвейера обновляется нативным воркером установки.
+     * Прежние оболочки без виджета сохраняют no-op, запрос не считается ошибкой.
+     */
+    default void refreshWidget() throws Exception {
+    }
   }
 
   /**
@@ -466,8 +473,11 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
     try {
       if (gate != null && gate.locked()) {
+        // Виджет получает только счётчики: обновление разрешено и при закрытом gate,
+        // интерфейс при этом остаётся заблокированным.
         boolean allowed = head.method().equals("GET") && path.equals("/__shell/state")
-          || head.method().equals("POST") && path.equals("/__shell/unlock");
+          || head.method().equals("POST") && path.equals("/__shell/unlock")
+          || head.method().equals("POST") && path.equals("/__shell/widget-refresh");
 
         if (!allowed) {
           return PipeResponse.error(423, "locked");
@@ -558,6 +568,21 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
         return PipeResponse.json(200, new JSONObject().put("ok", true));
       }
+
+      if (path.equals("/__shell/widget-refresh") && head.method().equals("POST")) {
+        if (data.length() != 0) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.widgetRefreshInvalid",
+              "Неверный запрос обновления виджета."));
+        }
+
+        if (nativeActions != null) {
+          nativeActions.refreshWidget();
+        }
+
+        return PipeResponse.json(200, new JSONObject().put("ok", true));
+      }
+
       String navigation = null;
       boolean move = false;
 
