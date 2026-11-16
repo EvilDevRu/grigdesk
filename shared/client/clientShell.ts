@@ -58,7 +58,7 @@ export interface ShellState {
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
   capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'taskSources' | 'browser'
-    | 'applicationLauncher' | 'appUpdates' | 'routeUpdate')[];
+    | 'applicationLauncher' | 'appUpdates' | 'routeUpdate' | 'notify')[];
 }
 
 export const RELEASES_URL = '';

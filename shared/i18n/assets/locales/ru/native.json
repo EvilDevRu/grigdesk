@@ -47,5 +47,9 @@
   "device_unknown": "Устройство не найдено. Получите новый QR и привяжите его заново.",
   "appLockInvalid": "Неверные поля блокировки приложения.",
   "appLockSaveFailure": "Не удалось сохранить настройку блокировки.",
-  "profileChanged": "Машина изменена. Повторите обновление."
+  "profileChanged": "Машина изменена. Повторите обновление.",
+  "notifyChannelName": "Оповещения GrigDesk",
+  "notifyChannelDescription": "Ответы агентов и события, которые требуют внимания.",
+  "invalidNotification": "Неверное оповещение.",
+  "notifyRequestOpen": "Запрос разрешения уже открыт.",
 }

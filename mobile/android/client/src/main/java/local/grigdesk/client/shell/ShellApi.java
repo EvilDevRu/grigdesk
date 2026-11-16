@@ -40,6 +40,25 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     String scan() throws Exception;
     void save(String name, String type, InputStream body) throws Exception;
     void unlock() throws Exception;
+
+    /**
+     * Оповещения необязательны для прежних оболочек: без нативного канала
+     * труба объявляет unsupported, и интерфейс сохраняет браузерное поведение.
+     */
+    default String notifyPermission() throws Exception {
+      return "unsupported";
+    }
+
+    default String requestNotifyPermission() throws Exception {
+      return "unsupported";
+    }
+
+    default boolean notify(String title, String body, String tag, String url) throws Exception {
+      return false;
+    }
+
+    default void cancelNotification(String tag) throws Exception {
+    }
   }
 
   /**
@@ -138,6 +157,10 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     return gate != null && gate.locked();
   }
 
+  /**
+   * Прежние оболочки без настройки фоновой связи сохраняют закрытый фон и gate.
+   * Чтение признака не создаёт настройку там, где её нет.
+   */
   /**
    * Заблокированный gate скрывает все транспорты: труба ответит 423 по статусу недоступности.
    * Открытие gate возвращает прежнюю выдачу без пересоздания соединений.
@@ -337,6 +360,33 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   }
 
   /**
+   * Отсутствие нативного канала читается как unsupported, а не как отказ разрешения.
+   * Интерфейс отличает такую оболочку от браузера без Notification API.
+   */
+  private String notifyPermission() throws Exception {
+    return nativeActions == null ? "unsupported" : nativeActions.notifyPermission();
+  }
+
+  /**
+   * Поля оповещения принимаются только строками в пределах длины системного показа.
+   * Отсутствующее поле считается пустым, чужой тип отвергается до нативного вызова.
+   */
+  private String notifyText(JSONObject data, String key, int limit) {
+    Object value = data.opt(key);
+
+    if (value == null || value == JSONObject.NULL) {
+      return "";
+    }
+
+    if (!(value instanceof String) || ((String) value).length() > limit) {
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.invalidNotification", "Неверное оповещение."));
+    }
+
+    return (String) value;
+  }
+
+  /**
    * Имена параметров и значения разбираются отдельно без интерпретации пути.
    * Перегрузка с именем кодировки поддерживается начиная с минимального Android API.
    */
@@ -427,6 +477,42 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         return PipeResponse.json(200, state.snapshot());
       }
 
+        return PipeResponse.json(200, new JSONObject().put("permission", notifyPermission()));
+      }
+
+      if (path.equals("/__shell/notify-permission") && head.method().equals("POST")) {
+        String permission = nativeActions == null ? "unsupported"
+          : nativeActions.requestNotifyPermission();
+
+        return PipeResponse.json(200, new JSONObject().put("permission", permission));
+      }
+
+      if (path.equals("/__shell/notify") && head.method().equals("POST")) {
+        String title = notifyText(data, "title", 200);
+        String bodyText = notifyText(data, "body", 2000);
+        String tag = notifyText(data, "tag", 200);
+        String url = notifyText(data, "url", 2048);
+
+        if (title.trim().isEmpty()) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.invalidNotification", "Неверное оповещение."));
+        }
+
+        boolean shown = nativeActions != null && nativeActions.notify(title, bodyText, tag, url);
+
+        return PipeResponse.json(200, new JSONObject()
+          .put("shown", shown).put("permission", notifyPermission()));
+      }
+
+      if (path.equals("/__shell/notify-cancel") && head.method().equals("POST")) {
+        String tag = notifyText(data, "tag", 200);
+
+        if (nativeActions != null) {
+          nativeActions.cancelNotification(tag);
+        }
+
+        return PipeResponse.json(200, new JSONObject().put("ok", true));
+      }
       String navigation = null;
       boolean move = false;
 

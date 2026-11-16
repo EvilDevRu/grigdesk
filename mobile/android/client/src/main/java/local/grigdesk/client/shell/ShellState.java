@@ -9,6 +9,7 @@ public final class ShellState {
   private final ProfileStore store;
   private final ShellLocale locale;
   private final java.util.function.Supplier<JSONObject> appLock;
+  private final java.util.function.BooleanSupplier notify;
   private final int major;
   private final int minor;
   private final Map<String, JSONObject> states = new HashMap<>();
@@ -32,11 +33,21 @@ public final class ShellState {
    */
   public ShellState(ProfileStore store, int major, int minor, ShellLocale locale,
     java.util.function.Supplier<JSONObject> appLock) {
+    this(store, major, minor, locale, appLock, () -> false);
+  }
+
+  /**
+   * Нативный канал оповещений объявляется отдельной возможностью: прежние оболочки
+   * без него сохраняют снимок без capability, а интерфейс не ждёт системного показа.
+   */
+  public ShellState(ProfileStore store, int major, int minor, ShellLocale locale,
+    java.util.function.Supplier<JSONObject> appLock, java.util.function.BooleanSupplier notify) {
     this.appLock = appLock;
     this.locale = locale;
     this.store = store;
     this.major = major;
     this.minor = minor;
+    this.notify = notify;
   }
 
   public synchronized void changed() {
@@ -132,7 +143,13 @@ public final class ShellState {
     result.put("serverApi", connection == null ? JSONObject.NULL : connection.get("serverApi"));
     result.put("appApi", new JSONObject().put("major", major).put("minor", minor));
     result.put("localAvailable", false);
-    result.put("capabilities", new JSONArray(new String[] { "scan", "save", "unlock", "routeUpdate" }));
+    JSONArray capabilities = new JSONArray(new String[] { "scan", "save", "unlock", "routeUpdate" });
+
+    if (notify.getAsBoolean()) {
+      capabilities.put("notify");
+    }
+
+    result.put("capabilities", capabilities);
 
     if (appLock != null) {
       result.put("appLock", appLock.get());

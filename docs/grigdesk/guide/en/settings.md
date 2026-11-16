@@ -38,6 +38,10 @@ can be assigned per node before work begins, and the start is performed by the "
 button on the pipeline card. The setting applies to all devices and affects only the manual
 launch from the task card — rule-based auto-launches and bulk start work as before.
 Scenario: [pipeline launch and operation](pipelines.md).
+
+System notifications are enabled and tested under Interface → Notifications: the button requests
+the device permission and immediately shows a test notification. In the Android app the system
+itself displays them through the GrigDesk alerts channel; the permission can be revoked in the
 ## Result
 
 Confirmed settings are saved. Closing with unapplied changes offers an explicit choice.

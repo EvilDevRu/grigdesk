@@ -33,6 +33,29 @@ public final class AndroidActions implements ShellApi.Native {
     local.grigdesk.client.shell.ClientFailure.await(activity.get().unlock());
   }
 
+  @Override
+  public String notifyPermission() {
+    return Notifications.permission(context);
+  }
+
+  /**
+   * Системный запрос разрешения принадлежит видимой Activity и жесту человека.
+   * Отказ возвращается состоянием, а не ошибкой трубы: интерфейс покажет причину.
+   */
+  @Override
+  public String requestNotifyPermission() throws Exception {
+    return local.grigdesk.client.shell.ClientFailure.await(activity.get().requestNotifyPermission());
+  }
+
+  @Override
+  public boolean notify(String title, String body, String tag, String url) {
+    return Notifications.show(context, title, body, tag, url);
+  }
+
+  @Override
+  public void cancelNotification(String tag) {
+    Notifications.cancel(context, tag);
+  }
   /**
    * Файл становится виден в Загрузках только после успешной потоковой записи.
    * Ошибка удаляет незавершённую запись, а имя не может содержать путь.

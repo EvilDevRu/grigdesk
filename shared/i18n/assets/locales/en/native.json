@@ -47,5 +47,9 @@
   "device_unknown": "Device not found. Get a new QR code and pair it again.",
   "appLockInvalid": "Invalid app lock fields.",
   "appLockSaveFailure": "Could not save the app lock preference.",
-  "profileChanged": "The machine changed. Try updating again."
+  "profileChanged": "The machine changed. Try updating again.",
+  "notifyChannelName": "GrigDesk alerts",
+  "notifyChannelDescription": "Agent replies and events that need attention.",
+  "invalidNotification": "Invalid notification.",
+  "notifyRequestOpen": "A permission request is already open.",
 }

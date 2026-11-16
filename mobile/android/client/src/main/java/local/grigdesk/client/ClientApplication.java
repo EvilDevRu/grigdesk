@@ -66,6 +66,8 @@ public final class ClientApplication extends Application implements Application.
       android.util.Log.e("GrigDesk", "Не удалось прочитать локаль установки", exception);
     }
 
+    // Канал оповещений существует до первого события, чтобы настройка важности была видна сразу.
+    Notifications.ensureChannel(this);
     // Gate создаётся до любых Activity: холодный запуск с включённой блокировкой закрыт.
     // Таймер фона живёт на главном цикле и переживает смену Activity.
     appLock = new AppLock(new File(getFilesDir(), "app-lock.json"),
