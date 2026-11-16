@@ -34,6 +34,11 @@ export interface AccessCapability {
   credentialFingerprint?: (env: NodeJS.ProcessEnv) => Promise<string | null>;
   cli?: {
     version: string;
+    // Дополнительно проверенные версии того же протокола login (быстрый путь gate).
+    versions?: string[];
+    // Проверенные наборы хэшей схем login: неизвестная версия допускается,
+    // если её протокол идентичен одному из наборов.
+    protocolSchemas?: Array<Record<string, string>>;
     args: string[];
     protocol: 'codex-rpc' | 'manual-code' | 'device-code';
     hosts: string[];

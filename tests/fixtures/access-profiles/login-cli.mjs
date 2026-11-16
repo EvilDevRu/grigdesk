@@ -98,6 +98,19 @@ if (!supported) {
   process.exit(64);
 }
 
+if (scenario.provider === 'codex' && args.includes('generate-json-schema')) {
+  if (scenario.unknown || !scenario.schemasDir) {
+    process.stderr.write('Фикстура не умеет генерировать схемы\n');
+    process.exit(64);
+  }
+  const out = args[args.indexOf('--out') + 1];
+  fs.cpSync(scenario.schemasDir, out, { recursive: true });
+  if (scenario.schemaSet === 'tampered') {
+    fs.writeFileSync(path.join(out, 'v2/LoginAccountResponse.json'), '{"tampered":true}\n');
+  }
+  process.exit(0);
+}
+
 if (args.includes('app-server')) {
   lines.on('line', (line) => {
     const message = JSON.parse(line);

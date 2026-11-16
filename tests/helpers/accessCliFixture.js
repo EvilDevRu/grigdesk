@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import protocols from '../fixtures/access-profiles/cli-protocols.json' with { type: 'json' };
 import codex from '../../server/src/lib/executors/codex.ts';
@@ -55,6 +56,7 @@ export async function prepareCliFixture(root, provider, extra = {}) {
   await fs.writeFile(path.join(root, 'scenario.json'), JSON.stringify({
     provider,
     version: CLI_VERSIONS[provider],
+    schemasDir: fileURLToPath(new URL('../fixtures/access-profiles/codex-schemas', import.meta.url)),
     ...extra,
   }));
 

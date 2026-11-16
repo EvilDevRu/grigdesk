@@ -27,7 +27,9 @@ conversations or unfinished pipelines. Work, approval waits, background work and
 a paused pipeline also holds access. Disabled buttons explain why and update automatically when work ends.
 
 After connection loss, the wizard checks the actual outcome without resending the key.
-Retry interrupted or expired sign-in. Unsupported CLI versions show a reason and preserve previous access.
+Retry interrupted or expired sign-in. The wizard verifies the sign-in protocol, not only the CLI version:
+verified versions are accepted immediately, a new version after comparing its app-server schemas with the verified ones.
+A changed protocol or unavailable schemas show a reason and preserve previous access.
 Failed executor sign-in does not sign you out of GrigDesk or automatically choose another account.
 When an old GLM key fails and accounts cannot be compared, replacing it requires confirmation after key verification.
 After cancelling CLI sign-in, wait for its process to exit; turns, switching and another sign-in may remain unavailable until then.
