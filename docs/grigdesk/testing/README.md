@@ -50,7 +50,7 @@
 - [Типы тестов установки: реестр без UI, Fastify, опись выпуска и TCP-адрес фикстуры](provider-install-type-boundaries.md)
 - [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
-- [Prefix source/SEA, архив Node, retention без блокировки свежих ELF и гонки уборки](source-runtime-dependencies.md)
+- [Prefix source/SEA, архив Node, native preflight вне срока запуска и безопасный retention](source-runtime-dependencies.md)
 - [Smoke GLM проверяет admission выбранного выпуска без внешней модели](glm-release-admission-fixture.md)
 - [Фикстуры GLM: smoke, изолированный CLI, model-only, команды и frozen admission](glm-smoke-mode-fixtures.md)
 - [Родитель фикстуры в артефактах: создание и GRIGDESK_ARTIFACTS_DIR без пути машины](artifact-fixture-parent.md)
