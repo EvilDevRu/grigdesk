@@ -564,6 +564,10 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
     append(root, null, errorReason(error));
   }
 
+  // Предварительный отказ от молодых данных мог прочитать занятость темы.
+  // Для удаления нужен новый снимок после захвата барьера.
+  themeLocks.clear();
+
   let barrier;
   const barrierPath = directoryCleanupLockPath(root);
 
