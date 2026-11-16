@@ -15,12 +15,20 @@ async function geometry(page) {
     const save = root.querySelector('[data-role="project-save"]');
     const saveRect = save?.getBoundingClientRect();
     const elements = [...root.querySelectorAll('*')];
-    const overflow = elements.filter((element) => {
+    const overflowing = elements.filter((element) => {
       const style = getComputedStyle(element);
 
       return element.clientWidth && element.scrollWidth > element.clientWidth + 2
         && style.overflowX === 'visible' && !['INPUT', 'TEXTAREA'].includes(element.tagName);
-    }).map((element) => element.className);
+    });
+    const overflow = overflowing.map((element) => element.className);
+    const overflowDetails = overflowing.map((element) => ({
+      className: element.className,
+      width: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      display: getComputedStyle(element).display,
+      text: element.textContent.slice(0, 100),
+    }));
     const targets = elements.filter((element) => (
       (element.tagName === 'BUTTON' || element.classList.contains('ui-radio'))
         && element.getBoundingClientRect().width > 0
@@ -32,6 +40,7 @@ async function geometry(page) {
 
     return {
       overflow,
+      overflowDetails,
       labels,
       documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       // Действия шапки видимы на 32 px, а общий ::after сохраняет площадку touch 44 px.
@@ -109,7 +118,7 @@ test('проекты: каталог, карточка и создание на 
         }
 
         assert.equal(result.documentOverflow, false, label);
-        assert.deepEqual(result.overflow, [], label);
+        assert.deepEqual(result.overflow, [], `${label}: ${JSON.stringify(result.overflowDetails)}`);
         assert.deepEqual(result.labels, [], `Обрезанные подписи: ${label}`);
         assert.equal(result.saveVisible, true, `Недоступно сохранение: ${label}`);
         assert.ok(result.minimumTarget >= (hasTouch ? 44 : 28), label);

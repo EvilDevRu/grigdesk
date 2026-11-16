@@ -265,13 +265,14 @@ test('NET-b24', async () => {
   server.reply = { tasks: [] };
   await store.load(true);
   assert.equal(baselineCalls, 1);
-  assert.equal(calls.filter((call) => call.url === '/api/trackers').length, 2);
+  assert.equal(calls.filter((call) => call.url === '/api/trackers').length, 3);
 
   const previous = store.data;
 
   server.reply = { tasks: 'bad' };
   await store.load(true);
-  assert.equal(store.data, previous, 'неверная доска не назначается');
+  assert.equal(store.data, null, 'ошибка DTO снимает снимок, а не назначает неверную доску');
+  assert.deepEqual(previous.tasks, [], 'прежний объект не меняется при отказе');
   assert.equal(baselineCalls, 1);
   assert.ok(store.error);
   assert.equal(calls.filter((call) => call.url === '/api/tracker/dashboard').length, 2);

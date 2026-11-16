@@ -45,7 +45,7 @@ test('AP23_reconcile_secret: двойной submit, lost ACK и reload узна�
   assert.equal(f.calls.filter((call) => call.method === 'POST').length, posts.length);
   await assertPrivate(f.page);
   await f.page.getByRole('button', { name: 'Подтвердить замену', exact: true }).click();
-  await f.page.getByText(/Сохранён|Сохранен/u).waitFor();
+  await f.page.getByText(/^(?:Сохранён|Сохранен)$/u).waitFor();
   assert.equal(f.snapshot.activeProfileId, 'profile-a', 'сохранение inactive не активирует профиль');
 });
 

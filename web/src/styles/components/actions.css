@@ -1901,6 +1901,12 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   transition: transform var(--control-motion-duration) var(--control-motion-easing);
 }
 
+/* SVG сохраняет границы стрелки при повороте независимо от метрик шрифта. */
+.ui-disclosure-button__chevron {
+  width: 16px;
+  height: 16px;
+}
+
 .ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__icon,
 .ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__chevron {
   transform: rotate(90deg);

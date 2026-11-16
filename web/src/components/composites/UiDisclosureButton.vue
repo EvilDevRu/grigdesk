@@ -13,7 +13,16 @@
   >
     <slot />
     <template #trailing>
-      <span class="ui-disclosure-button__chevron" aria-hidden="true">›</span>
+      <svg
+        class="ui-disclosure-button__chevron"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path d="m6 4 4 4-4 4" />
+      </svg>
     </template>
   </UiButton>
 </template>

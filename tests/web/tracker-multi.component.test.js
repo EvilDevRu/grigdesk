@@ -88,7 +88,7 @@ test('MD-SETTINGS-UI: включения A/B независимы, default вы�
   assert.equal(card.wrapper.findAll('[data-role="tracker-enabled"]').length, 2);
 });
 
-test('MD-CHIPS: лента, related и избранное показывают PNG A, монограмму B и GrigDesk', async (t) => {
+test('MD-CHIPS: лента, related и избранное показывают A/B без удалённой доски', async (t) => {
   const own = {
     id: '100000000001',
     source: 'grigdesk',
@@ -113,10 +113,10 @@ test('MD-CHIPS: лента, related и избранное показывают P
   });
   const rows = card.wrapper.findAll('li.trow');
 
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 2);
   assert.match(rows.find((row) => row.text().includes('Задача A')).text(), /Альфа/u);
   assert.match(rows.find((row) => row.text().includes('Задача B')).text(), /Бета/u);
-  assert.match(rows.find((row) => row.text().includes('Собственная задача')).text(), /GrigDesk/u);
+  assert.equal(rows.some((row) => row.text().includes('Собственная задача')), false);
   assert.equal(rows.find((row) => row.text().includes('Задача A')).find('img')
     .attributes('src'), card.metadata.catalog.drivers[1].logoUrl);
   assert.equal(rows.find((row) => row.text().includes('Задача B')).find('img').exists(), false);
@@ -178,10 +178,10 @@ test('MD-CHIPS: полка различает taskSource и причину со�
   const opened = [];
   const metadata = { catalog: multiCatalog(), async load() {} };
   const shelf = reactive({
-    allRows: [SOURCE_A, SOURCE_B, 'grigdesk'].map((taskSource, index) => ({
-      taskId: index === 2 ? '100000000001' : '42',
+    allRows: [SOURCE_A, SOURCE_B].map((taskSource, index) => ({
+      taskId: '42',
       taskSource,
-      title: ['Карточка A', 'Карточка B', 'Своя карточка'][index],
+      title: ['Карточка A', 'Карточка B'][index],
       addedAt: '2026-11-01T00:00:00Z',
       reasonText: 'Жду ответ',
       state: 'lit',
@@ -198,6 +198,9 @@ test('MD-CHIPS: полка различает taskSource и причину со�
     async load() {},
     async acknowledge() {},
     async remove() {},
+    forSource() {
+      return this;
+    },
   });
 
   globalThis.__multiShelfPanel = {
@@ -223,10 +226,9 @@ test('MD-CHIPS: полка различает taskSource и причину со�
 
   const rows = wrapper.findAll('[data-ui-task-shelf-row]');
 
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 2);
   assert.match(rows[0].text(), /Альфа/u);
   assert.match(rows[1].text(), /Бета/u);
-  assert.match(rows[2].text(), /GrigDesk/u);
   assert.equal(rows[0].get('img').attributes('src'), metadata.catalog.drivers[1].logoUrl);
   assert.equal(rows[1].find('img').exists(), false);
   await rows[1].get('.ui-selectable-row__primary').trigger('click');

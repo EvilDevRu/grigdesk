@@ -66,11 +66,9 @@
       "useSystemStore"
     ],
     "web/src/stores/taskFavorites.ts": [
-      "useGrigdeskTaskFavoritesStore",
       "useTaskFavoritesStore"
     ],
     "web/src/stores/taskSeen.ts": [
-      "useGrigdeskTaskSeenStore",
       "useTaskSeenStore"
     ],
     "web/src/stores/tasks.ts": [
@@ -135,6 +133,7 @@
         },
         "recentWorkdirs": [],
         "pagingEnabled": false,
+        "filtersProtocol": 0,
         "catalogMutationVersion": 0,
         "catalogPages": {},
         "catalogSummary": {
@@ -151,6 +150,14 @@
         "search": {
           "query": "",
           "archived": false,
+          "filters": {
+            "unread": false,
+            "waiting": false,
+            "working": false,
+            "task": "",
+            "provider": "",
+            "fresh": ""
+          },
           "loading": false,
           "error": "",
           "matches": {}
@@ -276,7 +283,13 @@
         "showAllModels": false,
         "updating": "",
         "updateResults": {},
-        "usageRefreshing": false
+        "usageRefreshing": false,
+        "usageRefreshingId": "",
+        "usageReloadPending": false,
+        "usageRefreshErrorId": "",
+        "usageRefreshError": "",
+        "usageAutoRefresh": null,
+        "usagePolicyRevision": -1
       }
     },
     "web/src/stores/system.ts": {

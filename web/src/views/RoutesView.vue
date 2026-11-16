@@ -1868,7 +1868,7 @@ onUnmounted(() => {
   }
 
   .route-editor-workspace__main {
-    grid-template-rows: minmax(160px, 1fr) minmax(96px, .45fr);
+    grid-template-rows: minmax(min-content, 1fr) minmax(96px, .45fr);
     min-height: 0;
   }
 
@@ -1882,9 +1882,14 @@ onUnmounted(() => {
     flex-shrink: 0;
   }
 
+  .route-editor-workspace__main :deep(.route-canvas__outcomes) {
+    flex-shrink: 0;
+  }
+
   .route-editor-workspace__main :deep(.route-canvas__graph) {
     flex: 1;
-    min-height: 0;
+    contain: size;
+    min-height: 200px;
   }
 
   .route-editor-workspace__stages {

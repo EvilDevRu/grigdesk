@@ -61,6 +61,7 @@ export async function desktopExitApp(t, options = {}) {
     stopPoll() {},
     setPassive() {},
     clearSource() {},
+    markTransportUnavailable() {},
   };
 
   other.$onAction = () => () => {};

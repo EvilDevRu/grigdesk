@@ -17,6 +17,8 @@ Route scripts remain in the selected profile; explicitly configured external pat
 5. Publish the verified revision and check the new-run form proposes it.
 
 Narrow panels switch between Catalog / Route / Properties using compact tabs, preserving selection and input.
+Wide panels keep the graph beside stage properties even when toolbar actions wrap;
+the stage list remains accessible below the graph.
 The catalog's round plus creates a draft; the plus beside project selection creates a project.
 Tooltips distinguish them.
 Model and effort belong to launch policy outside the route catalog; the inspector displays effective policy read-only.
