@@ -37,6 +37,7 @@ You have a consistent copy of working data, rather than program binaries alone.
 4. Alternatively, choose Developer → Artifact cleanup in the terminal menu. It previews candidates and
    defaults to Cancel. Only an explicit Delete starts removal after rechecking.
 5. Check the report. Young or busy directories and core Node cache content are preserved.
+   Cleanup does not block executor startup when it finds only young data.
    New directory-lock operations wait while removal runs; another cleanup skips directories if its barrier is busy.
    You can rerun after completion. Reported bytes estimate removed files and may differ from free-space gains.
    On error, resolve the reason and retry; other directories may already have been removed.

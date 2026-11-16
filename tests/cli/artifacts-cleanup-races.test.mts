@@ -7,6 +7,70 @@ import { cleanupArtifacts } from '../../shared/node/artifactsCleanup.ts';
 import { acquireDirectoryLock, directoryCleanupLockPath } from '../../shared/node/directoryLock.ts';
 import { DAY, oldTree, present, retentionFixture } from '../helpers/deepseekRetentionFixture.mts';
 
+test('AC-BARRIER: молодое содержимое не закрывает дерево для производителей', async (t) => {
+  const box = await retentionFixture(t);
+  const young = await oldTree(box.artifacts, 'young');
+
+  // Старый родитель не позволяет принять решение только по его mtime.
+  await fs.utimes(path.join(young, 'sentinel'), new Date(), new Date());
+
+  const mkdir = fs.mkdir.bind(fs);
+  const barrierPath = directoryCleanupLockPath(box.artifacts);
+  let barrierCreated = false;
+  const intercept = t.mock.method(fs, 'mkdir', async (...args: Parameters<typeof fs.mkdir>) => {
+    barrierCreated ||= String(args[0]) === barrierPath;
+
+    return mkdir(...args);
+  });
+
+  t.after(() => intercept.mock.restore());
+
+  const report = await cleanupArtifacts({ root: box.artifacts, scope: 'artifacts' });
+
+  assert.equal(report.errorCount, 0);
+  assert.equal(report.entries.find((entry) => entry.path === 'young')?.reason, 'young');
+  assert.equal(await present(young), true);
+  assert.equal(barrierCreated, false, 'Без кандидатов на удаление общий барьер не нужен');
+});
+
+test('AC-BARRIER: новый lock темы после young preview сохраняет старое поколение', async (t) => {
+  const box = await retentionFixture(t);
+  const generations = path.join(box.root, 'node-cache/generations');
+  const old = await oldTree(generations, 'old');
+
+  await oldTree(generations, 'young', 1, Date.now());
+
+  const active = path.join(box.root, 'test-builds/active');
+
+  await fs.mkdir(active, { recursive: true });
+
+  const mkdir = fs.mkdir.bind(fs);
+  let lock: Awaited<ReturnType<typeof acquireDirectoryLock>> | undefined;
+  const intercept = t.mock.method(fs, 'mkdir', async (...args: Parameters<typeof fs.mkdir>) => {
+    if (String(args[0]) === directoryCleanupLockPath(box.root) && !lock) {
+      lock = await acquireDirectoryLock(`${active}.lock`, { waitMs: 0 });
+    }
+
+    return mkdir(...args);
+  });
+
+  t.after(async () => {
+    intercept.mock.restore();
+    await lock?.release();
+  });
+
+  const report = await cleanupArtifacts({
+    root: box.root,
+    scope: 'deepseek-tests',
+    keepGenerations: 1,
+  });
+
+  assert.ok(lock, 'Сборка началась после предварительного обхода');
+  assert.equal(report.errorCount, 0);
+  assert.equal(await present(old), true, 'Старая generation нужна уже начавшейся сборке');
+  assert.equal(report.entries.find((entry) => entry.path === 'node-cache/generations/old')?.reason, 'locked');
+});
+
 for (const target of ['ancestor', 'ancestor-install', 'nested', 'payload'] as const) {
   test(`AC-BARRIER: ${target} lock не выдаётся между проверкой и удалением`, async (t) => {
     const box = await retentionFixture(t);

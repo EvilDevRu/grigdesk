@@ -478,11 +478,21 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
               ? path.dirname(path.dirname(directory)) : undefined,
           };
 
-          candidates.push(candidate);
-
           if (candidate.generation) {
             knownGenerations.set(child, candidate);
           }
+
+          // Свежий снимок можно только сохранить. Его повторный обход под общим
+          // барьером блокировал запуск соседних ELF, хотя удаление не допускалось.
+          if (candidate.newest >= cutoff) {
+            const busy = await candidateLocks(root, candidate, held, themeLocks, options.signal);
+
+            append(child, candidate.bytes, busy ?? 'young');
+
+            continue;
+          }
+
+          candidates.push(candidate);
         }
       } catch (error) {
         options.signal?.throwIfAborted();
@@ -553,6 +563,10 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
 
     append(root, null, errorReason(error));
   }
+
+  // Предварительный отказ от молодых данных мог прочитать занятость темы.
+  // Для удаления нужен новый снимок после захвата барьера.
+  themeLocks.clear();
 
   let barrier;
   const barrierPath = directoryCleanupLockPath(root);

@@ -4,11 +4,34 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { fixture, expectedBuildCalls } from './helpers/ctlBuildFixture.js';
+import {
+  fixture, expectedBuildCalls, expectedAllPhases, assertInterleavedPhases,
+} from './helpers/ctlBuildFixture.js';
 
 const server = ['server.node', 'server.build', 'server.install'];
 const web = ['web.dependencies', 'web.build'];
 const window = ['window.package', 'window.install'];
+const tasks = ['tracker.deps', 'tracker.build', 'pipeline.build', 'routes.deps', 'routes.build'];
+const voice = ['voice.deps', 'voice.build'];
+
+/**
+ * Общие зависимости и установка окружают четыре независимые цепочки.
+ * Внутри каждой start/end строго упорядочены; между цепочками порядок не задан.
+ */
+function assertAllEvents(actual) {
+  const events = (steps) => steps.flatMap((id) => [`start\t${id}`, `end\t${id}\t0`]);
+  const before = events(['web.dependencies']);
+  const after = events(['window.install']);
+  const tracks = [server, ['web.build', 'window.package'], tasks, voice].map(events);
+
+  assert.deepEqual(actual.slice(0, before.length), before);
+  assert.deepEqual(actual.slice(-after.length), after);
+  assert.deepEqual([...actual].sort(), [...before, ...tracks.flat(), ...after].sort());
+
+  for (const track of tracks) {
+    assert.deepEqual(actual.filter((event) => track.includes(event)), track);
+  }
+}
 
 /**
  * FD 3 отделён от пользовательского вывода и захватывается с момента spawn.
@@ -61,8 +84,15 @@ for (const [target, steps] of [
     const actual = result.events.trim().split('\n').filter((line) => !line.startsWith('hint\t'));
 
     assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(await box.calls(), expectedBuildCalls(box, target));
-    assert.deepEqual(actual, expected, 'Нет событий фактических шагов сборки на fd 3');
+
+    if (target === 'all') {
+      assertInterleavedPhases(await box.calls(), expectedAllPhases(box));
+      assertAllEvents(actual);
+    } else {
+      assert.deepEqual(await box.calls(), expectedBuildCalls(box, target));
+      assert.deepEqual(actual, expected, 'Нет событий фактических шагов сборки на fd 3');
+    }
+
     assert.doesNotMatch(result.stdout + result.stderr, /start\t|end\t|hint\t/u);
 
     if (steps.includes('server.install')) {
@@ -84,13 +114,13 @@ test('BE-STEPS: отказ APK завершает свою стадию исхо
 });
 
 for (const [stage, command, argument, code, count] of [
-  ['server.node', null, null, 1, 0],
-  ['server.build', 'npm', 'build:binary', 21, 1],
-  ['server.install', 'npm', 'install:binary', 22, 2],
-  ['web.dependencies', 'npm', 'install', 26, 3],
-  ['web.build', 'npm', 'build', 23, 4],
-  ['window.package', 'npm', 'dist', 24, 5],
-  ['window.install', 'desktop', 'install', 25, 6],
+  ['server.node', null, null, 1, 1],
+  ['server.build', 'npm', 'build:binary', 21, 2],
+  ['server.install', 'npm', 'install:binary', 22, 3],
+  ['web.dependencies', 'npm', 'install', 26, 1],
+  ['web.build', 'npm', 'build', 23, 3],
+  ['window.package', 'npm', 'dist', 24, 4],
+  ['window.install', 'desktop', 'install', 25, 5],
 ]) {
   test(`BE-STEPS: отказ ${stage}, end с кодом и без будущих фаз`, async (t) => {
     const box = await fixture(t);
@@ -105,14 +135,18 @@ for (const [stage, command, argument, code, count] of [
       await fs.rm(path.join(box.root, 'server/node_modules'), { recursive: true });
     }
 
-    const result = await observedBuild(box, 'all');
-    const steps = [...server, ...web, ...window];
+    const target = stage.startsWith('server.') ? 'server' : 'window';
+    const result = await observedBuild(box, target);
+    const steps = target === 'server' ? server : [...web, ...window];
     const index = steps.indexOf(stage);
     const expected = steps.slice(0, index).flatMap((id) => [`start\t${id}`, `end\t${id}\t0`]);
 
     expected.push(`start\t${stage}`, `end\t${stage}\t${code}`);
     assert.equal(result.code, code, result.stderr);
-    assert.equal((await box.calls()).length, count);
+
+    const commands = await box.calls();
+
+    assert.equal(commands.length, count);
     assert.deepEqual(result.events.trim().split('\n').filter((line) => !line.startsWith('hint\t')),
       expected, 'Нет end отказавшей фазы или начались последующие шаги');
   });
@@ -124,5 +158,5 @@ test('BE-STEPS барьер: открытого fd 3 без observed-марке�
 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.events, '');
-  assert.deepEqual(await box.calls(), expectedBuildCalls(box));
+  assertInterleavedPhases(await box.calls(), expectedAllPhases(box));
 });
