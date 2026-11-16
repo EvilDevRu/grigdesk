@@ -127,6 +127,12 @@ public class MainActivity extends AppCompatActivity {
     });
 
     captureNotifyUrl(getIntent());
+
+    // Сохранённая фоновая связь поднимает сервис при каждом старте видимой Activity.
+    if (((ClientApplication) getApplication()).backgroundLink.enabled()) {
+      LinkService.start(this);
+    }
+
     PendingNavigation.Entry waiting = navigation.peek();
 
     if (waiting != null) {
@@ -154,14 +160,16 @@ public class MainActivity extends AppCompatActivity {
       try {
         if (runtime == null) {
           runtime = new ClientRuntime(getApplicationContext(), SECRET, ORIGINS,
-            new AndroidActions(getApplicationContext(), () -> current.get()), (origin, reset) -> {
+            new AndroidActions(getApplicationContext(), () -> current.get(),
+              ((ClientApplication) getApplication()).backgroundLink), (origin, reset) -> {
               PendingNavigation.Entry entry = navigation.put(origin, reset);
               MainActivity visible = current.get();
 
               if (visible != null) {
                 visible.showOrigin(entry);
               }
-            }, ((ClientApplication) getApplication()).appLock);
+            }, ((ClientApplication) getApplication()).appLock,
+            ((ClientApplication) getApplication()).backgroundLink);
         }
 
         runtime.start(!((ClientApplication) getApplication()).lifecycle.isBackground());

@@ -13,10 +13,12 @@ import local.grigdesk.client.shell.ShellApi;
 public final class AndroidActions implements ShellApi.Native {
   private final Context context;
   private final Supplier<MainActivity> activity;
+  private final BackgroundLink backgroundLink;
 
-  public AndroidActions(Context context, Supplier<MainActivity> activity) {
+  public AndroidActions(Context context, Supplier<MainActivity> activity, BackgroundLink backgroundLink) {
     this.context = context;
     this.activity = activity;
+    this.backgroundLink = backgroundLink;
   }
 
   @Override
@@ -55,6 +57,21 @@ public final class AndroidActions implements ShellApi.Native {
   @Override
   public void cancelNotification(String tag) {
     Notifications.cancel(context, tag);
+  }
+
+  /**
+   * Выбор человека сохраняется до управления сервисом: отказ записи не меняет фон.
+   * Включение поднимает foreground-сервис, выключение останавливает его сразу.
+   */
+  @Override
+  public void setBackgroundLink(boolean enabled) throws Exception {
+    backgroundLink.set(enabled);
+
+    if (enabled) {
+      LinkService.start(context);
+    } else {
+      LinkService.stop(context);
+    }
   }
   /**
    * Файл становится виден в Загрузках только после успешной потоковой записи.

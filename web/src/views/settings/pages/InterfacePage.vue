@@ -52,6 +52,7 @@
           {{ t('settings.notificationsAreAllowedOnThisDevice') }}
         </p>
         <p v-else-if="!device.notificationSupported">{{ t('settings.systemNotificationsAreUnavailableInThisBrowser') }}</p>
+        <AndroidBackgroundLinkSetting />
       </template>
       <template v-else-if="loaded('hotkeys')">
         <p v-if="rows.some((row) => row.availability === 'pending')">
@@ -126,6 +127,7 @@ import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
 import DesktopExitSetting from '../DesktopExitSetting.vue';
 import AndroidAppLockSetting from '../AndroidAppLockSetting.vue';
+import AndroidBackgroundLinkSetting from '../AndroidBackgroundLinkSetting.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();

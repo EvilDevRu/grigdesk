@@ -59,6 +59,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
     default void cancelNotification(String tag) throws Exception {
     }
+
+    /**
+     * Фоновая связь сохраняется установкой и управляет foreground-сервисом Android.
+     * Прежние оболочки без нативного канала сохраняют настройку только в снимке.
+     */
+    default void setBackgroundLink(boolean enabled) throws Exception {
+    }
   }
 
   /**
@@ -91,6 +98,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   private final Map<String, Integer> attempts = new HashMap<>();
   private final Map<String, Integer> generations = new HashMap<>();
   private final java.util.Set<String> disabled = new java.util.HashSet<>();
+  private final java.util.function.BooleanSupplier backgroundLink;
   private boolean closed;
   private boolean suspended;
 
@@ -122,6 +130,19 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
     Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
     int major, int minor, ShellLocale locale, Gate gate) {
+    this(store, pairing, factory, scheduler, worker, navigate, nativeActions, random, major, minor,
+      locale, gate, null);
+  }
+
+  /**
+   * Фоновая связь разрешает данным жить в свёрнутом приложении и при закрытом gate.
+   * Интерфейс остаётся заблокированным: выбор человека не открывает действия оболочки.
+   * Null сохраняет контракт прежних оболочек без блока настройки и без обхода gate.
+   */
+  public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
+    Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
+    int major, int minor, ShellLocale locale, Gate gate,
+    java.util.function.BooleanSupplier backgroundLink) {
     this.gate = gate;
     this.locale = locale;
     this.store = store;
@@ -134,7 +155,9 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     this.random = random;
     this.major = major;
     this.minor = minor;
-    state = new ShellState(store, major, minor, locale, gate == null ? null : gate::snapshot);
+    this.backgroundLink = backgroundLink;
+    state = new ShellState(store, major, minor, locale, gate == null ? null : gate::snapshot,
+      () -> nativeActions != null, backgroundLink);
   }
 
   /**
@@ -161,12 +184,17 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
    * Прежние оболочки без настройки фоновой связи сохраняют закрытый фон и gate.
    * Чтение признака не создаёт настройку там, где её нет.
    */
+  private boolean backgroundLinkEnabled() {
+    return backgroundLink != null && backgroundLink.getAsBoolean();
+  }
+
   /**
    * Заблокированный gate скрывает все транспорты: труба ответит 423 по статусу недоступности.
    * Открытие gate возвращает прежнюю выдачу без пересоздания соединений.
+   * Включённая фоновая связь сохраняет выдачу данных при закрытом интерфейсе.
    */
   public PipeTransport upstream(String id) {
-    if (gate != null && gate.locked()) {
+    if (gate != null && gate.locked() && !backgroundLinkEnabled()) {
       return null;
     }
 
@@ -256,7 +284,8 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
    * Probe выполняется вне потока HTTP, поэтому недоступная машина не задерживает UI.
    */
   public synchronized void connect(String id, boolean manual) {
-    if (id == null || closed || suspended || gate != null && gate.locked()) {
+    if (id == null || closed || suspended
+      || gate != null && gate.locked() && !backgroundLinkEnabled()) {
       return;
     }
 
@@ -477,6 +506,22 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         return PipeResponse.json(200, state.snapshot());
       }
 
+      if (head.method().equals("POST") && path.equals("/__shell/background-link")) {
+        if (data.length() != 1 || !(data.opt("enabled") instanceof Boolean)) {
+          throw new IllegalArgumentException(
+            ShellLocale.text(locale, "native.backgroundLinkInvalid", "Неверные поля фоновой связи."));
+        }
+
+        if (nativeActions != null) {
+          nativeActions.setBackgroundLink(data.getBoolean("enabled"));
+        }
+
+        state.changed();
+
+        return PipeResponse.json(200, state.snapshot());
+      }
+
+      if (path.equals("/__shell/notify-permission") && head.method().equals("GET")) {
         return PipeResponse.json(200, new JSONObject().put("permission", notifyPermission()));
       }
 
@@ -634,8 +679,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   /**
    * Фон закрывает транспорт, но сохраняет выбранную машину и ручное отключение.
    * Возврат создаёт новые соединения только после проверки срока аутентификации ключа.
+   * Включённая фоновая связь не закрывает транспорт: события продолжают доходить до документа.
    */
   public synchronized void suspend() {
+    if (backgroundLinkEnabled()) {
+      return;
+    }
+
     suspended = true;
     generations.replaceAll((id, generation) -> generation + 1);
 
@@ -655,8 +705,20 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   /**
    * Возврат из фона снимает приостановку, сохраняя ручной запрет соединения.
    * Просроченный доступ требует явной разблокировки вместо автоматического probe.
+   * Фоновая связь уже держит соединение; отсутствующее восстанавливается без пересоздания живых.
    */
   public synchronized void resume(boolean locked) throws Exception {
+    if (backgroundLinkEnabled()) {
+      suspended = false;
+
+      if (store.selected != null && !disabled.contains(store.selected)
+        && transports.get(store.selected) == null) {
+        connect(store.selected, false);
+      }
+
+      return;
+    }
+
     suspended = false;
 
     if (store.selected != null && disabled.contains(store.selected)) {

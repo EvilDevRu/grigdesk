@@ -5,7 +5,11 @@ import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
-import { isAppLockState, type ShellState } from '../../../shared/client/clientShell.ts';
+import {
+  isAppLockState,
+  isBackgroundLinkState,
+  type ShellState,
+} from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
 
@@ -43,6 +47,11 @@ export const useShellStore = defineStore('shell', {
       const block = state.snapshot?.appLock;
 
       return isAppLockState(block) ? block.locked : false;
+    },
+    backgroundLink: (state) => {
+      const block = state.snapshot?.backgroundLink;
+
+      return isBackgroundLinkState(block) ? block : null;
     },
   },
   actions: {
@@ -206,6 +215,9 @@ export const useShellStore = defineStore('shell', {
     },
     scan() {
       return shellAction('POST', '/scan') as Promise<{ pairing: string }>;
+    },
+    setBackgroundLink(enabled: boolean) {
+      return shellAction('POST', '/background-link', { enabled });
     },
   },
 });

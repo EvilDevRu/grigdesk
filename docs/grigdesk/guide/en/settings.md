@@ -42,6 +42,10 @@ Scenario: [pipeline launch and operation](pipelines.md).
 System notifications are enabled and tested under Interface → Notifications: the button requests
 the device permission and immediately shows a test notification. In the Android app the system
 itself displays them through the GrigDesk alerts channel; the permission can be revoked in the
+app's system settings. The Background alerts toggle keeps the link alive and delivers alerts
+while the app is minimized; it uses more battery and does not cancel the interface lock.
+Without that toggle, alerts about new replies arrive only while the app is open.
+
 ## Result
 
 Confirmed settings are saved. Closing with unapplied changes offers an explicit choice.

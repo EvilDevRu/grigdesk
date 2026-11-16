@@ -46,7 +46,7 @@ public final class ClientRuntime implements AutoCloseable {
    * Встроенные assets проверяются до открытия WebView, сервер не отдаёт интерфейс.
    */
   public ClientRuntime(Context context, String secret, Set<String> origins, ShellApi.Native nativeActions,
-    BiConsumer<String, Boolean> navigate, AppLock appLock) throws Exception {
+    BiConsumer<String, Boolean> navigate, AppLock appLock, BackgroundLink backgroundLink) throws Exception {
     this.context = context.getApplicationContext();
     this.secret = secret;
     this.origins = origins;
@@ -115,7 +115,7 @@ public final class ClientRuntime implements AutoCloseable {
 
       return () -> future.cancel(false);
     }, worker::execute, this::show, nativeActions, Math::random, major, minor,
-      ClientLocale.initialize(context), appLock);
+      ClientLocale.initialize(context), appLock, backgroundLink::enabled);
   }
 
   /**

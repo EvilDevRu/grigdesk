@@ -16,6 +16,7 @@ import local.grigdesk.client.shell.ShellLocale;
  */
 public final class ClientApplication extends Application implements Application.ActivityLifecycleCallbacks {
   public AppLock appLock;
+  public BackgroundLink backgroundLink;
   public final AppLifecycle lifecycle = new AppLifecycle(SystemClock::elapsedRealtime,
     new AppLifecycle.Hooks() {
     public void background() {
@@ -68,6 +69,9 @@ public final class ClientApplication extends Application implements Application.
 
     // Канал оповещений существует до первого события, чтобы настройка важности была видна сразу.
     Notifications.ensureChannel(this);
+
+    // Фоновая связь читается до runtime: сохранённый выбор определяет жизнь трубы в фоне.
+    backgroundLink = new BackgroundLink(new File(getFilesDir(), "background-link.json"));
     // Gate создаётся до любых Activity: холодный запуск с включённой блокировкой закрыт.
     // Таймер фона живёт на главном цикле и переживает смену Activity.
     appLock = new AppLock(new File(getFilesDir(), "app-lock.json"),

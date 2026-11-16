@@ -10,6 +10,7 @@ public final class ShellState {
   private final ShellLocale locale;
   private final java.util.function.Supplier<JSONObject> appLock;
   private final java.util.function.BooleanSupplier notify;
+  private final java.util.function.BooleanSupplier backgroundLink;
   private final int major;
   private final int minor;
   private final Map<String, JSONObject> states = new HashMap<>();
@@ -42,12 +43,23 @@ public final class ShellState {
    */
   public ShellState(ProfileStore store, int major, int minor, ShellLocale locale,
     java.util.function.Supplier<JSONObject> appLock, java.util.function.BooleanSupplier notify) {
+    this(store, major, minor, locale, appLock, notify, null);
+  }
+
+  /**
+   * Блок фоновой связи присутствует только у оболочек с нативным сервисом.
+   * Прежние снимки без блока читаются интерфейсом как отсутствие настройки.
+   */
+  public ShellState(ProfileStore store, int major, int minor, ShellLocale locale,
+    java.util.function.Supplier<JSONObject> appLock, java.util.function.BooleanSupplier notify,
+    java.util.function.BooleanSupplier backgroundLink) {
     this.appLock = appLock;
     this.locale = locale;
     this.store = store;
     this.major = major;
     this.minor = minor;
     this.notify = notify;
+    this.backgroundLink = backgroundLink;
   }
 
   public synchronized void changed() {
@@ -153,6 +165,10 @@ public final class ShellState {
 
     if (appLock != null) {
       result.put("appLock", appLock.get());
+    }
+
+    if (backgroundLink != null) {
+      result.put("backgroundLink", new JSONObject().put("enabled", backgroundLink.getAsBoolean()));
     }
 
     return result;

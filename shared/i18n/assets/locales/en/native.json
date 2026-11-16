@@ -52,4 +52,9 @@
   "notifyChannelDescription": "Agent replies and events that need attention.",
   "invalidNotification": "Invalid notification.",
   "notifyRequestOpen": "A permission request is already open.",
+  "backgroundLinkInvalid": "Invalid background link fields.",
+  "linkChannelName": "GrigDesk background link",
+  "linkChannelDescription": "Persistent notification while the app works in the background.",
+  "linkServiceTitle": "GrigDesk is connected",
+  "linkServiceText": "Alerts arrive while the app is minimized.",
 }

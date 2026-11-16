@@ -38,12 +38,25 @@ export function isAppLockState(value: unknown): value is AppLockState {
     && typeof value.locked === 'boolean';
 }
 
+export interface BackgroundLinkState {
+  enabled: boolean;
+}
+
+/**
+ * Блок фоновой связи читается только в полной форме: чужой тип и лишние поля не становятся настройкой.
+ * Старые оболочки без блока выглядят как отсутствие нативного сервиса.
+ */
+export function isBackgroundLinkState(value: unknown): value is BackgroundLinkState {
+  return isRecord(value) && Object.keys(value).length === 1 && typeof value.enabled === 'boolean';
+}
+
 export interface ShellState {
   applicationUpdate?: ApplicationUpdateSnapshot;
   browser?: { preferences: BrowserPreferences; revision: number };
   windowControls?: WindowControlsState;
   desktopExit?: { skipConfirmation: boolean };
   appLock?: AppLockState;
+  backgroundLink?: BackgroundLinkState;
   locale?: { preference: string; systemLanguage: string };
   rev: number;
   status: ConnectionStatus;

@@ -52,4 +52,9 @@
   "notifyChannelDescription": "Ответы агентов и события, которые требуют внимания.",
   "invalidNotification": "Неверное оповещение.",
   "notifyRequestOpen": "Запрос разрешения уже открыт.",
+  "backgroundLinkInvalid": "Неверные поля фоновой связи.",
+  "linkChannelName": "Фоновая связь GrigDesk",
+  "linkChannelDescription": "Постоянное уведомление о работе приложения в фоне.",
+  "linkServiceTitle": "GrigDesk на связи",
+  "linkServiceText": "Оповещения приходят, пока приложение свёрнуто.",
 }
