@@ -12,7 +12,7 @@ import { qwenConfig, qwenHostEnabled } from './settings.ts';
 import { resolveQwenSnapshot } from './discovery.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
-import { createQwenTextSteps, qwenToolFailed } from './steps.ts';
+import { createQwenTextSteps, createQwenToolSteps } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { resolveQwenSessionHome } from './session.ts';
@@ -137,8 +137,7 @@ async function runQwenSession(
   let actualModel = '';
   let currentMode = mode;
   let planExecutionMode: string | undefined;
-  const tools = new Set<string>();
-  const results = new Set<string>();
+  const toolSteps = createQwenToolSteps();
   const inTurn = createQwenInTurn({
     available: () => active && !awaitingAnswer && !input.signal?.aborted,
     sendNow: () => transport.client.request('craft/midTurnSendNow', { sessionId }),
@@ -261,29 +260,9 @@ async function runQwenSession(
           reply += text;
           responseText += text;
         }
-      } else if (kind === 'tool_call' && id && !tools.has(id)) {
+      } else if ((kind === 'tool_call' || kind === 'tool_call_update') && id) {
         emitSteps(textSteps.flush());
-        tools.add(id);
-        sink.emit({
-          k: 'tool',
-          id,
-          name: update.title,
-          input: update.rawInput,
-        });
-      } else if (kind === 'tool_call_update' && id
-        && ['completed', 'failed'].includes(String(update.status)) && !results.has(id)) {
-        emitSteps(textSteps.flush());
-        results.add(id);
-
-        const failed = qwenToolFailed(update);
-
-        sink.emit({
-          k: 'res',
-          id,
-          text: JSON.stringify(update.content || []),
-          ok: !failed,
-          error: failed,
-        });
+        emitSteps(toolSteps.observe(update));
       }
     },
     /**

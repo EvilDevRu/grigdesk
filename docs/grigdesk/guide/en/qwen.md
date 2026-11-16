@@ -53,6 +53,9 @@ others are additional readable and writable roots. Task conversations use their 
 Their common parent is not granted. Changing folders, roots or access separates native memory from
 the previous session while keeping GrigDesk history. Stop interrupts the process;
 continuation uses the saved session. Successful tools show ✓ and failed tools ✕ in live and saved history.
+A tool row shows the command, file path or edit diff, and the expanded result shows short
+human-readable text instead of wire JSON; image results are marked with a placeholder.
+The fix applies to new turns after a manual server restart.
 
 The requested-model marker in turn status means the CLI has not confirmed session selection.
 After confirmation it disappears and the model is stored with the reply.

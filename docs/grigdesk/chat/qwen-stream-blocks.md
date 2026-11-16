@@ -41,8 +41,9 @@ Qwen объявляет `legacyTextStepDeltas`; `/api/providers` передаё�
 Без capability поведение остальных исполнителей остаётся прежним.
 
 Проверки: `qwen-stream.test.js`, `qwen-runtime.test.js`, `qwen-provider.test.js`,
-`qwen-cli-contract.test.js` и `step-list.test.js`. Они покрывают живую и сохранённую ленту,
+`qwen-cli-contract.test.js`, `qwen-tool-feed.test.js` и `step-list.test.js`. Они покрывают живую и сохранённую ленту,
 лимиты, ошибку потока, отмену, reader lease и отображение прежних токеновых шагов.
+Форматирование строк и итогов инструментов — [acp-tool-feed.md](acp-tool-feed.md).
 Тест настоящего CLI с локальным API отдельно чередует `reasoning_content` и `content`
 посреди слов и проверяет цельные шаги, одну опубликованную реплику и финальный ответ.
 Оплаченная модель и текущий разговор пользователя этой проверкой не затрагиваются.

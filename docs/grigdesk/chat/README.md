@@ -149,6 +149,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Общий ACP-нормализатор инструментов Qwen и Kimi](acp-tool-feed.md)
 - [Действия субагента под своим вызовом, включая поздние реплики](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Картинка результата рабочего инструмента Codex: снимок браузера без base64 в ленте](tool-result-images.md)
