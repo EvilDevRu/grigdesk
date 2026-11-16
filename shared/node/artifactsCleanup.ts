@@ -478,11 +478,21 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
               ? path.dirname(path.dirname(directory)) : undefined,
           };
 
-          candidates.push(candidate);
-
           if (candidate.generation) {
             knownGenerations.set(child, candidate);
           }
+
+          // Свежий снимок можно только сохранить. Его повторный обход под общим
+          // барьером блокировал запуск соседних ELF, хотя удаление не допускалось.
+          if (candidate.newest >= cutoff) {
+            const busy = await candidateLocks(root, candidate, held, themeLocks, options.signal);
+
+            append(child, candidate.bytes, busy ?? 'young');
+
+            continue;
+          }
+
+          candidates.push(candidate);
         }
       } catch (error) {
         options.signal?.throwIfAborted();

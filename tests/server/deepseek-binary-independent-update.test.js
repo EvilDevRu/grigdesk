@@ -160,7 +160,11 @@ for (const provider of ['deepseek', 'glm']) {
     let parallel;
 
     if (provider === 'deepseek') {
-      firstRun.catch(arrived.reject);
+      firstRun.then((response) => {
+        if (response.statusCode !== 200) {
+          arrived.reject(new Error(`Первый ход не дошёл до модели: ${response.body}`));
+        }
+      }, arrived.reject);
       await arrived.promise;
       await install(pair.b, target, runtime.root);
       parallel = await turn('parallel-chat', 'parallel-on-installed-b');
