@@ -157,9 +157,24 @@ test('кнопки подключений находятся снизу, а ли
   const fits = await rail.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
 
   assert.equal(fits, true, 'Кнопки не выходят за ширину всплывашки');
-  await rail.evaluate((element) => {
-    element.parentElement.style.width = '160px';
-  });
+
+  const activeBounds = await rail.getByRole('button', {
+    name: 'Дополнительное подключение 6',
+    exact: true,
+  }).boundingBox();
+  const overflowBounds = await rail.getByRole('button', {
+    name: 'Другие подключения',
+    exact: true,
+  }).boundingBox();
+
+  assert.ok(activeBounds);
+  assert.ok(overflowBounds);
+
+  // Ширина намеренно меньше двух настоящих controls: их размеры задаёт общий UI.
+  // Фиксированные 160 px после перехода на сегменты уже вмещают профиль и «…».
+  await rail.evaluate((element, width) => {
+    element.parentElement.style.width = `${width}px`;
+  }, activeBounds.width + overflowBounds.width - 1);
   await rail.getByRole('button', { name: 'Дополнительное подключение 6', exact: true })
     .waitFor({ state: 'hidden' });
   await rail.getByRole('button', { name: 'Другие подключения', exact: true }).click();
