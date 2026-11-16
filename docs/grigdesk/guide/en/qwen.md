@@ -65,6 +65,12 @@ If words are split between Reasoning rows, apply the GrigDesk fix and manually r
 it takes effect for new turns. Previously published separate replies are not rebuilt.
 Older token steps without their own IDs are combined when displayed without changing messages or memory.
 
+When subagents work in parallel, their actions and text previews stay under their
+respective Agent calls. One subagent's tools do not split another's words, and their
+text does not mix into the main agent's final reply. This fix applies to new turns
+after updating and manually restarting the server; previously saved fragments are
+not rebuilt automatically.
+
 Long reasoning, tools and approval waits do not stop after 30 seconds. Stop works during each state.
 If an installed version reports `ACP timeout: session/prompt` around 30 seconds, update the server,
 restart it manually and retry. Changing API service or re-entering a saved key does not fix that error.

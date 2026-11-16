@@ -443,3 +443,37 @@ test('qwen-native-final-guard-fails-closed', { timeout: 60000 }, async (t) => {
   assert.match(reason, /401|unauthorized|авторизац|authentication/i);
   assert.equal(reason.includes(QWEN_KEY), false, 'Ошибка API должна сохранять причину без секрета');
 });
+
+test('Qwen native: текст ребёнка сохраняет parent и не становится ответом основного агента', {
+  timeout: 60000,
+}, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const messages = [];
+
+  fixture.actions.push({
+    name: 'agent',
+    args: {
+      description: 'Проверить вывод текста',
+      prompt: 'Ответь одним предложением без инструментов.',
+      subagent_type: 'general-purpose',
+      run_in_background: false,
+    },
+  }, {
+    deltas: [
+      { role: 'assistant', content: 'CHILD_TEXT_SENTINEL' },
+    ],
+  });
+
+  const outcome = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    onAssistantMessage: (message) => messages.push(message),
+    signal: AbortSignal.timeout(45000),
+    permissionMode: 'yolo',
+  }));
+  const child = outcome.steps.find((step) => step.k === 'text' && step.text === 'CHILD_TEXT_SENTINEL');
+
+  assert.ok(child?.parent, 'Native CLI передал parentToolCallId в поток');
+  assert.ok(outcome.steps.some((step) => step.k === 'tool' && step.id === child.parent));
+  assert.deepEqual(messages.map((message) => message.text), ['Ответ настоящего CLI.']);
+  assert.equal(outcome.reply, 'Ответ настоящего CLI.');
+});

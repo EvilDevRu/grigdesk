@@ -1,5 +1,5 @@
 import { createStepSink, type ChatStep } from '../chat/streamSteps.ts';
-import { createQwenTextSteps, createQwenToolSteps } from './steps.ts';
+import { createQwenSteps, qwenStepParent } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { record } from './transport.ts';
 
@@ -22,9 +22,8 @@ export interface QwenBackgroundHooks {
  */
 export function createQwenBackground(sessionId: string, hooks: QwenBackgroundHooks) {
   const sink = createStepSink(hooks.onBackgroundStep);
-  const text = createQwenTextSteps();
+  const stream = createQwenSteps();
   const usage = createQwenUsage((tokens, info) => hooks.onBackgroundProgress?.(tokens, info));
-  const toolSteps = createQwenToolSteps();
   let reply = '';
   let finished = false;
 
@@ -47,21 +46,17 @@ export function createQwenBackground(sessionId: string, hooks: QwenBackgroundHoo
       const update = record(value);
       const kind = update.sessionUpdate;
       const part = record(update.content).text;
-      const id = String(update.toolCallId || '');
 
       usage.observe(update);
 
       if ((kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') && typeof part === 'string') {
-        const k = kind === 'agent_message_chunk' ? 'text' : 'think';
+        emit(stream.observe(update));
 
-        emit(text.append(k, part));
-
-        if (k === 'text') {
+        if (kind === 'agent_message_chunk' && !qwenStepParent(update)) {
           reply += part;
         }
-      } else if ((kind === 'tool_call' || kind === 'tool_call_update') && id) {
-        emit(text.flush());
-        emit(toolSteps.observe(update));
+      } else if (kind === 'tool_call' || kind === 'tool_call_update') {
+        emit(stream.observe(update));
       }
     },
     /**
@@ -74,7 +69,7 @@ export function createQwenBackground(sessionId: string, hooks: QwenBackgroundHoo
       }
 
       finished = true;
-      emit(text.flush());
+      emit(stream.flush());
       await hooks.onBackground?.({
         sessionId,
         reply: reply || (reason === 'cancelled' ? '⏹ Ход остановлен.' : ''),

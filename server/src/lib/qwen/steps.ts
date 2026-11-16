@@ -10,22 +10,34 @@ import {
 
 /**
  * ACP передаёт дельты текста, а лента хранит законченные смысловые блоки.
- * Каналы могут чередоваться внутри слова, поэтому только явная граница закрывает блоки.
+ * Каналы и субагенты могут чередоваться внутри слова; граница закрывает только свой поток.
  */
 export function createQwenTextSteps(now: () => number = Date.now) {
   const prefix = randomUUID();
   let sequence = 0;
-  const pending = new Map<'think' | 'text', { text: string; at: number }>();
+  const pending = new Map<string, {
+    kind: 'think' | 'text';
+    parent: string;
+    text: string;
+    at: number;
+  }>();
 
   /**
    * Хвост выпускается один раз, включая завершение с ошибкой или отменой.
    * Порядок первых дельт сохраняет место каждого канала перед следующим действием.
    */
-  function flush(): ChatStep[] {
+  function flush(parent?: string): ChatStep[] {
     const steps: ChatStep[] = [];
 
-    for (const [kind, block] of pending) {
+    for (const [key, block] of pending) {
+      if (parent !== undefined && block.parent !== parent) {
+        continue;
+      }
+
+      const { kind } = block;
       const text = block.text.trim();
+
+      pending.delete(key);
 
       if (text) {
         steps.push({
@@ -33,11 +45,10 @@ export function createQwenTextSteps(now: () => number = Date.now) {
           id: `${prefix}-${++sequence}`,
           text: cut(text, kind === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT),
           at: block.at,
+          ...(block.parent ? { parent: block.parent } : {}),
         });
       }
     }
-
-    pending.clear();
 
     return steps;
   }
@@ -46,16 +57,22 @@ export function createQwenTextSteps(now: () => number = Date.now) {
    * Пробелы между дельтами сохраняются, каждый канал ограничен лимитом предпросмотра.
    * Полный ответ отдельно собирает runtime; этот буфер не определяет его длину.
    */
-  function append(next: 'think' | 'text', text: string): ChatStep[] {
+  function append(next: 'think' | 'text', text: string, parent = ''): ChatStep[] {
     if (!text) {
       return [];
     }
 
-    let block = pending.get(next);
+    const key = JSON.stringify([parent, next]);
+    let block = pending.get(key);
 
     if (!block) {
-      block = { text: '', at: now() };
-      pending.set(next, block);
+      block = {
+        kind: next,
+        parent,
+        text: '',
+        at: now(),
+      };
+      pending.set(key, block);
     }
 
     const limit = next === 'think' ? STEP_THINK_LIMIT : STEP_TEXT_LIMIT;
@@ -113,6 +130,7 @@ export function createQwenToolSteps() {
   const tools = new Map<string, AcpToolState & {
     lastStep: string;
     currentPath: string;
+    parent: string;
   }>();
   const results = new Set<string>();
 
@@ -140,7 +158,10 @@ export function createQwenToolSteps() {
       diffs: [],
       lastStep: '',
       currentPath: '',
+      parent: qwenStepParent(update),
     };
+
+    state.parent = qwenStepParent(update) || state.parent;
 
     if (typeof update.kind === 'string' && update.kind.trim()) {
       const nextKind = update.kind.trim();
@@ -219,6 +240,7 @@ export function createQwenToolSteps() {
       changes: [],
       omittedChanges: 0,
       ...acpToolStep(state),
+      ...(state.parent ? { parent: state.parent } : {}),
     };
     const snapshot = JSON.stringify(step);
 
@@ -229,11 +251,77 @@ export function createQwenToolSteps() {
 
     if (terminal && !results.has(id)) {
       results.add(id);
-      out.push(qwenToolResult(update));
+      out.push({
+        ...qwenToolResult(update),
+        ...(state.parent ? { parent: state.parent } : {}),
+      });
     }
 
     return out;
   }
 
-  return { observe };
+  return {
+    observe,
+    has: (id: string) => tools.has(id),
+    parent: (update: Record<string, unknown>) => qwenStepParent(update)
+      || tools.get(String(update.toolCallId || ''))?.parent || '',
+  };
+}
+
+/**
+ * Native parentToolCallId связывает дельту с вызовом Agent, включая вложенных детей.
+ * Пустая связь означает основной поток; тип или имя агента не заменяют identity вызова.
+ */
+export function qwenStepParent(update: Record<string, unknown>): string {
+  const value = recordOrNull(update._meta)?.parentToolCallId;
+
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Общая сборка foreground и background изолирует текст каждого участника.
+ * Новый вызов закрывает только свой поток; поздний результат не разрезает чужой ответ.
+ */
+export function createQwenSteps() {
+  const text = createQwenTextSteps();
+  const tools = createQwenToolSteps();
+
+  /**
+   * Ответ ребёнка закрывается перед результатом его Agent, остальные буферы продолжаются.
+   * Sparse-обновления сохраняют parent первого вызова и не создают новую границу текста.
+   */
+  function observe(update: Record<string, unknown>): ChatStep[] {
+    const kind = update.sessionUpdate;
+    const parent = qwenStepParent(update);
+
+    if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
+      const part = recordOrNull(update.content)?.text;
+
+      return typeof part === 'string'
+        ? text.append(kind === 'agent_message_chunk' ? 'text' : 'think', part, parent) : [];
+    }
+
+    const id = String(update.toolCallId || '');
+
+    if (!id || (kind !== 'tool_call' && kind !== 'tool_call_update')) {
+      return [];
+    }
+
+    const progress = recordOrNull(update._meta)?.subagentProgress === true;
+    const steps = !tools.has(id) && !progress ? text.flush(tools.parent(update)) : [];
+
+    if (update.status === 'completed' || update.status === 'failed') {
+      steps.push(...text.flush(id));
+    }
+
+    steps.push(...tools.observe(update));
+
+    return steps;
+  }
+
+  return {
+    observe,
+    flush: text.flush,
+    parent: tools.parent,
+  };
 }

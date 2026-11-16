@@ -12,7 +12,7 @@ import { qwenConfig, qwenHostEnabled } from './settings.ts';
 import { resolveQwenSnapshot } from './discovery.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
-import { createQwenTextSteps, createQwenToolSteps } from './steps.ts';
+import { createQwenSteps, qwenStepParent } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { resolveQwenSessionHome } from './session.ts';
@@ -122,7 +122,7 @@ async function runQwenSession(
     readDirectories.map((directory) => validateWorkdirPath(directory)),
   ))];
   const sink = createStepSink(input.onStep);
-  const textSteps = createQwenTextSteps();
+  const streamSteps = createQwenSteps();
   const usage = createQwenUsage((tokens, info) => input.onProgress?.(tokens, info));
   const promptId = randomUUID();
   const settings = record(input.providerSettings);
@@ -137,7 +137,6 @@ async function runQwenSession(
   let actualModel = '';
   let currentMode = mode;
   let planExecutionMode: string | undefined;
-  const toolSteps = createQwenToolSteps();
   const inTurn = createQwenInTurn({
     available: () => active && !awaitingAnswer && !input.signal?.aborted,
     sendNow: () => transport.client.request('craft/midTurnSendNow', { sessionId }),
@@ -156,7 +155,7 @@ async function runQwenSession(
    */
   function emitSteps(steps: ChatStep[]): void {
     for (const step of steps) {
-      if (step.k === 'text') {
+      if (step.k === 'text' && !step.parent) {
         lastResponse = responseText;
         responseText = '';
         lastAssistantMessageId = String(step.id);
@@ -242,8 +241,6 @@ async function runQwenSession(
 
       const kind = update.sessionUpdate;
       const text = String(record(update.content).text || '');
-      const id = String(update.toolCallId || '');
-
 
       if (kind === 'current_mode_update') {
         if (['default', 'auto', 'auto-edit', 'plan', 'yolo'].includes(String(update.currentModeId))) {
@@ -254,15 +251,14 @@ async function runQwenSession(
       } else if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
         const k = kind === 'agent_message_chunk' ? 'text' : 'think';
 
-        emitSteps(textSteps.append(k, text));
+        emitSteps(streamSteps.observe(update));
 
-        if (k === 'text') {
+        if (k === 'text' && !qwenStepParent(update)) {
           reply += text;
           responseText += text;
         }
-      } else if ((kind === 'tool_call' || kind === 'tool_call_update') && id) {
-        emitSteps(textSteps.flush());
-        emitSteps(toolSteps.observe(update));
+      } else if (kind === 'tool_call' || kind === 'tool_call_update') {
+        emitSteps(streamSteps.observe(update));
       }
     },
     /**
@@ -273,8 +269,6 @@ async function runQwenSession(
       const params = record(value);
 
       if (method === 'qwen/control/external_tool_guard/prepare') {
-        emitSteps(textSteps.flush());
-
         // Host живёт между ходами: фоновые вызовы проверяет live actor, не локальный active.
         const allowed = (hostAccess || active) && await qwenToolAllowed(value, {
           sessionId,
@@ -298,7 +292,7 @@ async function runQwenSession(
           return { messages: [], hasQueuedPrompt: false };
         }
 
-        emitSteps(textSteps.flush());
+        emitSteps(streamSteps.flush(''));
 
         return inTurn.drain();
       }
@@ -307,7 +301,7 @@ async function runQwenSession(
         throw new Error('Qwen: неизвестный reverse RPC');
       }
 
-      emitSteps(textSteps.flush());
+      emitSteps(streamSteps.flush(streamSteps.parent(record(params.toolCall))));
 
       const ask = input.onPermission as ((question: Record<string, unknown>) => Promise<unknown>) | undefined;
 
@@ -483,7 +477,7 @@ async function runQwenSession(
       throw new Error(`Qwen: ход завершён без ответа (${String(result.stopReason)})`);
     }
 
-    emitSteps(textSteps.flush());
+    emitSteps(streamSteps.flush());
 
     return {
       reply: input.onAssistantMessage ? lastResponse || reply : reply,
@@ -514,7 +508,7 @@ async function runQwenSession(
     active = false;
     inTurn.close();
     input.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
-    emitSteps(textSteps.flush());
+    emitSteps(streamSteps.flush());
 
     if (abort) {
       input.signal?.removeEventListener('abort', abort);
