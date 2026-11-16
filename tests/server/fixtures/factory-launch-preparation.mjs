@@ -13,11 +13,13 @@ const Fastify = requireFromServer('fastify');
 const active = new Map();
 const initialPath = process.env.PATH;
 const exists = (file) => access(file).then(() => true, () => false);
+const { routeProviders } = await import(source('server/src/lib/accessProfiles/pipeline.ts'));
 
 // Подменяется доступ к личным профилям, но rollback остаётся наблюдаемым.
 // Настоящие HTTP-handler, launcher, descriptor и guard работают без замены.
 mock.module(source('server/src/lib/accessProfiles/pipeline.ts'), {
   namedExports: {
+    routeProviders,
     async preparePipelineAccess(service, config) {
       const observed = active.get(config.stateDir);
 

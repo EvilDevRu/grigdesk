@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { before } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -14,12 +14,19 @@ import { startDeepSeekAcpSettings } from '../../server/src/lib/deepseek/nativeSe
 import { readDeepSeekCatalog } from '../../server/src/lib/deepseek/catalog.ts';
 import { runDeepSeekTurn } from '../../server/src/lib/deepseek/runtime.ts';
 
+let candidate;
+
+// Полная подготовка и integrity ELF не расходуют минутный срок аварийного запуска.
+// Один проверенный candidate используется всеми сценариями файла без подмены runtime.
+before(async () => {
+  candidate = await ensureTestDeepSeekBinary();
+}, { timeout: 900000 });
+
 /**
  * Настоящий ELF получает только локальный барьер boot либо аварийный выход plugin.
  * Все каталоги принадлежат тесту; модель, пользовательский home и сеть не используются.
  */
 async function fixture(t, boot = false) {
-  const candidate = await ensureTestDeepSeekBinary();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-startup-cleanup-'));
   const launchDir = path.join(root, 'launch');
   const home = path.join(root, 'home');

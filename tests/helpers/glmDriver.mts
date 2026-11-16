@@ -4,13 +4,13 @@ import { randomUUID } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 
 import { createAcpClient, initializeAcp } from '../../server/src/lib/acp/client.ts';
-import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
+import { verifyDeepSeekRuntimeDescriptorAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
+import type { DeepSeekRuntimeDescriptor } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { openDeepSeekStream } from '../../server/src/lib/deepseek/serverEvents.ts';
 import type { DeepSeekWireFrame } from '../../server/src/lib/deepseek/serverEvents.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import type { DeepSeekServerProcess } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { GLM_RESEARCH_KEY } from './glmResearchOverlay.mts';
-import { testDeepSeekBinarySelection } from './deepseekBinary.mts';
 
 export interface GlmWaterfall {
   event: string;
@@ -49,14 +49,14 @@ export function glmResearchEnv(home: string, extra: Record<string, string> = {})
  * Хвост stderr без токена входа добавляется к ошибке старта для диагностики.
  */
 export async function startGlmWeb(options: {
-  artifact: string;
+  runtime: DeepSeekRuntimeDescriptor;
   overlayPath: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
 }): Promise<DeepSeekServerProcess & { diagnostics: () => string }> {
   let diagnostics = '';
   const server = await startDeepSeekServer({
-    runtime: await resolveDeepSeekRuntimeAsync((await testDeepSeekBinarySelection()).config),
+    runtime: options.runtime,
     bin: process.execPath,
     overlayPath: options.overlayPath,
     cwd: options.cwd,
@@ -218,12 +218,15 @@ export async function runGlmTurn(server: DeepSeekServerProcess, options: {
  * Остановка закрывает клиент и ждёт выхода только своего дочернего процесса.
  */
 export async function startGlmAcp(options: {
-  artifact: string;
+  runtime: DeepSeekRuntimeDescriptor;
   overlayPath: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
 }) {
-  const runtime = await resolveDeepSeekRuntimeAsync((await testDeepSeekBinarySelection()).config);
+  const runtime = options.runtime;
+
+  await verifyDeepSeekRuntimeDescriptorAsync(runtime);
+
   const child: ChildProcess = spawn(runtime.command, [
     ...runtime.prefixArgs, '--profile', 'acp', '--patch', options.overlayPath,
   ], {

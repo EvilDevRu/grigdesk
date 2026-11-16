@@ -52,8 +52,12 @@ const INDEX_URL = pathToFileURL(path.resolve(import.meta.dirname, '../../server/
   .href;
 
 test("карточка glm есть в getProviderAdapters, а без режима getExecutor('glm') возвращает null", async () => {
-  assert.equal((await getProviderAdapters()).get('glm'), glm);
-  assert.equal(await getExecutor('glm'), glm.run ? glm : null);
+  const card = (await getProviderAdapters()).get('glm');
+
+  assert.equal(card.id, glm.id);
+  assert.equal(card.name, glm.name);
+  assert.equal(typeof card.probe, 'function');
+  assert.equal(await getExecutor('glm'), card.run ? card : null);
 
   // Default export читает окружение при загрузке: «без режима» проверяется в чистом процессе.
   const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', [

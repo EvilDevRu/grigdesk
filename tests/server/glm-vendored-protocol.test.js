@@ -2,25 +2,33 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { before } from 'node:test';
 
 import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_RESEARCH_KEY, writeGlmResearchOverlay } from '../helpers/glmResearchOverlay.mts';
 import { glmResearchEnv, runGlmTurn, startGlmAcp, startGlmWeb } from '../helpers/glmDriver.mts';
 import { openDeepSeekStream } from '../../server/src/lib/deepseek/serverEvents.ts';
+import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { classifyGlmModelError } from '../../server/src/lib/glm/modelErrors.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G2/fixtures');
+let runtime;
+
+// Исходники, полный verify и выбор ELF относятся к подготовке всего набора.
+// Каждый запуск ниже проверяет закреплённый descriptor, не пересобирая тот же candidate.
+before(async () => {
+  const selection = await testDeepSeekBinarySelection();
+
+  runtime = await resolveDeepSeekRuntimeAsync(selection.config);
+}, { timeout: 900000 });
 
 /**
  * Стенд факта: настоящая generation, фейк Z.ai на loopback и отдельные каталоги.
  * Всё созданное удаляется после теста; фейк проверяет полноту сценария при остановке.
  */
 async function fixture(t, loopbackOptions = {}) {
-  const { generation: artifact } = await testDeepSeekBinarySelection();
-
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'protocol-'));
@@ -46,7 +54,7 @@ async function fixture(t, loopbackOptions = {}) {
   });
 
   return {
-    artifact,
+    runtime,
     root,
     cwd,
     home,
@@ -66,7 +74,7 @@ async function fixture(t, loopbackOptions = {}) {
         ...overlayOptions,
       });
       const server = await startGlmWeb({
-        artifact,
+        runtime,
         overlayPath,
         cwd,
         env: glmResearchEnv(home, overlayOptions.env),
@@ -88,7 +96,7 @@ async function fixture(t, loopbackOptions = {}) {
         ...overlayOptions,
       });
       const server = await startGlmAcp({
-        artifact,
+        runtime,
         overlayPath,
         cwd,
         env: glmResearchEnv(home),
@@ -823,7 +831,7 @@ test('настоящий сигнал готовности MCP-сервера д
     await fs.writeFile(overlayPath, JSON.stringify(rows));
 
     await assert.rejects(startGlmWeb({
-      artifact: f.artifact,
+      runtime: f.runtime,
       overlayPath,
       cwd: f.cwd,
       env: f.env,
