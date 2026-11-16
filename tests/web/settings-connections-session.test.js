@@ -92,6 +92,20 @@ test('Подключения и система в общей сессии', asyn
         uptimeSec: 120,
       }));
     }
+    if (String(url) === '/api/system/vpn-gate') {
+      return Response.json({
+        requireVpn: false,
+        iface: 'tun0',
+        probe: '',
+        defaults: { probe: '1.1.1.1' },
+        restartRequired: false,
+        active: {
+          requireVpn: false,
+          iface: 'tun0',
+          probe: '',
+        },
+      });
+    }
     if (String(url) === '/api/system/launcher/autostart') {
       return new Response(JSON.stringify({ autostart: {
         unit: 'enabled',
