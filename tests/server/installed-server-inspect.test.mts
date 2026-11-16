@@ -32,10 +32,14 @@ test('INSPECT-TOKEN: живой порт без токена установки 
     response.end('{}');
   });
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
 
-  const { port } = server.address();
+  const address = server.address();
+
+  assert.ok(address && typeof address !== 'string');
+
+  const { port } = address;
 
   await fs.rm(path.join(box.receipt.dataHome, 'state', 'cli-token'), { force: true });
   await fs.writeFile(path.join(box.receipt.dataHome, '.env'), `GRIGDESK_PORT=${port}\n`, { mode: 0o600 });

@@ -8,6 +8,7 @@
 
 ## Грабли
 
+- [Порог переполнения подключений: реальные размеры сегментов вместо фиксированных 160 px](access-profile-overflow-geometry.md)
 - [Тестовый конвейер: Bash/systemd, управляемый CLI, права проверяющего и аренды](../pipeline/stand-empty-editor-acceptance.md)
 - [JVM смены маршрута: стандартное окружение, честный skip и обязательный Java-прогон](relay-route-jvm-launcher.md)
 - [Happy-dom: отключённый CSS посылает преждевременный error](happy-dom-disabled-css-transport.md) — проверяемый HTTP receipt перед load/error.
@@ -46,7 +47,7 @@
 - [Подготовка legacy fixture DeepSeek: ABI-кэш, последовательный CI preflight и восстановление](deepseek-legacy-preflight.md)
 - [Унаследованный ELF меняет установку CLI-фикстуры после переноса helper-а](cli-helper-binary-environment.md)
 - [Vite и i18n: холодный граф, импорт DOM, готовность шапки, сети и формы настроек](browser-navigation-timeout.md)
-- [Типы тестов установки: реестр без UI и общие расширения Fastify](provider-install-type-boundaries.md)
+- [Типы тестов установки: реестр без UI, Fastify, опись выпуска и TCP-адрес фикстуры](provider-install-type-boundaries.md)
 - [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Prefix source/SEA, архив Node, retention DeepSeek и гонки/отмена уборки](source-runtime-dependencies.md)
