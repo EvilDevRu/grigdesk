@@ -352,6 +352,10 @@ async function workspaceGeometry(page) {
         && chosen.bottom > graph.top && chosen.top < graph.bottom,
       panelScroll: panel.scrollTop,
       documentScroll: document.scrollingElement.scrollTop,
+      mainRows: getComputedStyle(document.querySelector('.route-editor-workspace__main'))
+        .gridTemplateRows,
+      toolbarHeight: document.querySelector('.route-canvas__toolbar').getBoundingClientRect().height,
+      outcomesHeight: document.querySelector('.route-canvas__outcomes')?.getBoundingClientRect().height,
     };
   });
 }
@@ -393,6 +397,7 @@ for (const [width, height] of [[1440, 900], [1280, 800]]) {
 
       const before = await workspaceGeometry(page);
 
+      await page.screenshot({ path: `${client.artifacts}/routes-workspace-${width}.png` });
       assertWorkspaceVisible(before, width);
 
       const visibleNode = await page.locator('.route-canvas__graph').evaluate((viewport) => {
