@@ -5,6 +5,7 @@ import {
   compileModule,
   webFile
 } from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
 
 const UI_STUB = [
   'const h = () => globalThis.__alertsHarness;',
@@ -82,27 +83,19 @@ async function alertsModule(t, {
 
   };
 
-  for (const [key, value] of Object.entries({
-      window: {
-        location: {
-          href: 'https://grigdesk.test/#/board',
-        },
-      },
-      document: {
-        visibilityState: visibility,
-        hasFocus: () => focused,
-      },
-    })) {
-    Object.defineProperty(globalThis, key, {
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/board');
 
-      value,
-
+  Object.defineProperties(browser.document, {
+    visibilityState: {
+      value: visibility,
       configurable: true,
-
       writable: true,
-
-    });
-  }
+    },
+    hasFocus: {
+      value: () => focused,
+      configurable: true,
+    },
+  });
 
   t.after(() => {
     delete globalThis.window;

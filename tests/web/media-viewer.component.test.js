@@ -209,7 +209,7 @@ test('просмотр изображений: жесты, границы, па�
     stage.dispatchEvent(wheel);
     assert.equal(wheel.defaultPrevented, false);
     assert.equal(stage.dataset.image, 'false');
-    assert.equal(stage.querySelector('img'), null);
+    assert.equal(stage.querySelector('img') === null, true);
     assert.ok(stage.querySelector('video'));
   });
 });
