@@ -614,7 +614,8 @@ export class AccessProfileService {
    * Ответ относится только к прочитанной ревизии: поздний refresh не меняет новый вход.
    * Отозванный доступ блокирует запуск; обычное обновление токена сохраняет аккаунт.
    */
-  async observe(provider: string, snapshot: AccessSnapshot, result: unknown, refreshed: boolean) {
+  async observe(provider: string, snapshot: AccessSnapshot, result: unknown, refreshed: boolean,
+    method?: string) {
     await this.store.locked(provider, async () => {
       const manifest = await this.manifest(provider);
       const profile = manifest.profiles.find((item) => item.id === snapshot.profileId);
@@ -625,12 +626,15 @@ export class AccessProfileService {
 
       const state = (result as { state?: string } | null)?.state;
       const revoked = state === 'auth_required';
+      // Успешное чтение лимитов доказывает доступ текущими credentials профиля:
+      // флаг снимается без мастера, сами credentials observe не подменяет.
+      const proven = method === 'usage' && state === 'ok' && profile.authState === 'needs-auth';
 
-      if (!refreshed && (!revoked || profile.authState === 'needs-auth')) {
+      if (!proven && !refreshed && (!revoked || profile.authState === 'needs-auth')) {
         return;
       }
 
-      profile.authState = revoked ? 'needs-auth' : profile.authState;
+      profile.authState = revoked ? 'needs-auth' : (proven ? 'ready' : profile.authState);
       profile.revision += 1;
       profile.accessRevision += 1;
       manifest.revision += 1;

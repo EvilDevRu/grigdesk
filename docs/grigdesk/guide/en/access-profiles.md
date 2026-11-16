@@ -26,6 +26,11 @@ To delete the active profile, first select another. Switching is available only 
 conversations or unfinished pipelines. Work, approval waits, background work and sleep count as activity;
 a paused pipeline also holds access. Disabled buttons explain why and update automatically when work ends.
 
+"Sign-in required" appears when an executor call was rejected for authorization.
+A later successful quota check with the same connection clears the mark automatically:
+access is proven by the profile's current credentials, which are never substituted.
+Until a check succeeds, the mark stays until sign-in is restored through the wizard.
+
 After connection loss, the wizard checks the actual outcome without resending the key.
 Retry interrupted or expired sign-in. The wizard verifies the sign-in protocol, not only the CLI version:
 verified versions are accepted immediately, a new version after comparing its app-server schemas with the verified ones.

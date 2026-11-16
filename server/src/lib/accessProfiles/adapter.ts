@@ -245,7 +245,7 @@ export function accessProfileAdapter(
         if (selection && service && !work) {
           const after = await capability.credentialFingerprint?.(selection.env);
 
-          await service.observe(adapter.id, selection.snapshot, result, !!before && before !== after);
+          await service.observe(adapter.id, selection.snapshot, result, !!before && before !== after, name);
         }
 
         return result;
