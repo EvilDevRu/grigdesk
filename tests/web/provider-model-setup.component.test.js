@@ -23,7 +23,7 @@ test('Выбор модели: исполнитель без моделей ве
   await h.wrapper.get('button[data-provider-model-select]').trigger('click');
   await h.flushPromises();
 
-  assert.equal(h.browser.document.querySelector('[data-model-providers-settings]'), null);
+  assert.equal(h.browser.document.querySelector('[data-model-providers-settings]') === null, true);
 
   const action = h.browser.document.querySelector('[data-model-provider-setup][data-provider-id="empty"]');
 

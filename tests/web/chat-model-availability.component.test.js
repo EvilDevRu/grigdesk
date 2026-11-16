@@ -248,7 +248,7 @@ test('нечат-модель не выводится в выборе', async (t
 
   const { wrapper } = await mountChat(t);
 
-  assert.equal(modelOption(wrapper, 'wan3.0-video'), undefined);
+  assert.equal(modelOption(wrapper, 'wan3.0-video') === undefined, true);
   assert.equal(modelOption(wrapper, 'qwen3.8-max').element.disabled, false);
 });
 

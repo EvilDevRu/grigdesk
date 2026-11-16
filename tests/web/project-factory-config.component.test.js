@@ -224,7 +224,7 @@ export const api = {
     await f.wrapper.setProps({ readonly: true });
     assert.equal(f.field('PROFILE_LOOP_MAX_ROUNDS').attributes('disabled') !== undefined, true);
     await f.click('apply-config');
-    assert.equal(browser.document.querySelector('[data-test="confirm-config"]'), null);
+    assert.equal(browser.document.querySelector('[data-test="confirm-config"]') === null, true);
     await f.wrapper.setProps({ readonly: false });
     await f.field('PROFILE_LOOP_MAX_ROUNDS').setValue('40');
     await f.click('apply-config');
