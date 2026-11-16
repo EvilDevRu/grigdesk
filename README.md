@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://grigdesk.com">
+  <a href="https://app.grigdesk.com">
     <picture>
       <source media="(max-width: 640px)" srcset="docs/images/readme/hero-mobile.svg">
       <img src="docs/images/readme/hero.svg" width="1280" alt="GrigDesk — Your agents. One workspace. Plan, build, review, test.">
@@ -20,12 +20,17 @@
   <strong><a href="#install">Install</a></strong> &nbsp; / &nbsp;
   <a href="#documentation">Docs</a> &nbsp; / &nbsp;
   <a href="#plugins">Plugins</a> &nbsp; / &nbsp;
-  <a href="https://grigdesk.com">Website</a>
+  <a href="https://app.grigdesk.com">Website</a>
 </p>
 
 <p align="center">
   An open-source workspace for building software with AI agents.<br>
   Chat, run pipelines, and review the result — on your own machine.
+</p>
+
+<p align="center">
+  <img src="docs/images/readme/pipeline.png" width="1280" alt="GrigDesk pipelines: stages with assigned agents, human approval points, and a ready preview stand"><br>
+  <em>Pipelines carry a task from plan to acceptance; every task gets its own sandbox and preview stand.</em>
 </p>
 
 ## Works with
@@ -89,7 +94,7 @@ GrigDesk tasks are built in. Bitrix24 and Jira Cloud connect through installable
 
 **Work in a conversation.** Choose an agent, attach context, and develop a solution together. Your files, diffs, Git, terminals, Docker, and databases stay within reach.
 
-**Let a pipeline carry the task.** Connect planning, implementation, review, and testing. Choose the agents and approval points, and run tasks across projects in parallel.
+**Let a pipeline carry the task.** Connect planning, implementation, review, and testing. Choose the agents and approval points, and run tasks across projects in parallel. Prefer a [loop route](docs/grigdesk/guide/en/pipelines.md): a lead agent assigns work and checks results itself, and returns to you for acceptance.
 
 **Try the result before you approve.** Give a task its own Git working copy, containers, and data. Open the preview, inspect the changes, and decide what happens next.
 
