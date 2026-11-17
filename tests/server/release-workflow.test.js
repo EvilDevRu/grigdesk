@@ -31,6 +31,29 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.doesNotMatch(text, /GLM|glm-smoke|API_KEY/i);
 });
 
+test('RW-QWEN: native CLI закреплён, а Host имеет настоящий ограниченный user scope', async () => {
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = yaml.parse(await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8'));
+  const steps = workflow.jobs.server.steps;
+  const cli = steps.findIndex((step) => step.name === 'Настоящий CLI Qwen');
+  const manager = steps.findIndex((step) => step.name === 'Пользовательский менеджер процессов тестов');
+  const tests = steps.findIndex((step) => step.id === 'server_tests');
+  const lock = JSON.parse(await fs.readFile(
+    path.join(repository, 'tests/fixtures/qwen-cli/package-lock.json'), 'utf8'));
+
+  assert.ok(cli >= 0 && manager > cli && tests > manager);
+  assert.equal(lock.packages['node_modules/@qwen-code/qwen-code'].version, '0.27.3');
+  assert.match(steps[cli].run, /npm --prefix tests\/fixtures\/qwen-cli ci/u);
+  assert.match(steps[cli].run, /GRIGDESK_QWEN_BIN=\$GITHUB_WORKSPACE\//u);
+  assert.match(steps[manager].run, /github-hosted/u);
+  assert.match(steps[manager].run, /MemoryMax=4G/u);
+  assert.match(steps[manager].run, /DBUS_SESSION_BUS_ADDRESS/u);
+  assert.match(steps[tests].run, /systemd-run --user --scope --collect/u);
+  assert.match(steps[tests].run, /app-grigdesk-tests-.*\.scope/u);
+  assert.match(steps[tests].run, /-- npm --prefix server test/u);
+});
+
 test('RW-2: отдельный relay-workflow удалён', async () => {
   await assert.rejects(
     fs.stat(path.join(repository, '.github/workflows/relay-release.yml')),

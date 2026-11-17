@@ -36,3 +36,8 @@ Helper `factory-runner-models` собирает metadata конвейерных 
 Status port получает `engine/lib/stage-progress.sh` и `stage-result.sh` через общий
 `runtimeRoot()`. Относительный `import.meta.url` серверного исходника не сохраняется
 в собранном helper: после переноса команды принадлежат `R/engine`.
+
+Relocation-фикстура metadata helper подключает `server/node_modules` отдельно от
+серверных исходников: зависимости npm остаются внешними по общему контракту helper.
+`jsonc-parser` и `yaml` требуются графу Qwen даже при чтении metadata Codex. Проверка
+по-прежнему не копирует `server/src`; состав npm-поставки проверяется отдельным SEA gate.

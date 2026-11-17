@@ -185,3 +185,15 @@ user, mount и network namespaces. До тестов выполняется `uns
 это полная проверка, а не пропуск после metadata-пробы. Бюджет compiled status MCP составляет
 180 секунд на настоящий route loop при общем сроке случая 190 секунд: на двух CPU
 он уже занимает около минуты без параллельной сборки.
+
+Полный серверный набор устанавливает настоящий `@qwen-code/qwen-code@0.27.3` из
+`tests/fixtures/qwen-cli/package-lock.json`; абсолютный вход передаётся через
+`GRIGDESK_QWEN_BIN`. Поле `allowScripts` разрешает только точную версию ранее
+[проверенного audio-capture hook](../chat/qwen-install-hooks.md); пользовательская npm
+политика не меняется. Native-фикстуры используют loopback API и синтетические ключи.
+Для Qwen Host workflow поднимает настоящий user manager на одноразовом GitHub runner
+и запускает набор в уникальном `app-grigdesk-tests-*.scope`. Это даёт дочерним Qwen
+scope настоящего владельца для `BindsTo`; обычная оболочка терминала не подходит.
+`MemoryMax=4G` на user manager ограничивает суммарную память набора и Qwen scopes,
+которые создаются отдельно от process group сторожа. На машине владельца эти настройки
+не применяются; обычный guard с concurrency=2 и RSS=4096 МиБ остаётся обязательным.

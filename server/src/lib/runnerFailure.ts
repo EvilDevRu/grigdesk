@@ -343,6 +343,7 @@ export const RUNNER_FAILURE_READERS: Readonly<Record<string, {
   deepseek: { file: 'events.jsonl', inspect: inspectDeepSeekFactoryFailure },
   glm: { file: 'events.jsonl', inspect: inspectGlmFactoryFailure },
   kimi: { file: 'stderr.log', inspect: inspectKimiFailure },
+  qwen: { file: 'events.jsonl', inspect: inspectFactoryWrapperFailure },
 };
 
 /**

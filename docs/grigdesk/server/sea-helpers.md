@@ -57,3 +57,7 @@ Node или готового b24 отказывает. Source-команды р�
 Схему и хранилище маршрутов скрипт получает из library-helper-а `routes-publish-kit`: путь к его
 файлу сервер передаёт в `GRIGDESK_ROUTES_KIT` (`helperModule` в `runtimePaths.ts`; вход `main`
 или `script` так не отдаётся — его импорт запустил бы CLI).
+
+Опись также учитывает URL и ресурс Python PTY управляемого CLI-входа, уже включённый
+в оба ресурсных manifest. `process.execPath` общего CLI SEA builder относится к сборке,
+а не к runtime одиночного ELF. Владелец `qwen-native-tools` разрешён схемой inventory.

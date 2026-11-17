@@ -363,9 +363,10 @@ test('MC-35: повтор после ошибки за rename снова про�
   assert.equal((await fs.readdir(path.join(fixture.config.chatsDir, 'pending'))).length, 0);
 });
 
-test('MC-35: удаление с удержанным pending не мешает другим чатам и повторному id', async (t) => {
+test('MC-35: удалённый чат не возвращается из pending и не мешает другому чату', async (t) => {
   const fixture = await heldResult(t, 'mobile-deleted');
   const { app, config } = fixture;
+  const stale = (await app.inject('/api/chat/store/chat/mobile-deleted')).json().chat;
 
   fixture.restore();
   assert.equal(
@@ -378,11 +379,21 @@ test('MC-35: удаление с удержанным pending не мешает 
     200,
   );
   await app.mobileChat.reconcile();
-  await saveChat(app, 'mobile-deleted');
+
+  const restored = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: { chat: stale },
+  });
+
+  assert.equal(restored.statusCode, 409);
+  assert.equal(restored.json().error, 'chat_deleted');
+  await saveChat(app, 'mobile-other');
   await app.mobileChat.reconcile();
 
+  assert.equal((await app.inject('/api/chat/store/chat/mobile-deleted')).statusCode, 404);
   assert.equal(
-    (await app.inject('/api/chat/store/chat/mobile-deleted')).json().chat.messages.length,
+    (await app.inject('/api/chat/store/chat/mobile-other')).json().chat.messages.length,
     0,
   );
   assert.equal((await fs.readdir(path.join(config.chatsDir, 'pending'))).length, 0);
