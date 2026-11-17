@@ -49,7 +49,7 @@ candidate. Pinned Node и dependencies должны быть подготовл�
 helper выбора runtime. Тест проверяет candidate во всех ступенях и во вложенном source gate,
 а также отказ отсутствующего explicit candidate до запуска наборов. Это проверка проводки,
 она не заменяет полный прогон и настоящий source-sync build/transport gate.
-Опись включает самостоятельный `chat-list-benchmark`: шестнадцать обычных потребителей
+Опись включает самостоятельный `chat-list-benchmark`: восемнадцать обычных потребителей, включая routes и voice
 и пять вложенных. Контракт общего Node pin читает пакет `tracker`, прежнего `b24/` в checkout нет.
 Потребители в стенде не наследуют binary/cache/payload override от внешнего теста:
 его получает только subprocess настоящего producer helper. Наблюдатели требуют параметры,
@@ -79,3 +79,9 @@ TAP. Одна ранняя ошибка package unit не должна скры�
 Все файлы выполняются: общие параметры Node передаются обеим группам, а отказ любой группы
 остаётся общим кодом выхода. Benchmark использует ту же функцию разделения, сохраняя
 свой heap 2048 МиБ; source-sync получает heap 1024 МиБ и общий RSS 4096 МиБ.
+
+Внутри package unit реальный standalone builder `buildInputs.test.mts` и consumer-проверка
+`suite-wiring.test.mts` получают отдельные группы после остальных unit-файлов. Дочерние
+сборки и повторы native preparation не делят 4 ГиБ с соседним worker; остальные файлы
+продолжают идти с concurrency=2.
+Состав unit и ступени source gate сохраняются полностью.

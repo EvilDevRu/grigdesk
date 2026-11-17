@@ -117,3 +117,5 @@
 - [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.
 
 - [Сданные GREEN/RED, проверки updater и закрепление снимка TESTS](release-update-stage-order.md)
+
+Серверные Qwen native/Host проверки и закреплённая CI-среда описаны в [workflow выпуска](../server/release-workflow-validation.md).

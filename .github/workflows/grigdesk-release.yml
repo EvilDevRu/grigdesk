@@ -162,6 +162,26 @@ jobs:
           ffprobe -version
           rg --version
           python3 -c 'from PIL import Image; print(Image.__version__)'
+      - name: Настоящий CLI Qwen
+        run: |
+          npm --prefix tests/fixtures/qwen-cli ci --no-audit --no-fund
+          printf '%s\n' \
+            "GRIGDESK_QWEN_BIN=$GITHUB_WORKSPACE/tests/fixtures/qwen-cli/node_modules/@qwen-code/qwen-code/cli-entry.js" \
+            >> "$GITHUB_ENV"
+      - name: Пользовательский менеджер процессов тестов
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test_uid=$(id -u)
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$test_uid.service"
+          sudo systemctl set-property --runtime "user@$test_uid.service" MemoryMax=4G
+          export XDG_RUNTIME_DIR="/run/user/$test_uid"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user show-environment > /dev/null
+          systemd-run --user --scope --collect --quiet \
+            --unit="app-grigdesk-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.scope" -- true
+          printf '%s\n' "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" \
+            "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Браузер тестов
@@ -253,7 +273,9 @@ jobs:
             printf '%s\n' "Для полного native-набора нужно 16 GiB; доступно $available_kib KiB"
             exit 1
           fi
-          npm --prefix server test
+          systemd-run --user --scope --collect --quiet \
+            --unit="app-grigdesk-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.scope" \
+            -- npm --prefix server test
       - name: Тесты shared-контрактов
         id: shared_tests
         continue-on-error: true
