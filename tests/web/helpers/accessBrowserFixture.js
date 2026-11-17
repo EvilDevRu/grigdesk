@@ -288,8 +288,15 @@ export async function openProfiles(f, page = f.page) {
   const providerPage = page.locator('[data-provider-page="fixture"][data-ready="true"]');
 
   await providerPage.waitFor();
-  await providerPage.getByText(/^(Загрузка(?: профилей)?|Loading(?: profiles)?)…$/u)
-    .waitFor({ state: 'hidden' });
+
+  // Список и восстановление попытки могут одновременно показывать две подписи загрузки.
+  // Ждём исчезновения всех, не применяя strict locator к нескольким готовящимся блокам.
+  await page.waitForFunction(() => {
+    const section = document.querySelector('[data-provider-page="fixture"][data-ready="true"]');
+
+    return section && ![...section.querySelectorAll('*')].some((element) =>
+      /^(Загрузка(?: профилей)?|Loading(?: profiles)?)…$/u.test(element.textContent?.trim() ?? ''));
+  });
 
   const addButton = providerPage.getByRole('button', {
     name: /^(Добавить профиль|Add profile)$/u,
