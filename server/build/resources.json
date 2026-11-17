@@ -62,21 +62,6 @@
       "kind": "file"
     },
     {
-      "source": "server/requirements-showcase-qwen.txt",
-      "target": "server/requirements-showcase-qwen.txt",
-      "kind": "file"
-    },
-    {
-      "source": "server/requirements-showcase-silero.txt",
-      "target": "server/requirements-showcase-silero.txt",
-      "kind": "file"
-    },
-    {
-      "source": "server/requirements-showcase-voice.txt",
-      "target": "server/requirements-showcase-voice.txt",
-      "kind": "file"
-    },
-    {
       "source": "server/src/lib/analytics/dirfd-helper.py",
       "target": "server/src/lib/analytics/dirfd-helper.py",
       "kind": "file"
@@ -94,21 +79,6 @@
     {
       "source": "server/src/lib/media/transcribe.py",
       "target": "server/src/lib/media/transcribe.py",
-      "kind": "file"
-    },
-    {
-      "source": "server/src/lib/showcase/voice/piperSynth.py",
-      "target": "server/src/lib/showcase/voice/piperSynth.py",
-      "kind": "file"
-    },
-    {
-      "source": "server/src/lib/showcase/voice/qwenSynth.py",
-      "target": "server/src/lib/showcase/voice/qwenSynth.py",
-      "kind": "file"
-    },
-    {
-      "source": "server/src/lib/showcase/voice/sileroSynth.py",
-      "target": "server/src/lib/showcase/voice/sileroSynth.py",
       "kind": "file"
     },
     {

@@ -2,6 +2,7 @@ import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseSceneDraft } from '../../shared/showcaseApi';
 import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
+import { showcaseProjectOwner } from './showcaseRuntime';
 import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../../shared/uiLocalePort.ts';
 
@@ -9,38 +10,52 @@ const translateUi = localeTranslator(uiLocalePort);
 
 
 /**
- * Общая обвязка правок сцен. Каждая правка уходит со своей ожидаемой редакцией и
- * возвращает свежую запись целиком: сервер сам считает, что после правки устарело,
- * и клиенту незачем повторять этот расчёт по-своему.
- *
- * Конфликт редакций не теряет чужую работу: карточка перечитывается, и человек
- * видит текущее состояние вместо своего наложенного поверх.
+ * Успех, ошибка и перечитанная карточка принадлежат захваченному ролику. Внешний
+ * предикат дополнительно привязывает цепочку адаптации к эпохе навигации.
  */
-async function apply(
+export async function apply(
   store: ShowcaseStore,
   action: (project: ShowcaseProject) => Promise<ShowcaseProject>,
   fallback: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> {
   const opened = store.opened;
 
-  if (!opened) {
+  if (!opened || !isCurrent()) {
     return false;
   }
+
+  const owner = showcaseProjectOwner(store, opened.id);
+  const current = () => owner() && isCurrent();
 
   store.setBusy(opened.id, true);
 
   try {
-    store.setOpened(await action(opened));
+    const saved = await action(opened);
+
+    if (!current()) {
+      return false;
+    }
+
+    store.setOpened(saved);
     store.setError('');
 
     return true;
   } catch (error) {
+    if (!current()) {
+      return false;
+    }
+
     store.setError(showcaseErrorMessage(error, fallback));
 
     try {
-      store.setOpened(await showcaseApi.project(opened.id));
+      const fresh = await showcaseApi.project(opened.id);
+
+      if (current()) {
+        store.setOpened(fresh);
+      }
     } catch {
-      // Карточку могло уже не быть: список обновит общий обзор.
+      // Ошибка перечитывания не возвращает закрытую карточку и не теряет ввод.
     }
 
     return false;
@@ -69,11 +84,13 @@ export function updateShowcaseScene(
   store: ShowcaseStore,
   sceneId: string,
   patch: Partial<ShowcaseSceneDraft>,
+  isCurrent: () => boolean = () => true,
 ) {
   return apply(
     store,
     (project) => showcaseApi.updateScene(project.id, project.revision, sceneId, patch),
     translateUi('core.editShowcaseScenesCouldNotSaveTheScene'),
+    isCurrent,
   );
 }
 

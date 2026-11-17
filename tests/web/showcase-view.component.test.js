@@ -54,6 +54,9 @@ export const promptDialog = async (options) => {
 const ACTIONS_STUB = `
 import { showcaseSourceEqual } from '${webFile('../shared/plugins/showcase/showcaseContracts.ts')}';
 const harness = () => globalThis.__showcaseViewHarness;
+export const beginShowcaseNavigation = () => () => true;
+export const captureShowcaseNavigation = () => () => true;
+export const showcaseProjectOwner = (store, id = store.opened?.id) => () => store.opened?.id === id;
 export const useShowcaseStore = () => harness().store;
 export const watchShowcase = () => {
   harness().calls.push(['watch']);
@@ -101,6 +104,11 @@ export const markShowcaseDataUpdated = async () => { harness().calls.push(['data
 export const addShowcaseScene = async (store, draft) => { harness().calls.push(['add-scene', draft]); };
 export const updateShowcaseScene = async (store, id, patch) => {
   harness().calls.push(['update-scene', id, patch]);
+  if (harness().applyResponses && harness().updateResult) {
+    store.opened = { ...store.opened, revision: store.opened.revision + 1,
+      scenes: store.opened.scenes.map((scene) => scene.id === id
+        ? { ...scene, ...patch, title: patch.title?.trim() || scene.title } : scene) };
+  }
   return harness().updateResult;
 };
 export const removeShowcaseScene = async (store, id) => { harness().calls.push(['remove-scene', id]); };
@@ -123,7 +131,26 @@ export const cancelShowcaseVoiceInstall = async () => {
 };
 export const setShowcaseVoice = async (store, choice) => {
   harness().calls.push(['set-voice', choice]);
+  if (harness().applyResponses) {
+    store.opened = { ...store.opened, ...choice };
+  }
+  return true;
 };
+export const adaptShowcaseNarration = async (store, id) => {
+  harness().calls.push(['adapt', id]);
+  if (!harness().adaptResult) return false;
+  store.opened = { ...store.opened, revision: store.opened.revision + 1,
+    scenes: store.opened.scenes.map((scene) => scene.audioSource.kind === 'tts'
+      ? { ...scene, narration: 'Обзор две тысячи двадцать шесть.',
+          subtitleText: 'Обзор две тысячи двадцать шесть.', syncBindings: null,
+          pronunciationOverrides: [] } : scene) };
+  return true;
+};
+export const attachShowcaseTarget = async (store, id, revision, ref) => {
+  harness().calls.push(['attach', ref, id, revision]);
+  return true;
+};
+export const reshootShowcaseScene = async () => true;
 export const loadShowcaseVoicePreview = async (voiceRef) => {
   harness().calls.push(['preview', voiceRef]);
 
@@ -208,6 +235,9 @@ function showcaseViewComponent() {
       `,
       '../actions/showcase': ACTIONS_STUB,
       '../../actions/showcase': ACTIONS_STUB,
+      '../../stores/tasks': `export const useTasksStore = () => ({
+        load: async () => {}, title: () => null,
+      });`,
       '../shared/showcaseApi': API_STUB,
       '../composables/useUiContextSource.ts': CONTEXT_STUB,
       'vue-router': ROUTER_STUB,
@@ -246,10 +276,18 @@ function scene(overrides = {}) {
     caption: 'Обзор',
     subtitleText: 'Открываем обзор.',
     direction: {
-      tone: null, pace: null, emphasis: [], pauses: [], stresses: [],
+      tone: null,
+      pace: null,
+      emphasis: [],
+      pauses: [],
+      stresses: [],
     },
     timing: null,
-    audioSource: { kind: 'recorded', voiceRef: null, artifactId: 'audio-1' },
+    audioSource: {
+      kind: 'recorded',
+      voiceRef: null,
+      artifactId: 'audio-1',
+    },
     audio: artifact('audio', 'audio-1'),
     clip: artifact('clip', 'clip-1'),
     frame: null,
@@ -306,14 +344,22 @@ function readyVoiceCatalog() {
         id: 'piper',
         name: 'Piper (локально)',
         kind: 'local',
-        doctor: { status: 'ready', reason: 'Голос установлен.', install: '' },
+        doctor: {
+          status: 'ready',
+          reason: 'Голос установлен.',
+          install: '',
+        },
         voices: [{
           id: 'irina',
           name: 'Ирина',
           language: 'ru',
           available: true,
           reason: '',
-          capabilities: { pace: true, pause: true, stress: true },
+          capabilities: {
+            pace: true,
+            pause: true,
+            stress: true,
+          },
         }],
       },
     ],
@@ -351,7 +397,7 @@ function summary(overrides = {}) {
 
 function project(overrides = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'project-1',
     title: 'Ролик о готовой работе',
     revision: 3,
@@ -366,7 +412,11 @@ function project(overrides = {}) {
         viewUrl: 'http://127.0.0.1:5192',
         environment: 'read-only',
         capabilities: ['record'],
-        screens: [{ id: 'overview', title: 'Обзор', path: '/' }],
+        screens: [{
+          id: 'overview',
+          title: 'Обзор',
+          path: '/',
+        }],
         targetFingerprint: 'target',
         policyRevision: 'policy',
         mapRevision: 'map',
@@ -410,7 +460,11 @@ async function mountView(t, {
   promptValue = null,
   seed = null,
   voices = voiceCatalog(),
-  dictionary = { text: '', entries: [], errors: [] },
+  dictionary = {
+    text: '',
+    entries: [],
+    errors: [],
+  },
   targets = [targetChoice()],
   loaded = true,
   error = '',
@@ -428,6 +482,8 @@ async function mountView(t, {
   saveSourceResult = true,
   confirmGate = null,
   reactiveStore = false,
+  applyResponses = false,
+  adaptResult = true,
 } = {}) {
   const browser = await createUiBrowser(url);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -441,9 +497,11 @@ async function mountView(t, {
         external: 'system',
         agents: false,
       },
-      control: async () => {},
+      control: async () => { },
     },
     confirmed,
+    applyResponses,
+    adaptResult,
     confirmGate,
     sourceOptions,
     sourceError,
@@ -479,7 +537,10 @@ async function mountView(t, {
       jobs,
       buildRuns,
       limits: {
-        maxScenes: 20, maxSceneSeconds: 120, maxTotalSeconds: 600, retentionDays: 30,
+        maxScenes: 20,
+        maxSceneSeconds: 120,
+        maxTotalSeconds: 600,
+        retentionDays: 30,
       },
       opened,
       loading: false,
@@ -498,7 +559,7 @@ async function mountView(t, {
       isBusy: () => buildRuns.some((run) => (
         run.state === 'queued' || run.state === 'running' || run.state === 'cancelling'
       )),
-      setOpened: () => {},
+      setOpened: () => { },
       setError: (text) => {
         calls.push(['set-error', text]);
       },
@@ -546,7 +607,10 @@ async function mountView(t, {
   await flushPromises();
 
   return {
-    wrapper, flushPromises, calls, harness,
+    wrapper,
+    flushPromises,
+    calls,
+    harness,
   };
 }
 
@@ -559,133 +623,21 @@ function hasButton(wrapper, text) {
 }
 
 function sceneRows(wrapper) {
-  return wrapper.findAll('.board__row');
+  return wrapper.findAll('[data-testid^="showcase-timeline-"]');
 }
 
 async function selectRow(wrapper, index) {
-  await sceneRows(wrapper)[index].find('.ui-selectable-row__primary').trigger('click');
+  await sceneRows(wrapper)[index].trigger('click');
   await wrapper.vm.$nextTick();
 }
 
-test('без доступных стендов список ведёт в песочницы без ручных полей', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: null,
-    targets: [],
-  });
 
-  assert.match(wrapper.text(), /Нет стендов для записи/);
-  assert.doesNotMatch(wrapper.text(), /Профиль показа|Номер стенда/);
-  assert.equal(wrapper.find('a[href="#/sandboxes"]').text(), 'Открыть песочницы');
-});
 
-test('у живого стенда одна кнопка «Снять ролик», а в операцию уходит только ссылка цели', async (t) => {
-  const targets = [
-    targetChoice(),
-    targetChoice({
-      ref: { kind: 'sandbox', id: '990001' },
-      profile: 'arsenkin',
-      label: 'arsenkin · стенд t990001',
-      viewUrl: null,
-      viewPort: 5192,
-      screenCount: 0,
-    }),
-  ];
-  const { wrapper, flushPromises, calls } = await mountView(t, {
-    opened: null,
-    targets,
-    url: 'https://grigdesk.test/#/showcase',
-  });
-  const links = wrapper.findAll('.picker__link');
 
-  assert.equal(
-    links[0].attributes('href'),
-    'http://127.0.0.1:13000',
-    'постоянный стенд сохраняет опубликованный сервером адрес',
-  );
-  assert.equal(
-    links[1].attributes('href'),
-    'http://grigdesk.test:5192/',
-    'адрес песочницы использует прямой порт хоста, на котором открыт GrigDesk',
-  );
-  assert.equal(wrapper.find('select').exists(), false, 'выбор стенда — строки, а не список с «Далее»');
 
-  await wrapper.find('[data-testid="showcase-create-sandbox:990001"]').trigger('click');
-  await flushPromises();
 
-  assert.deepEqual(calls.filter(([name]) => name === 'create'), [[
-    'create',
-    { ref: { kind: 'sandbox', id: '990001' } },
-  ]]);
-  assert.ok(calls.some(([name]) => name === 'build'), 'после создания сразу стартует полный run');
-  assert.equal(
-    calls.some(([name]) => name === 'analyze'),
-    false,
-    'разбор нового ролика выполняет серверная сборка, а не вторая команда браузера',
-  );
-  assert.equal(
-    wrapper.find('input[data-testid="showcase-create-title"]').exists(),
-    false,
-    'имя ролику даёт сервер: поля названия нет',
-  );
-});
 
-test('ролик про тот же стенд предлагается открыть, а не заводить второй', async (t) => {
-  const { wrapper, flushPromises, calls } = await mountView(t, {
-    opened: null,
-    projects: [summary({
-      ref: { kind: 'project', id: 'parser' },
-      title: 'Проект parser',
-      state: 'done',
-    })],
-  });
-  const chip = wrapper.find('.picker__chip');
 
-  assert.equal(chip.text(), 'ролик собран', 'состояние ролика названо чипом прямо у стенда');
-  assert.equal(chip.attributes('data-tone'), 'good');
-  assert.equal(hasButton(wrapper, 'Снять ролик'), false, 'главное действие — открыть ролик');
-  assert.ok(buttonByText(wrapper, 'Снять новый'), 'второй ролик остаётся тихим действием');
-
-  await wrapper.find('[data-testid="showcase-open-project:parser"]').trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(calls.filter(([name]) => name === 'open'), [['open', 'project-1']]);
-  assert.ok(
-    calls.some(([name, to]) => name === 'route' && to === '/showcase/project-1'),
-    'открытый ролик попадает в адрес — после F5 человек увидит его же',
-  );
-});
-
-test('стенд без ролика так и подписан, а стенд задачи назван её названием', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: null,
-    targets: [
-      targetChoice(),
-      targetChoice({
-        ref: { kind: 'sandbox', id: '990001' },
-        profile: 'arsenkin',
-        label: 'arsenkin · стенд 990001 · ждёт приёмки',
-        taskTitle: 'Массовый съём частотности по проектам',
-        viewUrl: null,
-        viewPort: 5192,
-      }),
-    ],
-  });
-  const rows = wrapper.findAll('.picker__item');
-
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].find('.picker__chip').text(), 'ролика нет');
-  assert.equal(rows[0].find('.picker__label').text(), 'parser · постоянный стенд');
-  assert.equal(
-    rows[1].find('.picker__label').text(),
-    'Массовый съём частотности по проектам',
-    'по номеру человек задачу не узнаёт — первой строкой стоит её название',
-  );
-  assert.match(
-    rows[1].find('.picker__meta').text(),
-    /arsenkin · стенд 990001 · ждёт приёмки · карта: 2 экр\./,
-    'подпись стенда с состоянием попытки переезжает во вторую строку',
-  );
-});
 
 test('ошибка загрузки не остаётся бесконечным поиском стендов', async (t) => {
   const { wrapper } = await mountView(t, {
@@ -695,58 +647,15 @@ test('ошибка загрузки не остаётся бесконечным
     error: 'Сервер не ответил.',
   });
 
-  assert.match(wrapper.text(), /Не удалось загрузить стенды/);
+  assert.match(wrapper.text(), /Сервер не ответил/);
   assert.doesNotMatch(wrapper.text(), /Ищем доступные стенды/);
 });
 
-test('причина недоступности стенда видна рядом с самим стендом', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: null,
-    targets: [targetChoice({
-      status: 'blocked',
-      reason: 'Стенд сейчас не отвечает.',
-    })],
-  });
 
-  assert.match(wrapper.text(), /parser · постоянный стенд/);
-  assert.match(wrapper.text(), /Стенд сейчас не отвечает/);
-  assert.equal(hasButton(wrapper, 'Снять ролик'), false, 'снимать с мёртвого стенда нечего');
-  assert.equal(wrapper.find('a[href="#/sandboxes"]').text(), 'Открыть песочницы');
-});
 
-test('цель без карты экранов остаётся доступной для базовой записи', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: null,
-    targets: [targetChoice({ screenCount: 0 })],
-  });
 
-  assert.match(wrapper.text(), /только начальный экран/);
-  assert.match(wrapper.text(), /Можно записать начальный экран/);
-  assert.equal(
-    buttonByText(wrapper, 'Снять ролик').attributes('aria-disabled'),
-    undefined,
-    'отсутствие карты не блокирует запись',
-  );
-});
 
-test('предположенная привязка песочницы называет безопасные ограничения', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: null,
-    targets: [targetChoice({
-      ref: { kind: 'sandbox', id: '990001' },
-      profile: 'arsenkin',
-      profileBinding: 'inferred',
-      label: 'arsenkin · стенд t990001',
-      viewUrl: null,
-      viewPort: 5192,
-      screenCount: 0,
-    })],
-  });
 
-  assert.match(wrapper.text(), /Привязка профиля к песочнице не подтверждена/);
-  assert.match(wrapper.text(), /подготовка данных отключены/);
-  assert.doesNotMatch(wrapper.text(), /Карта экранов не настроена/);
-});
 
 test('неготовый голос виден с причиной, а поставить его можно кнопкой', async (t) => {
   const { wrapper, calls } = await mountView(t, { opened: null });
@@ -775,8 +684,20 @@ test('готовая установка не занимает список ро�
     voices: readyVoiceCatalog(),
     doctor: {
       operations: [
-        { id: 'browser', title: 'Браузер записи', status: 'ready', reason: 'Chromium найден.', manual: false },
-        { id: 'voice', title: 'Голос', status: 'ready', reason: 'Piper.', manual: false },
+        {
+          id: 'browser',
+          title: 'Браузер записи',
+          status: 'ready',
+          reason: 'Chromium найден.',
+          manual: false,
+        },
+        {
+          id: 'voice',
+          title: 'Голос',
+          status: 'ready',
+          reason: 'Piper.',
+          manual: false,
+        },
       ],
       checkedAt: '2026-09-09T10:00:00.000Z',
     },
@@ -797,7 +718,13 @@ test('готовая установка не занимает список ро�
           reason: 'Chromium не установлен.',
           manual: false,
         },
-        { id: 'speech', title: 'Проверка речи', status: 'blocked', reason: 'Whisper нет.', manual: false },
+        {
+          id: 'speech',
+          title: 'Проверка речи',
+          status: 'blocked',
+          reason: 'Whisper нет.',
+          manual: false,
+        },
       ],
       checkedAt: '2026-09-09T10:00:00.000Z',
     },
@@ -998,7 +925,11 @@ test('сцена без звука не пускает в сборку и гов
       scenes: [
         scene({
           audio: null,
-          audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+          audioSource: {
+            kind: 'tts',
+            voiceRef: null,
+            artifactId: null,
+          },
         }),
       ],
     }),
@@ -1034,7 +965,11 @@ test('у выбранной сцены видна её запись, и к не�
       latestFinal: final(),
       scenes: [
         scene({ id: 'scene-1', order: 1 }),
-        scene({ id: 'scene-2', order: 2, clip: artifact('clip', 'clip-2') }),
+        scene({
+          id: 'scene-2',
+          order: 2,
+          clip: artifact('clip', 'clip-2'),
+        }),
       ],
     }),
   });
@@ -1110,13 +1045,25 @@ test('правка сцены переживает переход к друго�
   const { wrapper, flushPromises, calls } = await mountView(t, {
     opened: project({
       scenes: [
-        scene({ id: 'scene-1', order: 1, audioSource: { kind: 'tts', voiceRef: null, artifactId: null } }),
+        scene({
+          id: 'scene-1',
+          order: 1,
+          audioSource: {
+            kind: 'tts',
+            voiceRef: null,
+            artifactId: null,
+          },
+        }),
         scene({
           id: 'scene-2',
           order: 2,
           narration: 'Вторая сцена.',
           subtitleText: 'Вторая сцена.',
-          audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+          audioSource: {
+            kind: 'tts',
+            voiceRef: null,
+            artifactId: null,
+          },
         }),
       ],
     }),
@@ -1254,7 +1201,11 @@ test('стадии озвучки нет отдельной кнопкой: он
   const { wrapper, flushPromises, calls } = await mountView(t, {
     opened: project({
       scenes: [scene({
-        audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+        audioSource: {
+          kind: 'tts',
+          voiceRef: null,
+          artifactId: null,
+        },
         audio: null,
         stale: true,
       })],
@@ -1399,7 +1350,7 @@ test('заблокированная цель объясняет причину 
   assert.match(wrapper.text(), /Поднимите стенд задачи/);
   assert.ok(
     build.attributes('disabled') !== undefined
-      || build.attributes('aria-disabled') === 'true',
+    || build.attributes('aria-disabled') === 'true',
     'без доступной цели записывать нечего',
   );
 });
@@ -1420,17 +1371,23 @@ test('сцена в списке показывает свой экран и д�
             { kind: 'highlight', targetId: 'bulkButton' },
           ],
         }),
-        scene({ id: 'scene-2', order: 2, actions: [] }),
+        scene({
+          id: 'scene-2',
+          order: 2,
+          actions: [],
+        }),
       ],
     }),
   });
-  const plans = wrapper.findAll('.board__plan');
+  const plans = sceneRows(wrapper);
 
   assert.equal(plans.length, 2);
   assert.match(plans[0].text(), /Обзор/);
-  assert.match(plans[0].text(), /клик: selectPage → подсветка: bulkButton/);
+  assert.match(wrapper.find('.scene__plan').text(), /клик: selectPage → подсветка: bulkButton/);
   assert.doesNotMatch(plans[0].text(), /rows|800/, 'ожидания и паузы в строку не попадают');
-  assert.match(plans[1].text(), /без действий — неподвижный экран/);
+  await selectRow(wrapper, 1);
+  assert.match(wrapper.find('.scene__plan').text(), /без действий — неподвижный экран/);
+  await selectRow(wrapper, 0);
   assert.match(wrapper.find('.scene__plan').text(), /клик: selectPage/, 'редактор повторяет план сцены');
 });
 
@@ -1470,7 +1427,11 @@ test('отказавшее задание показывает причину у
       state: 'failed',
       attempt: 1,
       sequence: 4,
-      progress: { index: 0, total: 6, label: reason },
+      progress: {
+        index: 0,
+        total: 6,
+        label: reason,
+      },
       error: reason,
       startedAt: '2026-09-11T06:10:32.000Z',
       finishedAt: '2026-09-11T06:11:19.000Z',
@@ -1493,7 +1454,11 @@ test('идущее задание показано ходом по сценам 
       state: 'running',
       attempt: 1,
       sequence: 2,
-      progress: { index: 3, total: 9, label: 'пишем сцену «Позиции»' },
+      progress: {
+        index: 3,
+        total: 9,
+        label: 'пишем сцену «Позиции»',
+      },
       error: null,
       startedAt: '2026-09-11T06:10:32.000Z',
       finishedAt: null,
@@ -1575,7 +1540,10 @@ test('остановка на проверке синхронизации пок
     stage: 'timeline-and-assemble',
     initialRevision: 1,
     children: [{
-      stage: 'timeline-and-assemble', jobId: 'job-assemble', attempt: 1, state: 'awaiting_review',
+      stage: 'timeline-and-assemble',
+      jobId: 'job-assemble',
+      attempt: 1,
+      state: 'awaiting_review',
     }],
     cancelRequested: false,
     error: { code: 'child_awaiting_review', message: reason },
@@ -1590,7 +1558,11 @@ test('остановка на проверке синхронизации пок
     state: 'awaiting_review',
     attempt: 1,
     sequence: 3,
-    progress: { index: 2, total: 8, label: 'нужна проверка синхронизации' },
+    progress: {
+      index: 2,
+      total: 8,
+      label: 'нужна проверка синхронизации',
+    },
     error: reason,
     startedAt: '2026-09-15T11:56:56.000Z',
     finishedAt: '2026-09-15T11:56:58.000Z',
@@ -1604,7 +1576,11 @@ test('остановка на проверке синхронизации пок
       note: 'Бриф предложен моделью и ждёт правки человека.',
     }],
   });
-  const { wrapper } = await mountView(t, { opened: bornInRun, buildRuns: [reviewRun], jobs: [reviewJob] });
+  const { wrapper } = await mountView(t, {
+    opened: bornInRun,
+    buildRuns: [reviewRun],
+    jobs: [reviewJob],
+  });
   const problem = wrapper.find('[data-role="build-failure"]');
 
   assert.equal(wrapper.find('[role="progressbar"]').exists(), false, 'ход сборки не показывается');
@@ -1614,7 +1590,11 @@ test('остановка на проверке синхронизации пок
   assert.ok(buttonByText(wrapper, 'Собрать ролик'), 'после правки сцены сборку можно повторить');
 
   // Задание без полного запуска (прежние ручки стадий) отчитывается само.
-  const alone = await mountView(t, { opened: bornInRun, buildRuns: [], jobs: [reviewJob] });
+  const alone = await mountView(t, {
+    opened: bornInRun,
+    buildRuns: [],
+    jobs: [reviewJob],
+  });
   const aloneProblem = alone.wrapper.find('[data-role="build-failure"]');
 
   assert.equal(alone.wrapper.find('[role="progressbar"]').exists(), false);
@@ -1648,7 +1628,11 @@ test('остановка сборки и отказ задания старше 
     state: 'failed',
     attempt: 1,
     sequence: 4,
-    progress: { index: 2, total: 7, label: 'сцена «scene-old» не записалась' },
+    progress: {
+      index: 2,
+      total: 7,
+      label: 'сцена «scene-old» не записалась',
+    },
     error: 'сцена «scene-old» не записалась',
     startedAt: '2026-09-11T06:10:32.000Z',
     finishedAt: '2026-09-11T06:11:19.000Z',
@@ -1662,7 +1646,11 @@ test('остановка сборки и отказ задания старше 
       note: 'Бриф предложен моделью и ждёт правки человека.',
     }],
   });
-  const { wrapper } = await mountView(t, { opened: reparsed, buildRuns: [stoppedRun], jobs: [failedJob] });
+  const { wrapper } = await mountView(t, {
+    opened: reparsed,
+    buildRuns: [stoppedRun],
+    jobs: [failedJob],
+  });
 
   assert.equal(wrapper.find('[data-role="build-failure"]').exists(), false, 'старый отказ не показан');
   assert.ok(buttonByText(wrapper, 'Собрать ролик'), 'сборку можно запустить');
@@ -1674,7 +1662,11 @@ test('остановка сборки и отказ задания старше 
     updatedAt: '2026-09-12T04:02:00.000Z',
     finishedAt: '2026-09-12T04:02:00.000Z',
   };
-  const current = await mountView(t, { opened: reparsed, buildRuns: [laterRun], jobs: [] });
+  const current = await mountView(t, {
+    opened: reparsed,
+    buildRuns: [laterRun],
+    jobs: [],
+  });
 
   assert.match(current.wrapper.find('[data-role="build-failure"]').text(), /Сборка остановлена/);
 });
@@ -1715,7 +1707,13 @@ test('темп речи — ползунок из пяти ступеней, а 
 
   const qwen = await mountView(t, {
     opened: project({
-      scenes: [scene({ audioSource: { kind: 'tts', voiceRef: 'qwen:vivian', artifactId: null } })],
+      scenes: [scene({
+        audioSource: {
+          kind: 'tts',
+          voiceRef: 'qwen:vivian',
+          artifactId: null,
+        }
+      })],
     }),
     voices: voiceCatalog({
       engines: [{
@@ -1723,14 +1721,22 @@ test('темп речи — ползунок из пяти ступеней, а 
         name: 'Qwen3-TTS',
         kind: 'local',
         pace: false,
-        doctor: { status: 'ready', reason: 'Установлен.', install: '' },
+        doctor: {
+          status: 'ready',
+          reason: 'Установлен.',
+          install: '',
+        },
         voices: [{
           id: 'vivian',
           name: 'Вивиан',
           language: 'ru',
           available: true,
           reason: '',
-          capabilities: { pace: false, pause: false, stress: false },
+          capabilities: {
+            pace: false,
+            pause: false,
+            stress: false,
+          },
         }],
       }],
     }),
@@ -1756,9 +1762,17 @@ test('темп речи — ползунок из пяти ступеней, а 
         id: 'old',
         name: 'Старый backend',
         kind: 'local',
-        doctor: { status: 'ready', reason: 'Готов.', install: '' },
+        doctor: {
+          status: 'ready',
+          reason: 'Готов.',
+          install: '',
+        },
         voices: [{
-          id: 'voice', name: 'Голос', language: 'ru', available: true, reason: '',
+          id: 'voice',
+          name: 'Голос',
+          language: 'ru',
+          available: true,
+          reason: '',
         }],
       }],
     }),
@@ -1778,7 +1792,7 @@ test('темп речи — ползунок из пяти ступеней, а 
 // Образец готовится секундами у тяжёлого движка: пока он идёт, человек читает,
 // чего ждёт, а отказ движка приходит его же словами, а не «кнопка не сработала».
 test('образец голоса показывает ожидание, а отказ движка называет причину', async (t) => {
-  let release = () => {};
+  let release = () => { };
   const { wrapper, flushPromises, calls } = await mountView(t, {
     voices: readyVoiceCatalog(),
     preview: () => new Promise((resolve) => {
@@ -1834,7 +1848,11 @@ test('своя реплика слушается с dirty-текстом, а я�
       scenes: [scene({
         narration,
         subtitleText: narration,
-        audioSource: { kind: 'tts', voiceRef: 'piper:irina', artifactId: null },
+        audioSource: {
+          kind: 'tts',
+          voiceRef: 'piper:irina',
+          artifactId: null,
+        },
         pronunciationOverrides: [],
       })],
     }),
@@ -1863,7 +1881,11 @@ test('своя реплика слушается с dirty-текстом, а я�
   assert.equal(previewInput.voiceRef, 'piper:irina');
   assert.equal(previewInput.narration, narration);
   assert.deepEqual(previewInput.direction, {
-    tone: null, pace: null, emphasis: [], pauses: [], stresses: [],
+    tone: null,
+    pace: null,
+    emphasis: [],
+    pauses: [],
+    stresses: [],
   });
   assert.deepEqual(previewInput.pronunciationOverrides, [{
     from,
@@ -1895,7 +1917,11 @@ test('правка реплики отменяет незавершённое п
     voices: readyVoiceCatalog(),
     opened: project({
       scenes: [scene({
-        audioSource: { kind: 'tts', voiceRef: 'piper:irina', artifactId: null },
+        audioSource: {
+          kind: 'tts',
+          voiceRef: 'piper:irina',
+          artifactId: null,
+        },
       })],
     }),
     narrationPreview: async (_input, currentSignal) => {
@@ -1925,7 +1951,11 @@ test('словарь ударений правится в панели голо�
     dictionary: {
       text: 'зам+ок\nплохо\n',
       entries: ['зам+ок'],
-      errors: [{ line: 2, text: 'плохо', reason: 'нет знака ударения «+»' }],
+      errors: [{
+        line: 2,
+        text: 'плохо',
+        reason: 'нет знака ударения «+»',
+      }],
     },
   });
 
@@ -1959,7 +1989,11 @@ test('субтитр следует за речью без знаков удар
       scenes: [scene({
         narration: 'Это з+амок.',
         subtitleText: 'Это замок.',
-        audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+        audioSource: {
+          kind: 'tts',
+          voiceRef: null,
+          artifactId: null,
+        },
       })],
     }),
   });
@@ -2033,13 +2067,21 @@ test('сцена-продолжение помечена в списке, а п�
     opened: project({
       scenes: [
         // Флаг у первой сцены — оговорка: продолжать ей нечего, и списку он не виден.
-        scene({ id: 'scene-1', order: 1, continuesPrevious: true }),
-        scene({ id: 'scene-2', order: 2, continuesPrevious: true }),
+        scene({
+          id: 'scene-1',
+          order: 1,
+          continuesPrevious: true,
+        }),
+        scene({
+          id: 'scene-2',
+          order: 2,
+          continuesPrevious: true,
+        }),
         scene({ id: 'scene-3', order: 3 }),
       ],
     }),
   });
-  const plans = wrapper.findAll('.board__plan');
+  const plans = sceneRows(wrapper);
 
   assert.doesNotMatch(plans[0].text(), /продолжает предыдущую/);
   assert.match(plans[1].text(), /продолжает предыдущую/);
@@ -2080,8 +2122,17 @@ test('счётчик пересъёмки считает всю цепочку �
     opened: project({
       scenes: [
         scene({ id: 'scene-1', order: 1 }),
-        scene({ id: 'scene-2', order: 2, continuesPrevious: true, stale: true }),
-        scene({ id: 'scene-3', order: 3, continuesPrevious: true }),
+        scene({
+          id: 'scene-2',
+          order: 2,
+          continuesPrevious: true,
+          stale: true,
+        }),
+        scene({
+          id: 'scene-3',
+          order: 3,
+          continuesPrevious: true,
+        }),
         scene({ id: 'scene-4', order: 4 }),
       ],
     }),
@@ -2101,16 +2152,7 @@ function sourceOptions() {
   return {
     taskAvailable: true,
     noteMax: 2000,
-    defaults: {
-      task: true,
-      note: '',
-      code: true,
-      repos: [{
-        name: 'frontend',
-        work: true,
-        commits: [COMMIT_NEW, COMMIT_OLD],
-      }],
-    },
+    defaults: { taskId: null, note: '' },
     requiresExplicitSelectionConfirmation: false,
     selectedOutsideCatalog: [],
     repos: [{
@@ -2138,20 +2180,7 @@ function sourceOptions() {
   };
 }
 
-test('«Выбрать, о чём…» заводит ролик без запуска и открывает его', async (t) => {
-  const { wrapper, flushPromises, calls } = await mountView(t, { opened: null });
 
-  await wrapper.find('[data-testid="showcase-configure-project:parser"]').trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(calls.filter(([name]) => name === 'create'), [[
-    'create',
-    { ref: { kind: 'project', id: 'parser' } },
-  ]]);
-  assert.ok(calls.some(([name, to]) => name === 'route' && to === '/showcase/project-new'));
-  assert.equal(calls.some(([name]) => name === 'build'), false, 'снимать сразу нельзя: сначала выбор');
-  assert.equal(calls.some(([name]) => name === 'analyze'), false);
-});
 
 test('пустой ролик показывает выбор открытым, а «Снять ролик» сохраняет его и снимает', async (t) => {
   const { wrapper, flushPromises, calls, harness } = await mountView(t, {
@@ -2159,12 +2188,10 @@ test('пустой ролик показывает выбор открытым, 
     sourceOptions: sourceOptions(),
   });
 
-  assert.ok(calls.some(([name]) => name === 'load-source'), 'список коммитов читается при открытии');
+  assert.equal(calls.some(([name]) => name === 'load-source'), false, 'git не читается');
   assert.equal(wrapper.find('[data-testid="showcase-source"]').exists(), true);
-  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Снять ролик');
-  assert.match(wrapper.text(), /Диалог массового съёма/);
+  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Применить выбор');
 
-  await wrapper.find(`[data-testid="showcase-source-commit-${COMMIT_NEW.slice(0, 7)}"]`).setValue(false);
   await wrapper.find('[data-testid="showcase-source-note"]').setValue('Упор на фильтры');
   await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
   await flushPromises();
@@ -2173,16 +2200,7 @@ test('пустой ролик показывает выбор открытым, 
 
   assert.deepEqual(calls.filter(([name]) => name === 'save-source'), [[
     'save-source',
-    {
-      task: true,
-      note: 'Упор на фильтры',
-      code: true,
-      repos: [{
-        name: 'frontend',
-        work: true,
-        commits: [COMMIT_OLD],
-      }],
-    },
+    { taskId: null, note: 'Упор на фильтры' },
   ]]);
   assert.ok(names.indexOf('save-source') < names.indexOf('build'), 'выбор сохраняется до съёмки');
   assert.equal(harness.confirmations.length, 0, 'у пустого ролика заменять нечего');
@@ -2202,7 +2220,7 @@ test('нетронутый выбор уходит умолчанием, а пр
   await buttonByText(wrapper, 'О чём ролик').trigger('click');
   await flushPromises();
 
-  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Разобрать по этому выбору');
+  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Применить выбор');
 
   await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
   await flushPromises();
@@ -2225,12 +2243,7 @@ test('нетронутый выбор уходит умолчанием, а пр
 });
 
 test('сцены по прежнему выбору предупреждают, а заблокированный стенд список не читает', async (t) => {
-  const chosen = {
-    task: false,
-    note: 'Упор на фильтры',
-    code: true,
-    repos: null,
-  };
+  const chosen = { taskId: null, note: 'Упор на фильтры' };
   const outdated = await mountView(t, { opened: project({ source: chosen, scriptSource: null }) });
 
   assert.equal(outdated.wrapper.find('[data-role="source-outdated"]').exists(), true);
@@ -2255,71 +2268,9 @@ test('сцены по прежнему выбору предупреждают, 
   assert.equal(blocked.calls.some(([name]) => name === 'load-source'), false);
 });
 
-test('слияние не выбирается, а «Снять все» и «Коммиты по умолчанию» меняют выбор целиком', async (t) => {
-  const options = sourceOptions();
-  const merge = 'c'.repeat(40);
 
-  options.repos[0].commits.unshift({
-    id: merge,
-    subject: 'Слияние главной',
-    date: '2026-10-08T11:00:00+07:00',
-    own: true,
-    merge: true,
-  });
 
-  const { wrapper, flushPromises, calls } = await mountView(t, {
-    opened: project({ scenes: [] }),
-    sourceOptions: options,
-  });
-  const mergeBox = wrapper.find(`[data-testid="showcase-source-commit-${merge.slice(0, 7)}"]`);
 
-  assert.equal(mergeBox.attributes('disabled'), '', 'слияние видно, но не выбирается');
-
-  await buttonByText(wrapper, 'Снять все').trigger('click');
-  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
-  await flushPromises();
-  await buttonByText(wrapper, 'Коммиты по умолчанию').trigger('click');
-  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(calls.filter(([name]) => name === 'save-source'), [
-    ['save-source', {
-      task: true,
-      note: '',
-      code: true,
-      repos: [],
-    }],
-    ['save-source', null],
-  ]);
-});
-
-test('у постоянного стенда задачи нет, а умолчание ничего не читает', async (t) => {
-  const { wrapper } = await mountView(t, {
-    opened: project({
-      ref: { kind: 'project', id: 'parser' },
-      scenes: [],
-    }),
-    sourceOptions: {
-      ...sourceOptions(),
-      taskAvailable: false,
-      defaults: {
-        task: false,
-        note: '',
-        code: true,
-        repos: [{
-          name: 'frontend',
-          work: false,
-          commits: [],
-        }],
-      },
-    },
-  });
-  const commitBox = wrapper.find(`[data-testid="showcase-source-commit-${COMMIT_NEW.slice(0, 7)}"]`);
-
-  assert.match(wrapper.text(), /изменения не читаются/);
-  assert.equal(wrapper.find('[data-testid="showcase-source-task"]').attributes('disabled'), '');
-  assert.equal(commitBox.element.checked, false, 'у постоянного стенда ничего не отмечено');
-});
 
 /**
  * Обещание с ручным исходом: тест держит ответ или подтверждение, пока проверяет, что
@@ -2388,41 +2339,210 @@ test('отказ сохранения выбора не запускает ни 
   assert.equal(calls.some(([name]) => name === 'build' || name === 'analyze'), false);
 });
 
-test('поздний ответ списка прежнего ролика не затирает список нового', async (t) => {
-  const first = deferred();
-  const second = deferred();
-  const fresh = sourceOptions();
 
-  fresh.repos[0].commits[0] = {
-    ...fresh.repos[0].commits[0],
-    subject: 'Свежий коммит',
+
+
+
+/**
+ * Два готовых движка позволяют проверить сам переход между возможностями речи.
+ * Серверные ответы сохраняют идентификаторы сцен и канонизируют название.
+ */
+function adaptationCatalog() {
+  const ready = readyVoiceCatalog();
+
+  return {
+    ...ready, engines: [...ready.engines, {
+      ...ready.engines[0],
+      id: 'silero',
+      name: 'Silero',
+      voices: [{
+        ...ready.engines[0].voices[0],
+        id: 'xenia',
+        name: 'Ксения',
+      }],
+    }]
   };
+}
 
-  const stale = sourceOptions();
+for (const title of [' Обзор ', '']) {
+  test(`адаптация сохраняет pending до модели и снимает draft: ${JSON.stringify(title)}`, async (t) => {
+    const { wrapper, calls, flushPromises } = await mountView(t, {
+      opened: project({
+        voiceRef: 'piper:irina', scenes: [scene({
+          audioSource: {
+            kind: 'tts',
+            voiceRef: 'piper:irina',
+            artifactId: null,
+          },
+        })]
+      }),
+      voices: adaptationCatalog(),
+      reactiveStore: true,
+      applyResponses: true,
+    });
 
-  stale.repos[0].commits[0] = {
-    ...stale.repos[0].commits[0],
-    subject: 'Устаревший коммит',
-  };
+    await wrapper.find('.scene textarea:not([readonly])').setValue('Обзор API 2026');
 
-  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
-    opened: project({ scenes: [] }),
-    sourceReads: [first.promise, second.promise],
-    reactiveStore: true,
+    const titleInput = wrapper.find('.scene input[type="text"]');
+
+    assert.ok(titleInput.exists());
+    await titleInput.setValue(title);
+
+    await wrapper.find('[data-testid="showcase-voice-select"]').setValue('silero:xenia');
+    await flushPromises();
+
+    const update = calls.findIndex(([name]) => name === 'update-scene');
+    const adapted = calls.findIndex(([name]) => name === 'adapt');
+
+    assert.ok(update >= 0 && adapted > update, 'сначала сохраняется ввод, затем начинается адаптация');
+    assert.equal(calls[update][2].narration, 'Обзор API 2026');
+    assert.equal(wrapper.find('.scene textarea:not([readonly])').element.value,
+      'Обзор две тысячи двадцать шесть.');
+
+    const beforeBuild = calls.filter(([name]) => name === 'update-scene').length;
+
+    await buttonByText(wrapper, 'Собрать ролик').trigger('click');
+    await flushPromises();
+    assert.equal(calls.filter(([name]) => name === 'update-scene').length, beforeBuild);
+    assert.ok(calls.some(([name]) => name === 'build'));
+  });
+}
+
+for (const outcome of ['decline', 'save-failed', 'adapt-failed']) {
+  test(`адаптация сохраняет ввод при ${outcome}`, async (t) => {
+    const { wrapper, calls, flushPromises, harness } = await mountView(t, {
+      opened: project({
+        voiceRef: 'piper:irina', scenes: [scene({
+          audioSource: {
+            kind: 'tts',
+            voiceRef: 'piper:irina',
+            artifactId: null,
+          },
+        })]
+      }),
+      voices: adaptationCatalog(),
+      reactiveStore: true,
+      applyResponses: true,
+      confirmed: outcome !== 'decline',
+      updateResult: outcome !== 'save-failed',
+      adaptResult: outcome !== 'adapt-failed',
+    });
+
+    await wrapper.find('.scene textarea:not([readonly])').setValue('Моя реплика');
+    await wrapper.find('[data-testid="showcase-voice-select"]').setValue('silero:xenia');
+    await flushPromises();
+    assert.equal(wrapper.find('.scene textarea:not([readonly])').element.value, 'Моя реплика');
+    assert.equal(calls.some(([name]) => name === 'build'), false);
+
+    if (outcome !== 'adapt-failed') {
+      assert.equal(calls.some(([name]) => name === 'adapt'), false);
+    } else {
+      harness.adaptResult = true;
+      await wrapper.find('[data-testid="showcase-adapt-retry"]').trigger('click');
+      await flushPromises();
+      assert.equal(wrapper.find('.scene textarea:not([readonly])').element.value,
+        'Обзор две тысячи двадцать шесть.');
+    }
+  });
+}
+
+const TARGETS = [targetChoice({
+  ref: { kind: 'project', id: 'demo-profile' },
+  profile: 'demo-profile',
+  label: 'demo-profile · постоянный стенд',
+})];
+
+function projectWithoutTarget() {
+  return project({
+    ref: null,
+    target: null,
+    scenes: [],
+  });
+}
+
+test('главная страница создаёт ролик без выбора стенда и не запускает сборку', async (t) => {
+  // opened: null обязателен: mountView по умолчанию открывает карточку ролика,
+  // а секция создания рендерится только на главной (находка R3-R3-B4).
+  const { wrapper, flushPromises, calls } = await mountView(t, {
+    opened: null,
+    projects: [],
+    targets: TARGETS,
   });
 
-  harness.store.opened = project({ id: 'project-2', scenes: [] });
-  await flushPromises();
-  second.resolve({ options: fresh, error: '' });
-  await flushPromises();
-  first.resolve({ options: stale, error: '' });
+  await wrapper.find('[data-testid="showcase-new-film"]').trigger('click');
   await flushPromises();
 
-  assert.deepEqual(
-    calls.filter(([name]) => name === 'load-source'),
-    [['load-source', 'project-1'], ['load-source', 'project-2']],
-  );
-  assert.match(wrapper.text(), /Свежий коммит/);
-  assert.doesNotMatch(wrapper.text(), /Устаревший коммит/);
-  assert.equal(wrapper.find('[data-testid="showcase-source"]').text().includes('Читаю историю'), false);
+  const create = calls.find((call) => call[0] === 'create');
+
+  assert.ok(create);
+  assert.equal(create[1].ref ?? null, null);
+  assert.equal(calls.some((call) => call[0] === 'build'), false);
+  // Реальный маркер пикера — кнопки configure/create цели (F25).
+  assert.equal(wrapper.find('[data-testid^="showcase-configure"]').exists(), false);
+});
+
+test('панель стенда подключает выбранный стенд к ролику', async (t) => {
+  const { wrapper, flushPromises, calls } = await mountView(t, {
+    opened: projectWithoutTarget(),
+    targets: TARGETS,
+  });
+
+  await wrapper.find('[data-testid="showcase-stand-select"]').setValue('project:demo-profile');
+  await wrapper.find('[data-testid="showcase-stand-attach"]').trigger('click');
+  await flushPromises();
+
+  const attach = calls.find((call) => call[0] === 'attach');
+
+  assert.ok(attach);
+  assert.deepEqual(attach[1], { kind: 'project', id: 'demo-profile' });
+});
+
+test('снесённый стенд виден причиной и ссылкой в Песочницы, кнопки подъёма нет', async (t) => {
+  // Fixture моделирует снесённый стенд: ref sandbox + blocked target с причиной
+  // (находка R4-B4: ref null не моделирует снос; ключ ссылки — строчная «п»).
+  const opened = projectWithoutTarget();
+
+  opened.ref = { kind: 'sandbox', id: '4920' };
+  opened.target = {
+    status: 'blocked',
+    ref: { kind: 'sandbox', id: '4920' },
+    reason: 'Стенд 4920 больше не поднят.',
+    nextAction: {
+      kind: 'open-sandboxes',
+      label: 'Открыть «Песочницы»',
+      hint: 'Поднимите стенд задачи.',
+    },
+  };
+
+  const { wrapper } = await mountView(t, { opened, targets: TARGETS });
+
+  assert.match(wrapper.text(), /не поднят/u);
+  assert.match(wrapper.text(), /песочниц/iu);
+  assert.equal(wrapper.find('[data-testid="showcase-stand-raise"]').exists(), false);
+});
+
+test('в пустом ролике голос стоит раньше источника', async (t) => {
+  const { wrapper } = await mountView(t, {
+    opened: projectWithoutTarget(),
+    targets: TARGETS,
+  });
+  const html = wrapper.html();
+
+  assert.ok(html.indexOf('showcase-voice-select') < html.indexOf('showcase-source'));
+});
+
+test('селект стенда преднастроен первым постоянным стендом (D25)', async (t) => {
+  const { wrapper } = await mountView(t, {
+    opened: projectWithoutTarget(),
+    targets: TARGETS,
+  });
+
+  assert.equal(wrapper.find('[data-testid="showcase-stand-select"]').element.value, 'project:demo-profile');
+});
+
+test('предупреждение выбранного стенда видно до подключения (F22)', async (t) => {
+  const targets = [{ ...TARGETS[0], warning: 'Стендом сейчас распоряжается идущая попытка конвейера.' }];
+  const { wrapper } = await mountView(t, { opened: projectWithoutTarget(), targets });
+
+  assert.match(wrapper.text(), /идущая попытка/u);
 });

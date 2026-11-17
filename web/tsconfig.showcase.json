@@ -16,6 +16,7 @@
     "src/shared/showcaseApi.ts",
     "src/views/showcase/**/*.vue",
     "src/views/ShowcaseView.vue",
-    "../tests/types/showcase-contract.test.ts"
+    "../tests/types/showcase-contract.test.ts",
+    "src/types/**/*.ts"
   ]
 }

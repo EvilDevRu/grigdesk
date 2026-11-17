@@ -1,5 +1,6 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { openShowcaseProject } from './openShowcaseProject';
+import { showcaseProjectOwner } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
 import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../../shared/uiLocalePort.ts';
@@ -125,14 +126,22 @@ export async function assembleShowcase(store: ShowcaseStore): Promise<boolean> {
     return false;
   }
 
+  const current = showcaseProjectOwner(store, opened.id);
+
   try {
     store.applyJob(await showcaseApi.assemble(opened.id));
-    store.setError('');
-    await openShowcaseProject(store, opened.id);
 
-    return true;
+    if (!current()) {
+      return false;
+    }
+
+    store.setError('');
+
+    return openShowcaseProject(store, opened.id, current);
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotAssembleTheVideo')));
+    if (current()) {
+      store.setError(showcaseErrorMessage(error, translateUi('core.buildShowcaseCouldNotAssembleTheVideo')));
+    }
 
     return false;
   }

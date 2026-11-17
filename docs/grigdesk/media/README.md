@@ -8,7 +8,7 @@
 
 ## Устройство
 
-- [Ядро voice: Model Studio, QwenCloud Token Plan и локальные движки](voice-core.md)
+- [Ядро voice: Model Studio, Token Plan, локальные движки и CLI-потребитель «Презентации»](voice-core.md)
 - [Qwen Token Plan в voice: инструкция, экспериментальные ударения и потоковый WAV](voice-qwen-token-plan.md)
 
 - [Ссылки установки системных зависимостей речи](speech-dependency-links.md)

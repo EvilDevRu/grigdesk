@@ -73,7 +73,12 @@ async function fixture(t, {
     dataRevisionOf: async () => 'начальные',
   });
 
-  return { targets, stateDir, profilesDir, contractDir };
+  return {
+    targets,
+    stateDir,
+    profilesDir,
+    contractDir,
+  };
 }
 
 async function writeSandbox(stateDir, task, values = {}) {
@@ -405,6 +410,7 @@ test('каталог связывает постоянный стенд и ру�
     serviceHost: null,
     status: 'ready',
     reason: '',
+    warning: '',
     screenCount: 0,
   });
   assert.equal(manual.profile, 'demo-profile');
@@ -421,7 +427,7 @@ test('каталог связывает постоянный стенд и ру�
   assert.equal(internal.viewUrl, null);
 });
 
-test('битое необязательное описание входа блокирует цель уже в каталоге', async (t) => {
+test('битое описание входа предупреждает и сохраняет базовую политику', async (t) => {
   const fx = await fixture(t, { target: null, screens: null });
 
   await writeFile(
@@ -433,11 +439,11 @@ test('битое необязательное описание входа бло
 
   const permanent = (await fx.targets.choices()).find((item) => item.ref.kind === 'project');
 
-  assert.equal(permanent.status, 'blocked');
-  assert.match(permanent.reason, /login\.json.*не является JSON/);
+  assert.equal(permanent.status, 'ready');
+  assert.match(permanent.warning, /login\.json.*не является JSON/);
 });
 
-test('живой API не делает песочницу готовой, если FE не отвечает', async (t) => {
+test('неотвечающий FE предупреждает в каталоге', async (t) => {
   const sandbox = {
     task: '990006',
     profile: 'demo-profile',
@@ -461,11 +467,11 @@ test('живой API не делает песочницу готовой, есл
 
   const manual = (await fx.targets.choices()).find((item) => item.ref.kind === 'sandbox');
 
-  assert.equal(manual.status, 'blocked');
-  assert.match(manual.reason, /Интерфейс стенда сейчас не отвечает/);
+  assert.equal(manual.status, 'ready');
+  assert.match(manual.warning, /Интерфейс стенда сейчас не отвечает/);
 });
 
-test('песочница остаётся заблокированной на время подъёма или сноса', async (t) => {
+test('подъём или снос предупреждает в каталоге', async (t) => {
   const sandbox = {
     task: '990007',
     profile: 'demo-profile',
@@ -489,11 +495,11 @@ test('песочница остаётся заблокированной на в
 
   const manual = (await fx.targets.choices()).find((item) => item.ref.kind === 'sandbox');
 
-  assert.equal(manual.status, 'blocked');
-  assert.match(manual.reason, /идёт подъём или снос/);
+  assert.equal(manual.status, 'ready');
+  assert.match(manual.warning, /идёт подъём или снос/);
 });
 
-test('начавшийся после каталога down блокирует resolve при неизменном env', async (t) => {
+test('начавшийся down предупреждает при неизменном env', async (t) => {
   const sandbox = {
     task: '990010',
     profile: 'demo-profile',
@@ -537,8 +543,8 @@ test('начавшийся после каталога down блокирует r
   const resolved = await fx.targets.resolveSelected({ kind: 'sandbox', id: sandbox.task });
 
   assert.equal(overviewCalls, 2);
-  assert.equal(resolved.status, 'blocked');
-  assert.match(resolved.reason, /идёт подъём или снос/);
+  assert.equal(resolved.status, 'ready');
+  assert.match(resolved.warning, /идёт подъём или снос/);
 });
 
 test('предположенный профиль не расширяет безопасную policy песочницы', async (t) => {
@@ -747,6 +753,7 @@ test('сохранённый ролик не перепривязывается 
   );
 
   const service = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir,
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -754,7 +761,7 @@ test('сохранённый ролик не перепривязывается 
     browserPath: null,
     listProjects: async () => ['demo-profile'],
     sandboxOverview: async () => ({ sandboxes: [sandbox] }),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -811,6 +818,7 @@ test('старый task-ролик без сохранённого профил�
   );
 
   const service = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir,
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -818,7 +826,7 @@ test('старый task-ролик без сохранённого профил�
     browserPath: null,
     listProjects: async () => ['demo-profile'],
     sandboxOverview: async () => ({ sandboxes: [sandbox] }),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -893,9 +901,13 @@ test('policy принимает и новые пропущенные, и ста�
 });
 
 test('цель без showcase-файлов получает безопасный корневой экран', async (t) => {
-  const fx = await fixture(t, { target: null, screens: null, sandboxOverview: async () => ({
-    sandboxes: [],
-  }) });
+  const fx = await fixture(t, {
+    target: null,
+    screens: null,
+    sandboxOverview: async () => ({
+      sandboxes: [],
+    }),
+  });
 
   await writeFile(
     path.join(fx.profilesDir, 'demo-profile', 'dashboard.env'),
@@ -909,7 +921,11 @@ test('цель без showcase-файлов получает безопасны�
 
   assert.equal(resolved.status, 'ready');
   assert.equal(resolved.scope.profile, 'demo-profile');
-  assert.deepEqual(resolved.scope.screens, [{ id: 'root', title: 'Главная', path: '/' }]);
+  assert.deepEqual(resolved.scope.screens, [{
+    id: 'root',
+    title: 'Главная',
+    path: '/',
+  }]);
   assert.deepEqual(internal.screens, [{
     id: 'root',
     title: 'Главная',
@@ -962,6 +978,7 @@ test('стенд задачи подписан её названием из по
   );
 
   const service = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase'),
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -978,7 +995,7 @@ test('стенд задачи подписан её названием из по
 
       return { title: '  Массовый   съём частотности ', description: '<p>текст</p>' };
     },
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -1029,6 +1046,7 @@ test('стенд задачи подписан её названием из по
   );
 
   const offline = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase-offline'),
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -1039,7 +1057,7 @@ test('стенд задачи подписан её названием из по
     taskDetails: async () => {
       throw new Error('портал недоступен');
     },
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -1071,6 +1089,7 @@ test('overview использует один снимок песочниц дл�
   );
 
   const service = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase'),
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -1082,7 +1101,7 @@ test('overview использует один снимок песочниц дл�
 
       return { sandboxes: [] };
     },
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -1131,6 +1150,7 @@ test('overview не перечитывает sandbox catalog для каждог
   );
 
   const service = createShowcaseService({
+    voiceBin: '/test/no-live-voice',
     showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase'),
     authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
     profilesDir: fx.profilesDir,
@@ -1142,7 +1162,7 @@ test('overview не перечитывает sandbox catalog для каждог
 
       return { sandboxes: [sandbox] };
     },
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -1196,7 +1216,7 @@ test('стенд остановленной попытки становится 
   assert.ok(scope.capabilities.includes('record'), 'ролик снимается именно с этого стенда');
 });
 
-test('стенд идущей попытки виден в списке, но целью не становится', async (t) => {
+test('стенд идущей попытки остаётся доступен с предупреждением', async (t) => {
   const sandbox = pipelineSandbox('990011');
   const fx = await fixture(t, {
     target: null,
@@ -1215,14 +1235,14 @@ test('стенд идущей попытки виден в списке, но ц
   const choice = (await fx.targets.choices()).find((item) => item.ref.kind === 'sandbox');
   const resolved = await fx.targets.resolveSelected({ kind: 'sandbox', id: '990011' });
 
-  assert.equal(choice.status, 'blocked');
+  assert.equal(choice.status, 'ready');
   assert.equal(choice.label, 'demo-profile · стенд 990011 · идёт попытка');
-  assert.match(choice.reason, /идущая попытка конвейера/);
-  assert.equal(resolved.status, 'blocked');
-  assert.match(resolved.reason, /идущая попытка конвейера/);
+  assert.match(choice.warning, /идущая попытка конвейера/);
+  assert.equal(resolved.status, 'ready');
+  assert.match(resolved.warning, /идущая попытка конвейера/);
 });
 
-test('попытка, снова взявшаяся за задачу, отбирает стенд у уже выбранной цели', async (t) => {
+test('возобновившаяся попытка предупреждает у выбранной цели', async (t) => {
   const sandbox = pipelineSandbox('990012');
   const fx = await fixture(t, {
     target: null,
@@ -1251,6 +1271,160 @@ test('попытка, снова взявшаяся за задачу, отби�
   const after = await fx.targets.resolveSelected({ kind: 'sandbox', id: '990012' });
 
   assert.equal(before.status, 'ready');
-  assert.equal(after.status, 'blocked');
-  assert.match(after.reason, /идущая попытка конвейера/);
+  assert.equal(after.status, 'ready');
+  assert.match(after.warning, /идущая попытка конвейера/);
 });
+
+// Продуктовые ограничения сняты: занятость стенда — предупреждение, не отказ.
+test('идущая попытка конвейера не блокирует цель, а предупреждает', async (t) => {
+  const { targets } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({
+      task: '4920',
+      owner: 'pipeline',
+      feAlive: true,
+    })],
+    hold: {
+      profile: 'demo-profile',
+      stalledHuman: false,
+      gate: 'review',
+    },
+  });
+  const catalog = await targets.choices();
+  const choice = catalog.find((item) => item.ref.id === '4920');
+
+  assert.equal(choice.status, 'ready');
+  assert.match(choice.warning, /идущая попытка/u);
+
+  const resolved = await targets.resolveSelected({ kind: 'sandbox', id: '4920' });
+
+  assert.equal(resolved.status, 'ready');
+  assert.match(resolved.warning, /идущая попытка/u);
+
+  // Запись возможна: внутренняя область готова, предупреждение не блокирует.
+  const scope = await targets.selectedInternalScope({ kind: 'sandbox', id: '4920' });
+
+  assert.ok(scope.recordUrl);
+});
+
+test('неотвечающий интерфейс — предупреждение, запись доступна', async (t) => {
+  const { targets } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({ task: '4920', feAlive: false })],
+  });
+  const resolved = await targets.resolveSelected({ kind: 'sandbox', id: '4920' });
+
+  assert.equal(resolved.status, 'ready');
+  assert.match(resolved.warning, /не отвечает/u);
+});
+
+test('чужая песочница остаётся заблокированной', async (t) => {
+  const { targets } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({ task: '4920', standOwnership: 'external' })],
+  });
+  const resolved = await targets.resolveSelected({ kind: 'sandbox', id: '4920' });
+
+  assert.equal(resolved.status, 'blocked');
+  assert.match(resolved.reason, /не принадлежит/u);
+});
+
+test('стенд без порта заблокирован со следующим шагом', async (t) => {
+  const { targets } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({ task: '4920', fePort: null })],
+  });
+  const resolved = await targets.resolveSelected({ kind: 'sandbox', id: '4920' });
+
+  assert.equal(resolved.status, 'blocked');
+  assert.equal(resolved.nextAction.kind, 'open-sandboxes');
+});
+
+test('неопределившийся профиль без порта — blocked, а не ready (R3-R3-B7)', async (t) => {
+  const { targets } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({
+      task: '4920',
+      fePort: null,
+      profile: '',
+    })],
+  });
+  const catalog = await targets.choices();
+  const choice = catalog.find((item) => item.ref.id === '4920');
+
+  assert.equal(choice.status, 'blocked');
+  assert.match(choice.reason, /адрес интерфейса/u);
+});
+
+test('битый login.json при резолве — ready + warning и базовая политика (B22)', async (t) => {
+  const { targets, root } = await sandboxFixture(t, {
+    sandboxes: [sandboxEntry({
+      task: '4920',
+      feAlive: true,
+      profileBinding: 'verified',
+    })],
+  });
+
+  // Портим необязательный контракт входа ПОСЛЕ выбора: резолв обязан дать
+  // предупреждение и базовую политику, а не JS-ошибку (TDZ warning).
+  await writeFile(
+    path.join(root, 'profiles', 'demo-profile', 'showcase', 'login.json'),
+    '{битый json',
+    'utf8',
+  );
+
+  const resolved = await targets.resolveSelected({ kind: 'sandbox', id: '4920' });
+
+  assert.equal(resolved.status, 'ready');
+  assert.match(resolved.warning, /не является JSON/u);
+  // Публичная проекция НЕ содержит login (граница доверия): базовая политика
+  // проверяется публично — capability login отфильтрован (находки J03/R5-B1).
+  // Добавлять login в toPublicScope ЗАПРЕЩЕНО.
+  assert.equal(resolved.scope.capabilities.includes('login'), false);
+});
+
+/**
+ * Полная запись каталога позволяет независимо менять продуктовые предупреждения.
+ * Порт и поколение синхронизируются с доверенным реестром в sandboxFixture.
+ */
+function sandboxEntry(overrides = {}) {
+  return {
+    task: '4920',
+    profile: 'demo-profile',
+    profileBinding: 'verified',
+    owner: 'manual',
+    slot: 1,
+    fePort: 5173,
+    apiPort: 8173,
+    repos: [],
+    standAlive: true,
+    feAlive: true,
+    removable: true,
+    removableReason: null,
+    updatedAt: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Обзор и реестр описывают один стенд, чтобы тест проверял именно предупреждение.
+ * Идущая попытка задаётся настоящим pipeline-журналом, а не выдуманным полем overview.
+ */
+async function sandboxFixture(t, { sandboxes, hold } = {}) {
+  const fx = await fixture(t, { sandboxOverview: async () => ({ sandboxes }) });
+
+  for (const entry of sandboxes) {
+    entry.updatedAt = await writeSandbox(fx.stateDir, entry.task, {
+      FE_PORT: entry.fePort ? String(entry.fePort) : '',
+      API_PORT: String(entry.apiPort),
+      STAND_OWNERSHIP: entry.standOwnership ?? 'task',
+      WORKSPACE_MODE: entry.workspaceMode ?? 'isolated',
+    });
+
+    if (hold) {
+      await writePipelineRegistry(fx.stateDir, entry.task, {
+        PROFILE: hold.profile,
+        STALLED_HUMAN: hold.stalledHuman ? '1' : '0',
+        ORCH_PID: hold.stalledHuman ? '' : '4242',
+        [`GATE_${hold.gate.toUpperCase()}`]: 'waiting',
+      });
+    }
+  }
+
+  return { ...fx, root: path.dirname(fx.profilesDir) };
+}

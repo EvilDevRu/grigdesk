@@ -192,7 +192,7 @@ export function payloadOf(scene: ShowcaseScene, draft: SceneDraft): SceneTextPay
 
   return {
     id: scene.id,
-    title: draft.title,
+    title: draft.title.trim() || scene.title,
     narration: draft.narration,
     caption: draft.caption,
     subtitleText: subtitleFollows ? plainNarration(draft.narration) : draft.subtitleText,

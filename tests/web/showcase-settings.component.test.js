@@ -98,7 +98,7 @@ test('Презентации: запись отделена от альтерн�
   assert.equal(recording.get('[data-setup-item="browser"] .setup-status').text(), 'Готово');
   assert.equal(recording.get('[data-setup-item="media"] .setup-status').text(), 'Нужна настройка');
   assert.equal(recording.find('[data-setup-item="voice:local"]').exists(), false);
-  assert.match(voices.text(), /достаточно одного подходящего голоса/u);
+  assert.match(voices.text(), /Достаточно одного подходящего голоса/u);
   assert.equal(voices.get('.setup-items').isVisible(), false);
   assert.equal(h.writes().length, 0);
 

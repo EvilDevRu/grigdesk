@@ -138,6 +138,7 @@ export interface ShowcaseResolvedScope {
   capabilities: ShowcaseCapability[];
   screens: ShowcaseScreenContract['screens'];
   login: ShowcaseLoginContract | null;
+  warning?: string;
   sandbox: SandboxRegistryEntry | null;
   targetFingerprint: string;
   policyRevision: string;
@@ -200,7 +201,14 @@ function blocked(
   nextAction: BlockedTarget['nextAction'],
   profile: string | null = null,
 ): BlockedTarget {
-  return { status: 'blocked', ref, profile, reason, nextAction };
+  return {
+    status: 'blocked',
+    ref,
+    profile,
+    reason,
+    nextAction,
+    warning: null,
+  };
 }
 
 export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
@@ -333,7 +341,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
     const [profiles, sandboxSnapshot] = await Promise.all([
       options.listProjects(),
       options.sandboxOverview?.().catch(() => ({ sandboxes: [] }))
-        ?? Promise.resolve({ sandboxes: [] }),
+      ?? Promise.resolve({ sandboxes: [] }),
     ]);
     const result: ShowcaseTargetOption[] = [];
 
@@ -360,8 +368,9 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
         viewUrl: url,
         viewPort: null,
         serviceHost: null,
-        status: policy.reason ? 'blocked' : 'ready',
-        reason: policy.reason,
+        status: 'ready',
+        reason: '',
+        warning: policy.reason,
         screenCount: policy.screenCount,
       });
     }
@@ -422,19 +431,37 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
     // как у собственного up GrigDesk: подменить её из браузера нечем.
     const profileBinding = hold ? 'verified' : sandbox.profileBinding ?? 'inferred';
     const label = labelOf(sandbox, hold, profile);
+    // Продуктовые ограничения сняты владельцем: занятость стенда видна предупреждением,
+    // а не отказом. Жёсткий отказ остаётся только там, где записывать физически нечего
+    // или стенд не принадлежит этой машине.
     let reason = '';
+    let warning = '';
+
+    if (!PROFILE_RE.test(profile)) {
+      warning = 'Профиль этого стенда не удалось определить: запись идёт по базовой политике.';
+    }
+
+    // Порт проверяется независимо от профиля: стенд без адреса не готов, даже
+    // если профиль не определился (находка R3-R3-B7).
+    if (!sandbox.fePort) {
+      reason = 'Стенд ещё не объявил готовый адрес интерфейса.';
+    }
 
     if (hold && !hold.stalledHuman) {
-      reason = 'Стендом сейчас распоряжается идущая попытка конвейера.';
-    } else if (sandbox.removableReason === 'job_running') {
-      reason = 'По стенду сейчас идёт подъём или снос.';
-    } else if (!PROFILE_RE.test(profile)) {
-      reason = 'Профиль этого стенда не удалось определить.';
-    } else if (!sandbox.fePort) {
-      reason = 'Стенд ещё не объявил готовый адрес интерфейса.';
-    } else if (sandbox.feAlive !== true) {
-      reason = 'Интерфейс стенда сейчас не отвечает.';
+      warning = [warning, 'Стендом сейчас распоряжается идущая попытка конвейера.']
+        .filter(Boolean).join(' ');
     }
+
+    if (sandbox.removableReason === 'job_running') {
+      warning = [warning, 'По стенду сейчас идёт подъём или снос.']
+        .filter(Boolean).join(' ');
+    }
+
+    if (sandbox.feAlive !== true) {
+      warning = [warning, 'Интерфейс стенда сейчас не отвечает.']
+        .filter(Boolean).join(' ');
+    }
+
 
     // Недоказанная связь оставляет стенд доступным для безопасной записи root,
     // но не даёт потенциально чужому профилю расширить policy, login и мутации.
@@ -447,19 +474,18 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       profile,
       profileBinding,
       label,
-      // Название задачи дописывает служба: связь с порталом держит она, а не каталог.
       taskTitle: null,
-      // Адрес записи остаётся на сервере. Для пользовательской ссылки клиент
-      // получает порт и отдельно проверенный хост профиля.
       viewUrl: null,
       viewPort: sandbox.fePort,
       serviceHost: profileBinding === 'verified'
         ? await readProfileServiceHost(profilesDir, profile)
         : null,
-      status: reason || policy.reason ? 'blocked' : 'ready',
-      reason: reason || policy.reason,
+      status: reason ? 'blocked' : 'ready',
+      reason,
+      warning: [warning, policy.reason].filter(Boolean).join(' '),
       screenCount: policy.screenCount,
     };
+
 
     sandboxRegistryTimes.set(choice, sandbox.updatedAt);
 
@@ -601,7 +627,11 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
           pipeline: sandbox.pipeline,
         },
       }),
-      policyRevision: jsonHash32({ target: target.raw, screens: screens.raw, login: login?.raw ?? null }),
+      policyRevision: jsonHash32({
+        target: target.raw,
+        screens: screens.raw,
+        login: login?.raw ?? null,
+      }),
       dataRevision,
       // Ревизия сборки на стенде подтверждается, только если профиль её публикует.
       buildRevision: null,
@@ -613,15 +643,15 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
   function selectedNextAction(ref: ShowcaseTargetRef): BlockedTarget['nextAction'] {
     return ref.kind === 'project'
       ? {
-          kind: 'retry',
-          label: 'Обновить список целей',
-          hint: 'Проверьте адрес постоянного стенда в профиле и обновите раздел.',
-        }
+        kind: 'retry',
+        label: 'Обновить список целей',
+        hint: 'Проверьте адрес постоянного стенда в профиле и обновите раздел.',
+      }
       : {
-          kind: 'open-sandboxes',
-          label: 'Открыть «Песочницы»',
-          hint: 'Проверьте состояние стенда: у стенда попытки его ведёт «Конвейер».',
-        };
+        kind: 'open-sandboxes',
+        label: 'Открыть «Песочницы»',
+        hint: 'Проверьте состояние стенда: у стенда попытки его ведёт «Конвейер».',
+      };
   }
 
   /** Находит server-owned связь цели с профилем; task поддержан для старых роликов. */
@@ -739,34 +769,44 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       );
     }
 
+    let warning = choice.warning ?? '';
+
     const profile = choice.profile;
     const profilePolicyTrusted = choice.ref.kind === 'project'
       || choice.profileBinding === 'verified';
 
     try {
-      const [target, declared, login] = await Promise.all([
-        profilePolicyTrusted
-          ? readContract(profile, 'target.json', targetContract)
-          : Promise.resolve(null),
-        profilePolicyTrusted ? declaredScreens(profile) : Promise.resolve(null),
-        profilePolicyTrusted
-          ? readContract(profile, 'login.json', loginContract)
-          : Promise.resolve(null),
-      ]);
+      let target = null;
+      let declared = null;
+      let login = null;
+
+      if (profilePolicyTrusted) {
+        try {
+          [target, declared, login] = await Promise.all([
+            readContract(profile, 'target.json', targetContract),
+            declaredScreens(profile),
+            readContract(profile, 'login.json', loginContract),
+          ]);
+        } catch (error) {
+          warning = [
+            warning,
+            error instanceof Error ? error.message : 'Настройки показа не читаются.',
+            'Запись идёт по базовой политике.',
+          ].filter(Boolean).join(' ');
+        }
+      }
+
       const sandbox = ref.kind === 'project' ? null : await resolveSandbox(ref.id);
       // Стенд попытки читается здесь второй раз намеренно: между каталогом и этим
       // местом движок мог снова взяться за задачу, а решение о доступе принимается
       // по состоянию на момент самого действия.
       const hold = sandbox?.pipeline ? await readPipelineHold(stateDir, ref.id) : null;
 
-      if (sandbox?.pipeline && !hold?.stalledHuman) {
-        return blocked(
-          ref,
-          `Стендом ${ref.id} сейчас распоряжается идущая попытка конвейера.`,
-          selectedNextAction(ref),
-          profile,
-        );
+      if (sandbox?.pipeline && !hold?.stalledHuman && !warning.includes('идущая попытка')) {
+        warning = [warning, 'Стендом сейчас распоряжается идущая попытка конвейера.']
+          .filter(Boolean).join(' ');
       }
+
 
       if (sandbox?.workspaceMode === 'shared' || sandbox?.standOwnership === 'external') {
         return blocked(
@@ -837,6 +877,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
         ref,
         profile,
         targetLabel: choice.label,
+        warning,
         environment: target?.value.environment ?? 'read-only',
         recordUrl,
         viewUrl,
@@ -902,7 +943,12 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       return resolved;
     }
 
-    return { status: 'ready', ref, scope: toPublicScope(resolved.scope) };
+    return {
+      status: 'ready',
+      ref,
+      scope: toPublicScope(resolved.scope),
+      warning: resolved.scope.warning || null,
+    };
   }
 
   /** Публичный резолвер выбранной сервером цели; профиль от клиента не нужен. */
@@ -917,7 +963,12 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       return resolved;
     }
 
-    return { status: 'ready', ref, scope: toPublicScope(resolved.scope) };
+    return {
+      status: 'ready',
+      ref,
+      scope: toPublicScope(resolved.scope),
+      warning: resolved.scope.warning || null,
+    };
   }
 
   /**
@@ -1009,9 +1060,14 @@ export function mapRevisionOf(screens: ShowcaseScreenContract['screens']): strin
   ]));
 }
 
+/**
+ * Публичная область отдаёт только сведения для интерфейса и отпечатки.
+ * Адрес записи, login, секреты и разрешённые origins остаются на сервере.
+ */
 export function toPublicScope(scope: ShowcaseResolvedScope): ShowcaseScope {
   return {
     targetKind: scope.ref.kind,
+    warning: scope.warning ?? '',
     targetLabel: scope.targetLabel,
     profile: scope.profile,
     viewUrl: scope.viewUrl,

@@ -578,51 +578,6 @@
       "detail": "Установщик браузера запускается вложенным Node как helper."
     },
     {
-      "file": "server/scripts/showcaseVoiceBench.mts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "development-only",
-      "detail": "Стенд сравнения голосов не входит в runtime-поставку."
-    },
-    {
-      "file": "server/scripts/showcaseVoiceInstall.mts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 3,
-      "owner": "task-9",
-      "fate": "helper",
-      "detail": "Установщик голосов запускается вложенным Node как helper."
-    },
-    {
-      "file": "server/scripts/showcaseVoiceInstall.mts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/piperSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Скрипты синтеза копируются рядом с helper."
-    },
-    {
-      "file": "server/scripts/showcaseVoiceInstall.mts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/qwenSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Скрипты синтеза копируются рядом с helper."
-    },
-    {
-      "file": "server/scripts/showcaseVoiceInstall.mts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/sileroSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Скрипты синтеза копируются рядом с helper."
-    },
-    {
       "file": "server/scripts/testSea.mts",
       "construct": "import-meta",
       "target": "dirname",
@@ -1226,96 +1181,6 @@
       "detail": "Рендер-worker запускается вложенным Node."
     },
     {
-      "file": "server/src/lib/showcase/voice/install.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 3,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Пути установщика и requirements берутся из контракта ресурсов."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/install.ts",
-      "construct": "resource-ref",
-      "target": "server/requirements-showcase-qwen.txt",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "requirements копируются как ресурсы."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/install.ts",
-      "construct": "resource-ref",
-      "target": "server/requirements-showcase-silero.txt",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "requirements копируются как ресурсы."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/install.ts",
-      "construct": "resource-ref",
-      "target": "server/requirements-showcase-voice.txt",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "requirements копируются как ресурсы."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/piper.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "piperSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/piper.ts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/piperSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "piperSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/qwen.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "qwenSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/qwen.ts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/qwenSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "qwenSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/silero.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "sileroSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
-      "file": "server/src/lib/showcase/voice/silero.ts",
-      "construct": "resource-ref",
-      "target": "server/src/lib/showcase/voice/sileroSynth.py",
-      "count": 1,
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "sileroSynth.py копируется как ресурс, путь переписывается задачей 4."
-    },
-    {
       "file": "server/src/lib/speech/capabilities.ts",
       "construct": "import-meta",
       "target": "url",
@@ -1634,30 +1499,6 @@
       "detail": "CUDA-вариант зависимостей медиа."
     },
     {
-      "path": "server/requirements-showcase-qwen.txt",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Зависимости голосового движка qwen."
-    },
-    {
-      "path": "server/requirements-showcase-silero.txt",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Зависимости голосового движка silero."
-    },
-    {
-      "path": "server/requirements-showcase-voice.txt",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Общие зависимости голосовой части."
-    },
-    {
       "path": "server/src/lib/analytics/dirfd-helper.py",
       "kind": "file",
       "expect": "source",
@@ -1688,30 +1529,6 @@
       "owner": "task-9",
       "fate": "asset",
       "detail": "Python-расшифровка медиа."
-    },
-    {
-      "path": "server/src/lib/showcase/voice/piperSynth.py",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Python-синтез piper."
-    },
-    {
-      "path": "server/src/lib/showcase/voice/qwenSynth.py",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Python-синтез qwen."
-    },
-    {
-      "path": "server/src/lib/showcase/voice/sileroSynth.py",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "asset",
-      "detail": "Python-синтез silero."
     },
     {
       "path": "server/src/lib/speech/cuda-probe.py",
@@ -1818,28 +1635,12 @@
       "detail": "Worker репетиции презентаций."
     },
     {
-      "path": "server/scripts/showcaseVoiceInstall.mts",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "helper",
-      "detail": "Установщик голосовых движков."
-    },
-    {
       "path": "server/scripts/showcaseBrowserInstall.mts",
       "kind": "file",
       "expect": "source",
       "owner": "task-9",
       "fate": "helper",
       "detail": "Установщик браузера Playwright."
-    },
-    {
-      "path": "server/scripts/showcaseVoiceBench.mts",
-      "kind": "file",
-      "expect": "source",
-      "owner": "task-9",
-      "fate": "development-only",
-      "detail": "Стенд сравнения голосов не входит в поставку."
     },
     {
       "path": "server/scripts/web-log.mjs",

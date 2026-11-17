@@ -298,7 +298,12 @@
       "scene",
       "narration",
       "voice",
-      "video"
+      "video",
+      "editor",
+      "timeline",
+      "environment",
+      "adaptation",
+      "source"
     ]
   },
   {

@@ -186,7 +186,11 @@ function parseAction(
       return null;
     }
 
-    return { kind: 'scroll', targetId, delta };
+    return {
+      kind: 'scroll',
+      targetId,
+      delta,
+    };
   }
 
   if (!TARGET_ACTIONS.has(value.kind) || typeof value.targetId !== 'string') {
@@ -664,4 +668,102 @@ export function parseBindingsReply(
   }
 
   return { bindings: null, problem };
+}
+
+export interface AdaptReplyScene {
+  narration: string;
+  subtitleText: string;
+}
+
+export type AdaptReplyResult = {
+  scenes: Map<string, AdaptReplyScene> | null;
+  problem: ScriptReplyProblem | null;
+};
+
+/**
+ * Ответ адаптации — строго по одной записи на входную сцену. Текст проверяется тем
+ * же пределом, что и обычная сцена: длинную реплику движок не примет, а сохранить
+ * её нельзя. Пустой текст и лишние поля отвергаются, а не чинятся молча.
+ */
+export function parseAdaptReply(
+  reply: unknown,
+  scenes: readonly { id: string; title: string }[],
+): AdaptReplyResult {
+  let problem: ScriptReplyProblem | null = null;
+  const byId = new Map(scenes.map((scene) => [scene.id, scene]));
+
+  for (const candidate of jsonCandidates(reply)) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+
+      if (
+        !isRecord(parsed)
+        || !exactKeys(parsed, ['scenes'])
+        || !Array.isArray(parsed.scenes)
+        || parsed.scenes.length !== scenes.length
+      ) {
+        continue;
+      }
+
+      const adapted = new Map<string, AdaptReplyScene>();
+      let valid = true;
+
+      for (const item of parsed.scenes) {
+        if (
+          !isRecord(item)
+          || !exactKeys(item, ['sceneId', 'narration', 'subtitleText'])
+          || typeof item.sceneId !== 'string'
+          || typeof item.narration !== 'string'
+          || typeof item.subtitleText !== 'string'
+        ) {
+          valid = false;
+
+          break;
+        }
+
+        const scene = byId.get(item.sceneId);
+
+        if (!scene || adapted.has(scene.id)) {
+          problem = {
+            sceneId: scene?.id ?? null,
+            sceneIndex: scene ? scenes.indexOf(scene) : null,
+            message: scene
+              ? `Сцена «${scene.title}» перечислена в ответе больше одного раза.`
+              : `Ответ ссылается на неизвестную сцену «${String(item.sceneId).slice(0, 80)}».`,
+          };
+          valid = false;
+
+          break;
+        }
+
+        const narration = parseNarration(item.narration).text;
+
+        if (!narration || narration.length > SHOWCASE_NARRATION_MAX_CHARS || !item.subtitleText.trim()) {
+          problem = {
+            sceneId: scene.id,
+            sceneIndex: scenes.indexOf(scene),
+            message: `Сцена «${scene.title}»: реплика пустая или длиннее `
+              + `${SHOWCASE_NARRATION_MAX_CHARS} знаков.`,
+          };
+          valid = false;
+
+          break;
+        }
+
+        adapted.set(scene.id, { narration: item.narration, subtitleText: item.subtitleText });
+      }
+
+      if (valid && adapted.size === scenes.length) {
+        return { scenes: adapted, problem: null };
+      }
+    } catch {
+      // Следующий кандидат может быть чистым JSON внутри markdown-забора.
+    }
+  }
+
+  return { scenes: null, problem };
 }

@@ -117,6 +117,7 @@ async function fixture(t, { credentials = true } = {}) {
   }
 
   service = createShowcaseService({
+    voiceBin: path.join(root, 'no-live-voice'),
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),

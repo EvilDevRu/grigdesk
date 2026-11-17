@@ -33,7 +33,11 @@ function target() {
       viewUrl: 'http://127.0.0.1:5173',
       environment: 'read-only',
       capabilities: ['record'],
-      screens: [{ id: 'overview', title: 'Обзор', path: '/' }],
+      screens: [{
+        id: 'overview',
+        title: 'Обзор',
+        path: '/',
+      }],
       targetFingerprint: 'target-v1',
       policyRevision: 'policy-v1',
       mapRevision: 'map-v1',
@@ -58,7 +62,13 @@ function scene({ bindings = true } = {}) {
     narration: 'Показываю запуск.',
     caption: 'Запуск',
     subtitleText: 'Показываю запуск.',
-    direction: { tone: null, pace: null, emphasis: [], pauses: [], stresses: [] },
+    direction: {
+      tone: null,
+      pace: null,
+      emphasis: [],
+      pauses: [],
+      stresses: [],
+    },
     timing: null,
     syncBindings: bindings
       ? createSyncBindings('Показываю запуск.', actions, [{
@@ -72,7 +82,11 @@ function scene({ bindings = true } = {}) {
     speechTiming: null,
     speechAlignment: null,
     recordingTiming: null,
-    audioSource: { kind: 'tts', voiceRef: 'edge:voice', artifactId: null },
+    audioSource: {
+      kind: 'tts',
+      voiceRef: 'edge:voice',
+      artifactId: null,
+    },
     audio: null,
     clip: null,
     frame: null,
@@ -81,11 +95,15 @@ function scene({ bindings = true } = {}) {
   };
 }
 
+/**
+ * Координатор получает стабильный снимок с необязательными связями сцены.
+ * Вариант empty проверяет начало сценария без подложенных результатов.
+ */
 function project({ empty = false, bindings = true } = {}) {
   const now = new Date().toISOString();
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: PROJECT_ID,
     title: 'Ролик',
     revision: 1,
@@ -140,7 +158,11 @@ async function fixture(t, options = {}) {
   await buildRuns.recover();
 
   let current = options.project ?? project();
-  const ready = { voice: false, recording: false, final: false };
+  const ready = {
+    voice: false,
+    recording: false,
+    final: false,
+  };
   const calls = [];
   const childIds = new Map();
   let jobSerial = 0;
@@ -169,7 +191,7 @@ async function fixture(t, options = {}) {
   }
 
   const ops = createBuildOps({
-    assertEnabled: () => {},
+    assertEnabled: () => { },
     buildRuns,
     jobs,
     limits: () => ({ maxScenes: 20 }),
@@ -396,7 +418,11 @@ test('requestId идемпотентен, а второй клиент прис�
     (error) => error.code === 'build_request_conflict' && error.status === 409,
   );
 
-  item.setProject({ ...item.project, revision: 2, title: 'Не влияет' });
+  item.setProject({
+    ...item.project,
+    revision: 2,
+    title: 'Не влияет',
+  });
   const sameContent = await item.ops.startBuild(PROJECT_ID, 2, 'build-request-0003');
 
   assert.equal(sameContent.id, first.id, 'служебная revision не создаёт второй run');
@@ -742,17 +768,17 @@ test('после холодного старта BuildRun подхватывае
 
   const freshLiveJobs = createShowcaseJobs({
     jobsDir: path.join(live.root, 'jobs'),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ maxQueued: 1, jobTimeoutMs: 60_000 }),
   });
   const freshLiveRuns = createShowcaseBuildRuns({
     runsDir: path.join(live.root, 'builds'),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ retentionDays: 30, maxRuns: 50 }),
   });
   let unexpectedStarts = 0;
   const freshLiveOps = createBuildOps({
-    assertEnabled: () => {},
+    assertEnabled: () => { },
     buildRuns: freshLiveRuns,
     jobs: freshLiveJobs,
     limits: () => ({ maxScenes: 20 }),
@@ -775,8 +801,8 @@ test('после холодного старта BuildRun подхватывае
     voiceReady: () => true,
     recordingReady: () => false,
     finalReady: () => false,
-    validateFinal: () => {},
-    restorePreviousFinal: () => {},
+    validateFinal: () => { },
+    restorePreviousFinal: () => { },
   });
 
   const liveRecovery = await freshLiveJobs.recover();
@@ -807,22 +833,26 @@ test('после холодного старта BuildRun подхватывае
     ...deadJob,
     state: 'running',
     heartbeatAt: new Date().toISOString(),
-    identity: { pid: 999_999, starttime: '111', cmdline: 'showcaseWorker' },
+    identity: {
+      pid: 999_999,
+      starttime: '111',
+      cmdline: 'showcaseWorker',
+    },
   }), 'utf8');
 
   const freshDeadJobs = createShowcaseJobs({
     jobsDir: path.join(dead.root, 'jobs'),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ maxQueued: 1, jobTimeoutMs: 60_000 }),
   });
   const freshDeadRuns = createShowcaseBuildRuns({
     runsDir: path.join(dead.root, 'builds'),
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ retentionDays: 30, maxRuns: 50 }),
   });
   let recoveredRecordId = null;
   const freshDeadOps = createBuildOps({
-    assertEnabled: () => {},
+    assertEnabled: () => { },
     buildRuns: freshDeadRuns,
     jobs: freshDeadJobs,
     limits: () => ({ maxScenes: 20 }),
@@ -856,8 +886,8 @@ test('после холодного старта BuildRun подхватывае
     voiceReady: () => true,
     recordingReady: () => false,
     finalReady: () => false,
-    validateFinal: () => {},
-    restorePreviousFinal: () => {},
+    validateFinal: () => { },
+    restorePreviousFinal: () => { },
   });
 
   const deadRecovery = await freshDeadJobs.recover();
@@ -906,7 +936,7 @@ test('ошибка атомарной записи не оставляет run, 
 
   const cleanupRuns = createShowcaseBuildRuns({
     runsDir: cleanupRoot,
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ retentionDays: 1, maxRuns: 10 }),
   });
 
@@ -928,11 +958,15 @@ test('ошибка атомарной записи не оставляет run, 
   const stored = JSON.parse(await readFile(file, 'utf8'));
   const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
-  await writeFile(file, JSON.stringify({ ...stored, updatedAt: old, finishedAt: old }), 'utf8');
+  await writeFile(file, JSON.stringify({
+    ...stored,
+    updatedAt: old,
+    finishedAt: old,
+  }), 'utf8');
 
   const recovered = createShowcaseBuildRuns({
     runsDir: cleanupRoot,
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({ retentionDays: 1, maxRuns: 10 }),
   });
 
@@ -968,24 +1002,9 @@ test('журнал не превышает maxRuns, если освободит�
   assert.equal(item.buildRuns.list().length, 1);
 });
 
-const SOURCE_FORWARD = {
-  task: true,
-  note: 'Упор на запуск',
-  code: true,
-  repos: [{
-    name: 'app',
-    work: false,
-    commits: ['a'.repeat(40), 'b'.repeat(40)],
-  }],
-};
+const SOURCE_FORWARD = { taskId: null, note: 'Упор на запуск' };
 
-const SOURCE_BACKWARD = {
-  ...SOURCE_FORWARD,
-  repos: [{
-    ...SOURCE_FORWARD.repos[0],
-    commits: ['b'.repeat(40), 'a'.repeat(40)],
-  }],
-};
+const SOURCE_BACKWARD = { taskId: null, note: '  Упор на запуск  ' };
 
 // Выбор «О чём ролик» — вход сценария: новый выбор — новый содержательный снимок. Без
 // выбора снимок прежний, иначе сохранённые запуски стали бы «чужими» после обновления.
@@ -1006,7 +1025,7 @@ test('выбор источника входит в снимок сборки, �
   assert.equal(nullSource.scriptBaseHash, plain.scriptBaseHash);
   assert.notEqual(chosen.scriptBaseHash, plain.scriptBaseHash);
   assert.notEqual(chosen.inputHash, plain.inputHash);
-  assert.equal(reordered.inputHash, chosen.inputHash, 'порядок коммитов смысла не несёт');
+  assert.equal(reordered.inputHash, chosen.inputHash, 'пробелы смысла не меняют');
   assert.equal(results.inputHash, plain.inputHash, 'бриф и сцены выбора — результаты, а не входы');
 });
 
@@ -1024,7 +1043,7 @@ async function settle(item, runId) {
   }
 }
 
-test('повтор requestId после смены выбора — конфликт, а перестановка коммитов — тот же запуск', async (t) => {
+test('повтор requestId после смены выбора — конфликт, а пробелы источника — тот же запуск', async (t) => {
   const item = await fixture(t);
   const first = await item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID);
 

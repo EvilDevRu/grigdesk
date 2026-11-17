@@ -8,7 +8,10 @@ import path from 'node:path';
 import { ShowcaseError } from './errors.ts';
 import { createSeedDecision, runSeed, seedAvailability } from './seed.ts';
 import type { SeedDecision } from './seed.ts';
-import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import type {
+  ShowcaseProject,
+  ShowcaseTargetRef,
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
@@ -21,8 +24,8 @@ export interface SeedOpsDeps {
   jobs: { list: (projectId: string) => { state: string }[] };
   // Удачный рецепт двигает ревизию данных сам: она входит в отпечаток цели, и
   // после подготовки записи по прежним данным считаются устаревшими.
-  setDataRevision: (ref: ShowcaseProject['ref'], revision: string) => void;
-  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
+  setDataRevision: (ref: ShowcaseTargetRef, revision: string) => void;
+  acquireTargetLease: (ref: ShowcaseTargetRef) => Promise<SandboxActivityLease | null>;
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
@@ -49,10 +52,12 @@ export function createSeedOps(deps: SeedOpsDeps) {
 
     const project = await readProject(id);
 
-    if (project.target.status !== 'ready') {
+    if (!project.ref || project.target?.status !== 'ready') {
       return {
         available: false,
-        reason: project.target.reason,
+        reason: project.target?.status === 'blocked'
+          ? project.target.reason
+          : 'Стенд не выбран: подключите его в карточке ролика.',
         recipeFingerprint: '',
         profile: '',
         targetLabel: '',
@@ -99,8 +104,14 @@ export function createSeedOps(deps: SeedOpsDeps) {
       );
     }
 
-    if (project.target.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', project.target.reason, 409);
+    if (!project.ref || !project.target || project.target.status !== 'ready') {
+      throw new ShowcaseError(
+        'target_unavailable',
+        project.target?.status === 'blocked'
+          ? project.target.reason
+          : 'Стенд не выбран: подключите его в карточке ролика.',
+        409,
+      );
     }
 
     const lease = await deps.acquireTargetLease(project.ref);

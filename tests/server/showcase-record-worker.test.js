@@ -7,13 +7,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import http from 'node:http';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 import { readRecordingTiming } from '../../server/src/lib/showcase/recordingOps.ts';
+import {
+  briefHashOf, scriptHashOf, SCRIPT_VERIFICATION_VERSION, writeScriptProof, readScriptProof,
+} from '../../server/src/lib/showcase/script/verification.ts';
 
 const SCREENS_CONTRACT = {
   version: 1,
@@ -78,7 +81,11 @@ async function startTarget() {
   };
 }
 
-async function fixture(t, { browserPath, targetOrigin, screens = SCREENS_CONTRACT }) {
+/**
+ * Изолированная служба использует настоящий стенд и worker Chromium.
+ * Проверяющую модель при необходимости заменяет управляемый ответ теста.
+ */
+async function fixture(t, { browserPath, targetOrigin, screens = SCREENS_CONTRACT, resolveScriptModel }) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-worker-'));
   let service = null;
 
@@ -108,11 +115,13 @@ async function fixture(t, { browserPath, targetOrigin, screens = SCREENS_CONTRAC
   await writeFile(path.join(contractDir, 'screens.json'), JSON.stringify(screens), 'utf8');
 
   service = createShowcaseService({
+    voiceBin: path.join(root, 'no-live-voice'),
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),
     stateDir: path.join(root, 'state'),
     browserPath,
+    resolveScriptModel,
     listProjects: async () => ['demo-profile'],
     broadcast: () => {},
     limits: () => ({
@@ -233,6 +242,10 @@ test('задание записи доходит до опубликованны
   }
 
   const recorded = await service.readProject(project.id);
+
+  assert.equal(recorded.recordingReady, true);
+  assert.equal((await service.store.readProject(recorded.id)).target.scope.policyRevision,
+    changedPolicy.target.scope.policyRevision);
 
   for (const scene of recorded.scenes) {
     assert.ok(scene.clip, `у сцены «${scene.title}» обязан появиться клип`);
@@ -549,6 +562,25 @@ test('цепочка сцен пишется одним состоянием э�
     (error) => error.code === 'nothing_to_record',
     'после пересъёмки цепочки все клипы свежие',
   );
+
+  // Принудительная пересъёмка свежего хвоста берёт всю цепочку и не трогает соседа.
+  const forced = await service.startRecording(after.id, { forceSceneIds: [after.scenes[1].id] });
+  const workDir = path.join(service.store.jobsDir, forced.id, 'work');
+  const attempts = await readdir(workDir);
+
+  assert.equal(attempts.length, 1);
+
+  const task = JSON.parse(await readFile(path.join(workDir, attempts[0], 'task.json'), 'utf8'));
+
+  assert.deepEqual(task.chains.flat().map((entry) => entry.scene.id),
+    after.scenes.slice(0, 3).map((entry) => entry.id));
+  assert.equal((await waitForJob(service, forced.id, 240_000)).state, 'succeeded');
+
+  const reshot = await service.readProject(after.id);
+
+  assert.notEqual(reshot.scenes[1].clip.id, after.scenes[1].clip.id);
+  assert.equal(reshot.scenes[3].clip.id, after.scenes[3].clip.id);
+
 });
 
 /**
@@ -790,4 +822,152 @@ test('экран, читающий данные POST-ом с другого ад
   const recorded = await service.readProject(project.id);
 
   assert.ok(recorded.scenes[0].clip, 'готовность наступила только после ответа API — значит, POST прошёл');
+});
+
+
+test('явная пересъёмка перепроверяет сохранённый текст перед строгой записью', async (t) => {
+  const browserPath = await findBrowser();
+
+  if (!browserPath) {
+    t.skip('браузер записи не установлен');
+
+    return;
+  }
+
+  const target = await startTarget();
+
+  t.after(() => target.close());
+
+  const review = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  let modelCalls = 0;
+  const { service } = await fixture(t, {
+    browserPath,
+    targetOrigin: target.origin,
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'fixture', model: 'fixture' },
+      executor: {
+        runUntrusted: async () => {
+          modelCalls += 1;
+          started.resolve();
+          await review.promise;
+
+          return {
+            reply: JSON.stringify({
+              accepted: true,
+              reason: 'Экран показан',
+              script: null,
+              coverage: [{
+                pointIndex: 0,
+                status: 'shown',
+                sceneIndices: [0],
+                reason: 'Главный экран',
+              }],
+            })
+          };
+        }
+      },
+    }),
+  });
+  let project = await service.createProject({
+    ref: { kind: 'project', id: 'demo-profile' }, profile: 'demo-profile',
+  });
+
+  project = await service.addScene(project.id, project.revision, {
+    title: 'Экран',
+    screenId: 'overview',
+    narration: 'Прежняя реплика.',
+    caption: 'Экран',
+    subtitleText: 'Прежняя реплика.',
+    actions: [],
+    startState: null,
+    readyCondition: null,
+  });
+  project = await service.addScene(project.id, project.revision, {
+    title: 'Сосед',
+    screenId: 'overview',
+    narration: 'Соседний экран.',
+    caption: 'Сосед',
+    subtitleText: 'Соседний экран.',
+    actions: [],
+    startState: null,
+    readyCondition: null,
+  });
+  project = await service.store.updateProject(project.id, null, (p) => ({
+    ...p, brief: ['Показать главный экран'],
+  }));
+
+  const hash = await writeScriptProof(service.store.namesOf(project.id).dir, {
+    version: SCRIPT_VERIFICATION_VERSION,
+    targetFingerprint: project.target.scope.targetFingerprint,
+    policyRevision: project.target.scope.policyRevision,
+    dataRevision: project.target.scope.dataRevision,
+    briefHash: briefHashOf(project.brief),
+    scriptHash: scriptHashOf(project.scenes),
+    rehearsal: {
+      screens: SCREENS_CONTRACT.screens,
+      observations: [],
+      completed: true,
+    },
+  });
+
+  project = await service.store.updateProject(project.id, null, (p) => ({ ...p, scriptProofHash: hash }));
+
+  const initial = await service.startRecording(project.id);
+
+  assert.equal((await waitForJob(service, initial.id)).state, 'succeeded');
+  project = await service.readProject(project.id);
+
+  const neighbor = project.scenes[1].clip;
+
+  assert.equal(project.recordingReady, true);
+  project = await service.updateScene(project.id, project.revision, project.scenes[0].id, {
+    narration: 'Новая реплика.',
+  });
+  assert.equal(await readScriptProof(service.store.namesOf(project.id).dir, project), null);
+  await assert.rejects(() => service.startRecording(project.id, { forceSceneIds: ['unknown'] }),
+    (error) => error.code === 'bad_scene');
+  assert.equal(modelCalls, 0);
+
+  let request;
+
+  try {
+    request = service.startRecording(project.id, { forceSceneIds: [project.scenes[0].id] });
+    // Отказ записи не должен повесить тест в ожидании модели, которая не запустилась.
+    await Promise.race([started.promise, request.then(() => {
+      throw Error('Модель не проверялась');
+    })]);
+    await assert.rejects(() => service.saveSource(project.id, project.revision, null),
+      (error) => error.code === 'script_busy');
+    await assert.rejects(() => service.startBuild(project.id, project.revision, 'during-reshoot-check'),
+      (error) => error.code === 'script_busy');
+
+    for (const operation of [
+      () => service.synthesizeScenes(project.id),
+      () => service.assemble(project.id),
+      () => service.prepareData(project.id, 'recipe'),
+    ]) {
+      await assert.rejects(operation, (error) => error.code === 'script_busy');
+    }
+
+    review.resolve();
+
+    const job = await request;
+
+    assert.equal((await waitForJob(service, job.id)).state, 'succeeded');
+
+    const saved = await service.readProject(project.id);
+
+    assert.equal(saved.scenes[0].id, project.scenes[0].id);
+    assert.equal(saved.scenes[0].narration, 'Новая реплика.');
+    assert.notEqual(saved.scriptProofHash, hash);
+    assert.ok(await readScriptProof(service.store.namesOf(project.id).dir, saved));
+    assert.deepEqual(saved.scenes[1].clip, neighbor);
+    assert.equal(saved.scenes[1].stale, true, 'общий новый proof не подменяет proof прежнего клипа');
+    assert.equal(saved.recordingReady, false);
+  } finally {
+    review.resolve();
+    await request?.catch(() => null);
+  }
 });

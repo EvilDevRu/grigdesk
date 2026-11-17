@@ -1,6 +1,5 @@
-// Значения сверены с server/src/lib/showcase/voice/piperCatalog.ts и sileroCatalog.ts.
-// Зависимости — requirements-showcase-voice.txt и requirements-showcase-silero.txt.
-// Дублирование временное: standalone SEA не импортирует серверный код showcase.
+// Единый каталог локальных пакетов voice: модели, контрольные суммы и зависимости.
+// Серверные потребители используют CLI и не поддерживают собственные копии каталога.
 
 interface PackageBase {
   id: string;

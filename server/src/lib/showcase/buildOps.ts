@@ -64,7 +64,7 @@ export interface BuildOpsDeps {
 }
 
 function targetSnapshot(project: ShowcaseProject) {
-  if (project.target.status !== 'ready') {
+  if (project.target?.status !== 'ready') {
     return { status: 'blocked', ref: project.ref };
   }
 
@@ -448,7 +448,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
     }
 
     const safeRecordingRetry = run.stage === 'record-if-needed'
-      && project.target.status === 'ready'
+      && project.target?.status === 'ready'
       && !project.target.scope.capabilities.includes('mutations');
     const safeRetry = run.stage === 'timeline-and-assemble' || safeRecordingRetry;
 
@@ -482,11 +482,24 @@ export function createBuildOps(deps: BuildOpsDeps) {
     child: JobRecord | null,
   ): Promise<'again' | 'wait' | 'done'> {
     if (run.stage === 'preflight') {
-      if (project.target.status !== 'ready') {
-        await stop(run, 'failed', { code: 'target_unavailable', message: project.target.reason });
+      // Без готовой цели сборка идёт, только если запись не нужна: признак
+      // recordingReady посчитан по сохранённому снимку (клипы свежие, журналы
+      // читаемы) и сценарий проверен. Иначе честный отказ — снимать не на чем (D24).
+      if (project.target?.status !== 'ready') {
+        const recordNotNeeded = project.recordingReady === true;
 
-        return 'done';
+        if (!recordNotNeeded || !deps.scriptReady || !(await deps.scriptReady(project))) {
+          await stop(run, 'failed', {
+            code: 'target_unavailable',
+            message: project.target?.status === 'blocked'
+              ? project.target.reason
+              : 'Стенд не выбран: подключите его в карточке ролика.',
+          });
+
+          return 'done';
+        }
       }
+
 
       if (project.scenes.length > deps.limits().maxScenes) {
         await stop(run, 'failed', {

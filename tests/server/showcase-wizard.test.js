@@ -10,6 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { createFakeShowcaseVoice } from './helpers/showcaseVoice.js';
+
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 import { createScene } from '../../server/src/lib/showcase/scenes.ts';
 import {
@@ -34,7 +36,11 @@ const SCREENS_CONTRACT = {
       path: '/',
       readySelector: '[data-testid="ready"]',
       // Подпись элемента доезжает до модели; селектор — нет.
-      elements: [{ id: 'run', selector: '[data-testid="run"]', title: 'кнопка запуска' }],
+      elements: [{
+        id: 'run',
+        selector: '[data-testid="run"]',
+        title: 'кнопка запуска',
+      }],
     },
   ],
 };
@@ -95,13 +101,14 @@ async function fixture(t, options = {}) {
   );
 
   const service = createShowcaseService({
+    ...await createFakeShowcaseVoice(root, { ready: [] }),
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),
     stateDir: path.join(root, 'state'),
     browserPath: null,
     listProjects: async () => ['demo-profile'],
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -181,14 +188,16 @@ test('сборка дожидается уже начатого разбора �
             }
 
             return {
-              reply: JSON.stringify({ scenes: [{
-                title: 'Обзор',
-                screenId: 'overview',
-                narration: 'Показываем обзор.',
-                caption: 'Обзор',
-                subtitleText: 'Показываем обзор.',
-                actions: [],
-              }] }),
+              reply: JSON.stringify({
+                scenes: [{
+                  title: 'Обзор',
+                  screenId: 'overview',
+                  narration: 'Показываем обзор.',
+                  caption: 'Обзор',
+                  subtitleText: 'Показываем обзор.',
+                  actions: [],
+                }]
+              }),
             };
           },
         },
@@ -289,15 +298,15 @@ test('разбор сам читает связанную задачу и не �
               reply: prompts.length === 1
                 ? JSON.stringify({ points: ['первое', 'второе', 'третье'] })
                 : JSON.stringify({
-                    scenes: [{
-                      title: 'Обзор',
-                      screenId: 'overview',
-                      narration: 'Показываю доску и фильтры на ней.',
-                      caption: 'Доска',
-                      subtitleText: 'Показываю доску и фильтры на ней.',
-                      actions: [],
-                    }],
-                  }),
+                  scenes: [{
+                    title: 'Обзор',
+                    screenId: 'overview',
+                    narration: 'Показываю доску и фильтры на ней.',
+                    caption: 'Доска',
+                    subtitleText: 'Показываю доску и фильтры на ней.',
+                    actions: [],
+                  }],
+                }),
             };
           },
         },
@@ -552,9 +561,24 @@ test('новый сценарий сохраняет три автоматиче
         { kind: 'highlight', targetId: 'run' },
       ],
       bindings: [
-        { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
-        { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'ready-before' },
-        { quote: 'результат', occurrence: 2, actionIndex: 2, kind: 'hold-through' },
+        {
+          quote: 'запускаем',
+          occurrence: 1,
+          actionIndex: 0,
+          kind: 'align-start',
+        },
+        {
+          quote: 'результат',
+          occurrence: 1,
+          actionIndex: 1,
+          kind: 'ready-before',
+        },
+        {
+          quote: 'результат',
+          occurrence: 2,
+          actionIndex: 2,
+          kind: 'hold-through',
+        },
       ],
     }],
   });
@@ -610,8 +634,18 @@ test('построение только связей сохраняет ручн
               scenes: [{
                 sceneId,
                 bindings: [calls === 1
-                  ? { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'hold-through' }
-                  : { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' }],
+                  ? {
+                    quote: 'результат',
+                    occurrence: 1,
+                    actionIndex: 1,
+                    kind: 'hold-through',
+                  }
+                  : {
+                    quote: 'запускаем',
+                    occurrence: 1,
+                    actionIndex: 0,
+                    kind: 'align-start',
+                  }],
               }],
             }),
           };
@@ -637,7 +671,12 @@ test('построение только связей сохраняет ручн
   const scene = added.scenes[0];
   const from = scene.narration.indexOf('результат');
   const manual = await service.updateScene(added.id, added.revision, scene.id, {
-    syncCues: [{ actionIndex: 1, from, to: from + 'результат'.length, kind: 'hold-through' }],
+    syncCues: [{
+      actionIndex: 1,
+      from,
+      to: from + 'результат'.length,
+      kind: 'hold-through',
+    }],
   });
   const before = manual.scenes[0];
   const manualCue = before.syncBindings.cues[0];
@@ -666,65 +705,6 @@ test('построение только связей сохраняет ручн
   assert.equal(after.syncBindings.cues.find((cue) => cue.origin === 'generated').actionIndex, 0);
 });
 
-const execGit = promisify(execFile);
-
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 'test',
-  GIT_AUTHOR_EMAIL: 'test@example.test',
-  GIT_COMMITTER_NAME: 'test',
-  GIT_COMMITTER_EMAIL: 'test@example.test',
-};
-
-/**
- * Репозиторий постоянного стенда: база и два коммита поверх неё. Человек отмечает
- * второй, и первый не должен доехать до модели ни кодом, ни описанием.
- */
-async function standRepository(root) {
-  const repo = path.join(root, 'stand-app');
-  const git = async (args) => (await execGit('git', ['-C', repo, ...args], { env: GIT_ENV })).stdout.trim();
-  // Коммит одного файла; возвращает полный идентификатор — им человек и отмечает
-  // коммит в списке «О чём ролик».
-  const commit = async (file, content, message) => {
-    await writeFile(path.join(repo, file), content, 'utf8');
-    await git(['add', file]);
-    await git(['commit', '-q', '-m', message]);
-
-    return git(['rev-parse', 'HEAD']);
-  };
-
-  await mkdir(repo, { recursive: true });
-  await git(['init', '-q', '-b', 'main']);
-  await commit('app.js', 'export const base = 0;\n', 'база');
-
-  const first = await commit('filters.js', 'export const filters = "первый";\n', 'Фильтры доски');
-  const second = await commit('dialog.vue', '<template>Диалог съёма</template>\n', 'Диалог массового съёма');
-
-  return {
-    repo,
-    git,
-    first,
-    second,
-  };
-}
-
-/**
- * Выбор одного репозитория постоянного стенда: отмеченные коммиты без
- * незакоммиченного, с задачей и кодом, как их ставит блок по умолчанию.
- */
-function standChoice(commits, name = 'app') {
-  return {
-    task: true,
-    note: '',
-    code: true,
-    repos: [{
-      name,
-      work: false,
-      commits,
-    }],
-  };
-}
-
 const DIALOG_SCENES = {
   scenes: [{
     title: 'Диалог',
@@ -738,97 +718,6 @@ const DIALOG_SCENES = {
 
 // Постоянный стенд раньше не давал модели изменений вовсе. Теперь человек сам
 // отмечает коммиты: модель видит только их и его пожелание, а сцены помнят выбор.
-test('«О чём ролик» постоянного стенда: только отмеченный коммит и пожелание человека', async (t) => {
-  const model = scriptedModel(DIALOG_SCENES);
-  const stand = { repos: [] };
-  const { service, root } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: async () => stand.repos,
-    },
-  });
-  const { repo, first, second } = await standRepository(root);
-
-  stand.repos = [{ name: 'app', path: repo }, { name: 'app-alias', path: repo }];
-
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const options = await service.sourceOptions(project.id);
-
-  assert.deepEqual(
-    options.repos.map((item) => item.name),
-    ['app'],
-    'два ключа одного каталога — один репозиторий',
-  );
-  assert.deepEqual(options.defaults.repos[0].commits, [], 'у постоянного стенда умолчание пустое');
-  assert.equal(options.taskAvailable, false);
-
-  const source = {
-    ...standChoice([second]),
-    note: 'Упор на диалог съёма',
-  };
-  const saved = await service.saveSource(project.id, project.revision, source);
-
-  assert.deepEqual(saved.source, source);
-
-  const analyzed = await service.analyze(project.id);
-  const [brief] = model.prompts;
-
-  assert.match(brief, /<human_focus>\nУпор на диалог съёма\n<\/human_focus>/);
-  assert.match(brief, /Диалог массового съёма/, 'описание выбранного коммита видно модели');
-  assert.match(brief, /<template>Диалог съёма<\/template>/);
-  assert.doesNotMatch(brief, /первый|Фильтры доски/, 'невыбранный коммит не читается');
-  assert.match(brief, new RegExp(`<diff_range>app:${first.slice(0, 12)}\\.\\.app:${second.slice(0, 12)}`));
-  assert.deepEqual(analyzed.scriptSource, source, 'сцены помнят выбор, по которому собраны');
-
-  const changed = await service.saveSource(analyzed.id, analyzed.revision, {
-    ...source,
-    note: 'Другой упор',
-  });
-
-  assert.notDeepEqual(changed.scriptSource, changed.source, 'новый выбор после разбора виден расхождением');
-});
-
-test('неверный выбор не сохраняется, а пропавший после rebase коммит останавливает разбор', async (t) => {
-  const model = scriptedModel(DIALOG_SCENES);
-  const stand = { repos: [] };
-  const { service, root } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: async () => stand.repos,
-    },
-  });
-  const { repo, git, first, second } = await standRepository(root);
-
-  stand.repos = [{ name: 'app', path: repo }];
-
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-
-  await assert.rejects(
-    service.saveSource(project.id, project.revision, standChoice(['f'.repeat(40)])),
-    (error) => error.code === 'bad_source' && error.status === 400 && /не найден/.test(error.message),
-  );
-  await assert.rejects(
-    service.saveSource(project.id, project.revision, standChoice([second], 'чужой')),
-    (error) => error.code === 'bad_source' && /не принадлежит стенду/.test(error.message),
-  );
-
-  const saved = await service.saveSource(project.id, project.revision, standChoice([second]));
-
-  await git(['reset', '-q', '--hard', first]);
-  await assert.rejects(service.analyze(saved.id), (error) => {
-    assert.equal(error.code, 'source_outdated');
-    assert.equal(error.status, 409);
-    assert.match(error.message, /Выберите заново в блоке «О чём ролик»/);
-
-    return true;
-  });
-  assert.equal(model.prompts.length, 0, 'модель не зовётся по устаревшему выбору');
-
-  const reset = await service.saveSource(saved.id, saved.revision, null);
-
-  assert.equal(reset.source, null, 'null возвращает умолчание цели');
-});
-
 test('выбор «О чём ролик» не меняется под идущим разбором', async (t) => {
   let release;
   let entered;
@@ -866,108 +755,6 @@ test('выбор «О чём ролик» не меняется под идущ�
   await analysis;
 });
 
-/**
- * Паспорт проекта, который отвечает только по сигналу теста: сохранение выбора стоит
- * на чтении репозиториев, и тест успевает войти в гонку без пауз по времени.
- */
-function gatedRepos() {
-  let release;
-  let entered;
-  const state = {
-    repos: [],
-    gate: new Promise((resolve) => {
-      release = resolve;
-    }),
-    started: new Promise((resolve) => {
-      entered = resolve;
-    }),
-  };
-
-  return {
-    state,
-    release: () => release(),
-    projectRepos: async () => {
-      entered();
-      await state.gate;
-
-      return state.repos;
-    },
-  };
-}
-
-test('сохранение выбора держит общий допуск ролика до самой записи', async (t) => {
-  const model = scriptedModel(DIALOG_SCENES);
-  const gated = gatedRepos();
-  const { service, root } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: gated.projectRepos,
-    },
-  });
-  const { repo, second } = await standRepository(root);
-
-  gated.state.repos = [{ name: 'app', path: repo }];
-
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const saving = service.saveSource(project.id, project.revision, standChoice([second]));
-
-  await gated.state.started;
-  await assert.rejects(service.analyze(project.id), (error) => error.code === 'script_busy');
-  await assert.rejects(
-    service.saveSource(project.id, project.revision, null),
-    (error) => error.code === 'script_busy',
-  );
-  gated.release();
-
-  const saved = await saving;
-
-  assert.deepEqual(saved.source, standChoice([second]));
-  await assert.rejects(
-    service.saveSource(project.id, project.revision, null),
-    (error) => error.code === 'revision_conflict',
-  );
-  assert.equal(model.prompts.length, 0, 'разбор под сохранением модель не звал');
-});
-
-test('сборка во время сохранения выбора отказывает до создания снимка', async (t) => {
-  const model = scriptedModel(DIALOG_SCENES);
-  const gated = gatedRepos();
-  const { service, root } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: gated.projectRepos,
-    },
-  });
-  const { repo, second } = await standRepository(root);
-
-  gated.state.repos = [{ name: 'app', path: repo }];
-
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const saving = service.saveSource(project.id, project.revision, standChoice([second]));
-
-  await gated.state.started;
-
-  const attempt = await service.startBuild(project.id, project.revision, 'build-during-source-save')
-    .then((run) => ({ run, error: null }), (error) => ({ run: null, error }));
-
-  gated.release();
-
-  const saved = await saving;
-
-  if (attempt.run) {
-    await settleRun(service, attempt.run.id);
-  }
-
-  assert.equal(attempt.error?.code, 'script_busy', 'выбор нельзя сменить под снимком новой сборки');
-  assert.equal(service.jobs.list().length, 0, 'задания по прежнему выбору не создаются');
-  assert.deepEqual((await service.readProject(project.id)).source, standChoice([second]));
-
-  const retry = await service.startBuild(saved.id, saved.revision, 'build-after-source-save');
-
-  await settleRun(service, retry.id);
-  assert.notEqual(service.readBuild(retry.id).error?.code, 'build_inputs_changed');
-});
-
 test('выбор не меняется и пока сборка ещё читает проект перед регистрацией', async (t) => {
   const { service } = await fixture(t);
   const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
@@ -999,10 +786,8 @@ test('выбор не меняется и пока сборка ещё чита�
   await started;
 
   const result = await service.saveSource(project.id, project.revision, {
-    task: false,
+    taskId: null,
     note: 'Новый упор',
-    code: true,
-    repos: null,
   }).then(() => null, (error) => error);
 
   release();
@@ -1014,10 +799,6 @@ test('выбор не меняется и пока сборка ещё чита�
   assert.equal((await service.readProject(project.id)).source, null);
 });
 
-/**
- * Модель с ответами по очереди: тест сам решает, где разбор ломается и что модель
- * вернёт после смены выбора. Каждый промпт сохраняется для проверки контекста.
- */
 function queuedModel(replies) {
   const prompts = [];
 
@@ -1042,54 +823,9 @@ function queuedModel(replies) {
   };
 }
 
-// Разбор успел записать бриф и сломался на сценах. Человек сменил выбор — новый
-// сценарий не вправе стоять на плане, составленном по прежнему выбору.
-test('бриф прежнего выбора перестраивается перед сценами нового', async (t) => {
-  const model = queuedModel([
-    { points: ['А1', 'А2', 'А3'] },
-    { scenes: 'не сцены' },
-    { scenes: 'не сцены' },
-    { points: ['Б1', 'Б2', 'Б3'] },
-    DIALOG_SCENES,
-  ]);
-  const stand = { repos: [] };
-  const { service, root } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: async () => stand.repos,
-    },
-  });
-  const { repo, second } = await standRepository(root);
-
-  stand.repos = [{ name: 'app', path: repo }];
-
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-
-  await assert.rejects(service.analyze(project.id), (error) => error.code === 'model_reply_invalid');
-
-  const failed = await service.readProject(project.id);
-
-  assert.deepEqual(failed.brief, ['А1', 'А2', 'А3']);
-  assert.equal(failed.scenes.length, 0);
-
-  const source = {
-    ...standChoice([second]),
-    note: 'Упор на диалог',
-  };
-  const saved = await service.saveSource(project.id, failed.revision, source);
-  const scripted = await service.generateScript(saved.id, '');
-
-  assert.match(model.prompts[3], /"points"/, 'после смены выбора первым идёт новый бриф');
-  assert.match(model.prompts[3], /Упор на диалог/);
-  assert.deepEqual(scripted.brief, ['Б1', 'Б2', 'Б3']);
-  assert.deepEqual(scripted.briefSource, source);
-  assert.deepEqual(scripted.scriptSource, source);
-  assert.equal(scripted.scenes.length, 1);
-});
-
 /**
- * Ролик со сценами и годной проверкой сценария: готов к сборке без модели. Выбор, по
- * которому собраны сцены, задаёт тест.
+ * Сцены и proof публикуются по настоящим формулам проверки сценария.
+ * Источник задаётся тестом, чтобы новый выбор не прошёл под прежним proof.
  */
 async function provenProject(service, scriptSource) {
   let project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
@@ -1137,10 +873,8 @@ test('сборка не выдаёт сцены прежнего выбора з
   const { service } = await fixture(t, { deps: model.deps });
   const proven = await provenProject(service, null);
   const saved = await service.saveSource(proven.id, proven.revision, {
-    task: true,
+    taskId: null,
     note: 'Новый упор',
-    code: true,
-    repos: null,
   });
 
   const run = await service.startBuild(saved.id, saved.revision, 'build-after-source-change');
@@ -1165,113 +899,169 @@ test('сборка не выдаёт сцены прежнего выбора з
   assert.equal(model.prompts.length, 0, 'модель не звалась');
 });
 
-// Rebase или squash-слияние ветки после разбора: принятые сцены пересобираются без
-// чтения истории, иначе каждое переписывание ветки заставляло бы разбирать заново.
-test('принятые сцены при том же выборе собираются, даже если выбранный коммит пропал', async (t) => {
-  const stand = { repos: [] };
-  const { service, root } = await fixture(t, { deps: { projectRepos: async () => stand.repos } });
-  const { repo, git, first, second } = await standRepository(root);
 
-  stand.repos = [{ name: 'app', path: repo }];
+for (const operation of ['analyze', 'startBuild', 'saveSource']) {
+  test(`сохранение источника держит допуск до записи: ${operation}`, async (t) => {
+    const { service } = await fixture(t);
+    const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+    const originalRead = service.store.readProject;
+    const gate = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    let first = true;
 
-  const proven = await provenProject(service, standChoice([second]));
+    service.store.readProject = async (id) => {
+      const result = await originalRead(id);
 
-  await git(['reset', '-q', '--hard', first]);
+      if (first) {
+        first = false;
+        entered.resolve();
+        await gate.promise;
+      }
 
-  const run = await service.startBuild(proven.id, proven.revision, 'build-after-rebase');
+      return result;
+    };
 
-  await settleRun(service, run.id);
+    const source = { taskId: '4920', note: 'Упор на фильтр' };
+    const saving = service.saveSource(project.id, project.revision, source);
 
-  const finished = service.readBuild(run.id);
+    try {
+      await entered.promise;
+      await assert.rejects(
+        () => service[operation](project.id, project.revision, 'build-source-gate'),
+        (error) => error.code === 'script_busy',
+      );
+    } finally {
+      gate.resolve();
+      await saving;
+    }
 
-  // Голос в этой проверке не настроен: запуск останавливается позже сценария.
-  assert.notEqual(finished.stage, 'script-if-empty', 'этап сценария пройден без разбора');
-  assert.equal(service.jobs.list().some((entry) => entry.kind === 'script'), false, 'история не читалась');
-});
+    assert.deepEqual((await service.readProject(project.id)).source, source);
+    assert.equal(service.jobs.list().length, 0);
+  });
+}
 
-test('недоступный паспорт проекта — отказ списка и явного выбора, а разбор без выбора идёт', async (t) => {
+test('явно выбранная задача и комментарий попадают в модель без git', async (t) => {
   const model = scriptedModel(DIALOG_SCENES);
-  let calls = 0;
+  const asked = [];
   const { service } = await fixture(t, {
     deps: {
       ...model.deps,
-      projectRepos: async () => {
-        calls += 1;
+      taskDetails: async (id) => {
+        asked.push(id);
 
-        throw new Error('/home/private/секретный путь не читается');
+        return { title: 'Фильтры', description: '<p>Показываем результат</p>' };
       },
-    },
+    }
   });
   const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const unavailable = (error) => (
-    error.code === 'source_unavailable' && error.status === 503 && !error.message.includes('/home/private')
-  );
-
-  await assert.rejects(service.sourceOptions(project.id), unavailable);
-  await assert.rejects(service.saveSource(project.id, project.revision, standChoice([])), unavailable);
-
-  const before = calls;
-  const analyzed = await service.analyze(project.id);
-
-  assert.equal(calls, before, 'разбор без выбора паспорт не читает');
-  assert.equal(analyzed.scenes.length, 1);
-});
-
-test('явно пустой выбор репозиториев не требует чтения паспорта проекта', async (t) => {
-  const model = scriptedModel(DIALOG_SCENES);
-  let reads = 0;
-  const { service } = await fixture(t, {
-    deps: {
-      ...model.deps,
-      projectRepos: async () => {
-        reads += 1;
-
-        throw new Error('Паспорт недоступен');
-      },
-    },
-  });
-  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const source = {
-    task: false,
-    note: 'Обзор готового интерфейса',
-    code: false,
-    repos: [],
-  };
+  const source = { taskId: '4920', note: 'Главное — результат' };
 
   await service.saveSource(project.id, project.revision, source);
 
   const analyzed = await service.analyze(project.id);
 
-  assert.equal(reads, 0, 'снятые репозитории не читаются даже для проверки выбора');
-  assert.equal(analyzed.scenes.length, 1);
+  assert.deepEqual(asked, ['4920']);
+  assert.match(model.prompts[0], /Фильтры/u);
+  assert.match(model.prompts[0], /Главное — результат/u);
+  assert.doesNotMatch(model.prompts[0], /<commits>|<diff>/u);
   assert.deepEqual(analyzed.scriptSource, source);
 });
 
-test('отказ чтения выбранной части останавливает разбор до вызова модели', async (t) => {
+test('недоступная задача не отменяет разбор по комментарию и карте', async (t) => {
   const model = scriptedModel(DIALOG_SCENES);
-  const stand = { repos: [] };
-  const { service, root } = await fixture(t, {
+  const { service } = await fixture(t, {
     deps: {
       ...model.deps,
-      projectRepos: async () => stand.repos,
-    },
+      taskDetails: async () => {
+        throw new Error('Портал недоступен');
+      },
+    }
   });
-  const { repo } = await standRepository(root);
-
-  stand.repos = [{ name: 'app', path: repo }];
-
   const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
-  const workOnly = {
-    ...standChoice([]),
-    repos: [{
-      name: 'app',
-      work: true,
-      commits: [],
-    }],
-  };
 
-  await service.saveSource(project.id, project.revision, workOnly);
-  await rm(path.join(repo, '.git'), { recursive: true, force: true });
-  await assert.rejects(service.analyze(project.id), (error) => error.code === 'source_unavailable');
-  assert.equal(model.prompts.length, 0, 'неполный контекст модели не уходит');
+  await service.saveSource(project.id, project.revision, { taskId: '4920', note: 'Показать диалог' });
+  assert.equal((await service.analyze(project.id)).scenes.length, 1);
+});
+
+test('источник сохраняется свободному ролику и проверяет форму', async (t) => {
+  const { service } = await fixture(t);
+  const project = await service.createProject({});
+
+  await assert.rejects(service.saveSource(project.id, project.revision, {
+    taskId: 'abc', note: '',
+  }), (error) => error.code === 'bad_source');
+
+  const saved = await service.saveSource(project.id, project.revision, {
+    taskId: ' 4920 ', note: '  Показать диалог  ',
+  });
+
+  assert.deepEqual(saved.source, { taskId: '4920', note: 'Показать диалог' });
+  assert.equal(saved.target, null);
+});
+
+test('бриф прежнего источника перестраивается перед сценами нового', async (t) => {
+  const model = queuedModel([
+    { points: ['А1', 'А2', 'А3'] },
+    { scenes: 'не сцены' },
+    { scenes: 'не сцены' },
+    { points: ['Б1', 'Б2', 'Б3'] },
+    DIALOG_SCENES,
+  ]);
+  const { service } = await fixture(t, { deps: model.deps });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  await assert.rejects(service.analyze(project.id), (error) => error.code === 'model_reply_invalid');
+
+  const failed = await service.readProject(project.id);
+  const source = { taskId: null, note: 'Упор на диалог' };
+  const saved = await service.saveSource(project.id, failed.revision, source);
+  const scripted = await service.generateScript(saved.id, '');
+
+  assert.match(model.prompts[3], /"points"/u);
+  assert.match(model.prompts[3], /Упор на диалог/u);
+  assert.deepEqual(scripted.brief, ['Б1', 'Б2', 'Б3']);
+  assert.deepEqual(scripted.scriptSource, source);
+});
+
+test('без голоса уровня ролика новая сцена наследует голос и темп предыдущей', async (t) => {
+  const { service } = await fixture(t);
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const draft = {
+    title: 'Обзор',
+    screenId: 'overview',
+    narration: 'Обзор.',
+    caption: '',
+    subtitleText: '',
+    actions: [],
+    startState: null,
+    readyCondition: null,
+  };
+  const first = await service.addScene(project.id, project.revision, draft);
+  const patched = await service.store.updateProject(first.id, first.revision, (current) => ({
+    ...current,
+    voiceRef: null,
+    pace: null,
+    scenes: current.scenes.map((scene) => ({
+      ...scene,
+      audioSource: { ...scene.audioSource, voiceRef: 'piper:irina' },
+      direction: { ...scene.direction, pace: 'fast' },
+    })),
+  }));
+  const second = await service.addScene(first.id, patched.revision, draft);
+
+  assert.equal(second.scenes[1].audioSource.voiceRef, 'piper:irina');
+  assert.equal(second.scenes[1].direction.pace, 'fast');
+});
+
+test('адаптация под идущей сборкой отказывает script_busy', async (t) => {
+  const { service } = await fixture(t);
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const run = await service.startBuild(project.id, project.revision, 'adapt-under-build');
+
+  try {
+    await assert.rejects(service.adaptNarration(project.id), (error) => error.code === 'script_busy');
+  } finally {
+    await service.cancelBuild(run.id);
+    await settleRun(service, run.id);
+  }
 });

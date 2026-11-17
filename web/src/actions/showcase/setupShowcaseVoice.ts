@@ -1,3 +1,4 @@
+import { apply as applyMutation } from './editShowcaseScenes';
 import { showcaseApi, showcaseErrorCode, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcasePronunciationOverrideDraft } from '../../shared/showcaseApi';
 import type { ShowcaseDirection, ShowcasePace } from '../../../../shared/plugins/showcase/showcaseContracts';
@@ -145,34 +146,20 @@ export async function saveShowcaseDictionary(store: ShowcaseStore, text: string)
 }
 
 /**
- * Голос и темп открытого ролика. Сервер меняет все синтезируемые сцены разом и
- * возвращает ролик с пересчитанной свежестью: звук устарел, и следующая сборка
- * переозвучит его сама.
+ * Смена голоса использует общую границу владения с pending-save и attach.
+ * Отказ или уход возвращают false, поэтому модель после ухода не начинается.
  */
-export async function setShowcaseVoice(
+export function setShowcaseVoice(
   store: ShowcaseStore,
   choice: ShowcaseVoiceChoice,
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> {
-  const opened = store.opened;
-
-  if (!opened) {
-    return false;
-  }
-
-  store.setBusy(opened.id, true);
-
-  try {
-    store.setOpened(await putVoice(opened.id, opened.revision, choice));
-    store.setError('');
-
-    return true;
-  } catch (error: unknown) {
-    store.setError(showcaseErrorMessage(error, translateUi('core.setupShowcaseVoiceCouldNotChangeTheVoice')));
-
-    return false;
-  } finally {
-    store.setBusy(opened.id, false);
-  }
+  return applyMutation(
+    store,
+    (project) => putVoice(project.id, project.revision, choice),
+    translateUi('core.setupShowcaseVoiceCouldNotChangeTheVoice'),
+    isCurrent,
+  );
 }
 
 /**

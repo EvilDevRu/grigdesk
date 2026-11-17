@@ -13,8 +13,8 @@ import { createScene, createSyncBindings } from '../../server/src/lib/showcase/s
 import { createShowcaseStore, newShowcaseId } from '../../server/src/lib/showcase/store.ts';
 import { SHOWCASE_SCHEMA_VERSION } from '../../shared/plugins/showcase/showcaseContracts.ts';
 
-const LEGACY_PROJECT_FIXTURE = new URL(
-  './fixtures/showcase-project-v1-without-sync.json',
+const OPTIONAL_SYNC_FIXTURE = new URL(
+  './fixtures/showcase-project-v2-without-sync.json',
   import.meta.url,
 );
 
@@ -193,9 +193,9 @@ test('запись ролика недоступна посторонним на
   assert.equal(mode & 0o077, 0, 'в записи ролика есть отпечатки цели и решения человека');
 });
 
-test('старый проект без sync-полей читается, обновляется и не попадает в карантин', async (t) => {
+test('проект текущей схемы без необязательных sync-полей читается и обновляется', async (t) => {
   const { store, showcaseDir } = await fixture(t);
-  const legacy = JSON.parse(await readFile(LEGACY_PROJECT_FIXTURE, 'utf8'));
+  const legacy = JSON.parse(await readFile(OPTIONAL_SYNC_FIXTURE, 'utf8'));
 
   await store.createProject(legacy);
 

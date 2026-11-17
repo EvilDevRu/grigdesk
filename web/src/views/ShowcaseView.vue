@@ -9,21 +9,23 @@
       </template>
     <h1 v-if="store.opened" id="showcase-title" class="ui-visually-hidden">{{ t('core.navShowcase') }}</h1>
     <div class="showcase" :class="{ 'showcase--film': store.opened }">
-    <p v-if="!store.opened" class="ui-workspace-intro"> {{ t('core.showcaseVyberiteStendChtobySozdat') }} </p>
+    <p v-if="!store.opened" class="ui-workspace-intro"> {{ t('core.showcaseRolikiOGotovoyRabote') }} </p>
 
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
     <!-- Экран следует за состоянием ролика на сервере, а не за памятью вкладки:
          открытый ролик живёт в адресе, и после F5 человек видит его же. -->
     <ShowcaseFilm
+      ref="film"
       v-if="store.opened"
       :project="store.opened"
+      :targets="store.targets"
       :seed="seed"
       :jobs="store.jobsOf(store.opened.id)"
       :build-run="store.latestBuildOf(store.opened.id)"
       :manifest="store.currentManifest"
       :manifest-status="store.manifestStatus"
-      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id || applyingSource"
+      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id || applyingSource || adapting"
       :analyzing="store.analyzing === store.opened.id"
       :max-scenes="store.limits.maxScenes"
       :target-url="openedTargetUrl"
@@ -31,9 +33,6 @@
       :voice-ref="effectiveVoiceRef"
       :voice-capabilities="effectiveVoiceCapabilities"
       :load-scene-preview="loadShowcaseNarrationPreview"
-      :source-options="sourceOptions"
-      :source-loading="sourceLoading"
-      :source-error="sourceError"
       @close="close"
       @build="build"
       @generate-bindings="generateBindings"
@@ -52,20 +51,23 @@
       @scene-audio="uploadAudio"
       @select-scene="selectedSceneId = $event"
       @apply-source="applySource"
-      @reload-source="reloadSource"
+      @attach-target="attachTarget"
+      @reshoot-scene="reshootScene"
     >
       <template #voice>
         <ShowcaseVoicePanel
           mode="choice"
           :catalog="store.voices"
           :dictionary="store.dictionary"
-          :busy="store.voiceBusy || store.isBusy(store.opened.id) || store.analyzing === store.opened.id"
+          :busy="store.voiceBusy || store.isBusy(store.opened.id) || store.analyzing === store.opened.id || adapting"
           :voice-ref="projectVoiceRef"
           :pace="projectPace"
           :load-preview="loadShowcaseVoicePreview"
           @install="installVoice"
           @cancel="cancelVoiceInstall"
           @change="changeVoice"
+          :can-adapt="store.opened.scenes.some((scene) => scene.audioSource.kind === 'tts')"
+          @adapt="adaptNarration"
           @save-dictionary="saveDictionary"
         />
       </template>
@@ -75,19 +77,14 @@
       <section class="showcase__panel" aria-labelledby="showcase-create-title">
         <div class="showcase__panel-head">
           <h2 id="showcase-create-title">{{ t('core.showcaseNovyyRolik') }}</h2>
-          <p>{{ t('core.showcaseVyberiteStendOKotorom') }}</p>
+          <p>{{ t('core.showcaseSozdayteRolikBezStenda') }}</p>
         </div>
-        <ShowcaseTargetPicker
-          :targets="store.targets"
-          :projects="store.projects"
-          :busy="creating"
-          :loaded="store.loaded"
-          :loading="store.loading"
-          :error="store.error"
-          @create="create"
-          @configure="configure"
-          @open="open"
-        />
+        <UiButton
+          variant="outline"
+          :loading="creating"
+          data-testid="showcase-new-film"
+          @click="createFree"
+        > {{ t('core.showcaseNovyyRolik') }} </UiButton>
       </section>
 
       <!-- Готовность установки показывается только когда она мешает: зелёный список
@@ -143,7 +140,7 @@
 
 <script setup lang="ts">
 import { openSettings } from '../shared/settingsNavigation.ts';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
@@ -159,6 +156,11 @@ import {
   cancelShowcaseVoiceInstall,
   closeShowcaseProject,
   createShowcaseProject,
+  attachShowcaseTarget,
+  showcaseProjectOwner,
+  adaptShowcaseNarration,
+  beginShowcaseNavigation,
+  captureShowcaseNavigation,
   deleteShowcaseProject,
   generateShowcaseBindings,
   importShowcaseAudio,
@@ -168,7 +170,6 @@ import {
   loadShowcaseDictionary,
   loadShowcaseManifest,
   loadShowcaseNarrationPreview,
-  loadShowcaseSource,
   loadShowcaseVoicePreview,
   loadShowcaseVoices,
   markShowcaseDataUpdated,
@@ -177,6 +178,7 @@ import {
   removeShowcaseScene,
   renameShowcaseProject,
   reorderShowcaseScenes,
+  reshootShowcaseScene,
   saveShowcaseDictionary,
   saveShowcaseSource,
   setShowcaseVoice,
@@ -191,12 +193,10 @@ import type { SeedStatus, ShowcaseVoiceChoice } from '../actions/showcase';
 import type {
   ShowcaseDoctor,
   ShowcaseSelectableTargetRef,
-  ShowcaseSourceOptions,
   ShowcaseStorySource,
 } from '../../../shared/plugins/showcase/showcaseContracts';
 import ShowcaseFilm from './showcase/ShowcaseFilm.vue';
 import ShowcaseProjectRow from './showcase/ShowcaseProjectRow.vue';
-import ShowcaseTargetPicker from './showcase/ShowcaseTargetPicker.vue';
 import ShowcaseVoicePanel from './showcase/ShowcaseVoicePanel.vue';
 import type { SceneTextPayload } from './showcase/sceneDraft';
 
@@ -208,16 +208,13 @@ const showcaseContext = useUiContextSource('showcase', { layer: 'page', active: 
 const creating = ref(false);
 const doctor = ref<ShowcaseDoctor | null>(null);
 const seed = ref<SeedStatus | null>(null);
+let seedRequest = 0;
 const selectedSceneId = ref('');
 // «О чём ролик»: живая история репозиториев открытого ролика и её отказ — у блока.
-const sourceOptions = ref<ShowcaseSourceOptions | null>(null);
-const sourceLoading = ref(false);
-const sourceError = ref('');
 // Цепочка «подтверждение → сохранение → разбор или сборка» одна на вид: повторный клик
 // не запускает вторую, пока идёт первая.
 const applyingSource = ref(false);
 // Билет чтения списка: поздний ответ прежнего запроса не меняет ни список, ни подпись.
-let sourceTicket = 0;
 
 // Без этого записи не будет вовсе. Голос и распознавание сюда не входят: без
 // голоса остаётся свой звук, а проверка речи рекомендательная.
@@ -236,11 +233,12 @@ const voiceReady = computed(() => (
 // Голос и темп ролика — у его сцен: первая синтезируемая сцена говорит за все,
 // потому что сервер меняет их только разом.
 const projectVoiceRef = computed(() => (
-  store.opened?.scenes.find((scene) => scene.audioSource.kind === 'tts')?.audioSource.voiceRef
+  store.opened?.voiceRef
+    ?? store.opened?.scenes.find((scene) => scene.audioSource.kind === 'tts')?.audioSource.voiceRef
     ?? null
 ));
 
-const projectPace = computed(() => store.opened?.scenes[0]?.direction.pace ?? null);
+const projectPace = computed(() => store.opened?.pace ?? store.opened?.scenes[0]?.direction.pace ?? null);
 
 const firstAvailableVoiceRef = computed(() => {
   for (const engine of store.voices?.engines ?? []) {
@@ -270,7 +268,7 @@ const effectiveVoiceCapabilities = computed(() => {
 const openedTargetUrl = computed(() => {
   const opened = store.opened;
 
-  if (!opened || opened.target.status !== 'ready') {
+  if (!opened || opened.target?.status !== 'ready') {
     return null;
   }
 
@@ -279,7 +277,7 @@ const openedTargetUrl = computed(() => {
   }
 
   const option = store.targets.find((target) => (
-    target.ref.kind === opened.ref.kind && target.ref.id === opened.ref.id
+    target.ref.kind === opened.ref?.kind && target.ref.id === opened.ref?.id
   ));
 
   return option ? sandboxUrl(option.viewPort, option.serviceHost) : null;
@@ -310,6 +308,8 @@ onMounted(() => {
  * Позже пустой адрес означает «к списку» — так работает «назад» в браузере.
  */
 watch(() => String(route.params.id ?? ''), async (id) => {
+  const current = beginShowcaseNavigation(store);
+
   if (!id) {
     if (store.opened && !mounted) {
       await router.replace(`/showcase/${store.opened.id}`);
@@ -335,7 +335,13 @@ watch(() => String(route.params.id ?? ''), async (id) => {
 
   // Известный ролик при неудаче остаётся на экране с ошибкой: уводить к списку
   // есть смысл только когда показывать нечего.
-  if (!await openShowcaseProject(store, id) && !known) {
+  const loaded = await openShowcaseProject(store, id, current);
+
+  if (!current()) {
+    return;
+  }
+
+  if (!loaded && !known) {
     refreshedId = '';
     await router.replace('/showcase');
   }
@@ -344,22 +350,40 @@ watch(() => String(route.params.id ?? ''), async (id) => {
 // Доступность подготовки данных зависит от ЖИВОГО состояния стенда, поэтому она
 // спрашивается при появлении карточки, а не хранится в записи ролика: вчерашняя
 // доступность сегодня уже ничего не значит.
-watch(() => store.opened?.id, async (id) => {
-  seed.value = id ? await loadSeedStatus(store) : null;
+watch(() => {
+  const project = store.opened;
+  const scope = project?.target?.status === 'ready' ? project.target.scope : null;
+
+  return JSON.stringify([
+    project?.id, project?.ref?.kind, project?.ref?.id,
+    scope?.profile, scope?.targetFingerprint, scope?.dataRevision,
+  ]);
+}, () => {
+  seed.value = null;
+  void refreshSeedStatus();
 }, { immediate: true });
 
-// Историю репозиториев спрашиваем при появлении карточки и когда цель стала готова:
-// вчерашний список коммитов сегодня может не совпасть с веткой стенда.
-watch(() => `${store.opened?.id ?? ''}:${store.opened?.target.status ?? ''}`, () => {
-  sourceTicket += 1;
-  sourceOptions.value = null;
-  sourceError.value = '';
-  sourceLoading.value = false;
+/**
+ * Готовность данных принадлежит карточке и последнему запросу этой карточки.
+ * Поздний null старого owner не должен стереть уже загруженный статус нового.
+ */
+async function refreshSeedStatus() {
+  const request = ++seedRequest;
+  const id = store.opened?.id;
 
-  if (store.opened?.target.status === 'ready') {
-    void reloadSource();
+  if (!id) {
+    seed.value = null;
+
+    return;
   }
-}, { immediate: true });
+
+  const current = showcaseProjectOwner(store, id);
+  const status = await loadSeedStatus(store);
+
+  if (current() && request === seedRequest) {
+    seed.value = status;
+  }
+}
 
 // Manifest относится к конкретному immutable final. Смена project/revision без
 // смены этой пары повторного чтения не запускает, а новый final загружается сам.
@@ -395,49 +419,32 @@ watch([() => store.opened?.id, () => store.opened?.title, selectedSceneId], ([id
 // Подписка снимается вместе с экраном: выключенный плагин и уход со страницы не
 // должны оставлять слушателя, который продолжит писать в состояние раздела.
 onUnmounted(() => {
+  beginShowcaseNavigation(store);
   stopWatching?.();
   stopWatching = null;
 });
 
 /**
- * «Снять ролик»: ролик заводится и одним POST уходит в полный backend-run. Вкладка
- * дальше только показывает сохранённый прогресс; закрытие страницы судьбу запуска
- * не меняет.
+ * Ролик создаётся свободно и открывается, пока человек не выбрал другой маршрут.
+ * Уже созданная сервером запись остаётся в списке при уходе во время запроса.
  */
-async function create(payload: { ref: ShowcaseSelectableTargetRef }) {
+async function createFree(): Promise<void> {
+  const current = captureShowcaseNavigation(store);
+
   creating.value = true;
 
   try {
-    const id = await createShowcaseProject(store, { ref: payload.ref });
+    const id = await createShowcaseProject(store, {});
 
-    if (!id) {
-      return;
-    }
-
-    await router.replace(`/showcase/${id}`);
-    await buildShowcaseFilm(store);
-  } finally {
-    creating.value = false;
-  }
-}
-
-/**
- * «Выбрать, о чём…»: ролик заводится без запуска. Человек отмечает коммиты и своё
- * пожелание в блоке «О чём ролик» и снимает ролик оттуда же.
- */
-async function configure(payload: { ref: ShowcaseSelectableTargetRef }) {
-  creating.value = true;
-
-  try {
-    const id = await createShowcaseProject(store, { ref: payload.ref });
-
-    if (id) {
+    if (id && current()) {
       await router.replace(`/showcase/${id}`);
     }
   } finally {
     creating.value = false;
   }
 }
+
+
 
 /**
  * Повторный разбор ЗАМЕНЯЕТ сцены, а вместе с ними уходят и правки текста, поэтому
@@ -463,29 +470,7 @@ async function analyze() {
   }
 }
 
-/**
- * Список коммитов открытого ролика. Отказ — подпись у блока, а не красная строка над
- * всем разделом: без списка ролик всё равно можно собрать по умолчанию. Ответ и снятие
- * ожидания принимает только последний запрос — по билету, а не по id ролика.
- */
-async function reloadSource() {
-  const ticket = ++sourceTicket;
 
-  sourceLoading.value = true;
-
-  try {
-    const read = await loadShowcaseSource(store.opened);
-
-    if (ticket === sourceTicket) {
-      sourceOptions.value = read.options;
-      sourceError.value = read.error;
-    }
-  } finally {
-    if (ticket === sourceTicket) {
-      sourceLoading.value = false;
-    }
-  }
-}
 
 /**
  * «О чём ролик»: выбор сохраняется, затем ролик без сцен снимается целиком, а ролик со
@@ -619,6 +604,28 @@ async function remove(id: string) {
   }
 }
 
+/**
+ * Пересъёмка передаёт сцену текущего ролика и сохраняет общий owner действия.
+ * Цепочку продолжений выбирает сервер, вид её не разделяет.
+ */
+/**
+ * Подключение захватывает ролик и его revision до сети, поздним ответом владеет action.
+ * Вид не дописывает безусловную ошибку поверх другой открытой карточки.
+ */
+async function attachTarget(ref: ShowcaseSelectableTargetRef) {
+  const opened = store.opened;
+
+  if (opened) {
+    await attachShowcaseTarget(store, opened.id, opened.revision, ref);
+  }
+}
+
+async function reshootScene(sceneId: string) {
+  if (store.opened) {
+    await reshootShowcaseScene(store, store.opened.id, sceneId);
+  }
+}
+
 async function cancel(jobId: string) {
   await cancelShowcaseJob(store, jobId);
 }
@@ -638,6 +645,7 @@ async function open(id: string) {
  * ровно то, что будет запущено: рецепт профиля на конкретном стенде.
  */
 async function prepareData(recipeFingerprint: string) {
+  const current = showcaseProjectOwner(store, store.opened?.id ?? null);
   const accepted = await confirmDialog(
     messageRef('core.showcaseZapustitPodgotovkuDannyhNa', {
       targetLabel: seed.value?.targetLabel ?? '',
@@ -650,12 +658,15 @@ async function prepareData(recipeFingerprint: string) {
     },
   );
 
-  if (!accepted) {
+  if (!accepted || !current()) {
     return;
   }
 
   await prepareShowcaseData(store, recipeFingerprint);
-  seed.value = await loadSeedStatus(store);
+
+  if (current()) {
+    await refreshSeedStatus();
+  }
 }
 
 async function markDataUpdated() {
@@ -763,8 +774,82 @@ async function cancelVoiceInstall() {
   await cancelShowcaseVoiceInstall(store);
 }
 
-async function changeVoice(choice: ShowcaseVoiceChoice) {
-  await setShowcaseVoice(store, choice);
+const film = ref<InstanceType<typeof ShowcaseFilm> | null>(null);
+const adaptationRequests = reactive(new Map<string, symbol>());
+const adapting = computed(() => Boolean(
+  store.opened && adaptationRequests.has(store.opened.id),
+));
+
+/**
+ * Подтверждение относится к ролику и эпохе навигации. Action проверяет владельца
+ * внутри success/error/reload, поэтому поздний save не может сам вернуть старый id.
+ */
+async function adaptNarration(): Promise<void> {
+  const opened = store.opened;
+
+  if (!opened || adaptationRequests.has(opened.id)) {
+    return;
+  }
+
+  const token = Symbol('adapt');
+  const current = showcaseProjectOwner(store, opened.id);
+
+  adaptationRequests.set(opened.id, token);
+
+  try {
+    const accepted = await confirmDialog(
+      messageRef('core.showcaseAdaptirovatReplikiPodNovyy'),
+      { okText: t('core.showcasePerepisatReplikiPodGolos') },
+    );
+
+    if (!accepted || !current()) {
+      return;
+    }
+
+    const pending = film.value?.prepareDrafts() ?? [];
+
+    for (const payload of pending) {
+      const { id, ...patch } = payload;
+
+      if (!current() || !await updateShowcaseScene(store, id, patch, current)) {
+        return;
+      }
+    }
+
+    // Канонический title совпадает с серверным trim/fallback. Watcher снимает
+    // подтверждённые drafts до нового текста; ошибка сохранения сюда не проходит.
+    await nextTick();
+
+    if (current()) {
+      await adaptShowcaseNarration(store, opened.id, current);
+    }
+  } finally {
+    if (adaptationRequests.get(opened.id) === token) {
+      adaptationRequests.delete(opened.id);
+    }
+  }
+}
+
+/**
+ * Голос сохраняется только в карточку владельца ответа. Уход в другой ролик
+ * останавливает предложение модели, а смена только темпа адаптации не требует.
+ */
+async function changeVoice(choice: ShowcaseVoiceChoice): Promise<void> {
+  const projectId = store.opened?.id;
+  const current = showcaseProjectOwner(store, projectId ?? null);
+  const previousEngine = effectiveVoiceRef.value?.split(':')[0];
+  const saved = await setShowcaseVoice(store, choice, current);
+  const opened = store.opened;
+
+  if (
+    saved
+    && opened
+    && current()
+    && previousEngine !== effectiveVoiceRef.value?.split(':')[0]
+    && opened.scenes.some((scene) => scene.audioSource.kind === 'tts')
+  ) {
+    await adaptNarration();
+  }
 }
 
 async function saveDictionary(text: string) {

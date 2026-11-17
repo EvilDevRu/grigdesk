@@ -30,7 +30,7 @@ const { finish, report } = createAttemptLog(task);
 
 await report('download', 'скачиваю Chromium');
 await writeFile(task.manifestFile, JSON.stringify({
-  schemaVersion: 1,
+  schemaVersion: 2,
   executable: process.execPath,
   playwrightVersion: task.playwrightVersion,
   browserVersion: 'Chromium 000.0',

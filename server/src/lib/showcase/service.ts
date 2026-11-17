@@ -43,19 +43,10 @@ import type { DeliveryChannelDeps } from './deliveryChannels.ts';
 import { PROFILE_RE } from '../profiles.ts';
 import { createVoiceRegistry } from './voice/registry.ts';
 import { createStressDictionaryStore } from './voice/dictionary.ts';
-import { createEdgeEngine } from './voice/edge.ts';
-import type { EdgeEngineOptions } from './voice/edge.ts';
-import { createPiperEngine } from './voice/piper.ts';
-import { createQwenEngine } from './voice/qwen.ts';
-import { createRhvoiceEngine } from './voice/rhvoice.ts';
-import { createSileroEngine } from './voice/silero.ts';
-import { createYandexEngine } from './voice/yandex.ts';
-import {
-  createVoiceInstaller,
-  qwenRuntimePaths,
-  sileroRuntimePaths,
-  voiceRuntimePaths,
-} from './voice/install.ts';
+import { createPackageEngines } from './voice/packageEngine.ts';
+import { createPackageInstaller } from './voice/packageInstall.ts';
+import { runtimeInstallationBin } from '../runtimePaths.ts';
+import os from 'node:os';
 import { createBrowserInstaller } from './browserInstall.ts';
 import { createShowcaseJobs, toPublicJob } from './jobs.ts';
 import { createShowcaseLoginStore } from './loginStore.ts';
@@ -104,18 +95,12 @@ export interface ShowcaseServiceOptions {
   // Каталог браузера, который раздел ставит сам из настроек плагина: сборка
   // Chromium под текущий playwright-core. Явный browserPath сильнее него.
   browserDir?: string;
-  // Каталог локального синтеза: отдельное python-окружение и скачанные голоса.
-  // Он вынесен из showcaseDir настройкой, потому что весит сотни мегабайт и его
-  // разумно держать там же, где остальные тяжёлые рантаймы установки.
-  voiceDir?: string;
-  // Облачный голос Яндекса: ключ приходит из машинных настроек сервера. Без ключа
-  // движок остаётся в списке заблокированным — с подсказкой, как его включить.
-  yandexVoice?: { apiKey: string; folderId: string } | null;
-  // Облачный голос Microsoft (Edge TTS): ключа у него нет, поэтому настройка —
-  // выключатель. Без опции движок не подключается вовсе: тесты службы не должны
-  // ходить в сеть, а боевой сервер передаёт её всегда.
-  edgeVoice?: EdgeEngineOptions | null;
-  bootstrapPython?: string;
+  // Пакет voice: явный путь к бинарю сильнее каталога установки; каталог данных
+  // владеет сам пакет (GRIGDESK_VOICE_DIR → ~/.grigdesk/voice). Ключи облака
+  // приходят из окружения сервера: пакет не читает его файловые хранилища.
+  voiceBin?: string | null;
+  voiceDataDir?: string | null;
+  voiceCloudEnv?: () => Record<string, string>;
   listProjects: () => Promise<string[]>;
   sandboxOverview?: () => Promise<Pick<SandboxOverview, 'sandboxes'>>;
   sandboxActivityGuard?: SandboxActivityGuard;
@@ -144,7 +129,6 @@ export interface ShowcaseServiceOptions {
   } | null>;
   // Репозитории постоянного стенда по имени профиля — из паспорта проекта. Без
   // зависимости разбор постоянного стенда идёт без изменений, как и раньше.
-  projectRepos?: (profile: string) => Promise<{ name: string; path: string }[]>;
   // Каналы доставки приходят снаружи: сессией портала и аккаунтом Telegram владеет
   // сервер, и раздел не заводит вторых.
   deliveryDeps?: DeliveryChannelDeps;
@@ -200,7 +184,7 @@ function stateOf(
     return 'building';
   }
 
-  if (project.target.status === 'blocked') {
+  if (project.target?.status === 'blocked') {
     return 'blocked';
   }
 
@@ -250,15 +234,37 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     dataRevisionOf: async (ref) => dataRevisions.get(`${ref.kind}:${ref.id}`) ?? 'начальные',
   });
 
-  const voiceDir = options.voiceDir || path.join(options.showcaseDir, 'voice');
-  const voiceInstaller = createVoiceInstaller({
-    voiceDir,
-    bootstrapPython: options.bootstrapPython,
+  // Голоса раздела — только движки пакета voice. Порядок задаёт выбор по умолчанию:
+  // первый готовый движок, как в самом пакете (Qwen → Piper → Silero). Ключи облака
+  // передаются через env дочернего процесса; без ключа облако остаётся видимым
+  // заблокированным с подсказкой пакета.
+  const voiceBin = options.voiceBin || path.join(runtimeInstallationBin(), 'voice');
+  const voiceDataDir = options.voiceDataDir
+    || process.env.GRIGDESK_VOICE_DIR
+    || path.join(os.homedir(), '.grigdesk', 'voice');
+  const cloudEnv = options.voiceCloudEnv ?? (() => ({}));
+  const voices = createVoiceRegistry(createPackageEngines({
+    voiceBin,
+    voiceDir: voiceDataDir,
+    cloudEnv,
+  }));
+  const voiceInstaller = createPackageInstaller({
+    voiceBin,
+    voiceDir: voiceDataDir,
+    installFile: path.join(options.showcaseDir, 'voice-install.json'),
+    workRoot: path.join(options.showcaseDir, 'voice-install'),
     broadcast: options.broadcast,
     onInstalled: () => {
       voices.forgetDoctors();
     },
+    readyProbe: async (engineId) => {
+      const engine = voices.list().find((item) => item.id === engineId);
+      const doctor = await engine?.doctor().catch(() => null);
+
+      return doctor?.status === 'ready';
+    },
   });
+
 
   // Браузер записи: явный путь из настроек машины, иначе установленный из
   // настроек плагина. Проверка готовности и запись читают его одной функцией.
@@ -274,33 +280,6 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
     return browserInstaller.installedExecutable();
   }
-
-  // Четыре локальных движка и два облачных. Qwen3-TTS, Silero и Piper раздел
-  // ставит сам, системный RHVoice остаётся для установок, где пакет уже есть.
-  // Порядок задаёт и выбор по умолчанию — первый ГОТОВЫЙ движок, а не первый в
-  // списке. Включённое облако Microsoft идёт первым: его утверждённым голосом
-  // должен говорить новый ролик, а готовность у него честная — по живому списку
-  // голосов, и без сети выбор переходит к следующему. Облако Яндекса с заданным
-  // ключом идёт следом: ключ задают ради его голосов; без ключа оно замыкает
-  // список, чтобы подсказка «чего не хватает» на чистой установке вела к кнопке,
-  // а не в .env. Среди локальных Qwen первый: его ставят ради качества, и новый
-  // ролик должен заговорить им, как только он установлен. Выключенное настройкой
-  // облако Microsoft стоит последним — видимым, с подсказкой, как включить.
-  const edge = options.edgeVoice ? createEdgeEngine(options.edgeVoice) : null;
-  const yandex = createYandexEngine(options.yandexVoice ?? { apiKey: '', folderId: '' });
-  const local = [
-    createQwenEngine(qwenRuntimePaths(voiceDir)),
-    createSileroEngine(sileroRuntimePaths(voiceDir)),
-    createPiperEngine(voiceRuntimePaths(voiceDir)),
-    createRhvoiceEngine(),
-  ];
-  const voices = createVoiceRegistry([
-    ...(edge && options.edgeVoice?.enabled ? [edge] : []),
-    ...(options.yandexVoice?.apiKey ? [yandex] : []),
-    ...local,
-    ...(options.yandexVoice?.apiKey ? [] : [yandex]),
-    ...(edge && !options.edgeVoice?.enabled ? [edge] : []),
-  ]);
 
   // Словарь ударений установки: общий для всех роликов, живёт рядом с ними и
   // читается при старте — его записи входят в хеш звука сцен.
@@ -374,6 +353,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       if (error instanceof ShowcaseError) {
         return {
           status: 'blocked',
+          warning: null,
           ref,
           profile: PROFILE_RE.test(profile) ? profile : null,
           reason: error.message,
@@ -395,10 +375,14 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    * автоматически открыться на пересозданной sandbox с тем же task.
    */
   async function resolveStoredTarget(
-    ref: ShowcaseTargetRef,
-    stored: ShowcaseTarget,
+    ref: ShowcaseTargetRef | null,
+    stored: ShowcaseTarget | null,
     catalog?: readonly ShowcaseTargetOption[],
-  ): Promise<ShowcaseTarget> {
+  ): Promise<ShowcaseTarget | null> {
+    if (!ref || !stored) {
+      return null;
+    }
+
     const profile = stored.status === 'ready'
       ? stored.scope.profile
       : (stored.profile ?? '');
@@ -406,6 +390,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     if (ref.kind !== 'project' && stored.status !== 'ready') {
       return {
         status: 'blocked',
+        warning: null,
         ref,
         profile: PROFILE_RE.test(profile) ? profile : null,
         reason: 'У ролика не сохранена привязка к конкретному стенду (отпечаток).',
@@ -427,6 +412,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     ) {
       return {
         status: 'blocked',
+        warning: null,
         ref,
         profile,
         reason: 'Стенд пересоздан или изменился после выбора для этого ролика.',
@@ -442,17 +428,21 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
   }
 
   /**
-   * Ролик наружу — с ЖИВОЙ целью и свежестью сцен. В project.json цель лежит снимком
-   * выбора (отпечаток, политика, ревизия карты на тот момент); ответ мутации с этим
-   * снимком заставлял интерфейс сравнивать свежий сценарий со старой картой, и сразу
-   * после «Разобрать заново» карточка просила разобрать заново ещё раз — пока
-   * следующее чтение не приносило живую цель.
+   * Готовая цель задаёт живые входы записи. При недоступной цели используются
+   * сохранённые входы последней принятой записи; публичный флаг всегда пересчитан.
    */
   async function publish(project: ShowcaseProject): Promise<ShowcaseProject> {
-    return withFreshness({
-      ...project,
-      target: await resolveStoredTarget(project.ref, project.target),
-    });
+    const target = await resolveStoredTarget(project.ref, project.target);
+    const live = { ...project, target };
+    const inputsProject = target?.status === 'ready' ? live : project;
+    const ready = await recordingReady({ ...inputsProject, recordingReady: null });
+    const freshnessProject = target?.status !== 'ready' && ready ? project : live;
+
+    return {
+      ...withFreshness(freshnessProject),
+      target,
+      recordingReady: ready,
+    };
   }
 
   async function readProject(id: string): Promise<ShowcaseProject> {
@@ -548,19 +538,20 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    * через readProject и не должны получать чужой сдвиг редакции под правкой.
    */
   async function adoptTaskTitle(project: ShowcaseProject): Promise<ShowcaseProject> {
-    if (project.ref.kind === 'project') {
+    if (!project.ref || project.ref.kind === 'project') {
       return project;
     }
 
-    const profile = project.target.status === 'ready'
+    const ref = project.ref;
+    const profile = project.target?.status === 'ready'
       ? project.target.scope.profile
-      : project.target.profile ?? '';
+      : project.target?.profile ?? '';
 
-    if (!fallbackTaskTitles(project.ref.id, profile).includes(project.title)) {
+    if (!fallbackTaskTitles(ref.id, profile).includes(project.title)) {
       return project;
     }
 
-    const taskTitle = await taskTitleOf(project.ref.id);
+    const taskTitle = await taskTitleOf(ref.id);
 
     if (!taskTitle) {
       return project;
@@ -568,7 +559,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
     const saved = await store.updateProject(project.id, null, (current) => ({
       ...current,
-      title: `Задача ${project.ref.id} · ${taskTitle}`,
+      title: `Задача ${ref.id} · ${taskTitle}`,
     }));
 
     options.broadcast('showcase-changed', { projectId: project.id, revision: saved.revision });
@@ -623,35 +614,37 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
   }
 
   /**
-   * Новый ролик. Цель резолвится сразу и сохраняется вместе с записью: человек
-   * должен видеть причину отказа в карточке, а не получать пустой ролик, который
-   * необъяснимо ничего не умеет.
+   * Новый ролик. Стенд не обязателен: ролик можно завести свободно и подключить
+   * цель позже в редакторе. Если цель передана, она резолвится сразу и сохраняется
+   * вместе с записью — человек видит причину отказа в карточке.
    */
   async function createProject(input: {
-    ref: ShowcaseTargetRef;
-    // Только старые библиотечные вызовы передают профиль. HTTP его не принимает;
-    // новый путь всегда связывает цель с профилем на сервере.
+    ref?: ShowcaseTargetRef | null;
     profile?: string;
     title?: string;
   }): Promise<ShowcaseProject> {
     assertEnabled();
     await store.ensureDirs();
 
-    const target = await resolveTarget(input.ref, input.profile);
+    const ref = input.ref ?? null;
+    const target = ref ? await resolveTarget(ref, input.profile) : null;
 
-    if (!input.profile && target.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', target.reason, 409);
+    if (ref && !input.profile && target?.status !== 'ready') {
+      throw new ShowcaseError('target_unavailable', target?.reason ?? 'Цель недоступна.', 409);
     }
 
-    const taskTitle = input.ref.kind === 'project' ? '' : await taskTitleOf(input.ref.id);
+    const taskTitle = ref && ref.kind !== 'project' ? await taskTitleOf(ref.id) : '';
     const now = new Date().toISOString();
     const project: ShowcaseProject = {
       schemaVersion: SHOWCASE_SCHEMA_VERSION,
       id: newShowcaseId(),
-      title: (input.title ?? '').trim() || titleOf(input.ref, target, taskTitle),
+      title: (input.title ?? '').trim()
+        || (ref ? titleOf(ref, target as ShowcaseTarget, taskTitle) : DEFAULT_TITLE),
       revision: 1,
-      ref: input.ref,
+      ref,
       target,
+      voiceRef: null,
+      pace: null,
       brief: [],
       scenes: [],
       scriptGaps: [],
@@ -662,6 +655,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       scriptSource: null,
       decisions: [],
       latestFinal: null,
+      recordingReady: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -670,6 +664,61 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     options.broadcast('showcase-changed', { projectId: project.id, revision: project.revision });
 
     return project;
+  }
+
+  /**
+   * Стенд подключается к ролику отдельным решением человека. Цель резолвится из
+   * server-owned каталога и сохраняется снимком с отпечатком: дальнейшие операции
+   * сверяют его и остановятся, если стенд пересоздан. Подключение другого стенда
+   * разрешено — свежесть клипов и звука пересчитается по новому отпечатку.
+   */
+  async function attachTarget(
+    id: string,
+    expectedRevision: number,
+    ref: ShowcaseTargetRef,
+  ): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    // Смена стенда посреди записи или сборки тратит работу впустую: клип
+    // опубликуется, а свежесть по новому отпечатку сразу его состарит. Человек
+    // дожидается завершения или отменяет задание сам. jobs.active() не принимает
+    // projectId — фильтр по ролику делается здесь (находка B11).
+    if (
+      jobs.active().some((job) => job.projectId === id)
+      || buildRuns.active(id).length > 0
+      || targetChangeRequests.has(id)
+      || pendingBuildStarts.has(id)
+      || pendingTargetWork.has(id)
+      || manualScriptRequests.has(id)
+    ) {
+      throw new ShowcaseError(
+        'target_busy',
+        'По ролику идёт задание или сборка. Дождитесь завершения или отмените её перед сменой стенда.',
+        409,
+      );
+    }
+
+    targetChangeRequests.add(id);
+
+    try {
+      const target = await resolveTarget(ref);
+
+      if (target.status !== 'ready') {
+        throw new ShowcaseError('target_unavailable', target.reason, 409);
+      }
+
+      const saved = await store.updateProject(id, expectedRevision, (current) => ({
+        ...current,
+        ref,
+        target,
+      }));
+
+      options.broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+      return await publish(saved);
+    } finally {
+      targetChangeRequests.delete(id);
+    }
   }
 
   async function renameProject(
@@ -787,7 +836,11 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
   }
 
   function setupJobOf(job: PluginSetupItem['job']): PluginSetupItem['job'] {
-    return job ? { state: job.state, label: job.label, error: job.error } : null;
+    return job ? {
+      state: job.state,
+      label: job.label,
+      error: job.error,
+    } : null;
   }
 
   /**
@@ -813,7 +866,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       status: browserOperation?.status ?? 'unknown',
       reason: staleBrowser
         ? `Chromium поставлен под Playwright ${browser.installed?.playwrightVersion}, а сейчас `
-          + `нужен ${browser.playwrightVersion}: переустановите его.`
+        + `нужен ${browser.playwrightVersion}: переустановите его.`
         : (browserOperation?.reason ?? ''),
       action: browserOperation?.status === 'ready'
         ? null
@@ -858,8 +911,8 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     // том, что задать. Порядок фиксированный, а не по реестру: пункт готовности
     // не должен прыгать по списку от того, задан ли ключ.
     const clouds: { id: string; title: string }[] = [
-      { id: 'edge', title: 'Облачный голос Microsoft' },
-      { id: 'yandex', title: 'Облачный голос Яндекса' },
+      { id: 'qwen-studio', title: 'Облачный голос Qwen (Model Studio)' },
+      { id: 'qwen-token', title: 'Облачный голос Qwen (Token Plan)' },
     ];
 
     for (const cloud of clouds) {
@@ -886,7 +939,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       reason: speech?.status === 'ready'
         ? speech.reason
         : `${speech?.reason ?? ''} Распознавание ставит deploy/install.sh вместе с остальным `
-          + 'речевым runtime GrigDesk.',
+        + 'речевым runtime GrigDesk.',
       action: null,
       job: null,
     });
@@ -1029,7 +1082,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    * считается устаревшим, и это правда: снимать нечего, пока цель недоступна.
    */
   function inputsOf(project: ShowcaseProject): ArtifactInputs {
-    const scope = project.target.status === 'ready' ? project.target.scope : null;
+    const scope = project.target?.status === 'ready' ? project.target.scope : null;
 
     return {
       targetFingerprint: scope?.targetFingerprint ?? '',
@@ -1073,7 +1126,11 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       ? { ...project.latestFinal, current: finalIsCurrent(project, inputs) }
       : null;
 
-    return { ...project, scenes, latestFinal };
+    return {
+      ...project,
+      scenes,
+      latestFinal,
+    };
   }
 
   // Операции раздела живут отдельными модулями и собираются здесь: каждая получает
@@ -1123,6 +1180,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
   const {
     cancelVoiceInstall,
+    defaultVoiceRef,
     installVoice,
     previewNarration,
     previewVoice,
@@ -1139,19 +1197,19 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     transcribe: options.transcribe ?? null,
     voiceInstaller,
     voices,
-    previewDir: path.join(voiceDir, 'previews'),
+    previewDir: path.join(options.showcaseDir, 'voice-previews'),
     stressDictionary,
     publish,
   });
 
   const {
+    adaptNarration,
     analyze,
     ensurePrepared,
     generateBindings,
     generateBrief,
     generateScript,
     saveSource,
-    sourceOptions,
   } = createScriptOps({
     acquireTargetLease,
     assertEnabled,
@@ -1164,10 +1222,12 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     executorConfig: options.executorConfig ?? null,
     providerSettings: options.providerSettings ?? null,
     taskDetails: options.taskDetails ?? null,
-    projectRepos: options.projectRepos ?? null,
     store,
     targets,
     publish,
+    voices,
+    defaultVoiceRef,
+    stressDictionary,
   });
 
   function voiceReady(project: ShowcaseProject): boolean {
@@ -1184,6 +1244,10 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    * legacy-клип для ручного просмотра.
    */
   async function recordingReady(project: ShowcaseProject): Promise<boolean> {
+    if (project.recordingReady != null) {
+      return project.recordingReady;
+    }
+
     const inputs = inputsOf(project);
     const names = store.namesOf(project.id);
 
@@ -1214,13 +1278,27 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     return project.scenes.length > 0;
   }
 
-  function finalReady(project: ShowcaseProject): boolean {
+  /**
+ * Итог без живого стенда проверяется на сохранённых входах принятой записи.
+ * Обычная сборка продолжает сверять живую цель; await обязателен у вызывающих.
+ */
+  async function finalReady(project: ShowcaseProject): Promise<boolean> {
+    if (project.target?.status !== 'ready' && project.recordingReady === true) {
+      const stored = await store.readProject(project.id);
+
+      return Boolean(stored.latestFinal && finalIsCurrent(stored, inputsOf(stored)));
+    }
+
     return Boolean(project.latestFinal && finalIsCurrent(project, inputsOf(project)));
   }
 
   /** Validate повторяет дешёвые инварианты после публикации, не собирая файл снова. */
+  /**
+   * Проверяет актуальность итога и реальные hash/размеры опубликованных файлов.
+   * Асинхронный finalReady учитывает сохранённую запись при недоступном стенде.
+   */
   async function validateBuildFinal(project: ShowcaseProject): Promise<void> {
-    if (!project.latestFinal || !finalReady(project)) {
+    if (!project.latestFinal || !(await finalReady(project))) {
       throw new ShowcaseError('final_not_current', 'Итоговый ролик не соответствует входам.', 409);
     }
 
@@ -1279,9 +1357,55 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     options.broadcast('showcase-changed', { projectId: run.projectId, revision: saved.revision });
   }
 
-  const manualScriptRequests = new Map<string, Promise<ShowcaseProject>>();
-  const sourceSaveRequests = new Set<string>();
+  const manualScriptRequests = new Map<string, Promise<unknown>>();
+  const snapshotMutationRequests = new Set<string>();
   const pendingBuildStarts = new Map<string, number>();
+
+  const targetChangeRequests = new Set<string>();
+  const pendingTargetWork = new Map<string, number>();
+
+  /**
+   * Смена цели резервируется до resolver. Встречное действие не должно читать
+   * снимок стенда, пока его изменение ещё не дошло до project.json.
+   */
+  function assertTargetNotChanging(id: string): void {
+    if (targetChangeRequests.has(id)) {
+      throw new ShowcaseError(
+        'target_busy',
+        'Стенд ролика подключается. Дождитесь завершения и повторите действие.',
+        409,
+      );
+    }
+  }
+
+  /**
+   * Прямое задание резервирует допуск до первого await. После его регистрации
+   * защиту продолжает active-job; отказ снимает отметку и не блокирует повтор.
+   */
+  async function targetWork<Value>(id: string, operation: () => Promise<Value>): Promise<Value> {
+    assertTargetNotChanging(id);
+
+    if (manualScriptRequests.has(id)) {
+      throw new ShowcaseError(
+        'script_busy', 'Сценарий этого ролика уже готовится. Дождитесь результата.', 409,
+      );
+    }
+
+    pendingTargetWork.set(id, (pendingTargetWork.get(id) ?? 0) + 1);
+
+    try {
+      return await operation();
+    } finally {
+      const remaining = (pendingTargetWork.get(id) ?? 1) - 1;
+
+      if (remaining > 0) {
+        pendingTargetWork.set(id, remaining);
+      } else {
+        pendingTargetWork.delete(id);
+      }
+    }
+  }
+
 
   /**
    * Вторая модель не должна менять бриф под уже идущей проверкой и срывать её
@@ -1290,17 +1414,18 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    * синхронно до первого await. Выбор не меняется и во время регистрации сборки,
    * пока она уже читает снимок, но ещё не появилась в списке активных запусков.
    */
-  async function requestScript(
+  async function requestScript<Value>(
     id: string,
-    operation: () => Promise<ShowcaseProject>,
-    changesSource = false,
-  ): Promise<ShowcaseProject> {
+    operation: () => Promise<Value>,
+    locksSnapshot = false,
+  ): Promise<Value> {
     assertEnabled();
+    assertTargetNotChanging(id);
 
     if (
       buildRuns.active(id).length > 0
       || manualScriptRequests.has(id)
-      || (changesSource && pendingBuildStarts.has(id))
+      || (locksSnapshot && pendingBuildStarts.has(id))
     ) {
       throw new ShowcaseError(
         'script_busy',
@@ -1311,13 +1436,13 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
     const request = Promise.resolve().then(operation).finally(() => {
       manualScriptRequests.delete(id);
-      sourceSaveRequests.delete(id);
+      snapshotMutationRequests.delete(id);
     });
 
     manualScriptRequests.set(id, request);
 
-    if (changesSource) {
-      sourceSaveRequests.add(id);
+    if (locksSnapshot) {
+      snapshotMutationRequests.add(id);
     }
 
     return request;
@@ -1330,8 +1455,9 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
    */
   async function startBuild(id: string, revision: number, requestId: string): Promise<ShowcaseBuildRun> {
     assertEnabled();
+    assertTargetNotChanging(id);
 
-    if (sourceSaveRequests.has(id)) {
+    if (snapshotMutationRequests.has(id)) {
       throw new ShowcaseError(
         'script_busy',
         'Выбор «О чём ролик» сохраняется. Дождитесь сохранения и запустите сборку ещё раз.',
@@ -1372,6 +1498,35 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     return ensurePrepared(id, onProgress);
   }
 
+  /**
+   * Явная пересъёмка сохраняет строгую проверку сценария: изменённый текст сначала
+   * проходит прежнюю keepScenes-верификацию. Резерв запроса держится до enqueue,
+   * поэтому смена источника или новый build не читают промежуточный proof.
+   */
+  async function recordSelectedScenes(
+    id: string,
+    options: { forceSceneIds?: string[] },
+  ): Promise<ShowcaseJob> {
+    const project = await readProject(id);
+
+    for (const sceneId of options.forceSceneIds ?? []) {
+      if (!project.scenes.some((scene) => scene.id === sceneId)) {
+        throw new ShowcaseError('bad_scene', `Сцена «${sceneId}» не найдена в ролике.`, 400);
+      }
+    }
+
+    if ((pendingTargetWork.get(id) ?? 0) > 1
+      || jobs.active().some((job) => job.projectId === id)) {
+      throw new ShowcaseError('script_busy', 'По ролику уже идёт задание. Дождитесь его завершения.', 409);
+    }
+
+    if (project.scriptProofHash) {
+      await ensurePrepared(id);
+    }
+
+    return startRecording(id, options);
+  }
+
   const buildOps = createBuildOps({
     assertEnabled,
     buildRuns,
@@ -1381,9 +1536,27 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     analyze,
     prepareScript,
     // Готовый proof сцен прежнего выбора годен только для прежнего выбора.
-    scriptReady: async (project) => !manualScriptRequests.has(project.id)
-      && showcaseSourceEqual(project.source, project.scriptSource)
-      && Boolean(await readScriptProof(store.namesOf(project.id).dir, project)),
+    scriptReady: async (project) => {
+      if (manualScriptRequests.has(project.id)) {
+        return false;
+      }
+
+      // Свежие клипы и журналы подтверждают действия: текст может меняться без
+      // нового proof и пересъёмки. Готовая цель проверяется по ЖИВЫМ отпечаткам;
+      // недоступная — по сохранённым. Источник и policy/data обязаны совпасть.
+      if (project.recordingReady === true) {
+        const proofProject = project.target?.status === 'ready'
+          ? project
+          : await store.readProject(project.id);
+
+        return showcaseSourceEqual(proofProject.source, proofProject.scriptSource)
+          && Boolean(await readScriptProof(store.namesOf(project.id).dir, proofProject, false));
+      }
+
+      return showcaseSourceEqual(project.source, project.scriptSource)
+        && Boolean(await readScriptProof(store.namesOf(project.id).dir, project));
+    },
+
     generateBindings,
     synthesizeScenes,
     startRecording,
@@ -1600,8 +1773,8 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       && manifest.video.durationMs === final.video.durationMs;
     const subtitlesMatch = manifest && final.subtitles
       ? manifest.subtitles?.id === final.subtitles.id
-        && manifest.subtitles.contentHash === final.subtitles.contentHash
-        && manifest.subtitles.byteSize === final.subtitles.byteSize
+      && manifest.subtitles.contentHash === final.subtitles.contentHash
+      && manifest.subtitles.byteSize === final.subtitles.byteSize
       : manifest?.subtitles === null && final.subtitles === null;
 
     if (!manifest || !videoMatches || !subtitlesMatch) {
@@ -1617,8 +1790,10 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
   return {
     addScene,
+    adaptNarration: (id: string) => requestScript(id, () => adaptNarration(id)),
     artifactPath,
-    assemble,
+    assemble: (id: string) => targetWork(id, () => assemble(id)),
+    attachTarget,
     buildRuns,
     cancelBuild: buildOps.cancelBuild,
     cancelJob,
@@ -1643,7 +1818,9 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     openProject,
     overview,
     planDelivery,
-    prepareData,
+    prepareData: (id: string, recipeFingerprint: string) => (
+      targetWork(id, () => prepareData(id, recipeFingerprint))
+    ),
     readProject,
     recover,
     renameProject,
@@ -1663,11 +1840,14 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     seedStatus,
     setupStatus,
     setVoice,
-    sourceOptions,
-    startRecording,
+    startRecording: (id: string, options: { forceSceneIds?: string[] } = {}) => (
+      targetWork(id, () => options.forceSceneIds?.length
+        ? requestScript(id, () => recordSelectedScenes(id, options), true)
+        : startRecording(id, options))
+    ),
     startBuild,
     store,
-    synthesizeScenes,
+    synthesizeScenes: (id: string) => targetWork(id, () => synthesizeScenes(id)),
     targets,
     updateScene,
     voiceCatalog,

@@ -114,7 +114,7 @@ const JOB_STATE: Record<ShowcaseJob['state'], string> = {
   },
 };
 
-const KIND_TEXT: Record<ShowcaseProjectSummary['ref']['kind'], string> = {
+const KIND_TEXT: Record<NonNullable<ShowcaseProjectSummary['ref']>['kind'], string> = {
   get project() {
     return t('core.showcaseProekt');
   },
@@ -140,7 +140,9 @@ const activeJob = computed(() => props.jobs.find((job) => ACTIVE_STATES.has(job.
  */
 const metaText = computed(() => {
   const target = props.project.targetLabel
-    || `${KIND_TEXT[props.project.ref.kind]} ${props.project.ref.id}`;
+    || (props.project.ref
+      ? `${KIND_TEXT[props.project.ref.kind]} ${props.project.ref.id}`
+      : t('core.showcaseStendNeVybran'));
   const scenes = props.project.sceneCount
   ? `${scenesCount(props.project.sceneCount)}`
   : t('core.showcaseStsenNet');

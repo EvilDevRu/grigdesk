@@ -26,6 +26,7 @@ import {
   SHOWCASE_PACES,
   parseShowcaseDirection,
   parseShowcaseStorySource,
+  normalizeShowcaseSource,
 } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { SHOWCASE_SYNC_CUE_KINDS } from '../../../../shared/plugins/showcase/showcaseSync.ts';
 import { SHOWCASE_MANIFEST_ID_RE } from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
@@ -68,6 +69,11 @@ interface CreateRoute {
     id?: unknown;
     title?: unknown;
   };
+}
+
+interface TargetAttachRoute {
+  Params: { id: string };
+  Body: { expectedRevision?: unknown; ref?: { kind?: unknown; id?: unknown } };
 }
 
 interface RenameRoute extends ProjectRoute {
@@ -366,16 +372,20 @@ function readPronunciationOverrides(value: unknown): PronunciationOverrideInput[
 }
 
 /**
- * Выбор «О чём ролик» из тела запроса: null — умолчание цели, иначе строгая форма
- * контракта. undefined значит «не по форме»: имена и коммиты проверит служба.
+ * Ручка отвергает лишние поля до проекции декодера и нормализует v2-источник.
+ * Негодный ввод не доходит до службы, в том числе в HTTP fixture со stub службы.
  */
 function readStorySource(value: unknown): ShowcaseStorySource | null | undefined {
   if (value === null) {
     return null;
   }
 
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'taskId' && key !== 'note')) {
+    return undefined;
+  }
+
   try {
-    return parseShowcaseStorySource(value);
+    return normalizeShowcaseSource(parseShowcaseStorySource(value));
   } catch {
     return undefined;
   }
@@ -438,9 +448,18 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   });
 
   fastify.post<CreateRoute>('/api/showcase', async (request, reply) => {
-    const ref = readCreateTargetRef(request.body?.kind, request.body?.id);
+    const kind = request.body?.kind;
+    const id = request.body?.id;
 
-    if (!ref) {
+    // Пара kind+id приходит целиком либо не приходит вовсе: один из двух полей —
+    // ошибка формы, а не молчаливое свободное создание.
+    if ((kind === undefined) !== (id === undefined)) {
+      return reply.code(400).send({ error: 'bad_target' });
+    }
+
+    const ref = kind === undefined ? null : readCreateTargetRef(kind, id);
+
+    if (kind !== undefined && !ref) {
       return reply.code(400).send({ error: 'bad_target' });
     }
 
@@ -478,6 +497,27 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
     try {
       return await service.renameProject(request.params.id, expectedRevision, title);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Стенд подключается к ролику из server-owned каталога: клиент передаёт только
+  // ссылку на цель, профиль и адрес выводит сервер.
+  fastify.put<TargetAttachRoute>('/api/showcase/:id/target', async (request, reply) => {
+    const expectedRevision = Number(request.body?.expectedRevision);
+    const ref = readTargetRef(request.body?.ref?.kind, request.body?.ref?.id);
+
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      return reply.code(400).send({ error: 'bad_revision' });
+    }
+
+    if (!ref || ref.kind === 'task') {
+      return reply.code(400).send({ error: 'bad_target' });
+    }
+
+    try {
+      return await service.attachTarget(request.params.id, expectedRevision, ref);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -676,14 +716,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   // Источник рассказа: из чего выбирать и что выбрано. Выбор — данные человека, но
   // форму проверяет ручка, а имена репозиториев и коммиты — служба по живой истории:
   // браузер называет только имя репозитория, путь к нему знает сервер.
-  fastify.get<ProjectRoute>('/api/showcase/:id/source', async (request, reply) => {
-    try {
-      return await service.sourceOptions(request.params.id);
-    } catch (error) {
-      return sendError(reply, error);
-    }
-  });
-
+  // Источник — задача и комментарий; форму проверяет ручка, текст добирает сервер.
   fastify.put<SourceRoute>('/api/showcase/:id/source', async (request, reply) => {
     const expectedRevision = request.body?.expectedRevision;
     const source = readStorySource(request.body?.source);
@@ -733,6 +766,16 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.post<ProjectRoute>('/api/showcase/:id/bindings', async (request, reply) => {
     try {
       return await service.generateBindings(request.params.id);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Адаптация реплик под движок: текст предлагает модель, решение принимает человек
+  // подтверждением в интерфейсе; сервер хранит результат только после годного разбора.
+  fastify.post<ProjectRoute>('/api/showcase/:id/adapt-narration', async (request, reply) => {
+    try {
+      return await service.adaptNarration(request.params.id);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -823,6 +866,13 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
     try {
       const project = await service.readProject(request.params.id);
+
+      if (!project.ref) {
+        return reply.code(409).send({
+          error: 'target_unavailable',
+          message: 'Стенд не выбран: подключите его в карточке ролика.',
+        });
+      }
 
       return { dataRevision: await service.markDataUpdated(project.ref) };
     } catch (error) {
@@ -1024,10 +1074,17 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     }
   });
 
-  fastify.post<ProjectRoute>('/api/showcase/:id/record', async (request, reply) => {
+  fastify.post<ProjectRoute & { Body: { sceneId?: unknown } }>(
+    '/api/showcase/:id/record',
+    async (request, reply) => {
+
+    const sceneId = typeof request.body?.sceneId === 'string' ? request.body.sceneId : null;
 
     try {
-      return reply.code(202).send(await service.startRecording(request.params.id));
+      return reply.code(202).send(await service.startRecording(
+        request.params.id,
+        sceneId ? { forceSceneIds: [sceneId] } : {},
+      ));
     } catch (error) {
       return sendError(reply, error);
     }

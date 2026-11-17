@@ -42,7 +42,11 @@ const OVERVIEW = {
     reason: '',
     screenCount: 0,
   }],
-  profiles: [{ id: 'demo-profile', ready: true, reason: '' }],
+  profiles: [{
+    id: 'demo-profile',
+    ready: true,
+    reason: '',
+  }],
   projects: [],
   jobs: [],
   buildRuns: [],
@@ -78,7 +82,11 @@ function serviceStub(overrides = {}) {
     renameProject: async (id, revision, title) => {
       calls.push(['rename', id, revision, title]);
 
-      return { id, revision: revision + 1, title };
+      return {
+        id,
+        revision: revision + 1,
+        title,
+      };
     },
     deleteProject: async (id) => {
       calls.push(['delete', id]);
@@ -101,7 +109,11 @@ function serviceStub(overrides = {}) {
     cancelBuild: async (id) => {
       calls.push(['cancel-build', id]);
 
-      return { ...BUILD_RUN, state: 'cancelling', cancelRequested: true };
+      return {
+        ...BUILD_RUN,
+        state: 'cancelling',
+        cancelRequested: true,
+      };
     },
     finalManifest: async (id, manifestId) => {
       calls.push(['manifest', id, manifestId]);
@@ -132,18 +144,32 @@ function serviceStub(overrides = {}) {
     readDictionary: async () => {
       calls.push(['read-dictionary']);
 
-      return { text: 'зам+ок\n', entries: ['зам+ок'], errors: [] };
+      return {
+        text: 'зам+ок\n',
+        entries: ['зам+ок'],
+        errors: [],
+      };
     },
     saveDictionary: async (text) => {
       calls.push(['save-dictionary', text]);
 
-      return { text, entries: [], errors: [] };
+      return {
+        text,
+        entries: [],
+        errors: [],
+      };
     },
     targets: {
       resolveSelected: async (ref) => {
         calls.push(['resolve', ref]);
 
-        return { status: 'blocked', ref, profile: null, reason: 'нет стенда', nextAction: null };
+        return {
+          status: 'blocked',
+          ref,
+          profile: null,
+          reason: 'нет стенда',
+          nextAction: null,
+        };
       },
     },
     jobs: {
@@ -157,7 +183,11 @@ function serviceStub(overrides = {}) {
           state: 'running',
           attempt: 1,
           sequence: 2,
-          progress: { index: 1, total: 3, label: 'пишем сцену' },
+          progress: {
+            index: 1,
+            total: 3,
+            label: 'пишем сцену',
+          },
           error: null,
           startedAt: new Date().toISOString(),
           finishedAt: null,
@@ -166,7 +196,11 @@ function serviceStub(overrides = {}) {
           inputRevision: 1,
           deadlineAt: new Date().toISOString(),
           heartbeatAt: null,
-          identity: { pid: 4242, starttime: '111', cmdline: 'showcaseWorker' },
+          identity: {
+            pid: 4242,
+            starttime: '111',
+            cmdline: 'showcaseWorker',
+          },
         };
       },
     },
@@ -191,12 +225,16 @@ const REQUESTS = [
   ['GET', '/api/showcase', undefined],
   ['GET', `/api/showcase/${PROJECT_ID}`, undefined],
   ['GET', '/api/showcase/doctor', undefined],
+  ['POST', `/api/showcase/${PROJECT_ID}/adapt-narration`, {}],
   ['POST', '/api/showcase', { kind: 'project', id: 'demo-profile' }],
   ['PUT', `/api/showcase/${PROJECT_ID}`, { expectedRevision: 1, title: 'Ролик' }],
+  ['PUT', `/api/showcase/${PROJECT_ID}/target`, {
+    expectedRevision: 1,
+    ref: { kind: 'project', id: 'demo-profile' },
+  }],
   ['DELETE', `/api/showcase/${PROJECT_ID}`, undefined],
   ['POST', `/api/showcase/${PROJECT_ID}/build`, { revision: 1, requestId: REQUEST_ID }],
   // Выбор «О чём ролик» читает историю репозиториев стенда — тоже только человеку.
-  ['GET', `/api/showcase/${PROJECT_ID}/source`, undefined],
   ['PUT', `/api/showcase/${PROJECT_ID}/source`, { expectedRevision: 1, source: null }],
   ['GET', `/api/showcase/builds/${BUILD_ID}`, undefined],
   ['POST', `/api/showcase/builds/${BUILD_ID}/cancel`, {}],
@@ -209,7 +247,13 @@ const REQUESTS = [
   ['POST', '/api/showcase/voices/preview', {
     voiceRef: 'silero:xenia',
     narration: 'Своя реплика.',
-    direction: { tone: null, pace: null, emphasis: [], pauses: [], stresses: [] },
+    direction: {
+      tone: null,
+      pace: null,
+      emphasis: [],
+      pauses: [],
+      stresses: [],
+    },
     pronunciationOverrides: [],
   }],
   // Словарь ударений — тоже настройка человека: агент его не читает и не правит.
@@ -221,7 +265,11 @@ test('токен агента в раздел не пускается — это
   const { app, service } = await fixture(t, { authKind: 'cli' });
 
   for (const [method, url, payload] of REQUESTS) {
-    const response = await app.inject({ method, url, payload });
+    const response = await app.inject({
+      method,
+      url,
+      payload,
+    });
 
     assert.equal(response.statusCode, 403, `${method} ${url}`);
     assert.equal(response.json().error, 'session_required', `${method} ${url}`);
@@ -234,7 +282,11 @@ test('выключенный плагин закрывает раздел цел
   const { app, service } = await fixture(t, { enabled: false });
 
   for (const [method, url, payload] of REQUESTS) {
-    const response = await app.inject({ method, url, payload });
+    const response = await app.inject({
+      method,
+      url,
+      payload,
+    });
 
     assert.equal(response.statusCode, 403, `${method} ${url}`);
     assert.equal(response.json().error, 'plugin_disabled', `${method} ${url}`);
@@ -285,17 +337,31 @@ test('создание принимает выбранную цель без к�
   const bad = [
     [{ kind: 'sandbox', id: 'не-число' }, 'bad_target'],
     [{ kind: 'task', id: '990001' }, 'bad_target'],
-    [{ title: 'Без цели' }, 'bad_target'],
+    [{ kind: 'project' }, 'bad_target'],
+    [{ id: 'demo-profile' }, 'bad_target'],
   ];
 
   for (const [payload, error] of bad) {
-    const response = await app.inject({ method: 'POST', url: '/api/showcase', payload });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/showcase',
+      payload,
+    });
 
     assert.equal(response.statusCode, 400, JSON.stringify(payload));
     assert.equal(response.json().error, error, JSON.stringify(payload));
   }
 
   assert.deepEqual(service.calls, []);
+
+  const free = await app.inject({
+    method: 'POST',
+    url: '/api/showcase',
+    payload: { title: 'Без цели' },
+  });
+
+  assert.equal(free.statusCode, 201);
+  assert.deepEqual(service.calls.shift(), ['create', { ref: null, title: 'Без цели' }]);
 
   const ok = await app.inject({
     method: 'POST',
@@ -414,7 +480,11 @@ test('полный запуск проверяет revision/requestId и отв�
     { revision: 1, requestId: 'короткий ключ' },
     { revision: 0, requestId: REQUEST_ID },
   ]) {
-    const response = await app.inject({ method: 'POST', url, payload });
+    const response = await app.inject({
+      method: 'POST',
+      url,
+      payload,
+    });
 
     assert.equal(response.statusCode, 400);
   }
@@ -487,14 +557,22 @@ test('выбор голоса проверяет редакцию, темп и �
   const { app, service } = await fixture(t);
   const url = `/api/showcase/${PROJECT_ID}/voice`;
 
-  const noRevision = await app.inject({ method: 'PUT', url, payload: { voiceRef: 'piper:irina' } });
+  const noRevision = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { voiceRef: 'piper:irina' },
+  });
 
   assert.equal(noRevision.json().error, 'bad_revision');
 
   const badPace = await app.inject({
     method: 'PUT',
     url,
-    payload: { expectedRevision: 1, voiceRef: 'piper:irina', pace: 'быстро' },
+    payload: {
+      expectedRevision: 1,
+      voiceRef: 'piper:irina',
+      pace: 'быстро',
+    },
   });
 
   assert.equal(badPace.json().error, 'bad_pace');
@@ -511,7 +589,11 @@ test('выбор голоса проверяет редакцию, темп и �
   const accepted = await app.inject({
     method: 'PUT',
     url,
-    payload: { expectedRevision: 1, voiceRef: 'silero:xenia', pace: 'slow' },
+    payload: {
+      expectedRevision: 1,
+      voiceRef: 'silero:xenia',
+      pace: 'slow',
+    },
   });
 
   assert.equal(accepted.statusCode, 200);
@@ -519,7 +601,11 @@ test('выбор голоса проверяет редакцию, темп и �
   const extreme = await app.inject({
     method: 'PUT',
     url,
-    payload: { expectedRevision: 1, voiceRef: 'silero:xenia', pace: 'fastest' },
+    payload: {
+      expectedRevision: 1,
+      voiceRef: 'silero:xenia',
+      pace: 'fastest',
+    },
   });
 
   assert.equal(extreme.statusCode, 200, 'крайние ступени темпа — часть контракта');
@@ -604,7 +690,11 @@ test('словарь ударений читается и сохраняется
   const read = await app.inject({ method: 'GET', url: '/api/showcase/voices/dictionary' });
 
   assert.equal(read.statusCode, 200);
-  assert.deepEqual(read.json(), { text: 'зам+ок\n', entries: ['зам+ок'], errors: [] });
+  assert.deepEqual(read.json(), {
+    text: 'зам+ок\n',
+    entries: ['зам+ок'],
+    errors: [],
+  });
 
   const bad = await app.inject({
     method: 'PUT',
@@ -629,7 +719,6 @@ test('выбор «О чём ролик» проверяет редакцию и
   const saved = [];
   const { app } = await fixture(t, {
     service: serviceStub({
-      sourceOptions: async (id) => ({ id, repos: [] }),
       saveSource: async (id, revision, source) => {
         saved.push([id, revision, source]);
 
@@ -638,18 +727,9 @@ test('выбор «О чём ролик» проверяет редакцию и
     }),
   });
   const url = `/api/showcase/${PROJECT_ID}/source`;
-  const source = {
-    task: false,
-    note: 'Упор на фильтры',
-    code: true,
-    repos: [{
-      name: 'frontend',
-      work: true,
-      commits: [],
-    }],
-  };
+  const source = { taskId: null, note: 'Упор на фильтры' };
 
-  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404);
 
   const noRevision = await app.inject({
     method: 'PUT',
@@ -689,7 +769,6 @@ test('редакция выбора принимается только поло
   const saved = [];
   const { app } = await fixture(t, {
     service: serviceStub({
-      sourceOptions: async (id) => ({ id, repos: [] }),
       saveSource: async (id, revision, source) => {
         saved.push(revision);
 
@@ -729,7 +808,7 @@ test('редакция выбора принимается только поло
   assert.equal(missing.json().error, 'bad_revision');
   assert.equal(accepted.statusCode, 200);
   assert.deepEqual(saved, [2], 'служба получает только проверенную редакцию');
-  assert.equal(read.json().id, PROJECT_ID, 'чтение списка идёт в службу с идентификатором ролика');
+  assert.equal(read.statusCode, 404, 'список git-источников удалён');
 });
 
 test('отказы выбора «О чём ролик» доходят до клиента своим кодом и текстом', async (t) => {
@@ -749,7 +828,6 @@ test('отказы выбора «О чём ролик» доходят до к�
     };
     const { app } = await fixture(t, {
       service: serviceStub({
-        sourceOptions: fail,
         saveSource: fail,
       }),
     });
@@ -760,9 +838,64 @@ test('отказы выбора «О чём ролик» доходят до к�
       payload: { expectedRevision: 1, source: null },
     });
 
-    for (const response of [read, save]) {
+    for (const response of [save]) {
       assert.equal(response.statusCode, status, code);
       assert.deepEqual(response.json(), { error: code, message: `отказ ${code}` });
     }
   }
+});
+
+test('источник отвергает негодный номер, длину и старые git-поля до службы', async (t) => {
+  const { app, service } = await fixture(t);
+  const bad = [
+    { taskId: 'abc', note: '' },
+    { taskId: '1234567890123', note: '' },
+    { taskId: null, note: 'я'.repeat(2001) },
+    {
+      taskId: null,
+      note: '',
+      code: true,
+    },
+    {
+      taskId: null,
+      note: '',
+      repos: [],
+    },
+    [],
+    {},
+  ];
+
+  for (const source of bad) {
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/api/showcase/${PROJECT_ID}/source`,
+      payload: { expectedRevision: 1, source },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, 'bad_source');
+  }
+
+  assert.deepEqual(service.calls, []);
+});
+
+test('ручка пересъёмки передаёт выбранную сцену и отвечает 202', async (t) => {
+  const calls = [];
+  const { app } = await fixture(t, {
+    service: serviceStub({
+      startRecording: async (...args) => {
+        calls.push(args);
+
+        return { id: 'record-job' };
+      },
+    })
+  });
+  const response = await app.inject({
+    method: 'POST',
+    url: `/api/showcase/${PROJECT_ID}/record`,
+    payload: { sceneId: 'scene-1' },
+  });
+
+  assert.equal(response.statusCode, 202);
+  assert.deepEqual(calls, [[PROJECT_ID, { forceSceneIds: ['scene-1'] }]]);
 });

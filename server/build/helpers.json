@@ -158,13 +158,6 @@
       "description": "Worker репетиции презентации."
     },
     {
-      "id": "showcase-voice-install",
-      "entry": "server/scripts/showcaseVoiceInstall.mts",
-      "entryKind": "script",
-      "exports": [],
-      "description": "Установщик голосовых движков презентаций."
-    },
-    {
       "id": "showcase-browser-install",
       "entry": "server/scripts/showcaseBrowserInstall.mts",
       "entryKind": "script",

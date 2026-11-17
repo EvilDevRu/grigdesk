@@ -135,7 +135,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let controller: AbortController | null = null;
 
 function isVoice(item: PluginSetupItem): boolean {
-  return item.id.startsWith('voice:') || item.id === 'edge' || item.id === 'yandex';
+  return item.id.startsWith('voice:') || item.id === 'qwen-studio' || item.id === 'qwen-token';
 }
 
 function active(): boolean {

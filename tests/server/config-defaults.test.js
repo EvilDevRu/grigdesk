@@ -92,7 +92,6 @@ test('CD-DH-1 вся раскладка данных вместе с фабри�
     sandboxJournalDir: 'state/sandboxes',
     showcaseDir: 'state/showcase',
     showcaseAuthDir: 'state/showcase-auth',
-    showcaseVoiceDir: 'state/showcase-voice',
     showcaseBrowserDir: 'state/showcase-browser',
     prefsPath: 'state/prefs.json',
     taskFavoritesPath: 'state/task-favorites.json',

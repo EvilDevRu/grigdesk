@@ -1,3 +1,4 @@
+import type { ShowcaseProject } from '../../../shared/plugins/showcase/showcaseContracts.ts';
 import { objectOrEmpty } from '../../../shared/lib/objects.ts';
 
 import { api } from './apiClient.ts';
@@ -7,7 +8,6 @@ import {
   parseShowcaseJob,
   parseShowcaseOverview,
   parseShowcaseProject,
-  parseShowcaseSourceOptions,
   parseShowcaseTarget,
   parseShowcaseVoiceCatalog,
   parseShowcaseVoiceDictionary,
@@ -61,7 +61,7 @@ export interface ShowcaseSceneDraft {
 }
 
 export interface ShowcaseCreateOptions {
-  ref: ShowcaseSelectableTargetRef;
+  ref?: ShowcaseSelectableTargetRef | null;
   title?: string;
 }
 
@@ -106,8 +106,7 @@ export const showcaseApi = {
 
   async create(options: ShowcaseCreateOptions) {
     const value: unknown = await api.post('/api/showcase', {
-      kind: options.ref.kind,
-      id: options.ref.id,
+      ...(options.ref ? { kind: options.ref.kind, id: options.ref.id } : {}),
       title: options.title ?? '',
     });
 
@@ -214,18 +213,8 @@ export const showcaseApi = {
   },
 
   /**
-   * Из чего выбирать «О чём ролик»: история и незакоммиченное по репозиториям стенда.
-   * Пути сервер не отдаёт — по ответу строятся только галочки.
-   */
-  async sourceOptions(id: string) {
-    const value: unknown = await api.get(`/api/showcase/${encodeURIComponent(id)}/source`);
-
-    return parseShowcaseSourceOptions(value);
-  },
-
-  /**
-   * Сохраняет выбор «О чём ролик» со своей редакцией ролика: null возвращает
-   * умолчание цели. Коммиты и имена репозиториев сервер сверяет с историей стенда.
+   * Источник рассказа — задача Б24 и комментарий, сохраняемые с revision.
+   * Сохранение само по себе не подменяет сценарий прежнего источника.
    */
   async saveSource(id: string, expectedRevision: number, source: ShowcaseStorySource | null) {
     const value: unknown = await api.put(`/api/showcase/${encodeURIComponent(id)}/source`, {
@@ -362,8 +351,11 @@ export const showcaseApi = {
     return parseShowcaseJob(value);
   },
 
-  async startRecording(id: string) {
-    const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/record`, {});
+  async startRecording(id: string, sceneId?: string) {
+    const value: unknown = await api.post(
+      `/api/showcase/${encodeURIComponent(id)}/record`,
+      sceneId ? { sceneId } : {},
+    );
 
     return parseShowcaseJob(value);
   },
@@ -536,4 +528,26 @@ export function showcaseErrorMessage(error: unknown, fallback = translateUi(
   const code = typeof data.error === 'string' ? data.error : '';
 
   return detail || MESSAGES[code] || fallback;
+}
+
+/**
+ * Стенд подключается к ролику отдельным запросом: сервер резолвит цель из своего
+ * каталога и возвращает ролик со снимком. Конфликт редакции — перечитать карточку.
+ */
+export async function attachShowcaseTarget(
+  id: string,
+  expectedRevision: number,
+  ref: ShowcaseSelectableTargetRef,
+): Promise<ShowcaseProject> {
+  const response = await api.put(`/api/showcase/${id}/target`, { expectedRevision, ref });
+
+  return parseShowcaseProject(response);
+}
+
+/**
+ * Запрос адаптации возвращает проверенную карточку после переписывания реплик.
+ * Авторизация и решение человека остаются на границах сервера и вида.
+ */
+export async function adaptShowcaseNarration(id: string): Promise<ShowcaseProject> {
+  return parseShowcaseProject(await api.post(`/api/showcase/${id}/adapt-narration`, {}));
 }

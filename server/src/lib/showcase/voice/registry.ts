@@ -7,7 +7,6 @@
 // В первом выпуске подключён один адаптер. Это осознанное ограничение плана:
 // сравнение движков — отдельный эксперимент, а выпуск не должен ждать его исхода.
 import type { VoiceDoctor, VoiceEngine, VoiceInfo } from './contract.ts';
-import { createRhvoiceEngine } from './rhvoice.ts';
 import { ShowcaseError } from '../errors.ts';
 
 export interface VoiceEngineStatus {
@@ -21,7 +20,11 @@ export interface VoiceEngineStatus {
   voices: VoiceInfo[];
 }
 
-export function createVoiceRegistry(engines: VoiceEngine[] = [createRhvoiceEngine()]) {
+/**
+ * Реестр содержит только явно переданные адаптеры голосового пакета.
+ * Отказ одного адаптера сохраняется в каталоге причиной, без подмены голоса.
+ */
+export function createVoiceRegistry(engines: VoiceEngine[] = []) {
   function list(): VoiceEngine[] {
     return engines;
   }
@@ -123,7 +126,13 @@ export function createVoiceRegistry(engines: VoiceEngine[] = [createRhvoiceEngin
     }
   }
 
-  return { engineOf, forgetDoctors, list, parseVoiceRef, statuses };
+  return {
+    engineOf,
+    forgetDoctors,
+    list,
+    parseVoiceRef,
+    statuses,
+  };
 }
 
 export type VoiceRegistry = ReturnType<typeof createVoiceRegistry>;

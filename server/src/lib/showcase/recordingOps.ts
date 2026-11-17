@@ -29,6 +29,8 @@ import type {
   ShowcaseArtifactRef,
   ShowcaseJob,
   ShowcaseProject,
+  ShowcaseScene,
+  ShowcaseTargetRef,
 } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import { toPublicScope } from './targets.ts';
@@ -100,7 +102,12 @@ function geometryOf(value: unknown): RecordingTimingCandidate['actions'][number]
     return undefined;
   }
 
-  return { x: source.x, y: source.y, width: source.width, height: source.height };
+  return {
+    x: source.x,
+    y: source.y,
+    width: source.width,
+    height: source.height,
+  };
 }
 
 /** Runtime codec worker metadata: invalid JSON can only remove the derived log. */
@@ -202,12 +209,12 @@ function timingCandidateOf(
       || Math.abs(interval.frameMs / frameMs - Math.round(interval.frameMs / frameMs)) > 1e-6
       || !(interval.afterActionIndex === null
         || Number.isSafeInteger(interval.afterActionIndex)
-          && (interval.afterActionIndex as number) >= 0
-          && (interval.afterActionIndex as number) < actions.length)
+        && (interval.afterActionIndex as number) >= 0
+        && (interval.afterActionIndex as number) < actions.length)
       || !(interval.beforeActionIndex === null
         || Number.isSafeInteger(interval.beforeActionIndex)
-          && (interval.beforeActionIndex as number) >= 0
-          && (interval.beforeActionIndex as number) < actions.length)
+        && (interval.beforeActionIndex as number) >= 0
+        && (interval.beforeActionIndex as number) < actions.length)
     ) {
       return null;
     }
@@ -237,11 +244,11 @@ function timingCandidateOf(
       || wait.toMs > source.durationMs + 0.01
       || !(wait.actionIndex === null
         || Number.isSafeInteger(wait.actionIndex)
-          && expectedActions[wait.actionIndex as number]?.kind === 'wait')
+        && expectedActions[wait.actionIndex as number]?.kind === 'wait')
       || !(wait.beforeActionIndex === null
         || Number.isSafeInteger(wait.beforeActionIndex)
-          && (wait.beforeActionIndex as number) >= 0
-          && (wait.beforeActionIndex as number) < actions.length)
+        && (wait.beforeActionIndex as number) >= 0
+        && (wait.beforeActionIndex as number) < actions.length)
     ) {
       return null;
     }
@@ -452,7 +459,7 @@ export interface RecordingOpsDeps {
   inputsOf: (project: ShowcaseProject) => ArtifactInputs;
   jobs: ShowcaseJobs;
   limits: () => { maxSceneSeconds: number; maxTotalSeconds: number };
-  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
+  acquireTargetLease: (ref: ShowcaseTargetRef) => Promise<SandboxActivityLease | null>;
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
@@ -470,13 +477,31 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
    * этом идёт целиком: её свежие сцены переснимаются вместе с устаревшей, потому
    * что состояние экрана для продолжения даёт только запись с головы.
    */
-  async function startRecording(id: string): Promise<ShowcaseJob> {
+  async function startRecording(
+    id: string,
+    options: { forceSceneIds?: string[] } = {},
+  ): Promise<ShowcaseJob> {
     assertEnabled();
 
     const project = await readProject(id);
 
-    if (project.target.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', project.target.reason, 409);
+    const forceSceneIds = options.forceSceneIds ?? [];
+
+    for (const sceneId of forceSceneIds) {
+      if (!project.scenes.some((scene) => scene.id === sceneId)) {
+        throw new ShowcaseError('bad_scene', `Сцена «${sceneId}» не найдена в ролике.`, 400);
+      }
+    }
+
+
+    if (!project.ref || !project.target || project.target.status !== 'ready') {
+      throw new ShowcaseError(
+        'target_unavailable',
+        project.target?.status === 'blocked'
+          ? project.target.reason
+          : 'Стенд не выбран: подключите его в карточке ролика.',
+        409,
+      );
     }
 
     const lease = await deps.acquireTargetLease(project.ref);
@@ -508,7 +533,12 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
 
       const inputs = inputsOf({
         ...project,
-        target: { status: 'ready', ref: project.ref, scope: toPublicScope(internal) },
+        target: {
+          status: 'ready',
+          ref: project.ref,
+          scope: toPublicScope(internal),
+          warning: internal.warning || null,
+        },
       });
       const lineageOf = (sceneId: string) => chainLineage(project.scenes, sceneId);
       const names = store.namesOf(id);
@@ -537,13 +567,22 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
 
         timingCurrent.set(scene.id, document !== null);
       }));
-      const chains = sceneChains(project.scenes).filter((chain) => (
-        chain.some((scene) => (
-          !sceneFreshness(scene, inputs, lineageOf(scene.id)).clip
-          || !timingCurrent.get(scene.id)
-        ))
-      ));
-      const pending = chains.flat();
+
+      const allChains = sceneChains(project.scenes);
+      const pending = selectRecordingChains(
+        allChains,
+        (sceneId) => (
+          !sceneFreshness(
+            project.scenes.find((scene) => scene.id === sceneId)!,
+            inputs,
+            lineageOf(sceneId),
+          ).clip || !timingCurrent.get(sceneId)
+        ),
+        forceSceneIds,
+      );
+      const pendingIds = new Set(pending.map((scene) => scene.id));
+      const chains = allChains.filter((chain) => chain.some((scene) => pendingIds.has(scene.id)));
+
 
       if (pending.length === 0) {
         throw new ShowcaseError('nothing_to_record', 'Все клипы сцен уже свежие.', 409);
@@ -709,7 +748,11 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
         targetDir,
       });
 
-      published.push({ sceneId: scene.sceneId, artifact, recordingTiming });
+      published.push({
+        sceneId: scene.sceneId,
+        artifact,
+        recordingTiming,
+      });
     }
 
     if (published.length === 0) {
@@ -717,51 +760,94 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
     }
 
     const saved = await store.updateProject(job.projectId, null, (current) => {
-      // Хранилище намеренно помнит снимок цели при выборе, а readProject выше
-      // подставляет её живую политику. После правки screens.json эти значения
-      // различаются: проверять результат по старому снимку означало записать новые
-      // clip/sidecar на диск и затем молча не прикрепить их к сцене.
-      const currentInputs = inputsOf({ ...current, target: project.target });
+      // Публикация не меняет выбранный стенд и не перепривязывает sandbox к новому
+      // поколению. Живой снимок может обновить только policy/map/data того же выбора.
+      if (
+        !current.ref
+        || !project.ref
+        || current.ref.kind !== project.ref.kind
+        || current.ref.id !== project.ref.id
+        || project.target?.status !== 'ready'
+        || (
+          current.ref.kind !== 'project'
+          && (
+            current.target?.status !== 'ready'
+            || current.target.scope.targetFingerprint !== project.target.scope.targetFingerprint
+          )
+        )
+      ) {
+        return current;
+      }
 
-      return {
+      const target = project.target;
+      const currentInputs = inputsOf({ ...current, target });
+      let accepted = false;
+      const scenes = current.scenes.map((scene) => {
+        const own = published.find((item) => item.sceneId === scene.id);
+        const expected = job.inputHashes[scene.id];
+        const lineage = chainLineage(current.scenes, scene.id);
+
+        if (
+          !own
+          || !expected
+          || own.artifact.inputHash !== expected
+          || clipInputHash(scene, currentInputs, lineage) !== expected
+        ) {
+          return scene;
+        }
+
+        const actionsHash = syncActionsHash(scene.actions);
+        const timingMatchesClip = own.recordingTiming === null
+          || own.recordingTiming.inputHash === recordingTimingInputHash(
+            expected,
+            own.artifact.contentHash,
+            actionsHash,
+          );
+
+        if (!timingMatchesClip) {
+          return scene;
+        }
+
+        accepted = true;
+
+        return {
+          ...scene,
+          clip: own.artifact,
+          recordingTiming: own.recordingTiming,
+        };
+      });
+
+      // Снимок и принятые clip/log сохраняются одной мутацией. Если результат
+      // устарел, снимок тоже не сдвигается; частичная запись оставляет остальные
+      // клипы устаревшими и не превращает весь ролик в recordingReady.
+      return accepted ? {
         ...current,
-        scenes: current.scenes.map((scene) => {
-          const own = published.find((item) => item.sceneId === scene.id);
-          const expected = job.inputHashes[scene.id];
-          const lineage = chainLineage(current.scenes, scene.id);
-
-          if (
-            !own
-            || !expected
-            || own.artifact.inputHash !== expected
-            || clipInputHash(scene, currentInputs, lineage) !== expected
-          ) {
-            return scene;
-          }
-
-          const actionsHash = syncActionsHash(scene.actions);
-          const timingMatchesClip = own.recordingTiming === null
-            || own.recordingTiming.inputHash === recordingTimingInputHash(
-              expected,
-              own.artifact.contentHash,
-              actionsHash,
-            );
-
-          return timingMatchesClip
-            ? {
-              ...scene,
-              clip: own.artifact,
-              // Новый клип всегда заменяет пару clip+log. Невалидный результат
-              // измерения не оставляет ссылку от предыдущей записи.
-              recordingTiming: own.recordingTiming,
-            }
-            : scene;
-        }),
-      };
+        target,
+        scenes,
+      } : current;
     });
+
 
     broadcast('showcase-changed', { projectId: job.projectId, revision: saved.revision });
   }
 
   return { publishRecording, startRecording };
+}
+
+/**
+ * Цепочки записи: устаревшая сцена переснимается вместе со своей цепочкой
+ * продолжений, потому что состояние экрана для продолжения даёт только запись
+ * с головы. Принудительная пересъёмка человека работает так же: она старит цепочку
+ * целиком, а не одну сцену посреди состояния.
+ */
+export function selectRecordingChains(
+  chains: readonly (readonly ShowcaseScene[])[],
+  isStale: (sceneId: string) => boolean,
+  forceSceneIds: readonly string[] = [],
+): ShowcaseScene[] {
+  const forced = new Set(forceSceneIds);
+
+  return chains
+    .filter((chain) => chain.some((scene) => forced.size > 0 ? forced.has(scene.id) : isStale(scene.id)))
+    .flat();
 }

@@ -27,12 +27,11 @@ export {
 } from './analyzeShowcase';
 export { buildShowcaseFilm, cancelShowcaseBuild } from './buildShowcaseFilm';
 export {
-  loadShowcaseSource,
   saveShowcaseSource,
   showcaseSourceOutdated,
   SOURCE_OUTDATED_TEXT,
 } from './showcaseSource';
-export type { ShowcaseSourceRead, ShowcaseSourceSave } from './showcaseSource';
+export type { ShowcaseSourceSave } from './showcaseSource';
 export { cancelShowcaseJob } from './cancelShowcaseJob';
 export { closeShowcaseProject, openShowcaseProject } from './openShowcaseProject';
 export {
@@ -58,3 +57,10 @@ export {
 } from './setupShowcaseVoice';
 export type { ShowcaseVoiceChoice } from './setupShowcaseVoice';
 export { watchShowcase } from './watchShowcase';
+
+export { attachShowcaseTarget } from './attachShowcaseTarget';
+export { beginShowcaseNavigation, captureShowcaseNavigation, showcaseProjectOwner } from './showcaseRuntime';
+
+export { adaptShowcaseNarration } from './adaptShowcaseNarration';
+
+export { reshootShowcaseScene } from './reshootShowcaseScene';

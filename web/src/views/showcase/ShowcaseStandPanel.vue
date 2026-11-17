@@ -68,7 +68,7 @@ const emit = defineEmits<{
 const open = ref(false);
 
 const scope = computed(() => (
-  props.project.target.status === 'ready' ? props.project.target.scope : null
+  props.project.target?.status === 'ready' ? props.project.target.scope : null
 ));
 
 const environmentText = computed(() => {

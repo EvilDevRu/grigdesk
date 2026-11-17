@@ -318,3 +318,45 @@ for (const kind of ['ssh', 'db', 'telegram', 'github']) {
     assert.equal(f.prefs.readStored().projects.demo.revision, 2);
   });
 }
+
+/**
+ * Счётчик извлекается из настоящей регистрации приложения без запуска app.ts.
+ * Так проверяется nullable-сводка, а сервер и соседние подсистемы не поднимаются.
+ */
+test('свободный ролик не роняет подсчёт зависимостей проекта', async () => {
+  const source = await readFile(new URL('../../server/src/app.ts', import.meta.url), 'utf8');
+  const pattern = /kind: 'showcase',[\s\S]*?count: (async \(id\) => \{[\s\S]*?\n    \}),/u;
+  const registration = pattern.exec(source);
+
+  assert.ok(registration, 'регистрация настоящего showcase-провайдера найдена');
+
+  const count = new Function('showcaseService', `return (${registration[1]});`)({
+    overview: async () => ({
+      projects: [
+        {
+          id: 'free-project',
+          title: 'Без стенда',
+          ref: null,
+        },
+        {
+          id: 'linked-project',
+          title: 'Связанный ролик',
+          ref: {
+            kind: 'project',
+            id: 'demo',
+          },
+        },
+        {
+          id: 'sandbox-project',
+          title: 'Другой стенд',
+          ref: {
+            kind: 'sandbox',
+            id: '123',
+          },
+        },
+      ],
+    }),
+  });
+
+  assert.deepEqual(await count('demo'), { count: 1, items: ['Связанный ролик'] });
+});

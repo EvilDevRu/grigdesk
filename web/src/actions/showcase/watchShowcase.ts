@@ -7,7 +7,7 @@ import {
 import { loadShowcase } from './loadShowcase';
 import { openShowcaseProject } from './openShowcaseProject';
 import { loadShowcaseVoices } from './setupShowcaseVoice';
-import { runtimeOf } from './showcaseRuntime';
+import { runtimeOf, showcaseProjectOwner } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 /**
@@ -22,6 +22,17 @@ export function watchShowcase(store: ShowcaseStore): () => void {
   if (runtime.off) {
     return runtime.off;
   }
+
+  /**
+   * Событие перечитывает только карточку владельца. Owner захвачен до GET,
+   * а для hello — до ожидания обзора, поэтому intent B отменяет его ещё при opened=A.
+   */
+  function refreshOpened(projectId: string, current: () => boolean): void {
+    if (current()) {
+      void openShowcaseProject(store, projectId, current);
+    }
+  }
+
 
   const off = sseSubscribe((name: string, data: unknown) => {
     if (name === 'showcase-progress') {
@@ -76,11 +87,12 @@ export function watchShowcase(store: ShowcaseStore): () => void {
           || event.state === 'cancelled'
         ) {
           const openedId = store.opened?.id;
+          const current = showcaseProjectOwner(store, openedId ?? null);
 
           void loadShowcase(store);
 
           if (openedId === event.projectId) {
-            void openShowcaseProject(store, openedId);
+            refreshOpened(openedId, current);
           }
         }
       } catch {
@@ -103,12 +115,13 @@ export function watchShowcase(store: ShowcaseStore): () => void {
     // прежней редакцией отвечала бы на каждую правку конфликтом.
     if (name === 'showcase-changed') {
       const openedId = store.opened?.id ?? null;
+      const current = showcaseProjectOwner(store, openedId);
 
       try {
         const event = parseShowcaseChangedEvent(data);
 
         if (openedId && event.projectId === openedId) {
-          void openShowcaseProject(store, openedId);
+          refreshOpened(openedId, current);
         }
       } catch {
         // Событие не по форме — обзор ниже всё равно перечитается целиком.
@@ -119,12 +132,12 @@ export function watchShowcase(store: ShowcaseStore): () => void {
     // должна обновиться сама, даже если ни один ролик при этом не менялся.
     if (name === 'showcase-changed' || name === 'sandboxes-changed'
       || name === 'projects-changed' || name === 'hello') {
+      const openedId = store.opened?.id ?? null;
+      const current = showcaseProjectOwner(store, openedId);
       const refreshed = loadShowcase(store, { fresh: name === 'projects-changed' || name === 'hello' });
 
-      if (name === 'hello' && store.opened?.id) {
-        const openedId = store.opened.id;
-
-        void refreshed.then(() => openShowcaseProject(store, openedId));
+      if (name === 'hello' && openedId) {
+        void refreshed.then(() => refreshOpened(openedId, current));
       }
 
       void loadShowcaseVoices(store);

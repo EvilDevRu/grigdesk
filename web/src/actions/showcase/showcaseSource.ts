@@ -2,7 +2,6 @@ import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { showcaseSourceEqual } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type {
   ShowcaseProject,
-  ShowcaseSourceOptions,
   ShowcaseStorySource,
 } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
@@ -12,11 +11,6 @@ import { uiLocalePort } from '../../shared/uiLocalePort.ts';
 const translateUi = localeTranslator(uiLocalePort);
 
 
-export interface ShowcaseSourceRead {
-  options: ShowcaseSourceOptions | null;
-  error: string;
-}
-
 // Сохранение привязано к ролику, который человек видел, когда нажимал: id и revision
 // захватывает вид до подтверждения, а не операция после него.
 export interface ShowcaseSourceSave {
@@ -25,30 +19,7 @@ export interface ShowcaseSourceSave {
   source: ShowcaseStorySource | null;
 }
 
-/**
- * Из чего выбирать «О чём ролик» у названного ролика. Ответ живёт у вида, а не в
- * сторе: это справка о живой истории стенда, и отказ остаётся рядом с блоком, а не
- * красной строкой над всем разделом.
- */
-export async function loadShowcaseSource(
-  project: Pick<ShowcaseProject, 'id' | 'target'> | null | undefined,
-): Promise<ShowcaseSourceRead> {
-  if (!project || project.target.status !== 'ready') {
-    return { options: null, error: '' };
-  }
 
-  try {
-    return { options: await showcaseApi.sourceOptions(project.id), error: '' };
-  } catch (error) {
-    return {
-      options: null,
-      error: showcaseErrorMessage(
-        error,
-        translateUi('core.showcaseSourceCouldNotReadEnvironmentRepositoryHistory'),
-      ),
-    };
-  }
-}
 
 function isRevisionConflict(error: unknown): boolean {
   const data = (error as { data?: { error?: unknown } } | null)?.data;

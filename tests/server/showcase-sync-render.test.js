@@ -14,7 +14,6 @@ import { promisify } from 'node:util';
 
 import { buildSyncedSceneClip } from '../../server/src/lib/showcase/render/assembler.ts';
 import { planShowcaseSync } from '../../server/src/lib/showcase/render/syncPlan.ts';
-import { wavOfPcm } from '../../server/src/lib/showcase/voice/pcm.ts';
 
 const run = promisify(execFile);
 
@@ -94,7 +93,10 @@ async function makeRawVideo(file) {
   return file;
 }
 
-/** WAV с короткими тонами на известных отсчётах и нулевой тишиной между ними. */
+/**
+ * WAV с короткими тонами на известных отсчётах и нулевой тишиной между ними.
+ * PCM упаковывает ffmpeg, поэтому тест не зависит от удалённых голосовых адаптеров.
+ */
 async function makeMarkerWave(file, durationMs, markers) {
   const sampleCount = Math.round(durationMs * SAMPLE_RATE / 1000);
   const pcm = Buffer.alloc(sampleCount * 2);
@@ -113,7 +115,14 @@ async function makeMarkerWave(file, durationMs, markers) {
     }
   }
 
-  await writeFile(file, wavOfPcm(pcm, SAMPLE_RATE));
+  const raw = `${file}.pcm`;
+
+  await writeFile(raw, pcm);
+  await run('ffmpeg', [
+    '-y', '-loglevel', 'error', '-f', 's16le', '-ar', String(SAMPLE_RATE),
+    '-ac', '1', '-i', raw, '-c:a', 'pcm_s16le', file,
+  ]);
+  await rm(raw);
 
   return { file, sampleCount };
 }

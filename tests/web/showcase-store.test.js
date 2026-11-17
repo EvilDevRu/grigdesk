@@ -20,7 +20,11 @@ const JOB = {
   state: 'running',
   attempt: 1,
   sequence: 2,
-  progress: { index: 1, total: 3, label: 'пишем сцену' },
+  progress: {
+    index: 1,
+    total: 3,
+    label: 'пишем сцену',
+  },
   error: null,
   startedAt: '2026-09-09T10:00:00.000Z',
   finishedAt: null,
@@ -88,8 +92,16 @@ const OVERVIEW = {
     },
   ],
   profiles: [
-    { id: 'demo-profile', ready: true, reason: '' },
-    { id: 'plain-profile', ready: false, reason: 'Профиль не объявил контракт презентаций.' },
+    {
+      id: 'demo-profile',
+      ready: true,
+      reason: '',
+    },
+    {
+      id: 'plain-profile',
+      ready: false,
+      reason: 'Профиль не объявил контракт презентаций.',
+    },
   ],
   projects: [PROJECT, BLOCKED_PROJECT],
   jobs: [JOB],
@@ -135,7 +147,11 @@ async function sectionFixture(t, api) {
     delete globalThis.__showcaseStoreHarness;
   });
 
-  return { store, emit, ...module };
+  return {
+    store,
+    emit,
+    ...module,
+  };
 }
 
 // Граница, ради которой раздел разделён: состояние не должно уметь ходить в сеть,
@@ -169,7 +185,7 @@ test('обзор раскладывается на цели, ролики и з�
 test('создание отправляет только выбранную цель и название', async (t) => {
   let createdBody = null;
   const created = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'created-project',
     title: 'Ролик парсера',
     revision: 1,
@@ -397,12 +413,17 @@ test('изменение ролика перечитывает открытую 
 
       if (path === '/api/showcase/project-1') {
         return {
-          schemaVersion: 1,
+          schemaVersion: 2,
           id: 'project-1',
           title: PROJECT.title,
           revision: 7,
           ref: PROJECT.ref,
-          target: { status: 'blocked', ref: PROJECT.ref, reason: 'нет стенда', nextAction: null },
+          target: {
+            status: 'blocked',
+            ref: PROJECT.ref,
+            reason: 'нет стенда',
+            nextAction: null,
+          },
           brief: [],
           scenes: [],
           decisions: [],
@@ -473,7 +494,11 @@ test('сквозная сборка создаёт один сохраняемы
 });
 
 test('snapshot запуска переживает F5, а старое SSE не откатывает sequence', async (t) => {
-  const overview = { ...OVERVIEW, jobs: [], buildRuns: [BUILD_RUN] };
+  const overview = {
+    ...OVERVIEW,
+    jobs: [],
+    buildRuns: [BUILD_RUN],
+  };
   const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
     get: async () => overview,
   });
@@ -510,7 +535,11 @@ test('snapshot запуска переживает F5, а старое SSE не 
 
 test('дыра sequence полного запуска восстанавливается обзором', async (t) => {
   let calls = 0;
-  const overview = { ...OVERVIEW, jobs: [], buildRuns: [BUILD_RUN] };
+  const overview = {
+    ...OVERVIEW,
+    jobs: [],
+    buildRuns: [BUILD_RUN],
+  };
   const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
     get: async () => {
       calls += 1;
@@ -588,7 +617,12 @@ test('v1 manifest загружается один раз и становится
       planHash: 'd'.repeat(32),
       mode: 'exact',
       quality: 'word-exact',
-      phrases: [{ id: 'phrase-1', text: 'Открываем обзор.', startMs: 400, endMs: 2_000 }],
+      phrases: [{
+        id: 'phrase-1',
+        text: 'Открываем обзор.',
+        startMs: 400,
+        endMs: 2_000,
+      }],
       cues: [],
     }],
     subtitleCues: [],
@@ -608,7 +642,11 @@ test('v1 manifest загружается один раз и становится
 
   store.setOpened({
     id: manifest.projectId,
-    latestFinal: { manifestVersion: 1, manifestId, video: { id: videoId } },
+    latestFinal: {
+      manifestVersion: 1,
+      manifestId,
+      video: { id: videoId },
+    },
   });
 
   const first = loadShowcaseManifest(store);
@@ -669,7 +707,11 @@ test('сводка прогресса приносит подпись хода �
   assert.equal(store.jobsOf('project-1')[0].progress.label, 'пишем сцену «Обзор»');
   assert.deepEqual(
     store.jobsOf('project-1')[0].progress,
-    { index: 2, total: 3, label: 'пишем сцену «Обзор»' },
+    {
+      index: 2,
+      total: 3,
+      label: 'пишем сцену «Обзор»',
+    },
   );
   assert.equal(store.jobsOf('project-1')[0].error, null);
 
@@ -688,21 +730,33 @@ test('сводка прогресса приносит подпись хода �
 test('словарь ударений уходит текстом целиком и возвращается с ошибками строк', async (t) => {
   const saved = [];
   const { store, loadShowcaseDictionary, saveShowcaseDictionary } = await sectionFixture(t, {
-    get: async () => ({ text: '', entries: [], errors: [] }),
+    get: async () => ({
+      text: '',
+      entries: [],
+      errors: [],
+    }),
     put: async (path, body) => {
       saved.push([path, body]);
 
       return {
         text: body.text,
         entries: ['дин+амика'],
-        errors: [{ line: 2, text: 'плохо', reason: 'нет знака ударения «+»' }],
+        errors: [{
+          line: 2,
+          text: 'плохо',
+          reason: 'нет знака ударения «+»',
+        }],
       };
     },
   });
 
   await loadShowcaseDictionary(store);
 
-  assert.deepEqual(store.dictionary, { text: '', entries: [], errors: [] });
+  assert.deepEqual(store.dictionary, {
+    text: '',
+    entries: [],
+    errors: [],
+  });
   assert.equal(await saveShowcaseDictionary(store, 'дин+амика\nплохо\n'), true);
   assert.deepEqual(saved, [['/api/showcase/voices/dictionary', { text: 'дин+амика\nплохо\n' }]]);
   assert.deepEqual(store.dictionary.entries, ['дин+амика']);
@@ -711,7 +765,7 @@ test('словарь ударений уходит текстом целиком
 });
 
 const READY_PROJECT = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'project-1',
   title: 'Ролик о готовой работе',
   revision: 4,
@@ -744,12 +798,7 @@ const READY_PROJECT = {
 const SOURCE_OPTIONS = {
   taskAvailable: true,
   noteMax: 2000,
-  defaults: {
-    task: true,
-    note: '',
-    code: true,
-    repos: [],
-  },
+  defaults: { taskId: null, note: '' },
   requiresExplicitSelectionConfirmation: false,
   selectedOutsideCatalog: [],
   repos: [],
@@ -757,13 +806,8 @@ const SOURCE_OPTIONS = {
 
 test('выбор «О чём ролик» читается справкой, а сохраняется с редакцией ролика', async (t) => {
   const requests = [];
-  const source = {
-    task: false,
-    note: 'Упор на фильтры',
-    code: true,
-    repos: null,
-  };
-  const { store, loadShowcaseSource, saveShowcaseSource, showcaseSourceOutdated } = await sectionFixture(t, {
+  const source = { taskId: null, note: 'Упор на фильтры' };
+  const { store, saveShowcaseSource, showcaseSourceOutdated } = await sectionFixture(t, {
     get: async (path) => {
       requests.push(['get', path]);
 
@@ -782,18 +826,14 @@ test('выбор «О чём ролик» читается справкой, а 
 
   store.setOpened(READY_PROJECT);
 
-  const read = await loadShowcaseSource(store.opened);
   const saved = await saveShowcaseSource(store, {
     id: READY_PROJECT.id,
     revision: READY_PROJECT.revision,
     source,
   });
 
-  assert.equal(read.error, '');
-  assert.equal(read.options.noteMax, 2000);
   assert.equal(saved.revision, 5, 'операция отдаёт сохранённый ролик');
   assert.deepEqual(requests, [
-    ['get', '/api/showcase/project-1/source'],
     ['put', '/api/showcase/project-1/source', { expectedRevision: 4, source }],
   ]);
   assert.equal(store.opened.revision, 5);
@@ -806,21 +846,7 @@ test('выбор «О чём ролик» читается справкой, а 
   );
 });
 
-test('отказ чтения выбора остаётся у блока, а не становится ошибкой раздела', async (t) => {
-  const { store, loadShowcaseSource } = await sectionFixture(t, {
-    get: async () => {
-      throw { data: { error: 'target_busy', message: 'Стенд сейчас поднимается или сносится.' } };
-    },
-  });
 
-  store.setOpened(READY_PROJECT);
-
-  const read = await loadShowcaseSource(store.opened);
-
-  assert.equal(read.options, null);
-  assert.equal(read.error, 'Стенд сейчас поднимается или сносится.');
-  assert.equal(store.error, '', 'общая строка ошибки раздела не загорается');
-});
 
 /**
  * Обещание с ручным исходом: тест держит ответ сервера, пока человек переходит к другому
@@ -851,12 +877,7 @@ test('поздний ответ сохранения выбора не откр�
   const answer = deferred();
   const failure = deferred();
   const replies = [answer, failure];
-  const source = {
-    task: true,
-    note: 'Упор на фильтры',
-    code: true,
-    repos: null,
-  };
+  const source = { taskId: null, note: 'Упор на фильтры' };
   const { store, saveShowcaseSource } = await sectionFixture(t, {
     put: async () => replies.shift().promise,
   });
@@ -927,21 +948,7 @@ test('конфликт редакции перечитывает ролик и �
   assert.match(store.error, /редакция 7/);
 });
 
-test('список выбора читается для ролика, который назвал вид, а не для открытого сейчас', async (t) => {
-  const requests = [];
-  const { store, loadShowcaseSource } = await sectionFixture(t, {
-    get: async (path) => {
-      requests.push(path);
 
-      return SOURCE_OPTIONS;
-    },
-  });
-
-  store.setOpened(READY_PROJECT);
-  await loadShowcaseSource(OTHER_PROJECT);
-
-  assert.deepEqual(requests, ['/api/showcase/project-2/source']);
-});
 
 for (const event of ['projects-changed', 'hello']) {
   test(`PD-showcase-catalog: ${event} во время общего GET требует свежий повтор`, async (t) => {
@@ -978,3 +985,215 @@ for (const event of ['projects-changed', 'hello']) {
     assert.equal(store.projects.some((item) => item.id === PROJECT.id), true);
   });
 }
+
+for (const outcome of ['success', 'error', 'reload', 'route-roundtrip']) {
+  test(`attach сохраняет владельца ответа: ${outcome}`, async (t) => {
+    const answer = deferred();
+    const reload = deferred();
+    const entered = deferred();
+    const { store, attachShowcaseTarget, beginShowcaseNavigation } = await sectionFixture(t, {
+      put: async () => answer.promise,
+      get: async () => {
+        entered.resolve();
+
+        return reload.promise;
+      },
+    });
+
+    store.setOpened(READY_PROJECT);
+
+    const pending = attachShowcaseTarget(store, READY_PROJECT.id, 4, { kind: 'project', id: 'parser' });
+
+    if (outcome === 'reload') {
+      answer.reject({ data: { error: 'revision_conflict', message: 'Конфликт' } });
+      await entered.promise;
+    }
+
+    if (outcome === 'route-roundtrip') {
+      beginShowcaseNavigation(store);
+      beginShowcaseNavigation(store);
+    } else {
+      store.setOpened(OTHER_PROJECT);
+    }
+
+    store.setError('');
+
+    if (outcome === 'reload') {
+      reload.resolve({ ...READY_PROJECT, revision: 5 });
+    } else if (outcome === 'error') {
+      answer.reject({ data: { error: 'target_unavailable', message: 'Поздний отказ' } });
+      reload.resolve(READY_PROJECT);
+    } else {
+      answer.resolve({ ...READY_PROJECT, revision: 5 });
+    }
+
+    assert.equal(await pending, false);
+    assert.equal(store.opened.id, outcome === 'route-roundtrip' ? READY_PROJECT.id : OTHER_PROJECT.id);
+    assert.equal(store.opened.revision, 4);
+    assert.equal(store.error, '');
+  });
+}
+
+test('позднее создание не открывается поверх выбранного ролика', async (t) => {
+  const answer = deferred();
+  const { store, createShowcaseProject } = await sectionFixture(t, {
+    post: async () => answer.promise,
+    get: async () => OVERVIEW,
+  });
+  const pending = createShowcaseProject(store, { ref: { kind: 'project', id: 'parser' } });
+
+  store.setOpened(OTHER_PROJECT);
+  answer.resolve(READY_PROJECT);
+
+  assert.equal(await pending, '');
+  assert.equal(store.opened.id, OTHER_PROJECT.id);
+});
+
+test('подключение отправляет редакцию и принимает новый scope', async (t) => {
+  const requests = [];
+  const { store, attachShowcaseTarget } = await sectionFixture(t, {
+    put: async (url, body) => {
+      requests.push([url, body]);
+
+      return { ...READY_PROJECT, revision: 5 };
+    },
+  });
+
+  store.setOpened(READY_PROJECT);
+  assert.equal(await attachShowcaseTarget(store, READY_PROJECT.id, 4, TARGET.ref), true);
+  assert.equal(store.opened.revision, 5);
+  assert.deepEqual(requests, [['/api/showcase/project-1/target', { expectedRevision: 4, ref: TARGET.ref }]]);
+});
+
+for (const name of ['updateShowcaseScene', 'setShowcaseVoice', 'adaptShowcaseNarration']) {
+  for (const outcome of ['success', 'error', 'reload']) {
+    test(`${name}: поздний ${outcome} принадлежит прежней карточке`, async (t) => {
+      const answer = deferred();
+      const reload = deferred();
+      const entered = deferred();
+      const { store, ...actions } = await sectionFixture(t, {
+        put: async () => answer.promise,
+        post: async () => answer.promise,
+        get: async () => {
+          entered.resolve();
+
+          return reload.promise;
+        },
+      });
+
+      store.setOpened(READY_PROJECT);
+
+      const args = name === 'updateShowcaseScene' ? ['scene-1', { narration: 'Новая реплика' }]
+        : name === 'setShowcaseVoice' ? [{ voiceRef: 'piper:irina', pace: null }] : [READY_PROJECT.id];
+      const pending = actions[name](store, ...args);
+
+      if (outcome === 'reload') {
+        answer.reject(name === 'setShowcaseVoice'
+          ? { data: { error: 'revision_conflict' } } : new Error('Отказ'));
+        await entered.promise;
+      }
+
+      store.setOpened(OTHER_PROJECT);
+      store.setError('');
+
+      if (outcome === 'reload') {
+        reload.resolve(READY_PROJECT);
+      } else if (outcome === 'error') {
+        answer.reject(new Error('Поздняя ошибка'));
+        reload.resolve(READY_PROJECT);
+      } else {
+        answer.resolve({ ...READY_PROJECT, revision: 5 });
+      }
+
+      assert.equal(await pending, false);
+      assert.equal(store.opened.id, OTHER_PROJECT.id);
+      assert.equal(store.error, '');
+      assert.equal(store.isBusy(READY_PROJECT.id), false);
+    });
+  }
+}
+
+for (const event of ['showcase-changed', 'hello']) {
+  for (const outcome of ['success', 'error', 'close', 'roundtrip']) {
+    test(`${event}: фоновый GET не навигирует после ${outcome}`, async (t) => {
+      const answer = deferred();
+      const entered = deferred();
+      const { store, watchShowcase, emit, closeShowcaseProject } = await sectionFixture(t, {
+        get: async (url) => {
+          if (url === '/api/showcase/project-1') {
+            entered.resolve();
+
+            return answer.promise;
+          }
+
+          return url === '/api/showcase' ? OVERVIEW : { engines: [], install: { available: [], job: null } };
+        },
+      });
+
+      store.setOpened(READY_PROJECT);
+      watchShowcase(store);
+      emit(event, { projectId: READY_PROJECT.id, revision: 5 });
+      await entered.promise;
+
+      if (outcome === 'close') {
+        closeShowcaseProject(store);
+      } else {
+        store.setOpened(OTHER_PROJECT);
+
+        if (outcome === 'roundtrip') {
+          store.setOpened({ ...READY_PROJECT, title: 'Новый ввод' });
+        }
+      }
+
+      store.setError('');
+
+      if (outcome === 'error') {
+        answer.reject(new Error('Поздняя ошибка'));
+      } else {
+        answer.resolve({
+          ...READY_PROJECT,
+          title: 'Старое чтение',
+          revision: 4,
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(store.opened?.id ?? null, outcome === 'close' ? null
+        : outcome === 'roundtrip' ? READY_PROJECT.id : OTHER_PROJECT.id);
+      assert.notEqual(store.opened?.title, 'Старое чтение');
+      assert.equal(store.error, '');
+    });
+  }
+}
+
+for (const outcome of ['success', 'error']) {
+  test(`пересъёмка: поздний ${outcome} оставляет B и общий job A`, async (t) => {
+    const answer = deferred();
+    const { store, reshootShowcaseScene } = await sectionFixture(t, { post: () => answer.promise });
+
+    store.setOpened(READY_PROJECT);
+
+    const pending = reshootShowcaseScene(store, READY_PROJECT.id, 'scene-1');
+
+    store.setOpened(OTHER_PROJECT);
+
+    if (outcome === 'success') {
+      answer.resolve(JOB);
+    } else {
+      answer.reject(new Error('Поздний отказ пересъёмки'));
+    }
+
+    assert.equal(await pending, false);
+    assert.equal(store.opened.id, OTHER_PROJECT.id);
+    assert.equal(store.error, '');
+    assert.equal(store.jobs.some((job) => job.id === JOB.id), outcome === 'success');
+  });
+}
+
+test('пересъёмка ставит job владельца без открытия карточки', async (t) => {
+  const { store, reshootShowcaseScene } = await sectionFixture(t, { post: async () => JOB });
+
+  store.setOpened(READY_PROJECT);
+  assert.equal(await reshootShowcaseScene(store, READY_PROJECT.id, 'scene-1'), true);
+  assert.equal(store.jobs.some((job) => job.id === JOB.id), true);
+});

@@ -44,6 +44,7 @@ interface ShowcaseState {
   buildRuns: ShowcaseBuildRun[];
   limits: ShowcaseOverview['limits'];
   opened: ShowcaseProject | null;
+  openedEpoch: number;
   manifest: ShowcaseFinalManifest | null;
   manifestProjectId: string;
   manifestId: string;
@@ -77,6 +78,7 @@ export const useShowcaseStore = defineStore('showcase', {
       retentionDays: 0,
     },
     opened: null,
+    openedEpoch: 0,
     manifest: null,
     manifestProjectId: '',
     manifestId: '',
@@ -181,6 +183,10 @@ export const useShowcaseStore = defineStore('showcase', {
      * Кэш шкалы сохраняется только для ровно того же проекта и manifestId.
      */
     setOpened(project: ShowcaseProject | null) {
+      if (this.opened?.id !== project?.id) {
+        this.openedEpoch += 1;
+      }
+
       this.opened = project;
 
       const final = project?.latestFinal;

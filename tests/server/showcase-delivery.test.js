@@ -27,7 +27,7 @@ function artifact(kind, id, overrides = {}) {
 
 function projectFixture(overrides = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'project-1',
     title: 'Ролик о готовой работе',
     revision: 5,

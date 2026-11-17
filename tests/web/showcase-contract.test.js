@@ -26,6 +26,7 @@ const SCOPE = {
   mapRevision: 'map',
   dataRevision: 'начальные',
   buildRevision: null,
+  warning: null,
 };
 
 const JOB = {
@@ -54,6 +55,7 @@ test('обзор принимает готовую цель без карты э
     serviceHost: null,
     status: 'ready',
     reason: '',
+    warning: null,
     screenCount: 0,
   };
   const overview = {
@@ -89,11 +91,13 @@ test('обзор принимает готовую цель без карты э
 test('готовая цель и заблокированная разбираются как разные ветки', () => {
   const ready = {
     status: 'ready',
+    warning: null,
     ref: { kind: 'sandbox', id: '990001' },
     scope: SCOPE,
   };
   const blocked = {
     status: 'blocked',
+    warning: null,
     ref: { kind: 'task', id: '990002' },
     profile: null,
     reason: 'Стенд не найден в реестре.',
@@ -126,6 +130,7 @@ test('«готово» без области показа целью не счи
 test('лишние поля ответа не становятся состоянием раздела', () => {
   const parsed = contract.parseShowcaseTarget({
     status: 'ready',
+    warning: null,
     ref: { kind: 'sandbox', id: '990001' },
     scope: { ...SCOPE, recordUrl: 'http://127.0.0.1:9999', allowedOrigins: ['*'] },
     reason: 'Поле из чужой ветки.',
@@ -252,6 +257,7 @@ test('каталог голосов приносит и состояние ус�
       ],
       job: {
         id: 'attempt-1',
+        pid: null,
         engineId: 'piper',
         voiceId: 'irina',
         state: 'running',
@@ -360,7 +366,7 @@ test('ошибка контракта называет путь поля, но �
 
 test('краткая карточка не выдумывает цель у заблокированного ролика', () => {
   const project = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'project-1',
     title: 'Ролик',
     revision: 2,
@@ -404,7 +410,7 @@ test('проект принимает безопасные sync-ссылки и 
     path: '/не-должен-выйти.json',
   });
   const project = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'project-sync',
     title: 'Ролик с привязками',
     revision: 3,
@@ -528,7 +534,7 @@ test('проект принимает безопасные sync-ссылки и 
 
 test('sync-codec называет точное структурно неверное поле', () => {
   const base = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'project-sync',
     title: 'Ролик',
     revision: 1,
@@ -688,25 +694,17 @@ test('черновик произношения не отправляет hash �
 
 // Источник рассказа — выбор человека. Контракт держит только форму: имя репозитория
 // и коммиты остаются строками, а чужое поле не становится частью выбора.
-const STORY_SOURCE = {
-  task: false,
-  note: 'Показать фильтры на доске',
-  code: true,
-  repos: [{
-    name: 'frontend',
-    work: true,
-    commits: ['a'.repeat(40)],
-  }],
-};
+const STORY_SOURCE = { taskId: null, note: 'Показать фильтры на доске' };
 
 const STORED_PROJECT = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'project-1',
   title: 'Ролик',
   revision: 2,
   ref: { kind: 'sandbox', id: '990001' },
   target: {
     status: 'blocked',
+    warning: null,
     ref: { kind: 'sandbox', id: '990001' },
     reason: 'Стенд не найден в реестре.',
     nextAction: null,
@@ -719,27 +717,7 @@ const STORED_PROJECT = {
   updatedAt: '2026-10-08T11:00:00.000Z',
 };
 
-test('выбор «О чём ролик» принимается строго по форме, а умолчание — это null', () => {
-  const parsed = contract.parseShowcaseStorySource({ ...STORY_SOURCE, path: '/srv/frontend' });
 
-  assert.deepEqual(parsed, STORY_SOURCE, 'лишнее поле не становится частью выбора');
-  assert.equal(contract.parseShowcaseStorySource({ ...STORY_SOURCE, repos: null }).repos, null);
-  assert.throws(
-    () => contract.parseShowcaseStorySource({ ...STORY_SOURCE, code: 'да' }),
-    /поле source\.code/,
-  );
-  assert.throws(
-    () => contract.parseShowcaseStorySource({
-      ...STORY_SOURCE,
-      repos: [{
-        name: 'frontend',
-        work: true,
-        commits: [42],
-      }],
-    }),
-    /поле source\.repos\[0\]\.commits\[0\]/,
-  );
-});
 
 test('старый ролик без выбора читается умолчанием, а расхождение с выбором сцен видно', () => {
   const old = contract.parseShowcaseProject(STORED_PROJECT);
@@ -758,49 +736,7 @@ test('старый ролик без выбора читается умолча�
   assert.equal(contract.showcaseSourceEqual(STORY_SOURCE, { ...STORY_SOURCE }), true);
 });
 
-test('список выбора несёт коммиты и умолчание цели, но не пути репозиториев', () => {
-  const repo = {
-    name: 'frontend',
-    branch: 'route-task-1',
-    workFiles: 2,
-    path: '/srv/frontend',
-    commits: [{
-      id: 'b'.repeat(40),
-      subject: 'Фильтры на доске',
-      date: '2026-10-08T10:00:00+07:00',
-      own: true,
-      merge: false,
-    }],
-    error: null,
-  };
-  const value = {
-    taskAvailable: true,
-    noteMax: contract.SHOWCASE_SOURCE_NOTE_MAX,
-    defaults: {
-      task: true,
-      note: '',
-      code: true,
-      repos: [{
-        name: 'frontend',
-        work: true,
-        commits: ['b'.repeat(40)],
-      }],
-    },
-    requiresExplicitSelectionConfirmation: false,
-    selectedOutsideCatalog: [],
-    repos: [repo],
-  };
-  const options = contract.parseShowcaseSourceOptions(value);
 
-  assert.equal(options.noteMax, 2000);
-  assert.equal('path' in options.repos[0], false, 'путь репозитория остаётся на сервере');
-  assert.equal(options.repos[0].commits[0].own, true);
-  assert.equal(options.defaults.repos[0].commits[0], 'b'.repeat(40));
-  assert.throws(
-    () => contract.parseShowcaseSourceOptions({ ...value, repos: [{ ...repo, workFiles: -1 }] }),
-    /поле sourceOptions\.repos\[0\]\.workFiles/,
-  );
-});
 
 // Выбор, бриф и сцены хранят свой источник: запись переживает чтение целиком, а старая
 // запись без полей остаётся умолчанием, а не повреждённым роликом.
@@ -822,94 +758,6 @@ test('запись со всеми тремя полями выбора пере
 
 // Порядок кликов смысла не несёт: снять и вернуть галочку — тот же выбор. Умолчание же
 // следует за веткой и не равно явному списку, даже если сейчас совпадает с ним.
-test('тот же выбор в другом порядке равен себе, а умолчание отличается от явного списка', () => {
-  const ordered = {
-    ...STORY_SOURCE,
-    note: 'Фильтры',
-    repos: [
-      {
-        name: 'backend',
-        work: false,
-        commits: ['c'.repeat(40), 'd'.repeat(40)],
-      },
-      {
-        name: 'frontend',
-        work: true,
-        commits: ['a'.repeat(40), 'b'.repeat(40)],
-      },
-    ],
-  };
-  const shuffled = {
-    ...ordered,
-    note: '  Фильтры ',
-    repos: [
-      {
-        ...ordered.repos[1],
-        commits: ['b'.repeat(40), 'a'.repeat(40)],
-      },
-      {
-        ...ordered.repos[0],
-        commits: ['d'.repeat(40), 'c'.repeat(40)],
-      },
-    ],
-  };
 
-  assert.equal(contract.showcaseSourceEqual(ordered, shuffled), true);
-  assert.deepEqual(contract.normalizeShowcaseSource(shuffled), ordered);
-  assert.equal(contract.normalizeShowcaseSource(null), null);
-  assert.equal(contract.showcaseSourceEqual(ordered, { ...ordered, repos: null }), false);
-  assert.equal(contract.showcaseSourceEqual(ordered, { ...ordered, task: true }), false);
-});
 
-test('список выбора несёт просьбу подтвердить сужение и выбор вне видимого списка', () => {
-  const value = {
-    taskAvailable: false,
-    noteMax: 2000,
-    defaults: {
-      task: false,
-      note: '',
-      code: true,
-      repos: [],
-    },
-    requiresExplicitSelectionConfirmation: true,
-    selectedOutsideCatalog: [{
-      name: 'frontend',
-      missing: false,
-      path: '/srv/frontend',
-      commits: [
-        {
-          id: 'e'.repeat(40),
-          subject: 'Старая работа',
-          state: 'available',
-        },
-        {
-          id: 'f'.repeat(40),
-          subject: null,
-          state: 'outdated',
-        },
-      ],
-    }],
-    repos: [],
-  };
-  const options = contract.parseShowcaseSourceOptions(value);
-  const [group] = options.selectedOutsideCatalog;
 
-  assert.equal(options.requiresExplicitSelectionConfirmation, true);
-  assert.equal('path' in group, false, 'путь репозитория остаётся на сервере');
-  assert.deepEqual(group.commits.map((commit) => commit.state), ['available', 'outdated']);
-  assert.equal(group.commits[1].subject, null);
-  assert.throws(
-    () => contract.parseShowcaseSourceOptions({
-      ...value,
-      selectedOutsideCatalog: [{
-        ...value.selectedOutsideCatalog[0],
-        commits: [{
-          id: 'f'.repeat(40),
-          subject: null,
-          state: 'lost',
-        }],
-      }],
-    }),
-    /поле sourceOptions\.selectedOutsideCatalog\[0\]\.commits\[0\]\.state/,
-  );
-});

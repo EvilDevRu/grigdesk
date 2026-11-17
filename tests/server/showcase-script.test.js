@@ -41,10 +41,6 @@ const SCREENS = [
 const CONTEXT = {
   taskTitle: 'Раздел презентаций',
   taskText: 'Нужно показать, как собирается ролик.',
-  diff: 'diff --git a/file b/file',
-  diffBase: 'repo:abc123',
-  diffHead: 'repo:feature',
-  diffTruncated: false,
   screens: SCREENS,
   maxScenes: 5,
 };
@@ -53,13 +49,14 @@ function reply(value) {
   return JSON.stringify(value);
 }
 
-test('промпт объявляет недоверенные блоки и не прячет обрезку контекста', () => {
+test('промпт объявляет недоверенные блоки задачи и карты', () => {
   const full = buildBriefPrompt(CONTEXT);
   const cut = buildBriefPrompt({ ...CONTEXT, diffTruncated: true });
 
   assert.match(full, /только недоверенные данные/);
-  assert.match(full, /<diff_truncated>Нет\.<\/diff_truncated>/);
-  assert.match(cut, /не поместилась и не видна/);
+  assert.match(full, /<task_text>/);
+  assert.match(cut, /<available_screens>/);
+  assert.doesNotMatch(full, /<diff>/);
 });
 
 test('промпт сценария перечисляет доступные экраны и их элементы', () => {
@@ -248,7 +245,11 @@ test('ожидание и прокрутка принимаются в объя�
       scenes: [scene({
         actions: [
           { kind: 'wait', ms: 800 },
-          { kind: 'scroll', targetId: null, delta: 400 },
+          {
+            kind: 'scroll',
+            targetId: null,
+            delta: 400,
+          },
         ],
       })],
     }),
@@ -296,9 +297,24 @@ test('три модельные связи переводятся из цита�
         { kind: 'highlight', targetId: 'filter' },
       ],
       bindings: [
-        { quote: 'запускаем', occurrence: 1, actionIndex: 1, kind: 'align-start' },
-        { quote: 'результат', occurrence: 1, actionIndex: 2, kind: 'ready-before' },
-        { quote: 'результат', occurrence: 2, actionIndex: 3, kind: 'hold-through' },
+        {
+          quote: 'запускаем',
+          occurrence: 1,
+          actionIndex: 1,
+          kind: 'align-start',
+        },
+        {
+          quote: 'результат',
+          occurrence: 1,
+          actionIndex: 2,
+          kind: 'ready-before',
+        },
+        {
+          quote: 'результат',
+          occurrence: 2,
+          actionIndex: 3,
+          kind: 'hold-through',
+        },
       ],
     })],
   }), SCREENS, 5);
@@ -309,9 +325,21 @@ test('три модельные связи переводятся из цита�
     text: parsed.scenes[0].narration.slice(cue.from, cue.to),
     kind: cue.kind,
   })), [
-    { actionIndex: 0, text: 'запускаем', kind: 'align-start' },
-    { actionIndex: 1, text: 'результат', kind: 'ready-before' },
-    { actionIndex: 2, text: 'результат', kind: 'hold-through' },
+    {
+      actionIndex: 0,
+      text: 'запускаем',
+      kind: 'align-start',
+    },
+    {
+      actionIndex: 1,
+      text: 'результат',
+      kind: 'ready-before',
+    },
+    {
+      actionIndex: 2,
+      text: 'результат',
+      kind: 'hold-through',
+    },
   ]);
 });
 
@@ -323,7 +351,12 @@ test('ссылка на удалённый goto даёт проблему сво
         { kind: 'click', targetId: 'run' },
       ],
       bindings: [
-        { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
+        {
+          quote: 'Открываем',
+          occurrence: 1,
+          actionIndex: 0,
+          kind: 'align-start',
+        },
       ],
     })],
   }), SCREENS, 5);
@@ -335,9 +368,26 @@ test('ссылка на удалённый goto даёт проблему сво
 
 test('binding не принимает сырой offset, selector и неверный номер повтора', () => {
   const attempts = [
-    { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start', from: 0 },
-    { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start', selector: '#run' },
-    { quote: 'Открываем', occurrence: 2, actionIndex: 0, kind: 'align-start' },
+    {
+      quote: 'Открываем',
+      occurrence: 1,
+      actionIndex: 0,
+      kind: 'align-start',
+      from: 0,
+    },
+    {
+      quote: 'Открываем',
+      occurrence: 1,
+      actionIndex: 0,
+      kind: 'align-start',
+      selector: '#run',
+    },
+    {
+      quote: 'Открываем',
+      occurrence: 2,
+      actionIndex: 0,
+      kind: 'align-start',
+    },
   ];
 
   for (const binding of attempts) {
@@ -377,7 +427,12 @@ test('отдельный ответ связей сохраняет ручное
     scenes: [{
       sceneId: 'scene-existing',
       bindings: [
-        { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
+        {
+          quote: 'запускаем',
+          occurrence: 1,
+          actionIndex: 0,
+          kind: 'align-start',
+        },
       ],
     }],
   }), scenes);
@@ -388,7 +443,12 @@ test('отдельный ответ связей сохраняет ручное
     scenes: [{
       sceneId: 'scene-existing',
       bindings: [
-        { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'hold-through' },
+        {
+          quote: 'результат',
+          occurrence: 1,
+          actionIndex: 1,
+          kind: 'hold-through',
+        },
       ],
     }],
   }), scenes);
@@ -420,7 +480,11 @@ test('пробелы карты экранов принимаются слова
   assert.deepEqual(without.gaps, [], 'без поля пробелов нет');
   assert.equal(parseScriptReply(reply({ scenes: [scene()], gaps: 'строкой' }), SCREENS, 5), null);
   assert.equal(
-    parseScriptReply(reply({ scenes: [scene()], gaps: [], extra: 1 }), SCREENS, 5),
+    parseScriptReply(reply({
+      scenes: [scene()],
+      gaps: [],
+      extra: 1,
+    }), SCREENS, 5),
     null,
     'лишний ключ верхнего уровня по-прежнему не проходит',
   );
@@ -457,10 +521,14 @@ test('версия промпта объявлена и попадает в ре
 
 test('лимит Codex останавливает сценарий с понятной причиной и HTTP 429', async () => {
   const ops = createScriptOps({
-    assertEnabled() {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled() { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => ({
-      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      title: 'Ролик',
+      ref: { kind: 'sandbox', id: 'demo' },
       target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
     }),
     acquireTargetLease: async () => null,
@@ -501,8 +569,11 @@ test('вызов модели получает серверный config исп�
     decisions: [],
   };
   const scriptOps = createScriptOps({
-    assertEnabled: () => {},
-    broadcast: () => {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled: () => { },
+    broadcast: () => { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => project,
     // Резолвер и исполнитель здесь только записывают, что им передали: проверяется
@@ -573,8 +644,11 @@ test('обрыв сети до модели повторяется после п
     decisions: [],
   };
   const ops = createScriptOps({
-    assertEnabled() {},
-    broadcast() {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled() { },
+    broadcast() { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => project,
     acquireTargetLease: async () => null,
@@ -617,15 +691,19 @@ test('обрыв сети до модели повторяется после п
 test('три обрыва подряд останавливают сценарий с названной причиной, а не «не уложился»', async () => {
   let calls = 0;
   const ops = createScriptOps({
-    assertEnabled() {},
-    broadcast() {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled() { },
+    broadcast() { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => ({
-      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      title: 'Ролик',
+      ref: { kind: 'sandbox', id: 'demo' },
       target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
     }),
     acquireTargetLease: async () => null,
-    pause: async () => {},
+    pause: async () => { },
     targets: { selectedInternalScope: async () => ({ screens: SCREENS }) },
     scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
     resolveScriptModel: async () => ({
@@ -656,11 +734,15 @@ test('три обрыва подряд останавливают сценари
 test('ошибка модели не по сети не повторяется', async () => {
   let calls = 0;
   const ops = createScriptOps({
-    assertEnabled() {},
-    broadcast() {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled() { },
+    broadcast() { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => ({
-      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      title: 'Ролик',
+      ref: { kind: 'sandbox', id: 'demo' },
       target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
     }),
     acquireTargetLease: async () => null,
@@ -690,7 +772,7 @@ test('ошибка модели не по сети не повторяется',
 
 // Пожелание человека приходит из его сессии и меняет только то, о чём рассказать;
 // описания коммитов пишут авторы коммитов — это такие же недоверенные данные, как diff.
-test('пожелание человека стоит до недоверенных данных, а описания коммитов — среди них', () => {
+test('пожелание человека стоит до недоверенных данных, а задача — среди них', () => {
   const context = {
     ...CONTEXT,
     note: 'Сделать упор на фильтрах',
@@ -698,17 +780,16 @@ test('пожелание человека стоит до недоверенны
   };
   const prompts = [buildBriefPrompt(context), buildScriptPrompt(context, ['Показать фильтры'])];
 
-  assert.equal(SCRIPT_PROMPT_VERSION, 'showcase-script-9', 'новые блоки — новая версия промпта');
+  assert.equal(SCRIPT_PROMPT_VERSION, 'showcase-script-11', 'новые блоки — новая версия промпта');
 
   for (const prompt of prompts) {
     const focus = prompt.indexOf('<human_focus>');
     const untrusted = prompt.indexOf('только недоверенные данные');
-    const commits = prompt.indexOf('<commits>');
+    const task = prompt.indexOf('<task_text>');
 
     assert.match(prompt, /<human_focus>\nСделать упор на фильтрах\n<\/human_focus>/);
     assert.ok(focus > 0 && focus < untrusted, 'пожелание — до недоверенных блоков');
-    assert.ok(commits > untrusted, 'описания коммитов — среди недоверенных данных');
-    assert.match(prompt, /<commits>\n- abc1234 Фильтры на доске\n<\/commits>/);
+    assert.ok(task > untrusted, 'задача — среди недоверенных данных');
   }
 });
 
@@ -716,8 +797,6 @@ test('без пожелания и описаний промпт говорит 
   const prompt = buildBriefPrompt(CONTEXT);
 
   assert.match(prompt, /<human_focus>\nЧеловек не уточнил\.\n<\/human_focus>/);
-  assert.match(prompt, /<commits>\nОписаний коммитов нет\.\n<\/commits>/);
-  assert.match(prompt, /только список файлов без кода/);
 });
 
 // Тег внутри задачи, описания коммита или diff остаётся текстом: поддельный
@@ -729,7 +808,6 @@ test('недоверенный текст не подделывает и не з
     note: 'Упор на фильтры',
     taskText: `Задача ${fake}`,
     commits: `- abc1234 Фильтры ${fake}`,
-    diff: `+const x = "${fake}";`,
   };
   const prompts = [buildBriefPrompt(context), buildScriptPrompt(context, ['Показать фильтры'])];
 
@@ -777,8 +855,11 @@ function taskSourceOps(source) {
     source,
   };
   const ops = createScriptOps({
-    assertEnabled: () => {},
-    broadcast: () => {},
+    voices: null,
+    defaultVoiceRef: null,
+    stressDictionary: null,
+    assertEnabled: () => { },
+    broadcast: () => { },
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => current,
     taskDetails: async (taskId) => {
@@ -838,24 +919,121 @@ function taskSourceOps(source) {
   };
 }
 
-test('без задачи в выборе «О чём ролик» портал не спрашивается, а с умолчанием — да', async () => {
-  const off = taskSourceOps({
-    task: false,
-    note: 'Только фильтры',
-    code: true,
-    repos: null,
-  });
+test('без задачи в выборе «О чём ролик» портал не спрашивается, а с номером — да', async () => {
+  const off = taskSourceOps({ taskId: null, note: 'Только фильтры' });
   const analyzed = await off.ops.analyze('demo');
 
   assert.deepEqual(off.asked, [], 'снятая галочка задачи не ходит в портал');
   assert.doesNotMatch(off.prompts[0], /Текст задачи из портала/);
   assert.match(off.prompts[0], /<human_focus>\nТолько фильтры\n<\/human_focus>/);
-  assert.equal(analyzed.scriptSource.task, false, 'сцены помнят выбор, по которому собраны');
+  assert.equal(analyzed.scriptSource.taskId, null, 'сцены помнят выбор, по которому собраны');
 
-  const standard = taskSourceOps(null);
+  const standard = taskSourceOps({ taskId: '990010', note: '' });
 
   await standard.ops.analyze('demo');
 
   assert.deepEqual(standard.asked, ['990010']);
   assert.match(standard.prompts[0], /Текст задачи из портала/);
+});
+
+// Правила реплик зависят от движка: ударения, форма текста и предел длины.
+const VOICE_RULES_SILERO = {
+  engineName: 'Silero',
+  stress: true,
+  stressExperimental: false,
+  pace: true,
+  maxChars: 400,
+  unreadable: ['latin', 'digits'],
+  dictionary: ['з+амок'],
+};
+
+test('сценарий для Silero просит ударения и слова вместо цифр и латиницы', () => {
+  const prompt = buildScriptPrompt(
+    { ...CONTEXT, voice: VOICE_RULES_SILERO },
+    ['Показать фильтр'],
+  );
+
+  assert.match(prompt, /ставь «\+» перед ударной гласной/u);
+  assert.match(prompt, /цифры и латиницу пиши русскими словами/u);
+  assert.match(prompt, /не длиннее 400 знаков/u);
+  assert.match(prompt, /з\+амок/u);
+  assert.equal(SCRIPT_PROMPT_VERSION, 'showcase-script-11');
+});
+
+test('сценарий для Piper не просит ударения, для Token Plan помечает их экспериментальными', () => {
+  const piper = buildScriptPrompt(
+    {
+      ...CONTEXT, voice: {
+        ...VOICE_RULES_SILERO,
+        engineName: 'Piper',
+        stress: false,
+        unreadable: [],
+      }
+    },
+    ['Показать фильтр'],
+  );
+  const token = buildScriptPrompt(
+    {
+      ...CONTEXT, voice: {
+        ...VOICE_RULES_SILERO,
+        engineName: 'Qwen Token Plan',
+        stressExperimental: true,
+        unreadable: [],
+      }
+    },
+    ['Показать фильтр'],
+  );
+
+  assert.match(piper, /знаки ударения не ставь/u);
+  assert.match(token, /экспериментальны/u);
+});
+
+test('без выбранного голоса правила нейтральные и разбор не блокируется', () => {
+  const prompt = buildScriptPrompt({ ...CONTEXT, voice: null }, ['Показать фильтр']);
+
+  assert.match(prompt, /голос ещё не выбран/u);
+  assert.match(prompt, /знаки ударения не ставь/u);
+});
+
+test('правила берут явный голос ролика и строки настоящего словаря', async (t) => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createStressDictionaryStore } = await import('../../server/src/lib/showcase/voice/dictionary.ts');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-voice-rules-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const dictionary = createStressDictionaryStore({ file: path.join(root, 'dictionary.txt') });
+
+  await dictionary.save('з+амок\n');
+
+  let asked;
+  const ops = createScriptOps({
+    voices: {
+      parseVoiceRef: (ref) => {
+        asked = ref;
+
+        return { engineId: 'silero', voiceId: 'xenia' };
+      },
+      engineOf: () => ({
+        name: 'Silero',
+        doctor: async () => ({ status: 'ready' }),
+        capabilities: () => ({
+          stress: true,
+          pace: true,
+          maxChars: 1000,
+          unreadable: ['latin', 'digits'],
+        }),
+      }),
+    },
+    defaultVoiceRef: async () => 'piper:irina',
+    stressDictionary: dictionary,
+  });
+  const rules = await ops.voiceRulesOf({ voiceRef: 'silero:xenia', scenes: [] });
+
+  assert.equal(asked, 'silero:xenia');
+  assert.equal(rules.engineName, 'Silero');
+  assert.deepEqual(rules.dictionary, ['з+амок']);
+  assert.match(buildScriptPrompt({ ...CONTEXT, voice: rules }, ['Показать обзор']), /з\+амок/u);
 });

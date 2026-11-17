@@ -19,7 +19,6 @@ export type JobIsChecked = Checked<IsUnchecked<Overview['jobs'][number]>>;
  * входа и identity процесса задания.
  */
 async function checkServerContracts(service: Service, store: Store, id: string): Promise<void> {
-  // @ts-expect-error Цель обязательна: показывать без адреса и экранов нечего.
   await service.createProject({ profile: 'demo-profile' });
   // Сервер сам связывает выбранную цель с профилем; отдельный profile не обязателен.
   await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
@@ -37,7 +36,7 @@ async function checkServerContracts(service: Service, store: Store, id: string):
 
   const project = await store.readProject(id);
 
-  if (project.target.status === 'ready') {
+  if (project.target?.status === 'ready') {
     project.target.scope.profile.toUpperCase();
     // @ts-expect-error Адрес серверной записи наружу не отдаётся.
     project.target.scope.recordUrl.toUpperCase();

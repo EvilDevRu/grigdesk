@@ -58,7 +58,11 @@ export function newSceneId(): string {
 /** Хеш смысловой связи разделён по домену, чтобы текст не совпал с JSON действий. */
 function syncHash(domain: 'text' | 'actions', value: unknown): string {
   return createHash('sha256')
-    .update(JSON.stringify({ version: SHOWCASE_SYNC_BINDING_VERSION, domain, value }))
+    .update(JSON.stringify({
+      version: SHOWCASE_SYNC_BINDING_VERSION,
+      domain,
+      value,
+    }))
     .digest('hex')
     .slice(0, 32);
 }
@@ -72,7 +76,11 @@ export function syncTextHash(narration: string): string {
 export function syncActionsHash(actions: readonly ShowcaseAction[]): string {
   const canonical = actions.map((action) => {
     if (action.kind === 'scroll') {
-      return { kind: action.kind, targetId: action.targetId, delta: action.delta };
+      return {
+        kind: action.kind,
+        targetId: action.targetId,
+        delta: action.delta,
+      };
     }
 
     if (action.kind === 'wait') {
@@ -188,14 +196,18 @@ export function createScene(project: ShowcaseProject, draft: SceneDraft): Showca
     narration: draft.narration,
     caption: draft.caption,
     subtitleText: draft.subtitleText || plainNarration(draft.narration),
-    direction: { ...EMPTY_DIRECTION, pace: previous?.direction.pace ?? null },
+    direction: { ...EMPTY_DIRECTION, pace: previous?.direction.pace ?? project.pace ?? null },
     pronunciationOverrides: [],
     timing: null,
     syncBindings: draft.syncBindings ?? null,
     speechTiming: null,
     speechAlignment: null,
     recordingTiming: null,
-    audioSource: { kind: 'tts', voiceRef: inheritedVoice, artifactId: null },
+    audioSource: {
+      kind: 'tts',
+      voiceRef: inheritedVoice ?? project.voiceRef ?? null,
+      artifactId: null,
+    },
     audio: null,
     clip: null,
     frame: null,

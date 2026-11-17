@@ -117,7 +117,13 @@ function reviewReason(scene: ShowcaseScene, diagnostics: readonly SyncDiagnostic
 
 function phrasesForManifest(
   scene: ShowcaseScene,
-  source: readonly { id: string; from: number; to: number; startMs: number; endMs: number }[],
+  source: readonly {
+    id: string;
+    from: number;
+    to: number;
+    startMs: number;
+    endMs: number;
+  }[],
   offsetMs: number,
 ): ShowcaseManifestPhrase[] {
   const canonical = parseNarration(scene.narration).text;
@@ -289,11 +295,19 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
           quality: 'missing',
           error: 'Ссылка на сопоставление речи есть без исходных меток WAV.',
         }
-        : { fixture: null, quality: 'missing', error: null };
+        : {
+          fixture: null,
+          quality: 'missing',
+          error: null,
+        };
     }
 
     if (!scene.audio) {
-      return { fixture: null, quality: 'missing', error: 'У меток речи отсутствует WAV.' };
+      return {
+        fixture: null,
+        quality: 'missing',
+        error: 'У меток речи отсутствует WAV.',
+      };
     }
 
     const targetDir = sidecarDir(store, projectId, scene.id);
@@ -416,11 +430,27 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
    * редакций. Работа идёт в самом сервере — она локальная, конечная и не открывает
    * ни браузера, ни сети.
    */
+  /**
+   * Обе стадии монтажа используют один снимок входов принятой записи.
+   * Недоступный стенд допускается только при проверенных clip/log, без смены policy.
+   */
+  async function assemblyInputs(project: ShowcaseProject): Promise<ArtifactInputs> {
+    const stored = project.target?.status !== 'ready' && project.recordingReady === true
+      ? await store.readProject(project.id)
+      : project;
+
+    return inputsOf(stored);
+  }
+
+  /**
+   * До постановки монтажа проверяет свежесть клипов и звука на выбранных inputs.
+   * Пустой или устаревший набор не получает задание ffmpeg.
+   */
   async function assemble(id: string): Promise<ShowcaseJob> {
     assertEnabled();
 
     const project = await ensureSpeechAlignments(id);
-    const inputs = inputsOf(project);
+    const inputs = await assemblyInputs(project);
     const ordered = [...project.scenes].sort((left, right) => left.order - right.order);
 
     if (ordered.length === 0) {
@@ -472,9 +502,13 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
     return toPublicJob(record);
   }
 
+  /**
+   * Монтирует неизменяемые медиа и публикует final после проверки входного hash.
+   * Повторная сверка внутри store не принимает результат поверх новых правок.
+   */
   async function runAssemble(jobId: string, projectId: string): Promise<void> {
     const project = await readProject(projectId);
-    const inputs = inputsOf(project);
+    const inputs = await assemblyInputs(project);
     const names = store.namesOf(projectId);
     const workDir = path.join(store.jobsDir, jobId, 'work');
     const ordered = [...project.scenes].sort((left, right) => left.order - right.order);
@@ -606,7 +640,7 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
 
       if (
         Math.abs(probedScene.durationMs - timing.totalMs)
-          > SHOWCASE_MANIFEST_MEDIA_TOLERANCE_MS
+        > SHOWCASE_MANIFEST_MEDIA_TOLERANCE_MS
       ) {
         throw new ShowcaseError(
           'assemble_failed',
@@ -668,7 +702,7 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
 
     if (
       Math.abs(probed.durationMs - measuredTotalMs)
-        > SHOWCASE_MANIFEST_MEDIA_TOLERANCE_MS
+      > SHOWCASE_MANIFEST_MEDIA_TOLERANCE_MS
     ) {
       throw new ShowcaseError(
         'assemble_failed',

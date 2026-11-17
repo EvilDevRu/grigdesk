@@ -159,7 +159,6 @@ import {
   countTelegramRules,
 } from './lib/projects/dependencySources.ts';
 import { isProjectArchived } from './lib/projects/archive.ts';
-import { projectRepos } from './lib/projects.ts';
 import { RoutesStore } from './modules/routes/store.ts';
 import { createFactoryBrowserTrusted } from './lib/browser/factoryBrowserTrusted.ts';
 import { createBrowserService } from './lib/browser/browserService.ts';
@@ -891,13 +890,12 @@ async function build(desktopParent: DesktopParent | null) {
     stateDir: config.stateDir,
     browserPath: config.showcaseBrowser || null,
     browserDir: config.showcaseBrowserDir,
-    voiceDir: config.showcaseVoiceDir,
-    yandexVoice: {
-      apiKey: config.showcaseYandexApiKey,
-      folderId: config.showcaseYandexFolderId,
-    },
-    edgeVoice: { enabled: config.showcaseEdgeTts },
-    bootstrapPython: process.env.GRIGDESK_MEDIA_BOOTSTRAP_PYTHON || 'python3',
+    voiceBin: config.showcaseVoiceBin || null,
+    voiceCloudEnv: () => ({
+      DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY ?? '',
+      TOKEN_PLAN_API_KEY: process.env.TOKEN_PLAN_API_KEY ?? '',
+      GRIGDESK_VOICE_QWEN_API_KEY: process.env.GRIGDESK_VOICE_QWEN_API_KEY ?? '',
+    }),
     listProjects: () => listProjects(config, prefs),
     sandboxOverview: () => sandboxService.overview(),
     sandboxActivityGuard,
@@ -935,13 +933,6 @@ async function build(desktopParent: DesktopParent | null) {
       title?: unknown;
       description?: unknown;
     } | null,
-    // Репозитории постоянного стенда — из паспорта проекта, тот же источник путей,
-    // что у «Кода». Разбор читает их только по выбору человека в «О чём ролик».
-    projectRepos: async (profile: string) => (await projectRepos({
-      config,
-      prefs,
-      id: profile,
-    })).map((repo) => ({ name: repo.key, path: repo.dir })),
     // Каналы доставки: сессией портала и аккаунтом Telegram владеет сервер, раздел
     // получает их готовыми и вторых не заводит.
     deliveryDeps: {
@@ -1333,7 +1324,7 @@ async function build(desktopParent: DesktopParent | null) {
     count: async (id) => {
       const overview = await showcaseService.overview();
       const items = overview.projects
-        .filter((project) => project.ref.kind === 'project' && project.ref.id === id)
+        .filter((project) => project.ref?.kind === 'project' && project.ref.id === id)
         .map((project) => project.title || project.id);
 
       return { count: items.length, items };

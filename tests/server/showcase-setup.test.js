@@ -9,13 +9,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createFakeShowcaseVoice } from './helpers/showcaseVoice.js';
+
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 
 /**
  * Служба на профиле без входа и с явным «браузером» — существующим файлом node.
  * Так пункт браузера готов, а установка ему не предлагается.
  */
-async function fixture(t, { browserPath = process.execPath, edgeVoice = undefined } = {}) {
+async function fixture(t, { browserPath = process.execPath, unused = undefined } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-setup-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -37,14 +39,14 @@ async function fixture(t, { browserPath = process.execPath, edgeVoice = undefine
     screens: [{ id: 'overview', title: 'Обзор', path: '/', readySelector: 'body', elements: [] }],
   }), 'utf8');
 
+  const voice = await createFakeShowcaseVoice(root, { ready: ['qwen-studio'] });
   const service = createShowcaseService({
+    ...voice,
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),
     stateDir: path.join(root, 'state'),
     browserPath,
-    voiceDir: path.join(root, 'voice'),
-    edgeVoice,
     listProjects: async () => ['demo-profile'],
     broadcast: () => {},
     limits: () => ({
@@ -66,71 +68,9 @@ function itemOf(status, id) {
   return status.items.find((item) => item.id === id);
 }
 
-test('пункты готовности: браузер, сборка видео, голоса, облако, речь, хранилище', async (t) => {
-  const service = await fixture(t);
-  const status = await service.setupStatus();
-  const ids = status.items.map((item) => item.id);
 
-  for (const expected of ['browser', 'media', 'yandex', 'speech', 'storage']) {
-    assert.ok(ids.includes(expected), `нет пункта ${expected}`);
-  }
 
-  assert.ok(ids.some((id) => id.startsWith('voice:')), 'у каждого пакета голоса свой пункт');
-  assert.match(status.checkedAt, /^\d{4}-/);
 
-  const browser = itemOf(status, 'browser');
-
-  assert.equal(browser.status, 'ready');
-  assert.equal(browser.action, null, 'готовому браузеру установка не предлагается');
-
-  const voice = status.items.find((item) => item.id.startsWith('voice:'));
-
-  assert.equal(voice.status, 'blocked');
-  assert.equal(voice.action.label, 'Установить');
-  assert.match(voice.action.hint, /МБ|ГБ/, 'размер назван до нажатия');
-  assert.equal(voice.job, null);
-
-  // Qwen3-TTS ставится той же кнопкой, что и остальные: модель на гигабайты
-  // называется гигабайтами, а не тысячами мегабайт.
-  const qwen = itemOf(status, 'voice:qwen3-tts-1_7b');
-
-  assert.ok(qwen, 'у Qwen3-TTS свой пункт готовности');
-  assert.equal(qwen.status, 'blocked');
-  assert.match(qwen.action.hint, /\d,\d ГБ/);
-  assert.match(qwen.reason, /Apache/);
-
-  const yandex = itemOf(status, 'yandex');
-
-  assert.equal(yandex.status, 'blocked');
-  assert.equal(yandex.action, null, 'ключ задаёт человек, кнопки у него нет');
-  assert.match(yandex.reason, /GRIGDESK_SHOWCASE_YANDEX_API_KEY/);
-
-  assert.equal(itemOf(status, 'media').action, null);
-  assert.equal(itemOf(status, 'speech').action, null);
-});
-
-test('облако Microsoft без настройки не подключается, выключенное — видно с подсказкой', async (t) => {
-  const silent = await fixture(t);
-
-  assert.equal(itemOf(await silent.setupStatus(), 'edge'), undefined, 'без опции движка нет');
-
-  const disabled = await fixture(t, { edgeVoice: { enabled: false } });
-  const status = await disabled.setupStatus();
-  const edge = itemOf(status, 'edge');
-  const ids = status.items.map((item) => item.id);
-
-  assert.equal(edge.status, 'blocked');
-  assert.equal(edge.action, null, 'облако включают настройкой, кнопки у него нет');
-  assert.match(edge.reason, /выключен/);
-  assert.match(edge.reason, /GRIGDESK_SHOWCASE_EDGE_TTS/);
-  assert.ok(ids.indexOf('edge') < ids.indexOf('yandex'), 'порядок облаков фиксированный');
-
-  // Выключенный движок замыкает реестр голосов, а не занимает место по умолчанию.
-  const catalog = await disabled.voiceCatalog();
-
-  assert.equal(catalog.engines.at(-1).id, 'edge');
-  assert.ok(catalog.engines.at(-1).voices.every((voice) => !voice.available));
-});
 
 test('без явного браузера пункт предлагает поставить Chromium', async (t) => {
   const service = await fixture(t, { browserPath: null });
@@ -156,5 +96,36 @@ test('неизвестный пункт и чужой голос отверга�
   await assert.rejects(
     () => service.cancelSetup('speech'),
     (error) => error.code === 'unknown_setup',
+  );
+});
+
+test('готовность показывает пакеты voice и облака Qwen без кнопки', async (t) => {
+  const service = await fixture(t);
+  const status = await service.setupStatus();
+  const piper = status.items.find((item) => item.id === 'voice:piper-irina');
+  const silero = status.items.find((item) => item.id === 'voice:silero-v5_5_ru');
+  const studio = status.items.find((item) => item.id === 'qwen-studio');
+  const token = status.items.find((item) => item.id === 'qwen-token');
+
+  assert.ok(piper && silero && studio && token);
+  assert.equal(piper.action.label, 'Установить');
+  assert.match(piper.action.hint, /МБ/u);
+  assert.equal(studio.action, null);
+  assert.equal(token.action, null);
+  assert.equal(status.items.some((item) => item.id === 'edge' || item.id === 'yandex'), false);
+  assert.equal(status.items.some((item) => item.id.startsWith('voice:qwen')), false);
+});
+
+test('каталог голосов содержит только движки пакета voice', async (t) => {
+  const service = await fixture(t);
+  const catalog = await service.voiceCatalog();
+
+  assert.deepEqual(
+    catalog.engines.map((engine) => engine.id).sort(),
+    ['piper', 'qwen-studio', 'qwen-token', 'silero'],
+  );
+  assert.deepEqual(
+    catalog.install.available.map((pack) => pack.id).sort(),
+    ['piper-irina', 'silero-v5_5_ru'],
   );
 });

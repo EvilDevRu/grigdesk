@@ -37,13 +37,12 @@ function checkContracts(
   // @ts-expect-error Непроверенный JSON нельзя класть в состояние раздела.
   const unchecked: ShowcaseOverview = input;
   // @ts-expect-error Вид цели закрыт перечислением: показывать «что-нибудь» нельзя.
-  const kind: ShowcaseProject['ref']['kind'] = 'anything';
+  const kind: NonNullable<ShowcaseProject['ref']>['kind'] = 'anything';
   // @ts-expect-error Среда показа объявляется профилем, а не выдумывается клиентом.
   const environment: ShowcaseOverview['projects'][number]['state'] = 'almost-ready';
   // @ts-expect-error В состояние кладут проверенное задание, а не кадр из сети.
   store.applyJob(input);
-  // @ts-expect-error Ролик заводится под конкретную цель: без неё показывать нечего.
-  createShowcaseProject(store, { profile: 'demo-profile' });
+  createShowcaseProject(store, {});
   // @ts-expect-error Новая форма не заводит ролик из абстрактной legacy-задачи.
   createShowcaseProject(store, { ref: { kind: 'task', id: '123' } });
   // @ts-expect-error Удаление адресуется идентификатором ролика, а не самим роликом.
@@ -74,6 +73,9 @@ function checkContracts(
     job.finishedAt.toUpperCase();
   }
 
+  const absentRef: ShowcaseProject['ref'] = null;
+
+  void absentRef;
   void unchecked;
   void kind;
   void environment;

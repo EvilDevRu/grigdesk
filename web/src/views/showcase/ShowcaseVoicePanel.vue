@@ -4,6 +4,13 @@
          читаются как ошибка. Образец слушается одним нажатием: по имени голос не
          выбрать, а тембр — единственное, что здесь важно. -->
     <template v-if="mode === 'choice'">
+      <UiButton
+        v-if="canAdapt"
+        variant="outline"
+        data-testid="showcase-adapt-retry"
+        :disabled="busy"
+        @click="emit('adapt')"
+      >{{ t('core.showcasePerepisatReplikiPodGolos') }}</UiButton>
       <div class="voice__choice">
         <UiField :label="t('core.showcaseGolosRolika')" class="voice__field">
           <UiSelect
@@ -206,6 +213,7 @@ const props = withDefaults(defineProps<{
   // Режим «установка» живёт на списке роликов, пока говорить нечем; «выбор» — на
   // экране ролика, где голос уже есть и его надо услышать и сменить.
   mode?: 'setup' | 'choice';
+  canAdapt?: boolean;
   voiceRef?: string | null;
   pace?: Pace | null;
   // Образец приносит вид: у панели нет доступа к сети, и стаб в тестах ей не нужен.
@@ -224,6 +232,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   install: [voiceId: string];
   cancel: [];
+  adapt: [];
   change: [choice: { voiceRef: string | null; pace: Pace | null }];
   'save-dictionary': [text: string];
 }>();

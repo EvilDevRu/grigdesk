@@ -43,7 +43,7 @@ import type {
   VoiceSession,
 } from './voice/contract.ts';
 import type { StressDictionaryStore } from './voice/dictionary.ts';
-import type { VoiceInstaller } from './voice/install.ts';
+import type { PackageInstaller } from './voice/packageInstall.ts';
 import {
   alignmentToSource,
   createPronunciationOverrides,
@@ -72,7 +72,7 @@ export interface NarrationOpsDeps {
   // GrigDesk, но не знает, как тот устроен, и без него обязан работать — с
   // пометкой, что проверка речи пропущена.
   transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
-  voiceInstaller: VoiceInstaller;
+  voiceInstaller: PackageInstaller;
   voices: VoiceRegistry;
   // Образцы голосов лежат отдельно от роликов: они общие для всех и не стареют
   // вместе со сценами.
@@ -224,6 +224,29 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
    * молча выпавшего слова хуже, чем сразу. Сцена и обрывки названы, чтобы человек
    * знал, ЧТО переписать словами.
    */
+  /**
+   * Возможности пакетного адаптера читаются после его doctor. Это рабочий путь
+   * холодного старта и восстановления сборки, а не побочный эффект открытия UI.
+   */
+  async function readyVoiceEngine(engineId: string): Promise<VoiceEngine> {
+    const engine = voices.engineOf(engineId);
+    const doctor = await engine.doctor();
+
+    if (doctor.status !== 'ready') {
+      throw new ShowcaseError(
+        'voice_unavailable',
+        doctor.reason || 'Голосовой движок недоступен. Проверьте его настройку.',
+        503,
+      );
+    }
+
+    return engine;
+  }
+
+  /**
+   * Нечитаемые символы останавливают озвучку до создания задания.
+   * Причина содержит имя сцены и фрагменты, которые человек может исправить.
+   */
   function assertReadable(
     scene: Pick<ShowcaseProject['scenes'][number], 'title'>,
     engine: VoiceEngine,
@@ -245,7 +268,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     throw new ShowcaseError(
       'unreadable_text',
       `У сцены «${scene.title}» в тексте ${what} (${fragments.join(', ')}): `
-        + `${engine.name} этого не прочитает — напишите словами.`,
+      + `${engine.name} этого не прочитает — напишите словами.`,
       409,
     );
   }
@@ -283,6 +306,8 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     // хуже, чем сразу. Голос по умолчанию спрашивается один раз на все сцены.
     let fallbackRef: string | null = null;
 
+    const readyEngines = new Map<string, VoiceEngine>();
+
     for (const scene of pending) {
       if (!scene.audioSource.voiceRef && !fallbackRef) {
         fallbackRef = await defaultVoiceRef();
@@ -294,7 +319,15 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
       const voiceRef = scene.audioSource.voiceRef ?? (fallbackRef as string);
       const prepared = synthesisInputOf(scene, voiceRef);
 
-      assertReadable(scene, voices.engineOf(engineId), voiceId, prepared.spokenText);
+      let engine = readyEngines.get(engineId);
+
+      if (!engine) {
+        engine = await readyVoiceEngine(engineId);
+        readyEngines.set(engineId, engine);
+      }
+
+      assertReadable(scene, engine, voiceId, prepared.spokenText);
+
     }
 
     const inputHashes = Object.fromEntries(
@@ -541,11 +574,11 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
         || speechTiming.inputHash === speechTimingInputHash(expected, artifact.contentHash);
       const alignmentMatchesTiming = speechAlignment === null
         || speechTiming !== null
-          && speechAlignment.inputHash === speechAlignmentInputHash(
-            textHash,
-            artifact.contentHash,
-            speechTiming.contentHash,
-          );
+        && speechAlignment.inputHash === speechAlignmentInputHash(
+          textHash,
+          artifact.contentHash,
+          speechTiming.contentHash,
+        );
 
       if (
         !own
@@ -631,7 +664,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     assertEnabled();
 
     const { engineId, voiceId } = voices.parseVoiceRef(voiceRef);
-    const engine = voices.engineOf(engineId);
+    const engine = await readyVoiceEngine(engineId);
     const version = engine.capabilities(voiceId).engineVersion;
     const name = `${engineId}-${voiceId}-${version}.wav`.replace(/[^\w.-]/g, '_');
     const file = path.join(deps.previewDir, name);
@@ -639,6 +672,8 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     if (await fs.stat(file).then(() => true, () => false)) {
       return file;
     }
+
+    await fs.mkdir(deps.previewDir, { recursive: true, mode: 0o700 });
 
     const candidate = await engine.synthesize(
       {
@@ -670,7 +705,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     }
 
     const { engineId, voiceId } = voices.parseVoiceRef(input.voiceRef);
-    const engine = voices.engineOf(engineId);
+    const engine = await readyVoiceEngine(engineId);
     const pronunciationOverrides = createPronunciationOverrides(
       input.narration,
       input.pronunciationOverrides,
@@ -696,7 +731,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
       throw new ShowcaseError(
         'text_too_long',
         `Реплика длиннее предела предпрослушивания: ${prepared.spokenText.length} из `
-          + `${maxChars}.`,
+        + `${maxChars}.`,
         413,
       );
     }
@@ -787,6 +822,8 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
 
     const saved = await store.updateProject(id, expectedRevision, (current) => ({
       ...current,
+      voiceRef: choice.voiceRef,
+      pace: choice.pace,
       scenes: current.scenes.map((scene) => ({
         ...scene,
         direction: { ...scene.direction, pace: choice.pace },

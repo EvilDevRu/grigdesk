@@ -45,7 +45,6 @@ function smokeEnvironment(root: string, port: number, mobilePort: number): NodeJ
     GRIGDESK_PLUGIN_INSTALLS_STATE_PATH: path.join(root, 'state/plugin-installs.json'),
     GRIGDESK_SHOWCASE_DIR: path.join(root, 'showcase'),
     GRIGDESK_SHOWCASE_AUTH_DIR: path.join(root, 'showcase-auth'),
-    GRIGDESK_SHOWCASE_VOICE_DIR: path.join(root, 'showcase-voice'),
     GRIGDESK_SHOWCASE_BROWSER_DIR: path.join(root, 'showcase-browser'),
     FACTORY_STATE_DIR: path.join(root, 'factory/state'),
     FACTORY_CONTROL_ROOT: path.join(root, 'factory/control'),

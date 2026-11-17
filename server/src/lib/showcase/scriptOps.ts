@@ -1,17 +1,19 @@
+import type { VoiceRegistry } from './voice/registry.ts';
+import { SHOWCASE_NARRATION_MAX_CHARS } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
+
+import path from 'node:path';
 // Бриф и сцены, предложенные моделью.
 //
-// Что читать при разборе, выбирает человек блоком «О чём ролик»: задача, коммиты,
-// незакоммиченное, код и своё пожелание. Выбор хранится в ролике, а коммиты и имена
-// репозиториев сервер сверяет с живой историей цели перед каждым чтением.
+// Что читать при разборе, выбирает человек блоком «О чём ролик»: опциональная задача Б24
+// и своё пожелание. Git раздел не читает.
 //
-// Текст задачи и diff — НЕДОВЕРЕННЫЕ данные. Поэтому модель зовётся одноразовым
+// Текст задачи и комментария — НЕДОВЕРЕННЫЕ данные. Поэтому модель зовётся одноразовым
 // безопасным режимом: без инструментов, рабочей области и продолжения сессии.
 // Обычный `run` не используется даже как запасной путь.
 //
 // Форма ответа и идентификаторы проходят строгий разбор. Пробное исполнение
 // дополняет карту наблюдениями браузера и проверяет рассказ по кадрам; исправление
 // обязательно исполняется заново до публикации сцен и начала озвучки.
-import path from 'node:path';
 
 import { ShowcaseError } from './errors.ts';
 import { launchRehearsal } from './script/rehearsalRunner.ts';
@@ -23,17 +25,17 @@ import {
   verifyAndRepairScript,
   writeScriptProof,
 } from './script/verification.ts';
-import { collectStoryContext, readSourceOptions, sourceProblem } from './script/source.ts';
-import type { RepoRef } from './script/context.ts';
 import {
+  buildAdaptNarrationPrompt,
   buildBindingsPrompt,
   buildBriefPrompt,
   buildRepairPrompt,
   buildScriptPrompt,
   SCRIPT_PROMPT_VERSION,
 } from './script/prompt.ts';
-import type { ScriptContext } from './script/prompt.ts';
+import type { ScriptContext, ScriptVoiceRules } from './script/prompt.ts';
 import {
+  parseAdaptReply,
   parseBindingsReply,
   parseBrief,
   parseScriptReplyResult,
@@ -52,21 +54,16 @@ import {
 } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   ShowcaseProject,
+  ShowcaseTargetRef,
   ShowcaseScene,
-  ShowcaseSourceOptions,
   ShowcaseStorySource,
 } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseResolvedScope, ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 
-// Пометка о неполном diff. Модель видела не все изменения — план и сцены построены
-// по видимой части, и человек должен знать об этом, не слушая оговорку в ролике.
-const DIFF_TRUNCATED_NOTE = 'Изменения репозиториев прочитаны не полностью (длинные файлы '
-  + 'обрезаны, тесты не читались): план и сцены построены по видимой части.';
-
 // Длина текста задачи, которая доезжает до промпта. Постановки бывают на десятки
-// килобайт, а разбору нужна суть: остальное всё равно вытеснит diff и карту экранов.
+// килобайт, а разбору нужна суть: остальное всё равно вытеснит карту экранов.
 const TASK_TEXT_MAX = 4000;
 
 // Срок одного вызова модели. Срок исполнителя по умолчанию — пять минут под триаж
@@ -107,6 +104,12 @@ function plainText(value: string): string {
 }
 
 export interface ScriptOpsDeps {
+  // Голосовой реестр и словарь приходят из службы: правила реплик зависят от
+  // выбранного движка, а словарь установки — подсказка модели.
+  voices: VoiceRegistry | null;
+  defaultVoiceRef: (() => Promise<string>) | null;
+  stressDictionary: { read: () => Promise<{ entries: string[] }> } | null;
+
   resolveBrowserPath?: () => Promise<string | null>;
   assertEnabled: () => void;
   broadcast: (event: string, data: unknown) => void;
@@ -127,14 +130,11 @@ export interface ScriptOpsDeps {
     title?: unknown;
     description?: unknown;
   } | null>) | null;
-  // Репозитории постоянного стенда по имени профиля: у него нет реестра песочницы,
-  // и пути приходят из паспорта проекта. Без зависимости у стенда репозиториев нет.
-  projectRepos?: ((profile: string) => Promise<{ name: string; path: string }[]>) | null;
   // Серверный config исполнителей и настройки провайдеров: путь к CLI и каталог
   // моделей объявлены в config.ts, и без них вызов падает на запуске процесса.
   executorConfig: (() => Record<string, unknown>) | null;
   providerSettings: (() => Record<string, unknown>) | null;
-  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
+  acquireTargetLease: (ref: ShowcaseTargetRef) => Promise<SandboxActivityLease | null>;
   // Ожидание перед повтором запроса к модели: тесты подменяют его, чтобы не ждать.
   pause?: (ms: number) => Promise<void>;
   store: ShowcaseStore;
@@ -151,7 +151,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
   /**
    * Одноразовый вызов модели на недоверенном тексте. Обычный `run` не используется
-   * даже как запасной путь: текст задачи и diff не должны получить инструменты,
+   * даже как запасной путь: текст задачи и комментария не должны получить инструменты,
    * рабочую область и продолжение сессии.
    */
   async function runUntrustedModel(
@@ -225,8 +225,8 @@ export function createScriptOps(deps: ScriptOpsDeps) {
           throw new ShowcaseError(
             'model_rate_limited',
             'Выбранная модель сценария исчерпала лимит. '
-              + (reset ? `Сброс по ответу провайдера: ${reset}. ` : '')
-              + 'Повторите сборку после сброса лимита или выберите другую модель в настройках плагина.',
+            + (reset ? `Сброс по ответу провайдера: ${reset}. ` : '')
+            + 'Повторите сборку после сброса лимита или выберите другую модель в настройках плагина.',
             429,
           );
         }
@@ -239,7 +239,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
           throw new ShowcaseError(
             'model_unreachable',
             `Модель сценария недоступна по сети: ${attempt} попытки подряд не дошли до API `
-              + `(${message}). Повторите сборку, когда сеть восстановится.`,
+            + `(${message}). Повторите сборку, когда сеть восстановится.`,
             502,
           );
         }
@@ -261,57 +261,25 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     return typeof reply === 'string' ? reply : String((reply as { reply?: unknown })?.reply ?? '');
   }
 
-  /**
-   * Репозитории цели: у песочницы — из её реестра, у постоянного стенда — из паспорта
-   * проекта. Путь резолвит сервер, браузер называет только имя; два ключа одного
-   * каталога дают один репозиторий, иначе история читалась бы дважды. Нечитаемый
-   * паспорт — отказ без пути: пустой список выглядел бы стендом без репозиториев.
-   */
-  async function reposOf(project: ShowcaseProject, scope: ShowcaseResolvedScope): Promise<RepoRef[]> {
-    if (project.ref.kind !== 'project') {
-      return scope.sandbox?.repos ?? [];
-    }
 
-    let listed: { name: string; path: string }[] = [];
-
-    try {
-      listed = await deps.projectRepos?.(scope.profile) ?? [];
-    } catch {
-      throw new ShowcaseError('source_unavailable', 'Не удалось прочитать репозитории проекта.', 503);
-    }
-
-    const seen = new Set<string>();
-    const repos: RepoRef[] = [];
-
-    for (const repo of listed) {
-      const resolved = path.resolve(repo.path);
-
-      if (!seen.has(resolved)) {
-        seen.add(resolved);
-        repos.push({
-          name: repo.name,
-          path: repo.path,
-          branch: '',
-        });
-      }
-    }
-
-    return repos;
-  }
 
   /**
-   * Работа с репозиториями цели под арендой стенда: песочницу не сносят и не
-   * переподнимают, пока читается её история. Цель перепроверяется по отпечатку.
-   * Репозитории читаются только когда нужны: разбор постоянного стенда без выбора от
-   * паспорта проекта не зависит.
+   * Работа с подключённым стендом под арендой: песочницу не сносят и не переподнимают,
+   * пока идёт действие. Цель перепроверяется по отпечатку. Git раздел не читает:
+   * контекст рассказа — задача, комментарий и карта экранов.
    */
-  async function withStoryRepos<Result>(
+  async function withTargetScope<Result>(
     project: ShowcaseProject,
-    needRepos: boolean,
-    work: (scope: ShowcaseResolvedScope, repos: RepoRef[]) => Promise<Result>,
+    work: (scope: ShowcaseResolvedScope) => Promise<Result>,
   ): Promise<Result> {
-    if (project.target.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', project.target.reason, 409);
+    if (!project.ref || !project.target || project.target.status !== 'ready') {
+      throw new ShowcaseError(
+        'target_unavailable',
+        project.target?.status === 'blocked'
+          ? project.target.reason
+          : 'Стенд не выбран: подключите его в карточке ролика.',
+        409,
+      );
     }
 
     const lease = await deps.acquireTargetLease(project.ref);
@@ -325,73 +293,204 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
       await lease?.assertPathIdentity();
 
-      return await work(scope, needRepos ? await reposOf(project, scope) : []);
+      return await work(scope);
     } finally {
       await lease?.release();
     }
   }
 
   /**
-   * Контекст генерации по выбору «О чём ролик». Пути и Git-ссылки сервер берёт у
-   * зарегистрированных репозиториев цели; выбранный коммит, пропавший из истории
-   * после rebase, останавливает разбор с понятной причиной, а не подменяется веткой.
+   * Контекст генерации: задача по номеру из источника, комментарий человека и карта
+   * экранов подключённого стенда. Ревизия словаря карты запоминается сценарием, чтобы
+   * после правки карты интерфейс мог сказать «сцены старше карты».
    */
-  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<{
-    context: ScriptContext;
-    // Ревизия словаря карты, по которому собран контекст: сценарий запоминает её,
-    // чтобы после правки карты экранов интерфейс мог сказать «сцены старше карты».
-    mapRevision: string;
-  }> {
-    const source = project.source ?? null;
-    const needRepos = project.ref.kind !== 'project' || Boolean(source?.repos?.length);
-
-    return withStoryRepos(project, needRepos, async (scope, repos) => {
-      // Проверка выбора, чтение по одному HEAD и сверка, что он не сдвинулся, — внутри:
-      // пропавший коммит и нечитаемая часть останавливают разбор до вызова модели.
-      const story = await collectStoryContext(repos, source, project.ref.kind);
-
-      return {
-        context: {
-          taskTitle: project.title,
-          taskText,
-          note: source?.note ?? '',
-          commits: story.commits,
-          diff: story.diff,
-          diffBase: story.base,
-          diffHead: story.head,
-          diffTruncated: story.truncated,
-          screens: scope.screens.map((screen) => ({
-            id: screen.id,
-            title: screen.title,
-            path: screen.path,
-            elements: screen.elements.map((element) => ({ id: element.id, title: element.title })),
-          })),
-          maxScenes: limits().maxScenes,
-        },
-        mapRevision: mapRevisionOf(scope.screens),
-      };
-    });
-  }
-
   /**
-   * Из чего выбирать источник рассказа: история и незакоммиченное по репозиториям
-   * цели и выбор, равный умолчанию. Наружу уходят имена, а не пути.
+   * Правила реплик для голоса ролика: явный выбор человека на уровне ролика,
+   * затем голос первой tts-сцены, иначе первый готовый движок. Возможности берёт
+   * адаптер движка; предел сцены жёстче облачного. Нет готового голоса —
+   * нейтральные правила, а не отказ разбора.
    */
-  async function sourceOptions(id: string): Promise<ShowcaseSourceOptions> {
+  /**
+   * Адаптация реплик под текущий движок. Сцены, действия и порядок сохраняются;
+   * меняются только narration и subtitleText. Привязки цитат и произносительные
+   * замены очищаются и пересвязываются существующим проходом: старые цитаты к
+   * новому тексту не годятся. До успешного разбора редакция не меняется.
+   */
+  async function adaptNarration(
+    id: string,
+    onProgress?: (label: string) => Promise<void>,
+  ): Promise<ShowcaseProject> {
     assertEnabled();
 
     const project = await readProject(id);
 
-    return withStoryRepos(project, true, (_scope, repos) => readSourceOptions(repos, {
-      kind: project.ref.kind,
-      taskAvailable: project.ref.kind !== 'project' && Boolean(deps.taskDetails),
-      saved: project.source ?? null,
+    if (project.scenes.length === 0) {
+      throw new ShowcaseError('no_scenes', 'В ролике нет сцен для адаптации.', 409);
+    }
+
+    // Загруженный человеком звук авторитетен: его текст и привязки не трогаются.
+    const ordered = [...project.scenes]
+      .filter((scene) => scene.audioSource.kind === 'tts')
+      .sort((left, right) => left.order - right.order);
+
+    if (ordered.length === 0) {
+      throw new ShowcaseError(
+        'no_scenes',
+        'Все сцены ролика с загруженным звуком: адаптировать нечего.',
+        409,
+      );
+    }
+
+    const rules = await voiceRulesOf(project);
+    const prompt = buildAdaptNarrationPrompt(
+      ordered.map((scene) => ({
+        id: scene.id,
+        title: scene.title,
+        narration: scene.narration,
+        subtitleText: scene.subtitleText,
+      })),
+      rules,
+    );
+
+    await onProgress?.('Переписываю реплики под выбранный голос.');
+
+    const first = await runUntrustedModel(prompt, [], onProgress);
+    let parsed = parseAdaptReply(first, ordered);
+
+    if (!parsed.scenes) {
+      parsed = parseAdaptReply(
+        await runUntrustedModel(buildRepairPrompt(prompt, first), [], onProgress),
+        ordered,
+      );
+    }
+
+    if (!parsed.scenes) {
+      throw new ShowcaseError(
+        'model_reply_invalid',
+        parsed.problem?.message
+        ?? ('Модель не вернула адаптированные реплики нужной формы. '
+          + 'Можно повторить или поправить текст вручную.'),
+        502,
+      );
+    }
+
+    const adapted = parsed.scenes;
+    const saved = await store.updateProject(id, project.revision, (current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => {
+        const next = adapted.get(scene.id);
+
+        if (!next) {
+          return scene;
+        }
+
+        return {
+          ...scene,
+          narration: next.narration,
+          subtitleText: next.subtitleText,
+          syncBindings: null,
+          pronunciationOverrides: [],
+        };
+      }),
+      decisions: [
+        ...current.decisions.filter((item) => item.kind !== 'script'),
+        {
+          id: `adapt-${Date.now().toString(36)}`,
+          kind: 'script' as const,
+          inputHash: SCRIPT_PROMPT_VERSION,
+          decidedAt: new Date().toISOString(),
+          note: 'Реплики адаптированы под голосовой движок и ждут пересвязки.',
+        },
+      ],
     }));
+
+    broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+    return generateBindings(id);
   }
 
   /**
-   * Сохраняет выбор «О чём ролик». Коммиты проверяются по живой истории сейчас, а не
-   * через минуты разбора; null возвращает умолчание цели и git не трогает.
+   * Выбор ролика имеет приоритет над первой сценой и готовым голосом по умолчанию.
+   * Doctor прогревает возможности, словарь передаёт модели канонические строки.
+   */
+  async function voiceRulesOf(project: ShowcaseProject): Promise<ScriptVoiceRules | null> {
+    const registry = deps.voices;
+
+    if (!registry) {
+      return null;
+    }
+
+    const explicit = project.voiceRef
+      ?? project.scenes.find((scene) => (
+        scene.audioSource.kind === 'tts' && scene.audioSource.voiceRef
+      ))?.audioSource.voiceRef
+      ?? null;
+
+    let voiceRef = explicit;
+
+    if (!voiceRef && deps.defaultVoiceRef) {
+      voiceRef = await deps.defaultVoiceRef().catch(() => null);
+    }
+
+    if (!voiceRef) {
+      return null;
+    }
+
+    try {
+      const { engineId, voiceId } = registry.parseVoiceRef(voiceRef);
+      const engine = registry.engineOf(engineId);
+
+      // Прогрев кэша возможностей: после перезапуска первый разбор не должен
+      // получать нейтральные правила из-за холодного кэша (находка F32).
+      await engine.doctor().catch(() => null);
+
+      const capabilities = engine.capabilities(voiceId);
+      const dictionary = deps.stressDictionary
+        ? (await deps.stressDictionary.read()).entries
+        : [];
+
+      return {
+        engineName: engine.name,
+        stress: capabilities.stress,
+        stressExperimental: capabilities.stressMode === 'experimental',
+        pace: capabilities.pace,
+        maxChars: Math.min(capabilities.maxChars, SHOWCASE_NARRATION_MAX_CHARS),
+        unreadable: capabilities.unreadable ?? [],
+        dictionary,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<{
+    context: ScriptContext;
+    mapRevision: string;
+  }> {
+    return withTargetScope(project, async (scope) => ({
+      context: {
+        taskTitle: project.title,
+        taskText,
+        note: project.source?.note ?? '',
+        screens: scope.screens.map((screen) => ({
+          id: screen.id,
+          title: screen.title,
+          path: screen.path,
+          elements: screen.elements.map((element) => ({ id: element.id, title: element.title })),
+        })),
+        maxScenes: limits().maxScenes,
+        voice: await voiceRulesOf(project),
+      },
+      mapRevision: mapRevisionOf(scope.screens),
+    }));
+  }
+
+
+
+  /**
+   * Сохраняет источник «задача + комментарий». Git не читается и не проверяется:
+   * номер задачи — данные человека, его текст сервер доберёт при разборе. Пустой
+   * выбор (null) означает умолчание: без задачи и без комментария.
    */
   async function saveSource(
     id: string,
@@ -400,15 +499,18 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   ): Promise<ShowcaseProject> {
     assertEnabled();
 
-    const project = await readProject(id);
-    const next = normalizeShowcaseSource(source);
-    const needRepos = Boolean(next?.repos?.length);
-    const problem = next
-      ? await withStoryRepos(project, needRepos, (_scope, repos) => sourceProblem(next, repos))
-      : null;
+    await readProject(id);
 
-    if (problem) {
-      throw new ShowcaseError('bad_source', problem, 400);
+    let next: ShowcaseStorySource | null = null;
+
+    try {
+      next = normalizeShowcaseSource(source);
+    } catch (error) {
+      throw new ShowcaseError(
+        'bad_source',
+        error instanceof Error ? error.message : 'Источник не по форме.',
+        400,
+      );
     }
 
     const saved = await store.updateProject(id, expectedRevision, (current) => ({
@@ -557,12 +659,19 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     const browserPath = await deps.resolveBrowserPath?.();
 
     if (browserPath) {
+      if (!project.ref || !project.target || project.target.status !== 'ready') {
+        throw new ShowcaseError(
+          'target_unavailable',
+          project.target?.status === 'blocked'
+            ? project.target.reason
+            : 'Стенд не выбран: подключите его в карточке ролика.',
+          409,
+        );
+      }
+
       const lease = await deps.acquireTargetLease(project.ref);
 
       try {
-        if (project.target.status !== 'ready') {
-          throw new ShowcaseError('target_unavailable', project.target.reason, 409);
-        }
 
         const scope = await targets.selectedInternalScope(
           project.ref, project.target.scope.profile, project.target.scope.targetFingerprint,
@@ -606,12 +715,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     }
 
     const { scenes: drafts } = draft;
-    // Обрезка изменений — знание для человека, а не тема ролика: она идёт в тот же
-    // список, что и пробелы карты, а не в озвучку заключительной сцены.
-    const gaps = [
-      ...draft.gaps.filter((gap) => gap !== DIFF_TRUNCATED_NOTE),
-      ...(context.diffTruncated ? [DIFF_TRUNCATED_NOTE] : []),
-    ];
+    const gaps = draft.gaps;
 
     const savedScenes = [...project.scenes].sort((a, b) => a.order - b.order);
 
@@ -783,7 +887,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError(
         problem ? 'model_bindings_invalid' : 'model_reply_invalid',
         problem?.message
-          ?? 'Модель не вернула смысловые привязки нужной формы. Исправьте сцены вручную.',
+        ?? 'Модель не вернула смысловые привязки нужной формы. Исправьте сцены вручную.',
         502,
       );
     }
@@ -805,7 +909,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   /**
    * Разбор целиком: текст связанной задачи, бриф и сцены одним шагом. Человек в
    * мастере не собирает ролик по кнопкам — он говорит, ЧТО показать, и получает
-   * готовый план. Отсутствие задачи в портале разбор не останавливает: diff стенда
+   * готовый план. Отсутствие задачи в портале разбор не останавливает: карта стенда
    * и карта экранов остаются на месте, а текст был лишь подсказкой модели.
    */
   async function analyze(id: string, onProgress?: (label: string) => Promise<void>): Promise<ShowcaseProject> {
@@ -820,17 +924,19 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   }
 
   /**
-   * Текст задачи из портала. Стенд задачи назван её номером, поэтому связь ищется
-   * по нему и только на сервере: браузер номер задачи не присылает и подменить его
-   * не может. Любая беда портала здесь — не отказ разбора, а пустой текст.
+   * Текст задачи из портала по номеру, который человек выбрал в источнике. Связь и
+   * сессия портала принадлежат серверу. Любая беда портала — не отказ разбора, а
+   * пустой текст: комментарий и карта экранов остаются.
    */
   async function taskTextOf(project: ShowcaseProject): Promise<string> {
-    if (project.ref.kind === 'project' || !deps.taskDetails || project.source?.task === false) {
+    const taskId = project.source?.taskId;
+
+    if (!taskId || !deps.taskDetails) {
       return '';
     }
 
     try {
-      const details = await deps.taskDetails(project.ref.id);
+      const details = await deps.taskDetails(taskId);
 
       if (!details) {
         return '';
@@ -861,7 +967,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError(
         'source_outdated',
         'Сцены собраны по прежнему выбору «О чём ролик». '
-          + 'Разберите заново, чтобы снять ролик по новому выбору.',
+        + 'Разберите заново, чтобы снять ролик по новому выбору.',
         409,
       );
     }
@@ -886,6 +992,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     generateBrief,
     generateScript,
     saveSource,
-    sourceOptions,
+    voiceRulesOf,
+    adaptNarration,
   };
 }

@@ -23,7 +23,8 @@ Text is editable and tasks are created after human review. Meeting analysis surv
 
 Model downloads need network and disk space. Use the stated settings reason for Python/dependency failures.
 Browser and server recognition have different capabilities; unavailable recognition is not success.
-Presentation narration is configured separately.
+Presentation narration uses the voice package. Install Piper/Silero with the section’s button;
+cloud Qwen uses keys from the server environment. Choose a voice in the video editor.
 
 ## Related articles
 

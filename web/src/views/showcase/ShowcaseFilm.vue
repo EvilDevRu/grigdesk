@@ -49,6 +49,15 @@
       @cancel-job="emit('cancel', $event)"
     />
 
+      <ShowcaseStandPicker
+        :project="project"
+        :targets="targets"
+        :busy="busy"
+        :target-url="targetUrl"
+        @attach="emit('attach-target', $event)"
+      />
+
+
     <!-- Разбор идёт минутами: экран говорит, что именно читается, и ничего не
          предлагает править, пока плана нет. -->
     <section v-if="analyzing" class="film__analysis" role="status" aria-live="polite">
@@ -64,17 +73,15 @@
         <strong id="showcase-empty-title">{{ t('core.showcaseStsenPokaNet') }}</strong>
         <p> {{ t('core.showcaseOtmetteOChemRolik') }} </p>
       </div>
+      <slot name="voice" />
+
       <!-- У пустого ролика выбор открыт сразу: «Выбрать, о чём…» ведёт именно сюда. -->
       <div class="film__source-empty" aria-labelledby="showcase-source-empty-title" role="group">
         <h3 id="showcase-source-empty-title">{{ t('core.showcaseOChemRolik') }}</h3>
         <ShowcaseSourcePanel
           :project="project"
-          :options="sourceOptions"
-          :loading="sourceLoading"
-          :error="sourceError"
           :busy="busy"
           @apply="emit('apply-source', $event)"
-          @reload="emit('reload-source')"
         />
       </div>
       <UiButton variant="ghost" :loading="busy" @click="emit('analyze')"> {{ t('core.showcaseRazobratZanovo') }} </UiButton>
@@ -149,14 +156,16 @@
               <span class="film__meta">{{ orderedScenes.length }} {{ t('settings.from') }} {{ maxScenes }}</span>
             </div>
 
-            <ShowcaseStoryboard
-              :scenes="orderedScenes"
-              :screens="screens"
-              :selected-id="selectedId"
-              :changed-ids="changedIds"
-              :starts-ms="startsMs"
-              @select="select"
-            />
+        <ShowcaseTimeline
+          :scenes="orderedScenes"
+          :selected-id="selectedScene?.id ?? null"
+          :changed-ids="changedIds"
+          :busy="busy"
+          :frame-url="artifactUrl"
+          :starts-ms="startsMs"
+          @select="select"
+          @reshoot="emit('reshoot-scene', $event)"
+        />
 
             <UiDisclosureButton v-model:open="addOpen" controls="showcase-add-scene" density="compact">
               {{ addOpen ? t('core.showcaseSkrytFormuStseny') : t('core.showcaseDobavitStsenu') }}
@@ -178,12 +187,8 @@
               <ShowcaseSourcePanel
                 v-show="sourceOpen"
                 :project="project"
-                :options="sourceOptions"
-                :loading="sourceLoading"
-                :error="sourceError"
                 :busy="busy"
                 @apply="emit('apply-source', $event)"
-                @reload="emit('reload-source')"
               />
             </div>
           </section>
@@ -207,6 +212,7 @@
           </section>
 
           <ShowcaseStandPanel
+            v-if="project.target?.status === 'ready'"
             :project="project"
             :seed="seed"
             :busy="busy"
@@ -263,8 +269,8 @@ import type {
   ShowcaseBuildRun,
   ShowcaseJob,
   ShowcaseProject,
+  ShowcaseTargetOption,
   ShowcaseScene,
-  ShowcaseSourceOptions,
   ShowcaseStorySource,
   ShowcaseVoiceInfo,
 } from '../../../../shared/plugins/showcase/showcaseContracts';
@@ -283,7 +289,8 @@ import ShowcaseSceneForm from './ShowcaseSceneForm.vue';
 import ShowcaseScriptGaps from './ShowcaseScriptGaps.vue';
 import ShowcaseSourcePanel from './ShowcaseSourcePanel.vue';
 import ShowcaseStandPanel from './ShowcaseStandPanel.vue';
-import ShowcaseStoryboard from './ShowcaseStoryboard.vue';
+import ShowcaseStandPicker from './ShowcaseStandPicker.vue';
+import ShowcaseTimeline from './ShowcaseTimeline.vue';
 import {
   draftChanged,
   draftOf,
@@ -301,6 +308,7 @@ type VoiceCapabilities = NonNullable<ShowcaseVoiceInfo['capabilities']>;
 
 const props = defineProps<{
   project: ShowcaseProject;
+  targets: ShowcaseTargetOption[];
   seed: SeedStatus | null;
   jobs: ShowcaseJob[];
   buildRun: ShowcaseBuildRun | null;
@@ -320,9 +328,6 @@ const props = defineProps<{
     signal?: AbortSignal,
   ) => Promise<Blob>;
   // «О чём ролик»: список из живой истории стенда читает вид при открытии ролика.
-  sourceOptions: ShowcaseSourceOptions | null;
-  sourceLoading: boolean;
-  sourceError: string;
 }>();
 
 const emit = defineEmits<{
@@ -346,9 +351,10 @@ const emit = defineEmits<{
   'scene-continues': [payload: { id: string; value: boolean }];
   'generate-bindings': [pending: SceneTextPayload[]];
   'select-scene': [id: string];
+  'reshoot-scene': [sceneId: string];
+  'attach-target': [ref: { kind: 'project' | 'sandbox'; id: string }];
   // Выбор «О чём ролик» уходит виду: сохранить, затем снять или разобрать заново.
   'apply-source': [source: ShowcaseStorySource | null];
-  'reload-source': [];
 }>();
 
 const selectedId = ref('');
@@ -366,7 +372,7 @@ const rebuilding = computed(() => Boolean(
 const drafts = reactive(new Map<string, SceneDraft>());
 
 const screens = computed(() => (
-  props.project.target.status === 'ready' ? props.project.target.scope.screens : []
+  props.project.target?.status === 'ready' ? props.project.target.scope.screens : []
 ));
 
 const orderedScenes = computed(() => (
@@ -425,7 +431,7 @@ const manifestUnavailable = computed(() => (
 ));
 
 const targetText = computed(() => {
-  if (props.project.target.status !== 'ready') {
+  if (props.project.target?.status !== 'ready') {
     return t('core.showcaseTselPokazaNedostupna');
   }
 
@@ -441,11 +447,11 @@ const targetText = computed(() => {
 });
 
 const blockedReason = computed(() => (
-  props.project.target.status === 'blocked' ? props.project.target.reason : ''
+  props.project.target?.status === 'blocked' ? props.project.target.reason : ''
 ));
 
 const nextAction = computed(() => (
-  props.project.target.status === 'blocked' ? props.project.target.nextAction?.hint ?? '' : ''
+  props.project.target?.status === 'blocked' ? props.project.target.nextAction?.hint ?? '' : ''
 ));
 
 const scriptOutdated = computed(() => showcaseScriptOutdated(props.project));
@@ -556,39 +562,10 @@ function save(scene: ShowcaseScene): void {
 }
 
 /**
- * Сборка забирает с собой несохранённые правки: каждая сначала уходит на сервер,
- * и только потом снимаются экраны. Черновики при этом фиксируются так же, как при
- * ручном сохранении.
+ * Черновики фиксируются в той же форме, которую получит сервер. Субтитр может
+ * следовать за репликой; нормализация позволяет watcher снять сохранённый draft.
  */
-function build(): void {
-  const pending = orderedScenes.value
-    .filter((scene) => changedIds.value.includes(scene.id))
-    .map((scene) => payloadOf(scene, draftFor(scene)));
-
-  for (const payload of pending) {
-    const scene = orderedScenes.value.find((item) => item.id === payload.id);
-
-    if (!scene) {
-      continue;
-    }
-
-    drafts.set(payload.id, {
-      ...draftFor(scene),
-      title: payload.title,
-      narration: payload.narration,
-      caption: payload.caption,
-      subtitleText: payload.subtitleText,
-    });
-  }
-
-  emit('build', pending);
-}
-
-/**
- * Сначала сохраняет те же черновики, затем просит модель менять только связи.
- * Так модель строит диапазоны уже по тому тексту, который видит человек.
- */
-function generateBindings(): void {
+function prepareDrafts(): SceneTextPayload[] {
   const pending = orderedScenes.value
     .filter((scene) => changedIds.value.includes(scene.id))
     .map((scene) => payloadOf(scene, draftFor(scene)));
@@ -607,8 +584,22 @@ function generateBindings(): void {
     }
   }
 
-  emit('generate-bindings', pending);
+  return pending;
 }
+
+function build(): void {
+  emit('build', prepareDrafts());
+}
+
+function generateBindings(): void {
+  emit('generate-bindings', prepareDrafts());
+}
+
+// Вид сохраняет ввод перед подтверждённой адаптацией тем же путём, что сборка.
+// Очистка drafts по любому серверному ответу запрещена: это потеряло бы ввод.
+defineExpose({ prepareDrafts });
+
+
 
 /**
  * Переход к сцене в готовом ролике: плеер перематывается на её начало и попадает в

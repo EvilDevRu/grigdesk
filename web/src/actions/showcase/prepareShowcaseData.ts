@@ -1,5 +1,6 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import { openShowcaseProject } from './openShowcaseProject';
+import { showcaseProjectOwner } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
 import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../../shared/uiLocalePort.ts';
@@ -27,12 +28,20 @@ export async function loadSeedStatus(store: ShowcaseStore): Promise<SeedStatus |
     return null;
   }
 
+  const current = showcaseProjectOwner(store, opened.id);
+
   try {
-    return await showcaseApi.seedStatus(opened.id);
+    const status = await showcaseApi.seedStatus(opened.id);
+
+    return current() ? status : null;
   } catch (error) {
-    store.setError(
-      showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataCouldNotReadDataPreparationOptions')),
-    );
+    if (current()) {
+      store.setError(
+        showcaseErrorMessage(
+          error, translateUi('core.prepareShowcaseDataCouldNotReadDataPreparationOptions'),
+        ),
+      );
+    }
 
     return null;
   }
@@ -52,16 +61,24 @@ export async function prepareShowcaseData(
     return '';
   }
 
+  const current = showcaseProjectOwner(store, opened.id);
+
   store.setBusy(opened.id, true);
 
   try {
     const outcome = await showcaseApi.prepareData(opened.id, recipeFingerprint);
 
-    await openShowcaseProject(store, opened.id);
+    if (!current() || !await openShowcaseProject(store, opened.id, current)) {
+      return '';
+    }
 
     return outcome.reason;
   } catch (error) {
-    store.setError(showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataDataPreparationFailed')));
+    if (current()) {
+      store.setError(
+        showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataDataPreparationFailed')),
+      );
+    }
 
     return '';
   } finally {
@@ -80,15 +97,18 @@ export async function markShowcaseDataUpdated(store: ShowcaseStore): Promise<boo
     return false;
   }
 
+  const current = showcaseProjectOwner(store, opened.id);
+
   try {
     await showcaseApi.markDataUpdated(opened.id);
-    await openShowcaseProject(store, opened.id);
 
-    return true;
+    return current() && await openShowcaseProject(store, opened.id, current);
   } catch (error) {
-    store.setError(
-      showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataCouldNotMarkTheDataAsUpdated')),
-    );
+    if (current()) {
+      store.setError(
+        showcaseErrorMessage(error, translateUi('core.prepareShowcaseDataCouldNotMarkTheDataAsUpdated')),
+      );
+    }
 
     return false;
   }

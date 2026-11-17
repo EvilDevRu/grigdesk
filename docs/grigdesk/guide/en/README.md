@@ -57,7 +57,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Code and Git: file tabs, quick open, history search, accurate blame and AI summaries](code.md)
 - [Docker](docker.md)
 - [Sandboxes and test environments](sandboxes.md)
-- [Presentations and videos](showcase.md)
+- [Presentations and videos: editor, timeline, voices, scene reshooting and verification](showcase.md)
 - [Browser and agent access](browser.md)
 - [GrigDesk settings](settings.md)
 - [Machines and connections](connections.md)

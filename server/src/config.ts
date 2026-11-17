@@ -248,11 +248,8 @@ export const config = {
   // или журнал он не должен.
   showcaseAuthDir: process.env.GRIGDESK_SHOWCASE_AUTH_DIR
     || path.join(dataStateDir, 'showcase-auth'),
-  // Локальный синтез речи раздела: своё python-окружение и скачанные голоса.
-  // Отдельно от media-venv распознавания намеренно — обновление голосового движка
-  // не должно менять состав, на котором проверена диктовка.
-  showcaseVoiceDir: process.env.GRIGDESK_SHOWCASE_VOICE_DIR
-    || path.join(dataStateDir, 'showcase-voice'),
+  // Голосовой пакет установлен рядом с сервером, явный путь сильнее каталога установки.
+  showcaseVoiceBin: process.env.GRIGDESK_SHOWCASE_VOICE_BIN || '',
   // Браузер записи объявляется явно. Найденный в чужом кэше бинарник установкой
   // зависимости раздела не считается: версия Playwright требует свою ревизию, и
   // случайная чужая даёт то падающую запись, то пустой клип.
@@ -262,16 +259,6 @@ export const config = {
   // сильнее него.
   showcaseBrowserDir: process.env.GRIGDESK_SHOWCASE_BROWSER_DIR
     || path.join(dataStateDir, 'showcase-browser'),
-  // Облачный голос раздела: ключ сервисного аккаунта Yandex SpeechKit. Пусто —
-  // говорят только локальные движки. Ключ остаётся серверной настройкой: интерфейс
-  // получает статус «задан/не задан», а не значение.
-  showcaseYandexApiKey: process.env.GRIGDESK_SHOWCASE_YANDEX_API_KEY || '',
-  showcaseYandexFolderId: process.env.GRIGDESK_SHOWCASE_YANDEX_FOLDER_ID || '',
-  // Облачный голос Microsoft (Edge TTS): ключа нет, включён по умолчанию, а
-  // выключается явным нулём — текст сцен уходит поставщику, и установка, которой
-  // это не подходит, отключает его одной переменной.
-  showcaseEdgeTts: process.env.GRIGDESK_SHOWCASE_EDGE_TTS !== '0',
-
   // Общие настройки GrigDesk (редактируются из UI, живут в .state).
   prefsPath: process.env.GRIGDESK_PREFS_PATH || path.join(dataStateDir, 'prefs.json'),
   // SSH-профили, известные host keys и журнал команд агента содержат адреса боевых

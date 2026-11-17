@@ -11,8 +11,6 @@
     "src/modules/showcase/**/*.ts",
     "scripts/showcaseWorker.mts",
     "scripts/showcaseRehearsal.mts",
-    "scripts/showcaseVoiceBench.mts",
-    "scripts/showcaseVoiceInstall.mts",
     "../tests/types/showcase-server-contract.test.mts"
   ]
 }

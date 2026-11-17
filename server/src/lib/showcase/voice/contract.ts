@@ -23,6 +23,7 @@ export interface VoiceCapabilities {
   emphasis: boolean;
   pause: boolean;
   stress: boolean;
+  stressMode?: 'experimental';
   maxChars: number;
   supportedFormats: string[];
   engineVersion: string;

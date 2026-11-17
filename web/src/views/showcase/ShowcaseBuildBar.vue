@@ -59,6 +59,7 @@
 </template>
 
 <script setup lang="ts">
+import { showcaseSourceEqual } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { computed } from 'vue';
 
 import { UiButton, UiInlineMessage, UiProgress, UiSpinner, t } from '../../ui';
@@ -339,15 +340,27 @@ const latestJobProblem = computed(() => {
   return latest && PROBLEM_JOB_STATES.has(latest.state) ? latest : null;
 });
 
+const sourceCurrent = computed(() => (
+  showcaseSourceEqual(props.project.source, props.project.scriptSource)
+));
 const canBuild = computed(() => (
   !props.busy
-  && props.project.target.status === 'ready'
-  && props.project.target.scope.capabilities.includes('record')
+  && (
+    (props.project.target?.status === 'ready'
+      && props.project.target.scope.capabilities.includes('record'))
+    || (props.project.recordingReady === true && sourceCurrent.value)
+  )
 ));
 
+
 const readinessText = computed(() => {
-  if (props.project.target.status !== 'ready') {
-    return t('core.showcaseTselPokazaNedostupnaZapisyvat');
+  if (props.project.target?.status !== 'ready') {
+    if (props.project.recordingReady === true) {
+      return sourceCurrent.value ? t('core.showcaseKlipySvezhieSborkaBezZapisi')
+        : t('core.showcaseIstochnikIzmenenRazberiteZanovo');
+    }
+
+    return t('core.showcaseStendNeVybranPodklyuchite');
   }
 
   if (props.unsavedCount) {

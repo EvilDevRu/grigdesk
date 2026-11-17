@@ -33,7 +33,7 @@ export const SHOWCASE_ID_RE = /^[a-z0-9]{10,32}$/;
  * отличать «файл другой версии» от «повреждённый файл», иначе миграция и починка
  * выглядят одинаково.
  */
-export const SHOWCASE_SCHEMA_VERSION = 1;
+export const SHOWCASE_SCHEMA_VERSION = 2;
 
 /**
  * Предел пожелания человека к ролику. Это подсказка модели о сути, а не постановка:
@@ -107,6 +107,7 @@ const scope = objectOf({
   // Соответствие развёрнутой версии исходникам подтверждается, только если профиль
   // публикует ревизию сборки. Иначе интерфейс обязан сказать, что не подтверждено.
   buildRevision: nullable(text),
+  warning: optional(text),
 });
 
 const targetRef = objectOf({
@@ -125,6 +126,7 @@ const readyTarget = objectOf({
   status: oneOf('ready'),
   ref: targetRef,
   scope,
+  warning: optional(text),
 });
 
 const blockedTarget = objectOf({
@@ -137,6 +139,7 @@ const blockedTarget = objectOf({
     label: text,
     hint: text,
   })),
+  warning: optional(text),
 });
 
 /**
@@ -363,84 +366,20 @@ const finalArtifact = objectOf({
   current: boolean,
 });
 
-// Источник рассказа: что модель читает при разборе. Выбор принадлежит человеку —
-// модель не называет коммиты и не расширяет выбор, она получает готовый текст.
-// Репозиторий назван именем из реестра стенда, путь на диске наружу не уходит.
-const storySourceRepo = objectOf({
-  name: text,
-  // Незакоммиченные правки и новые файлы рабочего дерева.
-  work: boolean,
-  // Полные идентификаторы выбранных коммитов.
-  commits: listOf(text),
-});
-
+// Источник рассказа v2: опциональная задача портала и пожелание человека. Git раздел
+// не читает: ролик о готовой работе, а не о коде; номер задачи — данные человека.
 const storySource = objectOf({
-  // Текст связанной задачи из портала.
-  task: boolean,
-  // Пожелание человека своими словами: что показать и на что сделать упор.
+  taskId: nullable(text),
   note: text,
-  // Показывать ли модели код изменений; без него — описания коммитов и список файлов.
-  code: boolean,
-  // null — выбор по умолчанию цели: у песочницы вся ветка с незакоммиченным, у
-  // постоянного стенда изменения не читаются.
-  repos: nullable(listOf(storySourceRepo)),
 });
 
-// Из чего выбирать источник: история и незакоммиченное по репозиториям цели. Пути
-// и содержимое изменений сюда не входят — только то, что человек видит в списке.
-const sourceCommit = objectOf({
-  id: text,
-  subject: text,
-  date: text,
-  // Коммит своей ветки — после общего предка с главной.
-  own: boolean,
-  // Коммит слияния не выбирается: его изменения принесла другая ветка.
-  merge: boolean,
-});
+export const SHOWCASE_TASK_ID_RE = /^\d{1,12}$/u;
 
-const sourceRepoOption = objectOf({
-  name: text,
-  branch: text,
-  workFiles: wholeNumber,
-  commits: listOf(sourceCommit),
-  // Репозиторий не прочитался: причина словами, без пути.
-  error: nullable(text),
-});
-
-// Сохранённый коммит вне видимого списка. available — найден в окне истории за пределами
-// списка; outdated — пропал из линии ветки или вышел из окна; unavailable — историю
-// репозитория не удалось прочитать.
-const sourceOutsideCommit = objectOf({
-  id: text,
-  subject: nullable(text),
-  state: oneOf('available', 'outdated', 'unavailable'),
-});
-
-const sourceOutsideGroup = objectOf({
-  name: text,
-  // Репозитория больше нет у цели: выбор виден и снимается, но не читается.
-  missing: boolean,
-  commits: listOf(sourceOutsideCommit),
-});
-
-const sourceOptions = objectOf({
-  taskAvailable: boolean,
-  noteMax: wholeNumber,
-  // Видимая проекция умолчания цели: с неё начинается черновик. Само умолчание шире —
-  // у песочницы это diff всей ветки, а не только показанные коммиты.
-  defaults: storySource,
-  // Переход от умолчания к явным отметкам сузит чтение: история ветки глубже списка,
-  // слияния внутри ветки или нечитаемый репозиторий. Интерфейс спрашивает человека.
-  requiresExplicitSelectionConfirmation: boolean,
-  // Сохранённый выбор вне видимого списка: его видно и можно снять.
-  selectedOutsideCatalog: listOf(sourceOutsideGroup),
-  repos: listOf(sourceRepoOption),
-});
 
 const projectSummary = objectOf({
   id: text,
   title: text,
-  ref: targetRef,
+  ref: nullable(targetRef),
   targetLabel: text,
   revision: wholeNumber,
   sceneCount: wholeNumber,
@@ -450,12 +389,15 @@ const projectSummary = objectOf({
 });
 
 const project = objectOf({
-  schemaVersion: wholeNumber,
+  recordingReady: optional(boolean),
+  voiceRef: optional(nullable(text)),
+  pace: optional(nullable(oneOf(...SHOWCASE_PACES))),
+  schemaVersion: oneOf(SHOWCASE_SCHEMA_VERSION),
   id: text,
   title: text,
   revision: wholeNumber,
-  ref: targetRef,
-  target: targetResolution,
+  ref: nullable(targetRef),
+  target: nullable(targetResolution),
   brief: listOf(text),
   scenes: listOf(scene),
   // Чего модели не хватило в карте экранов профиля, чтобы показать план: текст
@@ -610,6 +552,7 @@ const targetOption = objectOf({
   // Число экранов именно из объявления профиля. Ноль допустим: сервер даст
   // безопасный корневой экран, но UI честно покажет, что карта не настроена.
   screenCount: wholeNumber,
+  warning: optional(text),
 });
 
 const overview = objectOf({
@@ -684,6 +627,7 @@ const voicePackage = objectOf({
 const voiceInstallState = oneOf('running', 'succeeded', 'failed', 'cancelled', 'interrupted');
 
 const voiceInstallJob = objectOf({
+  pid: optional(nullable(wholeNumber)),
   id: text,
   engineId: text,
   voiceId: text,
@@ -781,12 +725,6 @@ export type ShowcaseTiming = ReturnType<typeof timing>;
 export type ShowcaseScene = ReturnType<typeof scene>;
 export type ShowcaseDecision = ReturnType<typeof decision>;
 export type ShowcaseStorySource = ReturnType<typeof storySource>;
-export type ShowcaseStorySourceRepo = ReturnType<typeof storySourceRepo>;
-export type ShowcaseSourceCommit = ReturnType<typeof sourceCommit>;
-export type ShowcaseSourceRepoOption = ReturnType<typeof sourceRepoOption>;
-export type ShowcaseSourceOutsideCommit = ReturnType<typeof sourceOutsideCommit>;
-export type ShowcaseSourceOutsideGroup = ReturnType<typeof sourceOutsideGroup>;
-export type ShowcaseSourceOptions = ReturnType<typeof sourceOptions>;
 export type ShowcaseFinal = ReturnType<typeof finalArtifact>;
 export type ShowcaseTargetProfile = ReturnType<typeof targetProfile>;
 export type ShowcaseTargetOption = ReturnType<typeof targetOption>;
@@ -879,18 +817,12 @@ export function parseShowcaseStorySource(value: unknown): ShowcaseStorySource {
   return storySource(value, 'source');
 }
 
-/**
- * Список, из которого человек выбирает источник рассказа. Ответ проходит декодер
- * до вида: по нему строятся галочки, и чужое поле не должно стать коммитом.
- */
-export function parseShowcaseSourceOptions(value: unknown): ShowcaseSourceOptions {
-  return sourceOptions(value, 'sourceOptions');
-}
+
 
 /**
- * Канонический вид выбора: репозитории по имени, коммиты по порядку строк, заметка без
- * пробелов по краям. Сервер хранит выбор в нём, поэтому сравнение не зависит от того,
- * в каком порядке человек ставил галочки. null и отсутствие поля — одно умолчание.
+ * Канонический вид источника: номер задачи без пробелов, заметка без пробелов по
+ * краям. Номер проверяется по форме здесь же: сервер хранит выбор в каноническом
+ * виде, и сравнение не зависит от того, как человек набрал номер.
  */
 export function normalizeShowcaseSource(
   source: ShowcaseStorySource | null | undefined,
@@ -899,22 +831,19 @@ export function normalizeShowcaseSource(
     return null;
   }
 
-  const repos = source.repos === null
-    ? null
-    : source.repos
-      .map((repo) => ({
-        name: repo.name,
-        work: repo.work,
-        commits: [...repo.commits].sort(),
-      }))
-      .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+  const taskId = (source.taskId ?? '').trim() || null;
 
-  return {
-    task: source.task,
-    note: source.note.trim(),
-    code: source.code,
-    repos,
-  };
+  if (taskId !== null && !SHOWCASE_TASK_ID_RE.test(taskId)) {
+    throw new ShowcaseContractError('source.taskId');
+  }
+
+  const note = source.note.trim();
+
+  if (note.length > SHOWCASE_SOURCE_NOTE_MAX) {
+    throw new ShowcaseContractError('source.note');
+  }
+
+  return { taskId, note };
 }
 
 /**
@@ -938,7 +867,7 @@ export function toProjectSummary(source: ShowcaseProject, state: ShowcaseProject
     id: source.id,
     title: source.title,
     ref: source.ref,
-    targetLabel: source.target.status === 'ready' ? source.target.scope.targetLabel : '',
+    targetLabel: source.target?.status === 'ready' ? source.target.scope.targetLabel : '',
     revision: source.revision,
     sceneCount: source.scenes.length,
     state,

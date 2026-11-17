@@ -91,7 +91,7 @@ export const SCRIPT_GAPS_HINT = translateUi('core.analyzeShowcaseTheVideoStillWo
  * и решение о нём остаётся за человеком.
  */
 export function showcaseScriptOutdated(project: ShowcaseProject | null | undefined): boolean {
-  if (!project || project.target.status !== 'ready' || project.scenes.length === 0) {
+  if (!project || project.target?.status !== 'ready' || project.scenes.length === 0) {
     return false;
   }
 

@@ -192,8 +192,14 @@ export function createSceneOps(deps: SceneOpsDeps) {
    * свой адрес: иначе правка объявления профиля перестала бы влиять на запись.
    */
   async function screenOf(project: ShowcaseProject, screenId: string) {
-    if (project.target.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', project.target.reason, 409);
+    if (!project.ref || !project.target || project.target.status !== 'ready') {
+      throw new ShowcaseError(
+        'target_unavailable',
+        project.target?.status === 'blocked'
+          ? project.target.reason
+          : 'Стенд не выбран: подключите его в карточке ролика.',
+        409,
+      );
     }
 
     const scope = await targets.resolveSelected(project.ref, project.target.scope.profile);

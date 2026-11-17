@@ -23,14 +23,13 @@ import {
   SPEECH_TIMING_PRODUCER_VERSION,
   speechTimingInputHash,
 } from '../../server/src/lib/showcase/syncStore.ts';
-import { QWEN_VOICES } from '../../server/src/lib/showcase/voice/qwenCatalog.ts';
+import { createFakeShowcaseVoice } from './helpers/showcaseVoice.js';
 import { createVoiceRegistry } from '../../server/src/lib/showcase/voice/registry.ts';
 import {
   alignmentToSource,
   createPronunciationOverrides,
   prepareVoiceText,
 } from '../../server/src/lib/showcase/voice/preparation.ts';
-import { SILERO_VOICES } from '../../server/src/lib/showcase/voice/sileroCatalog.ts';
 import { parseNarration } from '../../shared/plugins/showcase/showcaseNarration.ts';
 
 const run = promisify(execFile);
@@ -97,8 +96,20 @@ test('явное произношение меняет только голосо
       endMs: 700,
       precision: 'word',
     }],
-    phrases: [{ id: 'phrase-1', from: spokenFrom, to: spokenTo, startMs: 100, endMs: 700 }],
-    safePauses: [{ id: 'pause-1', textAt: spokenTo, atMs: 720, quietFromMs: 700, quietToMs: 740 }],
+    phrases: [{
+      id: 'phrase-1',
+      from: spokenFrom,
+      to: spokenTo,
+      startMs: 100,
+      endMs: 700,
+    }],
+    safePauses: [{
+      id: 'pause-1',
+      textAt: spokenTo,
+      atMs: 720,
+      quietFromMs: 700,
+      quietToMs: 740,
+    }],
     reason: 'Тестовая точная шкала.',
   }, prepared);
 
@@ -125,15 +136,35 @@ test('диапазоны произношения не режут emoji и не 
   );
   assert.throws(
     () => createPronunciationOverrides(narration, [
-      { from, to: from + 4, pronunciation: 'за', voiceRef: 'fixture:voice' },
-      { from: from + 2, to: from + 5, pronunciation: 'мок', voiceRef: 'fixture:voice' },
+      {
+        from,
+        to: from + 4,
+        pronunciation: 'за',
+        voiceRef: 'fixture:voice',
+      },
+      {
+        from: from + 2,
+        to: from + 5,
+        pronunciation: 'мок',
+        voiceRef: 'fixture:voice',
+      },
     ]),
     (error) => error.code === 'bad_pronunciation_overrides' && /пересекается/.test(error.message),
   );
 
   assert.doesNotThrow(() => createPronunciationOverrides(narration, [
-    { from, to: from + 5, pronunciation: 'з+амок', voiceRef: 'fixture:first' },
-    { from, to: from + 5, pronunciation: 'зам+ок', voiceRef: 'fixture:second' },
+    {
+      from,
+      to: from + 5,
+      pronunciation: 'з+амок',
+      voiceRef: 'fixture:first',
+    },
+    {
+      from,
+      to: from + 5,
+      pronunciation: 'зам+ок',
+      voiceRef: 'fixture:second',
+    },
   ]));
 });
 
@@ -185,95 +216,7 @@ async function sampleWave(root) {
  * реплики в файл (по строке на реплику) и сам запрос — в журнал запросов, а
  * вместо речи отдаёт настоящий короткий WAV.
  */
-async function fakeResidentPython(file, { probe, wav, stdin, requests, calls }) {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(
-    file,
-    `#!/usr/bin/env python3
-import json, shutil, sys
-args = sys.argv[1:]
-open(${JSON.stringify(calls)}, 'a').write(' '.join(args) + '\\n')
-if args[:1] == ['-c']:
-    print(${JSON.stringify(probe)}); sys.exit(0)
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    open(${JSON.stringify(requests)}, 'a').write(line)
-    request = json.loads(line)
-    results = []
-    for item in request['items']:
-        open(${JSON.stringify(stdin)}, 'a').write(item['text'] + '\\n')
-        shutil.copyfile(${JSON.stringify(wav)}, item['out'])
-        results.append({'durationMs': 1500, 'sampleRate': 48000, 'channels': 1, 'peak': 0.5})
-    print(json.dumps({'id': request['id'], 'results': results}), flush=True)
-`,
-    'utf8',
-  );
-  await chmod(file, 0o755);
-}
-
-/** Подменённая установка Silero: python отвечает на проверку модуля и на синтез. */
-async function fakeSilero(root, voiceDir) {
-  const modelDir = path.join(voiceDir, 'silero', SILERO_VOICES[0].id);
-  const stdin = path.join(root, 'stdin.txt');
-  const requests = path.join(root, 'silero-requests.txt');
-
-  await mkdir(modelDir, { recursive: true });
-  await fakeResidentPython(path.join(voiceDir, 'silero-venv', 'bin', 'python'), {
-    probe: '',
-    wav: await sampleWave(root),
-    stdin,
-    requests,
-    calls: path.join(root, 'silero-calls.txt'),
-  });
-  await writeFile(path.join(modelDir, SILERO_VOICES[0].fileName), 'модель', 'utf8');
-  await writeFile(path.join(modelDir, 'voice.json'), JSON.stringify({
-    schemaVersion: 1,
-    id: SILERO_VOICES[0].id,
-    name: SILERO_VOICES[0].name,
-    language: 'ru',
-    file: SILERO_VOICES[0].fileName,
-    sampleRate: 48_000,
-    speakers: SILERO_VOICES[0].speakers,
-  }), 'utf8');
-
-  return { stdin, requests };
-}
-
-/**
- * Подменённая установка Qwen3-TTS: проверка окружения отвечает «пакет есть,
- * видеокарта есть», а синтез — тот же резидентный протокол. Ставится отдельно
- * от Silero: голос по умолчанию — первый готовый движок, и с Qwen в установке
- * им становится он.
- */
-async function fakeQwen(root, voiceDir) {
-  const modelDir = path.join(voiceDir, 'qwen', QWEN_VOICES[0].id);
-  const stdin = path.join(root, 'qwen-stdin.txt');
-  const requests = path.join(root, 'qwen-requests.txt');
-  const calls = path.join(root, 'qwen-calls.txt');
-
-  await mkdir(modelDir, { recursive: true });
-  await fakeResidentPython(path.join(voiceDir, 'qwen-venv', 'bin', 'python'), {
-    probe: '1 1',
-    wav: await sampleWave(root),
-    stdin,
-    requests,
-    calls,
-  });
-  await writeFile(path.join(modelDir, 'voice.json'), JSON.stringify({
-    schemaVersion: 1,
-    id: QWEN_VOICES[0].id,
-    name: QWEN_VOICES[0].name,
-    language: 'ru',
-    revision: QWEN_VOICES[0].revision,
-    sampleRate: 24_000,
-    speakers: QWEN_VOICES[0].speakers,
-  }), 'utf8');
-
-  return { stdin, requests, calls };
-}
-
-async function fixture(t, { qwen = false, transcribe = null } = {}) {
+async function fixture(t, { qwen = false, transcribe = null, ready = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-narration-'));
   let service = null;
 
@@ -296,19 +239,21 @@ async function fixture(t, { qwen = false, transcribe = null } = {}) {
   }), 'utf8');
   await writeFile(path.join(contractDir, 'screens.json'), JSON.stringify(SCREENS), 'utf8');
 
-  const voiceDir = path.join(root, 'voice');
-  const silero = await fakeSilero(root, voiceDir);
-  const qwenFake = qwen ? await fakeQwen(root, voiceDir) : null;
+  const wav = await sampleWave(root);
+  const voice = await createFakeShowcaseVoice(root, {
+    ready: ready ?? (qwen ? ['qwen-studio', 'silero'] : ['silero']),
+    wav,
+  });
   service = createShowcaseService({
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),
     stateDir: path.join(root, 'state'),
     browserPath: null,
-    voiceDir,
+    ...voice,
     transcribe,
     listProjects: async () => ['demo-profile'],
-    broadcast: () => {},
+    broadcast: () => { },
     limits: () => ({
       maxScenes: 20,
       maxSceneSeconds: 120,
@@ -327,7 +272,14 @@ async function fixture(t, { qwen = false, transcribe = null } = {}) {
     title: 'Ударения',
   });
 
-  return { root, service, project, stdin: silero.stdin, qwen: qwenFake };
+  return {
+    root,
+    service,
+    project,
+    stdin: voice.stdin,
+    qwen: qwen ? voice : null,
+    marker: voice.marker,
+  };
 }
 
 function timedTranscript(text = 'Точные метки.') {
@@ -335,10 +287,22 @@ function timedTranscript(text = 'Точные метки.') {
     duration: 1.5,
     language: 'ru',
     model: 'small',
-    segments: [{ text, start: 0.02, end: 1.5 }],
+    segments: [{
+      text,
+      start: 0.02,
+      end: 1.5,
+    }],
     words: [
-      { text: 'Точные', start: 0.08, end: 0.48 },
-      { text: 'метки', start: 0.7, end: 1.5 },
+      {
+        text: 'Точные',
+        start: 0.08,
+        end: 0.48,
+      },
+      {
+        text: 'метки',
+        start: 0.7,
+        end: 1.5,
+      },
     ],
     wordTimestamps: true,
     wordTimingStatus: 'valid',
@@ -399,11 +363,23 @@ function validNativeTiming() {
   return {
     source: 'edge',
     words: [
-      { text: 'Точные', startMs: 80, endMs: 480 },
-      { text: 'метки', startMs: 700, endMs: 1500.75 },
+      {
+        text: 'Точные',
+        startMs: 80,
+        endMs: 480,
+      },
+      {
+        text: 'метки',
+        startMs: 700,
+        endMs: 1500.75,
+      },
     ],
     segments: [
-      { text: 'Точные метки.', startMs: 20, endMs: 1500.75 },
+      {
+        text: 'Точные метки.',
+        startMs: 20,
+        endMs: 1500.75,
+      },
     ],
   };
 }
@@ -434,7 +410,11 @@ function timingNarrationOps(service, root, {
       engineVersion: 'fixture-engine-1',
       modelRevision: 'fixture-model-1',
     }),
-    doctor: async () => ({ status: 'ready', reason: '', install: '' }),
+    doctor: async () => ({
+      status: 'ready',
+      reason: '',
+      install: '',
+    }),
     voices: async () => [{
       id: 'voice',
       name: 'Fixture voice',
@@ -467,8 +447,8 @@ function timingNarrationOps(service, root, {
   };
   const voices = createVoiceRegistry([engine]);
   const ops = createNarrationOps({
-    assertEnabled: () => {},
-    broadcast: () => {},
+    assertEnabled: () => { },
+    broadcast: () => { },
     inputsOf: () => TIMING_INPUTS,
     jobs: service.jobs,
     readProject: service.store.readProject,
@@ -482,7 +462,11 @@ function timingNarrationOps(service, root, {
     publish: (project) => project,
   });
 
-  return { calls, inputs, ops };
+  return {
+    calls,
+    inputs,
+    ops,
+  };
 }
 
 test('preview своей реплики и полный TTS получают один подготовленный вход и раздельный кэш', async (t) => {
@@ -684,7 +668,7 @@ test('правка словаря старит звук только сцен с
   assert.equal((await waitForJob(service, third.id)).state, 'succeeded');
 });
 
-test('сцены задания уходят в один процесс движка по одной, а проверяются после сеанса', async (t) => {
+test('сцены задания последовательно уходят через CLI и проходят проверку речи', async (t) => {
   const { service, project, qwen } = await fixture(t, { qwen: true });
   const titles = ['Первая', 'Вторая', 'Третья', 'Четвёртая', 'Пятая'];
 
@@ -708,14 +692,17 @@ test('сцены задания уходят в один процесс движ
     titles.map((title) => [`${title} сцена говорит своё.`]),
   );
   assert.equal(
-    (await readFile(qwen.calls, 'utf8')).split('\n').filter((line) => line.includes('--serve')).length,
-    1,
-    'процесс с моделью поднят один раз на задание',
+    (await readFile(qwen.calls, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line)).filter((args) => args[0] === 'generate').length,
+    5,
+    'на каждую сцену приходится ровно один generate',
   );
 
   const voiced = await service.readProject(current.id);
 
-  assert.ok(voiced.scenes.every((scene) => scene.audio && scene.audioSource.voiceRef === 'qwen:vivian'));
+  assert.ok(voiced.scenes.every((scene) => (
+    scene.audio && scene.audioSource.voiceRef === 'qwen-studio:Cherry'
+  )));
   assert.equal(
     voiced.scenes.filter((scene) => scene.checks.some((check) => check.kind === 'speech')).length,
     5,
@@ -760,8 +747,16 @@ test('нативные метки публикуются рядом с тем ж
 
   const invalidTiming = {
     source: 'edge',
-    words: [{ text: 'Метки', startMs: 100, endMs: 1600 }],
-    segments: [{ text: 'Метки неверны.', startMs: 50, endMs: 1400 }],
+    words: [{
+      text: 'Метки',
+      startMs: 100,
+      endMs: 1600,
+    }],
+    segments: [{
+      text: 'Метки неверны.',
+      startMs: 50,
+      endMs: 1400,
+    }],
   };
   const { calls, ops } = timingNarrationOps(service, root, {
     timingOf: (input) => {
@@ -829,10 +824,22 @@ test('нативные метки публикуются рядом с тем ж
     extractionVersion: SPEECH_TIMING_PRODUCER_VERSION,
     durationMs: 1500,
     words: [
-      { text: 'Точные', startMs: 80, endMs: 480 },
-      { text: 'метки', startMs: 700, endMs: 1500 },
+      {
+        text: 'Точные',
+        startMs: 80,
+        endMs: 480,
+      },
+      {
+        text: 'метки',
+        startMs: 700,
+        endMs: 1500,
+      },
     ],
-    segments: [{ text: 'Точные метки.', startMs: 20, endMs: 1500 }],
+    segments: [{
+      text: 'Точные метки.',
+      startMs: 20,
+      endMs: 1500,
+    }],
     quality: 'word-exact',
     status: 'valid',
     reason: 'Нативные метки поставщика проверены по длительности WAV.',
@@ -948,22 +955,54 @@ test('syncStore не сортирует и не растягивает неве�
     durationMs: 1500,
     targetDir,
   };
-  const segment = [{ text: 'Фраза.', startMs: 0, endMs: 1400 }];
+  const segment = [{
+    text: 'Фраза.',
+    startMs: 0,
+    endMs: 1400,
+  }];
   const cases = [
-    [{ text: 'NaN', startMs: Number.NaN, endMs: 100 }],
-    [{ text: 'Минус', startMs: -1, endMs: 100 }],
-    [{ text: 'Пустой', startMs: 100, endMs: 100 }],
+    [{
+      text: 'NaN',
+      startMs: Number.NaN,
+      endMs: 100,
+    }],
+    [{
+      text: 'Минус',
+      startMs: -1,
+      endMs: 100,
+    }],
+    [{
+      text: 'Пустой',
+      startMs: 100,
+      endMs: 100,
+    }],
     [
-      { text: 'Позже', startMs: 300, endMs: 500 },
-      { text: 'Раньше', startMs: 200, endMs: 250 },
+      {
+        text: 'Позже',
+        startMs: 300,
+        endMs: 500,
+      },
+      {
+        text: 'Раньше',
+        startMs: 200,
+        endMs: 250,
+      },
     ],
-    [{ text: 'Далеко', startMs: 100, endMs: 1500 + SPEECH_TIMING_END_TOLERANCE_MS + 0.01 }],
+    [{
+      text: 'Далеко',
+      startMs: 100,
+      endMs: 1500 + SPEECH_TIMING_END_TOLERANCE_MS + 0.01,
+    }],
   ];
 
   for (const words of cases) {
     assert.equal(await publishSpeechTiming({
       ...base,
-      timing: { source: 'edge', words, segments: segment },
+      timing: {
+        source: 'edge',
+        words,
+        segments: segment,
+      },
     }), null);
   }
 
@@ -978,8 +1017,8 @@ test('правка сцены во время TTS не прикрепляет н
   const { root, service, project } = await fixture(t);
   const current = await addScene(service, project, 'Гонка', 'Точные метки.');
   const scene = current.scenes[0];
-  let releaseSynthesis = () => {};
-  let markStarted = () => {};
+  let releaseSynthesis = () => { };
+  let markStarted = () => { };
   const held = new Promise((resolve) => { releaseSynthesis = resolve; });
   const started = new Promise((resolve) => { markStarted = resolve; });
   const { calls, ops } = timingNarrationOps(service, root, {
@@ -1009,4 +1048,79 @@ test('правка сцены во время TTS не прикрепляет н
   assert.equal(raced.narration, 'Текст изменился во время синтеза.');
   assert.equal(raced.audio, null, 'WAV прошлой редакции не становится актуальным');
   assert.equal(raced.speechTiming, null, 'timing прошлой редакции не получает ссылку');
+});
+
+test('голос и темп сохраняются в пустом ролике до появления сцен', async (t) => {
+  const { service, project } = await fixture(t);
+
+  await service.setVoice(project.id, project.revision, { voiceRef: 'silero:xenia', pace: 'slow' });
+
+  const saved = await service.readProject(project.id);
+
+  assert.equal(saved.voiceRef, 'silero:xenia');
+  assert.equal(saved.pace, 'slow');
+  assert.equal(saved.scenes.length, 0);
+});
+
+for (const operation of ['synthesizeScenes', 'previewVoice', 'previewNarration']) {
+  test(`холодный ${operation} сам прогревает возможности CLI`, async (t) => {
+    const { service, project, marker } = await fixture(t, { ready: ['piper'] });
+    let current = await addScene(service, project, 'Обзор', 'Показываем обзор.');
+
+    current = await service.store.updateProject(current.id, current.revision, (record) => ({
+      ...record,
+      scenes: record.scenes.map((scene) => ({
+        ...scene, audioSource: { ...scene.audioSource, voiceRef: 'piper:irina' },
+      })),
+    }));
+
+    if (operation === 'synthesizeScenes') {
+      const job = await service.synthesizeScenes(current.id);
+
+      assert.equal((await waitForJob(service, job.id)).state, 'succeeded');
+    } else {
+      const file = operation === 'previewVoice' ? await service.previewVoice('piper:irina')
+        : await service.previewNarration({
+          voiceRef: 'piper:irina',
+          narration: 'Показываем обзор.',
+          direction: current.scenes[0].direction,
+          pronunciationOverrides: [],
+        });
+
+      assert.equal((await readFile(file)).toString('ascii', 0, 4), 'RIFF');
+    }
+
+    const calls = (await readFile(marker + '.argv', 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line)[0]);
+
+    assert.ok(calls.indexOf('engines') >= 0 && calls.indexOf('engines') < calls.indexOf('generate'));
+    assert.ok(calls.indexOf('models') >= 0 && calls.indexOf('models') < calls.indexOf('generate'));
+  });
+}
+
+test('заблокированный doctor останавливает preview до generate', async (t) => {
+  const { service, marker } = await fixture(t, { ready: [] });
+
+  await assert.rejects(service.previewVoice('piper:irina'), (error) => error.code === 'voice_unavailable');
+
+  const calls = (await readFile(marker + '.argv', 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+
+  assert.equal(calls.some((args) => args[0] === 'generate'), false);
+});
+
+test('удалённый голос не подменяется другим движком при синтезе', async (t) => {
+  const { service, project } = await fixture(t);
+  const current = await addScene(service, project, 'Прежняя сцена', 'Показываем обзор.');
+
+  await service.store.updateProject(current.id, current.revision, (record) => ({
+    ...record,
+    scenes: record.scenes.map((scene) => ({
+      ...scene, audioSource: { ...scene.audioSource, voiceRef: 'edge:ru-RU-SvetlanaNeural' },
+    })),
+  }));
+  await assert.rejects(
+    service.synthesizeScenes(current.id),
+    (error) => error.code === 'unknown_voice_engine',
+  );
+  assert.equal(service.jobs.list().length, 0);
 });
