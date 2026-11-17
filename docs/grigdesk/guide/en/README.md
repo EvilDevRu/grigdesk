@@ -66,3 +66,5 @@ An older server that only provides Russian articles displays a language notice i
 - [Window log and diagnostics](web-log.md)
 - [Troubleshooting: connection, startup settings and build errors](troubleshooting.md)
 - [Glossary](glossary.md)
+
+[Installation](installation.md) covers the terminal script, network requirements and dist candidates.

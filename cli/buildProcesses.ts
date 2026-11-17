@@ -96,3 +96,39 @@ export async function signalBuildProcesses(
 
   return sent.size;
 }
+
+/**
+ * Завершение использует сохранённые PID/starttime и переживает выход лидера.
+ * После TERM даётся пять секунд, затем KILL и подтверждение смерти без учёта zombie.
+ */
+export async function terminateBuildProcesses(rootPid: number,
+  known: readonly BuildProcess[] = [], initialSignal: NodeJS.Signals = 'SIGTERM') {
+  let processes = await collectBuildProcesses(rootPid, known);
+  const living = async () => {
+    const checks = await Promise.all(processes.map(async (member) => {
+      const current = await identity(member.pid);
+
+      return current?.starttime === member.starttime && current.pgid === member.pgid;
+    }));
+
+    return checks.some(Boolean);
+  };
+  const waitForExit = async () => {
+    const deadline = Date.now() + 5000;
+
+    while (Date.now() < deadline && await living()) {
+      processes = await collectBuildProcesses(rootPid, processes);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  await signalBuildProcesses(processes, initialSignal);
+  await waitForExit();
+
+  if (await living()) {
+    await signalBuildProcesses(processes, 'SIGKILL');
+    await waitForExit();
+  }
+
+  return { processes, cleanupConfirmed: !await living() };
+}

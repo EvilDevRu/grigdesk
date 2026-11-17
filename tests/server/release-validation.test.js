@@ -14,9 +14,8 @@ const currentTree = 'e'.repeat(40);
 const priorTree = 'f'.repeat(40);
 const legacyWorkflow = '327853e9c7720731964077c47570ca1e0be46f6b';
 const names = [
-  'Тесты сервера', 'Тесты web', 'Тесты shared-контрактов', 'Руководство выпуска',
-  'Подтверждение всех проверок', 'Production-сборка web', 'Сборка комплекта',
-  'Deb-пакет', 'Артефакты проверочного выпуска',
+  'Общий прогон серверных проверок', 'Общий прогон web-проверок', 'Общая сборка web',
+  'Ключ подписи', 'Сборка комплекта', 'Deb-пакет', 'Свидетельство проверок',
 ];
 
 /**
@@ -241,4 +240,28 @@ test('reuse: текущий workflow допускает пропуск толь�
   assert.equal((await f.verify()).runId, 42);
   f.jobs().jobs[1].name = 'Произвольный пропущенный job';
   await assert.rejects(f.verify(), /release_validation_job_not_successful/);
+});
+
+import {
+  decodePipelineReceipt, computeRecipeDigest,
+} from '../../tools/releaseValidation.mts';
+
+const repository = path.resolve(import.meta.dirname, '../..');
+
+test('VALIDATION-PIPELINE-RECEIPT: reuse требует receipt с текущим recipeDigest', async () => {
+  const stale = { format: 1, checks: { commit: 'c'.repeat(40) } };
+  const recipeText = await readFile(
+    path.join(repository, 'tools/releaseRecipe.json'), 'utf8');
+
+  await assert.rejects(decodePipelineReceipt(stale, recipeText, repository),
+    /pipeline_receipt_invalid/u);
+
+  const good = {
+    format: 1,
+    recipeDigest: await computeRecipeDigest(recipeText, repository),
+    code: 0
+  };
+
+  assert.equal((await decodePipelineReceipt(good, recipeText, repository)).recipeDigest,
+    good.recipeDigest);
 });

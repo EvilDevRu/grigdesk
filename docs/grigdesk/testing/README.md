@@ -116,3 +116,5 @@
 - [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.
 
 - [Сданные GREEN/RED, проверки updater и закрепление снимка TESTS](release-update-stage-order.md)
+
+- [Релизный рецепт, изоляция dependency cache от уборки тестов и установка](../server/lightweight-installer.md).

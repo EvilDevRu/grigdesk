@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+const pipelineEntry = 'tools/releasePipeline.mts tools/releaseRecipe.json';
 const repository = path.resolve(import.meta.dirname, '../..');
 
 test('RW-1: workflow релиза запускается вручную, собирает комплект и публикует на сайт', async () => {
@@ -12,13 +13,15 @@ test('RW-1: workflow релиза запускается вручную, соб�
 
   assert.match(text, /^  workflow_dispatch:/m);
   assert.doesNotMatch(text, /^  push:/m);
-  assert.match(text, /tests\/docs\/help-guide\.test\.mts/);
+  assert.match(await fs.readFile(path.join(repository, 'tools/releaseRecipe.json'), 'utf8'),
+    /help-guide\.test\.mts/u);
   assert.match(text, /group: grigdesk-release\s*\n/);
-  assert.match(text, /node-version:\s*24\.21\.0/);
-  assert.match(text, /npm --prefix server test/);
-  assert.match(text, /npm --prefix web test/);
+  assert.match(text, /server\/build\/node-runtime\.json/u);
+  assert.ok(text.includes(pipelineEntry + ' --groups prepare-server,prepare-build,server'));
+  assert.ok(text.includes(pipelineEntry + ' --groups prepare-web,prepare-build,web'));
   assert.match(text, /npm --prefix mobile ci/);
-  assert.ok(text.indexOf('npm --prefix mobile ci') < text.indexOf('npm --prefix server test'));
+  assert.ok(text.indexOf('npm --prefix mobile ci')
+    < text.indexOf(pipelineEntry + ' --groups prepare-server'));
   assert.match(text, /npm --prefix tracker ci/);
   assert.match(text, /npm --prefix relay ci/);
   assert.match(text, /npm --prefix deepseek ci/);
@@ -111,8 +114,8 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   for (const job of [server, web, build]) {
     const install = job.steps.findIndex((step) =>
       (step.run ?? '').includes('npm --prefix voice ci --include=dev'));
-    const consumer = job.steps.findIndex((step) => job === server ? step.id === 'voice_tests'
-      : job === web ? /npm --prefix web test/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
+    const consumer = job.steps.findIndex((step) => job === server || job === web
+      ? /releasePipeline\.mts/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
 
     assert.ok(install >= 0 && consumer > install);
   }
@@ -120,38 +123,29 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   for (const job of [server, web, build]) {
     const install = job.steps.findIndex((step) =>
       (step.run ?? '').includes('npm --prefix routes ci --include=dev'));
-    const consumer = job.steps.findIndex((step) => job === server ? step.id === 'routes_tests'
-      : job === web ? /npm --prefix web test/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
+    const consumer = job.steps.findIndex((step) => job === server || job === web
+      ? /releasePipeline\.mts/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
 
     assert.ok(install >= 0 && consumer > install);
   }
 
-  const serverGate = server.steps.find((step) => step.name === 'Подтверждение серверных проверок');
+  const serverRun = server.steps.find((step) => step.name === 'Общий прогон серверных проверок');
 
-  for (const [id, result] of [
-    ['server_tests', 'SERVER_RESULT'],
-    ['shared_tests', 'SHARED_RESULT'],
-    ['guide_tests', 'GUIDE_RESULT'],
-    ['voice_tests', 'VOICE_RESULT'],
-    ['routes_tests', 'ROUTES_RESULT'],
-  ]) {
-    const step = server.steps.find((entry) => entry.id === id);
+  assert.match(serverRun.run, /--groups prepare-server,prepare-build,server/u);
+  assert.equal(server.steps.some((step) => step['continue-on-error']), false);
+  assert.equal(web.steps.find((step) =>
+    step.name === 'Общий прогон web-проверок')['continue-on-error'], undefined);
 
-    assert.equal(step['continue-on-error'], true);
-    assert.equal(serverGate.env[result], '${{ steps.' + id + '.outcome }}');
-    assert.ok(serverGate.run.includes(`test "$${result}" = success`));
-  }
-
-  assert.equal(web.steps.find((step) => step.name === 'Тесты web')['continue-on-error'], undefined);
+  const provisioning = await fs.readFile(path.join(repository, 'tools/ci/provision-ubuntu.sh'), 'utf8');
 
   for (const job of [server, web]) {
-    const browser = job.steps.findIndex((step) => step.name === 'Браузер тестов');
-    const sandbox = job.steps.findIndex((step) => step.name === 'Песочница Chromium');
-    const testIndex = job.steps.findIndex((step) => /npm --prefix (server|web) test/u.test(step.run ?? ''));
+    const setup = job.steps.findIndex((step) => step.name === 'Общая подготовка одноразового runner');
+    const testIndex = job.steps.findIndex((step) => /releasePipeline\.mts/u.test(step.run ?? ''));
 
-    assert.ok(browser >= 0 && browser < sandbox && sandbox < testIndex);
-    assert.match(job.steps[sandbox].run, /chromiumSandbox: true/u);
-    assert.doesNotMatch(job.steps[sandbox].run, /--no-sandbox/u);
+    assert.ok(setup >= 0 && setup < testIndex);
+    assert.match(job.steps[setup].run, /--disposable-environment/u);
+    assert.match(provisioning, /chromiumSandbox: true/u);
+    assert.doesNotMatch(provisioning, /--no-sandbox/u);
   }
 
   for (const job of [server, build]) {
@@ -161,4 +155,56 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
     assert.match(cleanup.run, /sudo rm -rf -- \/usr\/share\/dotnet \/usr\/local\/\.ghcup/u);
     assert.doesNotMatch(cleanup.run, /android|\/node\b|\/python\b|chromium/u);
   }
+});
+
+test('RELEASE-WORKFLOW-PIPELINE: тестовые и сборочные job-ы идут общим рецептом', async () => {
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8');
+  const doc = yaml.parse(workflow);
+  const runnings = workflow.match(/tools\/releasePipeline\.mts tools\/releaseRecipe\.json[^\n]*/gu) ?? [];
+
+  assert.ok(runnings.length >= 3, 'job-ы не вызывают общий runner');
+  assert.ok(runnings.some((line) => line.includes('--groups prepare-server,prepare-build,server')));
+  assert.ok(runnings.some((line) => line.includes('--groups prepare-web,prepare-build,web')));
+  assert.ok(runnings.some((line) => line.includes('--groups build')));
+
+  for (const jobName of ['server', 'web']) {
+    const steps = doc.jobs[jobName].steps.map((step) => step.run ?? '');
+
+    assert.ok(!steps.some((run) => run.includes('npm --prefix server test')
+      || run.includes('npm --prefix web test')),
+    `${jobName} содержит собственный список тестов`);
+  }
+
+  assert.ok(doc.jobs.build.needs.includes('server'));
+  assert.ok(doc.jobs.build.needs.includes('web'));
+  assert.ok(doc.jobs.verify.needs.includes('build'));
+
+  // Сборка комплекта и свидетельство проверок остаются шагами build-job.
+  const buildRuns = doc.jobs.build.steps.map((step) => step.run ?? '').join('\n');
+
+  assert.ok(buildRuns.includes('tools/bundle.mts'));
+  assert.ok(buildRuns.includes('release-plan/*.json'));
+});
+
+test('PROMOTE-WORKFLOW: продвижение не собирает и не подписывает заново', async () => {
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = await fs.readFile(
+    path.join(repository, '.github/workflows/grigdesk-promote.yml'), 'utf8');
+  const doc = yaml.parse(workflow);
+  const steps = doc.jobs.promote.steps.map((step) => step.name ?? step.uses ?? '');
+
+  assert.ok(!workflow.includes('RELEASE_SIGNING_KEY'));
+  assert.ok(!workflow.includes('tools/bundle.mts'));
+  assert.ok(steps.indexOf('Скачивание точного артефакта')
+    < steps.indexOf('Проверка кандидата без пересборки'));
+  assert.ok(steps.indexOf('Проверка кандидата без пересборки')
+    < steps.indexOf('Публикация'));
+
+  const publish = doc.jobs.promote.steps.find((step) => step.name === 'Публикация');
+
+  assert.equal(publish.if, '${{ inputs.publish }}');
+  assert.ok(workflow.includes('repos/${GITHUB_REPOSITORY}/actions/runs/'));
+  assert.ok(workflow.includes('--artifact-id'));
 });

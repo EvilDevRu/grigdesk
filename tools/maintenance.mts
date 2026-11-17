@@ -12,6 +12,7 @@ import { registerInstalledServerLaunch } from '../shared/node/installedServer.ts
 import { runInstalledCli } from '../cli/installedCli.ts';
 import { dataHome } from '../shared/runtime/dataHome.ts';
 import type { ReleaseEnvelope } from '../shared/runtime/installedUpdateContracts.ts';
+import { runInstallOnline } from './installOnline.mts';
 import { installRelease } from './installRelease.mts';
 import { copyInstallerArchive, verifyInstallerArchive } from '../shared/node/installerArchiveTail.ts';
 import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
@@ -46,6 +47,10 @@ function installerRelease(): ReleaseEnvelope {
 export async function runMaintenance(argv: string[]): Promise<number> {
   const root = path.resolve(path.dirname(process.execPath), '..');
   const [action, ...args] = argv;
+
+  if (action === 'install-online') {
+    return runInstallOnline(args);
+  }
 
   if (action === '--verify') {
     if (!isSea() || args.length !== 1 || args[0] !== '--json') {

@@ -24,7 +24,7 @@ const BOOTSTRAP = [
   'fi',
   '',
   'if [ ! -f "$HOME/.local/lib/grigdesk/current.json" ] || [ ! -x "$HOME/.local/bin/grigdesk" ]; then',
-  '  /usr/lib/grigdesk/grigdesk-install install local',
+  '  exec /usr/lib/grigdesk/grigdesk-install install local --launch',
   'fi',
   '',
   'exec "$HOME/.local/bin/grigdesk" "$@"',
@@ -36,7 +36,7 @@ const DESKTOP_ENTRY = [
   'Type=Application',
   'Name=GrigDesk',
   'Exec=/usr/bin/grigdesk',
-  'Terminal=false',
+  'Terminal=true',
   'Categories=Network;',
   '',
 ].join('\n');
@@ -62,6 +62,13 @@ export async function buildDeb(input: { root: string; artifacts: string }): Prom
     throw new Error('deb_release_index_empty');
   }
 
+  const script = await fs.readFile(path.join(input.artifacts, 'grigdesk-install'));
+
+  if (script.length > 64 * 1024 || script.includes(0)
+    || !script.subarray(0, 10).equals(Buffer.from('#!/bin/sh\n'))) {
+    throw new Error('deb_installer_not_script');
+  }
+
   const payload = index.latest.payload;
   const control = [
     'Package: grigdesk',
@@ -69,7 +76,7 @@ export async function buildDeb(input: { root: string; artifacts: string }): Prom
     'Section: net',
     'Priority: optional',
     'Architecture: amd64',
-    `Depends: libc6 (>= ${payload.platform.glibc})`,
+    `Depends: libc6 (>= ${payload.platform.glibc}), curl, gzip, coreutils`,
     `Maintainer: EvilDevRu <3668960+EvilDevRu@users.noreply.github.com>`,
     'Description: GrigDesk — рабочее место с локальным сервером',
     ' Пакет ставит загрузчик GrigDesk; при первом запуске подписанный installer',

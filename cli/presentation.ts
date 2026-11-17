@@ -29,7 +29,7 @@ function commandTitle(argv: readonly string[], t: Translate): string {
   const name = argv[0] ?? '';
   const key = name === 'device' ? 'devices' : name === 'artifacts-cleanup' ? 'artifactsCleanup' : name;
   const known = ['open', 'status', 'server', 'relay', 'devices', 'dev', 'deps', 'run',
-    'artifactsCleanup'].includes(key);
+    'artifactsCleanup', 'dist'].includes(key);
 
   if (!known) {
     return t('screens.command');
@@ -249,7 +249,7 @@ export async function runPresentedCommand(
     let code: number;
 
     try {
-      code = ['dev', 'deps', 'run'].includes(argv[0] ?? '')
+      code = ['dev', 'deps', 'run', 'dist'].includes(argv[0] ?? '')
         ? await output.attached('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), ...argv])
         : await runCli(argv, output);
     } catch (error) {

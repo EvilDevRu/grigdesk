@@ -89,3 +89,95 @@ test('DEB-3: без индекса канала сборка отказывае�
 function repository() {
   return path.resolve(import.meta.dirname, '../..');
 }
+
+test('DEB-ONLINE: прежний ELF нельзя упаковать как лёгкий загрузчик', async (t) => {
+  const { directory } = await artifactsFixture(t);
+  const binary = Buffer.alloc(128 * 1024, 0);
+
+  binary.set([0x7f, 0x45, 0x4c, 0x46]);
+  await fs.writeFile(path.join(directory, 'grigdesk-install'), binary);
+  await assert.rejects(buildDeb({ root: repository(), artifacts: directory }),
+    /deb_installer_not_script/);
+});
+
+test('DEB-BOOTSTRAP: первый запуск ставит, повтор запускает пользовательский launcher', async (t) => {
+  const { directory } = await artifactsFixture(t);
+  const deb = await buildDeb({ root: repository(), artifacts: directory });
+  const extract = await fs.mkdtemp(path.join(os.tmpdir(), 'deb-bootstrap-'));
+
+  t.after(() => fs.rm(extract, { recursive: true, force: true }));
+
+  await execute('dpkg-deb', ['-x', deb, extract]);
+
+  const original = await fs.readFile(path.join(extract, 'usr/bin/grigdesk'), 'utf8');
+  const home = path.join(extract, 'home');
+  const installer = path.join(extract, 'fake-grigdesk-install');
+  const bootstrap = path.join(extract, 'bootstrap-test');
+  const installerLog = path.join(extract, 'installer.log');
+  const launcherLog = path.join(extract, 'launcher.log');
+  const launcherScript = `#!/bin/sh\nprintf 'launcher %s\\n' "$*" > '${launcherLog}'\n`;
+  const launcherBase64 = Buffer.from(launcherScript).toString('base64');
+
+  await fs.mkdir(home, { recursive: true, mode: 0o700 });
+  await fs.writeFile(installer, [
+    '#!/bin/sh',
+    `printf 'installer %s\\n' "$*" > ${JSON.stringify(installerLog)}`,
+    'mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/grigdesk"',
+    'printf \'{}\' > "$HOME/.local/lib/grigdesk/current.json"',
+    `printf '%s' ${JSON.stringify(launcherBase64)} | base64 -d > "$HOME/.local/bin/grigdesk"`,
+    'chmod 755 "$HOME/.local/bin/grigdesk"',
+    '"$HOME/.local/bin/grigdesk"',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  await fs.writeFile(bootstrap,
+    original.replaceAll('/usr/lib/grigdesk/grigdesk-install', installer), { mode: 0o755 });
+
+  const env = { ...process.env, HOME: home };
+
+  await execute(bootstrap, [], { env });
+
+  assert.match(await fs.readFile(installerLog, 'utf8'), /install local --launch/u);
+  assert.match(await fs.readFile(launcherLog, 'utf8'), /.*/u);
+
+  await fs.rm(installerLog, { force: true });
+  await execute(bootstrap, [], { env });
+
+  assert.ok(await fs.stat(installerLog).then(() => false, () => true));
+  assert.match(await fs.readFile(launcherLog, 'utf8'), /.*/u);
+
+  const entry = await fs.readFile(path.join(extract, 'usr/share/applications/grigdesk.desktop'),
+    'utf8');
+
+  assert.match(entry, /Terminal=true/u);
+
+  const depends = await execute('dpkg-deb', ['--field', deb, 'Depends']);
+
+  assert.match(depends.stdout, /curl/u);
+  assert.match(depends.stdout, /gzip/u);
+  assert.match(depends.stdout, /coreutils/u);
+});
+
+test('DEB-BOOTSTRAP-FAIL: отказ установщика не запускает окно', async (t) => {
+  const { directory } = await artifactsFixture(t);
+  const deb = await buildDeb({ root: repository(), artifacts: directory });
+  const extract = await fs.mkdtemp(path.join(os.tmpdir(), 'deb-bootstrap-fail-'));
+
+  t.after(() => fs.rm(extract, { recursive: true, force: true }));
+
+  await execute('dpkg-deb', ['-x', deb, extract]);
+
+  const original = await fs.readFile(path.join(extract, 'usr/bin/grigdesk'), 'utf8');
+  const home = path.join(extract, 'home');
+  const installer = path.join(extract, 'failing-install');
+  const bootstrap = path.join(extract, 'bootstrap-test');
+  const launcherLog = path.join(extract, 'launcher.log');
+
+  await fs.mkdir(home, { recursive: true, mode: 0o700 });
+  await fs.writeFile(installer, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+  await fs.writeFile(bootstrap,
+    original.replaceAll('/usr/lib/grigdesk/grigdesk-install', installer), { mode: 0o755 });
+
+  await assert.rejects(execute(bootstrap, [], { env: { ...process.env, HOME: home } }));
+  assert.ok(await fs.stat(launcherLog).then(() => false, () => true));
+});

@@ -107,10 +107,10 @@ Run GrigDesk on your Linux machine and connect locally, from another computer, o
 **[Download the installer →](https://github.com/EvilDevRu/grigdesk/releases/latest/download/grigdesk-install)**
 
 Save `grigdesk-install`, open a terminal in the same folder, and run:
+The small script downloads its helper and the selected components; internet access is required.
 
 ```bash
-chmod +x grigdesk-install
-./grigdesk-install install local
+sh ./grigdesk-install
 ```
 
 This installs the desktop app and a local server in your user account. No source checkout, system Node.js, or npm is needed.
@@ -125,8 +125,8 @@ Use the same installer for another setup:
 
 | Another setup | Command |
 | :--- | :--- |
-| Desktop client for a remote server | `./grigdesk-install install remote` |
-| Headless server | `./grigdesk-install install server` |
+| Desktop client for a remote server | `sh ./grigdesk-install --mode remote` |
+| Headless server | `sh ./grigdesk-install --mode server` |
 
 A `.deb` package is also available in [releases](https://github.com/EvilDevRu/grigdesk/releases/latest).
 

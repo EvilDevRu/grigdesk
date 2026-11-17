@@ -233,3 +233,32 @@ test('stable: identity берётся прямо из main или соответ
       stdio: 'pipe',
     }), (error) => error.stderr.toString().includes('release_checkout_commit_mismatch'));
 });
+
+test('PROMOTION-SOURCE: источник и id артефакта строго проверяются', async () => {
+  const { assertPromotionSource, pickPromotionArtifact } = await import('../../tools/promoteArtifact.mts');
+  const run = {
+    id: 42,
+    repository: { full_name: 'fixture/project' },
+    path: '.github/workflows/grigdesk-release.yml',
+    conclusion: 'success',
+    head_sha: 'c'.repeat(40),
+  };
+
+  assertPromotionSource(run, 'fixture/project', 'c'.repeat(40));
+
+  for (const patch of [
+    { repository: { full_name: 'other/project' } },
+    { conclusion: 'failure' },
+    { path: '.github/workflows/other.yml' },
+  ]) {
+    assert.throws(() => assertPromotionSource({ ...run, ...patch }, 'fixture/project',
+      'c'.repeat(40)), /promotion_source_invalid/u);
+  }
+
+  assert.equal(pickPromotionArtifact({ artifacts: [{ id: 12, name: 'grigdesk-candidate' }] }, '12').id, 12);
+  assert.throws(() => pickPromotionArtifact({ artifacts: [
+    { id: 12, name: 'grigdesk-a' }, { id: 12, name: 'grigdesk-b' },
+  ] }, '12'), /promotion_artifact_invalid/u);
+  assert.throws(() => pickPromotionArtifact({ artifacts: [{ id: 12, name: 'foreign' }] }, '12'),
+    /promotion_artifact_invalid/u);
+});

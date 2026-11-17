@@ -296,3 +296,47 @@ test('CLI-ENTRY: pipeline делегирует source и не повторяет
     assert.equal(binary.stdout, '');
     assert.equal(binary.stderr, 'неизвестный результат');
 });
+
+test('DIST-HELP: новый вход доступен без сборки и установки', async (t) => {
+  const box = await createSandbox(t);
+  const repository = path.resolve(import.meta.dirname, '../..');
+  const result = await completed(spawn('/bin/bash', ['bin/grigdesk-ctl', 'dist', '--help'], {
+    cwd: repository,
+    env: box.environment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /dist build/);
+  assert.match(result.stdout, /dist check --from/);
+  assert.match(result.stdout, /dist install --from/);
+  assert.match(result.stdout, /dist check --local-run/);
+  assert.match(result.stdout, /dist install --local-run/);
+  assert.match(result.stdout, /dist doctor/);
+  assert.deepEqual(box.requests(), []);
+  assert.deepEqual(box.calls(), []);
+});
+
+test('DIST-SOURCE: установленный ELF не перехватывает source dist', async (t) => {
+  const box = await createSandbox(t);
+  const marker = path.join(box.home, 'wrong-elf');
+
+  for (const directory of ['server/src', 'web', 'desktop', 'tools']) {
+    mkdirSync(path.join(box.root, directory), { recursive: true });
+  }
+
+  writeFileSync(path.join(box.root, 'server/src/app.ts'), 'export {};\n');
+  writeFileSync(path.join(box.root, 'web/package.json'), '{}\n');
+  writeFileSync(path.join(box.root, 'desktop/package.json'), '{}\n');
+  writeFileSync(path.join(box.root, 'tools/distribution.mts'),
+    'process.stdout.write("dist-source-ok\\n");\n');
+  writeFileSync(path.join(box.root, 'bin/grigdesk-server'),
+    '#!/bin/sh\nprintf wrong > "$STUB_HOME/wrong-elf"\nexit 91\n', { mode: 0o755 });
+
+  const result = await box.run(['dist', '--help']);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, 'dist-source-ok\n');
+  assert.equal(existsSync(marker), false);
+  assert.deepEqual(box.requests(), []);
+});

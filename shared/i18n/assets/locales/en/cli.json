@@ -335,5 +335,40 @@
       "disappeared": "directory disappeared or replaced",
       "io-error": "access or I/O error"
     }
+  },
+  "dist": "Distribution",
+  "distDescription": "build and test installation before release",
+  "distribution": {
+    "build": "Build distribution",
+    "buildDescription": "full release checks in an isolated copy",
+    "check": "Check candidate",
+    "checkDescription": "verify files and installation in temporary profiles",
+    "install": "Install for testing",
+    "installDescription": "choose a mode and separate installation paths",
+    "doctor": "Check environment",
+    "doctorDescription": "show missing build requirements without changing the system",
+    "official": "Official files",
+    "officialDescription": "Actions artifact folder signed by GrigDesk",
+    "local": "Local build",
+    "localDescription": "verified local build run selected by UUID",
+    "officialPrompt": "Official artifact directory (Esc to cancel):",
+    "localPrompt": "Local build UUID from dist build output (Esc to cancel):",
+    "mode": {
+      "local": "Local: window and server",
+      "localDescription": "test both components in a separate profile",
+      "remote": "Window only",
+      "remoteDescription": "test the client without a local server",
+      "server": "Server only",
+      "serverDescription": "test the server without a window"
+    },
+    "confirmInstall": "Install into this test profile?",
+    "path": {
+      "root": "Program folder (absolute path)",
+      "data-home": "Data folder (absolute path)",
+      "user-data": "Window profile",
+      "bin-dir": "Command folder",
+      "applications-dir": "Shortcut folder",
+      "unit-dir": "Service folder"
+    }
   }
 }

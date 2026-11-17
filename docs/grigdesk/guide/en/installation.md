@@ -1,48 +1,82 @@
 # Installing the application
 
-The normal distribution is a ready-made Linux installer from the GrigDesk website.
-The target machine needs neither source code nor system Node or npm. New portable packages are no longer built.
+Download a small terminal script from the website. It obtains its helper and only the selected
+components of a ready-made release. Internet access is required; system Node/npm and source code are not.
+New complete offline packages are no longer produced.
 
 ## Before you begin
 
-You need Linux x64 and glibc 2.28 or newer. The application requires FUSE 2; server mode needs no GUI.
-External executor CLIs and authentication are configured separately.
-Close the previous portable application's window and server before migrating.
-Finished builds undergo separate acceptance testing before publication.
+Linux x64 with glibc 2.28 or newer is supported. You need curl, gzip and coreutils.
+GUI and FUSE 2 are needed to launch the window; server mode works without them.
+The installer reports missing prerequisites and does not install system packages itself.
+Close the old portable window and server before migrating, keeping their data.
 
 ## What to do
 
-1. Download a published, verified `grigdesk-install` from the [GrigDesk website](https://grigdesk.com).
-   The release owner must configure a trusted signing key.
-2. Allow execution: `chmod +x grigdesk-install`.
-3. Choose one mode: `./grigdesk-install install local` for the application with a local server;
-   `install remote` for an application connecting to remote machines; `install server` for a server alone.
-4. The program is installed separately from data in your user directory, without sudo.
-   Repeating your own installation resumes its saved update job; a conflicting shortcut or registration is rejected.
-5. Keep the old data and settings. The installer does not delete the previous portable folder.
+1. Download a verified release's `grigdesk-install` from the [GrigDesk website](https://grigdesk.com).
+2. Open a terminal in the download folder and run `sh ./grigdesk-install`.
+3. Select local for the window and local server, remote for the window alone, or server for a server alone.
+4. Choose separate program and data folders. Review the version, paths and download size, then confirm.
+   No network download happens before confirmation.
+5. Wait for verification and completion. The service is registered without being enabled or started.
+   External executor CLIs and authentication are configured separately.
 
-Before installing, run `./grigdesk-install --verify --json` to verify the signature and both embedded archives
-without changing the program or data. If verification fails, download the file again from a trusted source.
+For automation, specify the mode and confirmation explicitly:
+
+```sh
+sh ./grigdesk-install --yes --mode server --root /chosen/program --data-home /chosen/data
+```
+
+`install local|remote|server` remains supported, as do the absolute path flags `--root`, `--data-home`,
+`--user-data`, `--bin-dir`, `--applications-dir` and `--unit-dir`. Spaces are supported.
+`--launch` opens the window after local/remote installation and requires GUI/FUSE beforehand.
+Without it, installation over SSH is allowed, with a warning about later window launch requirements.
+
+The script pins exact hashes and sizes for the index and helper. The helper verifies the signed release
+before installing components. Failed integrity checks prevent execution.
+The old `--verify` command does not apply to the shell script: installation includes verification.
 
 ## Alternative: deb package
 
-Download `grigdesk_<version>_amd64.deb` and run `sudo apt install ./grigdesk_<version>_amd64.deb`.
-It installs only the `/usr/bin/grigdesk` launcher and signed installer. The first launch from the application
-menu installs the local-mode application under `~/.local`, just as manual installation does.
-The application then updates itself, without apt or further sudo use.
-Updating or removing the deb leaves the user installation and data intact.
-Use the normal installer for server mode.
+Install `grigdesk_<version>_amd64.deb` with `sudo apt install ./grigdesk_<version>_amd64.deb`.
+It contains only the script and launcher, requires internet and opens a terminal on first launch
+from the application menu. Later launches use the user installation; updates need neither apt nor sudo.
+Removing the deb keeps the application and user data.
 
 ## Result
 
-The installation has its own registration, verified component generations and a shared pointer.
-Remote mode does not create a local server descriptor.
+The application has private registration and verified component generations with a shared current pointer.
+Remote mode does not download a server or create a local server descriptor.
+The program, data and window profile remain separate.
+
+## Checking a candidate from source
+
+Open “Distribution” in the `grigdesk-ctl` menu. Choose an Actions artifact directory for official files,
+or the UUID printed by a successful `dist build` for your own local build:
+
+```sh
+grigdesk-ctl dist check --from /artifact/directory
+grigdesk-ctl dist check --local-run <UUID>
+```
+
+Checks install all three modes into temporary profiles. “Install for testing” asks for the mode,
+separate paths and confirmation. A local candidate trusts only its own private run record and cannot
+be published; `--from` uses the official product key. `dist doctor` reports host limitations.
+`dist build` runs the full release recipe in a source snapshot; ordinary fast `build` commands remain available.
+Verification uses isolated working folders and removes temporary files when it finishes.
+Preparation caches are stored separately from verification results.
 
 ## Limits and recovery
 
-Absolute paths can be set with `--root`, `--data-home`, `--user-data`, `--bin-dir`,
-`--applications-dir` and `--unit-dir`. The server service is registered without enabling or starting it.
-Do not remove data or registrations to get around a collision. Android installation and updates are separate.
+Verified archives stay in a private cache. After an interrupted download, the incomplete file is downloaded
+again in full. An unknown or incomplete installation folder is preserved: keep its files and failure reason.
+Repeating a completed installation uses the regular updater and keeps the previous maintenance helper.
+Do not remove data or registration to get around a collision.
+
+The website keeps the two most recent lightweight releases per channel. If a long-saved script can no longer
+find its pinned files, download a new script from the official website.
+A clean VM, real window and official Actions candidate require separate owner acceptance.
+Android installs and updates separately.
 
 ## Related articles
 

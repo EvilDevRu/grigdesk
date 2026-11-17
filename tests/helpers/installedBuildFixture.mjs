@@ -60,7 +60,10 @@ export async function loadInstalledModule(t, relative, publicKeyPem, stubs = {})
     }],
   });
 
-  return import(pathToFileURL(output).href);
+  return {
+    ...await import(pathToFileURL(output).href),
+    fixtureModuleUrl: pathToFileURL(output).href,
+  };
 }
 
 /**
@@ -78,6 +81,15 @@ export async function installedBuild(t, channel, options = {}) {
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   await fs.mkdir(root, { mode: 0o700 });
   await fs.writeFile(path.join(root, 'VERSION'), '0.3.0\n');
+  await fs.mkdir(path.join(root, 'tools'), { recursive: true });
+  await fs.mkdir(path.join(root, 'shared/i18n/assets/locales/ru'), { recursive: true });
+  await fs.mkdir(path.join(root, 'shared/i18n/assets/locales/en'), { recursive: true });
+
+  for (const relative of ['tools/installBootstrap.sh',
+    'shared/i18n/assets/locales/ru/installer.json', 'shared/i18n/assets/locales/en/installer.json']) {
+    await fs.copyFile(path.join(repository, relative), path.join(root, relative));
+  }
+
   await execute('git', ['init', '-q', root]);
   await execute('git', ['add', 'VERSION'], { cwd: root });
   await execute('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
@@ -105,7 +117,8 @@ export async function installedBuild(t, channel, options = {}) {
         : { version, releaseId: input.env.GRIGDESK_RELEASE_ID };
       const output = path.join(input.outDir, name);
 
-      const source = name === 'server' && options.serverSource
+      const source = options.builderSource ? await options.builderSource(name, input, metadata)
+        : name === 'server' && options.serverSource
         ? await options.serverSource(input, metadata)
         : '#!/bin/sh\nprintf \'%s\\n\' \'' + JSON.stringify(metadata) + '\'\n';
 
@@ -115,14 +128,18 @@ export async function installedBuild(t, channel, options = {}) {
     };
   }
 
+  const helperSource = options.maintenanceSource
+    ? await options.maintenanceSource(signer) : 'готовый helper';
+
   const { executeInstalledBundle } = await loadInstalledModule(t, 'tools/installedBundle.mts',
     signer.publicKeyPem, {
       'tools/build-maintenance.mts': [
         "import fs from 'node:fs/promises';",
         "import path from 'node:path';",
         'export async function buildMaintenance(input) {',
+        "  if (input.assets) throw new Error('fixture_official_helper_embedded_assets');",
         "  await fs.writeFile(path.join(input.outDir, 'grigdesk-install'),",
-        "    'готовый helper', { mode: 0o555 });",
+        `    ${JSON.stringify(helperSource)}, { mode: 0o555 });`,
         '}',
       ].join('\n'),
     });

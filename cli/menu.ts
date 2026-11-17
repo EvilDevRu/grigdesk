@@ -1,3 +1,4 @@
+import { distributionMenuItem } from './distributionMenu.ts';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -17,7 +18,7 @@ import { TerminalSession } from './terminal.ts';
 import type { TerminalKey } from './terminal.ts';
 import { readWindow } from './window.ts';
 
-interface MenuItem {
+export interface MenuItem {
   label: string;
   description: string;
   argv?: string[];
@@ -91,10 +92,10 @@ function menuItems(source: boolean): MenuItem[] {
     },
     ...source ? [
       {
-      label: 'build',
-      description: 'buildDescription',
-      children: build,
-    },
+        label: 'build',
+        description: 'buildDescription',
+        children: build,
+      },
       {
         label: 'development',
         description: 'developmentDescription',
@@ -110,6 +111,7 @@ function menuItems(source: boolean): MenuItem[] {
       description: 'artifactsCleanupDescription',
       argv: ['artifacts-cleanup'],
     },
+    ...source ? [distributionMenuItem()] : [],
     { label: 'exit', description: 'exitDescription' },
   ];
 }

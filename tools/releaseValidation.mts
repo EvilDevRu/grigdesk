@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { decodeRecipe, recipeDigest, recipeImplementationBytes } from './releasePipeline.mts';
 import { isRecord } from '../shared/lib/objects.ts';
 import { sha256 } from '../shared/node/hash.ts';
 import { parseProductVersion } from '../shared/runtime/productReleaseVersion.ts';
@@ -17,9 +18,8 @@ const ORCHESTRATION = new Set([
   'docs/grigdesk/server/README.md',
 ]);
 const CHECKS = [
-  'Тесты сервера', 'Тесты web', 'Тесты shared-контрактов', 'Руководство выпуска',
-  'Подтверждение всех проверок', 'Production-сборка web', 'Сборка комплекта',
-  'Deb-пакет', 'Артефакты проверочного выпуска',
+  'Общий прогон серверных проверок', 'Общий прогон web-проверок', 'Общая сборка web',
+  'Ключ подписи', 'Сборка комплекта', 'Deb-пакет', 'Свидетельство проверок',
 ];
 const COMMIT = /^[a-f0-9]{40}$/u;
 
@@ -246,4 +246,94 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   }
 
   await fs.appendFile(process.env.GITHUB_OUTPUT, `reused=${reused}\n`);
+}
+
+
+const RECEIPT_LIMIT = 1024 * 1024;
+
+export interface PipelineReceipt {
+  format: 1;
+  recipeDigest: string;
+  code: number;
+}
+
+/**
+ * Digest вычисляется от явно выбранного checkout, независимо от cwd тестового пакета.
+ * Runner, окружение и provisioning входят в ту же границу воспроизводимости.
+ */
+export async function computeRecipeDigest(recipeText: string,
+  root = process.cwd()): Promise<string> {
+  return recipeDigest(decodeRecipe(JSON.parse(recipeText)),
+    await recipeImplementationBytes(root));
+}
+
+// root передаётся явно: серверные тесты идут с cwd=server, а digest обязан
+// считаться от файлов репозитория, а не от текущего каталога запуска.
+
+/**
+ * Reuse допускает только receipt новой схемы: точный формат, текущий digest
+ * рецепта и нулевой код прогона. Прежние прогоны без receipt не покрывают схему.
+ */
+export async function decodePipelineReceipt(value: unknown, recipeText: string,
+  root = process.cwd()): Promise<PipelineReceipt> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || (value as { format?: unknown }).format !== 1
+    || typeof (value as { recipeDigest?: unknown }).recipeDigest !== 'string'
+    || typeof (value as { code?: unknown }).code !== 'number') {
+    throw new Error('pipeline_receipt_invalid');
+  }
+
+  const receipt = value as PipelineReceipt;
+  const expected = await computeRecipeDigest(recipeText, root);
+
+  if (receipt.recipeDigest !== expected || receipt.code !== 0
+    || receipt.recipeDigest.length !== 64) {
+    throw new Error('pipeline_receipt_invalid');
+  }
+
+  return receipt;
+}
+
+/**
+ * Полный кандидат требует успешных исходов всех обязательных server/web стадий.
+ * Один build-only receipt с правильным digest не доказывает выполнение тестов.
+ */
+export async function verifyPipelineReceipts(directory: string, root: string): Promise<void> {
+  const recipeText = await fs.readFile(path.join(root, 'tools/releaseRecipe.json'), 'utf8');
+  const recipe = decodeRecipe(JSON.parse(recipeText));
+  const outcomes: Record<string, { status?: string; exitCode?: number }> = {};
+  const files = (await fs.readdir(directory)).filter((name) =>
+    /^pipeline-[a-f0-9-]+[.]json$/u.test(name));
+
+  for (const name of files) {
+    const file = path.join(directory, name);
+    const stat = await fs.lstat(file);
+
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > RECEIPT_LIMIT) {
+      throw new Error('pipeline_receipt_invalid');
+    }
+
+    const value = JSON.parse(await fs.readFile(file, 'utf8'));
+
+    await decodePipelineReceipt(value, recipeText, root);
+
+    if (value.cleanupConfirmed !== true || !isRecord(value.outcomes)
+      || process.env.GRIGDESK_RELEASE_SOURCE_DIGEST
+        && value.sourceDigest !== process.env.GRIGDESK_RELEASE_SOURCE_DIGEST) {
+      throw new Error('pipeline_receipt_invalid');
+    }
+
+    for (const [id, outcome] of Object.entries(value.outcomes)) {
+      if (isRecord(outcome) && outcome.status !== 'skipped') {
+        outcomes[id] = outcome;
+      }
+    }
+  }
+
+  for (const stage of recipe.stages.filter((entry) =>
+    ['server', 'web'].includes(entry.group) && entry.required !== false)) {
+    if (outcomes[stage.id]?.status !== 'success' || outcomes[stage.id]?.exitCode !== 0) {
+      throw new Error('release_pipeline_receipt_missing');
+    }
+  }
 }

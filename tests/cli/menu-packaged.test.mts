@@ -56,7 +56,8 @@ for (const kind of ['portable', 'release', 'installed']) {
 
       await session.wait(menuTitle);
       assert.ok(session.output().includes((await readFile(path.join(moved, 'VERSION'), 'utf8')).trim()));
-      assert.doesNotMatch(session.output(), /Сборка|Разработка|Development|Build ›/iu);
+      assert.doesNotMatch(session.output(),
+        /Сборка|Разработка|Дистрибутив|Distribution|Development|Build ›/iu);
       assert.match(session.output(), locale.startsWith('ru') ? /Открыть окно/u : /Open.*window/iu);
       assert.ok(!box.calls().some((call) => call.startsWith('app ')));
       session.write('\r');

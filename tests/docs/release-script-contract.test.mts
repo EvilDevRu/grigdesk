@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const root = path.resolve(import.meta.dirname, '../..');
+const execute = promisify(execFile);
+
+test('INSTALL-GUIDE: обе редакции используют shell и разделяют два источника доверия', async () => {
+  const help = await execute('bash', ['bin/grigdesk-ctl', 'dist', '--help'], { cwd: root });
+
+  for (const language of ['ru', 'en']) {
+    const guide = await fs.readFile(path.join(root,
+      `docs/grigdesk/guide/${language}/installation.md`), 'utf8');
+
+    assert.match(guide, /sh \.\/grigdesk-install/u);
+    assert.doesNotMatch(guide, /grigdesk-install --verify/u);
+    assert.match(guide, /dist check --from/u);
+    assert.match(guide, /dist check --local-run/u);
+    assert.match(help.stdout, /dist check --from/u);
+    assert.match(help.stdout, /dist check --local-run/u);
+
+    for (const mode of ['local', 'remote', 'server']) {
+      assert.ok(guide.includes(mode));
+    }
+  }
+});

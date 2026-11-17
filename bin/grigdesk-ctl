@@ -13,8 +13,20 @@ SOURCE_COMMAND=0
 if [[ ! -f "$DIR/release.json" && -f "$DIR/server/src/app.ts" \
   && -f "$DIR/web/package.json" && -f "$DIR/desktop/package.json" ]]; then
   case "$CMD" in
-    dev|build|deps|mobile|release) SOURCE_COMMAND=1 ;;
+    dev|build|deps|mobile|release|dist) SOURCE_COMMAND=1 ;;
   esac
+fi
+
+# Source-only guard не позволяет установленному ELF перехватить новую команду.
+# Справка доступна без Node и без загрузки tools готовой поставки.
+if [[ "$CMD" == dist && ( "$SOURCE_COMMAND" == 0 || -f "$DIR/bin/bundle.json" ) ]]; then
+  if [[ "${2:-}" == --help || "${2:-}" == -h ]]; then
+    printf '%s\n' 'grigdesk-ctl dist: команда подготовки дистрибутива из исходников.'
+    exit 0
+  fi
+
+  printf '%s\n' 'Команда dist доступна в установке из исходников.' >&2
+  exit 2
 fi
 
 # Пустой человеческий TTY использует source CLI лишь при пригодном Node.
@@ -94,7 +106,7 @@ if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/
 
       exec "$DIR/deploy/desktop.sh" "${@:2}"
       ;;
-    dev|build|deps|mobile|release)
+    dev|build|deps|mobile|release|dist)
       help=0
       for argument in "${@:2}"; do
         [[ "$argument" != --help && "$argument" != -h ]] || help=1
@@ -157,7 +169,7 @@ if [[ -f "$DIR/release.json" ]]; then
       exec "$DIR/runtime/node/bin/node" \
         "$DIR/server/runtime/helpers/launch-sea-server.mjs" "${@:2}"
       ;;
-    dev|build|deps|mobile|release)
+    dev|build|deps|mobile|release|dist)
       for argument in "${@:2}"; do
         if [[ "$argument" == --help || "$argument" == -h ]]; then
           exec "$DIR/runtime/node/bin/node" "$DIR/server/runtime/helpers/grigdesk-cli.mjs" --help
@@ -742,6 +754,13 @@ case "$CMD" in
     source "$DIR/deploy/lib/runtime-env.sh"
     grigdesk_require_node
     exec node "$DIR/tracker/src/pipelineMain.ts" "$@"
+    ;;
+  dist)
+    shift
+    cd "$DIR"
+    source "$DIR/deploy/lib/runtime-env.sh"
+    grigdesk_require_node source
+    exec node "$DIR/tools/distribution.mts" "$@"
     ;;
   mobile|release)
     shift

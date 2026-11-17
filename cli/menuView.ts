@@ -91,7 +91,7 @@ export function menuLines(options: MenuViewOptions): TerminalLine[] {
 
   for (const [index, item] of level.items.entries()) {
     if (root && item.label !== 'exit') {
-      const section = ['build', 'development', 'artifactsCleanup'].includes(item.label)
+      const section = ['build', 'development', 'artifactsCleanup', 'dist'].includes(item.label)
         ? 'developer' : 'application';
 
       if (section !== group) {

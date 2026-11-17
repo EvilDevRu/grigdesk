@@ -37,15 +37,15 @@ async function stubBins(t) {
 
 const baseEnv = (bins, extra = {}) => {
   return ({
-  ...process.env,
-  PATH: `${bins.dir}:${process.env.PATH}`,
-  RELEASE_SITE_HOST: 'site.example',
-  RELEASE_SITE_USER: 'user',
-  RELEASE_SITE_KEY: '/tmp/key',
-  RELEASE_SITE_DIR: '/srv/grigdesk',
-  RELEASE_SITE_PUBLIC_ORIGIN: 'https://grigdesk.com',
-  ...extra,
-});
+    ...process.env,
+    PATH: `${bins.dir}:${process.env.PATH}`,
+    RELEASE_SITE_HOST: 'site.example',
+    RELEASE_SITE_USER: 'user',
+    RELEASE_SITE_KEY: '/tmp/key',
+    RELEASE_SITE_DIR: '/srv/grigdesk',
+    RELEASE_SITE_PUBLIC_ORIGIN: 'https://grigdesk.com',
+    ...extra,
+  });
 };
 
 /**
@@ -296,3 +296,28 @@ for (const channel of ['release', 'dev']) {
     assert.deepEqual(JSON.parse(await fs.readFile(latest, 'utf8')), box.built.index);
   });
 }
+
+test('PUB-BOOTSTRAP-TAMPER: порча helper отвергается до SSH', async (t) => {
+  const box = await installedPublicationFixture(t, 'release');
+  const file = path.join(box.built.directory, 'grigdesk-maintenance.gz');
+  const bytes = await fs.readFile(file);
+
+  bytes[bytes.length - 1] ^= 0xff;
+  await fs.writeFile(file, bytes);
+
+  await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets, true),
+    /installer_helper_integrity_invalid/u);
+  assert.equal(await fs.readFile(path.join(box.site, 'api/releases/v1/release.json'), 'utf8'), 'OLD');
+  assert.equal((await fs.readdir(box.site)).some((name) => name.startsWith('.grigdesk-publish-')), false);
+});
+
+test('PUB-OFFICIAL-KEY: удаление marker и override ключа не разрешают локальную подпись', async (t) => {
+  const box = await installedPublicationFixture(t, 'release');
+  const other = await installedBuild(t, 'release');
+  const keyFile = path.join(other.temporary, 'public.pem');
+
+  await fs.writeFile(keyFile, other.signer.publicKeyPem);
+  isolatedEnvironment(t, { RELEASE_SIGNING_PUBLIC_KEY_FILE: keyFile });
+  await assert.rejects(box.publishInstalledRelease(other.directory, box.targets, true),
+    /release_signature_invalid/u);
+});

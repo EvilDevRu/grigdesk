@@ -1,0 +1,104 @@
+name: Продвижение релиза GrigDesk — точные артефакты
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run id успешного выпуска'
+        required: true
+      artifact_id:
+        description: 'Идентификатор артефакта grigdesk-*'
+        required: true
+      channel:
+        description: 'Канал'
+        type: choice
+        options:
+          - release
+          - dev
+        default: release
+      version:
+        description: 'Ожидаемая версия'
+        required: true
+      commit:
+        description: 'Ожидаемый commit'
+        required: true
+      digest:
+        description: 'Ожидаемый manifestDigest'
+        required: true
+      publish:
+        description: 'Опубликовать после проверки'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: grigdesk-promote-${{ inputs.channel }}
+  cancel-in-progress: false
+jobs:
+  promote:
+    name: Проверка и продвижение точного артефакта
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.commit }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Скачивание точного артефакта
+        run: |
+          case "$SOURCE_RUN_ID:$ARTIFACT_ID" in *[!0-9:]*|:*|*:) exit 2 ;; esac
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID" > run.json
+          node tools/promoteArtifact.mts --run run.json \
+            --artifact-id "$ARTIFACT_ID" --output release-artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          GRIGDESK_RELEASE_COMMIT: ${{ inputs.commit }}
+      - name: Зависимости проверки и средства установки
+        run: bash tools/ci/provision-ubuntu.sh --disposable-environment
+      - name: Проверка кандидата без пересборки
+        run: NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh tools/verifyRelease.mts release-artifacts
+        env:
+          GRIGDESK_RELEASE_COMMIT: ${{ inputs.commit }}
+          GRIGDESK_RELEASE_VERSION: ${{ inputs.version }}
+          GRIGDESK_RELEASE_CHANNEL: ${{ inputs.channel }}
+          GRIGDESK_RELEASE_EXPECTED_DIGEST: ${{ inputs.digest }}
+      - name: Ключ сайта
+        if: ${{ inputs.publish }}
+        env:
+          SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
+          MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/release-site-key"
+          printf '%s' "$SITE_KEY" > "$RUNNER_TEMP/release-site-key"
+          if [ -n "$MIRROR_KEY" ]; then
+            install -m 600 /dev/null "$RUNNER_TEMP/release-site-mirror-key"
+            printf '%s' "$MIRROR_KEY" > "$RUNNER_TEMP/release-site-mirror-key"
+          fi
+      - name: Публикация
+        if: ${{ inputs.publish }}
+        run: node tools/release-publish.mts "$PWD"
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
+          RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
+          RELEASE_SITE_PORT: ${{ secrets.RELEASE_SITE_PORT || '22' }}
+          RELEASE_SITE_KEY: ${{ runner.temp }}/release-site-key
+          RELEASE_SITE_DIR: ${{ secrets.RELEASE_SITE_DIR }}
+          RELEASE_SITE_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN }}
+          RELEASE_SITE_MIRROR_HOST: ${{ secrets.RELEASE_SITE_MIRROR_HOST }}
+          RELEASE_SITE_MIRROR_USER: ${{ secrets.RELEASE_SITE_MIRROR_USER }}
+          RELEASE_SITE_MIRROR_PORT: ${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}
+          RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
+          RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
+          RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}

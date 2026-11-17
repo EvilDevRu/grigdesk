@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { canonicalJson } from '../shared/lib/canonicalJson.ts';
@@ -13,6 +13,7 @@ import { sha256, sha256File } from '../shared/node/hash.ts';
 import { acquireDirectoryLock } from '../shared/node/directoryLock.ts';
 import { auditStage } from '../server/scripts/sea/stage.mts';
 import { buildMaintenance } from './build-maintenance.mts';
+import { renderBootstrap } from './installBootstrap.mts';
 import type { BundleOptions, BundleBuildInput } from './bundleSteps.mts';
 
 const execute = promisify(execFile);
@@ -207,17 +208,62 @@ export async function executeInstalledBundle(options: BundleOptions): Promise<vo
     await buildMaintenance({
       root,
       outDir: work,
-      cacheDir: path.join(work, 'cache/maintenance'),
-      assets: {
-        release: path.join(work, 'release-envelope.json'),
-        desktop: path.join(work, 'desktop.tar.gz'),
-        server: path.join(work, 'server.tar.gz'),
-      },
+      cacheDir: path.join(work, 'cache/maintenance')
     });
+
+    const rawHelper = path.join(work, 'grigdesk-install');
+    const helperFile = path.join(work, 'grigdesk-maintenance.gz');
+    const gzipOutput = await fs.open(helperFile, 'wx', 0o644);
+    const gzip = spawn('gzip', ['-n', '-c', rawHelper],
+      { stdio: ['ignore', gzipOutput.fd, 'ignore'] });
+    const gzipCode = await new Promise<number>((resolve, reject) => {
+      gzip.on('error', reject);
+      gzip.on('close', (code) => resolve(code ?? 1));
+    });
+
+    await gzipOutput.close();
+
+    if (gzipCode !== 0) {
+      throw new Error('maintenance_gzip_failed');
+    }
+
+    const helperBytes = await fs.readFile(rawHelper);
+    const compressedBytes = await fs.readFile(helperFile);
+
+    await fs.rm(rawHelper);
+
+    const indexBytes = Buffer.from(canonicalJson(index) + '\n', 'utf8');
+    const manifestDigest = sha256(releaseSignedBytes(envelope));
+    const script = renderBootstrap({
+      format: 1,
+      version: payload.version,
+      channel,
+      origin: origin.origin,
+      manifestDigest,
+      indexSha256: sha256(indexBytes),
+      indexSize: indexBytes.length,
+      helperSha256: sha256(helperBytes),
+      helperSize: helperBytes.length,
+      compressedSha256: sha256(compressedBytes),
+      compressedSize: compressedBytes.length,
+      downloadBytes: {
+        local: indexBytes.length + compressedBytes.length + artifacts.desktop.size
+          + artifacts.server.size,
+        remote: indexBytes.length + compressedBytes.length + artifacts.desktop.size,
+        server: indexBytes.length + compressedBytes.length + artifacts.server.size,
+      },
+    }, await fs.readFile(path.join(root, 'tools/installBootstrap.sh'), 'utf8'), {
+      ru: JSON.parse(await fs.readFile(path.join(root,
+        'shared/i18n/assets/locales/ru/installer.json'), 'utf8')),
+      en: JSON.parse(await fs.readFile(path.join(root,
+        'shared/i18n/assets/locales/en/installer.json'), 'utf8')),
+    });
+
+    await fs.writeFile(path.join(work, 'grigdesk-install'), script, { mode: 0o755 });
 
     const installerDigest = await sha256File(path.join(work, 'grigdesk-install'));
     const installerProof = `GrigDesk installer v1\n${installerDigest}  grigdesk-install\n`
-      + `${sha256(releaseSignedBytes(envelope))}\n`;
+      + `${manifestDigest}\n`;
 
     await fs.writeFile(path.join(work, 'grigdesk-install.sha256'), installerProof);
     await fs.writeFile(path.join(work, 'grigdesk-install.sig'), await options.sign(installerProof));
@@ -237,7 +283,8 @@ export async function executeInstalledBundle(options: BundleOptions): Promise<vo
 
     await fs.mkdir(target);
 
-    for (const name of ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-install', 'grigdesk-install.sha256',
+    for (const name of ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-maintenance.gz', 'grigdesk-install',
+      'grigdesk-install.sha256',
       'grigdesk-install.sig', 'release-acceptance.json', `${channel}.json`]) {
       await fs.rename(path.join(work, name), path.join(target, name));
     }

@@ -4,7 +4,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { publishInstalledRelease, verifyReleaseInstaller } from './installedPublication.mts';
+import { verifyDistributionArtifacts } from './releaseArtifactVerification.mts';
+import { verifyInstallation } from './verifyInstallation.mts';
+import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 import { decodeReleaseChecks } from './releaseChecks.mts';
 import { decodeReleaseChannelIndex }
   from '../shared/runtime/installedUpdateContracts.ts';
@@ -18,7 +20,6 @@ import { decodeDeepSeekRuntimeInfo }
   from '../shared/chat/deepSeekBinary.ts';
 import { removePrivateTree }
   from '../shared/node/files.ts';
-import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 
 const execute = promisify(execFile);
 
@@ -53,18 +54,29 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
   assert.equal(acceptance.identity.version, index.latest.payload.version);
   assert.equal(acceptance.manifestDigest, verifyReleaseEnvelope(index.latest));
 
-  const origin = new URL(index.latest.payload.artifacts.server.url).origin;
+  if (process.env.GRIGDESK_RELEASE_REQUIRE_PIPELINE_RECEIPT === 'true') {
+    const { verifyPipelineReceipts } = await import('./releaseValidation.mts');
 
-  // Настоящий preflight проверяет обе подписи и SHA архивов; dryRun запрещает SSH.
-  // Заглушки адреса не используются: функция возвращает управление до подключения.
-  await publishInstalledRelease(directory, [{
-    origin,
-    host: 'not-used.invalid',
-    user: 'not-used',
-    port: '22',
-    key: '/not-used',
-    dir: '/not-used',
-  }], true);
+    await verifyPipelineReceipts(directory, path.resolve(import.meta.dirname, '..'));
+  }
+
+  if (process.env.GRIGDESK_RELEASE_EXPECTED_DIGEST
+    && process.env.GRIGDESK_RELEASE_EXPECTED_DIGEST !== verifyReleaseEnvelope(index.latest)) {
+    throw new Error('release_distribution_digest_mismatch');
+  }
+
+  if (process.env.GRIGDESK_RELEASE_CHANNEL) {
+    assert.equal(index.channel, process.env.GRIGDESK_RELEASE_CHANNEL);
+  }
+
+
+  const trust = {
+    purpose: 'official' as const,
+    publicKeyPem: RELEASE_SIGNING_PUBLIC_KEY,
+    expectedCommit,
+  };
+
+  await verifyDistributionArtifacts(directory, trust);
 
   const counts: Record<string, number> = {};
   const runtime: Record<string, unknown> = {};
@@ -117,22 +129,11 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
       timeout: 180000,
       maxBuffer: 1024 * 1024,
     };
-    const installerBinary = path.join(work, 'installer-probe');
 
-    await copyInstallFile(path.join(directory, 'grigdesk-install'), installerBinary);
-    await verifyReleaseInstaller(installerBinary, index.latest,
-      await fs.readFile(path.join(directory, 'grigdesk-install.sha256'), 'utf8'),
-      await fs.readFile(path.join(directory, 'grigdesk-install.sig'), 'utf8'));
-
-    const installer = await execute(installerBinary, ['--verify', '--json'], options);
-    const installerProof = JSON.parse(installer.stdout);
-
-    assert.equal(installer.stderr, '');
-    assert.equal(installerProof.verified, true);
-    assert.equal(installerProof.commit, expectedCommit);
-    assert.equal(installerProof.version, index.latest.payload.version);
-    assert.equal(installerProof.archiveHashesValid, true);
-    runtime.installer = installerProof;
+    runtime.installation = await verifyInstallation(directory, expectedCommit, {
+      trust,
+      installRoot: path.join(work, 'installation-acceptance'),
+    });
 
     const server = path.join(work, 'server/bin/grigdesk-server');
     const metadata = await execute(server, ['--runtime-info', '--json'], options);
@@ -192,6 +193,7 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
     inventoriesValid: true,
     files: counts,
     runtime,
+    guiAcceptance: 'not-performed',
     deb: debFields,
     testValidation: checks,
   };

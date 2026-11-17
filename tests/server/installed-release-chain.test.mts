@@ -51,7 +51,7 @@ for (const channel of ['release', 'dev'] as const) {
 test('PIPE-BUNDLE: подписанная server-поставка содержит pipeline с SHA и правами', async (t) => {
     const built = await installedBuild(t, 'release');
     const server = built.index.latest.payload.artifacts.server;
-    const entry = server.files.find((item) => item.path === 'bin/pipeline');
+    const entry = server.files.find((item: { path: string }) => item.path === 'bin/pipeline');
 
     assert.ok(entry, 'новый CLI отсутствует в подписанной server-описи');
     assert.equal(entry.mode, 0o555);
@@ -64,4 +64,15 @@ test('PIPE-BUNDLE-MISSING: официальный выпуск не приним
     await assert.rejects(installedBuild(t, 'release', {
         omitBuilder: 'pipeline'
     }), /release_builder_missing:pipeline/u);
+});
+
+test('ONLINE-BUNDLE: установщик мал и отделён от helper и архивов', async (t) => {
+  const box = await installedBuild(t, 'release');
+  const script = await fs.readFile(path.join(box.directory, 'grigdesk-install'));
+
+  assert.equal(script.subarray(0, 10).toString(), '#!/bin/sh\n');
+  assert.ok(script.length <= 64 * 1024);
+  assert.ok((await fs.stat(path.join(box.directory, 'grigdesk-maintenance.gz'))).size > 0);
+  assert.deepEqual(Object.keys(box.index.latest.payload.artifacts).sort(), ['desktop', 'server']);
+  assert.equal(box.index.format, 2);
 });

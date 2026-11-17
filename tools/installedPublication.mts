@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createPublicKey, randomUUID, verify } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { decodeReleaseChannelIndex, type ReleaseEnvelope }
   from '../shared/runtime/installedUpdateContracts.ts';
@@ -17,30 +17,14 @@ import { readContainedText } from '../shared/node/readContainedText.ts';
 import { verifyHelpBundle } from '../shared/node/helpSources.ts';
 import { HELP_LOCALES, helpResourceFile } from '../shared/help/helpContracts.ts';
 import { shellQuote } from '../shared/lib/shellQuote.ts';
+import { verifyBootstrapFiles } from './installBootstrap.mts';
 import { normalizeStageModes } from '../server/scripts/sea/stage.mts';
 
 const execute = promisify(execFile);
 
-/**
- * Подпись installer связывает точные байты ELF с уже проверенным конвертом выпуска.
- * Тот же verifier используется перед публикацией и перед запуском приватной копии.
- */
-export async function verifyReleaseInstaller(
-  binary: string,
-  envelope: ReleaseEnvelope,
-  proof: string,
-  signature: string,
-  publicKey: string = RELEASE_SIGNING_PUBLIC_KEY,
-): Promise<void> {
-  const digest = verifyReleaseEnvelope(envelope, publicKey);
-  const installer = await sha256File(binary);
-  const expected = `GrigDesk installer v1\n${installer}  grigdesk-install\n${digest}\n`;
+import { verifyReleaseInstaller } from './releaseArtifactVerification.mts';
 
-  if (proof !== expected || !verify(null, Buffer.from(proof), createPublicKey(publicKey),
-    Buffer.from(signature.trim(), 'base64'))) {
-    throw new Error('release_installer_signature_invalid');
-  }
-}
+export { verifyReleaseInstaller };
 
 interface InstalledSiteTarget {
   host: string;
@@ -109,13 +93,16 @@ async function prepareInstalledHelp(work: string, envelope: ReleaseEnvelope): Pr
  * Повтор сверяет manifest целиком; другой канал остаётся прежним. Deb-бутстрап
  * публикуется рядом с installer как необязательный файл того же выпуска.
  */
-function installedPublicationCommand(input: {
+export function installedPublicationCommand(input: {
   root: string;
   staging: string;
   version: string;
   channel: string;
   deb?: string;
 }): string {
+  const releaseFiles = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-install',
+    'grigdesk-install.sha256', 'grigdesk-install.sig', 'grigdesk-maintenance.gz']
+    .map(shellQuote).join(' ');
   const helpFiles = HELP_LOCALES.map(helpResourceFile).map(shellQuote).join(' ');
   const deb = input.deb ? `
 if test -e "$stage/${input.deb}"; then
@@ -146,11 +133,12 @@ for file in ${helpFiles}; do
   test -f "$stage/help/$file"
 done
 if test -e "$root/releases/$version"; then
-  cmp "$stage/$channel.json" "$root/releases/$version/$channel.json"
-  cmp "$stage/grigdesk-install.sha256" "$root/releases/$version/grigdesk-install.sha256"
+  for file in ${releaseFiles} "$channel.json"; do
+    cmp "$stage/$file" "$root/releases/$version/$file"
+  done
 else
   mkdir "$stage/release"
-  for file in desktop.tar.gz server.tar.gz grigdesk-install grigdesk-install.sha256 grigdesk-install.sig; do
+  for file in ${releaseFiles}; do
     mv "$stage/$file" "$stage/release/$file"
   done
   cp "$stage/$channel.json" "$stage/release/$channel.json"
@@ -168,7 +156,55 @@ cp "$root/help/$version/latest.js" "$stage/latest.js.new"
 mv "$stage/latest.html.new" "$root/help/latest-$channel.html"
 mv "$stage/latest.js.new" "$root/help/latest.js"
 mv "$stage/$channel.json" "$root/api/releases/v1/$channel.json"
+# Время фиксируется только после переключения канала; повтор не меняет порядок выпуска.
+if test ! -e "$root/releases/$version/.published-$channel"; then
+  touch "$root/releases/$version/.published-$channel"
+fi
+: > "$stage/retention"
+for candidate in "$root/releases/"*; do
+  test -d "$candidate" && test ! -L "$candidate" || continue
+  test -f "$candidate/grigdesk-maintenance.gz" && test -f "$candidate/$channel.json" || continue
+  candidate_version=$(basename "$candidate")
+  case "$candidate_version" in ''|*[!0-9A-Za-z.-]*) continue ;; esac
+  test "$candidate_version" != "$version" || continue
+  published="$candidate/.published-$channel"
+  test -f "$published" || published="$candidate/$channel.json"
+  printf '%s %s\n' "$(find "$published" -maxdepth 0 -printf '%T@')" "$candidate_version" >> "$stage/retention"
+done
+sort -k1,1nr -k2,2r "$stage/retention" | awk 'NR > 1 {print $2}' > "$stage/remove"
+while IFS= read -r obsolete; do
+  test -n "$obsolete" && test "$obsolete" != "$version" || continue
+  rm -rf -- "$root/releases/$obsolete" "$root/help/$obsolete"
+  printf 'Удалено: %s\n' "$root/releases/$obsolete" "$root/help/$obsolete"
+done < "$stage/remove"
 rm -rf "$stage"
+`;
+}
+
+/**
+ * Перед SCP убираются только старые staging-каталоги в корне публикации.
+ * Свободное место проверяется на этой файловой системе до заливки любых байтов.
+ */
+export function installedPublicationPreflight(root: string, staging: string, bytes: number): string {
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+    throw new Error('release_publication_size_invalid');
+  }
+
+  const cleanup = ['find "$root" -mindepth 1 -maxdepth 1 -type d',
+    "-name '.grigdesk-publish-*' -mmin +10080 -print -exec rm -rf -- {} +"].join(' ');
+
+  return `set -eu
+root=${shellQuote(root)}
+mkdir -p "$root"
+${cleanup}
+available=$(df -Pk -- "$root" | awk 'NR == 2 {print $4}')
+required=${Math.ceil(bytes * 2 / 1024)}
+case "$available" in ''|*[!0-9]*) echo 'Не удалось проверить свободное место выпуска' >&2; exit 2 ;; esac
+if test "$available" -lt "$required"; then
+  echo "Недостаточно места для выпуска: нужно $required KiB, свободно $available KiB" >&2
+  exit 2
+fi
+mkdir ${shellQuote(staging)}
 `;
 }
 
@@ -181,6 +217,17 @@ export async function publishInstalledRelease(
   targets: InstalledSiteTarget[],
   dryRun = false,
 ): Promise<void> {
+  if (await fs.lstat(path.join(directory, 'local-build.json')).then(() => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+
+      return false;
+    })) {
+    throw new Error('release_local_build_not_publishable');
+  }
+
   const names = (await fs.readdir(directory))
     .filter((name) => name === 'release.json' || name === 'dev.json');
 
@@ -195,8 +242,7 @@ export async function publishInstalledRelease(
     throw new Error('release_publication_empty');
   }
 
-  const publicKey = process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE
-    ? await fs.readFile(process.env.RELEASE_SIGNING_PUBLIC_KEY_FILE, 'utf8') : RELEASE_SIGNING_PUBLIC_KEY;
+  const publicKey = RELEASE_SIGNING_PUBLIC_KEY;
 
   verifyReleaseEnvelope(index.latest, publicKey);
 
@@ -205,6 +251,7 @@ export async function publishInstalledRelease(
 
   await verifyReleaseInstaller(path.join(directory, 'grigdesk-install'), index.latest,
     proof, signature, publicKey);
+  await verifyBootstrapFiles(directory, { envelope: index.latest, publicKey });
 
   for (const component of ['desktop', 'server'] as const) {
     const artifact = index.latest.payload.artifacts[component];
@@ -242,7 +289,8 @@ export async function publishInstalledRelease(
 
         return false;
       });
-    const upload = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-install', 'grigdesk-install.sha256',
+    const upload = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-maintenance.gz', 'grigdesk-install',
+      'grigdesk-install.sha256',
       'grigdesk-install.sig', names[0]!].map((name) => path.join(directory, name));
 
     upload.push(help);
@@ -259,16 +307,23 @@ export async function publishInstalledRelease(
         `${target.user}@${target.host}`, command]);
 
       try {
-        await remote(`mkdir -p ${shellQuote(staging)}`);
+        const bytes = (await Promise.all(upload.map(async (file) => (await fs.stat(file)).size)))
+          .reduce((sum, size) => sum + size, 0);
+        const preflight = await remote(installedPublicationPreflight(target.dir, staging, bytes));
+
+        process.stdout.write(preflight.stdout);
         await execute('scp', [...sshOptions, '-P', target.port, ...upload,
           `${target.user}@${target.host}:${staging}/`]);
-        await remote(installedPublicationCommand({
+
+        const published = await remote(installedPublicationCommand({
           root: target.dir,
           staging,
           version: index.latest.payload.version,
           channel: index.channel,
           ...(debPresent ? { deb: debName } : {}),
         }));
+
+        process.stdout.write(published.stdout);
       } catch (error) {
         if (number === 0) {
           throw error;

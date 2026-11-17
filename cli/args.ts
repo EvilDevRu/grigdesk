@@ -68,6 +68,11 @@ grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF �
 grigdesk-ctl build [all|server|web|window|deepseek|apk]
                                 Без аргументов: сервер, окно, tasks и voice (all)
                                 apk: Android-приложение со встроенным вебом
+grigdesk-ctl dist build | doctor
+                                Релизный прогон в снимке исходников или диагностика среды
+grigdesk-ctl dist check --from <каталог> | --local-run <UUID>
+grigdesk-ctl dist install --from <каталог> | --local-run <UUID> --mode local|remote|server
+                                Отдельные пути и подтверждение установки обязательны
 grigdesk-ctl dev | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help
 grigdesk-ctl --version

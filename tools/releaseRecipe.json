@@ -1,0 +1,336 @@
+{
+  "format": 1,
+  "stages": [
+    {
+      "id": "bundle-install",
+      "group": "prepare-build",
+      "argv": [
+        "bash",
+        "-c",
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix tracker ci && npm --prefix routes ci --include=dev && npm --prefix voice ci --include=dev && npm --prefix relay ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "server-install",
+      "group": "prepare-server",
+      "argv": [
+        "npm",
+        "--prefix",
+        "server",
+        "ci"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "web-install",
+      "group": "prepare-web",
+      "argv": [
+        "npm",
+        "--prefix",
+        "web",
+        "ci"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "mobile-install",
+      "group": "prepare-web",
+      "argv": [
+        "npm",
+        "--prefix",
+        "mobile",
+        "ci"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "deepseek-runtime",
+      "group": "prepare-build",
+      "argv": [
+        "bash",
+        "-c",
+        "npm --prefix deepseek run prepare:runtime -- --node-cache-dir \"$GRIGDESK_DEEPSEEK_NODE_CACHE\""
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "deepseek-vendor",
+      "group": "prepare-build",
+      "argv": [
+        "bash",
+        "-c",
+        "node --input-type=module <<'NODE'\nimport { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';\nawait materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');\nNODE"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "server-browser",
+      "group": "prepare-build",
+      "argv": [
+        "node",
+        "server/node_modules/playwright-core/cli.js",
+        "install",
+        "chromium"
+      ],
+      "needs": [
+        "bundle-install"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "server-environment",
+      "group": "prepare-server",
+      "needs": [
+        "prepare-build"
+      ],
+      "argv": [
+        "node",
+        "tools/releaseEnvironment.mts",
+        "--require-ready"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "deepseek-warmup",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh tests/helpers/deepseekBinary.mts --prepare-suite && NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh tests/helpers/deepseekRuntimeArtifact.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "cache-root-check",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment",
+        "deepseek-warmup"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test tests/server/deepseek-binary-cache-root.test.js"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "server-tests",
+      "group": "server",
+      "needs": [
+        "prepare-server",
+        "prepare-build",
+        "server-environment",
+        "deepseek-warmup",
+        "cache-root-check"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "available_kib=$(df --output=avail -k . | tail -n 1 | tr -d ' '); test \"$available_kib\" -ge 16777216 || { printf '%s\\n' \"Для полного native-набора нужно 16 GiB; доступно $available_kib KiB\"; exit 1; }; exec npm --prefix server test"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--test-reporter=tap"
+      },
+      "timeoutMs": 14400000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "shared-tests",
+      "group": "server",
+      "needs": [
+        "prepare-server",
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test --test-concurrency=2 tests/shared/*.test.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "guide-tests",
+      "group": "server",
+      "needs": [
+        "prepare-server",
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test --test-concurrency=2 tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs tests/docs/release-script-contract.test.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "voice-tests",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "voice",
+        "test"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "routes-tests",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "routes",
+        "test"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "installer-tests",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "-c",
+        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test --test-concurrency=2 tests/server/install-bootstrap.test.mts tests/server/install-bootstrap-dialog.test.mts tests/server/install-online.test.mts tests/server/installation-target.test.mts tests/server/verify-installation.test.mts tests/server/release-pipeline.test.mts tests/server/release-environment.test.mts tests/server/distribution-snapshot.test.mts tests/server/distribution-trust.test.mts tests/server/release-publish-command.test.mts tests/server/distribution-build.test.mts tests/server/verify-built-release.test.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "distribution-cli-tests",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-node-tests-safe.sh",
+        "--test",
+        "--test-concurrency=2",
+        "tests/cli/distribution-menu.test.mts",
+        "tests/cli/entry.test.mts"
+      ],
+      "env": {
+        "NODE_TEST_MAX_RSS_MB": "4096"
+      },
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "web-environment",
+      "group": "prepare-web",
+      "needs": [
+        "prepare-build"
+      ],
+      "argv": [
+        "node",
+        "tools/releaseEnvironment.mts",
+        "--require-ready"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "web-tests",
+      "group": "web",
+      "needs": [
+        "prepare-web",
+        "prepare-build",
+        "web-environment"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "web",
+        "test"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--test-reporter=tap"
+      },
+      "timeoutMs": 5400000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "web-build",
+      "group": "build",
+      "needs": [
+        "server",
+        "web"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "web",
+        "run",
+        "build"
+      ],
+      "timeoutMs": 7200000
+    }
+  ]
+}

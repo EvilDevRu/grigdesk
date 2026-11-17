@@ -2,6 +2,11 @@
 
 Start with the exact reason and selected machine's state. Keep your draft and determine whether the action already happened.
 
+For an installer download failure, keep the error and retry: verified archives remain cached.
+For a hash or signature failure, download the script again from the official website; keep verification enabled.
+Preserve an unknown or incomplete installation root. A long-saved script may point to a release older
+than the channel's two retained lightweight versions: get a new script rather than editing its pinned hashes.
+
 ## Before you begin
 
 Record operation, error time and server/window version.

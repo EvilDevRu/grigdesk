@@ -59,5 +59,13 @@ export async function runEntry(argv: readonly string[]): Promise<number> {
     });
   }
 
+  if (argv[0] === 'dist' && sourceInstallation(root)) {
+    if (interactive && !argv.includes('--json')) {
+      return runPresentedCommand(root, argv);
+    }
+
+    return runAttached('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), ...argv]);
+  }
+
   return interactive && !argv.includes('--json') ? runPresentedCommand(root, argv) : runCli(argv);
 }

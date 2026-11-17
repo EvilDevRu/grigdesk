@@ -207,6 +207,15 @@ async function runInstalledPipeline(root: string, argv: string[]): Promise<never
  * Стоп из app/server cgroup требует явного --force, не обходящего trust или права.
  */
 export async function runInstalledCli(root: string, argv: string[]): Promise<number> {
+  if (argv[0] === 'dist') {
+    const help = argv.includes('--help') || argv.includes('-h');
+
+    (help ? process.stdout : process.stderr).write(
+      'Команда dist доступна в установке из исходников.\n');
+
+    return help ? 0 : 2;
+  }
+
   const { t } = cliTranslator();
 
     if (argv[0] === 'pipeline') {

@@ -4,6 +4,11 @@ Release contains stable X.Y.Z versions; dev contains explicitly selected X.Y.Z-d
 Changing channels does not silently permit downgrading. Network and signature errors are shown
 separately from “no updates available”.
 
+The new installer script downloads only selected components. Repeating a completed installation
+prepares a regular component update, keeping its previous maintenance helper and data.
+The old helper is not migrated automatically. Component rollback uses local generations,
+independently of website retention.
+
 ## Before you begin
 
 Updates need a verified published release and a trusted key. The owner publishes manually;

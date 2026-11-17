@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 
 import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import { openBuildLog, readBuildTimings, saveBuildTimings } from './buildLog.ts';
-import { collectBuildProcesses, signalBuildProcesses } from './buildProcesses.ts';
+import { collectBuildProcesses, signalBuildProcesses, terminateBuildProcesses } from './buildProcesses.ts';
 import type { BuildProcess } from './buildProcesses.ts';
 import { buildStepIds, estimateBuildProgress } from './buildState.ts';
 import type { BuildStep } from './buildState.ts';
@@ -326,13 +326,12 @@ async function observeBuild(
       return;
     }
 
-    known = await collectBuildProcesses(child.pid, known);
-    await signalBuildProcesses(known, 'SIGINT');
+    const stopped = await terminateBuildProcesses(child.pid, known);
 
-    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
-      await pause(2000);
-      known = await collectBuildProcesses(child.pid, known);
-      await signalBuildProcesses(known, signal);
+    known = stopped.processes;
+
+    if (!stopped.cleanupConfirmed) {
+      failure = 'Не подтверждено завершение дочерних процессов сборки';
     }
   }
 
