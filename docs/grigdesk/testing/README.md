@@ -51,7 +51,7 @@
 - [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Prefix source/SEA, native preflight, быстрый young-retention и полная проверка ELF](source-runtime-dependencies.md)
-- [Smoke GLM проверяет admission выбранного выпуска без внешней модели](glm-release-admission-fixture.md)
+- [Smoke GLM: admission без внешней модели и срок хода после подготовки ELF](glm-release-admission-fixture.md)
 - [Фикстуры GLM: smoke, изолированный CLI, model-only, команды и frozen admission](glm-smoke-mode-fixtures.md)
 - [Родитель фикстуры в артефактах: создание и GRIGDESK_ARTIFACTS_DIR без пути машины](artifact-fixture-parent.md)
 - [Реальный GLM: policy и home фикстуры вне системного tmp, скрываемого песочницей](glm-sandbox-fixture-root.md)
