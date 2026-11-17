@@ -46,6 +46,7 @@ export const OWNERS = [
   'task-18',
   'task-19',
   'deepseek-plan',
+  'qwen-native-tools',
   'unassigned',
 ] as const;
 
