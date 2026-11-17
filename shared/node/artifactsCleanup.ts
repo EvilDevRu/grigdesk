@@ -43,6 +43,9 @@ export interface CleanupOptions {
   olderThanMs?: number;
   keepGenerations?: number;
   dryRun?: boolean;
+  // Автоматическая подготовка может не собирать размеры гарантированно молодых деревьев.
+  // По умолчанию полный отчёт и приоритет причин занятости сохраняются.
+  measureYoung?: boolean;
   now?: number;
   protectedPaths?: readonly string[];
   heldLock?: HeldLock;
@@ -300,7 +303,7 @@ async function candidateLocks(
  * Перед удалением обновляются состав и mtime корней; исчезнувшие поколения не занимают K мест.
  */
 async function latestGenerations(
-  root: string, directory: string, keep: number, known: ReadonlyMap<string, Candidate>,
+  root: string, directory: string, keep: number, known: ReadonlyMap<string, Pick<Candidate, 'newest'>>,
 ): Promise<Set<string>> {
   const values: Array<{ directory: string; newest: number }> = [];
 
@@ -390,7 +393,7 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
   }
 
   const candidates: Candidate[] = [];
-  const knownGenerations = new Map<string, Candidate>();
+  const knownGenerations = new Map<string, Pick<Candidate, 'newest'>>();
   const themeLocks = new Map<string, LockReason>();
   const held = options.heldLock ? [options.heldLock] : [];
   const cutoff = (options.now ?? Date.now()) - olderThanMs;
@@ -468,14 +471,27 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
             continue;
           }
 
+          const generation = mode === 'generations' && !lockSidecar(name) && !cleanupStaging(name)
+            ? directory : undefined;
+
+          // Свежий корень уже доказывает молодость всего дерева: удалять его нельзя.
+          // Helper может не считать размер сохранённых данных; CLI по умолчанию читает полную опись.
+          if (options.measureYoung === false && childStat.mtimeMs >= cutoff) {
+            if (generation) {
+              knownGenerations.set(child, { newest: childStat.mtimeMs });
+            }
+
+            append(child, null, 'young');
+
+            continue;
+          }
+
           const candidate: Candidate = {
             directory: child,
             stat: childStat,
             ...await measure(root, child, options.signal),
-            generation: mode === 'generations' && !lockSidecar(name) && !cleanupStaging(name)
-              ? directory : undefined,
-            theme: mode === 'generations' && !lockSidecar(name) && !cleanupStaging(name)
-              ? path.dirname(path.dirname(directory)) : undefined,
+            generation,
+            theme: generation ? path.dirname(path.dirname(directory)) : undefined,
           };
 
           if (candidate.generation) {

@@ -60,7 +60,8 @@ function lastUser(payload) {
     typeof item.content === 'string' ? item.content
       : (item.content ?? []).map((block) => block.text ?? '').join('\n'));
 
-  return messages.findLast((message) => !message.startsWith('Current runtime context.')) ?? '';
+  return messages.findLast((message) => !message.startsWith('Current runtime context.')
+    && !message.startsWith('<system-reminder>')) ?? '';
 }
 
 /**
@@ -205,6 +206,11 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и не �
     egressGuard: await writeGlmEgressGuard(root),
   };
   const production = createGlmAdapter(productionDeps);
+  const after = await ensureTestDeepSeekBinary();
+
+  assert.deepEqual(after.info.glm.admission, candidate.info.glm.admission,
+    'smoke не выдаёт постоянный допуск до проверки отчёта');
+
   const input = {
     config: {
       deepseekRuntimeMode: 'binary',
@@ -219,11 +225,6 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и не �
     signal: AbortSignal.timeout(60000),
     onSessionCreated: async () => {},
   };
-
-  const after = await ensureTestDeepSeekBinary();
-
-  assert.deepEqual(after.info.glm.admission, candidate.info.glm.admission,
-    'smoke не выдаёт постоянный допуск до проверки отчёта');
 
   if (candidate.info.glm.admission.some((entry) => entry.mode === 'api'
     && entry.compatibility === report.compatibility)) {
