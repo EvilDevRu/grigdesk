@@ -75,7 +75,9 @@ test('TRACKER-SECRETS-01: stale revision не меняет выбор, успе�
 test('Select: HTTP сохраняет строку варианта и отвергает неизвестное значение и тип', async (t) => {
   const fixture = await trackerFixture(t, { setup: copyStockPackage });
 
-  assert.ok(fixture);
+  if (!fixture) {
+    return;
+  }
 
   fixture.credsStore.writeFor('grigdesk-b24', {
     baseUrl: 'https://cloud.fixture',

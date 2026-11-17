@@ -38,6 +38,20 @@ Desktop использует ci --ignore-scripts и отдельную уста�
 xvfb и FUSE для проверки готового окна. Ни doctor, ни dist build не вызывают sudo.
 Отключение Chromium sandbox не считается успешной пробой.
 
+Подготовка проверяет ffmpeg, ffprobe, ripgrep и импорт Pillow для генерации растровых
+значков. На GitHub runner полный серверный прогон устанавливает закреплённый
+`@qwen-code/qwen-code@0.27.3` из `tests/fixtures/qwen-cli/package-lock.json` и передаёт
+его путь через `GRIGDESK_QWEN_BIN`. Native-фикстуры используют loopback API и синтетические
+ключи. Разрешение npm на скрипты действует только для закреплённой версии
+[проверенного audio-capture hook](../chat/qwen-install-hooks.md).
+
+На одноразовом GitHub runner общий серверный рецепт запускается в
+`app-grigdesk-tests-*.scope` пользовательского systemd. Это даёт Qwen Host владельца для
+`BindsTo`. `MemoryMax=4G` на пользовательском менеджере ограничивает суммарную память
+набора и дочерних Qwen scope, в том числе за пределами process group сторожа.
+Сторож запускает DeepSeek source-sync отдельно. Срок compiled status MCP для настоящего
+route loop составляет 180 секунд при общем сроке случая 190 секунд.
+
 Удаление .NET/GHC/CodeQL остаётся отдельным github-hosted шагом с явным guard;
 на рабочую ОС оно не переносится. Перед native-набором нужно 16 GiB свободного места.
 Doctor проверяет инструменты, sandbox, браузер, место и ограничения фактического хоста.
@@ -81,3 +95,8 @@ actionlint .github/workflows/grigdesk-release.yml .github/workflows/grigdesk-pro
 Профильные workflow/checks/validation тесты проверяют граф, команды, receipts и границы ключей;
 процессные тесты runner проверяют настоящие exit/cancel/timeout. Live Actions, платный допуск GLM,
 GUI на чистой VM и публикация требуют отдельного поручения владельца.
+
+Проверки workflow в `tests/server/release-workflow.test.js` и
+`tests/relay/release-workflow.test.js` проверяют ручной запуск без `push` и состав выпуска; они не заменяют
+валидацию доступности контекстов GitHub Actions. Уведомления настраиваются отдельно
+в [GitHub Actions notifications](https://docs.github.com/en/subscriptions-and-notifications/how-tos/managing-github-actions-notifications).

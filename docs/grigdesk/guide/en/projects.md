@@ -21,6 +21,8 @@ Prepare existing directories on the server. Human-supplied paths determine which
 6. Restore it from the archive when needed. Delete registration is available in the archive after checks and confirmation.
 
 The compact catalog search matches names, IDs, labels and paths; the adjacent button changes sorting.
+The factory configuration heading wraps on narrow screens, keeping its disclosure accessible
+with larger text.
 The connection skill ships with the application. After updating and starting the new server, type `$` in Codex
 and select `$grigdesk-connect-project`; in GLM or DeepSeek type `/` and choose `/grigdesk-connect-project`.
 Reload the page if the old menu remains. The agent reads code, proposes interview answers and previews future files;

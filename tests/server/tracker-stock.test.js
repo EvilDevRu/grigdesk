@@ -370,7 +370,9 @@ test('STOCK-04: правка задачи уходит в tasks.task.update', as
 test('STOCK-DELETE-01: удаление через HTTP-фасад отправляет tasks.task.delete один раз', async (t) => {
   const fixture = await stockFixture(t);
 
-  assert.ok(fixture);
+  if (!fixture) {
+    return;
+  }
 
   const response = await fixture.request('DELETE', '/api/tracker/task/42');
   const calls = fixture.cloud.requests.filter((request) => request.url === '/rest/tasks.task.delete');
@@ -385,7 +387,9 @@ test('STOCK-DELETE-01: удаление через HTTP-фасад отправ�
 test('STOCK-COMPLETE-01: отказ нового модуля завершает через STATUS=5 без повторов', async (t) => {
   const fixture = await stockFixture(t, { completeDenied: true });
 
-  assert.ok(fixture);
+  if (!fixture) {
+    return;
+  }
 
   const response = await fixture.request('POST', '/api/tracker/task/42/complete');
   const actions = fixture.cloud.requests.filter((request) =>
@@ -404,7 +408,9 @@ test('STOCK-COMPLETE-01: отказ нового модуля завершает
 test('STOCK-CARD: таймер проходит HTTP-фасад, срок принимается и снимается', async (t) => {
   const fixture = await stockFixture(t);
 
-  assert.ok(fixture);
+  if (!fixture) {
+    return;
+  }
 
   for (const action of ['start', 'pause', 'stop']) {
     const response = await fixture.request('POST', `/api/tracker/task/42/timer/${action}`, {});

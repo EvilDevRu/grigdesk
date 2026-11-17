@@ -27,7 +27,7 @@ test('AP23_reconcile_secret: двойной submit, lost ACK и reload узна�
   await f.page.getByRole('textbox', { name: /Имя профиля/u }).fill('Новое подключение');
   await f.page.getByLabel('API-ключ', { exact: true }).fill(PRIVATE_INPUT);
   await assertPrivate(f.page);
-  f.control.dropAck = true;
+  f.control.dropSecretAck = true;
   await f.page.getByRole('button', { name: /Сохранить/u }).dblclick();
   await f.page.getByText(WARNING, { exact: true }).waitFor();
 
@@ -44,7 +44,7 @@ test('AP23_reconcile_secret: двойной submit, lost ACK и reload узна�
   assert.equal(f.calls.filter((call) => call.method === 'POST').length, posts.length);
   await assertPrivate(f.page);
   await f.page.getByRole('button', { name: 'Подтвердить замену', exact: true }).click();
-  await f.page.getByText(/Сохранён|Сохранен/u).waitFor();
+  await f.page.getByText(/^(?:Сохранён|Сохранен)$/u).waitFor();
   assert.equal(f.snapshot.activeProfileId, 'profile-a', 'сохранение inactive не активирует профиль');
 });
 
@@ -101,10 +101,26 @@ test('AP23_reconcile_secret: направления кода, ожидание, 
   }
 
   await assertPrivate(f.page);
+
+  const previousDocument = await f.page.evaluate(() => performance.timeOrigin);
+
+  // Задержанная загрузка не даёт принять очищенный старый DOM за готовый новый документ.
+  // Проверка обязана дождаться reload, сохранив отсутствие секрета в состоянии и storage.
+  await f.page.route(new URL('/', f.origin).href, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.continue();
+  }, { times: 1 });
+
   f.control.unauthorized = true;
-  await f.page.getByRole('button', { name: /Продолжить/u, exact: true }).click();
+  await Promise.all([
+    f.page.waitForEvent('domcontentloaded'),
+    f.page.getByRole('button', { name: /Продолжить/u, exact: true }).click(),
+  ]);
+  await f.page.getByRole('button', { name: 'Настройки', exact: true }).waitFor();
   await f.page.waitForFunction(() => ![...document.querySelectorAll('input')]
     .some((input) => input.value.includes('synthetic-browser-private-access-code')));
+  assert.notEqual(await f.page.evaluate(() => performance.timeOrigin), previousDocument,
+    'После 401 проверяется состояние нового документа');
   await assertPrivate(f.page);
 });
 

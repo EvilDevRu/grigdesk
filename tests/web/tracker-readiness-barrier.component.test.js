@@ -18,16 +18,16 @@ for (const presentation of ['dialog', 'document']) {
     });
   }
 
-  test(`LEGACY-READY-01: ${presentation}, own-диапазон ждёт подтверждения источника`, async (t) => {
+  test(`LEGACY-READY-01: ${presentation}, большой номер остаётся внешней задачей`, async (t) => {
     const { wrapper } = await mountTrackerCard(t, {
       presentation,
       detailMode: 'held',
       id: '100000000001'
     });
 
-    assert.equal(wrapper.find('[aria-label="Учёт времени"]').exists(), false);
-    assert.equal(wrapper.find('[data-task-section="comments"]').exists(), false);
-    assert.equal(cardButton(wrapper, 'Завершить') === undefined, true);
+    assert.equal(wrapper.find('[aria-label="Учёт времени"]').exists(), true);
+    assert.equal(wrapper.find('[data-task-section="comments"]').exists(), true);
+    assert.equal(cardButton(wrapper, 'Завершить')?.element.disabled, false);
     assert.equal(wrapper.find('[data-role="task-edit-open"]').exists(), false);
   });
 }

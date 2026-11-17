@@ -1431,6 +1431,33 @@
       "owner": "qwen-native-tools",
       "fate": "helper",
       "detail": "Проверка ffmpeg/ffprobe использует каталог текущего Node из PATH песочницы; исходный и упакованный Qwen helper выполняют её одинаково."
+    },
+    {
+      "file": "server/src/lib/accessProfiles/cliProcess.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "server-bundle",
+      "detail": "URL модуля сохраняет относительное размещение PTY helper в payload."
+    },
+    {
+      "file": "server/src/lib/accessProfiles/cliProcess.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/accessProfiles/authPty.py",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "asset",
+      "detail": "Управляемый CLI-вход использует Python PTY, уже включённый в оба manifest ресурсов."
+    },
+    {
+      "file": "shared/node/cliSeaBuild.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "development-only",
+      "detail": "Сборщик CLI запускает postject обычным Node; в runtime CLI этот путь не исполняется."
     }
   ],
   "resources": [
@@ -1913,6 +1940,14 @@
       "owner": "deepseek-plan",
       "fate": "helper",
       "detail": "Metadata helper Factory без модельных вызовов."
+    },
+    {
+      "path": "server/src/lib/accessProfiles/authPty.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-1",
+      "fate": "asset",
+      "detail": "Python PTY управляемого CLI-входа; сохраняет размещение относительно серверного модуля."
     }
   ]
 }

@@ -242,7 +242,7 @@ function mountHelpForError(t) {
 
   globalThis.fetch = async (url) => {
     calls.push(String(url));
-    assert.equal(String(url), '/api/help?locale=ru');
+    assert.equal(String(url), '/api/help');
 
     return Response.json(corpus);
   };

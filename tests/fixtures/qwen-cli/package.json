@@ -1,0 +1,11 @@
+{
+  "name": "grigdesk-qwen-test-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@qwen-code/qwen-code": "0.27.3"
+  },
+  "allowScripts": {
+    "@qwen-code/audio-capture@0.27.3": true
+  }
+}

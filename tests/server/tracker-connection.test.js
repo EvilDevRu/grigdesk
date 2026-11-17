@@ -92,7 +92,7 @@ test('Черновик проверяет нужный драйвер, сохр�
   assert.equal(await readFile(fixture.config.trackerCredentialsPath, 'utf8'), beforeCredentials);
   assert.equal(await readFile(cookiePath, 'utf8'), 'saved-cookie');
   assert.equal(fixture.events.length, beforeEvents);
-  assert.deepEqual(fixture.runtime.registry.activeIds, ['own', 'active-board']);
+  assert.deepEqual(fixture.runtime.registry.activeIds, ['active-board']);
 
   const probes = (await readFile(path.join(path.dirname(cookiePath), '../../probes.jsonl'), 'utf8'))
     .trim().split('\n').map(JSON.parse);

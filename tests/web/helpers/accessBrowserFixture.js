@@ -57,7 +57,7 @@ export async function accessBrowser(t, options = {}) {
     listStatus: 200,
     busy: false,
     unauthorized: false,
-    dropAck: false,
+    dropSecretAck: false,
     connections: 0,
     attempt: null,
   };
@@ -217,8 +217,9 @@ export async function accessBrowser(t, options = {}) {
           broadcast();
         }
 
-        if (control.dropAck && request.method !== 'GET') {
-          control.dropAck = false;
+        if (control.dropSecretAck && request.method === 'POST' && url.pathname.includes('/steps/')
+          && body?.input?.apiKey === PRIVATE_INPUT) {
+          control.dropSecretAck = false;
           // Обрезанное тело теряет ACK после применения, не провоцируя повтор POST самим Chromium.
           // Клиент должен узнать исход через GET operation, сохранив единственный секретный запрос.
           response.writeHead(status, { 'content-type': 'application/json' });
@@ -293,8 +294,15 @@ export async function openProfiles(f, page = f.page) {
   const providerPage = page.locator('[data-provider-page="fixture"][data-ready="true"]');
 
   await providerPage.waitFor();
-  await providerPage.getByText(/^(Загрузка(?: профилей)?|Loading(?: profiles)?)…$/u)
-    .waitFor({ state: 'hidden' });
+
+  // Список и восстановление попытки могут одновременно показывать две подписи загрузки.
+  // Ждём исчезновения всех, не применяя strict locator к нескольким готовящимся блокам.
+  await page.waitForFunction(() => {
+    const section = document.querySelector('[data-provider-page="fixture"][data-ready="true"]');
+
+    return section && ![...section.querySelectorAll('*')].some((element) =>
+      /^(Загрузка(?: профилей)?|Loading(?: profiles)?)…$/u.test(element.textContent?.trim() ?? ''));
+  });
 
   const addButton = providerPage.getByRole('button', {
     name: /^(Добавить профиль|Add profile)$/u,

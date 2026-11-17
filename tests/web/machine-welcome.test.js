@@ -59,6 +59,7 @@ test('начальный выбор компьютера: адаптив, явн
       reducedMotion: 'reduce',
     });
     const page = await context.newPage();
+    let phoneHeadingSize = 0;
 
     page.on('pageerror', (error) => errors.push(error.message));
 
@@ -66,11 +67,18 @@ test('начальный выбор компьютера: адаптив, явн
       await page.goto(origin + '#/');
       await page.locator('.machine-welcome').waitFor();
       assert.equal(await page.locator('[data-role="add-machine"]').count(), 0);
-      await scaleClientText(page, scale, '.machine-welcome');
+
+      // Обычный текст остаётся под адаптивным CSS; scale=1 тоже записывает inline px.
+      if (scale > 1) {
+        await scaleClientText(page, scale, '.machine-welcome');
+      }
 
       for (const [width, height] of [[320, 568], [360, 740], [393, 840], [390, 844],
         [800, 1280], [1280, 800]]) {
         await page.setViewportSize({ width, height });
+        await page.waitForFunction((expectedHeight) => (
+          Math.abs(document.querySelector('#app').getBoundingClientRect().height - expectedHeight) <= 1
+        ), height);
         assert.deepEqual(await inspectWelcome(page), {
           overflow: false,
           clipped: [],
@@ -86,12 +94,27 @@ test('начальный выбор компьютера: адаптив, явн
             clientHeight: element.clientHeight,
             documentHeight: document.documentElement.scrollHeight,
             viewportHeight: innerHeight,
+            mainHeight: element.querySelector('.machine-welcome-main').getBoundingClientRect().height,
+            guideHeight: element.querySelector('.machine-welcome-guide').getBoundingClientRect().height,
+            artVisible: getComputedStyle(element.querySelector('.machine-welcome-art')).display,
+            gap: getComputedStyle(element.querySelector('.machine-welcome-layout')).gap,
+            font: getComputedStyle(element).fontFamily,
+            headingSize: parseFloat(getComputedStyle(element.querySelector('h1')).fontSize),
           }));
+
+          if (width === 393) {
+            phoneHeadingSize = geometry.headingSize;
+          }
+          if (width === 1280) {
+            assert.ok(geometry.headingSize > phoneHeadingSize,
+              'Обычный заголовок увеличивается на desktop по адаптивным стилям');
+          }
 
           assert.ok(geometry.width >= geometry.viewportWidth - 1,
             'Начальный экран должен занимать всю ширину без внешнего отступа и scrollbar-gutter');
           assert.ok(geometry.scrollHeight <= geometry.clientHeight + 1,
-            `${width}×${height}: инструкция должна помещаться без вертикальной прокрутки`);
+            `${width}×${height}: инструкция должна помещаться без вертикальной прокрутки; `
+              + JSON.stringify(geometry));
           assert.ok(geometry.documentHeight <= geometry.viewportHeight + 1,
             'Начальный экран не должен прокручивать документ');
         }

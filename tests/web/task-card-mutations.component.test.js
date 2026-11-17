@@ -477,7 +477,7 @@ test('Возобновление завершённого stock перечиты
   assert.equal(cardButton(card.wrapper, 'Завершить') !== undefined, true);
 });
 
-for (const mode of ['unsupported', 'legacy', 'own']) {
+for (const mode of ['unsupported', 'legacy']) {
   test(`${mode}: интерактивные контролы скрыты`, async (t) => {
     const card = await interactiveCard(t, {
       status: 4,
@@ -490,15 +490,6 @@ for (const mode of ['unsupported', 'legacy', 'own']) {
         },
       } : {}),
       ...(mode === 'legacy' ? { metadataMode: 'legacy' } : {}),
-      ...(mode === 'own' ? {
-        id: '100000000001',
-        detail: {
-          source: 'grigdesk',
-          projectId: 'own',
-          projectTitle: 'Проект',
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      } : {}),
     });
 
     for (const role of ['checklist-add-input', 'checklist-add-list', 'checklist-create', 'checklist-add-item',

@@ -234,7 +234,11 @@ async function openEntry(page, id, entry) {
         .selectPage('agents.providers', id, 'overview');
     }, id);
 
-    return page.locator('[data-role="settings-modal"]');
+    const provider = page.locator(`[data-provider-page="${id}"][data-ready="true"]`);
+
+    await provider.waitFor({ timeout: 15000 });
+
+    return provider;
   }
 
   await page.locator(`.prov-${id} [data-context="provider-status"]`).click();
@@ -250,7 +254,7 @@ async function openEntry(page, id, entry) {
  */
 async function confirmStart(page, area, provider, operation, posts) {
   await area.getByRole('button', {
-    name: operation === 'install' ? /Установить|Install/iu : /Обновить|Update/iu,
+    name: operation === 'install' ? /^(?:Установить|Install)$/iu : /Обновить|Update/iu,
   }).first().click();
 
   const confirmation = page.getByRole('dialog').filter({

@@ -7,6 +7,7 @@ import { installedBuild } from '../helpers/installedBuildFixture.mjs';
 import { installedFixture } from '../helpers/installedUpdateFixture.mjs';
 import { ReleaseChannelService } from '../../shared/node/releaseChannel.ts';
 import { verifyReleaseEnvelope } from '../../shared/node/releaseTrust.ts';
+import type { ReleaseArtifact } from '../../shared/runtime/installedUpdateContracts.ts';
 
 for (const channel of ['release', 'dev'] as const) {
   test(`CHAIN-${channel.toUpperCase()}: bundle → подписанный канал → настоящая подготовка`, async (t) => {
@@ -50,8 +51,8 @@ for (const channel of ['release', 'dev'] as const) {
 
 test('PIPE-BUNDLE: подписанная server-поставка содержит pipeline с SHA и правами', async (t) => {
     const built = await installedBuild(t, 'release');
-    const server = built.index.latest.payload.artifacts.server;
-    const entry = server.files.find((item: { path: string }) => item.path === 'bin/pipeline');
+    const server: ReleaseArtifact = built.index.latest.payload.artifacts.server;
+    const entry = server.files.find((item) => item.path === 'bin/pipeline');
 
     assert.ok(entry, 'новый CLI отсутствует в подписанной server-описи');
     assert.equal(entry.mode, 0o555);

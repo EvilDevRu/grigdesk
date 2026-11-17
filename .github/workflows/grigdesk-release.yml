@@ -154,6 +154,26 @@ jobs:
           RELEASE_CHANNEL: ${{ inputs.channel }}
       - name: Общая подготовка одноразового runner
         run: bash tools/ci/provision-ubuntu.sh --disposable-environment
+      - name: Настоящий CLI Qwen
+        run: |
+          npm --prefix tests/fixtures/qwen-cli ci --no-audit --no-fund
+          printf '%s\n' \
+            "GRIGDESK_QWEN_BIN=$GITHUB_WORKSPACE/tests/fixtures/qwen-cli/node_modules/@qwen-code/qwen-code/cli-entry.js" \
+            >> "$GITHUB_ENV"
+      - name: Пользовательский менеджер процессов тестов
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test_uid=$(id -u)
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$test_uid.service"
+          sudo systemctl set-property --runtime "user@$test_uid.service" MemoryMax=4G
+          export XDG_RUNTIME_DIR="/run/user/$test_uid"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user show-environment > /dev/null
+          systemd-run --user --scope --collect --quiet \
+            --unit="app-grigdesk-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.scope" -- true
+          printf '%s\n' "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" \
+            "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Зависимости web
@@ -177,7 +197,14 @@ jobs:
           await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
           NODE
       - name: Общий прогон серверных проверок
-        run: node tools/releasePipeline.mts tools/releaseRecipe.json --groups prepare-server,prepare-build,server
+        id: server_tests
+        run: |
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          free -m
+          getconf _NPROCESSORS_ONLN
+          systemd-run --user --scope --collect --quiet \
+            --unit="app-grigdesk-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.scope" \
+            -- node tools/releasePipeline.mts tools/releaseRecipe.json --groups prepare-server,prepare-build,server
         env:
           GRIGDESK_PIPELINE_LOG: ${{ runner.temp }}/pipeline-receipts/server.log
           GRIGDESK_PIPELINE_RECEIPTS: ${{ runner.temp }}/pipeline-receipts

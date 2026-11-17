@@ -170,7 +170,7 @@
 - [Штатная песочница Harness: расширение доступа и отсутствие оценки опасности команд](deepseek-native-sandbox.md)
 - [Лишние вопросы auto: старый установленный ELF, приватный tmp и запись артефактов](deepseek-auto-runtime-update.md)
 - [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
-- [Хранилище истории: chats/, слияние и параллельное завершение legacy-миграции](history-storage.md)
+- [Хранилище истории: chats/, слияние, tombstone позднего mobile pending и legacy-миграция](history-storage.md)
 - [История для нового процесса исполнителя: свежий снимок и граница текущего хода](executor-history-replay.md)
 - [Ссылки на сохранённые шаги: отдельный PUT, durable ACK, снимок и fallback](history-step-reuse.md)
 - [Живой ход: refs при серверных записях, stale CAS и синтетика 20 блоков](history-reuse-live-writes.md)

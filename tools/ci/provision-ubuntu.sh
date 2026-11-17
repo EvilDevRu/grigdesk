@@ -13,6 +13,11 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   bubblewrap apparmor ffmpeg ripgrep python3-pil xvfb libfuse2t64 unzip p7zip-full
 
+ffmpeg -version
+ffprobe -version
+rg --version
+python3 -c 'from PIL import Image; print(Image.__version__)'
+
 # Браузер тестов и его системные зависимости ставятся здесь: стадия рецепта
 # server-browser сознательно без --with-deps (решение 14 — без sudo в прогонах).
 npm --prefix server ci

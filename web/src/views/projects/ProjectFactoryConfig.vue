@@ -1,6 +1,6 @@
 <template>
   <section class="factory-config" data-test="factory-config" :data-profile="detail.id">
-    <UiDisclosureButton v-model:open="expanded" :controls="bodyId" density="compact">
+    <UiDisclosureButton v-model:open="expanded" :controls="bodyId" wrap>
       {{ t('core.projectKonfiguratsiyaFabriki') }}
     </UiDisclosureButton>
     <div v-show="expanded" :id="bodyId" class="factory-config__body">

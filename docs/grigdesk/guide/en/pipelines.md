@@ -140,6 +140,9 @@ An attempt closed before the main cursor exists also returns its trusted termina
 If a decision is saved but resume fails, exit code 3 keeps the result in stdout:
 retry only resume. Check state before repeating an operation after a connection failure.
 
+A Qwen stop includes the failure reported by its wrapper. Check that reason before retrying
+the stage; a successful later run clears the previous error.
+
 ## Related articles
 
 [Qwen Code](qwen.md) · [Tasks](tasks.md) · [Gates](gates.md) · [Routes](routes.md) · [Environments](sandboxes.md) · [Backups](data-and-backups.md)

@@ -24,6 +24,21 @@ const capacity = 'Selected model is at capacity. Please try a different model.';
 const failed = (message) => JSON.stringify({ type: 'turn.failed', error: { message } });
 const stream = (...events) => events.map((event) => JSON.stringify(event)).join('\n');
 
+test('Qwen читает отказ wrapper-а, скрывает секрет и снимает причину после успеха', () => {
+  const reader = RUNNER_FAILURE_READERS.qwen;
+  const raw = stream({
+    event: 'wrapper_error',
+    code: 'qwen_wrapper_error',
+    message: 'Qwen transport failed token=fixture-secret',
+  });
+
+  assert.equal(reader.file, 'events.jsonl');
+  assert.equal(reader.inspect(raw).code, 'qwen_wrapper_error');
+  assert.match(reader.inspect(raw).message, /token=\[скрыто\]/u);
+  assert.equal(reader.inspect(`${raw}\n${stream({ event: 'result', stopReason: 'end_turn' })}`), null);
+  assert.equal(reader.inspect(stream({ event: 'tool_result', message: 'quota exceeded' })), null);
+});
+
 test('для каждого встроенного раннера объявлен источник диагностики отказов', async () => {
   const files = await readdir(new URL('../../engine/lib/runners/', import.meta.url));
   const runners = files.filter((file) => file.endsWith('.sh'))

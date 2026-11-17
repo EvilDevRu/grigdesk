@@ -20,7 +20,7 @@ test('Qwen Host: два хода сохраняют один процесс и s
     close: async () => {},
   };
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const first = await handle.send({ message: 'Первый', signal: AbortSignal.timeout(12000) });
   const second = await handle.send({ message: 'Второй', signal: AbortSignal.timeout(12000) });
@@ -47,7 +47,7 @@ test('Qwen Host: отсутствие native guard ACK запрещает prompt
     close: async () => {},
   };
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
   await assert.rejects(handle.send({ message: 'Не запускать' }), /guard/);
   assert.equal((await fixture.records()).some((entry) => entry.frame?.method === 'session/prompt'), false);
 });
@@ -79,7 +79,7 @@ for (const cron of [false, true]) {
       alive: true,
     };
 
-    t.after(() => handle.close());
+    fixture.onCleanup(() => handle.close());
     await handle.send({ message: 'Начни фон.', signal: AbortSignal.timeout(12000) });
     await until(() => results.length === 1, 'публикация фона');
     assert.equal(starts, 1);
@@ -130,7 +130,7 @@ async function controlledLive(t, options = {}) {
     alive: true,
   };
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   return {
     fixture,

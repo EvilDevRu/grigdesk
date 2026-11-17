@@ -130,14 +130,12 @@ test('Старый DTO сохраняет метки, пустые расшир�
   }
 });
 
-test('Own-задача сохраняет проект и описание без внешнего page-запроса', async (t) => {
+test('Внешняя задача с большим номером сохраняет проект и описание', async (t) => {
   const { wrapper, calls } = await mountTrackerCard(t, {
     id: '100000000001',
     detail: {
       id: '100000000001',
-      source: 'grigdesk',
-      projectId: 'project',
-      projectTitle: 'Свой проект',
+      group_name: 'Свой проект',
       description: 'Своя постановка',
       sourceUrl: 'https://task.fixture/own',
       createdAt: '2026-01-01T00:00:00Z',
@@ -146,7 +144,7 @@ test('Own-задача сохраняет проект и описание бе�
 
   assert.equal(wrapper.text().includes('Свой проект'), true);
   assert.equal(wrapper.find('.desc').text(), 'Своя постановка');
-  assert.equal(calls.some((call) => call.url?.endsWith('/comments')), false);
+  assert.equal(calls.some((call) => call.url?.endsWith('/comments')), true);
 });
 
 for (const deadline of [null, '2026-11-05T19:00:34+07:00']) {

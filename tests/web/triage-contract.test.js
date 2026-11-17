@@ -66,6 +66,7 @@ const analysis = {
 };
 const status = {
   task: 42,
+  source: null,
   state: 'done',
   queuedAt: 1757318400000,
   startedAt: 1757318401000,
@@ -75,7 +76,12 @@ const status = {
   note: null,
 };
 const detail = {
-  task: 42, analysis, note: 'Разведнота.', stale: ['be:src/app.js'], status,
+  task: 42,
+  source: null,
+  analysis,
+  note: 'Разведнота.',
+  stale: ['be:src/app.js'],
+  status,
 };
 const clarifications = {
   text: '## Ответ человека — Оставить режим?\nВыбрано: Да\nДа.',
@@ -95,7 +101,12 @@ const clarifications = {
   }],
 };
 const contracts = [
-  [parseAnalysisRows, [{ task: 42, analysis, status }]],
+  [parseAnalysisRows, [{
+    task: 42,
+    source: null,
+    analysis,
+    status,
+  }]],
   [parseAnalysisDetail, detail],
   [parseAnalysisQueue, { outcome: 'queued', position: 2 }],
   [parseAnalysisClarifications, clarifications],
@@ -125,7 +136,12 @@ test('оценка модели переживает отсутствие нео
   assert.deepEqual(bare[0].analysis.questions, null);
   assert.deepEqual(bare[0].status, null, 'задача без статуса очереди законна');
   assert.deepEqual(parseAnalysisDetail({ task: 42 }), {
-    task: 42, analysis: null, note: null, stale: null, status: null,
+    task: 42,
+    source: null,
+    analysis: null,
+    note: null,
+    stale: null,
+    status: null,
   });
 });
 

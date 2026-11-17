@@ -7,6 +7,150 @@ import { cleanupArtifacts } from '../../shared/node/artifactsCleanup.ts';
 import { acquireDirectoryLock, directoryCleanupLockPath } from '../../shared/node/directoryLock.ts';
 import { DAY, oldTree, present, retentionFixture } from '../helpers/deepseekRetentionFixture.mts';
 
+for (const dryRun of [true, false]) {
+  test(`AC-YOUNG: подготовка сохраняет свежий корень без обхода, dryRun=${dryRun}`, async (t) => {
+    const box = await retentionFixture(t);
+    const young = await oldTree(box.root, 'test-builds/young', 1, Date.now());
+
+    await fs.mkdir(path.join(young, 'nested.lock'));
+
+    const readdir = fs.readdir.bind(fs);
+    let scans = 0;
+    const intercept = t.mock.method(fs, 'readdir', async (...args: Parameters<typeof fs.readdir>) => {
+      if (String(args[0]) === young || String(args[0]).startsWith(`${young}/`)) {
+        scans++;
+      }
+
+      return readdir(...args);
+    });
+
+    t.after(() => intercept.mock.restore());
+
+    const options = {
+      root: box.root,
+      scope: 'deepseek-tests' as const,
+      measureYoung: false,
+      dryRun,
+    };
+    const report = await cleanupArtifacts(options);
+
+    assert.equal(scans, 0, 'Свежий mtime корня уже запрещает удаление всего дерева');
+    assert.equal(report.errorCount, 0);
+    assert.deepEqual(report.entries.find((entry) => entry.path === 'test-builds/young'), {
+      path: 'test-builds/young',
+      bytes: null,
+      status: 'skipped',
+      reason: 'young',
+    });
+    assert.equal(await present(path.join(young, 'nested.lock')), true);
+    assert.equal(await present(directoryCleanupLockPath(box.root)), false);
+  });
+}
+
+test('AC-YOUNG: старый корень со свежим потомком измеряется и сохраняется', async (t) => {
+  const box = await retentionFixture(t);
+  const young = await oldTree(box.root, 'test-builds/old-parent', 1);
+
+  await fs.utimes(path.join(young, 'sentinel'), new Date(), new Date());
+
+  const options = {
+    root: box.root,
+    scope: 'deepseek-tests' as const,
+    measureYoung: false,
+  };
+  const report = await cleanupArtifacts(options);
+  const entry = report.entries.find((item) => item.path === 'test-builds/old-parent');
+
+  assert.equal(report.errorCount, 0);
+  assert.equal(entry?.reason, 'young');
+  assert.equal(entry?.bytes, 1);
+  assert.equal(await present(young), true);
+});
+
+test('AC-YOUNG: свежая generation занимает место среди последних K', async (t) => {
+  const box = await retentionFixture(t);
+  const generations = path.join(box.root, 'node-cache/generations');
+  const young = await oldTree(generations, 'young', 1, Date.now());
+  const kept = await oldTree(generations, 'kept', 1, Date.now() - 9 * DAY);
+  const old = await oldTree(generations, 'old', 1, Date.now() - 10 * DAY);
+  const options = {
+    root: box.root,
+    scope: 'deepseek-tests' as const,
+    measureYoung: false,
+    keepGenerations: 2,
+  };
+  const report = await cleanupArtifacts(options);
+
+  assert.equal(report.errorCount, 0);
+  assert.equal(await present(young), true);
+  assert.equal(await present(kept), true);
+  assert.equal(await present(old), false);
+});
+
+test('AC-BARRIER: молодое содержимое не закрывает дерево для производителей', async (t) => {
+  const box = await retentionFixture(t);
+  const young = await oldTree(box.artifacts, 'young');
+
+  // Старый родитель не позволяет принять решение только по его mtime.
+  await fs.utimes(path.join(young, 'sentinel'), new Date(), new Date());
+
+  const mkdir = fs.mkdir.bind(fs);
+  const barrierPath = directoryCleanupLockPath(box.artifacts);
+  let barrierCreated = false;
+  const intercept = t.mock.method(fs, 'mkdir', async (...args: Parameters<typeof fs.mkdir>) => {
+    barrierCreated ||= String(args[0]) === barrierPath;
+
+    return mkdir(...args);
+  });
+
+  t.after(() => intercept.mock.restore());
+
+  const report = await cleanupArtifacts({ root: box.artifacts, scope: 'artifacts' });
+
+  assert.equal(report.errorCount, 0);
+  assert.equal(report.entries.find((entry) => entry.path === 'young')?.reason, 'young');
+  assert.equal(await present(young), true);
+  assert.equal(barrierCreated, false, 'Без кандидатов на удаление общий барьер не нужен');
+});
+
+test('AC-BARRIER: новый lock темы после young preview сохраняет старое поколение', async (t) => {
+  const box = await retentionFixture(t);
+  const generations = path.join(box.root, 'node-cache/generations');
+  const old = await oldTree(generations, 'old');
+
+  await oldTree(generations, 'young', 1, Date.now());
+
+  const active = path.join(box.root, 'test-builds/active');
+
+  await fs.mkdir(active, { recursive: true });
+
+  const mkdir = fs.mkdir.bind(fs);
+  let lock: Awaited<ReturnType<typeof acquireDirectoryLock>> | undefined;
+  const intercept = t.mock.method(fs, 'mkdir', async (...args: Parameters<typeof fs.mkdir>) => {
+    if (String(args[0]) === directoryCleanupLockPath(box.root) && !lock) {
+      lock = await acquireDirectoryLock(`${active}.lock`, { waitMs: 0 });
+    }
+
+    return mkdir(...args);
+  });
+
+  t.after(async () => {
+    intercept.mock.restore();
+    await lock?.release();
+  });
+
+  const report = await cleanupArtifacts({
+    root: box.root,
+    scope: 'deepseek-tests',
+    keepGenerations: 1,
+  });
+
+  assert.ok(lock, 'Сборка началась после предварительного обхода');
+  assert.equal(report.errorCount, 0);
+  assert.equal(await present(old), true, 'Старая generation нужна уже начавшейся сборке');
+  assert.equal(report.entries.find((entry) => entry.path === 'node-cache/generations/old')?.reason, 'locked');
+});
+
 for (const target of ['ancestor', 'ancestor-install', 'nested', 'payload'] as const) {
   test(`AC-BARRIER: ${target} lock не выдаётся между проверкой и удалением`, async (t) => {
     const box = await retentionFixture(t);

@@ -52,7 +52,9 @@ export async function mountDesktopEntry(t, options = {}) {
     stubs: {
       vue: `export const createApp = () => ({ use() { return this; }, mount() {} });
         export const nextTick = async () => {};
-        export const watch = () => () => {};`,
+        export const watch = () => () => {};
+        export const ref = (value) => ({ value });
+        export const readonly = (value) => value;`,
       pinia: `export const createPinia = () => ({});`,
       'virtual:pwa-register': `export const registerSW = () => {
         globalThis.__desktopBootstrap.push('sw');

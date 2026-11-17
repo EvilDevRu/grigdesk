@@ -492,15 +492,12 @@ developer_command() {
   # Закрытый fd не должен менять старые коды или засорять stderr оболочки.
   build_event() {
     if [[ "${GRIGDESK_CTL_BUILD_OBSERVED:-}" == 1 ]] && { true >&3; } 2>/dev/null; then
-      {
-        printf '%s\t%s' "$1" "$2"
-
-        if (( $# >= 3 )); then
-          printf '\t%s' "$3"
-        fi
-
-        printf '\n'
-      } >&3
+      # Одна короткая запись не смешивается с событием соседней цепочки в общей трубе.
+      if (( $# >= 3 )); then
+        printf '%s\t%s\t%s\n' "$1" "$2" "$3" >&3
+      else
+        printf '%s\t%s\n' "$1" "$2" >&3
+      fi
     fi
     return 0
   }

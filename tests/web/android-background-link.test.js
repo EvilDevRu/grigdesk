@@ -167,13 +167,16 @@ test('тумблер фоновой связи: сохранение, busy, от
   assert.equal(current.checked, true);
 
   wrapper.unmount();
-  store.apply(base);
+  store.apply({
+    ...base,
+    rev: 5,
+  });
 
   const bare = await mountSetting();
 
   t.after(() => bare.wrapper.unmount());
   await bare.nextTick();
 
-  assert.equal(document.querySelector('[data-ui-settings-field]'), null,
+  assert.equal(document.querySelector('[data-ui-settings-field]') === null, true,
     'Оболочка без блока не показывает настройку');
 });

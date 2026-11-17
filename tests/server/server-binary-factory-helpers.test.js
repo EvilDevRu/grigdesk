@@ -256,6 +256,9 @@ test('stage-model-helper-relocated', { timeout: 20_000 }, async (t) => {
   await fs.mkdir(helpers, { recursive: true });
   await fs.mkdir(path.join(root, 'runtime/node/bin'), { recursive: true });
   await fs.symlink(process.execPath, path.join(root, 'runtime/node/bin/node'));
+  // npm-пакеты внешние и в настоящем payload лежат рядом с сервером.
+  // Как в metadata-фикстуре выше, подключаем зависимости отдельно от server sources.
+  await fs.symlink(path.join(SOURCE, 'server/node_modules'), path.join(root, 'server/node_modules'));
   await fs.cp(path.join(SOURCE, 'engine'), path.join(root, 'engine'), { recursive: true });
   await fs.writeFile(path.join(helpers, 'helpers.json'), await fs.readFile(MANIFEST));
   await buildHelper({
