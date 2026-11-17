@@ -279,6 +279,7 @@ export async function ensureTestDeepSeekBinary(): Promise<TestDeepSeekBinary> {
       scope: 'deepseek-tests',
       olderThanMs,
       keepGenerations,
+      measureYoung: false,
       heldLock: { path: lockPath, owner: lock.owner },
       protectedPaths,
     });
