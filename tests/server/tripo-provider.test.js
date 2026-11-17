@@ -708,7 +708,10 @@ test('ACK плюс SSE запускают два GET, разделяющие е�
       void store.invalidateCredentials(payload.credentials);
     }
   };
-  assert.deepEqual(await store.saveCredentials('tripo', { TRIPO_REGION: 'cn' }), { ok: true });
+  assert.deepEqual(await store.saveCredentials('tripo', { TRIPO_REGION: 'cn' }), {
+    ok: true,
+    savedChoices: { TRIPO_REGION: 'cn' },
+  });
   await started.promise;
   assert.equal(store.usage.tripo, undefined);
   assert.equal(usageGets.length, 2);

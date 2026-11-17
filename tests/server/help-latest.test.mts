@@ -16,6 +16,7 @@ async function runLatest(response: unknown, fail = false, pathname = '/help/late
     navigator: { language: 'ru' },
     document: { getElementById: () => message },
     AbortSignal,
+    URLSearchParams,
     location: {
       pathname,
       search,

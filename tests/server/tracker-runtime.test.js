@@ -79,7 +79,7 @@ for (const outcome of ['installed', 'reverted', 'blocked']) {
       const descriptor = catalog.drivers.find((driver) => driver.id === 'fixture-driver');
 
       assert.equal(descriptor.status, outcome === 'installed' ? 'restartRequired' : 'unavailable');
-      assert.ok(catalog.activeIds.includes('own'));
+      assert.deepEqual(catalog.activeIds, []);
     }
   });
 }
