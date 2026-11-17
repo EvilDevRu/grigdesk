@@ -138,14 +138,16 @@ export async function accessBrowser(t, options = {}) {
         } else if (request.method === 'POST' && url.pathname.endsWith('/attempts')) {
           control.attempt ??= {
             id: 'attempt-one',
+            name: body.name,
+            methodId: body.methodId,
             revision: 1,
             state: 'running',
             profileId: body.profileId ?? 'profile-b',
             expiresAt: new Date(Date.now() + 300000).toISOString(),
             step: {
               id: 'step-one',
-              kind: 'enter-code',
-              label: 'API-ключ'
+              kind: 'fields',
+              fields: snapshot.methods[0].fields
             },
           };
           result = control.attempt;
@@ -205,7 +207,10 @@ export async function accessBrowser(t, options = {}) {
         }
 
         if (body?.operationId) {
-          operations.set(body.operationId, { state: 'completed', result });
+          operations.set(body.operationId, {
+            state: 'completed',
+            ...(result?.step ? { attemptId: result.id } : {}),
+          });
         }
 
         if (request.method !== 'GET' && status < 400) {

@@ -25,11 +25,10 @@ test('AP23_reconcile_secret: двойной submit, lost ACK и reload узна�
 
   await openWizard(f);
   await f.page.getByRole('textbox', { name: /Имя профиля/u }).fill('Новое подключение');
-  await f.page.getByRole('button', { name: /Продолжить/u, exact: true }).click();
   await f.page.getByLabel('API-ключ', { exact: true }).fill(PRIVATE_INPUT);
   await assertPrivate(f.page);
   f.control.dropAck = true;
-  await f.page.getByRole('button', { name: /Продолжить|Проверить/u }).dblclick();
+  await f.page.getByRole('button', { name: /Сохранить/u }).dblclick();
   await f.page.getByText(WARNING, { exact: true }).waitFor();
 
   const posts = f.calls.filter((call) => call.method === 'POST');
@@ -54,7 +53,8 @@ test('AP23_reconcile_secret: направления кода, ожидание, 
 
   await openWizard(f);
   await f.page.getByRole('textbox', { name: /Имя профиля/u }).fill('CLI подключение');
-  await f.page.getByRole('button', { name: /Продолжить/u, exact: true }).click();
+  await f.page.getByLabel('API-ключ', { exact: true }).fill(PRIVATE_INPUT);
+  await f.page.getByRole('button', { name: /Сохранить/u, exact: true }).click();
 
   for (const step of [
     {
@@ -123,9 +123,8 @@ test('AP23_reconcile_secret: EN и отмена подтверждения не�
   await f.page.locator('[data-role="settings-modal"]').waitFor({ state: 'hidden' });
   await openWizard(f);
   await f.page.getByRole('textbox', { name: /Profile name/u }).fill('New access');
-  await f.page.getByRole('button', { name: /Continue/u, exact: true }).click();
   await f.page.getByLabel('API-ключ', { exact: true }).fill(PRIVATE_INPUT);
-  await f.page.getByRole('button', { name: /Continue|Verify/u }).click();
+  await f.page.getByRole('button', { name: /Save/u }).click();
   await f.page.getByText(/account.*(?:identified|determine)|(?:identify|determine).*account/iu).waitFor();
   assert.equal(await f.page.getByText(WARNING, { exact: true }).count(), 0);
   await f.page.getByRole('button', { name: /Cancel/u, exact: true }).last().click();

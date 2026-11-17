@@ -12,7 +12,7 @@ export function accessProfileDraft(settings: Settings, provider: string, target:
   methods: AccessMethod[], initial: { name: string; methodId: string }) {
   const id = `access-profile-draft:${provider}:${target}`;
 
-  return settings.sessionService(id, () => {
+  const draft = settings.sessionService(id, () => {
     const fields = new Map(methods.flatMap((method) => method.fields.map((field) => [field.id, field])));
     const keys = ['name', 'methodId', 'code', ...fields.keys()];
     const baseline = { name: initial.name, methodId: initial.methodId };
@@ -67,6 +67,18 @@ export function accessProfileDraft(settings: Settings, provider: string, target:
       set,
       clear,
       discard: (key: string) => settings.discardField(id, key),
+      /**
+       * Повторное открытие получает сохранённое имя, не затирая незавершённый ввод.
+       * Снимок обновляет baseline после отдельного сохранения профиля без общего Apply.
+       */
+      sync(values: { name: string; methodId: string }) {
+        Object.assign(baseline, values);
+        settings.acceptSnapshot(id, baseline);
+      },
     };
   });
+
+  draft.sync(initial);
+
+  return draft;
 }

@@ -15,9 +15,11 @@ test('переименование сохраняет карточки испо�
   const original = active(before);
   const initial = await f.request('GET', '/api/providers?wait=1');
   const gate = Promise.withResolvers();
+  let probes = 0;
 
   t.after(() => gate.resolve());
   f.adapters.get('synthetic-access').probe = async () => {
+    probes += 1;
     await gate.promise;
 
     return { ok: true, version: 'test-1' };
@@ -34,6 +36,8 @@ test('переименование сохраняет карточки испо�
 
   assert.deepEqual(current.providers.map((item) => item.id), initial.providers.map((item) => item.id));
   assert.ok(performance.now() - start < 1000, 'Карточки доступны до завершения пробы');
+  assert.equal(current.providers[0].accessProfiles.activeProfile.name, 'Новое имя аккаунта');
+  assert.equal(probes, 0, 'Переименование не запускает повторные пробы исполнителей');
 
   const renamed = active(await profiles(f));
 
@@ -47,6 +51,16 @@ test('переименование сохраняет карточки испо�
   const updated = await f.request('GET', '/api/providers?wait=1');
 
   assert.equal(updated.providers[0].accessProfiles.activeProfile.name, 'Новое имя аккаунта');
+
+  const stale = await f.request('POST', `${base()}/attempts`, {
+    operationId: operationId(),
+    name: original.name,
+    methodId: original.methodId,
+    profileId: original.id,
+    expectedRevision: original.revision,
+  }, 409);
+
+  assert.equal(stale.code, 'stale_revision', 'Старое окно не начинает замену с устаревшим названием');
 });
 
 test('AP01_saved_profiles: имя, UUID, несколько сохранённых и только один активный', async (t) => {

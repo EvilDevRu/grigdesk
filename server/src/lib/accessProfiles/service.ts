@@ -719,7 +719,7 @@ export class AccessProfileService {
     const { capability } = await this.adapter(provider);
     const op = this.operationId(body);
 
-    const allowed = ['operationId', 'name', 'methodId', 'profileId', 'client'];
+    const allowed = ['operationId', 'name', 'methodId', 'profileId', 'expectedRevision', 'client'];
 
     if (Object.keys(body).some((key) => !allowed.includes(key))) {
       throw accessError(400, 'invalid_fields', 'Параметры запуска определяет адаптер.');
@@ -745,6 +745,10 @@ export class AccessProfileService {
 
       if (body.profileId && !target) {
         throw accessError(404, 'unknown_profile', 'Профиль не найден.');
+      }
+
+      if (target && body.expectedRevision !== undefined && body.expectedRevision !== target.revision) {
+        throw accessError(409, 'stale_revision', 'Профиль изменён в другом окне. Обновите список.');
       }
 
       if (target && target.methodId !== method.id) {
@@ -1075,7 +1079,7 @@ export class AccessProfileService {
         ? (previous.memoryGeneration ?? previous.accountGeneration) + (resume ? 0 : 1) : 1;
       const profile: PrivateProfile = {
         id: previous?.id ?? randomUUID(),
-        name: previous?.name ?? attempt.name,
+        name: attempt.name,
         methodId: method.id,
         ...(method.mode ? { mode: method.mode } : {}),
         authState: 'ready',

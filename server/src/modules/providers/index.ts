@@ -439,9 +439,26 @@ async function providersModule(
           fastify.sse?.broadcast?.('providers-update', {});
         })
         : registryCache.read());
+      // Метаданные профиля читаются отдельно от долгих проб CLI и авторизации.
+      // Переименование обновляет имя сразу, не запуская пересборку всех исполнителей.
+      const current = await Promise.all(providers.map(async (provider) => {
+        if (!provider.accessProfiles) {
+          return provider;
+        }
+
+        const list = await accessProfiles.list(provider.id);
+
+        return {
+          ...provider,
+          accessProfiles: {
+            ...provider.accessProfiles,
+            activeProfile: list.profiles.find((item) => item.id === list.activeProfileId) ?? null,
+          },
+        };
+      }));
 
       if (version === registryCache.version()) {
-        return consume(providers);
+        return consume(current);
       }
     }
   }
@@ -1150,8 +1167,8 @@ async function providersModule(
   accessProfiles.changed = (id, options) => {
     if (options?.metadataOnly) {
       // Имя и удаление неактивного профиля не меняют действующий доступ.
-      // Сохраняем карточки на время проб и не отзываем модели или статистику аккаунта.
-      registryCache.expire();
+      // Имя проецируется при чтении реестра без повторных проб исполнителей.
+      // Каталог моделей и статистика аккаунта сохраняют прежний снимок.
       fastify.sse?.broadcast?.('providers-update', { metadata: id });
       fastify.sse?.broadcast?.('access-profiles', { provider: id });
 

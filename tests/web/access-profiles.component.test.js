@@ -27,7 +27,7 @@ test('AP22_settings_topbar: список и CRUD синхронизируютс�
   await row.getByRole('button', { name: /Активировать|Использовать/u }).click();
   await other.getByText(/Запасной аккаунт/u).first().waitFor();
   assert.equal(f.snapshot.activeProfileId, 'profile-b');
-  await row.getByRole('button', { name: /Переименовать/u }).click();
+  await row.getByRole('button', { name: /Изменить профиль/u }).click();
   await f.page.getByRole('textbox', { name: /Имя профиля/u }).fill('Рабочее подключение');
   await f.page.getByRole('button', { name: /Сохранить/u, exact: true }).click();
   await other.getByText('Рабочее подключение', { exact: true }).waitFor();
@@ -203,7 +203,7 @@ test('карточки доступа сохраняют действия и д�
   await active.getByText('Требуется вход', { exact: true }).waitFor();
   assert.equal(await active.getByRole('button', { name: 'Удалить', exact: true }).count(), 0);
   assert.equal(await active.getByRole('button', { name: 'Активировать', exact: true }).count(), 0);
-  assert.equal(await active.getByRole('button', { name: 'Переименовать', exact: true }).isVisible(), true);
+  assert.equal(await active.getByRole('button', { name: 'Изменить профиль', exact: true }).isVisible(), true);
 
   const geometry = await active.evaluate((element) => {
     const bounds = element.getBoundingClientRect();

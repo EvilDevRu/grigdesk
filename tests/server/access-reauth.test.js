@@ -102,6 +102,28 @@ test('AP15_deepseek_unknown_requires_confirmation: проверенный клю
   assert.equal(JSON.stringify(result).includes('secretRef'), false);
 });
 
+test('название и новый ключ сохраняются вместе после подтверждения аккаунта', async (t) => {
+  const { f, profile, method } = await apiFixture(t, 'deepseek');
+  const attempt = await createAttempt(f, 'deepseek', method, {
+    profileId: profile.id,
+    name: 'Новое название подключения',
+  });
+
+  await submit(f, 'deepseek', attempt, {
+    [method.fields.find((field) => field.kind === 'secret').id]: NEW_KEY,
+  });
+
+  const candidate = await settled(f, 'deepseek', attempt);
+
+  assert.equal(candidate.step.kind, 'choice');
+  assert.equal(active(await profiles(f, 'deepseek')).name, profile.name);
+  await assertSelectedKey(f, 'deepseek', OLD_KEY);
+  await submit(f, 'deepseek', candidate, { choice: 'confirm' });
+  assert.equal((await settled(f, 'deepseek', candidate)).state, 'saved');
+  assert.equal(active(await profiles(f, 'deepseek')).name, 'Новое название подключения');
+  await assertSelectedKey(f, 'deepseek', NEW_KEY);
+});
+
 test('AP15_deepseek_cancel_and_late_confirm: отмена необратима для позднего результата', async (t) => {
   const { f, profile, method } = await apiFixture(t, 'deepseek');
   const before = await profiles(f, 'deepseek');

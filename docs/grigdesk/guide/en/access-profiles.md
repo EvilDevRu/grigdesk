@@ -4,8 +4,9 @@ A profile saves one executor connection. Several can be saved, with one active a
 The selection applies to conversations, service calls and pipelines.
 
 1. Open Settings → Executors, choose an executor and its Access tab.
-2. Select Add profile, enter a name and sign-in method, then Continue.
-3. For API access, enter the key for the chosen mode. For CLI access, follow the wizard:
+2. Select Add profile and enter a name and sign-in method.
+3. For API access, enter the key for the chosen mode in the same dialog and select Save.
+   For CLI access, select Continue and follow the wizard:
    entering a code on a website and pasting a code from a website are different steps.
 4. Wait for verification and Saved status. Opening a link does not prove sign-in succeeded.
 5. Activate the required connection; the active row has a check mark.
@@ -13,8 +14,11 @@ The selection applies to conversations, service calls and pipelines.
    The active connection is filled; overflow connections are under “…”. Clicking the current one does not switch again.
    The row appears only with multiple accounts. The header gear opens settings for managing connections.
 
-Add profile is above the list. The circular arrow restores sign-in, the pencil renames, and the bin deletes
-an inactive connection after confirmation. Renaming preserves readiness, selection and statistics.
+Add profile is above the list. The circular arrow restores sign-in, the pencil opens Edit profile,
+and the bin deletes an inactive connection after confirmation. The name and new API key share one dialog.
+To rename only, leave the key empty and select Save: the current key is kept, running agents continue,
+and readiness and statistics are preserved. A new key is verified before saving; if account confirmation
+is needed, the name and key change together after confirmation. Buttons match the Settings dialog.
 These actions save immediately without the general Apply button.
 
 GLM API and Coding Plan profiles have distinct keys and statistics. DeepSeek sign-in warns if account identity

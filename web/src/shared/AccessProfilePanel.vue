@@ -44,11 +44,12 @@
           <div class="access-profile-tools">
             <UiIconButton size="compact" :disabled="pending" :label="t('settings.accessProfilesRestore')"
               v-tooltip="t('settings.accessProfilesRestore')"
-              :tone="profile.authState === 'needs-auth' ? 'warning' : 'neutral'" @click="begin(profile)">
+              :tone="profile.authState === 'needs-auth' ? 'warning' : 'neutral'"
+              @click="begin(profile, true)">
               <UiRefreshIcon />
             </UiIconButton>
-            <UiIconButton size="compact" :disabled="pending" :label="t('settings.accessProfilesRename')"
-              v-tooltip="t('settings.accessProfilesRename')" @click="rename(profile)">
+            <UiIconButton size="compact" :disabled="pending" :label="t('settings.accessProfilesEdit')"
+              v-tooltip="t('settings.accessProfilesEdit')" @click="begin(profile)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="m16 3 5 5-12 12-6 1 1-6Z M13 6l5 5" />
@@ -75,6 +76,7 @@
     </template>
     <AccessProfileDialog v-if="wizard" :key="`${providerId}:${editing?.id ?? 'new'}`"
       :provider-id="providerId" :profile="editing" :recovery-method-id="recovery?.methodId"
+      :reauthenticate="reauthenticate"
       @close="wizard = false" />
   </section>
 </template>
@@ -84,7 +86,7 @@ import { computed, ref, watch } from 'vue';
 
 import type { AccessProfile } from '../../../shared/chat/accessProfileContracts.ts';
 import {
-  UiButton, UiIconButton, UiInlineMessage, UiRefreshIcon, confirmDialog, promptDialog, t, vTooltip,
+  UiButton, UiIconButton, UiInlineMessage, UiRefreshIcon, confirmDialog, t, vTooltip,
 } from '../ui.ts';
 import { useAccessProfilesStore } from '../stores/accessProfiles.ts';
 import { useSse } from '../composables/useSse.ts';
@@ -96,6 +98,7 @@ const list = computed(() => store.lists[props.providerId]);
 const pending = computed(() => store.pending[props.providerId]);
 const wizard = ref(false);
 const editing = ref<AccessProfile>();
+const reauthenticate = ref(false);
 const recovery = computed(() => {
   const operation = store.unresolved[props.providerId];
 
@@ -149,7 +152,7 @@ async function reload() {
  * Другой мастер не получает попытку профиля с потерянным ответом.
  * Сначала восстанавливается исходный владелец шага, затем разрешается новый ввод.
  */
-async function begin(profile?: AccessProfile) {
+async function begin(profile?: AccessProfile, restore = false) {
   await store.load(props.providerId);
 
   const current = store.attempts[props.providerId];
@@ -170,6 +173,7 @@ async function begin(profile?: AccessProfile) {
   }
 
   editing.value = running ? list.value?.profiles.find((item) => item.id === current.profileId) : profile;
+  reauthenticate.value = restore;
 
   if (!running) {
     store.attempts[props.providerId] = null;
@@ -180,26 +184,6 @@ async function begin(profile?: AccessProfile) {
 
 async function activate(id: string) {
   await store.activate(props.providerId, id);
-}
-
-/**
- * Имя меняется отдельной CAS-операцией и не переписывает доступ.
- * Общий диалог сохраняет единое поведение клавиатуры и мобильного окна.
- */
-async function rename(profile: AccessProfile) {
-  const name = await promptDialog({
-    title: t('settings.accessProfilesProfileName'),
-    text: t('settings.accessProfilesProfileName'),
-    value: profile.name,
-    okText: t('settings.accessProfilesSave'),
-  });
-
-  if (name !== null) {
-    await store.mutate(props.providerId, `/${profile.id}`, {
-      name,
-      expectedRevision: profile.revision,
-    }, 'PATCH');
-  }
 }
 
 /**

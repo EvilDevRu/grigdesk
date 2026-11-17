@@ -21,7 +21,7 @@
 ## Устройство
 
 - [Сеть лимитов GLM, DeepSeek и Tripo: изоляция DNS и завершение зависшего запроса](../server/isolated-statistics-fetch.md)
-- [Профили доступа: допуск переключения, миграция CLI/API, переименование, login, память и восстановление ключа](access-profiles.md)
+- [Профили доступа: имя и ключ в одном окне, переименование без проб и сброса сессий, допуск, login и память](access-profiles.md)
 
 - [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
