@@ -17,7 +17,7 @@ test('Qwen Host: исходные settings неизменны, model selection �
     close: async () => {},
   };
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
   await handle.send({ message: 'Проверка.', signal: AbortSignal.timeout(12000) });
   await handle.close();
 

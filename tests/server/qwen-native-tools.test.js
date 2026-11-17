@@ -59,7 +59,7 @@ test('Qwen native Host: процессы и сокеты хоста, ребён�
 
   socket.listen(socketPath);
   await once(socket, 'listening');
-  t.after(() => new Promise((resolve) => socket.close(resolve)));
+  fixture.onCleanup(() => new Promise((resolve) => socket.close(resolve)));
 
   const host = { allowHostAccess: true, blockDirectSsh: true };
   const fakeBin = path.join(fixture.root, 'host-bin');
@@ -72,7 +72,7 @@ test('Qwen native Host: процессы и сокеты хоста, ребён�
     providerSettings: host, permissionMode: 'yolo',
   }), { PATH: `${fakeBin}:${process.env.PATH}` });
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
   fixture.actions.push({
     name: 'run_shell_command',
     args: { command: `test -S '${socketPath}' && ps -p ${process.pid} -o pid= > '${pidFile}'`
@@ -128,7 +128,7 @@ test('Qwen native Host: background shell завершается после от�
     hooks: { onBackground: (result) => results.push(result) },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const first = await handle.send({ message: 'Начни тестовый фон.', signal: AbortSignal.timeout(25000) });
   const pid = handle.pid;
@@ -161,7 +161,7 @@ test('Qwen native Host: loop_wakeup переживает ответ и проб�
     hooks: { onBackground: (result) => results.push(result) },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
   await handle.send({ message: 'Запланируй пробуждение.', signal: AbortSignal.timeout(25000) });
 
   const pid = handle.pid;
@@ -464,7 +464,7 @@ test('Qwen native: web_fetch читает страницу через штатн
     response.end('<html><body>native-fetch-sentinel</body></html>');
   });
 
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  fixture.onCleanup(() => new Promise((resolve) => server.close(resolve)));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
   const action = { name: 'web_fetch', args: {
@@ -600,7 +600,7 @@ test('Qwen native Host: настроенный LSP исполняет local serv
     permissionMode: 'yolo', providerSettings: { allowHostAccess: true },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const result = await handle.send({ message: 'Получи символы.', signal: AbortSignal.timeout(60000) });
 
@@ -657,7 +657,7 @@ test('Qwen native Host: медиа использует ffmpeg и выдаёт �
     permissionMode: 'yolo', providerSettings: { allowHostAccess: true },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const result = await handle.send({ message: 'Обрежь локальный звук.', signal: AbortSignal.timeout(60000) });
   const files = await readdir(output, { recursive: true });
@@ -697,7 +697,7 @@ test('Qwen native Host: отсутствующий LSP backend показыва�
     permissionMode: 'yolo', providerSettings: { allowHostAccess: true },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const result = await handle.send({ message: 'Получи символы.', signal: AbortSignal.timeout(60000) });
 
@@ -770,7 +770,7 @@ for (const failing of [false, true]) {
       });
 
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    t.after(() => new Promise((resolve) => {
+    fixture.onCleanup(() => new Promise((resolve) => {
       server.closeAllConnections();
       server.close(resolve);
     }));
@@ -792,7 +792,7 @@ for (const failing of [false, true]) {
       permissionMode: 'yolo', providerSettings: { allowHostAccess: true },
     }), overlay);
 
-    t.after(() => handle.close());
+    fixture.onCleanup(() => handle.close());
 
     const result = await handle.send({
       message: 'Вызови тестовый поиск.',
@@ -868,7 +868,7 @@ test('Qwen native Host: MCP сохраняет browser/SSH/DB/help и trusted sc
   });
   const work = await createWorkIpc({ root: fixture.workspace, workTools });
 
-  t.after(() => work.close());
+  fixture.onCleanup(() => work.close());
 
   const actions = [
     { match: 'supervised_db', args: {
@@ -895,7 +895,7 @@ test('Qwen native Host: MCP сохраняет browser/SSH/DB/help и trusted sc
     mcpServers: [{ name: 'grigdesk-work', ...work.mcpServer }],
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
 
   const result = await handle.send({
     message: 'Вызови только тестовые порты.',
@@ -939,7 +939,7 @@ for (const [mode, answer, allowed] of [
       },
     }));
 
-    t.after(() => handle.close());
+    fixture.onCleanup(() => handle.close());
     await handle.send({ message: 'Выполни разрешённую проверку.', signal: AbortSignal.timeout(60000) });
     assert.equal(action.missing, undefined);
 
@@ -970,7 +970,7 @@ test('Qwen native Host: картинка второго send доходит ба
     permissionMode: 'yolo', providerSettings: { allowHostAccess: true },
   }));
 
-  t.after(() => handle.close());
+  fixture.onCleanup(() => handle.close());
   await handle.send({ message: 'Первый.', signal: AbortSignal.timeout(25000) });
 
   const pid = handle.pid;
@@ -1014,7 +1014,7 @@ for (const viaPool of [false, true]) {
       stdio: 'ignore',
     });
 
-    t.after(() => stranger.kill('SIGKILL'));
+    fixture.onCleanup(() => stranger.kill('SIGKILL'));
 
     const action = { name: 'run_shell_command', args: {
       command: `trap '' TERM; echo $$ > '${pidFile}'; `
@@ -1029,7 +1029,7 @@ for (const viaPool of [false, true]) {
     }));
     const pool = new ChatLiveSessions();
 
-    t.after(async () => {
+    fixture.onCleanup(async () => {
       await handle.close();
       await pool.closeAll();
     });

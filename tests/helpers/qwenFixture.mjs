@@ -69,10 +69,23 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
   const stateDir = path.join(root, 'state');
   const saved = { ...process.env };
   const nativeBin = process.env.GRIGDESK_QWEN_BIN;
+  const cleanup = [];
 
   await Promise.all([workspace, home, qwenHome, dataHome, stateDir]
     .map((dir) => mkdir(dir, { recursive: true })));
   t.after(async () => {
+    const failures = [];
+
+    // Живые сессии закрываются до удаления их home и восстановления окружения.
+    // Отказ одного владельца не оставляет остальные собственные ресурсы открытыми.
+    for (const dispose of cleanup.toReversed()) {
+      try {
+        await dispose();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
     for (const key of Object.keys(process.env)) {
       if (!(key in saved)) {
         delete process.env[key];
@@ -80,6 +93,11 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
     }
 
     Object.assign(process.env, saved);
+
+    if (failures.length) {
+      throw new AggregateError(failures, 'Не удалось закрыть ресурсы фикстуры Qwen');
+    }
+
     await rm(root, { recursive: true, force: true });
   });
 
@@ -137,7 +155,7 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
   const savedConfig = { ...singletonConfig };
 
   Object.assign(singletonConfig, config);
-  t.after(() => Object.assign(singletonConfig, savedConfig));
+  cleanup.push(() => Object.assign(singletonConfig, savedConfig));
 
   const fixture = {
     root,
@@ -152,6 +170,9 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
     config,
     settings,
     env: { ...process.env },
+    onCleanup(dispose) {
+      cleanup.push(dispose);
+    },
     async writeSettings(value) {
       await writeFile(file, typeof value === 'string' ? value : JSON.stringify(value));
     },
