@@ -47,7 +47,10 @@ export interface ChatListFilters {
   task: string;
   provider: string;
   fresh: '' | 'day' | 'week' | 'month';
+  project?: string;
 }
+
+const PROJECT_FILTER_RE = /^(?:@none|[a-z0-9][a-z0-9_-]{0,40})$/u;
 
 export const EMPTY_CHAT_FILTERS: ChatListFilters = Object.freeze({
   unread: false,
@@ -78,6 +81,9 @@ export function normalizeChatFilters(value: unknown): ChatListFilters {
   const fresh = source.fresh === 'day' || source.fresh === 'week' || source.fresh === 'month'
     ? source.fresh : '';
 
+  const project = typeof source.project === 'string' && PROJECT_FILTER_RE.test(source.project)
+    ? source.project : '';
+
   return {
     unread: flag(source.unread),
     waiting: flag(source.waiting),
@@ -85,6 +91,7 @@ export function normalizeChatFilters(value: unknown): ChatListFilters {
     task,
     provider,
     fresh,
+    ...(project ? { project } : {}),
   };
 }
 
@@ -95,7 +102,7 @@ export function normalizeChatFilters(value: unknown): ChatListFilters {
 
 export function hasChatFilters(filters: ChatListFilters): boolean {
   return filters.unread || filters.waiting || filters.working
-    || filters.task !== '' || filters.provider !== '' || filters.fresh !== '';
+    || filters.task !== '' || filters.provider !== '' || filters.fresh !== '' || Boolean(filters.project);
 }
 
 /**
@@ -128,6 +135,10 @@ export function chatFiltersQuery(filters: ChatListFilters): Record<string, strin
 
   if (filters.fresh) {
     query.fresh = filters.fresh;
+  }
+
+  if (filters.project) {
+    query.project = filters.project;
   }
 
   return query;
@@ -165,6 +176,13 @@ export function chatFilterQueryError(query: Record<string, unknown>): boolean {
 
   if (fresh !== undefined && fresh !== ''
     && fresh !== 'day' && fresh !== 'week' && fresh !== 'month') {
+    return true;
+  }
+
+  const project = query.project;
+
+  if (project !== undefined && project !== ''
+    && (typeof project !== 'string' || !PROJECT_FILTER_RE.test(project))) {
     return true;
   }
 

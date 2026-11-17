@@ -294,7 +294,7 @@ test('LIST-PERSISTENT-BAD: битый, чужой и неподдерживае�
     assert.deepEqual(heads, headsOf(initial));
     assertLight(heads);
     assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
-    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).format, 1);
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).format, 2);
   }
 });
 

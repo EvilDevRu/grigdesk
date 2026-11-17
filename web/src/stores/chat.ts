@@ -18,7 +18,7 @@ import { messageRef, t as tr } from '../ui.ts';
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
 import { measureChatPerformance, startChatPerformance } from '../shared/chatPerformance.ts';
-import { toRaw } from 'vue';
+import { shallowReactive, toRaw } from 'vue';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import {
@@ -431,7 +431,7 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
     retiredSummaries: new Set(),
     counterEdits: new Map(),
     summaryJob: null,
-    heads: new Map(),
+    heads: shallowReactive(new Map<string, ChatSession>()),
     versions: new Map(),
     headOnly: new Set(),
     epochs: new Map(),
@@ -467,6 +467,7 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
 
     store.$dispose = () => {
       runtime.disposed = true;
+      runtime.heads.clear();
       clearTimeout(runtime.timer ?? undefined);
       clearTimeout(runtime.snapshotTimer ?? undefined);
       runtime.pullQueue.forEach((entry) => clearTimeout(entry.timer ?? undefined));
@@ -1435,6 +1436,7 @@ export const useChatStore = defineStore('chat', {
     ...pickStore(null),
     pagingEnabled: false,
     filtersProtocol: 0,
+    projectFiltersProtocol: 0,
     catalogMutationVersion: 0,
     catalogPages: {},
     catalogSummary: {
@@ -1636,8 +1638,13 @@ export const useChatStore = defineStore('chat', {
             : last.role === 'error' ? '⚠ ' : '') + last.text;
         }
 
+        const catalogHead = chatLoadRuntimeFor(this).heads.get(sess.id);
+
         return {
           id: sess.id,
+          catalogProjectId: catalogHead && Object.hasOwn(catalogHead, 'catalogProjectId')
+            ? catalogHead.catalogProjectId ?? null
+            : sess.workdir?.kind === 'project' ? sess.workdir.projectId : null,
           title,
           snippet: previews.get(sess.id, snippet),
           archived,
@@ -1663,7 +1670,31 @@ export const useChatStore = defineStore('chat', {
       const all = showArchived ? (s.archived || []) : s.sessions;
       const page = s.catalogPages[chatPageKey(q, showArchived, filters)];
       const ids = new Set([...(page?.ids || []), ...(page?.overlayIds || [])]);
-      const source = s.pagingEnabled ? all.filter((chat) => ids.has(chat.id)) : all;
+      const normalizedFilters = normalizeChatFilters(filters);
+      const ordinaryFilters = { ...normalizedFilters };
+
+      delete ordinaryFilters.project;
+
+      const runtime = chatLoadRuntimeFor(this);
+      const includeLocalProjectMembers = this.projectFiltersProtocol === 1 && !showArchived && !t
+        && Boolean(normalizedFilters.project) && !hasChatFilters(ordinaryFilters);
+      // all при !showArchived — только s.sessions: архивные головы живут в s.archived.
+      const source = s.pagingEnabled ? all.filter((session) => {
+        if (ids.has(session.id)) {
+          return true;
+        }
+
+        if (!includeLocalProjectMembers || runtime.disposed || session.taskId
+          || runtime.headOnly.has(session.id)) {
+          return false;
+        }
+
+        const choice = normalizeChatWorkdir(session.workdir);
+        const project = choice?.kind === 'project' ? choice.projectId : null;
+
+        return normalizedFilters.project === '@none'
+          ? project === null : project === normalizedFilters.project;
+      }) : all;
 
       previews.retain(source.map((chat) => chat.id));
       source.forEach((x) => {
@@ -1682,6 +1713,39 @@ export const useChatStore = defineStore('chat', {
     }; },
   },
   actions: {
+    /**
+     * Новая часть фильтра отправляется только после явного подтверждения сервера.
+     * Отсутствие project capability сохраняет остальные уже поддерживаемые фильтры.
+     */
+    _effectiveChatFilters(filters: ChatListFilters): ChatListFilters {
+      if (this.filtersProtocol !== 1) {
+        return EMPTY_CHAT_FILTERS;
+      }
+
+      const normalized = normalizeChatFilters(filters);
+
+      if (this.projectFiltersProtocol !== 1) {
+        delete normalized.project;
+      }
+
+      return normalized;
+    },
+
+    /**
+     * Изменение любой capability инвалидирует все ответы прежнего поколения фильтров.
+     * Поздний старый ответ не может вернуть поддержку уже откатившегося сервера.
+     */
+    _acceptChatFilterProtocols(data: { filtersProtocol?: number; projectFiltersProtocol?: number }): void {
+      const filters = data.filtersProtocol === 1 ? 1 : 0;
+      const projects = filters === 1 && data.projectFiltersProtocol === 1 ? 1 : 0;
+
+      if (this.filtersProtocol !== filters || this.projectFiltersProtocol !== projects) {
+        chatLoadRuntimeFor(this).filtersEpoch += 1;
+      }
+
+      this.filtersProtocol = filters;
+      this.projectFiltersProtocol = projects;
+    },
     /**
      * Scope списка создаётся без запроса и живёт дольше его компонента.
      * Непросмотренный архив не считается пустым подтверждённым каталогом.
@@ -1744,7 +1808,7 @@ export const useChatStore = defineStore('chat', {
         await this.ensure();
       }
 
-      const activeFilters = this.filtersProtocol === 1 ? filters : EMPTY_CHAT_FILTERS;
+      const activeFilters = this._effectiveChatFilters(filters);
 
       if (!this.loaded || !this.pagingEnabled || this.pageFor(query, archived, activeFilters).loaded) {
         return;
@@ -1771,8 +1835,7 @@ export const useChatStore = defineStore('chat', {
 
       const runtime = chatLoadRuntimeFor(this);
       const filtersEpoch = runtime.filtersEpoch;
-      const activeFilters = this.filtersProtocol === 1
-        ? normalizeChatFilters(filters) : EMPTY_CHAT_FILTERS;
+      const activeFilters = this._effectiveChatFilters(filters);
       const key = chatPageKey(query, archived, activeFilters);
       const page = this.pageFor(query, archived, activeFilters);
       const active = runtime.pageJobs.get(key);
@@ -1856,13 +1919,7 @@ export const useChatStore = defineStore('chat', {
 
           page.needsRefresh = false;
 
-          const protocol = Number(data.filtersProtocol) === 1 ? 1 : 0;
-
-          if (this.filtersProtocol === 1 && protocol === 0) {
-            runtime.filtersEpoch += 1;
-          }
-
-          this.filtersProtocol = protocol;
+          this._acceptChatFilterProtocols(data);
 
           this._acceptCatalogSummary(data.summary, mutation);
 
@@ -1904,44 +1961,36 @@ export const useChatStore = defineStore('chat', {
                 probeParams.set('q', query.trim());
               }
 
-              let rolledBack = false;
+              let probe: ReturnType<typeof decodeChatPage> | null = null;
 
               try {
-                const probe = decodeChatPage(await api.get(`/api/chat/store/list?${probeParams}`, {
+                probe = decodeChatPage(await api.get(`/api/chat/store/list?${probeParams}`, {
                   signal: controller.signal,
                   retry: false,
                   idleTimeoutMs: 30000,
                 }));
-
-                rolledBack = probe.filtersProtocol !== 1;
               } catch {
-                // Недоступная проба не доказывает откат: ошибка фильтрованной
-                // страницы остаётся доступной человеку вместе с повтором.
+                // Отказ пробы не доказывает откат: исходная ошибка остаётся видимой.
               }
 
-              if (rolledBack && !runtime.disposed && runtime.filtersEpoch === filtersEpoch
+              const rolledBack = probe && (probe.filtersProtocol !== 1
+                || Boolean(activeFilters.project) && probe.projectFiltersProtocol !== 1);
+
+              if (rolledBack && probe && !runtime.disposed && runtime.filtersEpoch === filtersEpoch
                 && runtime.pageEpochs.get(key) === epoch) {
-                runtime.filtersEpoch += 1;
-
-                this.filtersProtocol = 0;
-
+                this._acceptChatFilterProtocols(probe);
                 page.error = '';
 
                 const currentQuery = this.search.query;
-
                 const currentArchived = this.search.archived;
+                const supported = this._effectiveChatFilters(this.search.filters);
+                const supportedKey = chatPageKey(currentQuery, currentArchived, supported);
 
-                const plainKey = chatPageKey(currentQuery, currentArchived);
-
-                // beginChatSearch гасит право старого поиска принять результат;
-                // в шаге 5 его пустой filters по умолчанию также очищает scope.
-
-                this.beginChatSearch(currentQuery, currentArchived);
-
-                await runtime.pageJobs.get(plainKey);
+                this.beginChatSearch(currentQuery, currentArchived, supported);
+                await runtime.pageJobs.get(supportedKey);
 
                 if (!runtime.disposed && this.loaded) {
-                  await this.refreshChatPage(currentQuery, currentArchived, EMPTY_CHAT_FILTERS);
+                  await this.refreshChatPage(currentQuery, currentArchived, supported);
                 }
 
                 return;
@@ -3410,8 +3459,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       const value = query.trim();
-      const activeFilters = this.filtersProtocol === 1
-        ? normalizeChatFilters(filters) : { ...EMPTY_CHAT_FILTERS };
+      const activeFilters = this._effectiveChatFilters(filters);
 
       this.search = {
         query: value,
@@ -3850,7 +3898,7 @@ export const useChatStore = defineStore('chat', {
         }
 
         this.pagingEnabled = true;
-        this.filtersProtocol = Number(j.filtersProtocol) === 1 ? 1 : 0;
+        this._acceptChatFilterProtocols(j);
         Object.assign(this.pageFor('', false), j.page, {
 
           ids: j.sessions.map((head) => head.id),
@@ -6320,11 +6368,12 @@ export const useChatStore = defineStore('chat', {
     async _resyncPagedStore(): Promise<void> {
       const runtime = chatLoadRuntimeFor(this);
       const mutation = runtime.catalogEpoch;
+      const filtersEpoch = runtime.filtersEpoch;
       const query = this.search.query;
 
       const archived = this.search.archived;
 
-      const filters = this.search.filters;
+      const filters = this._effectiveChatFilters(this.search.filters);
 
       const searchEpoch = runtime.searchEpoch;
 
@@ -6359,6 +6408,10 @@ export const useChatStore = defineStore('chat', {
 
       try {
         for (let offset = 0; offset < Math.max(1, entries.length); offset += 40) {
+          if (runtime.disposed || runtime.filtersEpoch !== filtersEpoch) {
+            return;
+          }
+
           const chatEpochs = new Map(runtime.epochs);
           const raw = await api.post('/api/chat/store/changes', {
             known: Object.fromEntries(entries.slice(offset, offset + 40)),
@@ -6375,7 +6428,7 @@ export const useChatStore = defineStore('chat', {
           });
           const data = decodeChatList(raw, true);
 
-          if (runtime.disposed || !isRecord(raw)) {
+          if (runtime.disposed || runtime.filtersEpoch !== filtersEpoch || !isRecord(raw)) {
             return;
           }
 
@@ -6399,6 +6452,24 @@ export const useChatStore = defineStore('chat', {
 
               sent[field] = this[field];
               sentMeta = JSON.stringify(sent);
+            }
+
+            this._acceptChatFilterProtocols({
+              filtersProtocol: raw.filtersProtocol === undefined
+                ? this.filtersProtocol : Number(raw.filtersProtocol),
+              projectFiltersProtocol: raw.projectFiltersProtocol === undefined
+                ? this.projectFiltersProtocol : Number(raw.projectFiltersProtocol),
+            });
+
+            if (runtime.filtersEpoch !== filtersEpoch) {
+              const query = this.search.query;
+              const archived = this.search.archived;
+              const supported = this._effectiveChatFilters(this.search.filters);
+
+              this.beginChatSearch(query, archived, supported);
+              await this.refreshChatPage(query, archived, supported);
+
+              return;
             }
 
             this.turnProtocol = Number(data.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
@@ -6487,7 +6558,7 @@ export const useChatStore = defineStore('chat', {
         // использует ту же ограниченную пробу и актуальный пользовательский scope.
         await this.refreshChatPage(this.search.query, this.search.archived, this.search.filters);
 
-        if (this.filtersProtocol === 1) {
+        if (chatPageKey('', false, this._effectiveChatFilters(filters)) === chatPageKey('', false, filters)) {
           // Новый сервер или недоступная проба: исходный отказ не превращаем в успех.
           throw caught;
         }

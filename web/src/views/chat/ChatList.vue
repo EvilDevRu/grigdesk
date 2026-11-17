@@ -2,7 +2,37 @@
   <aside class="cl"
     :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
     :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined">
+    <ChatProjectPicker
+      v-if="projectAvailable"
+      :items="projectItems"
+      :model-value="selectedProject"
+      :disabled="!projectsReady"
+      @select="selectProject"
+    />
+
+    <div class="cl-body">
     <div class="top">
+      <ChatProjectPicker
+        v-if="projectAvailable"
+        :items="projectItems"
+        :model-value="selectedProject"
+        :disabled="!projectsReady"
+        compact
+        @select="selectProject"
+      />
+      <UiInlineMessage v-if="projectAvailable && projects.error" data-chat-project-error tone="danger">
+        {{ projects.error }}
+      </UiInlineMessage>
+      <UiButton
+        v-if="projectAvailable && projects.error"
+        data-chat-project-retry
+        size="compact"
+        variant="text"
+        :disabled="projects.loading"
+        @click="retryProjects"
+      >
+        {{ t('core.chatProjectRetry') }}
+      </UiButton>
       <div class="tools">
         <div class="search">
           <UiSearchInput
@@ -14,10 +44,16 @@
         <UiCreateButton
           class="new"
           :label="t('core.chatNovyyChat')"
-          :disabled="!chat.loaded"
+          :disabled="!canCreateChat"
           @click="newChat"
         />
       </div>
+      <div v-if="selectedProject" data-chat-project-current class="project-current">
+        <span>{{ selectedProjectTitle }}</span>
+        <UiIconButton data-chat-project-clear role="embedded" :label="t('core.chatProjectAll')"
+          @click="selectProject('')">×</UiIconButton>
+      </div>
+
       <div class="list-controls">
         <UiSegmentedControl
           v-model="scopeSegment"
@@ -207,11 +243,13 @@
       <div v-else-if="!paging.loaded" class="load-state" role="status">
         <p>{{ paging.error || t('core.chatPageLoading') }}</p>
         <UiButton v-if="paging.error" :disabled="paging.loading"
-                  @click="chat.ensureChatPage(q, showArchived, filters)">{{ t('core.chatPageRetry') }}</UiButton>
+                  @click="chat.ensureChatPage(q, showArchived, listFilters)">
+          {{ t('core.chatPageRetry') }}
+        </UiButton>
       </div>
       <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
         <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
-        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived, filters)">
+        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived, listFilters)">
           {{ t('core.chatListRetry') }}
         </UiButton>
       </div>
@@ -231,6 +269,8 @@
         v-memo="[
           r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
           r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
+          selectedProject, projectAvailable, Boolean(r.project),
+          r.catalogProjectId, r.projectTitle, r.project?.icon,
           r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
         ]"
         class="row"
@@ -238,6 +278,8 @@
           archived: r.archived,
           cur: r.id === chat.activeId,
           wait: r.waiting,
+          'has-project-chip': projectAvailable && !selectedProject && !!r.catalogProjectId
+            && editId !== r.id,
         }"
       >
         <template v-if="editId === r.id">
@@ -332,6 +374,20 @@
           </span>
         </UiPressable>
 
+        <UiButton
+          v-if="projectAvailable && !selectedProject && r.catalogProjectId && editId !== r.id"
+          class="project-chip"
+          data-context="chat-project-chip"
+          variant="ghost"
+          size="compact"
+          :data-chat-project-chip="r.catalogProjectId"
+          :disabled="!r.project"
+          v-tooltip="r.projectTitle"
+          @click.stop="selectProject(r.catalogProjectId)"
+        >
+          {{ r.projectTitle }}
+        </UiButton>
+
         <span v-if="editId !== r.id" class="acts">
           <!-- Мышь: кнопки появляются при наведении, действие — одним нажатием. -->
           <span class="acts-quick">
@@ -395,11 +451,14 @@
         <p v-if="paging.loading">{{ t('core.chatPageLoading') }}</p>
         <p v-else-if="paging.error">{{ paging.error }}</p>
         <UiButton v-if="paging.needsRefresh" :disabled="paging.loading"
-                  @click="chat.retryChatPage(q, showArchived, filters)">{{ t('core.chatPageRefresh') }}</UiButton>
-        <UiButton v-else :disabled="paging.loading" @click="chat.retryChatPage(q, showArchived, filters)">
+                  @click="chat.retryChatPage(q, showArchived, listFilters)">
+          {{ t('core.chatPageRefresh') }}
+        </UiButton>
+        <UiButton v-else :disabled="paging.loading" @click="chat.retryChatPage(q, showArchived, listFilters)">
           {{ t(paging.error ? 'core.chatPageRetry' : 'core.chatPageMore') }}
         </UiButton>
       </div>
+    </div>
     </div>
   </aside>
 </template>
@@ -416,22 +475,31 @@ import { captureChatScrollAnchor } from '../../shared/chatScrollAnchor.ts';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
+import ChatProjectPicker from './ChatProjectPicker.vue';
+import { useChatProjectFilter } from './useChatProjectFilter.ts';
 import ChatSleepBadge from './ChatSleepBadge.vue';
 import { useChatSleeping } from '../../composables/useChatSleeping.ts';
 import {
   confirmDialog, UiButton, UiPopover, UiIconButton, UiCreateButton, UiInput,
-  UiPressable, UiSearchInput, UiSegmentedControl, UiSelect, UiSpinner, resolveUiText, vTooltip,
+  UiPressable, UiSearchInput, UiSegmentedControl, UiSelect, UiSpinner,
+  UiInlineMessage, resolveUiText, vTooltip,
 } from '../../ui';
 
 import {
   EMPTY_CHAT_FILTERS, hasChatFilters, normalizeChatFilters,
 } from '../../../../shared/chat/chatPaging.ts';
 
+import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts.ts';
 import type { ChatListFilters } from '../../../../shared/chat/chatPaging.ts';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
-type ListRow = ChatListRow & { modelName: string; sleep?: ChatSleepingSession };
+type ListRow = ChatListRow & {
+  modelName: string;
+  sleep?: ChatSleepingSession;
+  project?: ProjectSummary;
+  projectTitle: string;
+};
 
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
@@ -476,13 +544,41 @@ const FILTERS_LS = 'chat.list.filters';
 
 function restoreFilters(): ChatListFilters {
   try {
-    return normalizeChatFilters(JSON.parse(localStorage.getItem(FILTERS_LS) || '{}'));
+    const restored = normalizeChatFilters(JSON.parse(localStorage.getItem(FILTERS_LS) || '{}'));
+
+    delete restored.project;
+
+    return restored;
   } catch {
     return { ...EMPTY_CHAT_FILTERS };
   }
 }
 
 const filters = ref<ChatListFilters>({ ...EMPTY_CHAT_FILTERS });
+
+const projectAvailable = computed(() => chat.pagingEnabled && chat.projectFiltersProtocol === 1);
+const { projects, projectItems, selectedProject, selectProject, retryProjects, ready: projectsReady }
+  = useChatProjectFilter(projectAvailable);
+const projectById = computed(() => new Map(projectItems.value.map((item) => [item.id, item])));
+const selectedProjectRecord = computed(() => projectById.value.get(selectedProject.value));
+const canCreateChat = computed(() => chat.loaded && (
+  !selectedProject.value || selectedProject.value === '@none'
+  || Boolean(selectedProjectRecord.value && !selectedProjectRecord.value.archivedAt)
+));
+const selectedProjectTitle = computed(() => selectedProject.value === '@none'
+  ? t('core.chatProjectNone') : selectedProjectRecord.value
+    ? selectedProjectRecord.value.title + (selectedProjectRecord.value.archivedAt
+      ? ` · ${t('core.chatFilterArchived')}` : '') : selectedProject.value);
+const listFilters = computed<ChatListFilters>(() => {
+  const ordinary = { ...filters.value };
+
+  delete ordinary.project;
+
+  return {
+    ...ordinary,
+    ...(projectAvailable.value && selectedProject.value ? { project: selectedProject.value } : {}),
+  };
+});
 
 const filtersOpen = ref(false);
 
@@ -570,7 +666,7 @@ function onTaskNumber(value: string | number | null) {
 
 const rowsHost = ref<HTMLElement | null>(null);
 
-const paging = computed(() => chat.pageFor(q.value, showArchived.value, filters.value));
+const paging = computed(() => chat.pageFor(q.value, showArchived.value, listFilters.value));
 
 // Сегмент области — прямая замена тумблера: showArchived остаётся источником правды
 // для всего списка, сегмент лишь переключает его двумя кнопками.
@@ -589,7 +685,7 @@ const scopeOptions = computed(() => [
   {
     value: 'archived',
     label: t('core.chatFilterArchived'),
-    badge: chat.archivedChatCount || '',
+    badge: selectedProject.value ? '' : chat.archivedChatCount || '',
   },
 ]);
 
@@ -736,7 +832,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let scopeEpoch = 0;
 let restoringScope = false;
 
-watch([q, showArchived, filters], ([query, archived, currentFilters], previous) => {
+watch([q, showArchived, listFilters], ([query, archived, currentFilters], previous) => {
   clearTimeout(searchTimer ?? undefined);
 
   const epoch = ++scopeEpoch;
@@ -794,7 +890,7 @@ function onRowsScroll() {
 
   if (page.loaded && page.hasMore && !page.loading && !page.error
     && element.scrollHeight - element.clientHeight - element.scrollTop <= 240) {
-    void chat.loadChatPage(q.value, showArchived.value, false, filters.value);
+    void chat.loadChatPage(q.value, showArchived.value, false, listFilters.value);
   }
 }
 
@@ -813,12 +909,15 @@ const rows = computed(() => {
     return [];
   }
 
-  return chat.list(q.value, showArchived.value, filters.value).map((r: ChatListRow) => {
+  return chat.list(q.value, showArchived.value, listFilters.value).map((r: ChatListRow) => {
     const { model, provider } = prov.modelOf(r.modelRef || r.model);
+    const project = r.catalogProjectId ? projectById.value.get(r.catalogProjectId) : undefined;
 
     return {
       ...r,
       provider,
+      project,
+      projectTitle: project?.title || r.catalogProjectId || '',
       modelName: model?.name || '',
       sleep: sleepingSessions.value[r.id],
     };
@@ -952,18 +1051,32 @@ function commitEdit() {
  * Мобильная область открывается, когда стор действительно создал разговор.
  */
 /**
- * Созданный чат выходит из фильтрованной выборки в обычную активную область.
- * Поиск сохраняет прежнее поведение: непустой текст может скрывать новую строку.
+ * Создание берёт только явный выбор списка; фильтр не изменяет существующие разговоры.
+ * Архивная/удалённая регистрация не становится новой рабочей областью.
  */
 function newChat() {
-  if (!chat.loaded || !chat.newSession()) {
+  const selected = selectedProject.value;
+
+  if (!canCreateChat.value) {
+    return;
+  }
+
+  const options = selected === '@none'
+    ? { workdir: { kind: 'grigdesk' as const } }
+    : selected ? {
+      workdir: {
+        kind: 'project' as const,
+        projectId: selected,
+        repoKey: null,
+      },
+    } : {};
+
+  if (!chat.newSession(options)) {
     return;
   }
 
   showArchived.value = false;
-
   resetFilters();
-
   emit('open');
 }
 
@@ -1004,8 +1117,28 @@ async function del(r: ListRow) {
 /* Ширину задаёт раскладка страницы: `--chat-list-w` ставит ChatsView, когда человек
    двигал разделитель. Пока не двигал — переменной нет, и ширину целиком решает CSS
    вместе со своими медиазапросами (второго источника правды о ширине экрана не заводим). */
-.cl { width: var(--chat-list-w, 300px); flex: none; display: flex; flex-direction: column; min-height: 0;
+.cl { width: var(--chat-list-w, 300px); flex: none; display: flex; flex-direction: row; min-height: 0;
   border-right: 1px solid var(--line); }
+
+.cl-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.project-current {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.project-current > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
@@ -1195,6 +1328,18 @@ async function del(r: ListRow) {
 .row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px;
   min-height: var(--chat-list-row-h); border-radius: 10px; --row-bg: var(--surface); background: var(--row-bg); }
 .row-hit { display: flex; flex: 1; align-items: center; gap: 9px; width: 100%; min-width: 0; text-align: left; }
+.project-chip {
+  position: absolute;
+  inset-inline-start: calc(var(--chat-avatar-size) + 17px);
+  bottom: 4px;
+  width: 88px;
+  max-width: 88px;
+}
+
+.has-project-chip .t2 {
+  padding-inline-start: 94px;
+}
+
 .row:hover { --row-bg: var(--surface-2); }
 .row.cur { --row-bg: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
 /* Чат, где агент ждёт ответа: тёплая полоска слева — видно, что строка требует действия,

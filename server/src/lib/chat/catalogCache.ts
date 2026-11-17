@@ -33,7 +33,7 @@ type CacheLog = {
   warn?: (fields: Record<string, unknown>, message: string) => void;
 };
 
-const CACHE_FORMAT = 1;
+const CACHE_FORMAT = 2;
 const FILE_PATTERN = /^\d{4}-\d{2}\/[A-Za-z0-9_-]{1,64}\.json$/;
 const HEAD_KEYS = new Set([
   'id', 'title', 'purpose', 'taskId', 'logicalIdentity', 'model', 'modelRef', 'unread',
@@ -41,7 +41,7 @@ const HEAD_KEYS = new Set([
 ]);
 const WEB_KEYS = new Set([
   ...HEAD_KEYS, 'version', 'previewSource', 'hasDraft', 'hasContent', 'pendingDelivery',
-  'lastReply', 'closedAt', 'revision', 'effort', 'mode', 'modeSelection',
+  'lastReply', 'closedAt', 'revision', 'effort', 'mode', 'modeSelection', 'catalogProjectId',
 ]);
 const ENTRY_KEYS = new Set([
   'file', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'head', 'web',
@@ -72,6 +72,7 @@ function validEntry(value: CatalogHead, id: string): boolean {
     && typeof value.needsWorkdirRecovery === 'boolean'
     && typeof value.migrationChecked === 'boolean'
     && typeof head.preview === 'string' && typeof web.previewSource === 'string'
+    && (web.catalogProjectId === null || typeof web.catalogProjectId === 'string')
     && typeof web.version === 'string' && /^[a-f0-9]{64}$/.test(web.version)
     && ['hasDraft', 'hasContent', 'pendingDelivery'].every((key) => typeof web[key] === 'boolean')
     && (lastReply === null || !!lastReply && typeof lastReply.key === 'string'

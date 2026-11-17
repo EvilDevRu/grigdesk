@@ -37,6 +37,10 @@ To use the letter avatar again, choose "Remove icon" and save the project.
 Cancel restores the saved image along with the other fields. An unreadable file
 leaves the previous icon in place.
 
+In Chats, select a project in the left rail or the "Chat project" selector above search.
+You can also start a conversation in the active project's working folder.
+[Choose a project and combine filters](chat-list-filters.md).
+
 ## Factory configuration
 
 For an existing project with a factory profile, expand Factory configuration. It shows capabilities,

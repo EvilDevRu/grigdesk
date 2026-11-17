@@ -839,7 +839,8 @@
 
 /* Внутренняя рейка разделов плагина «Код» сохраняет собственную геометрию плиток.
    Активный раздел выражен pressed-состоянием самой кнопки, а не внешним классом. */
-.ui-icon-button[data-context='code-rail-item'] {
+.ui-icon-button[data-context='code-rail-item'],
+.ui-icon-button[data-context='chat-project-rail-item'] {
   width: 34px;
   height: 34px;
   min-height: 34px;
@@ -849,24 +850,40 @@
   color: var(--ink-mid);
 }
 
-.ui-icon-button[data-context='code-rail-item']:hover {
+.ui-icon-button[data-context='code-rail-item']:hover,
+.ui-icon-button[data-context='chat-project-rail-item']:hover {
   background: var(--surface);
   color: var(--ink);
 }
 
-.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'] {
+.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'],
+.ui-icon-button[data-context='chat-project-rail-item'][aria-pressed='true'] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 
-.ui-icon-button[data-context='code-rail-item']:focus-visible {
+.ui-icon-button[data-context='code-rail-item']:focus-visible,
+.ui-icon-button[data-context='chat-project-rail-item']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.ui-icon-button[data-context='code-rail-item'] svg {
+.ui-icon-button[data-context='code-rail-item'] svg,
+.ui-icon-button[data-context='chat-project-rail-item'] svg {
   width: 19px;
   height: 19px;
+}
+
+.ui-button[data-context='chat-project-chip'] {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+.ui-button[data-context='chat-project-chip'] .ui-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Строка дерева и списка изменений плагина «Код». Это плотный список, а не ряд

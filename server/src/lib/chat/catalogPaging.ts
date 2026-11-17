@@ -125,9 +125,13 @@ export class ChatCatalogPaging {
    * Поиск и фильтры сужают один scope до сортировки и снимка курсора.
    * Top-сверка не выделяет snapshot и не вытесняет курсор читаемого списка.
    */
-  async page(query: Record<string, string | undefined>, top = false) {
+  async page(
+    query: Record<string, string | undefined>,
+    top = false,
+    snapshot?: WebChatHead[],
+  ) {
     const allowed = new Set(['page', 'archived', 'limit', 'q', 'cursor',
-      'unread', 'waiting', 'working', 'task', 'provider', 'fresh']);
+      'unread', 'waiting', 'working', 'task', 'provider', 'fresh', 'project']);
 
     const limit = query.limit === undefined ? 40 : Number(query.limit);
 
@@ -140,7 +144,7 @@ export class ChatCatalogPaging {
       throw new ChatHistoryError('bad_chat_page', 'Некорректная страница списка.', { statusCode: 400 });
     }
 
-    const heads = await this.history.webHeads();
+    const heads = snapshot ?? await this.history.webHeads();
 
     const summary = this.summary(heads);
 
@@ -165,6 +169,11 @@ export class ChatCatalogPaging {
 
     const selected: WebChatHead[] = heads.filter((head) => {
       if (!!head.archived !== archived || (matches && !matches.has(head.id))) {
+        return false;
+      }
+
+      if (filters.project && (filters.project === '@none'
+        ? head.catalogProjectId != null : head.catalogProjectId !== filters.project)) {
         return false;
       }
 
@@ -208,6 +217,7 @@ export class ChatCatalogPaging {
     return {
       listProtocol: 2,
       filtersProtocol: 1,
+      projectFiltersProtocol: 1,
       sessions: archived ? [] : page.items,
       archived: archived ? page.items : [],
       page: page.page,

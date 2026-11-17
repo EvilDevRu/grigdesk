@@ -45,7 +45,7 @@ import {
 
 const SERVER_CHAT_KEYS = new Set([
   'schema', 'surface', 'revision', 'modelRefState', 'sessionBindingState',
-  'logicalIdentity', 'workdirState',
+  'logicalIdentity', 'workdirState', 'catalogProjectId',
   'executionRunId', 'mobileHistoryAppliedAt', 'mobileHistoryEpoch',
   // Binding не должен оказаться в chat JSON даже под выдуманным клиентом именем.
   'binding', 'bindingGeneration', 'sessionBinding',
@@ -310,6 +310,8 @@ export class ChatHistoryStore {
 
   private catalogCache: ChatCatalogCache;
 
+  private readonly catalogTaskProject: (id: string) => Promise<string | null>;
+
   private catalogRegistry: ModelRegistry | null = null;
 
   private headsRefresh: Promise<void> | null = null;
@@ -330,6 +332,7 @@ export class ChatHistoryStore {
     log = null,
     registryProvider = async () => ({}),
     defaultSurface = 'chats',
+    catalogTaskProject = async () => null,
     now = () => Date.now(),
   }: {
     chatsDir: string;
@@ -339,6 +342,7 @@ export class ChatHistoryStore {
     log?: HistoryLog | null;
     registryProvider?: () => Promise<ModelRegistry>;
     defaultSurface?: string;
+    catalogTaskProject?: (id: string) => Promise<string | null>;
     now?: () => number;
   }) {
     this.dir = chatsDir;
@@ -348,6 +352,7 @@ export class ChatHistoryStore {
     this.legacyPath = legacyPath;
     this.log = log;
     this.registryProvider = registryProvider;
+    this.catalogTaskProject = catalogTaskProject;
     this.defaultSurface = CHAT_SURFACES.has(defaultSurface) ? defaultSurface : 'embedded';
     this.now = now;
     this.migrationPromise = null;
@@ -651,14 +656,47 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Каталог перечисляет и проверяет файлы, не перечитывая неизменные сообщения.
-   * Полные объекты освобождаются после построения двух коротких проекций.
+   * Производная принадлежность использует только проверенный task scope.
+   * Ошибка/отсутствие trusted проекта сохраняют явный выбор папки разговора.
+   */
+  async catalogHead(head: WebChatHead): Promise<WebChatHead> {
+    const task = this.catalogTaskId(head);
+    const project = task ? await this.catalogTaskProject(task) : null;
+
+    return { ...head, catalogProjectId: project || head.catalogProjectId || null };
+  }
+
+  private catalogTaskId(head: WebChatHead): string {
+    const task = String(head.taskId ?? '');
+
+    return /^[1-9][0-9]{0,18}$/u.test(task) ? task : '';
+  }
+
+  /**
+   * Текущий task scope читается один раз на задачу и максимум четырьмя workers.
+   * Файловая версия головы остаётся прежней: производная метка не является CAS истории.
    */
   async webHeads(): Promise<WebChatHead[]> {
     await this.prepareWeb();
     await this.heads();
 
-    return [...this.headCache.values()].flatMap((entry) => entry.web ? [entry.web] : []);
+    const heads = [...this.headCache.values()].flatMap((entry) => entry.web ? [entry.web] : []);
+    const tasks = [...new Set(heads.map((head) => this.catalogTaskId(head)).filter(Boolean))];
+    const projects = new Map<string, string | null>();
+    let next = 0;
+
+    await Promise.all(Array.from({ length: Math.min(4, tasks.length) }, async () => {
+      while (next < tasks.length) {
+        const task = tasks[next++]!;
+
+        projects.set(task, await this.catalogTaskProject(task));
+      }
+    }));
+
+    return heads.map((head) => ({
+      ...head,
+      catalogProjectId: projects.get(this.catalogTaskId(head)) || head.catalogProjectId || null,
+    }));
   }
 
   /**
@@ -673,7 +711,8 @@ export class ChatHistoryStore {
       return matches;
     }
 
-    await this.webHeads();
+    await this.prepareWeb();
+    await this.heads();
 
     let started = performance.now();
     let count = 0;

@@ -57,6 +57,15 @@ before(async () => {
 
   ChatList = await compileVue(webFile('src/views/chat/ChatList.vue'), {
     stubs: {
+      '../../actions/projects/index.ts': `
+        export const useProjectsStore = () => ({
+          items: [], loaded: false, loading: false, error: '', deletedIds: new Set(),
+        });
+        export const loadProjects = async () => {};
+        export const watchProjects = () => {};
+      `,
+      '../../stores/auth.ts': 'export const useAuthStore = () => ({ clientScope: "fixture" });',
+      '../../stores/shell.ts': 'export const useShellStore = () => ({ profile: { id: "fixture" } });',
       '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__loadListChat;',
       '../../stores/providers.ts': `export const useProvidersStore = () => ({
         load() {}, modelOf() { return { model: null, provider: null }; },

@@ -8,6 +8,7 @@ import { applyChatSpeed } from '../../lib/chat/speed.ts';
 import type { HelpService } from '../../lib/help/service.ts';
 import { withHelpHint } from '../../lib/chat/helpHint.ts';
 import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.ts';
+import type { WebChatHead } from '../../../../shared/chat/chatListProjection.ts';
 import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
 import { isProjectDeleted, readProjectsMeta, readProjectRecord, projectRepos } from '../../lib/projects.ts';
@@ -252,6 +253,7 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
     task?: string;
     provider?: string;
     fresh?: string;
+    project?: string;
   };
   window?: unknown;
   clearHistory?: boolean;
@@ -743,6 +745,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const history = new ChatHistoryStore({
     chatsDir: config.chatsDir,
     legacyPath: config.chatStoreLegacyPath,
+    catalogTaskProject: trustedWorkspaceProject,
     log: fastify.log,
     registryProvider: () => modelsRegistry(config),
     defaultSurface: 'chats',
@@ -788,7 +791,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     try {
       const entry = await history.readEntry(id);
 
-      head = entry ? projectWebChatHead(entry.chat, history.versionOf(entry.json)) : null;
+      head = entry ? await history.catalogHead(
+        projectWebChatHead(entry.chat, history.versionOf(entry.json)),
+      ) : null;
     } catch {
       // Адресное чтение недоступно — получатель сверит шапку следующим запросом.
     }
@@ -5507,8 +5512,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Общая дельта оставляет прежний формат метаданных и версий голов.
    * onlyKnown ограничивает payload уже просмотренными id без полной выдачи каталога.
    */
-  async function listStore(known?: Record<string, unknown>, onlyKnown = false) {
-    const heads = await history.webHeads();
+  async function listStore(
+    known?: Record<string, unknown>,
+    onlyKnown = false,
+    snapshot?: WebChatHead[],
+  ) {
+    const heads = snapshot ?? await history.webHeads();
     const selected = known ? heads.filter((head) => (!onlyKnown || Object.hasOwn(known, head.id))
       && known[head.id] !== head.version) : heads;
     const meta = await history.readMetaRaw();
@@ -5518,6 +5527,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       activeId: meta.activeId ?? null,
       ...(await storeOptions()),
       listProtocol: 1,
+      filtersProtocol: 1,
+      projectFiltersProtocol: 1,
       historyWindowProtocol: 1,
       summary: catalogPaging.summary(heads),
       sessions: selected.filter((head) => !head.archived),
@@ -5563,14 +5574,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
     if (top !== undefined && (!top || typeof top !== 'object' || Array.isArray(top)
       || Object.keys(top).some((key) => !['q', 'archived', 'unread', 'waiting', 'working',
-        'task', 'provider', 'fresh'].includes(key))
+        'task', 'provider', 'fresh', 'project'].includes(key))
       || (top.q !== undefined && (typeof top.q !== 'string' || top.q.length > 256))
       || (top.archived !== undefined && typeof top.archived !== 'boolean')
       || chatFilterQueryError(top))) {
       return reply.code(400).send({ error: 'bad_chat_page' });
     }
 
-    const result = await listStore(known, request.body.onlyKnown === true);
+    const snapshot = await history.webHeads();
+    const result = await listStore(known, request.body.onlyKnown === true, snapshot);
 
     if (top && request.body.onlyKnown) {
       const page = await catalogPaging.page({
@@ -5582,7 +5594,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         task: typeof top.task === 'string' ? top.task : undefined,
         provider: typeof top.provider === 'string' ? top.provider : undefined,
         fresh: typeof top.fresh === 'string' ? top.fresh : undefined,
-      }, true);
+        project: typeof top.project === 'string' ? top.project : undefined,
+      }, true, snapshot);
 
       return {
         ...result,
@@ -5644,7 +5657,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         return reply.code(404).send({ error: 'no_chat' });
       }
 
-      return { head: projectWebChatHead(entry.chat, history.versionOf(entry.json)) };
+      return { head: await history.catalogHead(
+        projectWebChatHead(entry.chat, history.versionOf(entry.json)),
+      ) };
     } catch (error) {
       if (error instanceof ChatHistoryError) {
         return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -5728,7 +5743,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
             const entry = await history.readEntry(id);
 
-            const head = projectWebChatHead(entry!.chat, history.versionOf(entry!.json));
+            const head = await history.catalogHead(
+              projectWebChatHead(entry!.chat, history.versionOf(entry!.json)),
+            );
 
             heads.push(head);
 
@@ -5788,7 +5805,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         const entry = await history.readEntry(id);
 
-        heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
+        heads.push(await history.catalogHead(
+          projectWebChatHead(entry!.chat, history.versionOf(entry!.json)),
+        ));
       }
 
       const known = body.knownIds === undefined ? null : new Set(body.knownIds as string[]);

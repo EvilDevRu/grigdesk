@@ -56,6 +56,15 @@ const compileChatsView = () => compileVue(CHATS_VIEW_PATH, {
 
 const compileChatList = () => compileVue(CHAT_LIST_PATH, {
   stubs: {
+    '../../actions/projects/index.ts': `
+      export const useProjectsStore = () => ({
+        items: [], loaded: false, loading: false, error: '', deletedIds: new Set(),
+      });
+      export const loadProjects = async () => {};
+      export const watchProjects = () => {};
+    `,
+    '../../stores/auth.ts': 'export const useAuthStore = () => ({ clientScope: "fixture" });',
+    '../../stores/shell.ts': 'export const useShellStore = () => ({ profile: { id: "fixture" } });',
     '../../stores/chat.ts': `
       export const useChatStore = globalThis.__chatListStore;
     `,

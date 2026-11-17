@@ -1,10 +1,12 @@
 import { stableMessageKey } from './chatMessageIdentity.ts';
+import { normalizeChatWorkdir } from './chatWorkdir.ts';
 
 type Message = Record<string, unknown>;
 
 export interface WebChatHead extends Record<string, unknown> {
   id: string;
   version: string;
+  catalogProjectId?: string | null;
   previewSource: string;
   hasDraft: boolean;
   hasContent: boolean;
@@ -38,7 +40,9 @@ export function projectWebChatHead(chat: Record<string, unknown>, version: strin
   const preview = draft.trim() ? draft : attachments.length
     ? `📎 ${attachments.map((entry) => entry.name).join(', ')}`
     : last ? `${last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : ''}${last.text || ''}` : '';
+  const workdir = normalizeChatWorkdir(chat.workdir);
   const head: WebChatHead = {
+    catalogProjectId: workdir?.kind === 'project' ? workdir.projectId : null,
     id: String(chat.id),
     version,
     previewSource: preview.slice(0, 1024),

@@ -164,6 +164,7 @@ export interface ChatStep extends Record<string, unknown> {
 }
 
 export interface ChatListRow {
+  catalogProjectId?: string | null;
   id: string;
   title: string;
   snippet: string;
@@ -309,6 +310,7 @@ export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
 }
 
 export interface ChatSession extends ChatRecord {
+  catalogProjectId?: string | null;
   version?: string;
   previewSource?: string;
   hasDraft?: boolean;
@@ -400,6 +402,7 @@ export interface ChatResult extends ChatContextUsage, Record<string, unknown> {
 }
 
 export interface ChatEnvelope extends ChatStoreData, ChatResult {
+  projectFiltersProtocol?: number;
   window?: unknown;
   version?: string;
   chat?: ChatSession;
@@ -430,6 +433,7 @@ export interface ChatState {
   pagingEnabled: boolean;
 
   filtersProtocol: number;
+  projectFiltersProtocol: number;
 
   catalogMutationVersion: number;
   catalogPages: Record<string, ChatCatalogPage>;
@@ -679,7 +683,7 @@ function isChatEnvelope(value: unknown): value is ChatEnvelope {
     || !optionalFields(value, ['activeId', 'defModel', 'defEffort', 'defMode', 'reply', 'title',
       'sessionId', 'state', 'surface', 'pendingSeed'], 'string')
     || !optionalFields(value, ['compactWindow', 'turnProtocol', 'workdirProtocol',
-      'historyStepReuseProtocol', 'protocol', 'revision', 'schema'], 'number')
+      'historyStepReuseProtocol', 'protocol', 'revision', 'schema', 'projectFiltersProtocol'], 'number')
     || (value.sessions != null && (!Array.isArray(value.sessions)
       || !value.sessions.every(isChatSession)))
     || (value.archived != null && (!Array.isArray(value.archived)
@@ -824,6 +828,8 @@ export function decodeChatHead(value: unknown): ChatSession {
     || typeof value.pendingDelivery !== 'boolean'
     || (value.lastReply !== null && (!isRecord(value.lastReply)
       || typeof value.lastReply.key !== 'string' || typeof value.lastReply.text !== 'string'))
+    || (value.catalogProjectId != null && (typeof value.catalogProjectId !== 'string'
+      || !/^[a-z0-9][a-z0-9_-]{0,40}$/u.test(value.catalogProjectId)))
     || Object.hasOwn(value, 'messages') || Object.hasOwn(value, 'steps')) {
     throw new Error(t('core.coreNekorrektnayaShapkaChata'));
   }
@@ -885,6 +891,7 @@ export function decodeChatPage(value: unknown) {
     page: value.page as { nextCursor: string | null; hasMore: boolean },
     summary: value.summary as unknown as ChatCatalogSummary,
     filtersProtocol: value.filtersProtocol === 1 ? 1 : 0,
+    projectFiltersProtocol: value.projectFiltersProtocol === 1 ? 1 : 0,
   };
 }
 

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
 import { EMPTY_CHAT_FILTERS } from '../../shared/chat/chatPaging.ts';
 
 import { readChat, sampleChat, writeChat } from '../server/helpers/chat-list.js';
 
-import { waitFor } from '../server/helpers/chat-turns.js';
+import { controlledExecutor, TEST_MODEL_REF, waitFor } from '../server/helpers/chat-turns.js';
 
 import { serverWorld, windowApi } from './helpers/chat-lazy.js';
 
@@ -19,8 +21,8 @@ import { drain } from './helpers/chat-load.js';
  * Журнал windowApi доказывает, какие фильтры действительно ушли на сервер.
  */
 
-async function filterWorld(t, records) {
-  const world = await serverWorld(t, records);
+async function filterWorld(t, records, options = {}) {
+  const world = await serverWorld(t, records, options);
 
   const network = windowApi(world.app);
 
@@ -732,3 +734,539 @@ test(
 
     assert.ok(stages.indexOf('deliveries') > stages.indexOf('active'));
   });
+
+test('PROJECT-STORE-SCOPE: проект получает отдельную страницу и метку строки', async (t) => {
+  const { chat } = await filterWorld(t, [
+    sampleChat('alpha', { workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    } }),
+    sampleChat('beta', { workdir: {
+      kind: 'project',
+      projectId: 'beta',
+      repoKey: null,
+    } }),
+  ]);
+  const filters = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+
+  assert.equal(chat.projectFiltersProtocol, 1);
+  await chat.ensureChatPage('', false, filters);
+  assert.deepEqual(chat.list('', false, filters).map((row) => [row.id, row.catalogProjectId]),
+    [['alpha', 'alpha']]);
+  assert.notEqual(chat.pageFor('', false, filters), chat.pageFor('', false));
+});
+
+test('PROJECT-STORE-ISOLATION: выбор project не меняет открытый чат и его папку', async (t) => {
+  const { chat } = await filterWorld(t, [
+    sampleChat('selected', { workdir: {
+      kind: 'project',
+      projectId: 'beta',
+      repoKey: null,
+    } }),
+    sampleChat('other', { workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    } }),
+  ]);
+
+  chat.selectChat('selected');
+  await chat.ensureChatMessages('selected');
+
+  const selected = chat._find('selected');
+  const folder = JSON.stringify(selected.workdir);
+  const messages = selected.messages;
+
+  selected.draft = 'Несохранённый текст';
+  await chat.ensureChatPage('', false, { ...EMPTY_CHAT_FILTERS, project: 'alpha' });
+
+  assert.equal(chat.activeId, 'selected');
+  assert.equal(JSON.stringify(selected.workdir), folder);
+  assert.equal(selected.messages === messages, true);
+  assert.equal(selected.draft, 'Несохранённый текст');
+  assert.equal(chat.list('', false).find((row) => row.id === 'selected').catalogProjectId, 'beta');
+});
+
+test('PROJECT-STORE-ROLLBACK: старый сервер снимает только project после доказанной пробы', async (t) => {
+  const { network, chat } = await filterWorld(t, [
+    sampleChat('unread-a', { unread: true,
+      workdir: {
+        kind: 'project',
+        projectId: 'alpha',
+        repoKey: null,
+      } }),
+    sampleChat('unread-b', { unread: true }), sampleChat('read', { unread: false }),
+  ]);
+  const filters = {
+    ...EMPTY_CHAT_FILTERS,
+    project: 'alpha',
+    unread: true,
+  };
+
+  await chat.searchChats('', false, filters);
+
+  const original = network.api.get;
+  const urls = [];
+
+  network.api.get = async (url, options) => {
+    urls.push(url);
+
+    if (new URL(url, 'http://fixture.test').searchParams.has('project')) {
+      throw Object.assign(new Error('old_project_filter'), { status: 400 });
+    }
+
+    const data = await original(url, options);
+    const { projectFiltersProtocol, ...legacy } = data;
+
+    return legacy;
+  };
+  await chat.refreshChatPage('', false, filters);
+
+  assert.equal(chat.filtersProtocol, 1);
+  assert.equal(chat.projectFiltersProtocol, 0);
+  assert.equal(chat.search.filters.unread, true);
+  assert.equal(chat.search.filters.project ?? '', '');
+  assert.deepEqual(chat.list('', false, { ...EMPTY_CHAT_FILTERS, unread: true }).map((row) => row.id).sort(),
+    ['unread-a', 'unread-b']);
+  assert.equal(urls.filter((url) => url.includes('project=')).length, 1);
+});
+
+test('PROJECT-STORE-ERROR: недоступная проба не выдаёт сетевой отказ за откат', async (t) => {
+  const { network, chat } = await filterWorld(t, [sampleChat('one', {
+    workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    },
+  })]);
+  const filters = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+
+  await chat.ensureChatPage('', false, filters);
+  network.api.get = async () => {
+    throw Object.assign(new Error('Сеть недоступна'), { status: 500 });
+  };
+  await chat.refreshChatPage('', false, filters);
+
+  assert.equal(chat.projectFiltersProtocol, 1);
+  assert.deepEqual(chat.pageFor('', false, filters).ids, ['one']);
+  assert.notEqual(chat.pageFor('', false, filters).error, '');
+});
+
+test('PROJECT-STORE-410: пересбор истёкшего cursor сохраняет project и глубину', async (t) => {
+  const records = Array.from({ length: 85 }, (_, index) => sampleChat(`project-exp-${index}`, {
+    updatedAt: 10000 - index,
+    workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    },
+  }));
+
+  records.push(sampleChat('foreign-exp', { updatedAt: 20000 }));
+
+  const { network, chat } = await filterWorld(t, records);
+  const filters = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+  const original = network.api.get;
+  let expire = false;
+
+  network.api.get = async (url, options) => {
+    if (expire && url.includes('cursor=')) {
+      expire = false;
+
+      throw Object.assign(new Error('Истёк список'), { status: 410 });
+    }
+
+    return original(url, options);
+  };
+  await chat.ensureChatPage('', false, filters);
+  await chat.loadChatPage('', false, false, filters);
+  assert.equal(chat.pageFor('', false, filters).ids.length, 80);
+
+  const start = network.calls.length;
+
+  expire = true;
+  await chat.loadChatPage('', false, false, filters);
+  await waitFor(() => {
+    const page = chat.pageFor('', false, filters);
+
+    return !page.loading && !page.needsRefresh && page.ids.length === 80;
+  }, { what: 'пересбор проекта с прежней глубиной' });
+
+  assert.equal(chat.pageFor('', false, filters).ids.includes('foreign-exp'), false);
+  assert.equal(network.calls.slice(start).filter((call) => call.url.includes('/store/list?'))
+    .every((call) => call.url.includes('project=alpha')), true);
+});
+
+test('PROJECT-STORE-RACE: поздняя alpha не подменяет выбранную beta', async (t) => {
+  const { network, chat } = await filterWorld(t, [
+    sampleChat('scope-a', { workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    } }),
+    sampleChat('scope-b', { workdir: {
+      kind: 'project',
+      projectId: 'beta',
+      repoKey: null,
+    } }),
+  ]);
+  const original = network.api.get;
+  let release;
+
+  network.api.get = async (url, options) => {
+    const data = await original(url, options);
+
+    if (url.includes('project=alpha')) {
+      return new Promise((resolve) => {
+        release = () => resolve(data);
+      });
+    }
+
+    return data;
+  };
+
+  const first = chat.searchChats('', false, { ...EMPTY_CHAT_FILTERS, project: 'alpha' });
+
+  await waitFor(() => typeof release === 'function', { what: 'удержанная страница alpha' });
+  await chat.searchChats('', false, { ...EMPTY_CHAT_FILTERS, project: 'beta' });
+  release();
+  await first;
+
+  assert.equal(chat.search.filters.project, 'beta');
+  assert.deepEqual(chat.list('', false, chat.search.filters).map((row) => row.id), ['scope-b']);
+});
+
+test('PROJECT-STORE-LEGACY-DELTA: ресинк со старой дельтой сохраняет обычные фильтры', async (t) => {
+  const { network, chat } = await filterWorld(t, [
+    sampleChat('unread-a', { unread: true }),
+    sampleChat('unread-b', { unread: true }),
+    sampleChat('read', { unread: false }),
+  ]);
+  const originalGet = network.api.get;
+  const originalPost = network.api.post;
+
+  network.api.get = async (url, options) => {
+    const data = await originalGet(url, options);
+    const { projectFiltersProtocol, ...legacy } = data;
+
+    return legacy;
+  };
+  network.api.post = async (url, body, options) => {
+    const data = await originalPost(url, body, options);
+
+    if (url === '/api/chat/store/changes') {
+      const { filtersProtocol, projectFiltersProtocol, ...legacy } = data;
+
+      return legacy;
+    }
+
+    return data;
+  };
+
+  const filters = { ...EMPTY_CHAT_FILTERS, unread: true };
+
+  await chat.searchChats('', false, filters);
+
+  assert.equal(chat.filtersProtocol, 1);
+  assert.equal(chat.projectFiltersProtocol, 0);
+
+  const { watch } = await import('../../web/node_modules/vue/index.mjs');
+  const transitions = [];
+  const stopFilters = watch(() => chat.filtersProtocol, (value) => transitions.push(['filters', value]),
+    { flush: 'sync' });
+  const stopProjects = watch(() => chat.projectFiltersProtocol,
+    (value) => transitions.push(['project', value]), { flush: 'sync' });
+
+  t.after(() => {
+    stopFilters();
+    stopProjects();
+  });
+  await chat._resyncPagedStore();
+
+  assert.deepEqual(transitions, []);
+  assert.equal(chat.filtersProtocol, 1);
+  assert.equal(chat.projectFiltersProtocol, 0);
+  assert.equal(chat.search.filters.unread, true);
+  assert.deepEqual(chat.list('', false, chat.search.filters).map((row) => row.id).sort(),
+    ['unread-a', 'unread-b']);
+});
+
+test('PROJECT-STORE-STALE-TOP: поздний changes не возвращает capability после отката', async (t) => {
+  const { network, chat } = await filterWorld(t, [sampleChat('old-top', {
+    unread: true,
+    workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    },
+  })]);
+  const filters = {
+    ...EMPTY_CHAT_FILTERS,
+    unread: true,
+    project: 'alpha',
+  };
+
+  await chat.searchChats('', false, filters);
+
+  const originalPost = network.api.post;
+  const originalGet = network.api.get;
+  let release;
+
+  network.api.post = async (url, body, options) => {
+    const data = await originalPost(url, body, options);
+
+    if (url === '/api/chat/store/changes') {
+      return new Promise((resolve) => {
+        release = () => resolve(data);
+      });
+    }
+
+    return data;
+  };
+
+  const resync = chat._resyncPagedStore();
+
+  await waitFor(() => typeof release === 'function', { what: 'удержанная top сверка' });
+  network.api.get = async (url, options) => {
+    if (url.includes('project=')) {
+      throw Object.assign(new Error('old_project_filter'), { status: 400 });
+    }
+
+    const data = await originalGet(url, options);
+    const { projectFiltersProtocol, ...legacy } = data;
+
+    return legacy;
+  };
+  await chat.refreshChatPage('', false, filters);
+  assert.equal(chat.projectFiltersProtocol, 0);
+
+  const { watch } = await import('../../web/node_modules/vue/index.mjs');
+  const transitions = [];
+  const stop = watch(() => chat.projectFiltersProtocol, (value) => transitions.push(value),
+    { flush: 'sync' });
+
+  t.after(stop);
+  release();
+  await resync;
+
+  assert.equal(transitions.includes(1), false);
+
+  assert.equal(chat.projectFiltersProtocol, 0);
+  assert.equal(chat.filtersProtocol, 1);
+  assert.equal(chat.search.filters.project ?? '', '');
+  assert.equal(chat.search.filters.unread, true);
+
+  const start = network.calls.length;
+
+  await chat.searchChats('', false, filters);
+  assert.equal(network.calls.slice(start).some((call) => call.url.includes('project=')), false);
+});
+
+test('PROJECT-STORE-REACTIVE-HEAD: computed полной dirty строки замечает новую метку', async (t) => {
+  const { chat, world } = await filterWorld(t, [sampleChat('reactive-project', {
+    workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    },
+  })]);
+
+  await chat.ensureChatMessages('reactive-project');
+
+  const session = chat._find('reactive-project');
+  const { computed } = await import('../../web/node_modules/vue/index.mjs');
+
+  session.draft = 'Несохранённый текст';
+
+  const rows = computed(() => chat.list('', false));
+
+  assert.equal(rows.value.find((row) => row.id === session.id).catalogProjectId, 'alpha');
+
+  const response = await world.app.inject('/api/chat/store/head/reactive-project');
+
+  assert.equal(response.statusCode, 200);
+  chat._applyChatHead({ ...response.json().head, catalogProjectId: 'beta' }, false);
+
+  assert.equal(rows.value.find((row) => row.id === session.id).catalogProjectId, 'beta');
+  assert.equal(session.draft, 'Несохранённый текст');
+  assert.equal(session.workdir.projectId, 'alpha');
+});
+
+test('PROJECT-STORE-CREATE: новый свободный черновик сразу виден в своём project scope', async (t) => {
+  const { chat } = await filterWorld(t, []);
+  const filters = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+
+  await chat.searchChats('', false, filters);
+
+  const id = chat.newSession({ workdir: {
+    kind: 'project',
+    projectId: 'alpha',
+    repoKey: null,
+  } });
+
+  assert.notEqual(id, null);
+  assert.equal(chat.list('', false, filters).some((row) => row.id === id), true);
+  assert.equal(chat.list('', false, { ...EMPTY_CHAT_FILTERS, project: 'beta' })
+    .some((row) => row.id === id), false);
+  assert.equal(chat._find(id).workdir.projectId, 'alpha');
+});
+
+/**
+ * Только временные каталоги и синтетический исполнитель: AI-ход не запускается.
+ * Отсутствующий alpha проверяет штатный fallback, beta остаётся доступным проектом.
+ */
+function projectWorldOptions(missingAlpha = false) {
+  const prefs = { projects: {} };
+  const control = controlledExecutor();
+
+  return {
+    prefs,
+    executor: { ...control.executor, workdir: { switch: 'resume', roots: 'multi' } },
+    beforeChat: async (_app, { root, config }) => {
+      config.profilesDir = path.join(root, 'profiles');
+      await fs.mkdir(config.profilesDir, { recursive: true });
+
+      for (const id of ['alpha', 'beta']) {
+        const dir = path.join(root, id);
+
+        if (id !== 'alpha' || !missingAlpha) {
+          await fs.mkdir(dir, { recursive: true });
+        }
+
+        prefs.projects[id] = {
+          title: id,
+          repos: [{ key: 'code', dir }],
+          defaultRepoKey: 'code',
+        };
+      }
+    },
+  };
+}
+
+test('PROJECT-STORE-CREATE-FALLBACK: implicit alpha после preview становится @none без утечки', async (t) => {
+  const { chat, world } = await filterWorld(t, [], projectWorldOptions(true));
+  const alpha = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+  const none = { ...EMPTY_CHAT_FILTERS, project: '@none' };
+
+  chat.defModelRef = { ...TEST_MODEL_REF };
+  chat.defModel = TEST_MODEL_REF.model;
+  chat.defWorkdir = {
+    kind: 'project',
+    projectId: 'alpha',
+    repoKey: null,
+  };
+  await chat.searchChats('', false, alpha);
+
+  const id = chat.newSession();
+  const session = chat._find(id);
+
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), true);
+  await chat._initializeWorkdir(session);
+  assert.deepEqual(session.workdir, { kind: 'grigdesk' });
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), false);
+  await chat._saveChatNow(session);
+  await chat._refreshChatSearch();
+  await chat.refreshChatPage('', false, alpha);
+  await chat.ensureChatPage('', false, none);
+
+  const serverAlpha = await world.app.inject('/api/chat/store/list?page=1&archived=0&project=alpha');
+  const serverNone = await world.app.inject('/api/chat/store/list?page=1&archived=0&project=%40none');
+
+  assert.equal(serverAlpha.statusCode, 200);
+  assert.equal(serverNone.statusCode, 200);
+  assert.equal(serverAlpha.json().sessions.some((head) => head.id === id), false);
+  assert.equal(serverNone.json().sessions.some((head) => head.id === id), true);
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), false);
+  assert.equal(chat.list('', false, none).some((row) => row.id === id), true);
+});
+
+test('PROJECT-STORE-CREATE-MOVE: подтверждённый переход alpha → beta не оставляет draft в alpha',
+  async (t) => {
+  const { chat, world } = await filterWorld(t, [], projectWorldOptions());
+  const alpha = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+  const beta = { ...EMPTY_CHAT_FILTERS, project: 'beta' };
+
+  chat.defModelRef = { ...TEST_MODEL_REF };
+  chat.defModel = TEST_MODEL_REF.model;
+  await chat.searchChats('', false, alpha);
+
+  const id = chat.newSession({ workdir: {
+    kind: 'project',
+    projectId: 'alpha',
+    repoKey: null,
+  } });
+  const session = chat._find(id);
+
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), true);
+  await chat._initializeWorkdir(session);
+  await chat._saveChatNow(session);
+  assert.equal(await chat.proposeWorkdir(id, {
+    taskId: null,
+    workdir: {
+      kind: 'project',
+      projectId: 'beta',
+      repoKey: null,
+    },
+  }), true);
+  await chat._refreshChatSearch();
+  await chat.refreshChatPage('', false, alpha);
+  await chat.ensureChatPage('', false, beta);
+
+  const serverAlpha = await world.app.inject('/api/chat/store/list?page=1&archived=0&project=alpha');
+  const serverBeta = await world.app.inject('/api/chat/store/list?page=1&archived=0&project=beta');
+
+  assert.equal(serverAlpha.statusCode, 200);
+  assert.equal(serverBeta.statusCode, 200);
+  assert.equal(serverAlpha.json().sessions.some((head) => head.id === id), false);
+  assert.equal(serverBeta.json().sessions.some((head) => head.id === id), true);
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), false);
+  assert.equal(chat.list('', false, beta).some((row) => row.id === id), true);
+});
+
+test('PROJECT-STORE-CREATE-ACK-GAP: сохранённый черновик виден до прихода головы', async (t) => {
+  const { chat } = await filterWorld(t, [], projectWorldOptions());
+  const alpha = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+
+  chat.defModelRef = { ...TEST_MODEL_REF };
+  chat.defModel = TEST_MODEL_REF.model;
+  await chat.searchChats('', false, alpha);
+
+  const id = chat.newSession({ workdir: {
+    kind: 'project',
+    projectId: 'alpha',
+    repoKey: null,
+  } });
+  const session = chat._find(id);
+
+  await chat._initializeWorkdir(session);
+  session.title = 'Сохранённый разговор';
+  await chat._saveChatNow(session);
+
+  assert.equal(Number(session.revision) >= 1, true);
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), true);
+
+  await chat._refreshChatSearch();
+  await chat.refreshChatPage('', false, alpha);
+
+  assert.equal(chat.list('', false, alpha).some((row) => row.id === id), true);
+});
+
+test('PROJECT-STORE-NONE-HEADONLY: head-only проектных чатов нет в «Без проекта»', async (t) => {
+  const { chat } = await filterWorld(t, [
+    sampleChat('alpha-head', { workdir: {
+      kind: 'project',
+      projectId: 'alpha',
+      repoKey: null,
+    } }),
+    sampleChat('plain-head'),
+  ]);
+  const alpha = { ...EMPTY_CHAT_FILTERS, project: 'alpha' };
+  const none = { ...EMPTY_CHAT_FILTERS, project: '@none' };
+
+  await chat.searchChats('', false, alpha);
+  await chat.ensureChatPage('', false, none);
+
+  assert.deepEqual(chat.list('', false, none).map((row) => row.id), ['plain-head']);
+  assert.deepEqual(chat.list('', false, alpha).map((row) => row.id), ['alpha-head']);
+});
