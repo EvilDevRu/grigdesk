@@ -13,10 +13,12 @@ import { randomUUID } from 'node:crypto';
 
 import type { ProviderUsagePatch } from '../providerUsage.ts';
 import type { BackgroundIdentity, BackgroundSession } from './backgroundRuns.ts';
+import type { ChatSessionActivity } from '../../../../shared/chat/chatSessionActivity.ts';
 import type { ChatBackgroundTask } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 4;
+const ACTIVITY_MAX_AGE_MS = 20_000;
 // Что нельзя поменять на лету: это флаги командной строки, зафиксированные при запуске
 // процесса. Исполнитель вправе назвать свой набор — тогда сессия переоткроется только
 // на его полях.
@@ -51,6 +53,7 @@ export interface LiveHandle {
   send: (turn: unknown) => Promise<{ sessionId?: string } | null>;
   interrupt: () => Promise<unknown>;
   close: () => Promise<unknown>;
+  closeIfIdle?: () => Promise<boolean>;
 }
 
 // Контракт исполнителя в части жизни между ходами; объявляет его он сам.
@@ -64,6 +67,7 @@ export interface LiveExecutor {
     enabled?: (spec: LiveSessionSpec) => boolean;
     fingerprint?: (spec: LiveSessionSpec) => Promise<string> | string;
     keepAlive?: boolean;
+    limitExempt?: boolean;
   };
 }
 
@@ -82,6 +86,7 @@ interface LiveEntry {
   executorId: string;
   unsolicited: boolean;
   keepAlive: boolean;
+  limitExempt: boolean;
   fingerprint: string;
   sessionId: string | null;
   model: string;
@@ -93,6 +98,9 @@ interface LiveEntry {
   managed: boolean;
   background: { backgroundId: string } | null;
   backgroundTasks: ChatBackgroundTask[];
+  activity: ChatSessionActivity | null;
+  activityAt: number;
+  idleSince: number | null;
   closedNotified: boolean;
   backgroundWaiters: Array<() => void>;
   openedAt: number;
@@ -377,6 +385,12 @@ export class ChatLiveSessions {
       alive: !!entry.handle?.alive,
       busy: !!entry.managed || !!entry.background,
       unsolicited: !!entry.unsolicited,
+      keepAlive: entry.keepAlive,
+      limitExempt: entry.limitExempt,
+      activity: entry.activity && now - entry.activityAt <= ACTIVITY_MAX_AGE_MS
+        ? entry.activity : entry.handle.closeIfIdle ? {
+          state: 'unknown', reasons: [{ kind: 'unknown' }],
+        } : null,
       sleeping: sleeping(entry),
       backgroundTasks: entry.backgroundTasks.map((task) => ({ ...task })),
       sessionId: entry.sessionId || null,
@@ -389,14 +403,21 @@ export class ChatLiveSessions {
       lastUsed: entry.lastUsed,
       // Занятая сессия по простою не гаснет: таймер перевзводится, пока идёт ход.
       // keepAlive-процесс живёт без idle timer до явного закрытия владельцем.
-      idleAtMs: (entry.managed || entry.background || sleeping(entry) || entry.keepAlive)
-        ? null : Math.max(now, entry.lastUsed + this.idleMs),
+      idleAtMs: this.idleAt(entry, now),
     }));
   }
 
   /** Границы пула — чтобы окно объясняло их словами, а не повторяло числа у себя. */
   limits() {
-    return { maxSessions: this.maxSessions, idleMs: this.idleMs, live: this.entries.size };
+    const pooledLive = this.pooledSize();
+
+    return {
+      maxSessions: this.maxSessions,
+      idleMs: this.idleMs,
+      live: this.entries.size,
+      pooledLive,
+      unlimitedLive: this.entries.size - pooledLive,
+    };
   }
 
   /**
@@ -466,6 +487,7 @@ export class ChatLiveSessions {
         // Выдача процесса резервирует его до возврата Promise: проверка архивности
         // другого запуска не должна вытеснить его до продолжения run в микрозадаче.
         existing.managed = true;
+        existing.idleSince = null;
 
         return { entry: existing, wasSleeping };
       }
@@ -511,7 +533,9 @@ export class ChatLiveSessions {
       throw new Error('Сервер останавливается — новая сессия не открывается.');
     }
 
-    const releaseOpening = await this.reserveOpening(session.keepAlive === true);
+    const releaseOpening = await this.reserveOpening(
+      session.keepAlive === true, session.limitExempt === true,
+    );
 
     try {
       const entry: LiveEntry = {
@@ -519,6 +543,7 @@ export class ChatLiveSessions {
         executorId: String(executor?.id ?? ''),
         unsolicited: !!session.unsolicited,
         keepAlive: session.keepAlive === true,
+        limitExempt: session.limitExempt === true,
         fingerprint,
         sessionId: spec.sessionId || null,
         // Копия параметров запуска: они зафиксированы на жизнь процесса, и человек по
@@ -533,6 +558,9 @@ export class ChatLiveSessions {
         managed: true,
         background: null,
         backgroundTasks: [],
+        activity: null,
+        activityAt: 0,
+        idleSince: null,
         closedNotified: false,
         backgroundWaiters: [],
         openedAt: Date.now(),
@@ -545,6 +573,35 @@ export class ChatLiveSessions {
         ...spec,
         log: this.log,
         hooks: {
+          onActivity: (activity: ChatSessionActivity) => {
+            if (entry.closedNotified || (this.entries.has(chatKey) && this.entries.get(chatKey) !== entry)) {
+              return;
+            }
+
+            const changed = JSON.stringify(entry.activity) !== JSON.stringify(activity);
+            const previousIdleSince = entry.idleSince;
+
+            if (Date.now() - entry.activityAt > ACTIVITY_MAX_AGE_MS) {
+              entry.idleSince = null;
+            }
+
+            entry.activity = activity;
+            entry.activityAt = Date.now();
+
+            if (activity.state !== 'idle' || entry.managed || entry.background || sleeping(entry)) {
+              entry.idleSince = null;
+            } else {
+              entry.idleSince ??= Date.now();
+            }
+
+            if (this.entries.get(chatKey) === entry) {
+              this._armIdle(entry);
+
+              if (changed || previousIdleSince !== entry.idleSince) {
+                this.onChange?.({ chatKey, event: 'tasks' });
+              }
+            }
+          },
           onBackgroundTasks: (tasks: ChatBackgroundTask[]) => {
             const current = this.entries.get(chatKey);
 
@@ -565,6 +622,10 @@ export class ChatLiveSessions {
             const wasSleeping = sleeping(entry);
 
             entry.backgroundTasks = next;
+
+            if (next.length) {
+              entry.idleSince = null;
+            }
 
             // Во время open снимок сохраняется до присвоения handle и события opened.
             if (current !== entry) {
@@ -598,6 +659,7 @@ export class ChatLiveSessions {
             }
 
             entry.background = { backgroundId: `bg-${randomUUID()}` };
+            entry.idleSince = null;
             this._clearIdle(entry);
             this.log?.info?.({ chatKey }, 'чат: агент проснулся сам');
             this.onBackgroundStart?.({
@@ -688,7 +750,13 @@ export class ChatLiveSessions {
       this.entries.set(chatKey, entry);
 
       this.log?.info?.(
-        { chatKey, executor: entry.executorId, pid: entry.handle.pid },
+        {
+          chatKey,
+          executor: entry.executorId,
+          pid: entry.handle.pid,
+          keepAlive: entry.keepAlive,
+          limitExempt: entry.limitExempt,
+        },
         'чат: открыта живая сессия',
       );
       this.onChange?.({ chatKey, event: 'opened' });
@@ -700,14 +768,15 @@ export class ChatLiveSessions {
   }
 
   /**
-   * Потолок живых процессов — обязательная часть, а не отделка: каждый держит память
-   * и свои MCP-серверы. Архивный keepAlive можно освободить только без ходов и фоновых
-   * задач; остальные keepAlive защищены. Обычный запуск сохраняет мягкий потолок.
+   * Потолок относится только к процессам общего пула. Адаптер с limitExempt
+   * не занимает его места и не вытесняется при открытии другого процесса.
+   * Архивный keepAlive общего пула освобождается только без ходов и фоновых задач.
    */
   async _enforceLimit(strict = false): Promise<void> {
-    while (this.entries.size + this.opening >= this.maxSessions) {
+    while (this.pooledSize() + this.opening >= this.maxSessions) {
       const candidates = [...this.entries.values()]
-        .filter((entry) => !entry.managed && !entry.background && !sleeping(entry))
+        .filter((entry) => !entry.limitExempt
+          && !entry.managed && !entry.background && !sleeping(entry))
         .sort((a, b) => a.lastUsed - b.lastUsed);
       let idle: LiveEntry | undefined;
 
@@ -737,16 +806,21 @@ export class ChatLiveSessions {
       }
 
       if (!idle) {
-        if (this.entries.size + this.opening < this.maxSessions) {
+        if (this.pooledSize() + this.opening < this.maxSessions) {
           continue;
         }
 
         if (strict) {
+          this.log?.warn?.(
+            { ...this.limits(), opening: this.opening },
+            'чат: нет свободного места в общем пуле живых сессий',
+          );
+
           throw new Error('Нет свободного слота живых сессий. Закройте ненужный живой процесс агента.');
         }
 
         this.log?.warn?.(
-          { live: this.entries.size, limit: this.maxSessions },
+          { ...this.limits(), opening: this.opening },
           'чат: все живые сессии заняты, потолок превышен',
         );
         return;
@@ -762,7 +836,7 @@ export class ChatLiveSessions {
    * Проверка лимита и резервирование одного места атомарны относительно других opens.
    * Мьютекс держится только до резерва, а не во время native open или пользовательского prompt.
    */
-  private async reserveOpening(strict: boolean): Promise<() => void> {
+  private async reserveOpening(strict: boolean, limitExempt: boolean): Promise<() => void> {
     const previous = this.admission;
     let unlock!: () => void;
 
@@ -776,20 +850,33 @@ export class ChatLiveSessions {
         throw new Error('Сервер останавливается — новая сессия не открывается.');
       }
 
-      await this._enforceLimit(strict);
-      this.opening += 1;
+      if (!limitExempt) {
+        await this._enforceLimit(strict);
+        this.opening += 1;
+      }
 
       let released = false;
 
       return () => {
         if (!released) {
           released = true;
-          this.opening -= 1;
+
+          if (!limitExempt) {
+            this.opening -= 1;
+          }
         }
       };
     } finally {
       unlock();
     }
+  }
+
+  /**
+   * Безлимитные процессы сохраняются в реестре для управления и диагностики.
+   * При проверке вместимости учитываются только участники обычного пула.
+   */
+  private pooledSize(): number {
+    return [...this.entries.values()].filter((entry) => !entry.limitExempt).length;
   }
 
   /**
@@ -799,19 +886,89 @@ export class ChatLiveSessions {
   _armIdle(entry: LiveEntry): void {
     this._clearIdle(entry);
 
-    if (sleeping(entry) || entry.keepAlive) {
+    const deadline = this.idleAt(entry, Date.now());
+
+    if (deadline === null) {
       return;
     }
 
     entry.idleTimer = setTimeout(() => {
       if (entry.managed || entry.background) {
         this._armIdle(entry);
+
         return;
       }
+
+      if (entry.keepAlive) {
+        this.closeReportedIdle(entry);
+
+        return;
+      }
+
       this._forget(entry, 'простой');
       void this._closeHandle(entry);
-    }, this.idleMs);
+    }, Math.max(0, deadline - Date.now()));
     entry.idleTimer?.unref?.();
+  }
+
+  /**
+   * Persistent-процесс без полного свежего статуса сохраняет прежнюю защиту.
+   * Повторные idle-снимки не продлевают уже начатый интервал простоя.
+   */
+  private idleAt(entry: LiveEntry, now: number): number | null {
+    if (entry.managed || entry.background || sleeping(entry)) {
+      return null;
+    }
+
+    if (!entry.keepAlive) {
+      return Math.max(now, entry.lastUsed + this.idleMs);
+    }
+
+    if (!entry.handle?.closeIfIdle || entry.activity?.state !== 'idle'
+      || now - entry.activityAt > ACTIVITY_MAX_AGE_MS || entry.idleSince === null) {
+      return null;
+    }
+
+    return Math.max(now, entry.idleSince + this.idleMs);
+  }
+
+  /**
+   * Закрываемое поколение резервируется до native проверки, чтобы новый send ждал.
+   * Отказ, новые задачи и неизвестный исход сохраняют entry и право повторить закрытие.
+   */
+  private closeReportedIdle(entry: LiveEntry): void {
+    if (this.entries.get(entry.chatKey) !== entry || this.closing.has(entry.chatKey)) {
+      return;
+    }
+
+    const job = Promise.resolve().then(async () => {
+      const deadline = this.idleAt(entry, Date.now());
+
+      if (deadline === null || deadline > Date.now()) {
+        return;
+      }
+
+      if (await entry.handle.closeIfIdle?.()) {
+        if (this.entries.get(entry.chatKey) === entry) {
+          this._forget(entry, 'подтверждённый простой');
+        }
+      } else {
+        entry.idleSince = null;
+      }
+    }).catch((error) => {
+      entry.activity = { state: 'unknown', reasons: [{ kind: 'unknown' }] };
+      entry.idleSince = null;
+      this.log?.warn?.({ err: (error as Error).message, chatKey: entry.chatKey },
+        'чат: автоматическое закрытие не подтверждено');
+      this.onChange?.({ chatKey: entry.chatKey, event: 'tasks' });
+    });
+    const tracked = job.finally(() => {
+      if (this.closing.get(entry.chatKey) === tracked) {
+        this.closing.delete(entry.chatKey);
+      }
+    });
+
+    this.closing.set(entry.chatKey, tracked);
   }
 
   /**

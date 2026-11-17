@@ -12,6 +12,8 @@ test('Процессы: DTO и подтверждение погашения с�
           chatKey: 'sample',
           chatTitle: 'Разбор',
           executor: 'fixture',
+          keepAlive: true,
+          limitExempt: true,
           pid: 123,
           cwd: '/fixture/work',
           running: false,
@@ -25,6 +27,9 @@ test('Процессы: DTO и подтверждение погашения с�
   assert.match(h.wrapper.text(), /123/);
   assert.match(h.wrapper.text(), /\/fixture\/work/);
   assert.match(h.wrapper.text(), /Лимит пула\s*4, автогашение через 30 мин простоя/);
+  assert.match(h.wrapper.text(), /сессии без лимита не учитываются/);
+  assert.match(h.wrapper.text(), /До явного закрытия/);
+  assert.match(h.wrapper.text(), /Без лимита сессий/);
   h.control.answer = false;
   await h.wrapper.findAll('button').find((item) => item.text() === 'Погасить').trigger('click');
   assert.equal(h.writes().length, 0);
@@ -114,4 +119,60 @@ test('Процессы: успешное массовое гашение сох�
 
   assert.match(h.wrapper.text(), /Погашено: 2\. Занятых пропущено: 1/);
   assert.doesNotMatch(h.wrapper.text(), /Не удалось погасить/);
+});
+
+test('Процессы: расписание, монитор и неизвестный статус объясняют удержание', async (t) => {
+  const nextAt = Date.now() + 3600000;
+  const h = await settingsHarness(t, 'system.processes', 'ProcessesPage', {
+    prepare({ control }) {
+      control.handlers['/api/chat/sessions'] = () => Response.json({
+        maxSessions: 4,
+        idleMs: 1800000,
+        sessions: [
+          {
+            chatKey: 'scheduled',
+            chatTitle: 'Запланированный',
+            executor: 'fixture',
+            running: false,
+            keepAlive: true,
+            limitExempt: true,
+            idleAtMs: null,
+            activity: {
+              state: 'busy',
+              reasons: [
+                {
+                  kind: 'schedule',
+                  count: 1,
+                  nextAt,
+                },
+                { kind: 'monitor', count: 2 },
+              ],
+            },
+          },
+          {
+            chatKey: 'unknown',
+            chatTitle: 'Неизвестный',
+            running: false,
+            activity: { state: 'unknown', reasons: [{ kind: 'unknown' }] },
+          },
+          {
+            chatKey: 'idle',
+            chatTitle: 'Простаивающий',
+            running: false,
+            idleAtMs: Date.now() + 1800000,
+            activity: { state: 'idle', reasons: [] },
+          },
+        ],
+      });
+    },
+  });
+
+  const text = h.wrapper.text();
+
+  assert.match(text, /Ожидает фон или расписание/);
+  assert.match(text, /Пробуждение через 60 мин/);
+  assert.match(text, /Работающие мониторы: 2/);
+  assert.match(text, /Автозавершение приостановлено/);
+  assert.match(text, /Автогашение через 30 мин/);
+  assert.doesNotMatch(text, /До явного закрытия/);
 });

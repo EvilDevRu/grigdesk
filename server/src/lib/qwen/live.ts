@@ -13,6 +13,10 @@ import { qwenPermissionResponse } from './permissions.ts';
 import { qwenToolAllowed } from './policy.ts';
 import { runQwenTurn } from './runtime.ts';
 import { qwenConfig, readQwenSnapshot } from './settings.ts';
+import {
+  decodeQwenActivity, QWEN_IDLE_CLOSE_METHOD, QWEN_IDLE_POLL_MS,
+  QWEN_IDLE_STATUS_METHOD, unknownQwenActivity,
+} from './activity.ts';
 import { openQwenTransport, record } from './transport.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import type { QwenOwnedProcess } from './sandbox.ts';
@@ -163,6 +167,7 @@ class QwenLiveSession {
   private deferredNotifications: Array<[string, unknown]> = [];
   private closed = false;
   private closeJob?: Promise<void>;
+  private exitReason = 'процесс Qwen завершён';
   private currentAbort?: AbortController;
   private processAbort = new AbortController();
   private pendingPrompt: Promise<unknown> | null = null;
@@ -173,6 +178,8 @@ class QwenLiveSession {
   private latestSessionHeld = false;
   private cronHeld = false;
   private goalEnds = new Set<string>();
+  private activityTimer?: ReturnType<typeof setInterval>;
+  private activityJob?: Promise<void>;
   private cancelDeadline?: ReturnType<typeof setTimeout>;
   private hooks: QwenBackgroundHooks;
   private context: ExternalCliProcessContext;
@@ -563,7 +570,23 @@ class QwenLiveSession {
         }
 
         this.transport = opened;
-        opened.child.once('close', () => {
+        this.activityTimer = setInterval(() => {
+          void this.refreshActivity();
+        }, QWEN_IDLE_POLL_MS);
+        this.activityTimer.unref?.();
+        opened.child.once('close', (exitCode, exitSignal) => {
+          const log = record(this.spec.log);
+
+          if (typeof log.info === 'function') {
+            log.info({
+              exitCode,
+              exitSignal,
+              foreground: this.foreground,
+              background: !!this.background,
+              closing: this.closed,
+            }, 'Qwen: native процесс завершился');
+          }
+
           void this.close().catch(() => this.reportCloseFailure());
         });
       } catch (error) {
@@ -726,6 +749,7 @@ class QwenLiveSession {
       }
 
       this.currentAbort = undefined;
+      void this.refreshActivity();
     }
   }
 
@@ -747,6 +771,71 @@ class QwenLiveSession {
           .catch(() => this.reportCloseFailure());
       }, 1000);
       this.cancelDeadline.unref?.();
+    }
+  }
+
+  /**
+   * Независимый read-only RPC перечисляет и текущую работу, и будущие расписания.
+   * Недоступность расширения не превращается в разрешение гасить процесс.
+   */
+  private refreshActivity(): Promise<void> {
+    if (this.activityJob) {
+      return this.activityJob;
+    }
+
+    if (this.closed || !this.transport || !this.sessionId) {
+      return Promise.resolve();
+    }
+
+    this.activityJob = this.transport.client.request(QWEN_IDLE_STATUS_METHOD, {
+      sessionId: this.sessionId,
+    }, 3000).then((result) => {
+      if (!this.closed) {
+        this.hooks.onActivity?.(decodeQwenActivity(result, this.sessionId));
+      }
+    }).catch(() => {
+      if (!this.closed) {
+        this.hooks.onActivity?.(unknownQwenActivity());
+      }
+    }).finally(() => {
+      this.activityJob = undefined;
+    });
+
+    return this.activityJob;
+  }
+
+  /**
+   * Автоуборка не использует обычный close: native повторно проверяет все holds
+   * под собственным close gate, затем сервер подтверждает завершение всего scope.
+   */
+  async closeIfIdle(): Promise<boolean> {
+    if (this.closed || this.foreground || this.background || !this.transport || !this.sessionId) {
+      return false;
+    }
+
+    try {
+      const result = record(await this.transport.client.request(QWEN_IDLE_CLOSE_METHOD, {
+        sessionId: this.sessionId,
+      }, 12000));
+
+      if (result.v !== 1 || result.sessionId !== this.sessionId || typeof result.closed !== 'boolean') {
+        throw new Error('Qwen: неверный ответ условного закрытия');
+      }
+
+      if (!result.closed) {
+        this.hooks.onActivity?.(decodeQwenActivity(result, this.sessionId));
+
+        return false;
+      }
+
+      this.exitReason = 'подтверждённый простой';
+      await this.close();
+
+      return true;
+    } catch (error) {
+      this.hooks.onActivity?.(unknownQwenActivity());
+
+      throw error;
     }
   }
 
@@ -794,6 +883,7 @@ class QwenLiveSession {
     }
 
     this.closed = true;
+    clearInterval(this.activityTimer);
     this.processAbort.abort();
     this.currentAbort?.abort();
     this.background?.abort.abort();
@@ -817,7 +907,7 @@ class QwenLiveSession {
       await this.ownedProcess?.close();
       this.ownedProcess = undefined;
       this.hooks.onBackgroundTasks?.([]);
-      this.hooks.onExit?.({ reason: 'процесс Qwen завершён' });
+      this.hooks.onExit?.({ reason: this.exitReason });
     })().catch((error) => {
       this.closeJob = undefined;
 

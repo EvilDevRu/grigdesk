@@ -47,9 +47,13 @@ Archive and search load separately; counts cover all server conversations.
 New conversations from other windows or devices appear after a server notification without reloading or losing
 open messages or list position. Restored archived chats stay active after reload even without new messages.
 Closing a chat moves it to the archive. Its agent process can stay alive between messages to continue
-background tasks. When session slots are full, a new launch automatically closes an idle archived chat's
-process, including Qwen Host. Running turns and agents with background tasks stay protected.
-History and saved conversation memory remain available when the chat is restored.
+background tasks. The regular pool may release idle processes; running turns and agents
+with background tasks stay protected. Qwen Host has no session-slot limit and is not
+evicted when the pool fills, including archived chats. All live processes appear in
+Settings → Runs → Live agent processes; the running-turn list shows only current work.
+An idle Qwen process closes after 30 minutes of confirmed inactivity; background
+tasks and future schedules stay protected. History and saved conversation memory
+remain available after closing a process.
 A new answer can move a card up: a list at the top stays there; lower down, the visible card keeps its position.
 
 Several applications can share a server, each keeping its selected conversation and reading position.

@@ -172,6 +172,7 @@ const adapter: ExecutorAdapter = {
     mode: 'persistent',
     unsolicited: true,
     keepAlive: true,
+    limitExempt: true,
     enabled: (spec: Record<string, unknown>) => !spec.factory && qwenHostEnabled(spec.providerSettings),
     fingerprint: qwenLiveFingerprint,
     open: openQwenLiveSession,

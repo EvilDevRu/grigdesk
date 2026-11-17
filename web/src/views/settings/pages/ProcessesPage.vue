@@ -56,7 +56,7 @@
           <h5>{{ resolveUiText(title(item)) }}</h5>
           <span class="settings-process-status" :data-running="item.running">
             <span aria-hidden="true" />
-            {{ item.running ? t('settings.turnRunning') : t('settings.processStatusIdle') }}
+            {{ processStatus(item) }}
           </span>
         </header>
         <p class="settings-process-provider">{{ runLabel(item) }}</p>
@@ -71,6 +71,13 @@
               minutes: Math.max(0, Math.round((item.idleAtMs - now) / 60000)),
             }) }}
           </span>
+          <span v-if="item.keepAlive && !item.activity">{{ t('settings.processUntilClosed') }}</span>
+          <template v-if="item.activity && !item.running">
+            <span v-for="(reason, index) in item.activity.reasons" :key="index">
+              {{ activityReason(reason) }}
+            </span>
+          </template>
+          <span v-if="item.limitExempt">{{ t('settings.processUnlimitedSessions') }}</span>
           <span v-if="item.unsolicited">{{ t('settings.processCanSpeak') }}</span>
         </div>
         <footer class="settings-process-footer">
@@ -125,6 +132,8 @@ import { useSettingsStore } from '../../../stores/settings.ts';
 import { createSettingsActions } from '../../../features/settings/actions.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
 import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
+import type { ChatSessionActivity, SessionActivityReason }
+  from '../../../../../shared/chat/chatSessionActivity.ts';
 
 interface ProcessView {
   chatKey: string;
@@ -140,6 +149,9 @@ interface ProcessView {
   lastUsed?: number;
   idleAtMs?: number;
   unsolicited?: boolean;
+  keepAlive?: boolean;
+  activity?: ChatSessionActivity | null;
+  limitExempt?: boolean;
   cwd?: string;
 }
 
@@ -229,6 +241,48 @@ function runLabel(item: ProcessView): string {
     item.effort ? t('settings.effort2', { itemEffort: item.effort }) : '',
     mode || item.permissionMode,
   ].filter(Boolean).join(' · ');
+}
+
+/**
+ * Ожидание фоновой работы отличается от свободного процесса с таймером простоя.
+ * Недостоверное состояние видно человеку и не обещает автоматического завершения.
+ */
+function processStatus(item: ProcessView): string {
+  if (item.running) {
+    return t('settings.turnRunning');
+  }
+
+  if (item.activity?.state === 'busy') {
+    return t('settings.processStatusHeld');
+  }
+
+  return item.activity?.state === 'unknown'
+    ? t('settings.processStatusUnknown') : t('settings.processStatusIdle');
+}
+
+/**
+ * Причины приходят как нейтральные типы и числа, без текста заданий или ключей CLI.
+ * Ожидающее пробуждение показывает оставшееся время, остальные расписания — количество.
+ */
+function activityReason(reason: SessionActivityReason): string {
+  if (reason.kind === 'schedule' && reason.nextAt) {
+    return t('settings.processActivityWakeup', {
+      minutes: Math.max(0, Math.ceil((reason.nextAt - now.value) / 60000)),
+    });
+  }
+
+  const keys = {
+    turn: 'settings.processActivityTurn',
+    subagent: 'settings.processActivitySubagent',
+    command: 'settings.processActivityCommand',
+    monitor: 'settings.processActivityMonitor',
+    workflow: 'settings.processActivityWorkflow',
+    schedule: 'settings.processActivitySchedule',
+    goal: 'settings.processActivityGoal',
+    unknown: 'settings.processActivityUnknown',
+  } as const;
+
+  return t(keys[reason.kind], { count: reason.count ?? 1 });
 }
 
 function minutes(at: number | undefined): number {

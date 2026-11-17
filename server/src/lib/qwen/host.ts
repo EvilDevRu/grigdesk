@@ -13,6 +13,7 @@ import { currentExternalCliProcess, externalCliSpawnSpec }
 import { inspectCliLeases } from '../providerInstall/leases.ts';
 import { redactRunnerError } from '../factoryProviderRunner.ts';
 import { qwenConfig, type QwenSnapshot } from './settings.ts';
+import { prepareQwenIdleBridge } from './idleBridge.ts';
 import type { QwenLaunchOptions } from './sandbox.ts';
 
 const record = (value: unknown): Record<string, unknown> => isRecord(value) ? value : {};
@@ -330,6 +331,12 @@ export async function startQwenHost(
     ], { cwd: options.cwd, env });
 
     delete launch.options.env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD_PROVIDER;
+
+    const idleBridge = await prepareQwenIdleBridge(context.executable, staging).catch(() => null);
+
+    if (idleBridge) {
+      Object.assign(launch.options.env, idleBridge);
+    }
 
     const scope = await startHostScope(launch.command, launch.args, options.cwd, launch.options.env);
 

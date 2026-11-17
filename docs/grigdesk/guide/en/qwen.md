@@ -178,11 +178,23 @@ is being prepared, its result is still published to the feed exactly once with t
 and is not mixed into the reply to your message. Stop interrupts the current turn, not the process.
 Closing the live process in Settings → Runs → Live agent processes, resetting memory, deleting the chat
 and exiting GrigDesk terminate it; there is no autostart after an OS reboot.
-Closing a chat moves it to the archive and lets background work continue. When slots are full,
-a new launch automatically closes an idle archived chat's process. History and saved conversation
-memory remain available. Active chats, running turns and agents with background tasks stay protected;
-if no process can be released, a new Host gets a refusal
-suggesting to close an unneeded process.
+Closing a chat moves it to the archive and lets background work continue.
+GrigDesk has no internal session-count limit for Qwen Host: other agents filling
+the regular pool do not block new Qwen conversations, and pool pressure does not
+terminate Qwen even in archived chats.
+
+With no current work, background tasks, active goal or future schedules, the process
+closes after 30 minutes of confirmed idle time. Repeated checks do not extend that
+period. A new message or background work starts the idle countdown again.
+Pending cron jobs and wakeups keep the process alive between executions.
+The process list shows why it is retained, time until a wakeup or auto stop,
+and “Unlimited sessions”. History and saved memory remain available: the next
+message starts a process using the same session.
+
+If the full status is unavailable, automatic shutdown pauses and the list shows
+“Status unconfirmed”. Support is verified for Qwen Code 0.27.3; another version or
+modified package needs updated GrigDesk support. Every process remains available
+for explicit shutdown.
 The bulk “Stop idle processes” action on that page shows an explicit message with the number
 of failures when processes did not confirm shutdown: such processes remain in the list
 until a repeated close confirms their termination.

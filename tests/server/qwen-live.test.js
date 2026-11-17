@@ -100,6 +100,7 @@ async function controlledLive(t, options = {}) {
   const tasks = [];
   const steps = [];
   const exits = [];
+  const logs = [];
   let starts = 0;
 
   await writeFile(control, '');
@@ -111,6 +112,7 @@ async function controlledLive(t, options = {}) {
 
   const input = runInput(fixture, 'shared-model(openai)', {
     providerSettings: { allowHostAccess: true },
+    log: { info: (fields, message) => logs.push({ fields, message }) },
     hooks: {
       onBackgroundStart: () => {
         starts += 1;
@@ -137,6 +139,7 @@ async function controlledLive(t, options = {}) {
     tasks,
     steps,
     exits,
+    logs,
     starts: () => starts,
     async frame(value) {
       await appendFile(control, JSON.stringify(value) + '\n');
@@ -320,6 +323,13 @@ for (const partial of [false, true]) {
     assert.equal(h.results.length, 0, 'Нет поддельного финального сообщения от пользователя');
     assert.equal(h.handle.alive, false);
     assert.deepEqual(h.tasks.at(-1), []);
+
+    const exit = h.logs.find((entry) => entry.message === 'Qwen: native процесс завершился');
+
+    assert.ok(exit, 'Причина исчезновения native процесса попала в журнал');
+    assert.equal(exit.fields.exitCode, 7);
+    assert.equal(exit.fields.exitSignal, null);
+    assert.equal(exit.fields.closing, false, 'Самостоятельный выход отличается от явного закрытия');
     assert.equal((await h.fixture.records()).filter((entry) =>
       entry.frame?.method === 'session/prompt').length, 1, 'Нет автоматического replay');
   });

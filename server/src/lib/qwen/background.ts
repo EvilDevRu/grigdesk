@@ -1,9 +1,12 @@
+import type { ChatSessionActivity } from '../../../../shared/chat/chatSessionActivity.ts';
+
 import { createStepSink, type ChatStep } from '../chat/streamSteps.ts';
 import { createQwenSteps, qwenStepParent } from './steps.ts';
 import { createQwenUsage } from './usage.ts';
 import { record } from './transport.ts';
 
 export interface QwenBackgroundHooks {
+  onActivity?: (activity: ChatSessionActivity) => void;
   onBackgroundStart?: () => void;
   onBackgroundStep?: (step: ChatStep) => void;
   onBackgroundProgress?: (tokens: number, info?: Record<string, unknown>) => void;
