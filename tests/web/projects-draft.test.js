@@ -170,3 +170,13 @@ test('toInput отдаёт repos: [] явно и не содержит серв�
   assert.equal('revision' in input, false);
   assert.equal('id' in input, false);
 });
+
+test('ICON-DRAFT: иконка участвует в dirty/toInput и null означает удаление', () => {
+  const snapshot = draftModule.createDraft({ ...DETAIL, icon: 'sample-icon' });
+  const changed = { ...snapshot, icon: null };
+
+  assert.equal(snapshot.icon, 'sample-icon');
+  assert.deepEqual(draftModule.changedFields(changed, snapshot), ['icon']);
+  assert.equal(draftModule.toInput(changed).icon, null);
+  assert.equal(Object.hasOwn(draftModule.toInput(draftModule.createDraft(DETAIL)), 'icon'), false);
+});

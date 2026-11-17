@@ -346,6 +346,7 @@ export function createProjectsService({
     return {
       id,
       title: record?.title ?? id,
+      ...(record && Object.hasOwn(record, 'icon') ? { icon: record.icon ?? null } : {}),
       tags: record?.tags ?? [],
       repos,
       defaultRepoKey: record?.defaultRepoKey ?? null,
@@ -451,6 +452,7 @@ export function createProjectsService({
       const record: ProjectRecord = {
         title: value.title,
         description: value.description,
+        ...(Object.hasOwn(value, 'icon') ? { icon: value.icon } : {}),
         tags: value.tags,
         repos: normalizedRepos(value.repos),
         defaultRepoKey: value.defaultRepoKey,
@@ -521,6 +523,8 @@ export function createProjectsService({
         ...rawRecordOf(stored, id),
         title: value.title,
         description: value.description,
+        ...(Object.hasOwn(value, 'icon') ? { icon: value.icon }
+          : record && Object.hasOwn(record, 'icon') ? { icon: record.icon ?? null } : {}),
         tags: value.tags,
         repos: normalizedRepos(value.repos),
         defaultRepoKey: value.defaultRepoKey,
@@ -554,6 +558,7 @@ export function createProjectsService({
     return {
       title: record?.title ?? id,
       description: record?.description ?? '',
+      ...(record && Object.hasOwn(record, 'icon') ? { icon: record.icon ?? null } : {}),
       tags: record?.tags ?? [],
       repos: effective.repos.map((repo) => ({ ...repo })),
       defaultRepoKey: record?.defaultRepoKey ?? null,

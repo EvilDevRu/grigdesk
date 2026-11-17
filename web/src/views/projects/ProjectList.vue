@@ -67,6 +67,7 @@
         :aria-current="selectedId === item.id ? 'page' : undefined"
         @click="emit('open', item.id)"
       >
+        <ProjectAvatar :id="item.id" :title="item.title" :icon="item.icon" />
         <span class="row-content">
           <span class="head">
             <span class="title">{{ item.title }}</span>
@@ -101,6 +102,7 @@ import {
   vTooltip,
   UiLoadingState,
 } from '../../ui';
+import ProjectAvatar from './ProjectAvatar.vue';
 import ProjectIcon from './ProjectIcon.vue';
 import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts';
 

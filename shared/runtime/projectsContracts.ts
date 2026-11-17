@@ -10,6 +10,7 @@
 import { trimmedText } from '../lib/text.ts';
 
 import { contractDecoders } from '../lib/contractDecoders.ts';
+import { projectIcon } from './projectIcon.ts';
 
 // Границы полей паспорта: те же числа проверяет и форма, и сервер.
 export const PROJECT_LIMITS = {
@@ -150,8 +151,8 @@ export type ProjectDependency = ReturnType<typeof projectDependency>;
 export type ProjectDependencies = ReturnType<typeof projectDependencies>;
 
 export type ProjectRepo = ReturnType<typeof repoRef>;
-export type ProjectSummary = ReturnType<typeof projectSummary>;
-export type ProjectDetail = ReturnType<typeof projectDetail>;
+export type ProjectSummary = ReturnType<typeof projectSummary> & { icon?: string | null };
+export type ProjectDetail = ReturnType<typeof projectDetail> & { icon?: string | null };
 export type ProjectRepositoryCheck = ReturnType<typeof repositoryCheckBody>;
 export type ProjectRepositoryState = (typeof REPOSITORY_STATES)[number];
 
@@ -166,6 +167,7 @@ export interface ProjectInput {
   id?: string;
   title: string;
   description: string;
+  icon?: string | null;
   tags: string[];
   repos: ProjectRepoInput[];
   defaultRepoKey: string | null;
@@ -214,6 +216,28 @@ export function parseProjectsChange(value: unknown) {
   return projectsChange(value, 'projects-changed');
 }
 
+/**
+ * Необязательная иконка проверяется отдельно от legacy-формы ответа.
+ * Отсутствующий ключ не появляется как null и не меняет прежние снимки контракта.
+ */
+function withProjectIcon<T extends object>(parsed: T, value: unknown): T & { icon?: string | null } {
+  const source = value as Record<string, unknown>;
+
+  if (!Object.hasOwn(source, 'icon')) {
+    return parsed;
+  }
+
+  if (source.icon !== null && !projectIcon(source.icon)) {
+    throw new ProjectsContractError('icon');
+  }
+
+  return { ...parsed, icon: source.icon === null ? null : projectIcon(source.icon) };
+}
+
+/**
+ * Проверяет каталог перед использованием в списках проектов.
+ * Путь поля сохраняет индекс записи для диагностики ответа.
+ */
 export function parseProjectSummaries(value: unknown): ProjectSummary[] {
   const source = record(value, 'projects');
   const list = source.projects;
@@ -223,11 +247,15 @@ export function parseProjectSummaries(value: unknown): ProjectSummary[] {
   }
 
   // Путь поля внутри списка пишется через точку: так его называет форма отказа.
-  return list.map((item, index) => projectSummary(item, `projects.${index}`));
+  return list.map((item, index) => withProjectIcon(projectSummary(item, `projects.${index}`), item));
 }
 
+/**
+ * Проверяет паспорт вместе с необязательной иконкой.
+ * Для прежних ответов сохраняет исходный набор полей.
+ */
 export function parseProjectDetail(value: unknown): ProjectDetail {
-  return projectDetail(value, 'project');
+  return withProjectIcon(projectDetail(value, 'project'), value);
 }
 
 /**
@@ -259,6 +287,7 @@ const KNOWN_INPUT_FIELDS = new Set([
   'id',
   'title',
   'description',
+  'icon',
   'tags',
   'repos',
   'defaultRepoKey',
@@ -339,6 +368,10 @@ export function validateProjectInput(
     fail('defaultRepoKey', 'Репозиторий по умолчанию не из списка', 'bad_default_repo');
   }
 
+  if (Object.hasOwn(source, 'icon') && source.icon !== null && !projectIcon(source.icon)) {
+    fail('icon', 'Иконка: PNG до 64×64 и 32 КиБ в виде data URL', 'bad_request');
+  }
+
   if (fieldErrors.length) {
     return { ok: false, fieldErrors };
   }
@@ -356,6 +389,10 @@ export function validateProjectInput(
   }
   if (!creating && Object.hasOwn(source, 'expectedRevision')) {
     result.expectedRevision = source.expectedRevision as number;
+  }
+
+  if (Object.hasOwn(source, 'icon')) {
+    result.icon = source.icon === null ? null : projectIcon(source.icon);
   }
 
   return { ok: true, value: result };

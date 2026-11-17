@@ -12,6 +12,7 @@ export { deletedProjectIds, isProjectDeleted } from './projects/deletion.ts';
 // каждому потребителю по-своему нельзя, иначе они разойдутся между собой.
 import { textOr } from '../../../shared/lib/text.ts';
 import { recordOrEmpty } from '../../../shared/lib/objects.ts';
+import { projectIcon } from '../../../shared/runtime/projectIcon.ts';
 
 import { PROFILE_RE, listFactoryProfiles } from './profiles.ts';
 import { loadTriageProfile } from './analysis/profile.ts';
@@ -66,6 +67,7 @@ export interface ProjectImport {
 export interface ProjectRecord {
   title: string;
   description: string;
+  icon?: string | null;
   tags: string[];
   repos: ProjectRepoRef[];
   defaultRepoKey: string | null;
@@ -207,6 +209,7 @@ export function readProjectRecord(
   return {
     title: textOr(source.title, '') || id,
     description: textOr(source.description, ''),
+    ...(Object.hasOwn(source, 'icon') ? { icon: projectIcon(source.icon) } : {}),
     tags: (Array.isArray(source.tags) ? source.tags : [])
       .filter((tag): tag is string => typeof tag === 'string'),
     repos: repoRefs(source.repos),

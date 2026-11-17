@@ -15,6 +15,7 @@ export interface ProjectDraft {
   id: string;
   title: string;
   description: string;
+  icon?: string | null;
   tags: string[];
   repos: ProjectRepoDraft[];
   defaultRepoKey: string | null;
@@ -24,8 +25,8 @@ export interface ProjectDraft {
 }
 
 // Поля, которые уходят на сервер и сравниваются при правке. Порядок здесь — порядок
-// показа в списке изменённых полей: заголовок, описание, метки, репозитории, выбор.
-export const DRAFT_FIELDS = ['title', 'description', 'tags', 'repos', 'defaultRepoKey'] as const;
+// показа в списке изменённых полей: заголовок, описание, иконка, метки, репозитории, выбор.
+export const DRAFT_FIELDS = ['title', 'description', 'icon', 'tags', 'repos', 'defaultRepoKey'] as const;
 
 export type ProjectDraftField = (typeof DRAFT_FIELDS)[number];
 
@@ -50,6 +51,7 @@ export function createDraft(detail: ProjectDetail | null): ProjectDraft {
     id: detail.id,
     title: detail.title,
     description: detail.description,
+    ...(Object.hasOwn(detail, 'icon') ? { icon: detail.icon } : {}),
     tags: [...detail.tags],
     repos: detail.repos.map((repo) => ({ key: repo.key, dir: repo.dir })),
     defaultRepoKey: detail.defaultRepoKey,
@@ -75,6 +77,9 @@ function sameRepos(left: ProjectRepoDraft[], right: ProjectRepoDraft[]): boolean
  * а не по ссылке, иначе форма считала бы правкой любую пересборку массива.
  */
 function sameField(field: ProjectDraftField, left: ProjectDraft, right: ProjectDraft): boolean {
+  if (field === 'icon') {
+    return (left.icon ?? null) === (right.icon ?? null);
+  }
   if (field === 'tags') {
     return sameList(left.tags, right.tags);
   }
@@ -181,6 +186,7 @@ export function toInput(draft: ProjectDraft): ProjectInput {
   return {
     title: draft.title,
     description: draft.description,
+    ...(Object.hasOwn(draft, 'icon') ? { icon: draft.icon } : {}),
     tags: [...draft.tags],
     repos: draft.repos.map((repo) => ({ key: repo.key, dir: repo.dir })),
     defaultRepoKey: draft.defaultRepoKey,

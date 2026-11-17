@@ -300,3 +300,32 @@ test('parseProjectDependencies принимает сводку связей и �
     );
   }
 });
+
+const PROJECT_PNG = 'data:image/png;base64,'
+  + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
+
+test('ICON-CONTRACT: принимает PNG, отличает отсутствие от явного удаления', () => {
+  const accepted = contract.validateProjectInput({ ...INPUT, icon: PROJECT_PNG }, { creating: true });
+
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.value.icon, PROJECT_PNG);
+  assert.equal(contract.validateProjectInput({ ...INPUT, icon: null }, { creating: true }).ok, true);
+  assert.equal(Object.hasOwn(contract.validateProjectInput(INPUT, { creating: true }).value, 'icon'), false);
+});
+
+test('ICON-CONTRACT-INVALID: URL, SVG, повреждение и переполнение отклоняются', () => {
+  for (const icon of ['https://example.test/icon.png', 'file:///tmp/icon.png',
+    'data:image/svg+xml;base64,PHN2Zy8+', 'data:image/png;base64,AAAA',
+    'data:image/png;base64,' + 'A'.repeat(32768), 42]) {
+    const result = contract.validateProjectInput({ ...INPUT, icon }, { creating: true });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.fieldErrors.some((entry) => entry.path === 'icon'), true);
+  }
+});
+
+test('ICON-READ: декодер не теряет иконку, legacy DTO остаётся прежним', () => {
+  assert.deepEqual(contract.parseProjectSummaries({ projects: [SUMMARY] }), [SUMMARY]);
+  assert.equal(contract.parseProjectDetail({ ...DETAIL, icon: PROJECT_PNG }).icon, PROJECT_PNG);
+  assert.throws(() => contract.parseProjectDetail({ ...DETAIL, icon: 'https://example.test/a' }));
+});

@@ -54,6 +54,9 @@ const LABELS: Record<string, string> = {
   get description() {
     return t('core.taskDescription');
   },
+  get icon() {
+    return t('core.projectIcon');
+  },
   get tags() {
     return t('core.projectMetki');
   },

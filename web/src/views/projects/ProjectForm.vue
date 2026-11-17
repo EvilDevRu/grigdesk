@@ -14,6 +14,17 @@
             <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title" :readonly="readonly"
               data-role="project-title" :placeholder="t('core.projectNazvanieProekta')" @update:model-value="set('title', $event)" />
           </UiField>
+          <UiField :label="t('core.projectIcon')" :error="errorOf('icon')" data-context="workspace-property">
+            <ProjectIconEditor
+              :key="draft.id + ':' + iconEditorEpoch"
+              :id="draft.id"
+              :title="draft.title"
+              :model-value="draft.icon"
+              :disabled="readonly || saving || archived"
+              @update:model-value="draft = { ...draft, icon: $event }"
+              @busy="iconBusy = $event"
+            />
+          </UiField>
           <div v-if="!creating" class="identity-row">
             <span class="label">{{ t('core.projectIdentifikator') }}</span>
             <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">{{ t('core.projectNeMenyaetsya') }}</span></div>
@@ -161,6 +172,7 @@ import { UiButton, UiField, UiFormActions, UiInput, UiTextarea, t } from '../../
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
 import { toInput } from './projectDraft';
 import ProjectIcon from './ProjectIcon.vue';
+import ProjectIconEditor from './ProjectIconEditor.vue';
 import ProjectProfileStatus from './ProjectProfileStatus.vue';
 import ProjectFactoryConfig from './ProjectFactoryConfig.vue';
 import ProjectRepoRows from './ProjectRepoRows.vue';
@@ -210,6 +222,8 @@ const RULE_ROUTES: Record<string, string> = {
 };
 
 const localErrors = ref<Array<{ path: string; message: string }>>([]);
+const iconBusy = ref(false);
+const iconEditorEpoch = ref(0);
 const accessNoteOpen = ref(false);
 const accessNoteId = useId();
 const idInput = ref<InstanceType<typeof UiInput> | null>(null);
@@ -230,6 +244,7 @@ const reposReadonly = computed(() => props.readonly || profilePaths.value);
 // исчез бы молча, а от него зависят и «Код», и пути триажа.
 const canSave = computed(() => (
   props.dirty && !draft.value.defaultRepoRequired && !props.saving && !props.busy && !props.readonly
+  && !iconBusy.value
 ));
 
 const saveStatus = computed(() => {
@@ -253,6 +268,7 @@ const canArchive = computed(() => (
 
 function cancel(): void {
   localErrors.value = [];
+  iconEditorEpoch.value += 1;
   emit('cancel');
 }
 

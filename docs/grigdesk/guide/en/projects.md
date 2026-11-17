@@ -27,6 +27,16 @@ Reload the page if the old menu remains. The agent reads code, proposes intervie
 one package confirmation applies them. Existing profiles show a diff first.
 You do not need to send tokens; registering a project alone does not install the skill.
 
+## Project icon
+
+In the project's basic details, choose "Upload icon" and select a PNG, JPEG, or WebP
+up to 5 MiB and 4096×4096 pixels. The image is resized while keeping its proportions.
+Once it is ready, choose Save. The icon appears in the project catalog and the chat rail.
+
+To use the letter avatar again, choose "Remove icon" and save the project.
+Cancel restores the saved image along with the other fields. An unreadable file
+leaves the previous icon in place.
+
 ## Factory configuration
 
 For an existing project with a factory profile, expand Factory configuration. It shows capabilities,

@@ -127,6 +127,7 @@ async function mountForm(t, {
   dependencies = null,
   lifecycleResult = { ok: true, error: '', message: '' },
   confirmed = true,
+  iconRead = null,
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/projects/demo');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -140,6 +141,9 @@ async function mountForm(t, {
     error: '',
     checks: {},
     dependencies,
+    setDraft(value) {
+      this.draft = value;
+    },
   });
   const harness = {
     confirmed,
@@ -157,6 +161,7 @@ async function mountForm(t, {
   };
 
   globalThis.__projectsFormHarness = harness;
+  globalThis.__projectIconRead = iconRead;
   Object.defineProperty(browser.window, 'matchMedia', {
     configurable: true,
     writable: true,
@@ -165,6 +170,9 @@ async function mountForm(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
+      ...(iconRead ? {
+        './projectIconFile.ts': 'export const projectIconFile = globalThis.__projectIconRead;',
+      } : {}),
       '../stores/chat.ts': `export const useChatStore = () => ({
         loaded: true,
         loading: false,
@@ -192,6 +200,7 @@ async function mountForm(t, {
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__projectsFormHarness;
+    delete globalThis.__projectIconRead;
   });
 
   await flushPromises();
@@ -395,4 +404,62 @@ test('архивация и восстановление зовут операц
   assert.deepEqual(archived.harness.calls.filter(([name]) => name === 'restore'), [
     ['restore', 'demo', { expectedRevision: 3 }],
   ]);
+});
+
+const PROJECT_PNG = 'data:image/png;base64,'
+  + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
+
+test('ICON-FORM-REMOVE: удаление иконки — отменяемая правка формы', async (t) => {
+  const { wrapper, harness } = await mountForm(t, { detail: { ...DETAIL, icon: PROJECT_PNG } });
+
+  assert.equal(wrapper.find('[data-project-icon-image]').exists(), true);
+  assert.equal(wrapper.find('[data-project-icon-picker] input[type="file"]').exists(), true);
+
+  await wrapper.find('[data-project-icon-remove]').trigger('click');
+
+  assert.equal(harness.store.draft.icon, null);
+  assert.equal(wrapper.find('[data-project-icon-image]').exists(), false);
+  assert.equal(saveButton(wrapper).attributes('disabled'), undefined);
+
+  await wrapper.find('[data-role="project-cancel"]').trigger('click');
+
+  assert.equal(harness.store.draft.icon, PROJECT_PNG);
+});
+
+test('ICON-FORM-FALLBACK: сломанное изображение показывает букву', async (t) => {
+  const { wrapper } = await mountForm(t, { detail: { ...DETAIL, icon: PROJECT_PNG } });
+
+  await wrapper.find('[data-project-icon-image]').trigger('error');
+
+  assert.equal(wrapper.find('[data-project-icon-image]').exists(), false);
+  assert.equal(wrapper.find('[data-project-initial]').text(), 'Д');
+});
+
+test('ICON-FORM-RACE: отмена инвалидирует поздний decode', async (t) => {
+  let release;
+  const iconRead = () => new Promise((resolve) => {
+    release = resolve;
+  });
+  const { wrapper, harness } = await mountForm(t, { iconRead });
+  const input = wrapper.find('[data-project-icon-picker] input[type="file"]');
+
+  assert.equal(input.exists(), true);
+  Object.defineProperty(input.element, 'files', {
+    configurable: true,
+    value: [new window.File(['image'], 'icon.png', { type: 'image/png' })],
+  });
+  await input.trigger('change');
+
+  assert.equal(saveButton(wrapper).attributes('disabled') !== undefined, true);
+
+  // Ввести другую правку, чтобы существующая кнопка отмены была видна.
+  await wrapper.find('[data-role="project-title"]').setValue('Правка');
+  await wrapper.find('[data-role="project-cancel"]').trigger('click');
+  release(PROJECT_PNG);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(harness.store.draft.icon ?? null, null);
+  assert.equal(harness.store.draft.title, DETAIL.title);
+  await wrapper.find('[data-role="project-title"]').setValue('Правка после отмены');
+  assert.equal(saveButton(wrapper).attributes('disabled'), undefined);
 });

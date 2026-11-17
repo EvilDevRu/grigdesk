@@ -4,7 +4,7 @@
 // только форма ответа, но и то, что отказ сервиса доезжает до клиента тем же кодом,
 // которым его ждёт форма: 400 с полями, 404, 409 с текущей ревизией.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -511,4 +511,98 @@ test('PD-DELETE: публичные коды ревизии, связей, по�
 
   assert.equal(recreated.statusCode, 409, recreated.body);
   assert.equal(recreated.json().error, 'tombstoned');
+});
+
+const PROJECT_PNG = 'data:image/png;base64,'
+  + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
+
+test('ICON-API-ROUNDTRIP: create/read/list/update/clear сохраняют иконку', async (t) => {
+  const { app, env } = await projectsApp(t);
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/projects',
+    payload: inputFor('icons', [], { icon: PROJECT_PNG }),
+  });
+
+  assert.equal(created.statusCode, 201, created.body);
+  assert.equal(parseProjectDetail(created.json()).icon, PROJECT_PNG);
+
+  const list = parseProjectSummaries((await app.inject('/api/projects')).json());
+
+  assert.equal(list.find((item) => item.id === 'icons').icon, PROJECT_PNG);
+
+  const omitted = await app.inject({
+    method: 'PUT',
+    url: '/api/projects/icons',
+    payload: updateBody([], { expectedRevision: 1 }),
+  });
+
+  assert.equal(omitted.statusCode, 200, omitted.body);
+  assert.equal(parseProjectDetail(omitted.json()).icon, PROJECT_PNG);
+  assert.equal(env.prefs.readStored().projects.icons.icon, PROJECT_PNG);
+
+  const cleared = await app.inject({
+    method: 'PUT',
+    url: '/api/projects/icons',
+    payload: updateBody([], { expectedRevision: 2, icon: null }),
+  });
+
+  assert.equal(cleared.statusCode, 200, cleared.body);
+  assert.equal(parseProjectDetail(cleared.json()).icon, null);
+});
+
+test('ICON-API-STALE: 409 и неверная иконка не меняют prefs и события', async (t) => {
+  const { app, env, events } = await projectsApp(t);
+
+  await app.inject({
+    method: 'POST',
+    url: '/api/projects',
+    payload: inputFor('icons', [], { icon: PROJECT_PNG }),
+  });
+
+  const before = await readFile(env.prefsPath, 'utf8');
+  const count = events.length;
+  const stale = await app.inject({
+    method: 'PUT',
+    url: '/api/projects/icons',
+    payload: updateBody([], { expectedRevision: 0, icon: null }),
+  });
+  const invalid = await app.inject({
+    method: 'PUT',
+    url: '/api/projects/icons',
+    payload: updateBody([], { expectedRevision: 1, icon: 'https://example.test/a.png' }),
+  });
+
+  assert.equal(stale.statusCode, 409);
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(await readFile(env.prefsPath, 'utf8'), before);
+  assert.equal(events.length, count);
+});
+
+test('ICON-API-LIFECYCLE: архив и возврат сохраняют иконку', async (t) => {
+  const { app } = await projectsApp(t);
+
+  await app.inject({
+    method: 'POST',
+    url: '/api/projects',
+    payload: inputFor('icons', [], { icon: PROJECT_PNG }),
+  });
+
+  const archived = await app.inject({
+    method: 'POST',
+    url: '/api/projects/icons/archive',
+    payload: { expectedRevision: 1 },
+  });
+
+  assert.equal(archived.statusCode, 200, archived.body);
+  assert.equal(archived.json().icon, PROJECT_PNG);
+
+  const restored = await app.inject({
+    method: 'POST',
+    url: '/api/projects/icons/restore',
+    payload: { expectedRevision: archived.json().revision },
+  });
+
+  assert.equal(restored.statusCode, 200, restored.body);
+  assert.equal(restored.json().icon, PROJECT_PNG);
 });
