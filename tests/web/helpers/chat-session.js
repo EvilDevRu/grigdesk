@@ -118,6 +118,14 @@ export function compileChatSession(prefix, {
         '}',
       ].join('\n'),
       '../../stores/tasks.ts': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
+      '../../stores/board.ts': [
+        `export const useBoardStore = globalThis.${prefix}BoardStore`,
+        '  || (() => ({ data: null, load() {} }));',
+      ].join('\n'),
+      '../../stores/trackers.ts': [
+        `export const useTrackersStore = globalThis.${prefix}TrackersStore`,
+        '  || (() => ({ catalog: null, load() {} }));',
+      ].join('\n'),
       '../../stores/ui.ts': `export const useUiStore = globalThis.${prefix}UiStore;`,
       '../../stores/providers.ts': (
         `export const useProvidersStore = globalThis.${prefix}ProvidersStore;`

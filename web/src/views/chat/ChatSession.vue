@@ -76,15 +76,39 @@
                   <UiSelect
                     v-model="taskChoice"
                     compact
+                    searchable
+                    :group-navigation="multiBoard"
                     data-context="chat-session-toolbar"
                     :aria-label="t('core.chatOptionTask')"
                     :disabled="frozen || sess.sending || sess.purpose === 'companion'"
                     @change="onTaskChange"
                   >
                     <option value="">{{ t('core.chatBezZadachi') }}</option>
-                    <option v-for="o in taskOpts" :key="o.task" :value="o.task">
-                      {{ optLabel(o) }}
-                    </option>
+                    <template v-if="multiBoard">
+                      <optgroup v-for="b in groupedTaskBoards" :key="b.id" :label="b.name">
+                        <option v-for="o in b.options" :key="o.task" :value="o.task">
+                          {{ optLabel(o) }}
+                        </option>
+                      </optgroup>
+                    </template>
+                    <template v-else>
+                      <option v-for="o in taskOpts" :key="o.task" :value="o.task">
+                        {{ optLabel(o) }}
+                      </option>
+                    </template>
+                    <template #value-leading="{ value }">
+                      <TrackerIcon v-if="boardOfValue(value)" :name="boardOfValue(value)!.name"
+                                   :logo-url="boardOfValue(value)!.logoUrl" :size="14" />
+                    </template>
+                    <template #group-leading="{ option }">
+                      <TrackerIcon v-if="boardOfGroupKey(option.groupKey)"
+                                   :name="boardOfGroupKey(option.groupKey)!.name"
+                                   :logo-url="boardOfGroupKey(option.groupKey)!.logoUrl" :size="16" />
+                    </template>
+                    <template #option-leading="{ option }">
+                      <TrackerIcon v-if="boardOfValue(option.value)" :name="boardOfValue(option.value)!.name"
+                                   :logo-url="boardOfValue(option.value)!.logoUrl" :size="14" />
+                    </template>
                   </UiSelect>
                 </span>
               </template>
@@ -834,11 +858,11 @@ import { api } from '../../shared/apiClient.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { decodeChatAttachment } from '../../shared/chatContracts.ts';
 import { resolvePermissionMode } from '../../shared/chatPermissionMode.ts';
-import { decodePipelineTasks } from '../../shared/pipelineContracts.ts';
+import { unifiedBoardTasks } from '../../shared/boardTaskList.ts';
+import type { BoardTask } from '../../shared/boardContracts.ts';
 import type {
   ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
 } from '../../shared/chatContracts.ts';
-import type { PipelineTask } from '../../shared/pipelineContracts.ts';
 import type { ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
 
 import { useDictationController } from '../../features/speech/provider.ts';
@@ -846,7 +870,8 @@ import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
 import { startChatPerformance } from '../../shared/chatPerformance.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
-import { useTasksStore } from '../../stores/tasks.ts';
+import { useBoardStore } from '../../stores/board.ts';
+import { useTrackersStore } from '../../stores/trackers.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
@@ -862,6 +887,7 @@ import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ProviderModelSelect from '../../shared/ProviderModelSelect.vue';
+import TrackerIcon from '../../shared/TrackerIcon.vue';
 import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 import {
   UiRefreshIcon, confirmDialog, t, UiButton, UiFilePicker, UiDialog, UiIconButton,
@@ -908,7 +934,8 @@ watch(() => props.sid, () => {
 });
 
 const chat = useChatStore();
-const tasks = useTasksStore();
+const board = useBoardStore();
+const trackers = useTrackersStore();
 const documentPreview = useDocumentPreviewStore();
 const { openTool } = useToolLauncher();
 // Карта деревьев репозиториев для моста «ссылка на файл кода → панель „Код“».
@@ -1392,55 +1419,99 @@ watch(effortLevels, (levels) => {
   }
 }, { immediate: true });
 
-// ── Список задач для селекта (с ЗАГОЛОВКАМИ, не только номером) ──
-let taskListPromise: Promise<PipelineTask[]> | null = null;
-
-function fetchTaskList() {
-  if (!taskListPromise) {
-    taskListPromise = api.get('/api/tasks')
-      .then((r) => decodePipelineTasks(r).tasks || [])
-      .catch(() => []);
-  }
-
-  return taskListPromise;
+// ── Список задач для селекта: доски с заголовками, не реестр конвейера ──
+interface TaskSelectOption {
+  task: string;
+  title: string;
 }
 
-const taskOpts = ref<Array<{
-  task: string;
-  route: unknown;
-  title: string;
-}>>([]); // [{ task, route, title }]
+interface TaskSelectBoard {
+  id: string;
+  name: string;
+  logoUrl: string;
+  options: TaskSelectOption[];
+}
+
+/**
+ * Доски селекта следуют включённым подключениям трекеров; legacy-одиночное
+ * подключение становится одной доской. Задачи и заголовки берутся из живого
+ * снимка доски, поэтому список не зависит от реестра фабрики.
+ */
+const taskBoards = computed<TaskSelectBoard[]>(() => {
+  const tasks = unifiedBoardTasks(board.data?.tasks);
+  const optionOf = (task: BoardTask): TaskSelectOption => ({
+    task: String(task.id),
+    title: String(task.title || ''),
+  });
+  const catalog = trackers.catalog;
+
+  if (catalog?.enabledIds) {
+    return catalog.drivers
+      .filter((driver) => catalog.enabledIds!.includes(driver.id))
+      .map((driver) => ({
+        id: driver.id,
+        name: driver.name,
+        logoUrl: driver.logoUrl ?? '',
+        options: tasks
+          .filter((task) => task.driverId === driver.id || task.source?.startsWith(`${driver.id}@`))
+          .map(optionOf),
+      }));
+  }
+
+  const driver = catalog?.drivers.find((entry) => entry.id === catalog?.externalId);
+
+  return [{
+    id: driver?.id ?? 'tracker',
+    name: driver?.name ?? t('core.boardTrackerSource'),
+    logoUrl: driver?.logoUrl ?? '',
+    options: tasks.map(optionOf),
+  }];
+});
+
+// Вкладки досок и optgroup появляются только при нескольких досках с задачами;
+// одна доска даёт плоский список, но иконки доски сохраняются.
+const groupedTaskBoards = computed(() => taskBoards.value.filter((b) => b.options.length));
+const multiBoard = computed(() => groupedTaskBoards.value.length > 1);
+const taskOpts = computed(() => taskBoards.value.flatMap((b) => b.options));
+
+// Значение варианта — номер задачи; иконку ведёт первая доска с этим номером.
+const taskBoardByValue = computed(() => {
+  const map = new Map<string, TaskSelectBoard>();
+
+  for (const b of groupedTaskBoards.value) {
+    for (const o of b.options) {
+      if (!map.has(o.task)) {
+        map.set(o.task, b);
+      }
+    }
+  }
+
+  return map;
+});
+const taskBoardByGroupKey = computed(() => new Map(
+  groupedTaskBoards.value.map((b, index): [string, TaskSelectBoard] => [String(index), b]),
+));
+
+function boardOfValue(value: unknown): TaskSelectBoard | undefined {
+  return taskBoardByValue.value.get(String(value ?? ''));
+}
+
+function boardOfGroupKey(groupKey: string): TaskSelectBoard | undefined {
+  return taskBoardByGroupKey.value.get(groupKey);
+}
 
 onMounted(async () => {
   // При открытии — сразу в конец истории
   await nextTick();
   scrollDown();
-
-  const list = await fetchTaskList();
-
-  taskOpts.value = list.map((t) => ({
-    task: String(t.task),
-    route: t.route,
-    title: '',
-  }));
-  // Подтягиваем названия из B24 (для «#<TASK> · Название задачи…»).
-  list.forEach((t) => tasks.load(t.task).then((d) => {
-    const o = taskOpts.value.find((x) => x.task === String(t.task));
-
-    if (o && d?.title) {
-      o.title = d.title;
-    }
-  }).catch(() => {}));
+  void trackers.load();
+  void board.load();
 });
 
-function optLabel(o: {
-  task: string;
-  title: string;
-  route?: unknown;
-}) {
+function optLabel(o: TaskSelectOption) {
   return t(
     'core.chatTaskHeader',
-    { task: String(o.task ?? ''), title: String(o.title || o.route || '') || t('core.chatTaskWord') },
+    { task: o.task, title: o.title || t('core.chatTaskWord') },
   );
 }
 

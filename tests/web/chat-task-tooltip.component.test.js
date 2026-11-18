@@ -344,13 +344,28 @@ test('ChatSession передаёт в тултип полное загружен
     contextCache: { scope: 'request', status: 'reported', readTokens: 72_000, uncachedTokens: 8_000 },
     sending: false,
   };
+  const apiCalls = [];
   globalThis.__chatTaskTooltipApi = {
     url(path) { return path; },
     async get(path) {
-      assert.equal(path, '/api/tasks');
-      return { tasks: [{ task: '42', route: 'demo-profile' }] };
+      apiCalls.push(path);
+      return { tasks: [] };
     },
   };
+  // Список селекта теперь приходит со снимком доски, а не из реестра конвейера.
+  globalThis.__chatTaskTooltipBoardStore = () => ({
+    data: { tasks: [{ id: 42, title, source: `b24@${'a'.repeat(64)}` }] },
+    load() {},
+  });
+  globalThis.__chatTaskTooltipTrackersStore = () => ({
+    catalog: {
+      drivers: [{ id: 'b24', name: 'Битрикс24', logoUrl: '/logo-b24.svg' }],
+      activeIds: ['b24'],
+      externalId: 'b24',
+      revision: 1,
+    },
+    load() {},
+  });
   globalThis.__chatTaskTooltipDocumentPreview = {
     show() {},
     showImage(image) { previewedImages.push(image); },
@@ -399,6 +414,8 @@ test('ChatSession передаёт в тултип полное загружен
     delete globalThis.__chatTaskTooltipProvidersStore;
     delete globalThis.__chatTaskTooltipRouter;
     delete globalThis.__chatTaskTooltipDocumentPreview;
+    delete globalThis.__chatTaskTooltipBoardStore;
+    delete globalThis.__chatTaskTooltipTrackersStore;
   });
 
   const [{ mount, flushPromises }, ChatSession] = await Promise.all([
@@ -417,6 +434,8 @@ test('ChatSession передаёт в тултип полное загружен
   assert.equal(taskTip.text(), `#42 · ${title}`);
   assert.equal(wrapper.get('.task-tip').attributes('tabindex'), undefined);
   assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
+  assert.equal(apiCalls.includes('/api/tasks'), false, 'селект задачи не читает реестр конвейера');
+  assert.equal(wrapper.get('.task-tip img').attributes('src'), '/logo-b24.svg');
 
   const ring = wrapper.find('.ctx-meter');
   const ringLabel = ring.attributes('aria-label');
@@ -604,9 +623,13 @@ test('ChatSession возвращает селект задачи к привяз
 
   globalThis.__chatTaskTooltipApi = {
     async get() {
-      return { tasks: [{ task: '42', route: 'demo-profile' }] };
+      return { tasks: [] };
     },
   };
+  globalThis.__chatTaskTooltipBoardStore = () => ({
+    data: { tasks: [{ id: 42, title: 'Задача 42' }] },
+    load() {},
+  });
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
     compactWindow: 0,
@@ -648,6 +671,7 @@ test('ChatSession возвращает селект задачи к привяз
     delete globalThis.__chatTaskTooltipUiStore;
     delete globalThis.__chatTaskTooltipProvidersStore;
     delete globalThis.__chatTaskTooltipRouter;
+    delete globalThis.__chatTaskTooltipBoardStore;
   });
 
   const wrapper = mount(ChatSession, {
@@ -666,6 +690,142 @@ test('ChatSession возвращает селект задачи к привяз
   assert.deepEqual(requested, ['42']);
   assert.equal(session.taskId, null);
   assert.equal(select.element.value, '', 'селект показывает фактическую привязку чата');
+});
+
+test('селект задачи показывает доски с иконками; группы только при нескольких досках', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ reactive, nextTick }, { mount, flushPromises }] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+  ]);
+  const session = reactive({
+    id: 'task-boards',
+    taskId: null,
+    title: 'Доски в селекте',
+    model: '',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sending: false,
+  });
+  const hash = 'a'.repeat(64);
+  const boardState = reactive({
+    data: {
+      multiSource: true,
+      tasks: [
+        { id: 42, title: 'Задача Б24', driverId: 'b24', source: `b24@${hash}` },
+        { id: 7, title: 'Issue GitHub', driverId: 'github', source: `github@${hash}` },
+      ],
+    },
+    load() {},
+  });
+  const trackersState = reactive({
+    catalog: {
+      drivers: [
+        { id: 'b24', name: 'Битрикс24', logoUrl: '/logo-b24.svg' },
+        { id: 'github', name: 'GitHub', logoUrl: '/logo-github.svg' },
+      ],
+      activeIds: ['b24', 'github'],
+      enabledIds: ['b24', 'github'],
+      default: 'b24',
+      externalId: 'b24',
+      revision: 1,
+    },
+    load() {},
+  });
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipBoardStore = () => boardState;
+  globalThis.__chatTaskTooltipTrackersStore = () => trackersState;
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor: () => null,
+    questionFor: () => null,
+    isOnConveyor: () => false,
+    tabLabel: () => session.title,
+    async setTask(_id, taskId, title) {
+      session.taskId = taskId;
+      session.title = title;
+
+      return true;
+    },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ load: async () => null });
+  globalThis.__chatTaskTooltipUiStore = () => ({});
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf: () => ({ id: '', model: null, provider: null }),
+    visibleModels: () => [],
+    modesOf: () => [],
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipBoardStore;
+    delete globalThis.__chatTaskTooltipTrackersStore;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const native = wrapper.get('.sel.task select').element;
+  assert.deepEqual(
+    [...native.querySelectorAll('optgroup')].map((group) => group.label),
+    ['Битрикс24', 'GitHub'],
+  );
+
+  await wrapper.get('.sel.task button.ui-select').trigger('click');
+  await flushPromises();
+  let popup = document.querySelector('.ui-select-popup');
+  assert.deepEqual(
+    [...popup.querySelectorAll('.ui-select-group-nav button')]
+      .map((button) => button.getAttribute('data-select-group')),
+    ['all', '0', '1'],
+  );
+  assert.ok(popup.querySelector('.ui-select-group-nav img[src="/logo-b24.svg"]'));
+  assert.ok(popup.querySelector('.ui-select-group-nav img[src="/logo-github.svg"]'));
+  const optionIcons = [...popup.querySelectorAll('.ui-select-option')]
+    .map((option) => option.querySelector('img')?.getAttribute('src') ?? null);
+  assert.deepEqual(optionIcons, [null, '/logo-b24.svg', '/logo-github.svg']);
+
+  popup.querySelector('[data-option-index="1"]').click();
+  await flushPromises();
+  assert.equal(session.taskId, '42');
+  assert.equal(wrapper.get('.task-tip img').attributes('src'), '/logo-b24.svg');
+
+  // Одна доска: плоский список без вкладок досок, но иконка доски остаётся.
+  trackersState.catalog = {
+    drivers: [{ id: 'b24', name: 'Битрикс24', logoUrl: '/logo-b24.svg' }],
+    activeIds: ['b24'],
+    externalId: 'b24',
+    revision: 2,
+  };
+  boardState.data = { tasks: [{ id: 42, title: 'Задача Б24', source: `b24@${hash}` }] };
+  await nextTick();
+  await flushPromises();
+  assert.equal(native.querySelectorAll('optgroup').length, 0);
+
+  await wrapper.get('.sel.task button.ui-select').trigger('click');
+  await flushPromises();
+  popup = document.querySelector('.ui-select-popup');
+  assert.equal(popup.querySelector('.ui-select-group-nav') === null, true);
+  assert.ok(popup.querySelector('.ui-select-option img[src="/logo-b24.svg"]'));
 });
 
 // Сторож согласованности шкал кольца. Цвет считался от порога сжатия, а дуга и подсказка —

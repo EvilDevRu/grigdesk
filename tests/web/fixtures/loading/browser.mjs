@@ -179,11 +179,30 @@ export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '',
             if (request.method() === 'GET' && url.pathname === '/api/tasks') {
                 return route.fulfill({ json: { tasks: [] } });
             }
+            if (request.method() === 'GET' && url.pathname === '/api/tracker/dashboard') {
+                return route.fulfill({ json: { tasks: [] } });
+            }
             if (request.method() === 'GET' && url.pathname === '/api/chat/sessions') {
                 return route.fulfill({ json: { sessions: [] } });
             }
             if (request.method() === 'GET' && url.pathname === '/api/projects') {
                 return route.fulfill({ json: { projects: [] } });
+            }
+            if (request.method() === 'GET' && url.pathname === '/api/trackers') {
+                return route.fulfill({ json: {
+                    drivers: [],
+                    activeIds: [],
+                    externalId: null,
+                    revision: 0,
+                } });
+            }
+            if (request.method() === 'GET' && url.pathname === '/api/tracker/task-seen') {
+                return route.fulfill({ json: {
+                    scope: 'fixture',
+                    revision: 1,
+                    initialized: true,
+                    taskIds: [],
+                } });
             }
 
             unexpected.push(`${request.method()} ${url.pathname}${url.search}`);
