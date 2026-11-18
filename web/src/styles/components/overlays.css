@@ -301,11 +301,6 @@
   width: min(560px, calc(100vw - 40px));
 }
 
-.ui-dialog[data-role='new-grigdesk-task'] .ui-dialog__title {
-  flex: 1;
-  min-width: 0;
-}
-
 .ui-dialog[data-role='new-grigdesk-task'] > .ui-dialog__description {
   padding-top: 8px;
 }
@@ -318,11 +313,6 @@
    Длинные формы прокручиваются в теле; на телефоне действует полноэкранная оболочка. */
 .ui-dialog-overlay .ui-dialog[data-role='tracker-settings'] {
   width: min(980px, calc(100vw - 40px));
-}
-
-.ui-dialog[data-role='tracker-settings'] .ui-dialog__title {
-  flex: 1;
-  min-width: 0;
 }
 
 .ui-dialog[data-role='tracker-settings'] .ui-dialog__body {
@@ -338,11 +328,6 @@
 .ui-dialog-overlay .ui-dialog[data-role='tracker-settings'],
 .ui-dialog-overlay .ui-dialog[data-role='tracker-install'] {
   height: min(780px, calc(var(--app-viewport-height, 100dvh) - 40px));
-}
-
-.ui-dialog[data-role='tracker-install'] .ui-dialog__title {
-  flex: 1;
-  min-width: 0;
 }
 
 .ui-dialog[data-role='tracker-install'] .ui-dialog__body {
@@ -384,8 +369,7 @@
 
 /* Шапка повторяет рабочую полосу задачи на всех размерах окна.
    Подвал и прокрутка остаются отдельными областями общей модальной поверхности. */
-.ui-dialog__header,
-.ui-dialog__footer {
+.ui-dialog__header {
   display: flex;
   flex: none;
   align-items: center;
@@ -416,8 +400,11 @@
   overflow-wrap: anywhere;
 }
 
-.ui-dialog__footer {
-  padding: 14px 20px 18px;
+.ui-dialog__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .ui-dialog > .ui-dialog__description {
@@ -425,9 +412,81 @@
   padding: 4px 20px 0;
 }
 
-.ui-dialog-overlay[data-size='workspace'] .ui-dialog__footer {
-  padding: 12px 16px;
+.ui-dialog-form-footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 18px;
   border-top: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.ui-dialog-form-footer__status {
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog-form-footer__status p {
+  margin: 0;
+}
+
+.ui-dialog-form-footer__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.ui-dialog-form-footer__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-round);
+  background: var(--ink-low);
+}
+
+.ui-dialog-form-footer__summary[data-pending='true'] {
+  color: var(--ink);
+}
+
+.ui-dialog-form-footer__summary[data-pending='true'] .ui-dialog-form-footer__dot {
+  background: var(--accent);
+}
+
+.ui-dialog-form-footer__details {
+  max-height: 120px;
+  overflow: auto;
+}
+
+.ui-dialog-form-footer__details:empty {
+  display: none;
+}
+
+.ui-dialog-form-footer__actions {
+  margin-left: auto;
+}
+
+.ui-dialog-form-footer__actions:only-child {
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .ui-dialog-form-footer {
+    gap: 10px;
+    padding-right: max(18px, env(safe-area-inset-right));
+    padding-bottom: max(11px, env(safe-area-inset-bottom));
+    padding-left: max(18px, env(safe-area-inset-left));
+  }
+
+  .ui-dialog-form-footer__status {
+    width: 100%;
+  }
 }
 
 .ui-dialog-host__message,
@@ -514,12 +573,7 @@
   display: grid;
   gap: 10px;
   padding-top: 14px;
-  padding-bottom: 0;
-}
-
-.ui-dialog.ui-dialog-host .ui-dialog__footer {
-  padding-top: 18px;
-  font-size: 13px;
+  padding-bottom: 14px;
 }
 
 .ui-dialog-host__prompt {
@@ -580,11 +634,6 @@
   width: min(1120px, calc(100vw - 40px));
   height: min(780px, calc(100dvh - 40px));
 }
-.ui-dialog[data-role='settings-modal'] .ui-dialog__footer {
-  padding: 11px 18px;
-  background: var(--sidebar);
-}
-
 /* Модалка плагина с блоком готовности: список приходит с сервера после открытия,
    и высота по содержимому прыгала бы. Высота задана по окну, тело прокручивается. */
 .ui-dialog[data-role='plugin-settings'][data-setup='true'] {
@@ -607,11 +656,6 @@
    Высота и нижнее действие сохраняются с первого запроса до завершения привязки. */
 .ui-dialog[data-role='phone-connect'] {
   height: min(720px, calc(100dvh - 40px));
-}
-
-.ui-dialog__footer {
-  justify-content: flex-end;
-  flex-wrap: wrap;
 }
 
 .ui-layer-fade-enter-active,
@@ -660,15 +704,9 @@
   }
 
   .ui-dialog__header,
-  .ui-dialog__footer,
   .ui-dialog__body {
     padding-right: max(16px, env(safe-area-inset-right));
     padding-left: max(16px, env(safe-area-inset-left));
-  }
-
-  .ui-dialog__footer {
-    padding-top: 8px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .ui-dialog__body {
@@ -701,10 +739,6 @@
     font-size: var(--panel-header-font-size);
     font-weight: var(--panel-header-font-weight);
     line-height: 18px;
-  }
-
-  .ui-dialog .ui-dialog__title {
-    flex: 1;
   }
 
   .ui-dialog > .ui-dialog__description {

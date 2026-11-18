@@ -107,6 +107,15 @@ assert.equal(measured.getAttribute('data-perf-key'), settings.pageId);
   await t.test('MD01: повторный open не создаёт вторую форму и не теряет ввод', async (scenario) => {
     const { settings } = await scenarioFixture(scenario);
 
+    const footer = doc.querySelector('.ui-dialog__footer.ui-dialog-form-footer');
+
+    assert.ok(footer, 'Подвал настроек использует общий компонент');
+
+    const buttons = [...footer.querySelectorAll('.ui-dialog-form-footer__actions > button')];
+
+    assert.deepEqual(buttons.map((button) => button.dataset.variant), ['outline', 'outline', 'solid']);
+    assert.equal(buttons.at(-1)?.dataset.tone, 'accent');
+
     settings.setField('test', 'value', 'правка');
     settings.requestOpen({ source: 'shortcut' });
     await flushPromises();

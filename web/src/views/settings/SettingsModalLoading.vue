@@ -9,7 +9,9 @@
       </div>
     </UiLoadingState>
     </div>
-    <template #footer><UiSkeleton width="240px" height="32px" /></template>
+    <template #footer>
+      <UiSkeleton width="240px" height="32px" />
+    </template>
   </UiDialog>
 </template>
 

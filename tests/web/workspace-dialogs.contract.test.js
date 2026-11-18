@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { webFile } from './helpers/compile-vue.js';
 
 test('DiffModal и DocumentModal используют единый dialog runtime без legacy stack', async () => {
@@ -14,7 +14,7 @@ test('DiffModal и DocumentModal используют единый dialog runtim
 
   for (const source of [diff, document]) {
     assert.match(source, /<UiDialog/);
-    assert.match(source, /<UiIconButton/);
+    assert.match(source, /:close-label=/);
     assert.match(source, /:body-inset="false"/);
     assert.doesNotMatch(source, /registerLayer|layer-stack|<Transition|<button/);
   }
@@ -25,6 +25,23 @@ test('DiffModal и DocumentModal используют единый dialog runtim
   assert.match(dialog, /:data-body-inset="bodyInset \? 'true' : 'false'"/);
   assert.match(overlays, /\.ui-dialog\[data-body-inset='false'\] \.ui-dialog__body/);
   assert.match(runtime, /data-ui-layer='diff-workspace'/);
+});
+
+test('Модальный HTML в ядре принадлежит UiDialog', async () => {
+  const files = (await readdir(webFile('src'), { recursive: true }))
+    .filter((name) => name.endsWith('.vue') && name !== 'components/overlays/UiDialog.vue');
+  const violations = [];
+
+  for (const file of files) {
+    const source = await readFile(webFile(`src/${file}`), 'utf8');
+    const template = source.split('<script', 1)[0];
+
+    if (/<dialog\b|\b(?:aria-modal="true"|role="(?:dialog|alertdialog)")/u.test(template)) {
+      violations.push(file);
+    }
+  }
+
+  assert.deepEqual(violations, []);
 });
 
 test('Действия TaskModal используют общее оформление из UI-kit', async () => {

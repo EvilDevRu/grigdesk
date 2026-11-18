@@ -64,7 +64,7 @@
           <UiButton :disabled="session?.saving" @click="closeSummary(false)">
             {{ t('core.cancel') }}
           </UiButton>
-          <UiButton data-test="confirm-config" tone="accent" :disabled="locked"
+          <UiButton data-test="confirm-config" variant="solid" tone="accent" :disabled="locked"
                     :loading="session?.saving" @click="confirm">
             {{ t('core.projectPodtverditZapisi') }}
           </UiButton>

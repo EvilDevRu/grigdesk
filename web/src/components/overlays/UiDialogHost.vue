@@ -82,7 +82,6 @@
         <UiButton
           v-if="request?.kind !== 'alert'"
           ref="cancelButton"
-          variant="link"
           :disabled="busy"
           @click="cancel"
         >

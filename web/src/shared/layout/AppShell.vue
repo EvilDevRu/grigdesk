@@ -99,16 +99,9 @@
       </UiPressable>
     </nav>
 
-    <UiDialog v-model:open="phoneMenuOpen" :label="t('core.sections')" size="workspace"
-              data-role="phone-sections" fade-only initial-focus=".tools-grid">
-      <template #header>
-        <h2 class="ui-dialog__title">{{ t('core.sections') }}</h2>
-        <UiIconButton :label="t('core.close')" data-context="workspace-toolbar" variant="ghost"
-                      @click="phoneMenuOpen = false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-               stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-        </UiIconButton>
-      </template>
+    <UiDialog v-model:open="phoneMenuOpen" :title="t('core.sections')" size="workspace"
+              data-role="phone-sections" fade-only initial-focus=".tools-grid"
+              :close-label="t('core.close')">
       <ToolsGrid v-if="hasMachine" :items="phoneMenuItems" :groups="phoneMenuGroups" :badges="badges" layout="list"
                  searchable @select="phoneMenuOpen = false" />
       <section class="phone-sections-system" data-ui-phone-sections>

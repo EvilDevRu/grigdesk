@@ -5,19 +5,14 @@
   </section>
   <UiDialog v-else-if="!embedded" v-model:open="open" :id="id" layer="confirm"
             :title="t('core.workdirTitle')" size="compact" mobile-sheet :body-inset="false"
-            :busy="busy" :dismissible="!busy" data-role="workdir-picker" data-ui-workspace>
+            :busy="busy" :dismissible="!busy" data-role="workdir-picker" data-ui-workspace
+            :close-label="t('core.close')">
     <template #title>
       <span class="workdir-heading">
         <span class="workdir-heading-copy">
           <span>{{ t('core.workdirTitle') }}</span>
           <span class="workdir-caption">{{ t('core.workdirOnComputer') }}</span>
         </span>
-        <UiIconButton :label="t('core.close')" :disabled="busy" @click="open = false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="m6 6 12 12M6 18 18 6" />
-          </svg>
-        </UiIconButton>
       </span>
     </template>
     <slot />
@@ -25,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiDialog, UiIconButton, t } from '../../ui.ts';
+import { UiDialog, t } from '../../ui.ts';
 
 defineProps<{
   id: string;

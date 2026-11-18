@@ -4,18 +4,8 @@
   <UiDialog v-else :open="open" :title="t('core.trackerDriversTitle')" :busy="busy" :dismissible="!busy"
             data-role="tracker-settings" data-ui-workspace
             initial-focus="[data-driver][aria-pressed='true'], #tracker-driver"
-            @update:open="emit('update:open', $event)">
-    <template #title>
-      <div class="tracker-settings__heading">
-        <span class="tracker-settings__title">{{ t('core.trackerDriversTitle') }}</span>
-        <UiIconButton :label="t('core.close')" :disabled="busy" @click="emit('update:open', false)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
-        </UiIconButton>
-      </div>
-    </template>
+            @update:open="emit('update:open', $event)"
+            :close-label="t('core.close')">
 
     <div class="tracker-settings" :aria-busy="loading || busy">
       <UiLoadingState v-if="loading">
@@ -242,7 +232,7 @@
 
     <template #footer>
       <UiFormActions class="tracker-settings__actions">
-        <UiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">
+        <UiButton :disabled="busy" @click="emit('update:open', false)">
           {{ t('core.close') }}
         </UiButton>
         <UiButton :loading="saving === 'apply'"
@@ -272,7 +262,7 @@ import type { DriverInstallRequest } from '../../stores/driverInstall.ts';
 import { api, ApiError, failureText } from '../../shared/apiClient.ts';
 import {
   t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeleton,
+  UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeleton,
 } from '../../ui.ts';
 import TrackerInstallDialog from './TrackerInstallDialog.vue';
 import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
@@ -764,10 +754,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.tracker-settings__title {
-  flex: 1;
-  min-width: 0;
-}
 
 .tracker-settings__sidebar,
 .tracker-settings__catalog,

@@ -6,36 +6,13 @@
     class="diff-dialog"
     layer="diff-workspace"
     size="workspace"
-    :label="t('core.diffDesignDialogTitle', { task: diff.taskId || '—' })"
+    :title="t('core.diffDesignDialogTitle', { task: diff.taskId || '—' })"
+    :close-label="t('core.diffZakrytDif')"
+    :close-tooltip="t('core.docZakrytEsc')"
     :body-inset="false"
     fade-only
     @update:open="onDialogOpenChange"
   >
-    <template #header="{ close }">
-      <div class="diff-dialog__header">
-        <span class="diff-dialog__title">
-          {{ t('core.diffDesignDialogTitle', { task: diff.taskId || '—' }) }}
-        </span>
-        <UiIconButton
-          role="embedded"
-          :label="t('core.diffZakrytDif')"
-          v-tooltip="t('core.docZakrytEsc')"
-          @click="close('action')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <path d="M6 6l12 12M18 6 6 18" />
-          </svg>
-        </UiIconButton>
-      </div>
-    </template>
-
     <!-- Пустая строка вместо null: у панели нет «задачи не выбрано», и её
          собственное значение по умолчанию — та же пустая строка. -->
     <DiffPanel :task-id="diff.taskId ?? ''" class="diff-dialog__panel" />
@@ -44,7 +21,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue';
-import { UiDialog, UiIconButton, t, vTooltip } from '../ui';
+import { UiDialog, t } from '../ui';
 import { useDiffStore } from '../stores/diff.ts';
 import DiffPanel from './diff/DiffPanel.vue';
 
@@ -70,19 +47,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.diff-dialog__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-}
 
-.diff-dialog__title {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-}
 
 .diff-dialog__panel {
   flex: 1;

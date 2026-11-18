@@ -169,10 +169,8 @@
       </div>
     </div>
     <template #footer>
-      <div class="phone-connect__footer">
-        <UiButton variant="link" @click="configureRelay">{{ t('settings.phoneConfigureRelay') }}</UiButton>
-        <UiButton variant="text" @click="phone.close()">{{ t('settings.close') }}</UiButton>
-      </div>
+      <UiButton @click="configureRelay">{{ t('settings.phoneConfigureRelay') }}</UiButton>
+      <UiButton variant="solid" tone="accent" @click="phone.close()">{{ t('settings.close') }}</UiButton>
     </template>
   </UiDialog>
 </template>
@@ -475,14 +473,6 @@ onBeforeUnmount(phone.close);
 .phone-connect__notes {
   color: var(--ink-dim);
   font-size: 12px;
-}
-.phone-connect__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  width: 100%;
 }
 .phone-qr {
   display: block;

@@ -36,7 +36,8 @@ test('AppShell использует public UI controls и общую повер�
   const providerSection = /<span v-if="runtimeProviders.length"[\s\S]*?class="netbox mono"/u;
   const outsideProviders = source.replace(providerSection, '');
 
-  assert.equal([...outsideProviders.matchAll(/<UiIconButton\b/gu)].length, 3);
+  assert.equal([...outsideProviders.matchAll(/<UiIconButton\b/gu)].length, 2);
+  assert.match(source, /<UiDialog[^>]*data-role="phone-sections"[^>]*:close-label=/u);
   assert.doesNotMatch(source, /<button\b/u);
 
   const { page, diagnose } = await shellContractBrowser(t);

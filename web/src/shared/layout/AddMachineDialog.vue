@@ -43,12 +43,12 @@
       </UiField>
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     </div>
-    <template #footer>
-      <div class="pair-machine-footer">
-        <UiButton v-if="manual || pairing" block wrap variant="solid" tone="accent" :loading="submitting"
-                  :disabled="busy || !pairing.trim()" @click="add">{{ t('core.add') }}</UiButton>
-        <p><MachineGlyph name="lock" />{{ t('core.machinePairOnce') }}</p>
-      </div>
+    <template #footer-status>
+      <p class="pair-machine-footer-note"><MachineGlyph name="lock" />{{ t('core.machinePairOnce') }}</p>
+    </template>
+    <template v-if="manual || pairing" #footer>
+      <UiButton variant="solid" tone="accent" :loading="submitting"
+                :disabled="busy || !pairing.trim()" @click="add">{{ t('core.add') }}</UiButton>
     </template>
   </UiDialog>
 </template>
@@ -269,16 +269,9 @@ async function scan(): Promise<void> {
   text-align: center;
 }
 
-.pair-machine-footer {
-  display: grid;
-  gap: 16px;
-  width: 100%;
-}
-
-.pair-machine-footer p {
+.pair-machine-footer-note {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 7px;
   margin: 0;
   color: var(--ink-mid);
@@ -286,7 +279,7 @@ async function scan(): Promise<void> {
   line-height: 1.7;
 }
 
-.pair-machine-footer svg {
+.pair-machine-footer-note svg {
   width: 14px;
   height: 14px;
 }

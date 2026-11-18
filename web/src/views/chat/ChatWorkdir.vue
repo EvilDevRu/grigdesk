@@ -151,7 +151,7 @@
         > {{ t('core.chatSzhatRazgovorIPereyti') }} </UiButton>
         <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')"> {{ t('core.chatPereytiBezVyzhimki') }} </UiButton>
       </template>
-      <UiButton variant="text" :disabled="session?.workdirChanging" @click="cancel">{{ t('core.cancel') }}</UiButton>
+      <UiButton :disabled="session?.workdirChanging" @click="cancel">{{ t('core.cancel') }}</UiButton>
     </template>
   </UiDialog>
 </template>

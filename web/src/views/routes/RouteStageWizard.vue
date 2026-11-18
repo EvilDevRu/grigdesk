@@ -109,30 +109,30 @@
                          @approve="approveRouteSimulation" />
         <p v-if="store.simulationError" role="alert">{{ store.simulationError }}</p>
       </template>
-      <div class="stage-wizard__actions">
-        <UiButton v-if="step < 4" data-test="wizard-empty" variant="ghost" @click="emit('empty')">
-          {{ t('core.stageWizardEmpty') }}
-        </UiButton>
-        <UiButton data-test="wizard-cancel" variant="ghost" :disabled="busy" @click="emit('close')">
-          {{ t('core.stageWizardCancel') }}
-        </UiButton>
-        <UiButton v-if="step > 1 && step < 4" data-test="wizard-back" @click="step -= 1">
-          {{ t('core.stageWizardBack') }}
-        </UiButton>
-        <UiButton v-if="step < 3" data-test="wizard-next" :disabled="!canContinue" @click="next">
-          {{ t('core.stageWizardNext') }}
-        </UiButton>
-        <UiButton v-if="step === 3" data-test="wizard-apply" :disabled="!canApply" @click="apply">
-          {{ t('core.stageWizardApply') }}
-        </UiButton>
-        <UiButton v-if="step === 4" data-test="wizard-add-more" :disabled="busy" @click="addMore">
-          {{ t('core.stageWizardAddMore') }}
-        </UiButton>
-        <UiButton v-if="step === 4" data-test="wizard-check-publish" :disabled="busy" @click="finish">
-          {{ t('core.stageWizardCheckPublish') }}
-        </UiButton>
-      </div>
     </div>
+    <template #footer>
+      <UiButton v-if="step < 4" data-test="wizard-empty" @click="emit('empty')">
+        {{ t('core.stageWizardEmpty') }}
+      </UiButton>
+      <UiButton data-test="wizard-cancel" :disabled="busy" @click="emit('close')">
+        {{ t('core.stageWizardCancel') }}
+      </UiButton>
+      <UiButton v-if="step > 1 && step < 4" data-test="wizard-back" @click="step -= 1">
+        {{ t('core.stageWizardBack') }}
+      </UiButton>
+      <UiButton v-if="step < 3" data-test="wizard-next" variant="solid" tone="accent" :disabled="!canContinue" @click="next">
+        {{ t('core.stageWizardNext') }}
+      </UiButton>
+      <UiButton v-if="step === 3" data-test="wizard-apply" variant="solid" tone="accent" :disabled="!canApply" @click="apply">
+        {{ t('core.stageWizardApply') }}
+      </UiButton>
+      <UiButton v-if="step === 4" data-test="wizard-add-more" :disabled="busy" @click="addMore">
+        {{ t('core.stageWizardAddMore') }}
+      </UiButton>
+      <UiButton v-if="step === 4" data-test="wizard-check-publish" variant="solid" tone="accent" :disabled="busy" @click="finish">
+        {{ t('core.stageWizardCheckPublish') }}
+      </UiButton>
+    </template>
   </UiDialog>
 </template>
 
@@ -529,12 +529,6 @@ onMounted(async () => {
 
 .stage-wizard__roles small {
   display: block;
-}
-
-.stage-wizard__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .stage-wizard :deep(pre) {

@@ -28,7 +28,7 @@ test('RE-G2-02/03: конфликтующие route и bootstrap требуют 
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteRebaseDialog.vue'), {
     stubs: { '../../ui': (uiStub) +
-      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
+      "\nexport { default as UiDialog } from \"./src/components/overlays/UiDialog.vue\";\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
   });
   const { mount } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -43,6 +43,7 @@ test('RE-G2-02/03: конфликтующие route и bootstrap требуют 
     ] };
   const confirms = [];
   const wrapper = mount(Component, { attachTo: browser.document.querySelector('#mount'),
+    global: { stubs: { teleport: true } },
     props: { preview, busy: false, onConfirm: (value) => confirms.push(value) } });
   t.after(() => wrapper.unmount());
   assert.match(wrapper.text(), /Мой quick/);

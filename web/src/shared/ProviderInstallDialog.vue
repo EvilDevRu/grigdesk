@@ -3,21 +3,24 @@
     v-if="install.visible"
     :open="install.visible"
     :label="heading"
+    :close-label="t('core.close')"
     size="compact"
     :body-inset="false"
     mobile-fullscreen
     data-role="provider-install-dialog"
     @close="install.visible = false"
   >
-    <div class="provider-install" :data-tone="tone" :data-phase="install.selectedRequest?.phase || job?.stage">
-      <header class="provider-install-head">
+    <template #header>
+      <div class="provider-install-head">
         <span class="provider-install-logo" :style="brandStyle" aria-hidden="true">
           <ProviderIcon :provider="iconProvider" :size="20" />
         </span>
         <div class="provider-install-titles">
           <h2 class="provider-install-heading">{{ heading }}</h2>
         </div>
-      </header>
+      </div>
+    </template>
+    <div class="provider-install" :data-tone="tone" :data-phase="install.selectedRequest?.phase || job?.stage">
       <UiProgress
         v-if="job?.status === 'running' || install.selectedRequest && install.selectedRequest.phase !== 'confirming'"
         size="line"
@@ -110,38 +113,38 @@
         </UiInlineMessage>
       </div>
 
-      <footer class="provider-install-foot">
-        <p v-if="job?.status === 'running'" class="provider-install-note provider-install-foot-note">
-          {{ t('settings.providerInstallationBackground') }}
-        </p>
-        <UiButton
-          v-if="install.error || install.uncertain"
-          @click="install.load()"
-        >{{ t('settings.providerInstallationRefresh') }}</UiButton>
-        <UiButton variant="ghost" @click="install.visible = false">
-          {{ t('settings.providerInstallationClose') }}
-        </UiButton>
-        <UiButton
-          v-if="fallbackCommand"
-          :variant="retryOperation ? 'outline' : 'solid'"
-          tone="accent"
-          @click="openTerminal(fallbackCommand)"
-        >{{ t('settings.providerInstallationTerminal') }}</UiButton>
-        <UiButton
-          v-if="retryOperation"
-          variant="solid"
-          tone="accent"
-          :disabled="install.busy"
-          @click="install.requestInstall(install.providerId, retryOperation)"
-        >{{ t('settings.providerInstallationRetryAction') }}</UiButton>
-        <UiButton
-          v-if="loginCommand"
-          variant="solid"
-          tone="accent"
-          @click="openLogin"
-        >{{ t('settings.providerInstallationLogin') }}</UiButton>
-      </footer>
     </div>
+    <template v-if="job?.status === 'running'" #footer-status>
+      {{ t('settings.providerInstallationBackground') }}
+    </template>
+    <template #footer>
+      <UiButton
+        v-if="install.error || install.uncertain"
+        @click="install.load()"
+      >{{ t('settings.providerInstallationRefresh') }}</UiButton>
+      <UiButton @click="install.visible = false">
+        {{ t('settings.providerInstallationClose') }}
+      </UiButton>
+      <UiButton
+        v-if="fallbackCommand"
+        :variant="retryOperation ? 'outline' : 'solid'"
+        tone="accent"
+        @click="openTerminal(fallbackCommand)"
+      >{{ t('settings.providerInstallationTerminal') }}</UiButton>
+      <UiButton
+        v-if="retryOperation"
+        variant="solid"
+        tone="accent"
+        :disabled="install.busy"
+        @click="install.requestInstall(install.providerId, retryOperation)"
+      >{{ t('settings.providerInstallationRetryAction') }}</UiButton>
+      <UiButton
+        v-if="loginCommand"
+        variant="solid"
+        tone="accent"
+        @click="openLogin"
+      >{{ t('settings.providerInstallationLogin') }}</UiButton>
+    </template>
   </UiDialog>
 </template>
 
@@ -453,7 +456,6 @@ watch([() => job.value?.outputTail, outputElement, outputOpen], async (current, 
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
-  padding: 1.125rem 1.25rem 1rem;
 }
 
 .provider-install-logo {
@@ -648,27 +650,4 @@ watch([() => job.value?.outputTail, outputElement, outputOpen], async (current, 
   font-size: 0.75rem;
 }
 
-.provider-install-foot {
-  display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 1.125rem 1.25rem;
-}
-
-.provider-install-foot-note {
-  flex: 1 1 12rem;
-}
-
-@media (max-width: 600px) {
-  .provider-install-head {
-    padding-top: max(1.125rem, calc(env(safe-area-inset-top) + 0.75rem));
-  }
-
-  .provider-install-foot {
-    padding-bottom: max(1.125rem, calc(env(safe-area-inset-bottom) + 0.75rem));
-  }
-}
 </style>

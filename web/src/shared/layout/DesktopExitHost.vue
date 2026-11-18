@@ -73,17 +73,15 @@
       </section>
     </div>
     <template v-if="state.phase === 'prompt'" #footer>
-      <div class="desktop-exit-footer">
-        <UiCheckbox v-model="state.remember">{{ t('desktop.exitRemember') }}</UiCheckbox>
-        <div class="ui-dialog-host__actions">
-          <UiButton variant="ghost" data-role="desktop-exit-cancel" @click="renderer.choose(false)">
-            {{ t('desktop.exitCancel') }}
-          </UiButton>
-          <UiButton variant="solid" tone="danger" @click="renderer.choose(true)">
-            {{ t('desktop.exitConfirm') }}
-          </UiButton>
-        </div>
-      </div>
+      <UiCheckbox v-model="state.remember" class="desktop-exit-remember">
+        {{ t('desktop.exitRemember') }}
+      </UiCheckbox>
+      <UiButton data-role="desktop-exit-cancel" @click="renderer.choose(false)">
+        {{ t('desktop.exitCancel') }}
+      </UiButton>
+      <UiButton variant="solid" tone="danger" @click="renderer.choose(true)">
+        {{ t('desktop.exitConfirm') }}
+      </UiButton>
     </template>
   </UiDialog>
 </template>
@@ -209,11 +207,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.desktop-exit-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
+.desktop-exit-remember {
+  margin-right: auto;
 }
 </style>

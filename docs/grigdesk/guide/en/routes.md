@@ -2,6 +2,9 @@
 
 The editor prepares routes for future launches. A draft and published version are different states.
 
+Rebasing changes and confirming publication open in a dialog over the editor. Its
+actions are in the footer.
+
 ## Before you begin
 
 Choose a project and route. Editing needs profile-settings access and an understanding of stage inputs and outputs.

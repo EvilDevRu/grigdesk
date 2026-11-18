@@ -337,16 +337,8 @@
     <UiDialog v-model:open="optionsOpen" size="compact" :title="t('core.conversationOptions')"
               class="phone-chat-options" data-role="chat-options" data-ui-workspace data-ui-touch
               data-ui-chat-options
-              initial-focus="[data-role='chat-options-body']">
-      <template #title>
-        <span class="options-heading">
-          <span>{{ t('core.conversationOptions') }}</span>
-          <UiIconButton :label="t('core.close')" @click="optionsOpen = false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                 stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
-          </UiIconButton>
-        </span>
-      </template>
+              initial-focus="[data-role='chat-options-body']"
+              :close-label="t('core.close')">
       <div class="options-body" data-role="chat-options-body" tabindex="-1">
         <section class="options-section" :aria-labelledby="`chat-options-agent-${sid}`">
           <h2 :id="`chat-options-agent-${sid}`">{{ t('core.chatSettingsAgent') }}</h2>
@@ -361,8 +353,8 @@
           <div ref="contextOptionsHost"></div>
         </section>
       </div>
+      <template #footer-status>{{ t('core.chatSettingsImmediate') }}</template>
       <template #footer>
-        <span class="option-help">{{ t('core.chatSettingsImmediate') }}</span>
         <UiButton variant="solid" tone="accent" @click="optionsOpen = false">
           {{ t('core.chatSettingsDone') }}
         </UiButton>
@@ -3018,7 +3010,6 @@ function skipQuestion() {
 .hrow { display: flex; align-items: center; column-gap: var(--chat-head-gap); min-width: 0; }
 .session-heading, .cs .session-workspace, .cs .session-controls, .cs .session-option { display: contents; }
 .cs .option-label { display: none; }
-.options-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 .options-body { display: flex; flex-direction: column; gap: 20px; min-width: 0; outline: none; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
 .back { display: none; flex: none; margin: 0 calc(8px - var(--chat-head-gap)) 0 -6px; place-items: center; }

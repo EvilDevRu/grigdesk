@@ -2,7 +2,8 @@
   <UiDialog :open="open" :title="t('core.taskFormNewTask')" :busy="saving"
             :description="t('core.taskFormNewTaskIntro')" :dismissible="!saving"
             data-role="new-grigdesk-task" data-ui-workspace initial-focus="#grigdesk-task-title"
-            @update:open="emit('update:open', $event)">
+            @update:open="emit('update:open', $event)"
+            :close-label="t('core.close')">
     <template #title>
       <div class="new-task-heading">
         <span class="new-task-icon" aria-hidden="true">
@@ -13,12 +14,6 @@
           </svg>
         </span>
         <span class="new-task-title">{{ t('core.taskFormNewTask') }}</span>
-        <UiIconButton :label="t('core.close')" :disabled="saving" @click="emit('update:open', false)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
-        </UiIconButton>
       </div>
     </template>
 
@@ -60,26 +55,22 @@
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     </form>
 
+    <template #footer-status>{{ t('core.taskCreationHint') }}</template>
     <template #footer>
-      <div class="new-task-footer">
-        <p class="new-task-note">{{ t('core.taskCreationHint') }}</p>
-        <UiFormActions>
-          <UiButton variant="ghost" :disabled="saving" @click="emit('update:open', false)">
-            {{ t('core.taskFormCancel') }}
-          </UiButton>
-          <UiButton type="submit" form="grigdesk-new-task" variant="solid" tone="accent"
-                    :loading="saving" :disabled="saving || loadingBoards || loadingProjects || !target"
-                    @click.prevent="save">
-            <template #leading>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </template>
-            {{ t('core.taskFormCreate') }}
-          </UiButton>
-        </UiFormActions>
-      </div>
+      <UiButton :disabled="saving" @click="emit('update:open', false)">
+        {{ t('core.taskFormCancel') }}
+      </UiButton>
+      <UiButton type="submit" form="grigdesk-new-task" variant="solid" tone="accent"
+                :loading="saving" :disabled="saving || loadingBoards || loadingProjects || !target"
+                @click.prevent="save">
+        <template #leading>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </template>
+        {{ t('core.taskFormCreate') }}
+      </UiButton>
     </template>
   </UiDialog>
 </template>
@@ -96,7 +87,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import { isTaskSourceId, parseTaskReference } from '../../../../shared/tasks/taskReference.ts';
 import type { TaskReference } from '../../../../shared/tasks/taskReference.ts';
 import {
-  t, UiButton, UiDialog, UiField, UiFormActions, UiIconButton, UiInlineMessage,
+  t, UiButton, UiDialog, UiField, UiInlineMessage,
   UiInput, UiSelect, UiTextarea,
 } from '../../ui.ts';
 
@@ -300,33 +291,5 @@ onMounted(async () => {
 .new-task-title {
   flex: 1;
   min-width: 0;
-}
-
-.new-task-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-}
-
-.new-task-note {
-  max-width: 200px;
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-@media (max-width: 600px) {
-  .new-task-footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .new-task-note {
-    max-width: none;
-  }
 }
 </style>

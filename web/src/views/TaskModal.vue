@@ -966,8 +966,9 @@
         </section>
       </div>
 
-      <!-- Управление -->
+      <!-- Общая рабочая область владеет полями запуска в отдельном окне и диалоге. -->
       <footer v-show="!editForm || taskSection !== 'description'" class="controls"
+              :class="{ 'ui-dialog-form-footer': presentation === 'dialog' }"
               :aria-label="t('core.taskDeystviyaSZadachey')">
           <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" :aria-label="t('core.taskUchetVremeni')">
             <div class="timer" :class="{ run: running }">
@@ -4897,10 +4898,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 10px 16px;
   min-width: 0;
+}
+
+.controls:not(.ui-dialog-form-footer) {
   padding: 12px 20px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
+
 .timer-group {
   display: flex;
   flex: 1 1 auto;
@@ -5124,6 +5129,8 @@ onUnmounted(() => {
   }
   .controls {
     gap: 8px;
+  }
+  .controls:not(.ui-dialog-form-footer) {
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   }
   .timer-group {
@@ -5183,7 +5190,7 @@ onUnmounted(() => {
     padding-bottom: 6px;
     overflow-y: auto;
   }
-  .controls {
+  .controls:not(.ui-dialog-form-footer) {
     padding-block: 6px;
   }
   .timer-group {

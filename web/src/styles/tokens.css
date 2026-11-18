@@ -213,11 +213,19 @@ html:root[data-ui-touch] {
   --control-height: var(--workspace-control-h);
 }
 
+.ui-dialog-form-footer {
+  --control-height: var(--workspace-control-h);
+}
+
 /* Узкое окно настроек использует те же площадки, что и сенсорный интерфейс. */
 @media (max-width: 600px) {
   [data-role='settings-modal'] {
     --workspace-control-h: 44px;
     --control-height: 44px;
     --toolbar-control-h: 44px;
+  }
+
+  .ui-dialog-form-footer {
+    --control-height: 44px;
   }
 }

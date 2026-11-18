@@ -33,7 +33,7 @@
     </label>
     <p v-if="commandError" role="alert" data-test="add-command-error">{{ commandError }}</p>
     <template #footer>
-      <UiButton variant="ghost" data-test="add-close" @click="emit('close')">
+      <UiButton data-test="add-close" @click="emit('close')">
         {{ t('core.cancel') }}
       </UiButton>
       <UiButton v-if="custom" data-test="add-custom-confirm"

@@ -298,104 +298,87 @@
         </UiInlineMessage>
       </div>
     </div>
+    <template #footer-status><p class="install-footer-hint">{{ footerHint }}</p></template>
     <template #footer>
-      <div class="install-footer">
-        <p class="install-footer-hint">{{ footerHint }}</p>
-        <div class="install-actions">
-          <div class="install-secondary">
-            <UiButton
-              v-if="view === 'source' || view === 'loading' || view === 'unavailable'"
-              block
-              data-role="install-dismiss"
-              @click="onOpenChange(false)"
-            >
-              {{ t('settings.cancel') }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'ready' || store.job?.status === 'awaiting_restart'
-                || view === 'progress' && !clarifying && store.job?.status === 'running'"
-              block
-              data-role="install-cancel"
-              :disabled="locked"
-              @click="store.cancel()"
-            >
-              {{ t('settings.cancel2') }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'result' && store.job?.status === 'failed'"
-              block
-              data-role="install-close"
-              @click="onOpenChange(false)"
-            >
-              {{ t('settings.close') }}
-            </UiButton>
-          </div>
-          <div class="install-primary">
-            <UiButton
-              v-if="view === 'loading'"
-              block
-              disabled
-              loading
-            >
-              {{ t('settings.checkingStatus') }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'unavailable'"
-              block
-              variant="solid"
-              tone="accent"
-              data-role="install-reload"
-              @click="loadCurrent"
-            >
-              {{ t('settings.retryLoading') }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'source'"
-              block
-              variant="solid"
-              tone="accent"
-              data-role="install-start"
-              :disabled="!canStart"
-              :loading="store.busy"
-              @click="start"
-            >
-              {{ t('settings.downloadAndVerify') }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'ready'"
-              block
-              variant="solid"
-              tone="accent"
-              data-role="install-apply"
-              :disabled="locked || catalog?.loading"
-              @click="confirmApply"
-            >
-              {{ applyCaption }}
-            </UiButton>
-            <UiButton
-              v-else-if="view === 'result' && store.job?.status === 'failed'"
-              block
-              variant="solid"
-              tone="accent"
-              data-role="install-retry"
-              :disabled="locked"
-              @click="retry"
-            >
-              {{ t('settings.tryAgain') }}
-            </UiButton>
-            <UiButton
-              v-else
-              block
-              :variant="completed ? 'solid' : 'outline'"
-              :tone="completed ? 'accent' : 'neutral'"
-              :data-role="view === 'result' ? 'install-close' : 'install-dismiss'"
-              @click="onOpenChange(false)"
-            >
-              {{ completed ? t('settings.done') : t('settings.close') }}
-            </UiButton>
-          </div>
-        </div>
-      </div>
+      <UiButton
+        v-if="view === 'source' || view === 'loading' || view === 'unavailable'"
+        data-role="install-dismiss"
+        @click="onOpenChange(false)"
+      >
+        {{ t('settings.cancel') }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'ready' || store.job?.status === 'awaiting_restart'
+          || view === 'progress' && !clarifying && store.job?.status === 'running'"
+        data-role="install-cancel"
+        :disabled="locked"
+        @click="store.cancel()"
+      >
+        {{ t('settings.cancel2') }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'result' && store.job?.status === 'failed'"
+        data-role="install-close"
+        @click="onOpenChange(false)"
+      >
+        {{ t('settings.close') }}
+      </UiButton>
+      <UiButton
+        v-if="view === 'loading'"
+        disabled
+        loading
+      >
+        {{ t('settings.checkingStatus') }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'unavailable'"
+        variant="solid"
+        tone="accent"
+        data-role="install-reload"
+        @click="loadCurrent"
+      >
+        {{ t('settings.retryLoading') }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'source'"
+        variant="solid"
+        tone="accent"
+        data-role="install-start"
+        :disabled="!canStart"
+        :loading="store.busy"
+        @click="start"
+      >
+        {{ t('settings.downloadAndVerify') }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'ready'"
+        variant="solid"
+        tone="accent"
+        data-role="install-apply"
+        :disabled="locked || catalog?.loading"
+        @click="confirmApply"
+      >
+        {{ applyCaption }}
+      </UiButton>
+      <UiButton
+        v-else-if="view === 'result' && store.job?.status === 'failed'"
+        variant="solid"
+        tone="accent"
+        data-role="install-retry"
+        :disabled="locked"
+        @click="retry"
+      >
+        {{ t('settings.tryAgain') }}
+      </UiButton>
+      <UiButton
+        v-else
+        :variant="completed ? 'solid' : 'outline'"
+        :tone="completed ? 'accent' : 'neutral'"
+        :data-role="view === 'result' ? 'install-close' : 'install-dismiss'"
+        @click="onOpenChange(false)"
+      >
+        {{ completed ? t('settings.done') : t('settings.close') }}
+      </UiButton>
     </template>
   </UiDialog>
 </template>
@@ -1039,42 +1022,6 @@ onBeforeUnmount(() => {
 .install-skeleton-short {
   width: 65%;
   height: 1rem;
-}
-.install-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 19rem;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-}
-.install-footer-hint {
-  display: flex;
-  align-items: center;
-  height: 2.5rem;
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-.install-actions {
-  display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.install-secondary,
-.install-primary {
-  min-width: 0;
-}
-@media (max-width: 600px) {
-  .install-footer {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-  }
-  .install-footer-hint {
-    height: 2.25rem;
-  }
 }
 @media (max-width: 420px) {
   .install-content {

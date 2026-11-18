@@ -58,7 +58,7 @@
       <UiField :label="t('settings.deviceName')"><UiInput v-model="newName" /></UiField>
       <template #footer>
         <UiButton :disabled="!newName.trim() || mutating" @click="rename">{{ t('settings.phoneSave') }}</UiButton>
-        <UiButton variant="text" @click="editing = null">{{ t('settings.cancel') }}</UiButton>
+        <UiButton @click="editing = null">{{ t('settings.cancel') }}</UiButton>
       </template>
     </UiDialog>
     <UiDialog :open="!!revoking" :title="t('settings.revoke')" @update:open="revoking = null">
@@ -66,7 +66,7 @@
         deviceName: revoking?.name ?? '' }) : t('settings.revokeDevice', { deviceName: revoking?.name ?? '' }) }}</p>
       <template #footer>
         <UiButton tone="danger" :disabled="mutating" @click="confirmRevoke">{{ t('settings.revoke') }}</UiButton>
-        <UiButton variant="text" @click="revoking = null">{{ t('settings.cancel') }}</UiButton>
+        <UiButton @click="revoking = null">{{ t('settings.cancel') }}</UiButton>
       </template>
     </UiDialog>
   </section>

@@ -9,36 +9,15 @@
     layer="document"
     initial-focus="#document-dialog-title"
     size="workspace"
-    :label="title"
+    :title="title"
+    :close-label="t('core.docZakrytDokument')"
+    :close-tooltip="t('core.docZakrytEsc')"
     :body-inset="false"
     fade-only
     @update:open="onDialogOpenChange"
     @click="onDocumentClick"
   >
-    <template #header="{ close }">
-      <div class="document-dialog__header">
-        <div class="document-dialog__title">
-          <span id="document-dialog-title" tabindex="-1">{{ title }}</span>
-        </div>
-        <UiIconButton
-          role="embedded"
-          :label="t('core.docZakrytDokument')"
-          v-tooltip="t('core.docZakrytEsc')"
-          @click="close('action')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <path d="M6 6l12 12M18 6 6 18" />
-          </svg>
-        </UiIconButton>
-      </div>
-    </template>
+    <template #title><span id="document-dialog-title" tabindex="-1">{{ title }}</span></template>
 
     <UiLoadingState v-if="resolving" :label="t('core.docProveryayuSsylku')" variant="document" >
       <UiSkeletonLayout layout="text" :header="false" />
@@ -65,8 +44,6 @@ import { UiSkeletonLayout, t } from '../ui';
 import { computed, ref, watch } from 'vue';
 import {
   UiDialog,
-  UiIconButton,
-  vTooltip,
   UiLoadingState,
 } from '../ui';
 import { documentsApi } from '../shared/documentsApi.ts';
@@ -196,37 +173,9 @@ function onDialogOpenChange(open: boolean): void {
   width: min(1120px, calc(100vw - 40px));
 }
 
-.document-dialog__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  min-height: 30px;
-}
 
-.document-dialog__title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 650;
-}
 
-.document-dialog__title span,
-.document-dialog__title small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.document-dialog__title small {
-  color: var(--ink-mid);
-  font-size: 10px;
-  font-weight: 400;
-}
 
 .document-panel {
   flex: 1;

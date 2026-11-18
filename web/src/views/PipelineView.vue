@@ -1077,26 +1077,24 @@
           </main>
         </div>
 
-        <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
-        <footer class="sactions">
-          <span class="sactions-context">
-            <span class="stage-footer-dot" :class="stageArbitrating ? 'arb' : stage!.status"
-                  aria-hidden="true"></span>
-            {{ stageArbitrating ? translate('core.arbiterAnalyzing') : stageStatusHint(stage!) }}
-          </span>
-          <div class="sactions-buttons">
-            <!-- Задачу открываем поверх этапа: она нужна как справка, а не вместо узла.
-                 Нижняя модалка не закрывается, и человек возвращается к тому же этапу. -->
-            <UiButton
-              class="sactions-task"
-              data-role="pipeline-stage-task-open"
-              variant="text"
-              @click="ui.openTask(stage!.task)"
-            > {{ translate('core.openTask') }} </UiButton>
-            <OpenDiffButton :task-id="stage!.task" />
-          </div>
-        </footer>
       </div>
+      <template #footer-status>
+        <span class="sactions-context">
+          <span class="stage-footer-dot" :class="stageArbitrating ? 'arb' : stage!.status"
+                aria-hidden="true"></span>
+          {{ stageArbitrating ? translate('core.arbiterAnalyzing') : stageStatusHint(stage!) }}
+        </span>
+      </template>
+      <template #footer>
+        <!-- Задачу открываем поверх этапа: она нужна как справка, а не вместо узла.
+             Нижняя модалка не закрывается, и человек возвращается к тому же этапу. -->
+        <UiButton
+          class="sactions-task"
+          data-role="pipeline-stage-task-open"
+          @click="ui.openTask(stage!.task)"
+        > {{ translate('core.openTask') }} </UiButton>
+        <OpenDiffButton :task-id="stage!.task" />
+      </template>
     </UiDialog>
 
   </div>
@@ -4903,19 +4901,6 @@ function cardState(g: PipelineViewGraph) {
 .gate-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Справочные действия всегда доступны под рабочей областью. */
-.sactions {
-  min-height: 46px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: auto;
-  padding: 10px 20px;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-}
 .sactions-context {
   display: flex;
   align-items: center;
@@ -4938,12 +4923,7 @@ function cardState(g: PipelineViewGraph) {
 .stage-footer-dot.stall {
   background: var(--warn);
 }
-.sactions-buttons {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
+
 
 @media (max-width: 980px) {
   .sworkspace {
@@ -5033,15 +5013,7 @@ function cardState(g: PipelineViewGraph) {
   .gbtns .btn {
     flex: 1 1 120px;
   }
-  .sactions {
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-  }
-  .sactions-context {
-    display: none;
-  }
-  .sactions-buttons {
-    width: 100%;
-  }
+
 }
 
 @container pipeline-stage (max-width: 480px) {

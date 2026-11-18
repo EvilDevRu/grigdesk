@@ -255,7 +255,8 @@
 
 /* В строках формы кнопки равны полям; компактная высота остаётся у шапок. */
 .ui-button[data-context='workspace-form'],
-.ui-button[data-context='workspace-form-wrap'] {
+.ui-button[data-context='workspace-form-wrap'],
+.ui-dialog-form-footer__actions > .ui-button {
   height: var(--control-height);
   min-height: var(--control-height);
   padding: 0 10px;
@@ -264,7 +265,8 @@
 }
 
 /* Длинные названия операций переносятся; короткая кнопка сохраняет высоту поля. */
-.ui-button[data-context='workspace-form-wrap'] {
+.ui-button[data-context='workspace-form-wrap'],
+.ui-dialog-form-footer__actions > .ui-button {
   height: auto;
   padding-block: 5px;
   line-height: 20px;

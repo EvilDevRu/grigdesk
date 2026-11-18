@@ -1,18 +1,9 @@
 <template>
   <UiDialog :open="open" :title="title" :description="description" data-role="tracker-install"
             data-ui-workspace initial-focus="[data-primary], .driver-source, .driver-custom-source"
-            @update:open="emit('update:open', $event)">
-    <template #title>
-      <div class="driver-install__heading">
-        <span class="driver-install__title">{{ title }}</span>
-        <UiIconButton :label="t('core.close')" @click="emit('update:open', false)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
-        </UiIconButton>
-      </div>
-    </template>
+            @update:open="emit('update:open', $event)"
+            :close-label="t('core.close')">
+    <template #title><span class="driver-install__title">{{ title }}</span></template>
 
     <div class="driver-install" :aria-busy="store.busy || store.loading || store.removing">
       <ol v-if="steps.length" class="driver-steps" :class="{ 'driver-steps--three': steps.length === 3 }"
@@ -214,67 +205,65 @@
     </div>
 
     <template #footer>
-      <div class="driver-install__footer">
-        <UiLoadingState v-if="store.loading && displayScreen !== 'source'" variant="inline" />
-        <template v-else-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
-          <UiButton :loading="store.busy" :disabled="store.busy" @click="store.current()">
-            {{ t('core.trackerCheckingOutcome') }}
-          </UiButton>
-        </template>
-        <template v-else-if="initializationError">
-          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
-          <UiButton :disabled="store.busy" @click="initialize()">{{ t('core.trackerRefresh') }}</UiButton>
-        </template>
-        <template v-else-if="displayScreen === 'source'">
-          <UiButton :disabled="store.loading || store.busy" @click="configure()">
-            {{ t('core.trackerBackToSettings') }}
-          </UiButton>
-          <UiButton variant="solid" tone="accent" data-primary
-                    :disabled="store.loading || store.busy || !store.url.trim()"
-                    @click="nextVersion()">{{ t('core.trackerNext') }}</UiButton>
-        </template>
-        <template v-else-if="store.screen === 'version'">
-          <UiButton :disabled="store.busy" @click="backFromVersion()">{{ t('core.trackerBack') }}</UiButton>
-          <UiButton variant="solid" tone="accent" data-primary :loading="store.busy"
-                    :disabled="store.busy || !validVersion" @click="store.prepare()">
-            {{ t('core.trackerPrepare') }}
-          </UiButton>
-        </template>
-        <template v-else-if="store.screen === 'rollback'">
-          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBack') }}</UiButton>
-          <UiButton v-if="store.errorCode" :disabled="store.busy"
-                    @click="store.openRollback(store.rollbackPreview!.id)">
-            {{ t('core.trackerRefresh') }}
-          </UiButton>
-          <UiButton v-else variant="solid" tone="accent" data-primary :disabled="store.busy"
-                    @click="store.rollback()">{{ t('core.trackerRollback') }}</UiButton>
-        </template>
-        <template v-else-if="store.screen === 'review' && store.job?.status === 'ready'">
-          <UiButton :disabled="store.busy" @click="editVersion()">{{ t('core.trackerBack') }}</UiButton>
-          <UiButton v-if="store.errorCode === 'preview_stale'" variant="solid" tone="accent"
-                    :disabled="store.busy" @click="editVersion()">{{ t('core.trackerPrepareAgain') }}</UiButton>
-          <UiButton v-else variant="solid" tone="accent" data-primary :disabled="store.busy"
-                    @click="store.apply()">{{ t(store.flow === 'update' ? 'core.trackerUpdate' : 'core.trackerInstall') }}</UiButton>
-        </template>
-        <template v-else-if="working">
-          <UiButton v-if="store.job && ['running', 'ready'].includes(store.job.status)" :disabled="store.busy"
-                    @click="editVersion()">{{ t('core.trackerCancelReview') }}</UiButton>
-          <p v-else class="driver-install__note">{{ t('core.trackerCloseKeepsOperation') }}</p>
-        </template>
-        <template v-else>
-          <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
-          <UiButton v-if="store.job?.status === 'done' && canConfigure(store.job.driverId)"
-                    variant="solid" tone="accent" data-primary @click="configure(store.job.driverId!)">
-            {{ t('core.trackerConfigureConnection') }}
-          </UiButton>
-          <UiButton v-else-if="store.job?.status === 'done'" variant="solid" tone="accent" @click="configure(store.job?.driverId ?? undefined)">
-            {{ t('core.trackerFinish') }}
-          </UiButton>
-          <UiButton v-else-if="store.flow !== 'rollback'" variant="solid" tone="accent" @click="editVersion()">
-            {{ t('core.trackerOtherVersion') }}
-          </UiButton>
-        </template>
-      </div>
+      <UiLoadingState v-if="store.loading && displayScreen !== 'source'" variant="inline" />
+      <template v-else-if="store.recoveryError || store.job?.status === 'recovery_required' || store.unknownOutcome">
+        <UiButton :loading="store.busy" :disabled="store.busy" @click="store.current()">
+          {{ t('core.trackerCheckingOutcome') }}
+        </UiButton>
+      </template>
+      <template v-else-if="initializationError">
+        <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
+        <UiButton :disabled="store.busy" @click="initialize()">{{ t('core.trackerRefresh') }}</UiButton>
+      </template>
+      <template v-else-if="displayScreen === 'source'">
+        <UiButton :disabled="store.loading || store.busy" @click="configure()">
+          {{ t('core.trackerBackToSettings') }}
+        </UiButton>
+        <UiButton variant="solid" tone="accent" data-primary
+                  :disabled="store.loading || store.busy || !store.url.trim()"
+                  @click="nextVersion()">{{ t('core.trackerNext') }}</UiButton>
+      </template>
+      <template v-else-if="store.screen === 'version'">
+        <UiButton :disabled="store.busy" @click="backFromVersion()">{{ t('core.trackerBack') }}</UiButton>
+        <UiButton variant="solid" tone="accent" data-primary :loading="store.busy"
+                  :disabled="store.busy || !validVersion" @click="store.prepare()">
+          {{ t('core.trackerPrepare') }}
+        </UiButton>
+      </template>
+      <template v-else-if="store.screen === 'rollback'">
+        <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBack') }}</UiButton>
+        <UiButton v-if="store.errorCode" :disabled="store.busy"
+                  @click="store.openRollback(store.rollbackPreview!.id)">
+          {{ t('core.trackerRefresh') }}
+        </UiButton>
+        <UiButton v-else variant="solid" tone="accent" data-primary :disabled="store.busy"
+                  @click="store.rollback()">{{ t('core.trackerRollback') }}</UiButton>
+      </template>
+      <template v-else-if="store.screen === 'review' && store.job?.status === 'ready'">
+        <UiButton :disabled="store.busy" @click="editVersion()">{{ t('core.trackerBack') }}</UiButton>
+        <UiButton v-if="store.errorCode === 'preview_stale'" variant="solid" tone="accent"
+                  :disabled="store.busy" @click="editVersion()">{{ t('core.trackerPrepareAgain') }}</UiButton>
+        <UiButton v-else variant="solid" tone="accent" data-primary :disabled="store.busy"
+                  @click="store.apply()">{{ t(store.flow === 'update' ? 'core.trackerUpdate' : 'core.trackerInstall') }}</UiButton>
+      </template>
+      <template v-else-if="working">
+        <UiButton v-if="store.job && ['running', 'ready'].includes(store.job.status)" :disabled="store.busy"
+                  @click="editVersion()">{{ t('core.trackerCancelReview') }}</UiButton>
+        <p v-else class="driver-install__note">{{ t('core.trackerCloseKeepsOperation') }}</p>
+      </template>
+      <template v-else>
+        <UiButton :disabled="store.busy" @click="configure()">{{ t('core.trackerBackToSettings') }}</UiButton>
+        <UiButton v-if="store.job?.status === 'done' && canConfigure(store.job.driverId)"
+                  variant="solid" tone="accent" data-primary @click="configure(store.job.driverId!)">
+          {{ t('core.trackerConfigureConnection') }}
+        </UiButton>
+        <UiButton v-else-if="store.job?.status === 'done'" variant="solid" tone="accent" @click="configure(store.job?.driverId ?? undefined)">
+          {{ t('core.trackerFinish') }}
+        </UiButton>
+        <UiButton v-else-if="store.flow !== 'rollback'" variant="solid" tone="accent" @click="editVersion()">
+          {{ t('core.trackerOtherVersion') }}
+        </UiButton>
+      </template>
     </template>
   </UiDialog>
 </template>
@@ -290,7 +279,7 @@ import { sameCatalogSource } from '../../../../shared/plugins/pluginCatalogPolic
 import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import {
   t, UiButton, UiDialog, UiDisclosureButton, UiField,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSkeleton, UiSpinner,
+  UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSkeleton, UiSpinner,
 } from '../../ui.ts';
 
 const props = defineProps<{
@@ -647,10 +636,6 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.driver-install__heading {
-  flex-wrap: nowrap;
-  width: 100%;
-}
 
 .driver-install__title {
   flex: 1;
@@ -791,15 +776,6 @@ onUnmounted(() => {
   display: none;
 }
 
-.driver-install__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  width: 100%;
-}
-
 @media (max-width: 600px) {
   .driver-steps {
     display: none;
@@ -822,17 +798,6 @@ onUnmounted(() => {
   .driver-job {
     gap: 12px;
     padding: 16px;
-  }
-
-  .driver-install__footer {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .driver-install__footer > :only-child {
-    grid-column: 1 / -1;
   }
 
   .driver-source-list {

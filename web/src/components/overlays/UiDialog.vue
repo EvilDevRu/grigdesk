@@ -25,19 +25,29 @@
           :data-body-inset="bodyInset ? 'true' : 'false'"
           :role="normalizedRole"
           aria-modal="true"
-          :aria-label="hasTitle ? undefined : (label ?? t('core.dialog'))"
-          :aria-labelledby="hasTitle ? titleId : undefined"
+          :aria-label="hasTitle && !slots.header ? undefined : (label ?? (title || t('core.dialog')))"
+          :aria-labelledby="hasTitle && !slots.header ? titleId : undefined"
           :aria-describedby="hasDescription ? descriptionId : undefined"
           :aria-busy="busy || undefined"
           tabindex="-1"
           @keydown="onSurfaceKeydown"
         >
-          <header v-if="hasTitle || slots.header" class="ui-dialog__header">
+          <header v-if="hasTitle || slots.header || slots['header-actions'] || closeLabel" class="ui-dialog__header">
             <slot name="header" v-bind="dialogSlotProps">
               <div v-if="hasTitle" :id="titleId" class="ui-dialog__title">
                 <slot name="title">{{ title }}</slot>
               </div>
             </slot>
+            <div v-if="slots['header-actions'] || closeLabel" class="ui-dialog__header-actions">
+              <slot name="header-actions" v-bind="dialogSlotProps" />
+              <UiIconButton v-if="closeLabel" :label="closeLabel" :disabled="busy"
+                v-tooltip="closeTooltip" @click="requestClose('action')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                     stroke-linecap="round" aria-hidden="true">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </UiIconButton>
+            </div>
           </header>
 
           <div
@@ -52,8 +62,22 @@
             <slot v-bind="dialogSlotProps" />
           </div>
 
-          <footer v-if="slots.footer" class="ui-dialog__footer">
-            <slot name="footer" v-bind="dialogSlotProps" />
+          <footer v-if="slots.footer || hasFooterStatus()"
+            class="ui-dialog__footer ui-dialog-form-footer">
+            <div v-if="hasFooterStatus()" class="ui-dialog-form-footer__status" role="status">
+              <slot name="footer-status" v-bind="dialogSlotProps">
+                <p v-if="footerStatus" class="ui-dialog-form-footer__summary" :data-pending="footerPending">
+                  <span class="ui-dialog-form-footer__dot" aria-hidden="true" />
+                  {{ footerStatus }}
+                </p>
+              </slot>
+              <div v-if="slots['footer-details']" class="ui-dialog-form-footer__details">
+                <slot name="footer-details" v-bind="dialogSlotProps" />
+              </div>
+            </div>
+            <UiFormActions v-if="slots.footer" class="ui-dialog-form-footer__actions">
+              <slot name="footer" v-bind="dialogSlotProps" />
+            </UiFormActions>
           </footer>
         </section>
       </div>
@@ -63,6 +87,9 @@
 
 <script setup lang="ts">
 import { t } from '../../services/locale.ts';
+import UiFormActions from '../composites/UiFormActions.vue';
+import UiIconButton from '../primitives/UiIconButton.vue';
+import { vTooltip } from '../../services/tooltipDirective.ts';
 
 import {
   computed,
@@ -104,6 +131,10 @@ interface Props {
   title?: string;
   description?: string;
   label?: string;
+  closeLabel?: string;
+  closeTooltip?: string;
+  footerStatus?: string;
+  footerPending?: boolean;
   dismissible?: boolean;
   persistent?: boolean;
   busy?: boolean;
@@ -138,10 +169,13 @@ const emit = defineEmits<{
 }>();
 const slots = defineSlots<{
   header?(props: DialogSlotProps): VNode[];
+  'header-actions'?(props: DialogSlotProps): VNode[];
   title?(): VNode[];
   description?(): VNode[];
   default(props: DialogSlotProps): VNode[];
   footer?(props: DialogSlotProps): VNode[];
+  'footer-status'?(props: DialogSlotProps): VNode[];
+  'footer-details'?(props: DialogSlotProps): VNode[];
 }>();
 const attrs = useAttrs();
 
@@ -166,6 +200,7 @@ const hasTitle = computed(() => Boolean(props.title || slots.title));
 const hasDescription = computed(() =>
   Boolean(props.description || slots.description),
 );
+
 const baseId = useId().replaceAll(':', '');
 const titleId = `ui-dialog-title-${baseId}`;
 const descriptionId = `ui-dialog-description-${baseId}`;
@@ -175,6 +210,10 @@ const modalIsTop = ref(false);
 let modalHandle: ModalEnvironmentHandle | null = null;
 let returnTarget: HTMLElement | null = null;
 let requestedCloseReason: UiDialogCloseReason | null = null;
+
+function hasFooterStatus(): boolean {
+  return Boolean(props.footerStatus || slots['footer-status'] || slots['footer-details']);
+}
 
 const surfaceAttrs = computed<Record<string, unknown>>(() => {
   const forwarded: Record<string, unknown> = {};

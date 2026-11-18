@@ -91,7 +91,7 @@
         </UiButton>
       </div>
       <template #footer>
-        <UiButton variant="ghost" @click="setQuickOpen(false)">
+        <UiButton @click="setQuickOpen(false)">
           {{ t('core.codeQuickOpenClose') }}
         </UiButton>
       </template>

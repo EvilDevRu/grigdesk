@@ -21,7 +21,7 @@
       <UiButton v-if="!pairing || seconds === 0" :disabled="busy || !name.trim()" @click="issue">
         {{ pairing ? t('settings.newCode') : t('settings.getCode') }}
       </UiButton>
-      <UiButton variant="text" @click="$emit('update:open', false)">{{ t('settings.close') }}</UiButton>
+      <UiButton @click="$emit('update:open', false)">{{ t('settings.close') }}</UiButton>
     </template>
   </UiDialog>
 </template>

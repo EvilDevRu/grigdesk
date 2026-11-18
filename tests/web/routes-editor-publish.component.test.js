@@ -286,7 +286,7 @@ test('RE-E6-06: подтверждение показывает точный с�
           },
         });
       `) +
-        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
+        "\nexport { default as UiDialog } from \"./src/components/overlays/UiDialog.vue\";\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
     });
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -296,7 +296,8 @@ test('RE-E6-06: подтверждение показывает точный с�
       capabilitiesHash: 'b'.repeat(64), changes: [] };
     let confirms = 0;
     const wrapper = mount(Component, { attachTo: browser.document.querySelector('#mount'),
-      props: { report, canPublish: true, onConfirm: () => { confirms += 1; } } });
+      global: { stubs: { teleport: true } },
+    props: { report, canPublish: true, onConfirm: () => { confirms += 1; } } });
     t.after(() => wrapper.unmount());
     assert.match(wrapper.text(), /r4/);
     assert.match(wrapper.text(), /aaaaaaaaaaaa/);

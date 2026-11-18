@@ -35,24 +35,27 @@ test('RE-H4-01: подтверждение публикации получает
 
     const Component = await compileVue(webFile('src/views/routes/RoutePublishDialog.vue'), {
       stubs: { '../../ui': (UI) +
-        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
+        "\nexport { default as UiDialog } from \"./src/components/overlays/UiDialog.vue\";\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
     });
-    const { mount } = await import(
+    const { mount, flushPromises } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
     );
     const draft = makeDraft();
     const wrapper = mount(Component, {
       attachTo: document.querySelector('#mount'),
-      props: { report: { draftId: draft.id, draftRevision: 1,
+      global: { stubs: { teleport: true } },
+    props: { report: { draftId: draft.id, draftRevision: 1,
         currentCatalogHash: null, sourceMode: 'editor', sourceRevision: 1,
         capabilitiesHash: 'a'.repeat(64), changes: [] },
       canPublish: true },
     });
     t.after(() => wrapper.unmount());
+    await flushPromises();
+
     const dialog = wrapper.find('[role="dialog"]').element;
-    assert.ok(document.activeElement === dialog,
+    assert.ok(dialog.contains(document.activeElement),
       'после открытия клавиатура работает внутри подтверждения');
-    assert.equal(dialog.getAttribute('aria-label'), 'Подтверждение публикации маршрутов');
+    assert.ok(dialog.hasAttribute('aria-labelledby'));
     assert.equal(wrapper.find('textarea').attributes('id'), 'route-publication-comment');
     wrapper.unmount();
     assert.ok(document.activeElement === opener,

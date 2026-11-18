@@ -25,6 +25,9 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
       size: 'workspace',
       label: 'Диф задачи',
       bodyInset: false,
+      closeLabel: 'Закрыть окно',
+      footerStatus: 'Черновик',
+      footerPending: true,
       'onUpdate:open': (value) => {
         updates.push(value);
 
@@ -36,6 +39,9 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
     },
     slots: {
       default: () => h('button', { type: 'button' }, 'Действие'),
+      'header-actions': () => h('span', 'Команды заголовка'),
+      'footer-details': () => h('span', 'Результат проверки'),
+      footer: () => h('button', { type: 'button' }, 'Сохранить'),
     },
   });
 
@@ -51,6 +57,10 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
   assert.equal(overlay.dataset.uiLayer, 'diff-workspace');
   assert.equal(surface.dataset.bodyInset, 'false');
   assert.equal(surface.getAttribute('aria-label'), 'Диф задачи');
+  assert.ok(surface.querySelector('.ui-dialog__header-actions button[aria-label="Закрыть окно"]'));
+  assert.match(surface.querySelector('.ui-dialog-form-footer__status').textContent, /Черновик/);
+  assert.match(surface.querySelector('.ui-dialog-form-footer__details').textContent, /Результат проверки/);
+  assert.equal(surface.querySelector('.ui-dialog-form-footer__actions button').textContent, 'Сохранить');
   assert.equal(browser.document.body.classList.contains('ui-modal-scroll-lock'), true);
   assert.equal(hasOpenModal(), true);
 

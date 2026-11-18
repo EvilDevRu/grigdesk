@@ -70,7 +70,7 @@
       </template>
     </div>
     <template #footer>
-      <UiButton variant="ghost" @click="open = false">{{ t('core.codeBranchClose') }}</UiButton>
+      <UiButton @click="open = false">{{ t('core.codeBranchClose') }}</UiButton>
     </template>
   </UiDialog>
 </template>
