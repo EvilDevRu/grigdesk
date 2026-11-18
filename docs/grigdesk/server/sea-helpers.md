@@ -47,6 +47,10 @@ Qwen helper проверяет доступность `ffmpeg` и `ffprobe` в �
 заглушкой. `mcp.test.mts` в той же папке проверяет настоящий stdio-протокол собранных
 permission/work MCP с локальными broker-ами, scope и отказом чужому nonce.
 
+`sea-media-helpers.test.js` проверяет пути записи, репетиции и установки браузера
+Showcase в перенесённом комплекте. Установку голосов через отдельный `bin/voice`
+проверяет `showcase-voice-package-install.test.js`.
+
 `server/build/compatibility.json` перечисляет прежние пути data-home, legacyBrand
 и двух JS-мостов движка. Генератор создаёт в staging относительные import/re-export
 на собранные helper-ы. Исходные bash-файлы движка при этом не меняются.

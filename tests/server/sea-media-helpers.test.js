@@ -83,13 +83,13 @@ test('SEA-MEDIA-02: packaged-команды берут helper-ы своего R'
 
 test('SEA-MEDIA-03: Python-ресурсы и requirements находятся после переноса R', async (t) => {
   const { R, paths } = await packaged(t);
-  const requirements = moduleUrlFor(paths, 'server/requirements-showcase-voice.txt');
+  const requirements = moduleUrlFor(paths, 'server/requirements-media.txt');
   const transcribe = moduleUrlFor(paths, 'server/src/lib/media/transcribe.py');
   const pty = moduleUrlFor(paths, 'server/src/modules/terminal/pty-helper.py');
 
   assert.equal(requirements.href,
-    pathToFileURL(path.join(R, 'server/requirements-showcase-voice.txt')).href);
-  assert.ok(requirements.pathname.endsWith('/server/requirements-showcase-voice.txt'));
+    pathToFileURL(path.join(R, 'server/requirements-media.txt')).href);
+  assert.ok(requirements.pathname.endsWith('/server/requirements-media.txt'));
   assert.ok(transcribe.pathname.endsWith('/server/src/lib/media/transcribe.py'));
   assert.ok(pty.pathname.endsWith('/server/src/modules/terminal/pty-helper.py'));
 });
@@ -146,30 +146,24 @@ test('SEA-MEDIA-05: showcase workers выбирают штатный helper ил
   ]);
 });
 
-test('REVIEW-R5: override Node сохраняет скрипт каждого штатного установщика', () => {
-  for (const [helper, file] of [
-    ['showcase-voice-install', 'showcaseVoiceInstall.mts'],
-    ['showcase-browser-install', 'showcaseBrowserInstall.mts'],
-  ]) {
-    const command = resolveWorkerCommand({ helper, nodeBin: '/fixture/node' }, '/fixture/task.json');
+test('REVIEW-R5: override Node сохраняет штатный установщик браузера Showcase', () => {
+  const taskFile = '/fixture/task.json';
+  const command = resolveWorkerCommand({
+    helper: 'showcase-browser-install',
+    nodeBin: '/fixture/node',
+  }, taskFile);
 
-    assert.equal(command.command, '/fixture/node');
-    assert.deepEqual(command.args, [path.join(ROOT, 'server/scripts', file), '/fixture/task.json']);
-    assert.equal(command.marker, path.basename(file, '.mts'));
-    assert.equal(command.args[0].includes(command.marker), true);
-  }
+  assert.equal(command.command, '/fixture/node');
+  assert.deepEqual(command.args, [path.join(ROOT, 'server/scripts/showcaseBrowserInstall.mts'), taskFile]);
+  assert.equal(command.marker, 'showcaseBrowserInstall');
+  assert.equal(command.args[0].includes(command.marker), true);
 });
 
 test('SEA-MEDIA-06: packaged showcase-команды берут helper-ы своего R', async (t) => {
   const { R, paths } = await packaged(t);
   const catalog = readHelperCatalog(path.join(ROOT, 'server/build/helpers.json'));
 
-  for (const [id, file] of [
-    ['showcase-worker', 'showcaseWorker.mts'],
-    ['showcase-rehearsal', 'showcaseRehearsal.mts'],
-    ['showcase-voice-install', 'showcaseVoiceInstall.mts'],
-    ['showcase-browser-install', 'showcaseBrowserInstall.mts'],
-  ]) {
+  for (const id of ['showcase-worker', 'showcase-rehearsal', 'showcase-browser-install']) {
     const command = helperCommandFor(paths, catalog, id, ['task.json']);
 
     assert.equal(command.command, path.join(R, 'runtime/node/bin/node'));
@@ -177,6 +171,5 @@ test('SEA-MEDIA-06: packaged showcase-команды берут helper-ы сво
       path.join(R, 'server/runtime/helpers', `${id}.mjs`),
       'task.json',
     ]);
-    assert.match(file, /\.mts$/);
   }
 });
