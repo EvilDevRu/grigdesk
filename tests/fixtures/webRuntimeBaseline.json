@@ -134,6 +134,7 @@
         "recentWorkdirs": [],
         "pagingEnabled": false,
         "filtersProtocol": 0,
+        "projectFiltersProtocol": 0,
         "catalogMutationVersion": 0,
         "catalogPages": {},
         "catalogSummary": {

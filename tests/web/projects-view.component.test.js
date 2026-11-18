@@ -502,13 +502,14 @@ test('создание открывает сохранённый проект б
   );
 
   assert.equal(harness.store.opened, null, 'новый проект не наследует снимок предыдущего');
-  await wrapper.find('[data-role="project-id"]').setValue('new-project');
+  assert.equal(wrapper.find('[data-role="project-id"]').exists(), false);
+  await wrapper.find('[data-role="project-title"]').setValue('Первый черновик');
   await wrapper.find('[data-role="project-title"]').setValue('Новый продукт');
   await wrapper.find('[data-role="project-save"]').trigger('click');
   await flushPromises();
 
   assert.equal(harness.calls.filter(([name]) => name === 'save').length, 1);
-  assert.deepEqual(harness.pushes, ['/projects/new-project']);
+  assert.deepEqual(harness.pushes, ['/projects/novyy-produkt']);
   assert.equal(await harness.updateGuards[0](), true);
   assert.equal(harness.confirmations.length, 0, 'успешно сохранённая форма не считается изменённой');
 });
@@ -711,8 +712,7 @@ test('409 exists при создании показывает «Открыть �
     saveResult: { ok: false, error: 'exists', fieldErrors: [] },
   });
 
-  await wrapper.find('[data-role="project-id"]').setValue('demo');
-  await wrapper.find('[data-role="project-title"]').setValue('Мой проект');
+  await wrapper.find('[data-role="project-title"]').setValue('Demo');
   await nextTick();
   await wrapper.find('[data-role="project-save"]').trigger('click');
 
@@ -721,7 +721,12 @@ test('409 exists при создании показывает «Открыть �
   assert.ok(failure.exists());
   assert.match(failure.text(), /Открыть найденный проект/);
   assert.equal(harness.store.draft.id, 'demo');
-  assert.equal(harness.store.draft.title, 'Мой проект');
+  assert.equal(harness.store.draft.title, 'Demo');
+  await wrapper.find('[data-role="project-title"]').setValue('Другой проект');
+  assert.equal(harness.store.draft.id, 'drugoy-proekt');
+  await wrapper.find('[data-role="project-id"]').setValue('custom-project');
+  await wrapper.find('[data-role="project-title"]').setValue('Новое название');
+  assert.equal(harness.store.draft.id, 'custom-project');
 
   await wrapper.find('[data-role="project-open-found"]').trigger('click');
 

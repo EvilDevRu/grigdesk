@@ -53,88 +53,34 @@
           </template>
         </UiPaneHeader>
 
-        <div class="form-content">
-          <UiInlineMessage
-            v-if="!chat.loaded && !creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted"
-            :tone="chat.loadError ? 'warning' : 'neutral'"
-          >
-            <template v-if="chat.loadError">
-              <strong>{{ t('core.chatListLoadFailed') }}</strong>
-              <div>{{ resolveUiText(chat.loadErrorMessage || '') }}</div>
-              <UiButton :disabled="chat.loading" @click="chat.retryLoad()">
-                {{ t('core.chatListRetry') }}
-              </UiButton>
-            </template>
-            <div v-if="!chat.loadError || chat.loading">{{ t('core.chatListLoading') }}</div>
-            <div>{{ t('core.chatStoreNotLoaded') }}</div>
-          </UiInlineMessage>
-          <ProjectForm
-            v-if="currentDraft && store.draft"
-            v-model="store.draft"
-            :detail="creating ? null : currentDetail"
-            :creating="creating"
-            :saving="saving"
-            :dirty="dirty"
-            :server-errors="fieldErrors"
-            :checks="store.checks"
-            :busy="lifecycleBusy"
-            :readonly="registrationDeleted"
-            :lifecycle-failure="lifecycleFailure"
-            :dependencies="store.dependencies"
-            @save="submit"
-            @cancel="cancelChanges"
-            @check="check"
-            @select-repo="selectRepo"
-            @open-routes="openRoutes"
-            @archive="archive"
-            @restore="restore"
-            @remove="remove"
-            @retry-dependencies="retryDependencies"
-            @open-rules="openRules"
-          >
-            <template #notices>
-              <div
-                v-if="store.error && !store.conflict && saveFailure !== 'exists'"
-                class="form-notice"
-                role="alert"
-              >
-                <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
-                <UiButton
-                  v-if="!creating && !currentDetail"
-                  data-role="project-detail-retry"
-                  @click="retryProject"
-                > {{ t('core.pluginNotificationsRetry') }} </UiButton>
-              </div>
-              <ProjectConflict
-                v-if="currentDraft && store.conflict"
-                class="form-notice"
-                :conflict="store.conflict"
-                :busy="saving"
-                @reload="reloadFromServer"
-                @overwrite="overwriteServer"
-              />
-
-              <div v-if="saveFailure === 'exists'" class="form-notice" data-role="project-save-failure">
-                <UiInlineMessage tone="warning">
-                  <p class="sub">{{ t('core.projectProektSTakimIdentifikatorom') }}</p>
-                  <UiButton data-role="project-open-found" variant="text" @click="openFound"> {{ t('core.projectOtkrytNaydennyyProekt') }} </UiButton>
-                </UiInlineMessage>
-              </div>
-
-            </template>
-          </ProjectForm>
-          <div v-else class="form-notice">
-            <template v-if="store.error">
-              <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
-              <UiButton v-if="!creating" data-role="project-detail-retry" @click="retryProject"> {{ t('core.pluginNotificationsRetry') }} </UiButton>
-            </template>
-            <UiLoadingState v-else :label="t('core.projectZagruzkaProekta')" variant="document">
-              <div class="passport-loading">
-                <UiSkeletonLayout layout="form" :header="false" />
-              </div>
-            </UiLoadingState>
-          </div>
-        </div>
+        <ProjectFormScreen
+          :chat="chat"
+          :creating="creating"
+          :detail="currentDetail"
+          :draft-present="currentDraft"
+          :saving="saving"
+          :dirty="dirty"
+          :server-errors="fieldErrors"
+          :busy="lifecycleBusy"
+          :readonly="registrationDeleted"
+          :lifecycle-failure="lifecycleFailure"
+          :dependencies="store.dependencies"
+          :save-failure="saveFailure"
+          @save="submit"
+          @cancel="cancelChanges"
+          @check="check"
+          @select-repo="selectRepo"
+          @open-routes="openRoutes"
+          @archive="archive"
+          @restore="restore"
+          @remove="remove"
+          @retry-dependencies="retryDependencies"
+          @open-rules="openRules"
+          @reload="reloadFromServer"
+          @overwrite="overwriteServer"
+          @retry-detail="retryProject"
+          @open-found="openFound"
+        />
       </section>
 
       <section
@@ -158,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout, t, messageRef } from '../ui';
+import { t, messageRef } from '../ui';
 
 // Раздел «Проекты»: список паспортов слева, паспорт открытого проекта справа.
 //
@@ -169,8 +115,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 
 import {
-  UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip, resolveUiText,
-  UiLoadingState,
+  UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
@@ -189,8 +134,7 @@ import {
 import * as projectActions from '../actions/projects';
 import type { ProjectDetail } from '../../../shared/runtime/projectsContracts';
 import { createDraft, isDirty } from './projects/projectDraft';
-import ProjectConflict from './projects/ProjectConflict.vue';
-import ProjectForm from './projects/ProjectForm.vue';
+import ProjectFormScreen from './projects/ProjectFormScreen.vue';
 import ProjectList from './projects/ProjectList.vue';
 import ProjectIcon from './projects/ProjectIcon.vue';
 
@@ -587,9 +531,7 @@ function openRules(path: string): void {
   }
 }
 
-function openFound(): void {
-  const id = store.draft?.id ?? '';
-
+function openFound(id: string): void {
   if (id) {
     openProject(id);
   }
@@ -702,54 +644,6 @@ function retryProject(): void {
 
 .status-dot.archived {
   background: var(--ink-low);
-}
-
-.form-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-}
-
-.form-notice {
-  margin-bottom: 16px;
-  overflow-wrap: anywhere;
-}
-
-.form-content > .form-notice {
-  padding: 20px;
-  overflow: auto;
-}
-
-.passport-loading {
-  --skeleton-form-columns: var(--workspace-label-column) minmax(0, 1fr);
-  --skeleton-form-column-gap: var(--workspace-column-gap);
-  max-width: calc(940px - var(--workspace-selection-column) - var(--workspace-actions-column)
-    - 2 * var(--workspace-column-gap));
-  width: calc(100% - var(--workspace-selection-column) - var(--workspace-actions-column)
-    - 2 * var(--workspace-column-gap));
-}
-
-.passport-loading :deep(.ui-skeleton-layout__copy) {
-  grid-template-columns: var(--skeleton-form-columns);
-  column-gap: var(--skeleton-form-column-gap);
-}
-
-@container project-detail (max-width: 660px) {
-  .passport-loading {
-    width: 100%;
-  }
-}
-
-@container project-detail (max-width: 480px) {
-  .passport-loading {
-    --skeleton-form-columns: minmax(0, 1fr);
-  }
-
-  .form-content > .form-notice:has(.passport-loading) {
-    padding: 16px 12px;
-  }
 }
 
 .welcome {

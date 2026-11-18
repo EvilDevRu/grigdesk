@@ -1,16 +1,24 @@
 import { projectIcon } from '../../../../shared/runtime/projectIcon.ts';
 
+const svgType = 'image/svg+xml';
+const iconFileTypes = ['image/png', 'image/jpeg', 'image/webp', svgType];
+
+export const PROJECT_ICON_FILE_ACCEPT = [...iconFileTypes, '.svg'].join(',');
+
 /**
- * Загруженный raster уменьшается до небольшой самостоятельной иконки.
- * Object URL освобождается при любом исходе, оригинал на сервер не отправляется.
+ * PNG, JPEG, WebP и SVG декодируются как изображение и вписываются в PNG 64×64.
+ * SVG загружается в Image, где сценарии и внешние ресурсы отключены браузером.
  */
 export async function projectIconFile(file: File): Promise<string> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)
-    || file.size <= 0 || file.size > 5 * 1024 * 1024) {
+  const unknownType = file.type === '' || file.type === 'application/octet-stream';
+  const type = unknownType && /\.svg$/iu.test(file.name) ? svgType : file.type;
+
+  if (!iconFileTypes.includes(type) || file.size <= 0 || file.size > 5 * 1024 * 1024) {
     throw new Error();
   }
 
-  const url = URL.createObjectURL(file);
+  const imageData = type === file.type ? file : file.slice(0, file.size, type);
+  const url = URL.createObjectURL(imageData);
 
   try {
     const image = new Image();

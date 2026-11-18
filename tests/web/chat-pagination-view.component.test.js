@@ -64,6 +64,7 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
       `,
       '../../stores/auth.ts': 'export const useAuthStore = () => ({ clientScope: "fixture" });',
       '../../stores/shell.ts': 'export const useShellStore = () => ({ profile: { id: "fixture" } });',
+      'vue-router': 'export const useRouter = () => ({ push: async () => {} });',
       '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__pagingMountChat;',
       '../../stores/providers.ts': `export const useProvidersStore = () => ({
         load() {}, modelOf() { return { model: null, provider: null }; },

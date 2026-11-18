@@ -41,6 +41,7 @@ test('CHATS-RETURN-01', async (t) => {
   const component = await compileVue(webFile('src/views/ChatsView.vue'), {
     stubs: {
       '../ui': 'export const vTooltip = {};',
+      'vue-router': 'export const useRouter = () => ({ push: async () => {} });',
       '../stores/chat.ts': 'export const useChatStore = globalThis.__returnStore;',
       '../composables/useUiContextSource.ts': `export const useUiContextSource = () => ({
         focus() {}, update() {}, blur() {},

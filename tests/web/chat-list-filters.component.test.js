@@ -72,6 +72,8 @@ before(
       `,
       '../../stores/auth.ts': 'export const useAuthStore = () => ({ clientScope: "fixture" });',
       '../../stores/shell.ts': 'export const useShellStore = () => ({ profile: { id: "fixture" } });',
+      '../projects/ProjectCreateDialog.vue':
+        'export default { template: "<div data-chat-project-create-dialog />" };',
     };
 
     ChatList = await compileVue(webFile('src/views/chat/ChatList.vue'), { stubs: listStubs });
@@ -829,17 +831,35 @@ test('PROJECT-UI-SELECT: полоса выбирает проект, откры�
   assert.equal(calls.search.at(-1)[2].project ?? '', '');
 });
 
-test('PROJECT-UI-CHIP: клик чипа меняет scope, не выбирая строку', async (t) => {
-  const { wrapper, state } = await fixture(t, { activeId: 'c-2' });
-  const chip = wrapper.find('[data-chat-project-chip="alpha"]');
+test('PROJECT-UI-CREATE-PLUS: плюс полосы и компактной шапки открывает модалку создания', async (t) => {
+  const { wrapper } = await fixture(t);
 
-  assert.equal(chip.exists(), true);
-  assert.equal(chip.element.parentElement.closest('button') === null, true);
-  await chip.trigger('click');
+  assert.equal(wrapper.find('[data-chat-project-create-dialog]').exists(), false);
+  assert.equal(wrapper.find('[data-chat-project-picker="compact"] [data-chat-project-create]').exists(), true);
+
+  const railPlus = wrapper.find('[data-chat-project-picker="rail"] [data-chat-project-create]');
+
+  assert.equal(railPlus.exists(), true);
+  await railPlus.trigger('click');
   await drain();
 
-  assert.equal(state.activeId, 'c-2');
-  assert.equal(wrapper.find('[data-chat-project-chip="alpha"]').exists(), false);
+  assert.equal(wrapper.find('[data-chat-project-create-dialog]').exists(), true);
+});
+
+test('PROJECT-UI-ROW: строка без плашки проекта, клик выбирает чат', async (t) => {
+  const { wrapper, state, calls } = await fixture(t, { activeId: 'c-2' });
+
+  // Общая фикстура глушит selectChat: здесь проверяем именно выбор строки.
+  state.selectChat = (id) => {
+    state.activeId = id;
+  };
+
+  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
+  await wrapper.find('[data-chat-id="c-1"] .row-hit').trigger('click');
+  await drain();
+
+  assert.equal(state.activeId, 'c-1');
+  assert.equal(calls.search.at(-1)[2].project ?? '', '');
 });
 
 test('PROJECT-UI-ARCHIVE: архив и остальные фильтры пересекаются с project', async (t) => {
@@ -997,7 +1017,7 @@ test('PROJECT-UI-ARCHIVE-LABEL: desktop раскрывает причину не
   assert.equal(wrapper.find('[data-chat-project-current]').text().includes('Архив'), true);
 });
 
-test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty ленты обновляет прогретый chip', async (t) => {
+test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty ленты обновляет проект строки', async (t) => {
   const world = await serverWorld(t, [
     sampleChat('dirty-project', {
       workdir: {
@@ -1021,7 +1041,7 @@ test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty �
 
   const { wrapper } = await fixture(t, {}, chat);
 
-  assert.equal(wrapper.find('[data-chat-project-chip="alpha"]').text(), 'Альфа');
+  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
 
   const response = await world.app.inject('/api/chat/store/head/dirty-project');
 
@@ -1034,15 +1054,14 @@ test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty �
   await chat._pullChat('dirty-project', false, head);
   await drain();
 
-  assert.equal(wrapper.find('[data-chat-project-chip="alpha"]').exists(), false);
-  assert.equal(wrapper.find('[data-chat-project-chip="beta"]').text(), 'Бета');
+  // Проект строки живёт в проекции шапки, а не в полях сессии: workdir не переписан.
+  const row = chat.list('', false).find((entry) => entry.id === 'dirty-project');
+
+  assert.equal(row?.catalogProjectId, 'beta');
+  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
   assert.equal(session.draft, 'Локальный черновик');
   assert.equal(JSON.stringify(session.workdir), folder);
   assert.equal(session.messages === messages, true);
-  await wrapper.find('[data-chat-project-chip="beta"]').trigger('click');
-  await drain();
-
-  assert.equal(chat.search.filters.project, 'beta');
   assert.equal(chat.activeId, 'other-project');
 });
 

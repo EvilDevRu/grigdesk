@@ -864,6 +864,13 @@
   color: var(--accent);
 }
 
+/* Служебные элементы повторяют видимые 28 px аватаров и сохраняют площадку нажатия 34 px. */
+.ui-icon-button[data-context='chat-project-rail-item']:is([data-chat-project=''], [data-chat-project='@none']) {
+  padding: 3px;
+  border-radius: calc(var(--control-radius) + 3px);
+  background-clip: content-box;
+}
+
 .ui-icon-button[data-context='code-rail-item']:focus-visible,
 .ui-icon-button[data-context='chat-project-rail-item']:focus-visible {
   outline: 2px solid var(--accent);
@@ -874,18 +881,6 @@
 .ui-icon-button[data-context='chat-project-rail-item'] svg {
   width: 19px;
   height: 19px;
-}
-
-.ui-button[data-context='chat-project-chip'] {
-  min-height: 24px;
-  height: 24px;
-  padding: 0 4px;
-  font-size: 10px;
-}
-.ui-button[data-context='chat-project-chip'] .ui-button__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Строка дерева и списка изменений плагина «Код». Это плотный список, а не ряд

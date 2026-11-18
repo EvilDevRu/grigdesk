@@ -4,6 +4,7 @@
 // переименование ключа, перенос выбора по умолчанию, порядок — можно проверить без
 // компонента, а форма не держит вторую копию правил.
 
+import { PROJECT_LIMITS } from '../../../../shared/runtime/projectsContracts';
 import type { ProjectDetail, ProjectInput } from '../../../../shared/runtime/projectsContracts';
 
 export interface ProjectRepoDraft {
@@ -30,9 +31,71 @@ export const DRAFT_FIELDS = ['title', 'description', 'icon', 'tags', 'repos', 'd
 
 export type ProjectDraftField = (typeof DRAFT_FIELDS)[number];
 
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'yo',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'kh',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'shch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
+  є: 'ye',
+  і: 'i',
+  ї: 'yi',
+  ґ: 'g',
+  ў: 'u',
+};
+
+/**
+ * Превращает заголовок в ключ, совместимый с фабрикой и паспортом.
+ * Числовые названия получают префикс, а для названий без латинского представления есть запасной ключ.
+ */
+export function projectIdFromTitle(title: string): string {
+  if (!title.trim()) {
+    return '';
+  }
+
+  const slug = title.normalize('NFC').toLowerCase()
+    .replace(/[а-яёєіїґў]/gu, (letter) => CYRILLIC_TO_LATIN[letter] ?? letter)
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+
+  const id = /^[a-z]/u.test(slug) ? slug : ['project', slug].filter(Boolean).join('-');
+
+  return id.slice(0, PROJECT_LIMITS.id).replace(/-+$/u, '');
+}
+
 /**
  * Черновик открытого паспорта: копия полей, которые правит форма.
- * Для нового проекта — пустой (`createDraft(null)`): идентификатор впишет человек.
+ * Для нового проекта черновик пустой, идентификатор вычисляется из названия.
  */
 export function createDraft(detail: ProjectDetail | null): ProjectDraft {
   if (!detail) {

@@ -8,6 +8,7 @@
       :model-value="selectedProject"
       :disabled="!projectsReady"
       @select="selectProject"
+      @create="createOpen = true"
     />
 
     <div class="cl-body">
@@ -19,6 +20,7 @@
         :disabled="!projectsReady"
         compact
         @select="selectProject"
+        @create="createOpen = true"
       />
       <UiInlineMessage v-if="projectAvailable && projects.error" data-chat-project-error tone="danger">
         {{ projects.error }}
@@ -269,8 +271,6 @@
         v-memo="[
           r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
           r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
-          selectedProject, projectAvailable, Boolean(r.project),
-          r.catalogProjectId, r.projectTitle, r.project?.icon,
           r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
         ]"
         class="row"
@@ -278,8 +278,6 @@
           archived: r.archived,
           cur: r.id === chat.activeId,
           wait: r.waiting,
-          'has-project-chip': projectAvailable && !selectedProject && !!r.catalogProjectId
-            && editId !== r.id,
         }"
       >
         <template v-if="editId === r.id">
@@ -374,20 +372,6 @@
           </span>
         </UiPressable>
 
-        <UiButton
-          v-if="projectAvailable && !selectedProject && r.catalogProjectId && editId !== r.id"
-          class="project-chip"
-          data-context="chat-project-chip"
-          variant="ghost"
-          size="compact"
-          :data-chat-project-chip="r.catalogProjectId"
-          :disabled="!r.project"
-          v-tooltip="r.projectTitle"
-          @click.stop="selectProject(r.catalogProjectId)"
-        >
-          {{ r.projectTitle }}
-        </UiButton>
-
         <span v-if="editId !== r.id" class="acts">
           <!-- Мышь: кнопки появляются при наведении, действие — одним нажатием. -->
           <span class="acts-quick">
@@ -460,6 +444,13 @@
       </div>
     </div>
     </div>
+    <ProjectCreateDialog
+      v-if="createOpen"
+      :open="createOpen"
+      @update:open="createOpen = $event"
+      @saved="retryProjects"
+      @open-found="openFoundProject"
+    />
   </aside>
 </template>
 
@@ -476,6 +467,7 @@ import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ChatProjectPicker from './ChatProjectPicker.vue';
+import ProjectCreateDialog from '../projects/ProjectCreateDialog.vue';
 import { useChatProjectFilter } from './useChatProjectFilter.ts';
 import ChatSleepBadge from './ChatSleepBadge.vue';
 import { useChatSleeping } from '../../composables/useChatSleeping.ts';
@@ -489,7 +481,6 @@ import {
   EMPTY_CHAT_FILTERS, hasChatFilters, normalizeChatFilters,
 } from '../../../../shared/chat/chatPaging.ts';
 
-import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts.ts';
 import type { ChatListFilters } from '../../../../shared/chat/chatPaging.ts';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
@@ -497,14 +488,12 @@ import type { ChatListFilters } from '../../../../shared/chat/chatPaging.ts';
 type ListRow = ChatListRow & {
   modelName: string;
   sleep?: ChatSleepingSession;
-  project?: ProjectSummary;
-  projectTitle: string;
 };
 
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
 // колонку: следить за activeId там мало — повторный тык по уже активному чату его не меняет.
-const emit = defineEmits(['open']);
+const emit = defineEmits(['open', 'open-project']);
 
 const prov = useProvidersStore();
 const { sessions: sleepingSessions } = useChatSleeping();
@@ -581,6 +570,16 @@ const listFilters = computed<ChatListFilters>(() => {
 });
 
 const filtersOpen = ref(false);
+
+const createOpen = ref(false);
+
+/**
+ * «Открыть найденный» из модалки создания ведёт в паспорт существующего проекта:
+ * адрес принимает раздел «Проекты», поэтому навигацию делает владелец раскладки.
+ */
+function openFoundProject(id: string): void {
+  emit('open-project', id);
+}
 
 const taskSelect = ref<'all' | 'any' | 'none'>('all');
 
@@ -911,13 +910,10 @@ const rows = computed(() => {
 
   return chat.list(q.value, showArchived.value, listFilters.value).map((r: ChatListRow) => {
     const { model, provider } = prov.modelOf(r.modelRef || r.model);
-    const project = r.catalogProjectId ? projectById.value.get(r.catalogProjectId) : undefined;
 
     return {
       ...r,
       provider,
-      project,
-      projectTitle: project?.title || r.catalogProjectId || '',
       modelName: model?.name || '',
       sleep: sleepingSessions.value[r.id],
     };
@@ -1328,17 +1324,6 @@ async function del(r: ListRow) {
 .row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px;
   min-height: var(--chat-list-row-h); border-radius: 10px; --row-bg: var(--surface); background: var(--row-bg); }
 .row-hit { display: flex; flex: 1; align-items: center; gap: 9px; width: 100%; min-width: 0; text-align: left; }
-.project-chip {
-  position: absolute;
-  inset-inline-start: calc(var(--chat-avatar-size) + 17px);
-  bottom: 4px;
-  width: 88px;
-  max-width: 88px;
-}
-
-.has-project-chip .t2 {
-  padding-inline-start: 94px;
-}
 
 .row:hover { --row-bg: var(--surface-2); }
 .row.cur { --row-bg: color-mix(in srgb, var(--accent) 18%, var(--surface)); }

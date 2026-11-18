@@ -32,6 +32,7 @@ before(async () => {
             `,
             '../../stores/auth.ts': 'export const useAuthStore = () => ({ clientScope: "fixture" });',
             '../../stores/shell.ts': 'export const useShellStore = () => ({ profile: { id: "fixture" } });',
+            'vue-router': 'export const useRouter = () => ({ push: async () => {} });',
             '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__loadingChat;',
             '../../stores/providers.ts': `export const useProvidersStore = () => ({
         load() {}, modelOf() { return { model: null, provider: null }; },
@@ -39,7 +40,8 @@ before(async () => {
             '../../shared/apiClient.ts': `export const api = { get: async (url) => {
         if (url !== '/api/chat/sessions') throw new Error('Неожиданный API: ' + url);
         return { sessions: [] };
-      } };`,
+      } };
+      export const failureText = (value) => String(value ?? '');`,
             '../../composables/useSse.ts': `import { ref } from 'vue';
         export const useSse = () => ({ connected: ref(true) });
         export const sseSubscribe = () => () => {};`,

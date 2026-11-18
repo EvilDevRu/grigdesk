@@ -672,6 +672,15 @@ button.ui-select {
   padding-block: 10px;
 }
 
+.ui-file-picker[data-context='project-icon-upload'] {
+  display: block;
+}
+
+.ui-file-picker[data-context='project-icon-upload'] .ui-file-picker__copy strong {
+  font-size: var(--workspace-text-size);
+  font-weight: 500;
+}
+
 .ui-file-picker[data-role='task-attachment'] {
   display: inline-grid;
   flex: none;

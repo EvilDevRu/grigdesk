@@ -159,8 +159,11 @@ const visible = computed(() => {
 
 <style scoped>
 .project-loading {
-  --skeleton-row-height: max(34px, var(--control-height));
-  --skeleton-list-gap: 0px; padding: 0 6px 10px; }
+  /* Иконка 28 px и по 7 px вертикального отступа готовой строки. */
+  --skeleton-row-height: max(42px, var(--control-height));
+  --skeleton-list-gap: 0px;
+  padding: 0 6px 10px;
+}
 
 .list {
   min-width: 0;
@@ -212,14 +215,15 @@ const visible = computed(() => {
 .row {
   display: flex;
   align-items: center;
+  column-gap: 8px;
   width: 100%;
 }
 
 .row-content {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
-  width: 100%;
   overflow-wrap: anywhere;
 }
 

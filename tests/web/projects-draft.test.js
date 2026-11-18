@@ -80,6 +80,17 @@ test('createDraft(null) даёт пустой черновик нового пр
   });
 });
 
+test('идентификатор выводится из названия и помещается в ограничения формата', () => {
+  const { projectIdFromTitle } = draftModule;
+
+  assert.equal(projectIdFromTitle('  Ёлки и Щуки!  '), 'yolki-i-shchuki');
+  assert.equal(projectIdFromTitle('Café / CRM'), 'cafe-crm');
+  assert.equal(projectIdFromTitle('2026'), 'project-2026');
+  assert.equal(projectIdFromTitle('📦'), 'project');
+  assert.equal(projectIdFromTitle('   '), '');
+  assert.equal(projectIdFromTitle(`${'а'.repeat(40)}-б`), 'a'.repeat(40));
+});
+
 test('removeRepo последней строки обнуляет defaultRepoKey', () => {
   const single = draftModule.createDraft({ ...DETAIL, repos: [DETAIL.repos[0]] });
   const afterRemoval = draftModule.removeRepo(single, 0);

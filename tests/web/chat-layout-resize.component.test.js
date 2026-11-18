@@ -33,6 +33,7 @@ let nonce = 0;
 const compileChatsView = () => compileVue(CHATS_VIEW_PATH, {
   stubs: {
     '../ui': `export {vTooltip} from './src/services/tooltipDirective.ts';`,
+    'vue-router': 'export const useRouter = () => ({ push: async () => {} });',
     '../stores/chat.ts': 'export const useChatStore = globalThis.__chatsResizeStore;',
     '../composables/useUiContextSource.ts': `export const useUiContextSource = () => ({
       focus() {}, update() {}, blur() {},

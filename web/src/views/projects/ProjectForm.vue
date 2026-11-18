@@ -1,24 +1,27 @@
 <template>
-  <form class="project-editor" @submit.prevent="submit">
+  <form :id="formId" class="project-editor" :class="{ 'project-editor-dialog': dialog }" @submit.prevent="submit">
     <div class="editor-scroll">
       <div class="editor-body">
         <slot name="notices" />
         <section class="basics" :aria-label="t('core.projectOsnovnoe')">
-          <UiField v-if="creating" :label="t('core.projectIdentifikator')" :error="errorOf('id')"
-            data-context="workspace-property"
+          <UiField :label="t('core.taskTitle')" :error="errorOf('title')"
+            :data-context="propertyContext" :required="creating">
+            <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title" :readonly="readonly"
+              data-role="project-title" :placeholder="t('core.projectNazvanieProekta')"
+              @update:model-value="setTitle" />
+          </UiField>
+          <UiField v-if="creating && (allowIdEdit || errorOf('id'))"
+            :label="t('core.projectIdentifikator')" :error="errorOf('id')" :data-context="propertyContext"
             :hint="t('core.projectLatinskieBukvyTsifryI')">
             <UiInput :ref="(element) => setIdRef(element)" :model-value="draft.id"
-              data-role="project-id" :placeholder="'my-project'" @update:model-value="setId" />
+              data-role="project-id" @update:model-value="setId" />
           </UiField>
-          <UiField :label="t('core.taskTitle')" :error="errorOf('title')" data-context="workspace-property">
-            <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title" :readonly="readonly"
-              data-role="project-title" :placeholder="t('core.projectNazvanieProekta')" @update:model-value="set('title', $event)" />
-          </UiField>
-          <UiField :label="t('core.projectIcon')" :error="errorOf('icon')" data-context="workspace-property">
+          <UiField :label="t('core.projectIcon')" :error="errorOf('icon')"
+            :data-context="propertyContext">
             <ProjectIconEditor
-              :key="draft.id + ':' + iconEditorEpoch"
-              :id="draft.id"
-              :title="draft.title"
+              :key="iconProjectId + ':' + iconEditorEpoch"
+              :id="iconProjectId"
+              :project-title="draft.title"
               :model-value="draft.icon"
               :disabled="readonly || saving || archived"
               @update:model-value="draft = { ...draft, icon: $event }"
@@ -29,13 +32,15 @@
             <span class="label">{{ t('core.projectIdentifikator') }}</span>
             <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">{{ t('core.projectNeMenyaetsya') }}</span></div>
           </div>
-          <UiField :label="t('core.taskDescription')" :error="errorOf('description')" data-context="workspace-property">
+          <UiField :label="t('core.taskDescription')" :error="errorOf('description')"
+            :data-context="propertyContext">
             <UiTextarea :model-value="draft.description" :readonly="readonly" data-role="project-description"
               data-context="workspace-note" :rows="2" :placeholder="t('core.projectChemZanimaetsyaProektI')"
-              @update:model-value="set('description', $event)" />
+              @update:model-value="setDescription" />
           </UiField>
-          <UiField :label="t('core.projectMetki')" :error="errorOf('tags')" :hint="t('core.projectCherezZapyatuyu')"
-            data-context="workspace-property" data-hint-inline="true">
+          <UiField :label="t('core.projectMetki')" :error="errorOf('tags')"
+            :hint="t('core.projectCherezZapyatuyu')" :data-context="propertyContext"
+            :data-hint-inline="dialog ? undefined : 'true'">
             <UiInput :model-value="draft.tags.join(', ')" :readonly="readonly" data-role="project-tags"
               :placeholder="t('core.projectProduktSaytVnutrenniy')" @update:model-value="setTags" />
           </UiField>
@@ -46,7 +51,7 @@
             @check="emit('check', $event)"
             @select-repo="emit('selectRepo', $event)" />
           <div class="source-row">
-            <span class="hint">{{ repoSourceText }}</span>
+            <span v-if="!dialog" class="hint">{{ repoSourceText }}</span>
             <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
               :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen"> {{ t('core.projectDostupKPapkam') }} {{ accessNoteOpen ? '↑' : '↓' }}
             </UiButton>
@@ -132,11 +137,10 @@
 
       </div>
     </div>
-    <footer class="editor-footer">
+    <footer v-if="!dialog" class="editor-footer">
       <UiFormActions class="save-actions" align="between">
-        <span v-if="draft.defaultRepoRequired" class="save-status attention" role="status"> {{ t('core.projectVyberiteRepozitoriyPoUmolchaniyu') }} </span>
-        <span v-else class="save-status" :class="{ attention: dirty }" role="status">
-          <span v-if="!creating" class="save-dot" aria-hidden="true" />
+        <span class="save-status" :class="{ attention: dirty || draft.defaultRepoRequired }" role="status">
+          <span v-if="!creating && !draft.defaultRepoRequired" class="save-dot" aria-hidden="true" />
           {{ saveStatus }}
         </span>
         <div class="save-buttons">
@@ -146,13 +150,12 @@
             data-role="project-save"
             data-context="workspace-save"
             tone="accent"
-            variant="outline"
             :disabled="!canSave"
             :loading="saving"
             :loading-label="t('core.projectSohranyayu')"
             type="submit"
           >
-            {{ creating ? t('core.projectSozdatProekt') : t('core.save') }}
+            {{ saveLabel }}
           </UiButton>
         </div>
       </UiFormActions>
@@ -170,7 +173,7 @@ import { computed, nextTick, ref, useId } from 'vue';
 
 import { UiButton, UiField, UiFormActions, UiInput, UiTextarea, t } from '../../ui';
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
-import { toInput } from './projectDraft';
+import { projectIdFromTitle, toInput } from './projectDraft';
 import ProjectIcon from './ProjectIcon.vue';
 import ProjectIconEditor from './ProjectIconEditor.vue';
 import ProjectProfileStatus from './ProjectProfileStatus.vue';
@@ -188,6 +191,9 @@ const draft = defineModel<ProjectDraft>({ required: true });
 const props = defineProps<{
   detail: ProjectDetail | null;
   creating: boolean;
+  dialog?: boolean;
+  formId?: string;
+  allowIdEdit?: boolean;
   saving: boolean;
   // Есть ли правки относительно снимка: считает страница — ей это нужно и для
   // защиты ухода, и для кнопки сохранения.
@@ -229,6 +235,8 @@ const accessNoteId = useId();
 const idInput = ref<InstanceType<typeof UiInput> | null>(null);
 const titleInput = ref<InstanceType<typeof UiInput> | null>(null);
 const repoRows = ref<InstanceType<typeof ProjectRepoRows> | null>(null);
+const propertyContext = computed(() => props.dialog ? undefined : 'workspace-property');
+const iconProjectId = computed(() => props.creating ? '' : draft.value.id);
 
 // Свежая локальная проверка важнее серверной: она про тот текст, что в поле сейчас.
 const shownErrors = computed(() => (
@@ -246,10 +254,14 @@ const profileRepoCount = computed(() => (
 // исчез бы молча, а от него зависят и «Код», и пути триажа.
 const canSave = computed(() => (
   props.dirty && !draft.value.defaultRepoRequired && !props.saving && !props.busy && !props.readonly
-  && !iconBusy.value
+  && !iconBusy.value && (!props.creating || Boolean(draft.value.title.trim()))
 ));
 
+const saveLabel = computed(() => t(props.creating ? 'core.projectSozdatProekt' : 'core.save'));
 const saveStatus = computed(() => {
+  if (draft.value.defaultRepoRequired) {
+    return t('core.projectVyberiteRepozitoriyPoUmolchaniyu');
+  }
   if (props.saving) {
     return t('core.projectSohranyaemIzmeneniya');
   }
@@ -302,8 +314,24 @@ function setId(value: UiTextValue): void {
   draft.value = { ...draft.value, id: String(value ?? '') };
 }
 
-function set(field: 'title' | 'description', value: UiTextValue): void {
-  draft.value = { ...draft.value, [field]: String(value ?? '') };
+/**
+ * Название обновляет автоматически полученный идентификатор нового проекта.
+ * Ручной выбор после конфликта и идентификатор сохранённого проекта сохраняются.
+ */
+function setTitle(value: UiTextValue): void {
+  const title = String(value ?? '');
+  const { id, title: previousTitle } = draft.value;
+  const automatic = props.creating && (!id || id === projectIdFromTitle(previousTitle));
+
+  draft.value = {
+    ...draft.value,
+    title,
+    id: automatic ? projectIdFromTitle(title) : id,
+  };
+}
+
+function setDescription(value: UiTextValue): void {
+  draft.value = { ...draft.value, description: String(value ?? '') };
 }
 
 function setTags(value: UiTextValue): void {
@@ -342,7 +370,8 @@ async function submit(): Promise<void> {
     return;
   }
 
-  const value = { ...toInput(draft.value), ...(props.creating ? { id: draft.value.id } : {}) };
+  const id = draft.value.id || projectIdFromTitle(draft.value.title);
+  const value = { ...toInput(draft.value), ...(props.creating ? { id } : {}) };
   const validation = validateProjectInput(value, { creating: props.creating });
 
   if (!validation.ok) {
@@ -353,8 +382,14 @@ async function submit(): Promise<void> {
   }
 
   localErrors.value = [];
+
+  if (props.creating && !draft.value.id) {
+    draft.value = { ...draft.value, id };
+  }
+
   emit('save');
 }
+defineExpose({ canSave, saveStatus });
 </script>
 
 <style scoped>
@@ -380,6 +415,15 @@ async function submit(): Promise<void> {
   display: grid;
   gap: 8px;
   width: calc(100% - var(--workspace-selection-column) - var(--workspace-actions-column) - 2 * var(--workspace-column-gap));
+}
+
+.project-editor-dialog .editor-scroll {
+  overscroll-behavior: contain;
+}
+
+.project-editor-dialog .basics {
+  width: 100%;
+  gap: 14px;
 }
 
 .identity-row {
@@ -526,6 +570,11 @@ async function submit(): Promise<void> {
 }
 
 @container project-detail (max-width: 480px) {
+  .project-editor-dialog .editor-body {
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+
   .editor-body {
     padding: 16px 12px;
   }

@@ -171,7 +171,10 @@ async function mountForm(t, {
   const component = await compileVue(VIEW, {
     stubs: {
       ...(iconRead ? {
-        './projectIconFile.ts': 'export const projectIconFile = globalThis.__projectIconRead;',
+        './projectIconFile.ts': `
+          export { PROJECT_ICON_FILE_ACCEPT } from './src/views/projects/projectIconFile.ts';
+          export const projectIconFile = globalThis.__projectIconRead;
+        `,
       } : {}),
       '../stores/chat.ts': `export const useChatStore = () => ({
         loaded: true,
@@ -205,7 +208,7 @@ async function mountForm(t, {
 
   await flushPromises();
 
-  return { wrapper, harness };
+  return { wrapper, harness, flushPromises };
 }
 
 function saveButton(wrapper) {
@@ -426,14 +429,20 @@ const PROJECT_PNG = 'data:image/png;base64,'
 
 test('ICON-FORM-REMOVE: удаление иконки — отменяемая правка формы', async (t) => {
   const { wrapper, harness } = await mountForm(t, { detail: { ...DETAIL, icon: PROJECT_PNG } });
+  const picker = () => wrapper.get('[data-project-icon-picker]');
 
   assert.equal(wrapper.find('[data-project-icon-image]').exists(), true);
-  assert.equal(wrapper.find('[data-project-icon-picker] input[type="file"]').exists(), true);
+  const formats = picker().get('input[type="file"]').attributes('accept').split(',');
+
+  assert.ok(formats.includes('image/svg+xml'));
+  assert.ok(formats.includes('.svg'));
+  assert.match(picker().get('button').text(), /Заменить иконку/);
 
   await wrapper.find('[data-project-icon-remove]').trigger('click');
 
   assert.equal(harness.store.draft.icon, null);
   assert.equal(wrapper.find('[data-project-icon-image]').exists(), false);
+  assert.match(picker().get('button').text(), /Загрузить иконку/);
   assert.equal(saveButton(wrapper).attributes('disabled'), undefined);
 
   await wrapper.find('[data-role="project-cancel"]').trigger('click');
@@ -448,6 +457,39 @@ test('ICON-FORM-FALLBACK: сломанное изображение показы
 
   assert.equal(wrapper.find('[data-project-icon-image]').exists(), false);
   assert.equal(wrapper.find('[data-project-initial]').text(), 'Д');
+});
+
+test('ICON-FORM-ERROR: ошибка чтения сменяет подсказку, повтор обновляет превью', async (t) => {
+  const { wrapper, flushPromises } = await mountForm(t, {
+    iconRead: async (file) => {
+      if (file.name === 'broken.png') {
+        throw new Error();
+      }
+
+      return PROJECT_PNG;
+    },
+  });
+  const editor = wrapper.get('[data-project-icon-editor]');
+  const input = editor.get('input[type="file"]');
+
+  async function selectFile(name) {
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [new window.File(['image'], name, { type: 'image/png' })],
+    });
+    await input.trigger('change');
+    await flushPromises();
+  }
+
+  await selectFile('broken.png');
+  assert.match(editor.get('[role="alert"]').text(), /Не удалось прочитать иконку/);
+  assert.equal(editor.find('.icon-hint').exists(), false);
+  assert.equal(editor.find('[data-project-initial]').exists(), true);
+
+  await selectFile('valid.png');
+  assert.equal(editor.find('[role="alert"]').exists(), false);
+  assert.match(editor.get('.icon-hint').text(), /PNG/);
+  assert.equal(editor.get('[data-project-icon-image]').attributes('src'), PROJECT_PNG);
 });
 
 test('ICON-FORM-RACE: отмена инвалидирует поздний decode', async (t) => {

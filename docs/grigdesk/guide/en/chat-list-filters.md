@@ -9,9 +9,15 @@ immediately after the tabs.
 ## Project
 
 Choose a project in the rail on the left. On narrow screens, use the "Chat project"
-selector above search. In the full list, select the chip beside a chat preview
-to filter by that project. The open conversation and its working folder stay in
-place. "All chats" returns to the full list. "No project" shows chats without a project.
+selector above search. On phones, the selector replaces the project rail. The open
+conversation and its working folder stay in place. The top button with a list icon
+("All chats") returns to the full list. "No project" shows chats without a project.
+
+The plus at the bottom of the rail or next to the "Chat project" selector opens the
+"New project" dialog. Enter a name to generate the ID automatically. On phones,
+the dialog fills the screen. "Cancel" and "Create project" are in the footer.
+Cancel and Close ask for confirmation if you have edited the draft. Once created,
+the project appears in the project picker.
 
 Search, archive, and the other filters apply within the selected project.
 Archived projects are available for reading previous conversations. Deleting a

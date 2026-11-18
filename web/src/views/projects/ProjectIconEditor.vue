@@ -1,39 +1,48 @@
 <template>
   <div class="icon-editor" data-project-icon-editor>
-    <ProjectAvatar :id="id" :title="title" :icon="modelValue" large />
-    <UiFilePicker
-      data-project-icon-picker
-      accept="image/png,image/jpeg,image/webp"
-      density="compact"
-      :label="t('core.projectIconChoose')"
-      :disabled="disabled"
-      :busy="busy"
-      :show-summary="false"
-      :show-reset="false"
-      @change="choose"
-    />
-    <UiButton
-      v-if="modelValue"
-      data-project-icon-remove
-      variant="text"
-      :disabled="disabled"
-      @click="clear"
-    >
-      {{ t('core.projectIconRemove') }}
-    </UiButton>
-    <p v-if="error" role="alert">{{ t('core.projectIconInvalid') }}</p>
+    <ProjectAvatar :id="id" :title="projectTitle" :icon="modelValue" large />
+    <div class="icon-details">
+      <div class="icon-actions">
+        <UiFilePicker
+          data-project-icon-picker
+          data-context="project-icon-upload"
+          :accept="PROJECT_ICON_FILE_ACCEPT"
+          :label="modelValue ? t('core.projectIconReplace') : t('core.projectIconChoose')"
+          :disabled="disabled"
+          :busy="busy"
+          :show-summary="false"
+          :show-reset="false"
+          @change="choose"
+        >
+          <template #leading><ProjectIcon name="upload" /></template>
+        </UiFilePicker>
+        <UiButton
+          v-if="modelValue"
+          data-project-icon-remove
+          data-context="workspace-form"
+          variant="text"
+          :disabled="disabled"
+          @click="clear"
+        >
+          {{ t('core.projectIconRemove') }}
+        </UiButton>
+      </div>
+      <UiInlineMessage v-if="error" tone="danger">{{ t('core.projectIconInvalid') }}</UiInlineMessage>
+      <p v-else class="icon-hint">{{ t('core.projectIconRequirements') }}</p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
-import { UiButton, UiFilePicker, t } from '../../ui.ts';
+import { UiButton, UiFilePicker, UiInlineMessage, t } from '../../ui.ts';
 import ProjectAvatar from './ProjectAvatar.vue';
-import { projectIconFile } from './projectIconFile.ts';
+import ProjectIcon from './ProjectIcon.vue';
+import { PROJECT_ICON_FILE_ACCEPT, projectIconFile } from './projectIconFile.ts';
 
 const props = defineProps<{
   id: string;
-  title: string;
+  projectTitle: string;
   modelValue?: string | null;
   disabled?: boolean;
 }>();
@@ -101,15 +110,28 @@ onBeforeUnmount(invalidate);
 
 <style scoped>
 .icon-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.icon-details {
+  display: grid;
+  gap: 4px;
+}
+
+.icon-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 4px 6px;
 }
 
-.icon-editor p {
-  flex-basis: 100%;
+.icon-hint {
   margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 16px;
 }
 </style>

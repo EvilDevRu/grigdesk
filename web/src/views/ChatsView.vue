@@ -2,7 +2,7 @@
   <div ref="host" class="agents"
     :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
     :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined" :class="`m-${pane}`" :style="layoutStyle">
-    <ChatList @open="pane = 'chat'" />
+    <ChatList @open="pane = 'chat'" @open-project="openProject" />
     <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
          :aria-label="t('core.chatShirinaSpiskaChatov')"
          :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
@@ -22,6 +22,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useChatStore } from '../stores/chat.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
@@ -34,6 +35,15 @@ import { vTooltip, t } from '../ui';
 // Рабочее место агентов в телеграм-раскладке: слева список чатов, справа активный чат.
 const chat = useChatStore();
 const { activeId } = storeToRefs(chat);
+const router = useRouter();
+
+/**
+ * Модалка создания проекта из списка чатов может увести в паспорт найденного
+ * проекта: адрес принимает раздел «Проекты», раскладка чатов остаётся прежней.
+ */
+function openProject(id: string): void {
+  void router.push(`/projects/${id}`);
+}
 
 // На узком экране колонка одна: показываем либо список, либо открытый чат. Переключение
 // держим здесь классом, а не через matchMedia в JS: раскладку и так решает CSS, второй

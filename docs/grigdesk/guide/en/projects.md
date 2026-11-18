@@ -12,9 +12,12 @@ Prepare existing directories on the server. Human-supplied paths determine which
 
 ## What to do
 
-1. Open Projects and create a registration with a permanent ID and name.
-2. Add repositories with short labels and absolute paths. Choose the default and check path availability.
-3. Save the project details. If paths differ from the factory profile, compare both and choose explicitly.
+1. Open Projects, select New, and enter a name. GrigDesk generates the ID from
+   the name. If the ID is taken, enter another one or open the existing project.
+   The ID is visible in the project details after creation.
+2. In Repositories, select Add and enter a short label and absolute path. Choose the primary
+   folder and check that the paths are available.
+3. Save the project details.
 4. Chat with project creates a draft with its working folder selected. Configure the profile and routes separately
    for tasks and pipelines.
 5. Archive the project to prevent new work. Inspect blocking references and disable them in their owning sections.
@@ -35,9 +38,10 @@ You do not need to send tokens; registering a project alone does not install the
 
 ## Project icon
 
-In the project's basic details, choose "Upload icon" and select a PNG, JPEG, or WebP
-up to 5 MiB and 4096×4096 pixels. The image is resized while keeping its proportions.
-Once it is ready, choose Save. The icon appears in the project catalog and the chat rail.
+In the project's basic details, choose "Upload icon" next to the preview. Choose
+"Replace icon" if an image is already set. Select a PNG, JPEG, WebP, or SVG up to 5 MiB
+and 4096×4096 pixels. The preview keeps the image's proportions. SVG is converted to PNG. Choose Save to
+display the icon in the project catalog and the chat rail.
 
 To use the letter avatar again, choose "Remove icon" and save the project.
 Cancel restores the saved image along with the other fields. An unreadable file

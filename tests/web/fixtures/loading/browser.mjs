@@ -21,7 +21,6 @@ export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '',
           enabled: () => true, loaded: true,
           loadSetup: () => fetch('/api/fixture/setup').then((response) => response.json()),
         });`,
-        'shared/projectsApi.ts': 'export const projectsApi = { list: async () => [] };',
         'stores/chat.ts': `export { useChatStore } from ${ports}; export const CONTEXT_WINDOW = 200000;`,
         'stores/providers.ts': `import { providers } from ${ports};
       export const useProvidersStore = () => providers;`,
@@ -182,6 +181,9 @@ export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '',
             }
             if (request.method() === 'GET' && url.pathname === '/api/chat/sessions') {
                 return route.fulfill({ json: { sessions: [] } });
+            }
+            if (request.method() === 'GET' && url.pathname === '/api/projects') {
+                return route.fulfill({ json: { projects: [] } });
             }
 
             unexpected.push(`${request.method()} ${url.pathname}${url.search}`);
