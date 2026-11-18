@@ -341,6 +341,42 @@
   "distribution": {
     "build": "Build distribution",
     "buildDescription": "full release checks in an isolated copy",
+    "progress": {
+      "snapshot": "Snapshotting sources",
+      "setup": "Preparing Node.js and working copies",
+      "acceptance": "Verifying installation",
+      "record": "Recording verified candidate",
+      "scope": {
+        "server": "Server",
+        "web": "Web",
+        "build": "Build"
+      },
+      "stages": {
+        "bundle-install": "Shared dependencies",
+        "server-install": "Server dependencies",
+        "qwen-test-cli": "Qwen CLI for tests",
+        "web-install": "Web dependencies",
+        "mobile-install": "Mobile client dependencies",
+        "deepseek-runtime": "DeepSeek runtime",
+        "deepseek-vendor": "DeepSeek sources",
+        "server-browser": "Chromium for tests",
+        "server-environment": "Checking environment",
+        "deepseek-warmup": "Preparing DeepSeek tests",
+        "cache-root-check": "Checking DeepSeek cache",
+        "server-tests": "Server tests",
+        "shared-tests": "Shared code tests",
+        "guide-tests": "Documentation checks",
+        "voice-tests": "Voice module tests",
+        "routes-tests": "Route tests",
+        "installer-tests": "Installer tests",
+        "distribution-cli-tests": "Distribution command tests",
+        "web-environment": "Checking environment",
+        "web-tests": "Web tests",
+        "web-build": "Building the web client",
+        "bundle": "Packaging distribution",
+        "deb": "Building the DEB package"
+      }
+    },
     "check": "Check candidate",
     "checkDescription": "verify files and installation in temporary profiles",
     "install": "Install for testing",

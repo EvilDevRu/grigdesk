@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 
@@ -48,6 +49,12 @@ export interface PipelineResult {
   reason: null | 130 | 143 | 124;
   cleanupConfirmed: boolean;
   outcomes: Record<string, StageOutcome>;
+}
+
+export interface PipelineObserver {
+  start(stage: RecipeStage): void;
+  finish(outcome: StageOutcome): void;
+  output?(text: string, stream: 'stdout' | 'stderr'): void;
 }
 
 /**
@@ -139,6 +146,7 @@ export async function runStages(input: {
   receiptDir: string;
   groups?: string[];
   sourceDigest?: string;
+  observer?: PipelineObserver;
 }): Promise<PipelineResult> {
   const recipe = decodeRecipe(input.recipe);
 
@@ -204,6 +212,7 @@ export async function runStages(input: {
       cwd: stage.cwd ?? '.',
       envKeys: Object.keys(stage.env ?? {})
     })}\n`);
+    input.observer?.start(stage);
 
     const child = spawn(stage.argv[0]!, stage.argv.slice(1), {
       cwd: stage.cwd ? path.resolve(input.cwd, stage.cwd) : input.cwd,
@@ -250,14 +259,30 @@ export async function runStages(input: {
       }
     }, stage.timeoutMs);
 
-    const capture = async (stream: AsyncIterable<Buffer>, output: NodeJS.WriteStream) => {
+    /**
+     * Журнал получает исходные байты в обоих режимах вывода.
+     * У наблюдателя отдельный декодер каждого потока сохраняет границы UTF-8.
+     */
+    const capture = async (stream: AsyncIterable<Buffer>, channel: 'stdout' | 'stderr') => {
+      const output = input.observer?.output;
+      const decoder = output ? new StringDecoder('utf8') : undefined;
+
       for await (const chunk of stream) {
-        output.write(chunk);
+        if (output && decoder) {
+          output(decoder.write(chunk), channel);
+        } else {
+          process[channel].write(chunk);
+        }
+
         await log.write(chunk);
+      }
+
+      if (output && decoder) {
+        output(decoder.end(), channel);
       }
     };
     const streams = Promise.all([
-      capture(child.stdout!, process.stdout), capture(child.stderr!, process.stderr),
+      capture(child.stdout!, 'stdout'), capture(child.stderr!, 'stderr'),
     ]);
 
     const exit = await closed;
@@ -317,6 +342,7 @@ export async function runStages(input: {
       }
 
       outcomes[stage.id] = await runStage(stage);
+      input.observer?.finish(outcomes[stage.id]!);
     }
 
     if (terminate !== null) {

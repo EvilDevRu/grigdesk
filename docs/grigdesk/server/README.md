@@ -24,7 +24,7 @@
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
-- [Лёгкий shell-установщик, изоляция dist/TMPDIR и кэша, доверие кандидата и retention](lightweight-installer.md)
+- [Лёгкий shell-установщик, прогресс dist build, изоляция сборки, временный ключ и retention](lightweight-installer.md)
 - [История автономного установщика: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
 - [Подписанный канал сайта: CI, публикация обеих редакций справки RU/EN и восстановление](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)

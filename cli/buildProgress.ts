@@ -11,7 +11,7 @@ import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import { openBuildLog, readBuildTimings, saveBuildTimings } from './buildLog.ts';
 import { collectBuildProcesses, signalBuildProcesses, terminateBuildProcesses } from './buildProcesses.ts';
 import type { BuildProcess } from './buildProcesses.ts';
-import { buildStepIds, estimateBuildProgress } from './buildState.ts';
+import { buildProgressBar, buildStepIds, estimateBuildProgress } from './buildState.ts';
 import type { BuildStep } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
 import { runPresentedCommand } from './presentation.ts';
@@ -290,12 +290,11 @@ async function observeBuild(
     }
 
     const width = Math.max(4, Math.min(30, session.columns - 12));
-    const filled = Math.floor(width * estimate.percent / 100);
 
     // Итог расположен перед стадиями: новые CLI не прячут процент на терминале 80×24.
     // Подробные стадии и журнал сохраняют прежний порядок ниже сводной строки.
     lines.unshift({
-      text: `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(estimate.percent)}%`
+      text: buildProgressBar(estimate.percent, width)
         + `  ${duration(elapsed)} / ≈ ${duration(elapsed + estimate.remainingMs)}`,
       tone: succeeded ? 'success' : 'accent',
     });

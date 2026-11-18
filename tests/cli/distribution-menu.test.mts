@@ -179,3 +179,47 @@ test('DIST-MENU-FAILED-DIST: ошибка команды возвращает к
   assert.equal(result.code, 0);
   assertRestored(result, session.output());
 });
+
+test('DIST-MENU-BUILD: шкала обновляется во время команды и показывает 100% после успеха', async (t) => {
+  const box = await sourceMenu(t);
+  const gate = path.join(box.home, 'finish-dist');
+  const tool = [
+    "import { existsSync } from 'node:fs';",
+    "import { setTimeout as pause } from 'node:timers/promises';",
+    "import { createDistributionProgress } from '../cli/distributionProgress.ts';",
+    'const progress = createDistributionProgress();',
+    'progress.plan(2);',
+    "progress.phase('snapshot');",
+    'progress.completed();',
+    "const observer = progress.observer('/tmp/pipeline-server.log', 'server');",
+    "observer.start({ id: 'server-tests' });",
+    "observer.output('Проверка идёт\\n', 'stdout');",
+    `while (!existsSync(${JSON.stringify(gate)})) await pause(20);`,
+    'progress.success();',
+    "console.log('Кандидат: /tmp/test-candidate');",
+  ].join('\n');
+
+  await mkdir(path.join(box.root, 'tools'), { recursive: true });
+  await writeFile(path.join(box.root, 'tools/distribution.mts'), tool);
+
+  const session = launchMenu(t, box);
+
+  await session.wait(menuTitle);
+  session.write(down.repeat(8) + '\r');
+  await session.wait(/Собрать дистрибутив/u);
+  session.write('\r');
+  await session.wait(/50%  Сервер · Серверные тесты  › Проверка идёт/u);
+  assert.match(session.output(), /\/tmp\/pipeline-server\.log/u);
+  assert.doesNotMatch(session.output(), /100%/u);
+
+  await writeFile(gate, '');
+  await session.wait(/100%/u);
+  await session.wait(/Кандидат: \/tmp\/test-candidate/u);
+  await session.wait(/Enter \/ Esc — назад/u);
+  await exitMenus(session);
+
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assertRestored(result, session.output());
+});

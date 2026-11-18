@@ -159,6 +159,8 @@ export async function runPresentedCommand(
   const session = parent ?? new TerminalSession();
   const { t } = cliTranslator();
   const title = commandTitle(argv, t);
+  const distributionBuild = argv[0] === 'dist' && argv[1] === 'build';
+  const liveProgress = distributionBuild && process.env.TERM !== 'dumb';
   const lines: ScreenLine[] = [];
   const pending = { output: '', error: '' };
   let structured: ((width: number) => ScreenLine[]) | undefined;
@@ -179,6 +181,7 @@ export async function runPresentedCommand(
     footer: t('screens.cancel'),
     minimumWidth,
     follow: true,
+    incremental: distributionBuild,
   });
   const refresh = () => {
     if (!timer && process.env.TERM !== 'dumb') {
@@ -195,7 +198,11 @@ export async function runPresentedCommand(
    */
   const receive = (text: string, error = false): void => {
     const channel = error ? 'error' : 'output';
-    const parts = (pending[channel] + text).split(/\r\n|\r|\n/u);
+    const combined = pending[channel] + text;
+    // Во время сборки CR заменяет текущую строку прогресса, LF сохраняет её в истории.
+    const parts = liveProgress && error
+      ? combined.split(/\r?\n/u).map((part) => part.slice(part.lastIndexOf('\r') + 1))
+      : combined.split(/\r\n|\r|\n/u);
 
     pending[channel] = parts.pop()!.slice(-4096);
 
@@ -249,8 +256,10 @@ export async function runPresentedCommand(
     let code: number;
 
     try {
+      const env = distributionBuild ? { ...process.env, GRIGDESK_CTL_DIST_PROGRESS: '1' } : undefined;
+
       code = ['dev', 'deps', 'run', 'dist'].includes(argv[0] ?? '')
-        ? await output.attached('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), ...argv])
+        ? await output.attached('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), ...argv], env)
         : await runCli(argv, output);
     } catch (error) {
       receive(error instanceof Error ? error.message : String(error), true);

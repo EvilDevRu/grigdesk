@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { sha256File } from '../../shared/node/hash.ts';
+import { assertRestored, startPty } from '../cli/helpers/pty.mts';
 import { createSandbox } from '../cli/helpers/sandbox.mts';
 
 const execute = promisify(execFile);
@@ -101,7 +102,8 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
       'temporary: os.tmpdir(), mode: fs.statSync(os.tmpdir()).mode & 0o777,',
       'uid: fs.statSync(os.tmpdir()).uid }));',
       note('tests-a'),
-      'server.close(() => process.exit(7));',
+      "process.stderr.write('Проверочная ошибка стадии\\n');",
+      'server.close(() => setTimeout(() => process.exit(7), 600));',
       '});',
     ].join('\n')),
     stage('tests-b', 'server', [
@@ -131,6 +133,8 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   });
 
   assert.equal(result.code, 1, result.stderr);
+  assert.match(result.stderr, /Проверочная ошибка стадии/u);
+  assert.doesNotMatch(result.stdout + result.stderr, /[█░]/u);
   t.diagnostic(result.stdout + result.stderr);
 
   const [runDir] = (await fs.readdir(artifacts)).filter((name) => name.startsWith('dist-build-'));
@@ -163,6 +167,39 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   assert.equal(temporaryInfo.mode, 0o700);
   assert.equal(temporaryInfo.uid, process.getuid!());
   await assert.rejects(fs.stat(temporary), { code: 'ENOENT' });
+
+  const terminalArtifacts = path.join(box.home, 'pty-artifacts');
+  const session = startPty(t, {
+    argv: ['/bin/bash', path.join(box.root, 'bin/grigdesk-ctl'), 'dist', 'build'],
+    cwd: box.root,
+    columns: 100,
+    env: {
+      ...box.environment,
+      LC_ALL: 'ru_RU.UTF-8',
+      TERM: 'xterm-256color',
+      GRIGDESK_ARTIFACTS_DIR: terminalArtifacts,
+      GRIGDESK_DIST_NODE_CACHE: cache,
+    },
+  });
+
+  await session.wait(/░+ 0%  Снимок исходников/u);
+  await session.wait(/\d+%  Сервер · tests-a  › Проверочная ошибка стадии/u, 12_000);
+
+  const terminalResult = await session.done;
+  const terminalFolders = await fs.readdir(terminalArtifacts);
+  const terminalRun = terminalFolders.find((name) => name.startsWith('dist-build-'));
+
+  assert.ok(terminalRun);
+
+  const terminalLogFile = path.join(terminalArtifacts, terminalRun, 'pipeline-server.log');
+  const terminalLog = await fs.readFile(terminalLogFile, 'utf8');
+
+  assert.equal(terminalResult.code, 1, session.output());
+  assert.match(session.output(), /Журналы:/u);
+  assert.ok(session.output().includes(terminalLogFile));
+  assert.doesNotMatch(session.output(), /100%/u);
+  assert.match(terminalLog, /^Проверочная ошибка стадии$/mu);
+  assertRestored(terminalResult, session.output());
 
   // Подстановка ключа не должна скрывать несовпадение в исходном снимке.
   const contractsPath = path.join(box.root, 'shared/runtime/releaseChannelContracts.ts');

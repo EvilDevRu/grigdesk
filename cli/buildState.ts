@@ -34,6 +34,16 @@ const seconds: Record<string, number> = {
 };
 
 /**
+ * Округляем шкалу и число вниз, используя один процент для обеих частей.
+ * Ширину передаёт вызывающий экран с учётом размера своего терминала.
+ */
+export function buildProgressBar(percent: number, width: number): string {
+  const filled = Math.floor(width * percent / 100);
+
+  return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(percent)}%`;
+}
+
+/**
  * Оценка использует только завершённые веса и ограниченный вклад текущей стадии.
  * Процент не убывает и достигает ста только после подтверждения общего успеха.
  */

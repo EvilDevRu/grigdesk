@@ -4,6 +4,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 import { artifactsPath } from '../shared/runtime/dataHome.ts';
+import type { createDistributionProgress } from '../cli/distributionProgress.ts';
 import { buildReleaseIdentity } from '../shared/runtime/productReleaseVersion.ts';
 import { sha256, sha256File } from '../shared/node/hash.ts';
 import { releaseSignedBytes } from '../shared/node/releaseTrust.ts';
@@ -12,6 +13,12 @@ import { createRunRecord, completeRunRecord } from './distributionRuns.mts';
 import { runStages, decodeRecipe, recipeDigest, recipeImplementationBytes } from './releasePipeline.mts';
 import { prepareReleaseToolchain } from './releaseEnvironment.mts';
 import { apiContractFingerprint } from './api-version.mjs';
+
+const pipelines = [
+  ['server', ['prepare-server', 'prepare-build', 'server']],
+  ['web', ['prepare-web', 'prepare-build', 'web']],
+  ['build', ['prepare-build', 'prepare-web', 'build']],
+] as const;
 
 /**
  * Каждый scope получает собственные HOME/XDG/cache и фиксированный PATH toolchain.
@@ -57,10 +64,14 @@ async function stageEnvironment(scope: string, toolchain: string, version: strin
  * Исходный снимок остаётся неизменным; временный ключ подставляется только в копии scope.
  * Вся сборка живёт в artifacts, а verified появляется лишь после реальной установки.
  */
-export async function runDistributionBuild(root: string, channel: string, runsDir: string): Promise<number> {
+export async function runDistributionBuild(
+  root: string, channel: string, runsDir: string, progress?: ReturnType<typeof createDistributionProgress>,
+): Promise<number> {
   if (!['release', 'dev'].includes(channel)) {
     throw new Error('dist_channel_invalid');
   }
+
+  progress?.phase('snapshot');
 
   const artifacts = artifactsPath({ env: process.env, home: os.homedir() });
 
@@ -106,10 +117,17 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
     }
   };
 
+  // Четыре собственные фазы, упаковка bundle и deb плюс выбранные стадии рецепта каждой копии.
+  progress?.plan(pipelines.reduce((count, [, groups]) =>
+    count + recipe.stages.filter((stage) => groups.some((group) => group === stage.group)).length, 6));
+  progress?.close();
   process.stdout.write(`Запуск: ${created.runId}\nЖурналы: ${runDir}\n`
     + `sourceDigest: ${snapshot.sourceDigest}\nrecipeDigest: ${digest}\n`);
 
   try {
+    progress?.completed();
+    progress?.phase('setup');
+
     const toolchain = await prepareReleaseToolchain(snapshot.cloneRoot, runDir,
       process.env.GRIGDESK_DIST_NODE_CACHE ?? path.join(artifacts, 'dist-node-cache'));
     const scopes = new Map<string, { root: string; env: NodeJS.ProcessEnv }>();
@@ -148,23 +166,24 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
       });
     }
 
-    for (const [name, groups] of [
-      ['server', ['prepare-server', 'prepare-build', 'server']],
-      ['web', ['prepare-web', 'prepare-build', 'web']],
-      ['build', ['prepare-build', 'prepare-web', 'build']],
-    ] as const) {
+    progress?.completed();
+
+    for (const [name, groups] of pipelines) {
       const scope = scopes.get(name)!;
+      const logFile = path.join(runDir, `pipeline-${name}.log`);
       const pipeline = await runStages({
         recipe,
         sourceDigest: snapshot.sourceDigest,
         cwd: scope.root,
         env: scope.env,
         groups: [...groups],
-        logFile: path.join(runDir, `pipeline-${name}.log`),
+        logFile,
         receiptDir: path.join(runDir, 'receipts'),
+        observer: progress?.observer(logFile, name),
       });
 
       if (pipeline.code !== 0) {
+        progress?.close();
         process.stderr.write(`Этап ${name} отказал (${pipeline.code}); журнал: ${runDir}\n`);
 
         return pipeline.code;
@@ -172,6 +191,7 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
     }
 
     const build = scopes.get('build')!;
+    const bundleLog = path.join(runDir, 'bundle.log');
     const bundle = await runStages({
       recipe: { format: 1, stages: [
         {
@@ -192,14 +212,16 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
       ] },
       cwd: build.root,
       env: build.env,
-      logFile: path.join(runDir, 'bundle.log'),
+      logFile: bundleLog,
       receiptDir: path.join(runDir, 'receipts'),
+      observer: progress?.observer(bundleLog),
     });
 
     if (bundle.code !== 0) {
       return bundle.code;
     }
 
+    progress?.phase('acceptance');
     await fs.rename(path.join(build.root, 'release-artifacts'), artifactsRoot);
 
     const index = JSON.parse(await fs.readFile(path.join(artifactsRoot, `${channel}.json`), 'utf8'));
@@ -215,6 +237,9 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
       },
       installRoot: path.join(runDir, 'acceptance'),
     });
+
+    progress?.completed();
+    progress?.phase('record');
 
     await fs.writeFile(path.join(artifactsRoot, 'local-build.json'), JSON.stringify({
       runId: created.runId,
@@ -241,6 +266,7 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
     await removeScratchDirectories();
     await completeRunRecord(runsDir, created.runId, 'verified', inventory, manifestDigest);
     verified = true;
+    progress?.success();
     process.stdout.write(`Кандидат: ${artifactsRoot}\nТолько локальное тестовое доверие.\n`
       + `Проверка: dist check --local-run ${created.runId}\n`);
 

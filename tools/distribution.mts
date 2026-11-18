@@ -15,6 +15,7 @@ import { RELEASE_SIGNING_PUBLIC_KEY }  from '../shared/runtime/releaseChannelCon
 import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 import { verifyReleaseInstaller } from './releaseArtifactVerification.mts';
 import { cliTranslator } from '../cli/i18n.ts';
+import { createDistributionProgress } from '../cli/distributionProgress.ts';
 
 const USAGE = [
   'grigdesk-ctl dist — подготовка и проверка дистрибутива из исходников',
@@ -316,8 +317,14 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === 'build') {
-    return runDistributionBuild(process.cwd(), valueOf(argv, '--channel') ?? 'release',
-      defaultRunsRoot());
+    const progress = createDistributionProgress();
+
+    try {
+      return await runDistributionBuild(process.cwd(), valueOf(argv, '--channel') ?? 'release',
+        defaultRunsRoot(), progress);
+    } finally {
+      progress?.close();
+    }
   }
 
   process.stderr.write(USAGE);
@@ -327,10 +334,10 @@ async function main(argv: string[]): Promise<number> {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   try {
-    process.exit(await main(process.argv.slice(2)));
+    process.exitCode = await main(process.argv.slice(2));
   } catch (error) {
     process.stderr.write(`${(error as Error).message}\n`);
 
-    process.exit(2);
+    process.exitCode = 2;
   }
 }

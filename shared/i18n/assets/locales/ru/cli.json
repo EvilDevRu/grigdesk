@@ -341,6 +341,42 @@
   "distribution": {
     "build": "Собрать дистрибутив",
     "buildDescription": "полный релизный прогон в отдельной копии",
+    "progress": {
+      "snapshot": "Снимок исходников",
+      "setup": "Подготовка Node.js и рабочих копий",
+      "acceptance": "Проверка установки",
+      "record": "Запись проверенного кандидата",
+      "scope": {
+        "server": "Сервер",
+        "web": "Веб",
+        "build": "Сборка"
+      },
+      "stages": {
+        "bundle-install": "Общие зависимости",
+        "server-install": "Зависимости сервера",
+        "qwen-test-cli": "Qwen CLI для тестов",
+        "web-install": "Зависимости веба",
+        "mobile-install": "Зависимости мобильного клиента",
+        "deepseek-runtime": "Среда DeepSeek",
+        "deepseek-vendor": "Исходники DeepSeek",
+        "server-browser": "Chromium для тестов",
+        "server-environment": "Проверка окружения",
+        "deepseek-warmup": "Подготовка тестов DeepSeek",
+        "cache-root-check": "Проверка кэша DeepSeek",
+        "server-tests": "Серверные тесты",
+        "shared-tests": "Тесты общего кода",
+        "guide-tests": "Проверка документации",
+        "voice-tests": "Тесты голосового модуля",
+        "routes-tests": "Тесты маршрутов",
+        "installer-tests": "Тесты установщика",
+        "distribution-cli-tests": "Тесты команд дистрибутива",
+        "web-environment": "Проверка окружения",
+        "web-tests": "Веб-тесты",
+        "web-build": "Сборка веба",
+        "bundle": "Упаковка дистрибутива",
+        "deb": "Сборка DEB-пакета"
+      }
+    },
     "check": "Проверить кандидат",
     "checkDescription": "проверить файлы и установку во временных профилях",
     "install": "Установить для проверки",

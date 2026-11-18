@@ -62,7 +62,10 @@ grigdesk-ctl dist check --local-run <UUID>
 Checks install all three modes into temporary profiles. “Install for testing” asks for the mode,
 separate paths and confirmation. A local candidate trusts only its own private run record and cannot
 be published; `--from` uses the official product key. `dist doctor` reports host limitations.
-`dist build` runs the full release recipe in a source snapshot. The native server tests require a
+`dist build` runs the full release recipe in a source snapshot. The terminal command and the
+“Build distribution” menu item show the share of completed stages, the current stage and its
+latest output line. The log directory appears after the snapshot is prepared, and the bar
+reaches 100% once the verified candidate is recorded. The native server tests require a
 running user systemd manager so the build can create a dedicated scope. Fast `build` commands remain available.
 Building the AppImage requires curl, unzip and 7z on the host.
 Verification uses isolated working folders and removes temporary files when it finishes.
