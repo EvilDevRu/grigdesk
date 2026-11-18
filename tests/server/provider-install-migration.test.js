@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { bashPathBlock } from '../../server/src/lib/providerInstall/bashPath.ts';
 import { discoverExternalCli } from '../../server/src/lib/providerInstall/inventory.ts';
 import {
@@ -25,15 +24,10 @@ const success = (stdout = '') => ({
 
 /**
  * Fixture содержит только изолированные HOME/prefix/legacy-каталоги.
- * Настоящие Bash и npm-границы не покидают тему артефактов.
+ * Короткий временный путь сохраняет запас для hex-имени файла резервной копии.
  */
 async function fixture(t) {
-  const base = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
-    'external-cli-lifecycle/migration-tests');
-
-  await fs.mkdir(base, { recursive: true });
-
-  const home = await fs.mkdtemp(path.join(base, 'case-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-cli-migration-'));
   const data = path.join(home, 'data');
   const prefix = path.join(home, 'user-prefix');
   const runtimeBin = path.join(home, 'runtime/bin');

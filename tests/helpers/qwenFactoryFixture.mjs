@@ -35,7 +35,8 @@ export async function qwenFactoryFixture(t) {
 
   assert.ok(installed.includes('qwen'), 'Реестр конвейера не содержит раннера Qwen');
 
-  const stage = await settingsFixture(t);
+  // Work MCP добавляет путь до сокета внутри журнала запуска и ограничен 107 байтами.
+  const stage = await settingsFixture(t, 'q');
 
   await copyFile(path.join(sourceRoot, 'engine/lib/runners/qwen.sh'),
     path.join(stage.env.FACTORY_RUNNERS_DIR, 'qwen.sh'));

@@ -54,6 +54,7 @@ export async function runEnvironmentReport(root: string, options: {
   strictCI?: boolean;
   probes?: EnvironmentProbes;
   requireBrowser?: boolean;
+  requireUserManager?: boolean;
 } = {}): Promise<EnvironmentReport> {
   const probes = options.probes ?? {};
   const diskFreeKiB = probes.diskFreeKiB ?? (async (probe: string) => {
@@ -98,6 +99,12 @@ export async function runEnvironmentReport(root: string, options: {
     mandatory(id, output !== null && expected.test(output), output ?? 'не найден');
   }
 
+  for (const [tool, argv] of [['curl', ['--version']], ['unzip', ['-v']], ['7z', ['i']]] as const) {
+    const output = await probeCommand(probes, tool, [...argv]);
+
+    mandatory(tool, output !== null, output?.split('\n')[0] ?? 'не найден');
+  }
+
   const pillow = await probeCommand(probes, 'python3',
     ['-c', 'from PIL import Image; print(Image.__version__)']);
 
@@ -109,6 +116,14 @@ export async function runEnvironmentReport(root: string, options: {
 
   mandatory('bubblewrap', bwrap !== null, bwrap ?? 'проба bwrap не прошла');
   mandatory('unshare', unshare !== null, unshare ?? 'проба unshare не прошла');
+
+  const userBus = `unix:path=/run/user/${process.getuid!()}/bus`;
+  const userManager = await probeCommand(probes, 'env', [
+    `DBUS_SESSION_BUS_ADDRESS=${userBus}`, 'systemctl', '--user', 'show', '--property=Version', '--value',
+  ]);
+
+  (options.requireUserManager ? mandatory : informational)('systemd-user', Boolean(userManager),
+    userManager || 'пользовательский systemd недоступен для нативных тестов Qwen');
 
   const chromium = process.env.PLAYWRIGHT_BROWSERS_PATH
     ?? path.join(os.homedir(), '.cache', 'ms-playwright');
@@ -189,11 +204,14 @@ export async function prepareReleaseToolchain(root: string, runDir: string,
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const strictCI = process.argv.includes('--strict-ci');
+  const requireBrowser = process.argv.includes('--require-ready');
+  const requireUserManager = process.argv.includes('--require-user-manager');
   const report = await runEnvironmentReport(process.cwd(), {
     strictCI,
-    requireBrowser: process.argv.includes('--require-ready'),
+    requireBrowser,
+    requireUserManager,
   });
 
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  process.exitCode = (strictCI || process.argv.includes('--require-ready')) && !report.ok ? 2 : 0;
+  process.exitCode = (strictCI || requireBrowser || requireUserManager) && !report.ok ? 2 : 0;
 }

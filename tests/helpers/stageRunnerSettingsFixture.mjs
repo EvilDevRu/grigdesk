@@ -13,8 +13,8 @@ const fixtureShell = path.join(sourceRoot, 'tests/engine/lib/stage-runner-settin
  * Создаёт настоящий trusted attempt, pinned route и временную модельную политику.
  * Только модельные адаптеры заменены: чтение, CLI, resolver и launcher принадлежат движку.
  */
-export async function settingsFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'stage-settings-'));
+export async function settingsFixture(t, directoryPrefix = 'stage-settings-') {
+  const root = await mkdtemp(path.join(os.tmpdir(), directoryPrefix));
   const env = {
     PATH: `${sourceRoot}/tests/engine/fakes/bin:/usr/bin:/bin`,
     HOME: path.join(root, 'home'),

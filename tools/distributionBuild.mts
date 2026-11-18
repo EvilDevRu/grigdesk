@@ -11,6 +11,7 @@ import { createSourceSnapshot } from './distributionSnapshot.mts';
 import { createRunRecord, completeRunRecord } from './distributionRuns.mts';
 import { runStages, decodeRecipe, recipeDigest, recipeImplementationBytes } from './releasePipeline.mts';
 import { prepareReleaseToolchain } from './releaseEnvironment.mts';
+import { apiContractFingerprint } from './api-version.mjs';
 
 /**
  * Каждый scope получает собственные HOME/XDG/cache и фиксированный PATH toolchain.
@@ -67,6 +68,14 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
 
   const runDir = await fs.mkdtemp(path.join(artifacts, 'dist-build-'));
   const snapshot = await createSourceSnapshot({ root, runDir });
+  const apiVersionPath = 'shared/client/apiVersion.ts';
+  const originalApiVersion = await fs.readFile(path.join(snapshot.cloneRoot, apiVersionPath), 'utf8');
+  const originalFingerprint = `API_CONTRACT_FINGERPRINT = '${apiContractFingerprint(snapshot.cloneRoot)}';`;
+
+  if (!originalApiVersion.includes(originalFingerprint)) {
+    throw new Error('dist_source_api_fingerprint_mismatch');
+  }
+
   const baseVersion = (await fs.readFile(path.join(snapshot.cloneRoot, 'VERSION'), 'utf8')).trim();
   const version = channel === 'dev' ? `${baseVersion}-dev.${Date.now()}` : baseVersion;
 
@@ -122,8 +131,15 @@ export async function runDistributionBuild(root: string, channel: string, runsDi
       }
 
       await fs.writeFile(contractsFile, substituted);
+
+      // Временный ключ входит в отпечаток API. Версия API в копии остаётся прежней.
+      const scopedFingerprint = `API_CONTRACT_FINGERPRINT = '${apiContractFingerprint(scopeRoot)}';`;
+
+      await fs.writeFile(path.join(scopeRoot, apiVersionPath),
+        originalApiVersion.replace(originalFingerprint, scopedFingerprint));
+
       // Постоянные выходы живут в artifacts; короткий scratch нужен Unix IPC.
-      const temporary = await fs.mkdtemp('/tmp/grigdesk-dist-');
+      const temporary = await fs.mkdtemp('/tmp/gd-dist-');
 
       temporaryDirectories.push(temporary);
       scopes.set(name, {

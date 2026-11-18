@@ -31,14 +31,21 @@ async function identity(pid: number): Promise<BuildProcess | null> {
 
 /**
  * Обход начинается только от собственного ребёнка, включая вложенные setsid-группы.
- * Сохранённые идентичности позволяют довести отмену даже после раннего выхода лидера.
+ * Живые потомки остаются наблюдаемыми после выхода лидера. Старые PID убираются,
+ * кроме исходной идентичности корня, защищающей от повторного использования номера.
  */
 export async function collectBuildProcesses(
   rootPid: number, known: readonly BuildProcess[] = [],
 ): Promise<BuildProcess[]> {
-  const found = new Map(known.map((item) => [item.pid, item]));
+  const knownByPid = new Map(known.map((item) => [item.pid, item]));
+  const found = new Map<number, BuildProcess>();
+  const originalRoot = knownByPid.get(rootPid);
   const queue = [rootPid, ...known.map((item) => item.pid)];
   const visited = new Set<number>();
+
+  if (originalRoot) {
+    found.set(rootPid, originalRoot);
+  }
 
   while (queue.length) {
     const pid = queue.shift()!;
@@ -50,7 +57,7 @@ export async function collectBuildProcesses(
     visited.add(pid);
 
     const current = await identity(pid);
-    const previous = found.get(pid);
+    const previous = knownByPid.get(pid);
 
     if (!current || previous && previous.starttime !== current.starttime) {
       continue;

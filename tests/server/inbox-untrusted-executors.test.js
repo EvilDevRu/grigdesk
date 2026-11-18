@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -119,7 +119,9 @@ for (const [requested, expected] of [['ultracode', 'xhigh'], ['max', 'max'], [un
     assert.equal(out.sessionId, null);
 
     const cwd = (await readFile(`${capture}.cwd`, 'utf8')).trim();
-    assert.match(cwd, /^\/tmp\/grigdesk-inbox-model-/u);
+
+    assert.equal(path.dirname(cwd), await realpath(os.tmpdir()));
+    assert.match(path.basename(cwd), /^grigdesk-inbox-model-/u);
     assert.notEqual(cwd, process.cwd());
     await assert.rejects(access(cwd));
 

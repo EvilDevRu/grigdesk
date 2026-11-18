@@ -112,6 +112,10 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
     assert.equal(version.status, 0, `environment: CLI не запускается: ${version.stderr}`);
   }
 
+  if (process.env.GRIGDESK_TEST_QWEN_SESSION_BUS) {
+    process.env.DBUS_SESSION_BUS_ADDRESS = process.env.GRIGDESK_TEST_QWEN_SESSION_BUS;
+  }
+
   Object.assign(process.env, {
     HOME: home,
     GRIGDESK_HOME: dataHome,

@@ -104,7 +104,8 @@ export function recipeDigest(recipe: ReleaseRecipe, runnerBytes: Buffer): string
  */
 export async function recipeImplementationBytes(root: string): Promise<Buffer> {
   const files = ['tools/releasePipeline.mts', 'tools/releaseEnvironment.mts',
-    'tools/ci/provision-ubuntu.sh', 'cli/buildProcesses.ts'];
+    'tools/ci/provision-ubuntu.sh', 'tools/ci/run-release-server-tests.sh',
+    'tools/ci/prepare-release-desktop.sh', 'cli/buildProcesses.ts'];
   const chunks: Buffer[] = [];
 
   for (const file of files) {
@@ -150,6 +151,7 @@ export async function runStages(input: {
   let reason: null | 130 | 143 | 124 = null;
   let cleanupConfirmed = true;
   let known: BuildProcess[] = [];
+  let trackingInFlight: Promise<void> | null = null;
   let currentChildPid: number | null = null;
   let terminate: Promise<void> | null = null;
 
@@ -165,6 +167,8 @@ export async function runStages(input: {
     if (currentChildPid === null) {
       return;
     }
+
+    await trackingInFlight;
 
     const result = await terminateBuildProcesses(currentChildPid, known);
 
@@ -227,11 +231,15 @@ export async function runStages(input: {
     known = child.pid ? await collectBuildProcesses(child.pid) : [];
 
     const tracking = setInterval(() => {
-      if (child.pid) {
-        void collectBuildProcesses(child.pid, known).then((entries) => {
-          known = entries;
-        });
+      if (!child.pid || reason !== null || trackingInFlight) {
+        return;
       }
+
+      trackingInFlight = collectBuildProcesses(child.pid, known).then((entries) => {
+        known = entries;
+      }).finally(() => {
+        trackingInFlight = null;
+      });
     }, 100);
 
     const timer = stage.timeoutMs === undefined ? null : setTimeout(() => {
@@ -259,6 +267,7 @@ export async function runStages(input: {
     }
 
     clearInterval(tracking);
+    await trackingInFlight;
     await streams;
 
     if (terminate !== null) {

@@ -23,6 +23,19 @@
       "timeoutMs": 1800000
     },
     {
+      "id": "qwen-test-cli",
+      "group": "prepare-server",
+      "argv": [
+        "npm",
+        "--prefix",
+        "tests/fixtures/qwen-cli",
+        "ci",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
       "id": "web-install",
       "group": "prepare-web",
       "argv": [
@@ -87,7 +100,8 @@
       "argv": [
         "node",
         "tools/releaseEnvironment.mts",
-        "--require-ready"
+        "--require-ready",
+        "--require-user-manager"
       ],
       "timeoutMs": 1800000
     },
@@ -142,8 +156,7 @@
       ],
       "argv": [
         "bash",
-        "-c",
-        "available_kib=$(df --output=avail -k . | tail -n 1 | tr -d ' '); test \"$available_kib\" -ge 16777216 || { printf '%s\\n' \"Для полного native-набора нужно 16 GiB; доступно $available_kib KiB\"; exit 1; }; exec npm --prefix server test"
+        "tools/ci/run-release-server-tests.sh"
       ],
       "env": {
         "NODE_OPTIONS": "--test-reporter=tap"

@@ -28,7 +28,7 @@
 - [История автономного установщика: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
 - [Подписанный канал сайта: CI, публикация обеих редакций справки RU/EN и восстановление](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)
-- [Release workflow: общий рецепт, Qwen Host в CI, full/skip/reuse, receipts и promote](release-workflow-validation.md)
+- [Release workflow: общий рецепт, Electron и AppImage, scope Qwen Host, отмена, full/skip/reuse и promote](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, проверка пакетов и сверка Git-дерева](release-validation-reuse.md)
 - [Фоновый реестр исполнителей: бюджет 1,2 с, сохранение карточек при переименовании, wait и refresh](providers-background-read.md)
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)

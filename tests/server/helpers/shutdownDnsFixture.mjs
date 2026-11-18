@@ -12,7 +12,7 @@ import { isolatedFetchWithLimits } from '../../../server/src/lib/isolatedFetch.t
 import { prepareBrowserSocket } from '../../../server/src/lib/browser/browserSocketDirectory.ts';
 import { callBotApi } from '../../../server/src/lib/telegram/api.ts';
 
-const [mode, root] = process.argv.slice(2);
+const [mode, root, relaySocket] = process.argv.slice(2);
 const source = fileURLToPath(new URL('../../../', import.meta.url));
 const resolver = path.join(root, 'resolv.conf');
 const sockets = new Set();
@@ -73,7 +73,7 @@ const net = require('node:net');
 const { spawn } = require('node:child_process');
 exports.startPayloadServer = async () => {
   const server = net.createServer((socket) => socket.destroy());
-  await new Promise((resolve) => server.listen(${JSON.stringify(path.join(root, 'relay.sock'))}, resolve));
+  await new Promise((resolve) => server.listen(${JSON.stringify(relaySocket)}, resolve));
   const factory = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     stdio: 'ignore', detached: true, env: {},
   });
@@ -148,7 +148,7 @@ async function serverCase() {
 
     if (mode === 'launcher') {
       // Без независимого fd-сторожа SIGKILL launcher навсегда оставлял этот worker.
-      await assert.rejects(prepareBrowserSocket(path.join(root, 'relay.sock')), /browser_socket_busy/u);
+      await assert.rejects(prepareBrowserSocket(relaySocket), /browser_socket_busy/u);
       launcher.kill('SIGKILL');
     }
 
@@ -161,7 +161,7 @@ async function serverCase() {
     await until(() => sockets.size === 0, native ? 2500 : 48_000);
     assert.ok(Date.now() - startedAt < (native ? 2500 : 48_000));
     process.kill(ready.factory, 0);
-    await nextStart(path.join(root, 'relay.sock'));
+    await nextStart(relaySocket);
 
     return {
       nativeRequestsAtExit: true,

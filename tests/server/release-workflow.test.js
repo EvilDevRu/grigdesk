@@ -39,29 +39,32 @@ test('RW-QWEN: native CLI закреплён, а Host имеет настоящ�
   const workflow = yaml.parse(await fs.readFile(
     path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8'));
   const steps = workflow.jobs.server.steps;
-  const cli = steps.findIndex((step) => step.name === 'Настоящий CLI Qwen');
   const manager = steps.findIndex((step) => step.name === 'Пользовательский менеджер процессов тестов');
   const tests = steps.findIndex((step) => step.id === 'server_tests');
   const lock = JSON.parse(await fs.readFile(
     path.join(repository, 'tests/fixtures/qwen-cli/package-lock.json'), 'utf8'));
 
-  assert.ok(cli >= 0 && manager > cli && tests > manager);
+  assert.ok(manager >= 0 && tests > manager);
   assert.equal(lock.packages['node_modules/@qwen-code/qwen-code'].version, '0.27.3');
-  assert.match(steps[cli].run, /npm --prefix tests\/fixtures\/qwen-cli ci/u);
-  assert.match(steps[cli].run, /GRIGDESK_QWEN_BIN=\$GITHUB_WORKSPACE\//u);
   assert.match(steps[manager].run, /github-hosted/u);
   assert.match(steps[manager].run, /MemoryMax=4G/u);
   assert.match(steps[manager].run, /DBUS_SESSION_BUS_ADDRESS/u);
-  assert.match(steps[tests].run, /systemd-run --user --scope --collect/u);
-  assert.match(steps[tests].run, /app-grigdesk-tests-.*\.scope/u);
-  assert.match(steps[tests].run,
-    /-- node tools\/releasePipeline\.mts tools\/releaseRecipe\.json --groups prepare-server,prepare-build,server/u);
+  assert.ok(steps[tests].run.includes(pipelineEntry + ' --groups prepare-server,prepare-build,server'));
 
   const recipe = JSON.parse(await fs.readFile(path.join(repository, 'tools/releaseRecipe.json'), 'utf8'));
+  const cli = recipe.stages.find((stage) => stage.id === 'qwen-test-cli');
   const native = recipe.stages.find((stage) => stage.id === 'server-tests');
+  const launcher = await fs.readFile(path.join(repository, 'tools/ci/run-release-server-tests.sh'), 'utf8');
 
+  assert.equal(cli.group, 'prepare-server');
+  assert.match(cli.argv.join(' '), /npm --prefix tests\/fixtures\/qwen-cli ci/u);
+  assert.ok(native.needs.includes('prepare-server'));
   assert.equal(native.group, 'server');
-  assert.match(native.argv.join(' '), /exec npm --prefix server test/u);
+  assert.deepEqual(native.argv, ['bash', 'tools/ci/run-release-server-tests.sh']);
+  assert.match(launcher, /GRIGDESK_QWEN_BIN="\$PWD\/tests\/fixtures\/qwen-cli\//u);
+  assert.match(launcher, /systemd-run --user --scope --collect/u);
+  assert.match(launcher, /app-grigdesk-tests-.*\.scope/u);
+  assert.match(launcher, /npm --prefix server test/u);
 });
 
 test('RW-2: отдельный relay-workflow удалён', async () => {
@@ -165,6 +168,14 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   assert.equal(server.steps.some((step) => step['continue-on-error']), false);
   assert.equal(web.steps.find((step) =>
     step.name === 'Общий прогон web-проверок')['continue-on-error'], undefined);
+
+  const desktopPreparation = 'tools/ci/prepare-release-desktop.sh';
+  const desktopStep = build.steps.findIndex((step) => (step.run ?? '').includes(desktopPreparation));
+  const bundleStep = build.steps.findIndex((step) => step.name === 'Сборка комплекта');
+  const localBundle = await fs.readFile(path.join(repository, 'tools/bundle.mts'), 'utf8');
+
+  assert.ok(desktopStep >= 0 && desktopStep < bundleStep);
+  assert.ok(localBundle.includes(desktopPreparation));
 
   const provisioning = await fs.readFile(path.join(repository, 'tools/ci/provision-ubuntu.sh'), 'utf8');
 

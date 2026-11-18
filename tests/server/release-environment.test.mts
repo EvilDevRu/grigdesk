@@ -19,11 +19,15 @@ function probesWith(overrides: {
   ffmpeg?: string | null;
   bwrap?: string | null;
   disk?: number;
+  userManager?: boolean;
 }): EnvironmentProbes {
   const outputs = new Map<string, string>([
     ['ffmpeg', `ffmpeg version ${overrides.ffmpeg ?? '7.0.1'}`],
     ['ffprobe', 'ffprobe version 7.0.1'],
     ['rg', 'ripgrep 14.1.0'],
+    ['curl', 'curl 8.5.0'],
+    ['unzip', 'UnZip 6.00'],
+    ['7z', '7-Zip 23.01'],
     ['npm', '10.9.2'],
     ['bwrap', 'bwrap 0.10'],
     ['unshare', 'unshare 2.40'],
@@ -46,6 +50,10 @@ function probesWith(overrides: {
 
       if (file === 'bwrap' && overrides.bwrap === null) {
         throw new Error('sandbox denied');
+      }
+
+      if (file === 'env' && argv[1] === 'systemctl' && overrides.userManager !== false) {
+        return { stdout: '255\n', stderr: '' };
       }
 
       const output = outputs.get(file);
@@ -86,6 +94,18 @@ test('ENVIRONMENT-HEALTHY: полная среда даёт ok без устан
 
   assert.equal(report.ok, true, JSON.stringify(report.checks.filter((c) => !c.ok)));
   assert.equal(report.nodeVersion, 'v24.21.0');
+});
+
+test('ENVIRONMENT-USER-MANAGER: недоступная шина блокирует обязательную проверку Qwen', async () => {
+  const report = await runEnvironmentReport(repository, {
+    probes: probesWith({ userManager: false }),
+    requireUserManager: true,
+  });
+  const check = report.checks.find((item) => item.id === 'systemd-user');
+
+  assert.equal(check?.mandatory, true);
+  assert.equal(check?.ok, false);
+  assert.equal(report.ok, false);
 });
 
 test('ENVIRONMENT-STRICT-CI: чужой релиз Ubuntu отмечается только в строгом режиме', async (t) => {

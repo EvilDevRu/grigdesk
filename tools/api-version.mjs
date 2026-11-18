@@ -34,7 +34,7 @@ function contractPaths(directory, prefix = 'shared') {
  * Различия CRLF и LF не означают изменения API между рабочими машинами.
  * Сортировка путей и явные разделители делают результат независимым от обхода файловой системы.
  */
-function fingerprint(root) {
+export function apiContractFingerprint(root) {
   const hash = createHash('sha256');
 
   for (const file of contractPaths(path.join(root, 'shared')).sort()) {
@@ -82,7 +82,7 @@ function main() {
     return;
   }
 
-  const hash = fingerprint(root);
+  const hash = apiContractFingerprint(root);
 
   if (values.check) {
     if (!source.includes(`API_CONTRACT_FINGERPRINT = '${hash}'`)) {
@@ -104,9 +104,11 @@ function main() {
   process.stdout.write(`Версия контрактов API: ${major}.${minor}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
+if (import.meta.main) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }

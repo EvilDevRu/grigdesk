@@ -4,8 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import type { TestContext } from 'node:test';
 
+import { collectBuildProcesses } from '../../cli/buildProcesses.ts';
 import {
   runStages, decodeRecipe, recipeDigest, type ReleaseRecipe, type RecipeStage,
 } from '../../tools/releasePipeline.mts';
@@ -76,6 +78,26 @@ test('PIPELINE-FAIL: ошибка теста не запускает упако�
   assert.equal(result.outcomes['tests-b']!.status, 'success');
   assert.equal(result.outcomes.bundle!.status, 'blocked');
   await assert.rejects(fs.stat(box.marker), { code: 'ENOENT' });
+});
+
+test('PIPELINE-PROCESSES: законченные потомки не накапливаются при проверках', async (t) => {
+  const worker = spawn(process.execPath, ['-e', 'setInterval(() => {}, 100);'], { stdio: 'ignore' });
+  const finished = once(worker, 'close');
+
+  t.after(() => {
+    worker.kill();
+  });
+
+  const known = await collectBuildProcesses(worker.pid!);
+
+  assert.equal(known[0]?.pid, worker.pid);
+  worker.kill();
+  await finished;
+
+  const collected = await collectBuildProcesses(process.pid, known);
+
+  assert.equal(collected.some((item) => item.pid === worker.pid), false);
+  assert.deepEqual(await collectBuildProcesses(worker.pid!, known), known);
 });
 
 test('PIPELINE-CANCEL-TRAPS-TERM: exit 0 ребёнка после SIGINT не возвращает успех', async (t) => {

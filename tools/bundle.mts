@@ -164,12 +164,18 @@ async function main(): Promise<void> {
       /**
        * AppImage собирается вместе со свежим UI в явный выход, без desktop install.
        * Лишний второй образ считается неоднозначным результатом и не публикуется.
-       * Electron уже установлен pinned-зависимостью: изолированный HOME не должен
-       * заставлять упаковщик повторно скачивать тот же runtime и его checksum.
+       * Локальная упаковка готовит те же закреплённые Electron и AppImage tools, что CI.
+       * Готовый runtime передаётся упаковщику, чтобы он не скачивал его повторно.
        */
       async window(input) {
-        const tools = process.env.GRIGDESK_APPIMAGE_TOOLS_PATH;
-        const env = tools ? { ...input.env, APPIMAGE_TOOLS_PATH: tools } : input.env;
+        const preparedTools = process.env.GRIGDESK_APPIMAGE_TOOLS_PATH;
+        const tools = preparedTools ?? path.join(input.cacheDir, 'appimage-tools');
+
+        if (!preparedTools) {
+          await run('bash', ['tools/ci/prepare-release-desktop.sh', tools], input);
+        }
+
+        const env = { ...input.env, APPIMAGE_TOOLS_PATH: tools };
 
         await run('npm', ['--prefix', path.join(root, 'desktop'), 'run', 'dist', '--',
           `--config.directories.output=${input.outDir}`,

@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { bashPathBlock } from '../../server/src/lib/providerInstall/bashPath.ts';
 import { ProviderInstallService } from '../../server/src/lib/providerInstall/service.ts';
 import { isProviderLifecycleSnapshot } from '../../shared/chat/providerLifecycleContracts.ts';
@@ -23,15 +22,10 @@ const success = (stdout = '') => ({
 
 /**
  * Сервис работает с тем же изолированным HOME/prefix, что и planner.
- * Настоящие пакеты и настоящий HOME владельца не участвуют.
+ * Короткий временный путь сохраняет запас для hex-имени файла резервной копии.
  */
 async function fixture(t) {
-  const base = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
-    'external-cli-lifecycle/migration-service-tests');
-
-  await fs.mkdir(base, { recursive: true });
-
-  const home = await fs.mkdtemp(path.join(base, 'case-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-cli-migration-'));
   const data = path.join(home, 'data');
   const prefix = path.join(home, 'user-prefix');
   const runtimeBin = path.join(home, 'runtime/bin');

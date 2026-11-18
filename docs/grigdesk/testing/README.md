@@ -56,7 +56,7 @@
 - [Родитель фикстуры в артефактах: создание и GRIGDESK_ARTIFACTS_DIR без пути машины](artifact-fixture-parent.md)
 - [Реальный GLM: policy и home фикстуры вне системного tmp, скрываемого песочницей](glm-sandbox-fixture-root.md)
 - [Короткий engine-фильтр может совпасть с именем checkout](engine-filter-path.md)
-- [Временная папка вложенного сторожа при явном TMPDIR](node-guard-temp-root.md)
+- [Временные папки тестов при явном TMPDIR, вложенный сторож и предел Unix-сокета](node-guard-temp-root.md)
 - [Transition-stub создаёт inert-предка Teleport-модалки в тесте фокуса](modal-transition-stub.md)
 - [Фикстуры чистой установки: import closure, tracker, metadata и независимость от CI PATH/версии](clean-checkout-shared-sources.md)
 - [Общий Node-модуль не должен попадать в браузерную программу типов по шаблону](shared-node-typecheck.md)

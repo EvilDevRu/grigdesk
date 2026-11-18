@@ -32,6 +32,12 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
     filter: (source) => !source.split(path.sep).includes('node_modules'),
   });
 
+  // Major 1 заставляет штатный сторож проверить отпечаток в копии с временным ключом.
+  await execute(process.execPath, ['tools/api-version.mjs', '--bump', 'major'], { cwd: box.root });
+
+  const apiVersionPath = 'shared/client/apiVersion.ts';
+  const originalApiVersion = await fs.readFile(path.join(box.root, apiVersionPath), 'utf8');
+
   for (const dir of ['server/src', 'server/build', 'web', 'desktop']) {
     await fs.mkdir(path.join(box.root, dir), { recursive: true });
   }
@@ -75,11 +81,22 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
       "fs.writeFileSync(path.join(generation, 'prepared-runtime'), 'pinned');",
     ].join('\n')),
     stage('prepare-web', 'prepare-web', 'process.exit(0)'),
+    {
+      id: 'api-fingerprint',
+      group: 'server',
+      argv: ['node', 'tools/api-version.mjs', '--check'],
+    },
     stage('tests-a', 'server', [
       "const fs = require('fs'), path = require('path'), os = require('os');",
-      "const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-work-'));",
+      "const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-kimi-runtime-test-'));",
+      "const broker = path.join(directory, 'private-state', 'broker', 'r', 'a'.repeat(20));",
+      'fs.mkdirSync(broker, { recursive: true });',
+      "const socket = path.join(broker, 'e.sock');",
+      'if (Buffer.byteLength(socket) > 107) {',
+      '  process.exit(78);',
+      '}',
       "const server = require('net').createServer();",
-      "server.listen(path.join(directory, 'work.sock'), () => {",
+      'server.listen(socket, () => {',
       `fs.writeFileSync(${JSON.stringify(temporaryRecord)}, JSON.stringify({`,
       'temporary: os.tmpdir(), mode: fs.statSync(os.tmpdir()).mode & 0o777,',
       'uid: fs.statSync(os.tmpdir()).uid }));',
@@ -115,6 +132,16 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
 
   assert.equal(result.code, 1, result.stderr);
   t.diagnostic(result.stdout + result.stderr);
+
+  const [runDir] = (await fs.readdir(artifacts)).filter((name) => name.startsWith('dist-build-'));
+  const receiptDir = path.join(artifacts, runDir!, 'receipts');
+  const [receiptFile] = await fs.readdir(receiptDir);
+  const receipt = JSON.parse(await fs.readFile(path.join(receiptDir, receiptFile!), 'utf8'));
+
+  assert.equal(receipt.outcomes['api-fingerprint'].status, 'success');
+  assert.equal(await fs.readFile(path.join(box.root, apiVersionPath), 'utf8'), originalApiVersion);
+  assert.equal(await fs.readFile(path.join(artifacts, runDir!, 'source-clone', apiVersionPath), 'utf8'),
+    originalApiVersion);
   assert.equal(await fs.readFile(trace, 'utf8'), 'tests-a\ntests-b\n');
   await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
 
@@ -136,4 +163,19 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   assert.equal(temporaryInfo.mode, 0o700);
   assert.equal(temporaryInfo.uid, process.getuid!());
   await assert.rejects(fs.stat(temporary), { code: 'ENOENT' });
+
+  // Подстановка ключа не должна скрывать несовпадение в исходном снимке.
+  const contractsPath = path.join(box.root, 'shared/runtime/releaseChannelContracts.ts');
+
+  await fs.appendFile(contractsPath, '\n// Изменение контракта после фиксации отпечатка.\n');
+
+  const stale = await box.run(['dist', 'build'], {
+    GRIGDESK_ARTIFACTS_DIR: artifacts,
+    GRIGDESK_DIST_RUN_DIR: path.join(box.home, 'runs'),
+    GRIGDESK_DIST_NODE_CACHE: cache,
+  });
+
+  assert.equal(stale.code, 2);
+  assert.match(stale.stderr, /dist_source_api_fingerprint_mismatch/u);
+  assert.deepEqual(await fs.readdir(path.join(box.home, 'runs')), [id]);
 });

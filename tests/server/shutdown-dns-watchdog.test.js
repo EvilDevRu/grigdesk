@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -27,7 +27,12 @@ for (const mode of ['cancel', 'native', 'restart', 'launcher', 'network-orphan']
     await mkdir(path.join(artifacts, 'shutdown-checks'), { recursive: true });
 
     const root = await mkdtemp(path.join(artifacts, 'shutdown-checks/t-'));
-    const result = await run('unshare', ['-Urnm', process.execPath, fixture, mode, root], {
+    const socketRoot = await mkdtemp(path.join(os.tmpdir(), 'gd-dns-'));
+    const relaySocket = path.join(socketRoot, 'relay.sock');
+
+    t.after(() => rm(socketRoot, { recursive: true, force: true }));
+
+    const result = await run('unshare', ['-Urnm', process.execPath, fixture, mode, root, relaySocket], {
       timeout: 60_000,
       env: { PATH: '/usr/sbin:/usr/bin:/bin' },
     }).catch((error) => {
