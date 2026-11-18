@@ -2945,6 +2945,18 @@
     ]
   },
   "dynamicExpressions": {
+    "web/src/views/settings/pages/ProcessesPage.vue": {
+      "keys[reason.kind]": [
+        "settings.processActivityTurn",
+        "settings.processActivitySubagent",
+        "settings.processActivityCommand",
+        "settings.processActivityMonitor",
+        "settings.processActivityWorkflow",
+        "settings.processActivitySchedule",
+        "settings.processActivityGoal",
+        "settings.processActivityUnknown"
+      ]
+    },
     "web/src/stores/providers.ts": {
       "mode.labelKey": [
         "core.agentModeAsk",
