@@ -11,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { PrefsStore, PrefsCorruptedError } from '../../server/src/lib/prefsStore.ts';
+import { projectRepos } from '../../server/src/lib/projects.ts';
+import { resolveChatWorkdir } from '../../server/src/lib/chat/workdir.ts';
 import { ProjectsError } from '../../server/src/modules/projects/errors.ts';
 import { createProjectsService } from '../../server/src/modules/projects/service.ts';
 
@@ -128,6 +130,7 @@ test('create пишет паспорт: revision 1, createdAt = updatedAt = now,
     description: 'Описание',
     tags: ['конвейер'],
     repos: [{ key: 'be', dir: be }, { key: 'fe', dir: fe }],
+    additionalRepos: [],
     defaultRepoKey: 'be',
     archivedAt: null,
     import: EMPTY_IMPORT,
@@ -360,24 +363,54 @@ test('update архивной записи отклоняется', async (t) =>
   assert.equal(env.prefs.readStored().projects.demo.title, 'В архиве');
 });
 
-test('update repos фабричного проекта с PROFILE_TRIAGE_REPOS отклоняется, поля правятся', async (t) => {
+test('проект фабрики сохраняет дополнительные папки и защищает строки профиля', async (t) => {
   const env = await withPrefs(t);
   const be = await makeRepoDir(env, 'be');
   const fe = await makeRepoDir(env, 'fe');
+  const notes = await makeRepoDir(env, 'рабочие заметки');
 
-  await makeProfile({ profilesDir: env.profilesDir, id: 'factory', repos: `be:${be} fe:${fe}` });
+  const profileDir = await makeProfile({ profilesDir: env.profilesDir, id: 'factory' });
+  const profileFile = path.join(profileDir, 'profile.sh');
+  const profileText = `root="${path.dirname(be)}"\nPROFILE_TRIAGE_REPOS="be:$root/be fe:$root/fe"\n`;
+  await writeFile(profileFile, profileText);
+  env.prefs.write({ projects: { factory: { repos: [{ key: 'old', dir: '/srv/old' }] } } });
 
   const { service } = serviceFor(env);
+  const base = [{ key: 'be', dir: be }, { key: 'fe', dir: fe }];
+  const extra = { key: 'notes', dir: notes };
   const saved = await service.update('factory', {
     title: 'Переименован',
     description: 'Описание',
     tags: ['метка'],
-    repos: [{ key: 'be', dir: be }, { key: 'fe', dir: fe }],
-    defaultRepoKey: 'be',
+    repos: [...base, extra],
+    defaultRepoKey: 'notes',
   }, 0);
 
   assert.equal(saved.title, 'Переименован');
   assert.deepEqual(saved.tags, ['метка']);
+  assert.equal(saved.defaultRepoKey, 'notes');
+  assert.deepEqual(saved.repos, [...base, extra].map((repo) => ({ ...repo, exists: true })));
+  assert.deepEqual(saved.profile.repos, base);
+  assert.equal(await readFile(profileFile, 'utf8'), profileText);
+  assert.deepEqual(env.prefs.readStored().projects.factory.additionalRepos, [extra]);
+  const config = { factoryHome: env.dir, profilesDir: env.profilesDir };
+
+  assert.deepEqual(await projectRepos({ config, prefs: env.prefs, id: 'factory', strict: true }), [
+    ...base.map((repo) => ({ ...repo, from: 'factory' })),
+    { ...extra, from: 'grigdesk' },
+  ]);
+  const workspace = await resolveChatWorkdir({
+    config: { ...config, rootDir: env.dir },
+    prefs: env.prefs,
+    provider: 'test',
+    caps: null,
+    factoryState: { readEnv: async () => ({}) },
+    trustedProject: async () => null,
+    workdir: { kind: 'project', projectId: 'factory', repoKey: null },
+  });
+
+  assert.equal(workspace.cwd, notes);
+  assert.deepEqual(workspace.extraDirs, [be, fe]);
 
   await assert.rejects(
     service.update('factory', {
@@ -390,6 +423,11 @@ test('update repos фабричного проекта с PROFILE_TRIAGE_REPOS �
     (error) => isProjectsError(error, 409, 'factory_project'),
   );
   assert.equal(env.prefs.readStored().projects.factory.title, 'Переименован');
+
+  const removed = await service.update('factory', updateBody(base), 1);
+
+  assert.deepEqual(removed.repos, base.map((repo) => ({ ...repo, exists: true })));
+  assert.deepEqual(env.prefs.readStored().projects.factory.additionalRepos, []);
 });
 
 test('валидация путей: bad_dir, dup_key, bad_key и path.normalize', async (t) => {

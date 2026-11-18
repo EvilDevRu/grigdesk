@@ -1,7 +1,10 @@
 <template>
   <div class="rows">
     <header class="repo-heading">
-      <h3>{{ t('core.projectRepozitorii') }} <span class="repo-count">{{ draft.repos.length }}</span></h3>
+      <h3>
+        {{ t('core.projectRepozitorii') }}
+        <span v-if="draft.repos.length" class="repo-count">{{ draft.repos.length }}</span>
+      </h3>
       <UiButton
         data-role="project-repo-add"
         :aria-label="t('core.projectDobavitRepozitoriy')"
@@ -17,7 +20,10 @@
           </svg>
         </template> {{ t('core.add') }} </UiButton>
     </header>
-    <div class="repo-columns" aria-hidden="true"><span>{{ t('core.projectMetka') }}</span><span>{{ t('core.projectPutKRabocheyKopii') }}</span></div>
+    <div v-if="draft.repos.length" class="repo-columns" aria-hidden="true">
+      <span>{{ t('core.projectMetka') }}</span>
+      <span>{{ t('core.projectPutKRabocheyKopii') }}</span>
+    </div>
     <div
       v-for="(repo, index) in draft.repos"
       :key="index"
@@ -36,7 +42,7 @@
           :ref="(element) => setKeyRef(index, element)"
           :model-value="repo.key"
           data-role="project-repo-key"
-          :disabled="readonly"
+          :disabled="rowLocked(index)"
           :placeholder="'service'"
           @update:model-value="rename(index, $event)"
         />
@@ -54,7 +60,7 @@
           :model-value="repo.dir"
           data-role="project-repo-dir"
           data-context="workspace-path"
-          :disabled="readonly"
+          :disabled="rowLocked(index)"
           v-tooltip="repo.dir"
           :placeholder="'/srv/project/service'"
           @update:model-value="setDir(index, $event)"
@@ -84,7 +90,7 @@
           variant="ghost"
           :aria-label="t('core.projectPeremestitKeyVyshe', { key: repo.key || t('core.repositoryWord') })"
           v-tooltip="t('core.projectPeremestitVyshe')"
-          :disabled="readonly || index === 0"
+          :disabled="rowLocked(index) || index === 0 || rowLocked(index - 1)"
           @click="move(index, -1)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -97,7 +103,7 @@
           variant="ghost"
           :aria-label="t('core.projectPeremestitKeyNizhe', { key: repo.key || t('core.repositoryWord') })"
           v-tooltip="t('core.projectPeremestitNizhe')"
-          :disabled="readonly || index === draft.repos.length - 1"
+          :disabled="rowLocked(index) || index === draft.repos.length - 1 || rowLocked(index + 1)"
           @click="move(index, 1)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -109,7 +115,7 @@
           data-context="project-repo-action"
           variant="ghost"
           :aria-label="t('core.projectUbratKey', { key: repo.key || t('core.repositoryWord') })"
-          :disabled="readonly"
+          :disabled="rowLocked(index)"
           v-tooltip="t('core.projectUbratStroku')"
           @click="remove(index)"
         >
@@ -132,7 +138,7 @@
 // Правки идут через чистые функции черновика, а не через мутацию строк: так выбор
 // по умолчанию едет вместе с переименованной строкой, а форма не держит вторую
 // копию этих правил. Состояние пути приходит снаружи: проверяет его сервер.
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 
 import { UiButton, UiField, UiInput, UiRadio, vTooltip, t } from '../../ui';
 import { moveRepo, removeRepo, renameRepoKey } from './projectDraft';
@@ -144,7 +150,8 @@ const draft = defineModel<ProjectDraft>({ required: true });
 const props = defineProps<{
   errors: Array<{ path: string; message: string }>;
   checks: Record<string, { state: string; message: string }>;
-  readonly: boolean;
+  readonly?: boolean;
+  lockedPrefix?: number;
 }>();
 
 const emit = defineEmits<{
@@ -156,6 +163,10 @@ const emit = defineEmits<{
 const keyInputs = ref<Array<InstanceType<typeof UiInput> | null>>([]);
 const dirInputs = ref<Array<InstanceType<typeof UiInput> | null>>([]);
 const defaultGroup = computed(() => `project-default-${draft.value.id || 'new'}`);
+
+function rowLocked(index: number): boolean {
+  return Boolean(props.readonly || index < (props.lockedPrefix ?? 0));
+}
 
 function errorOf(path: string): string {
   return props.errors.find((error) => error.path === path)?.message ?? '';
@@ -216,10 +227,16 @@ function remove(index: number): void {
   draft.value = removeRepo(draft.value, index);
 }
 
-// Новая строка пустая: метку и путь человек вписывает сам, а отправить её
-// с пустыми полями форма не даст — проверка ввода назовёт оба поля.
-function add(): void {
+/**
+ * Добавляет пустую строку и переводит фокус на метку после отрисовки.
+ * На длинном списке поле сразу попадает в видимую область.
+ */
+async function add(): Promise<void> {
+  const index = draft.value.repos.length;
+
   draft.value = { ...draft.value, repos: [...draft.value.repos, { key: '', dir: '' }] };
+  await nextTick();
+  keyInputs.value[index]?.focus();
 }
 
 /**

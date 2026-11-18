@@ -14,6 +14,7 @@ import { projectIcon } from './projectIcon.ts';
 
 // Границы полей паспорта: те же числа проверяет и форма, и сервер.
 export const PROJECT_LIMITS = {
+  id: 41,
   title: 120,
   description: 2000,
   tags: 20,
@@ -25,7 +26,7 @@ export const PROJECT_LIMITS = {
 // Новый идентификатор проекта начинается с буквы — так требует движок фабрики.
 // Существующие профили шире, поэтому проверка идентификатора профиля остаётся
 // отдельной (PROFILE_RE на сервере).
-export const PROJECT_ID_RE = /^[a-z][a-z0-9_-]{0,40}$/;
+export const PROJECT_ID_RE = new RegExp(`^[a-z][a-z0-9_-]{0,${PROJECT_LIMITS.id - 1}}$`);
 // Ключ репозитория — метка внутри проекта: короткая, строчная, без пробелов.
 export const REPO_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,15}$/;
 
@@ -53,8 +54,8 @@ const {
 // Метка и путь — то, что приходит на сервер и уходит с него без служебных полей.
 const repoRef = objectOf({ key: text, dir: text });
 
-// Источник путей закрыт перечислением: по нему раздел решает, можно ли править
-// репозитории. Незнакомое значение здесь опаснее отказа.
+// Источник основных путей закрыт перечислением. При «profile» подробный паспорт
+// указывает фиксированные первые строки в profile.repos, за ними идут добавления.
 const pathsSource = oneOf('passport', 'profile');
 
 const importStatus = oneOf('none', 'pending', 'imported', 'conflict', 'failed', 'manual');

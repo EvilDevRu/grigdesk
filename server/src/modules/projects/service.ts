@@ -14,7 +14,7 @@ import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 
 import { PROFILE_RE, listFactoryProfiles, listProjects } from '../../lib/profiles.ts';
 import {
-  cachedTriageProfile, readProjectRecord, readProjectsMeta, isProjectDeleted,
+  cachedTriageProfile, readProjectRecord, readProjectsMeta, isProjectDeleted, projectRepoAdditions,
 } from '../../lib/projects.ts';
 import { checkRepositoryPaths } from '../../lib/projects/repositoryCheck.ts';
 import { RoutesStore } from '../routes/store.ts';
@@ -280,16 +280,18 @@ export function createProjectsService({
     };
   }
 
-  /** Пути проекта: непустой профиль фабрики главнее паспорта — до миграции в B. */
+  /**
+   * Собирает тот же список, который видят «Код» и чаты проекта.
+   * Дополнительные папки идут после основных и используют только свободные метки.
+   */
   function effectiveRepos(
     record: ProjectRecord | null,
     profile: ProfileState,
   ): { repos: ProjectRepoRef[]; pathsSource: 'passport' | 'profile' } {
-    if (profile.present && profile.repos.length) {
-      return { repos: profile.repos, pathsSource: 'profile' };
-    }
+    const pathsSource = profile.repos.length ? 'profile' : 'passport';
+    const repos = pathsSource === 'profile' ? profile.repos : record?.repos ?? [];
 
-    return { repos: record?.repos ?? [], pathsSource: 'passport' };
+    return { repos: [...repos, ...projectRepoAdditions(repos, record?.additionalRepos ?? [])], pathsSource };
   }
 
   async function routesOf(id: string): Promise<string[]> {
@@ -342,6 +344,10 @@ export function createProjectsService({
     const missing = repos
       .filter((repo) => !repo.exists)
       .map((repo) => `Каталог ${repo.dir} не найден.`);
+    const keys = new Set(profile.repos.map((repo) => repo.key));
+    const hidden = (record?.additionalRepos ?? [])
+      .filter((repo) => keys.has(repo.key))
+      .map((repo) => `Метка «${repo.key}» занята профилем фабрики. Дополнительная папка скрыта.`);
 
     return {
       id,
@@ -356,7 +362,7 @@ export function createProjectsService({
       profile: { present: profile.present, pathsSource: effective.pathsSource },
       importStatus: record?.import.status ?? 'none',
       routes: await routesOf(id),
-      warnings: [...warningsOf(effective.repos), ...missing],
+      warnings: [...warningsOf(effective.repos), ...missing, ...hidden],
     };
   }
 
@@ -455,6 +461,7 @@ export function createProjectsService({
         ...(Object.hasOwn(value, 'icon') ? { icon: value.icon } : {}),
         tags: value.tags,
         repos: normalizedRepos(value.repos),
+        additionalRepos: [],
         defaultRepoKey: value.defaultRepoKey,
         archivedAt: null,
         import: { ...EMPTY_IMPORT },
@@ -506,16 +513,22 @@ export function createProjectsService({
         );
       }
 
-      // Правило инкремента A: у проекта фабрики с непустым PROFILE_TRIAGE_REPOS пути
-      // задаёт профиль. Остальные поля правятся — их у профиля нет.
-      if (profile.present && profile.repos.length && !sameRepos(value.repos, profile.repos)) {
+      const profileRepoCount = profile.repos.length;
+      const leadingRepos = value.repos.slice(0, profileRepoCount);
+
+      if (!sameRepos(leadingRepos, profile.repos)) {
         throw new ProjectsError(
           409,
           'factory_project',
-          'Пути этого проекта задаёт профиль фабрики (PROFILE_TRIAGE_REPOS) — правьте их там.',
+          'Пути из профиля фабрики доступны только для чтения. Перечитайте проект и повторите правку.',
         );
       }
 
+      // Если профиль занял метку добавления, не теряем сохранённый путь при правке
+      // видимых строк. Его снова можно будет увидеть после освобождения метки.
+      const reservedKeys = new Set(profile.repos.map((repo) => repo.key));
+      const hiddenAdditions = record?.additionalRepos.filter((repo) => reservedKeys.has(repo.key)) ?? [];
+      const additionalRepos = profileRepoCount ? normalizedRepos(value.repos.slice(profileRepoCount)) : [];
       const at = now();
       const next = {
         // Неизвестные внутренние поля записи сохраняются: их могло положить будущее
@@ -526,7 +539,8 @@ export function createProjectsService({
         ...(Object.hasOwn(value, 'icon') ? { icon: value.icon }
           : record && Object.hasOwn(record, 'icon') ? { icon: record.icon ?? null } : {}),
         tags: value.tags,
-        repos: normalizedRepos(value.repos),
+        repos: normalizedRepos(profileRepoCount ? profile.repos : value.repos),
+        additionalRepos: [...additionalRepos, ...hiddenAdditions],
         defaultRepoKey: value.defaultRepoKey,
         archivedAt: record?.archivedAt ?? null,
         import: record?.import ?? { ...EMPTY_IMPORT },
@@ -553,14 +567,13 @@ export function createProjectsService({
     id: string,
     at: string,
   ) {
-    const effective = effectiveRepos(record, profile);
-
     return {
       title: record?.title ?? id,
       description: record?.description ?? '',
       ...(record && Object.hasOwn(record, 'icon') ? { icon: record.icon ?? null } : {}),
       tags: record?.tags ?? [],
-      repos: effective.repos.map((repo) => ({ ...repo })),
+      repos: profile.repos.length ? profile.repos : record?.repos ?? [],
+      additionalRepos: record?.additionalRepos ?? [],
       defaultRepoKey: record?.defaultRepoKey ?? null,
       import: record?.import ?? { ...EMPTY_IMPORT },
       createdAt: record?.createdAt ?? at,

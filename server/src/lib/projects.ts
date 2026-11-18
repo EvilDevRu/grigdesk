@@ -2,10 +2,8 @@ import { deletedProjectIds, isProjectDeleted } from './projects/deletion.ts';
 
 export { deletedProjectIds, isProjectDeleted } from './projects/deletion.ts';
 // Паспорта проектов: откуда GrigDesk знает пути репозиториев проекта на диске.
-// Источник №1 — профиль фабрики (PROFILE_TRIAGE_REPOS, читается через loadTriageProfile):
-// пока идёт миграция, для проектов фабрики пути живут ТАМ, и второй источник тут же
-// разъехался бы с первым (инкремент B переведёт читателей на паспорт).
-// Источник №2 — реестр prefs.projects.<id>: паспорт проекта, заведённого в GrigDesk.
+// Пути из PROFILE_TRIAGE_REPOS имеют приоритет. Паспорт проекта хранит локальные
+// добавления отдельно, чтобы старые копии путей профиля не возвращались в список.
 //
 // Записи реестра бывают двух поколений: старая знает только `repos`, новая — весь
 // паспорт. Читатели получают одну форму через readProjectRecord: разбирать умолчания
@@ -70,6 +68,7 @@ export interface ProjectRecord {
   icon?: string | null;
   tags: string[];
   repos: ProjectRepoRef[];
+  additionalRepos: ProjectRepoRef[];
   defaultRepoKey: string | null;
   archivedAt: string | null;
   import: ProjectImport;
@@ -213,6 +212,7 @@ export function readProjectRecord(
     tags: (Array.isArray(source.tags) ? source.tags : [])
       .filter((tag): tag is string => typeof tag === 'string'),
     repos: repoRefs(source.repos),
+    additionalRepos: repoRefs(source.additionalRepos),
     defaultRepoKey: optionalText(source.defaultRepoKey),
     archivedAt: optionalText(source.archivedAt),
     import: source.import === undefined ? { ...EMPTY_IMPORT } : normalizeImport(source.import),
@@ -255,6 +255,18 @@ function normalizeProjectRepos(repos: unknown, from: string): ProjectRepo[] {
 }
 
 /**
+ * Оставляет дополнительные папки, чьи метки свободны в основном списке.
+ * При совпадении метки основной список задаёт единственный видимый путь.
+ */
+export function projectRepoAdditions(
+  repos: ProjectRepoRef[], additions: ProjectRepoRef[],
+): ProjectRepoRef[] {
+  const keys = new Set(repos.map((repo) => repo.key));
+
+  return additions.filter((repo) => !keys.has(repo.key));
+}
+
+/**
  * Профиль фабрики с коротким кэшем: source bash-файла не дёшев, а профили правят руками
  * и редко. Кэш общий на процесс — раздел «Проекты» и плагин «Код» читают один профиль.
  */
@@ -272,10 +284,8 @@ async function factoryRepos(config: ProjectPathsConfig, name: string) {
 }
 
 /**
- * Репозитории проекта: [{key, dir, from: 'factory'|'grigdesk'}]. Может быть пусто —
- * профиль без PROFILE_TRIAGE_REPOS или проект GrigDesk, где пути ещё не заданы
- * (тогда пути GrigDesk работают и для фабричного проекта — как фолбэк, не перекрытие).
- * Пока идёт миграция, непустой профиль фабрики остаётся источником путей.
+ * Собирает рабочие папки для «Кода» и чатов, сохраняя происхождение каждой.
+ * Основные пути берутся из непустого профиля или паспорта, добавления идут следом.
  */
 export async function projectRepos({ config, prefs, id, isFactory = null, strict = false }: {
   config: ProjectPathsConfig;
@@ -296,16 +306,15 @@ export async function projectRepos({ config, prefs, id, isFactory = null, strict
   }
 
   const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir, { strict })).includes(id);
+  const record = readProjectRecord(prefs, id);
+  const profileRepos = factory ? (strict
+    ? (await loadTriageProfile(config, id, { strict: true })).repos
+    : await factoryRepos(config, id)) : [];
+  const repos = profileRepos.length ? profileRepos : record?.repos ?? [];
+  const additions = projectRepoAdditions(repos, record?.additionalRepos ?? []);
 
-  if (factory) {
-    const repos = strict
-      ? (await loadTriageProfile(config, id, { strict: true })).repos
-      : await factoryRepos(config, id);
-
-    if (repos.length) {
-      return normalizeProjectRepos(repos, 'factory');
-    }
-  }
-
-  return normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'grigdesk');
+  return [
+    ...normalizeProjectRepos(repos, profileRepos.length ? 'factory' : 'grigdesk'),
+    ...normalizeProjectRepos(additions, 'grigdesk'),
+  ];
 }

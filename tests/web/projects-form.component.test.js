@@ -304,16 +304,31 @@ test('серверные fieldErrors раскладываются по поля�
   assert.match(titleField.text(), /Название уже занято другим проектом/);
 });
 
-test('профильный проект: строки репозиториев заблокированы, остальные поля активны', async (t) => {
-  const { wrapper } = await mountForm(t, { detail: profileDetail() });
+test('в проекте фабрики можно добавить рабочую папку рядом с защищёнными строками', async (t) => {
+  const { wrapper, harness } = await mountForm(t, { detail: profileDetail() });
+  const add = wrapper.find('[data-role="project-repo-add"]');
 
   assert.ok(wrapper.find('[data-role="project-repo-dir"]').attributes('disabled') !== undefined);
   assert.ok(wrapper.find('[data-role="project-repo-key"]').attributes('disabled') !== undefined);
-  // Весь список репозиториев профильного проекта — чтение: ни строк, ни порядка.
-  assert.ok(wrapper.find('[data-role="project-repo-add"]').attributes('disabled') !== undefined);
+  assert.equal(add.attributes('disabled'), undefined);
   assert.ok(wrapper.find('[data-role="project-repo-remove"]').attributes('disabled') !== undefined);
   assert.equal(wrapper.find('[data-role="project-title"]').attributes('disabled'), undefined);
-  assert.match(wrapper.text(), /Пути задаёт профиль фабрики/);
+  assert.match(wrapper.text(), /Пути из профиля фабрики доступны для чтения/);
+
+  await add.trigger('click');
+  const row = wrapper.findAll('[data-role="project-repo-row"]').at(-1);
+  const key = row.find('[data-role="project-repo-key"]');
+
+  await key.setValue('be');
+  assert.equal(key.attributes('disabled'), undefined);
+  await key.setValue('notes');
+  await row.find('[data-role="project-repo-dir"]').setValue('/srv/рабочие заметки');
+  assert.notEqual(row.find('[data-role="project-repo-up"]').attributes('disabled'), undefined);
+  await saveButton(wrapper).trigger('click');
+
+  const [, , draft] = harness.calls.find(([name]) => name === 'save');
+
+  assert.deepEqual(draft.repos.at(-1), { key: 'notes', dir: '/srv/рабочие заметки' });
 });
 
 test('текст о границе доверия на месте, удаления в «Управлении» пока нет', async (t) => {
@@ -321,7 +336,7 @@ test('текст о границе доверия на месте, удален�
 
   assert.match(
     wrapper.find('[data-role="project-trust"]').text(),
-    /Права чатов и попыток фабрики/,
+    /доступны в чатах проекта с учётом разрешений исполнителя/,
   );
 
   const manage = wrapper.find('[data-role="project-manage"]');

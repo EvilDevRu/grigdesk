@@ -24,6 +24,7 @@ test('readProjectRecord дополняет legacy-запись значения�
     description: '',
     tags: [],
     repos: [{ key: 'be', dir: '/srv/be' }],
+    additionalRepos: [],
     defaultRepoKey: null,
     archivedAt: null,
     import: { status: 'none', fingerprint: null, at: null, error: null, candidates: null },

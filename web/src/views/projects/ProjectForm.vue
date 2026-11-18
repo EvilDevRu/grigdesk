@@ -42,15 +42,15 @@
         </section>
         <section class="editor-section">
           <ProjectRepoRows ref="repoRows" v-model="draft" :errors="shownErrors"
-            :checks="checks" :readonly="reposReadonly" @check="emit('check', $event)"
+            :checks="checks" :readonly="readonly || archived" :locked-prefix="profileRepoCount"
+            @check="emit('check', $event)"
             @select-repo="emit('selectRepo', $event)" />
           <div class="source-row">
-            <span class="hint">{{ profilePaths ? t('core.projectPutiIzProfilyaFabriki') : t('core.projectPutiIzPasportaProekta') }}</span>
+            <span class="hint">{{ repoSourceText }}</span>
             <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
               :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen"> {{ t('core.projectDostupKPapkam') }} {{ accessNoteOpen ? '↑' : '↓' }}
             </UiButton>
           </div>
-          <p v-if="profilePaths" class="hint"> {{ t('core.projectPutiZadaetProfilFabriki') }} </p>
           <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust"> {{ t('core.projectPutiIzPasportaRasshiryayut') }} </p>
         </section>
         <section v-if="!creating" class="editor-section">
@@ -238,7 +238,9 @@ const shownErrors = computed(() => (
 // Источник путей сохраняется и в локальной копии удалённого паспорта.
 // Запрет редактирования всей формы не меняет происхождение репозиториев.
 const profilePaths = computed(() => props.detail?.profile.pathsSource === 'profile');
-const reposReadonly = computed(() => props.readonly || profilePaths.value);
+const profileRepoCount = computed(() => (
+  profilePaths.value ? props.detail?.profile.repos.length ?? 0 : 0
+));
 
 // Пока выбор по умолчанию потерян, сохранять нельзя: репозиторий по умолчанию
 // исчез бы молча, а от него зависят и «Код», и пути триажа.
@@ -259,6 +261,14 @@ const saveStatus = computed(() => {
 });
 
 const archived = computed(() => Boolean(props.detail?.archivedAt));
+const repoSourceText = computed(() => {
+  if (!profilePaths.value) {
+    return t('core.projectPutiIzPasportaProekta');
+  }
+
+  return props.readonly || archived.value
+    ? t('core.projectPutiIzProfilyaFabriki') : t('core.projectPutiZadaetProfilFabriki');
+});
 
 // Архив при несохранённых правках потерял бы их: сначала сохранение. Живые связи
 // (например, правила Telegram) архив тоже не пропускают — это видно по сводке.

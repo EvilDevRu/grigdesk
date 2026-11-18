@@ -20,6 +20,10 @@ Prepare existing directories on the server. Human-supplied paths determine which
 5. Archive the project to prevent new work. Inspect blocking references and disable them in their owning sections.
 6. Restore it from the archive when needed. Delete registration is available in the archive after checks and confirmation.
 
+Rows from a factory profile are read-only. Use the same Add button to include your own working
+folders. After saving, they appear in Code and can be used in project chats. The factory profile
+sets the repositories for triage and pipelines.
+
 The compact catalog search matches names, IDs, labels and paths; the adjacent button changes sorting.
 The factory configuration heading wraps on narrow screens, keeping its disclosure accessible
 with larger text.
