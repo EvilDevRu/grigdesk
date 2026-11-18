@@ -1,4 +1,10 @@
 {
+  "showcaseSearchFilms": "Find a video",
+  "showcaseCreateFirstHint": "Show your finished work: choose a stand, prepare a script, and build a video.",
+  "showcaseNoSearchResults": "No videos found",
+  "showcaseFilmSettings": "Video settings",
+  "showcaseForWholeFilm": "For all scenes",
+  "showcaseEditorStartHint": "Connect a stand, choose a voice, and describe what to show. Your video scenes will appear here.",
   "trackerActionUnknown": "The action outcome is unknown. Checking the current state; before sending it again, make sure it has not already completed. {reason}",
   "taskReadOnly": "The connection is not confirmed. Retry reading before changing the task.",
   "taskPageStale": "Could not refresh the discussion. Showing the last received data.",

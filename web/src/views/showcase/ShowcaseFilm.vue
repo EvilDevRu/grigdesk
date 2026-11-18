@@ -1,5 +1,6 @@
 <template>
-  <section class="film" aria-labelledby="showcase-film-title">
+  <section class="film" :class="{ 'film--empty': !orderedScenes.length }"
+    aria-labelledby="showcase-film-title">
     <header class="film__head">
       <div class="film__crumbs">
         <UiButton variant="ghost" @click="emit('close')">{{ t('core.showcaseRoliki2') }}</UiButton>
@@ -26,7 +27,7 @@
           v-if="targetUrl"
           :href="targetUrl"
           variant="ghost"
-        > {{ t('core.showcaseOtkrytStend') }} <span aria-hidden="true">↗</span>
+          > {{ t('core.showcaseOtkrytStend') }} <span aria-hidden="true">↗</span>
         </StandLink>
         <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove-project')"> {{ t('core.showcaseUdalitRolik') }} </UiButton>
       </div>
@@ -49,66 +50,107 @@
       @cancel-job="emit('cancel', $event)"
     />
 
-      <ShowcaseStandPicker
-        :project="project"
-        :targets="targets"
-        :busy="busy"
-        :target-url="targetUrl"
-        @attach="emit('attach-target', $event)"
-      />
-
-
-    <!-- Разбор идёт минутами: экран говорит, что именно читается, и ничего не
-         предлагает править, пока плана нет. -->
-    <section v-if="analyzing" class="film__analysis" role="status" aria-live="polite">
-      <div class="film__analysis-head">
-        <UiSpinner decorative role="standalone" />
-        <strong>{{ t('core.showcaseRazbirayuZadachu') }}</strong>
-      </div>
-      <p class="film__analysis-copy"> {{ t('core.showcaseChitayuPostanovkuIzPortala') }} </p>
-    </section>
-
-    <section v-else-if="!orderedScenes.length" class="film__empty" aria-labelledby="showcase-empty-title">
-      <div class="film__empty-copy">
-        <strong id="showcase-empty-title">{{ t('core.showcaseStsenPokaNet') }}</strong>
-        <p> {{ t('core.showcaseOtmetteOChemRolik') }} </p>
-      </div>
-      <slot name="voice" />
-
-      <!-- У пустого ролика выбор открыт сразу: «Выбрать, о чём…» ведёт именно сюда. -->
-      <div class="film__source-empty" aria-labelledby="showcase-source-empty-title" role="group">
-        <h3 id="showcase-source-empty-title">{{ t('core.showcaseOChemRolik') }}</h3>
-        <ShowcaseSourcePanel
+    <div class="film__workspace">
+      <aside class="film__setup" :aria-label="t('core.showcaseFilmSettings')">
+        <div class="film__setup-head">
+          <h3>{{ t('core.showcaseFilmSettings') }}</h3>
+          <span class="film__meta">{{ t('core.showcaseForWholeFilm') }}</span>
+        </div>
+        <ShowcaseStandPicker
           :project="project"
+          :targets="targets"
           :busy="busy"
-          @apply="emit('apply-source', $event)"
+          :target-url="targetUrl"
+          @attach="emit('attach-target', $event)"
         />
-      </div>
-      <UiButton variant="ghost" :loading="busy" @click="emit('analyze')"> {{ t('core.showcaseRazobratZanovo') }} </UiButton>
-      <ShowcaseScriptGaps :gaps="project.scriptGaps" />
-      <ShowcaseSceneForm :screens="screens" :busy="busy" @add="emit('add-scene', $event)" />
-    </section>
+        <div class="film__voice"><slot name="voice" /></div>
+        <section class="film__source" aria-labelledby="showcase-source-title">
+          <div class="film__block-head">
+            <UiDisclosureButton v-if="orderedScenes.length" v-model:open="sourceOpen" controls="showcase-source-body" density="compact">
+              <span id="showcase-source-title">{{ t('core.showcaseOChemRolik') }}</span>
+            </UiDisclosureButton>
+            <h3 v-else id="showcase-source-title">{{ t('core.showcaseOChemRolik') }}</h3>
+            <span class="film__meta">{{ project.source ? t('core.showcaseSvoyVybor') : t('settings.diagnosticSourceDefault') }}</span>
+          </div>
+          <div id="showcase-source-body">
+            <ShowcaseSourcePanel
+              v-show="!orderedScenes.length || sourceOpen"
+              :project="project"
+              :busy="busy"
+              @apply="emit('apply-source', $event)"
+            />
+          </div>
+          <UiButton v-if="!orderedScenes.length" variant="ghost" :loading="busy" @click="emit('analyze')">
+            {{ t('core.showcaseRazobratZanovo') }}
+          </UiButton>
+        </section>
 
-    <template v-else>
-      <slot name="voice" />
+        <section v-if="orderedScenes.length" class="film__brief" aria-labelledby="showcase-brief-title">
+          <div class="film__block-head">
+            <UiDisclosureButton v-model:open="briefOpen" controls="showcase-brief-body" density="compact">
+              <span id="showcase-brief-title">{{ briefTitle }}</span>
+            </UiDisclosureButton>
+            <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
+          </div>
+          <div v-show="briefOpen" id="showcase-brief-body">
+            <ol v-if="project.brief.length" class="film__brief-list">
+              <li v-for="(point, index) in project.brief" :key="index">{{ point }}</li>
+            </ol>
+            <p v-else class="film__note"> {{ t('core.showcasePlanSobiraetsyaPoTekstu') }} </p>
+          </div>
+          <!-- Чего карта экранов не дала показать — справка при плане, а не
+                 предупреждение над роликом: решать это оператору не нужно. -->
+          <ShowcaseScriptGaps :gaps="project.scriptGaps" />
+        </section>
 
-      <!-- Карта экранов изменилась после разбора. Сборка переснимет прежние действия
+        <ShowcaseStandPanel
+          v-if="project.target?.status === 'ready'"
+          :project="project"
+          :seed="seed"
+          :busy="busy"
+          @seed="emit('seed', $event)"
+          @data-updated="emit('data-updated')"
+        />
+      </aside>
+
+      <div class="film__canvas">
+        <section v-if="analyzing" class="film__analysis" role="status" aria-live="polite">
+          <div class="film__analysis-head">
+            <UiSpinner decorative role="standalone" />
+            <strong>{{ t('core.showcaseRazbirayuZadachu') }}</strong>
+          </div>
+          <p class="film__analysis-copy"> {{ t('core.showcaseChitayuPostanovkuIzPortala') }} </p>
+        </section>
+
+        <section v-else-if="!orderedScenes.length" class="film__empty"
+          aria-labelledby="showcase-empty-title">
+          <div class="film__empty-copy">
+            <h3 id="showcase-empty-title">{{ t('core.showcaseStsenPokaNet') }}</h3>
+            <p>{{ t('core.showcaseEditorStartHint') }}</p>
+          </div>
+          <ShowcaseScriptGaps :gaps="project.scriptGaps" />
+          <div class="film__manual">
+            <h3>{{ t('core.showcaseDobavitStsenu') }}</h3>
+            <ShowcaseSceneForm :screens="screens" :busy="busy" @add="emit('add-scene', $event)" />
+          </div>
+        </section>
+
+        <template v-else>
+          <!-- Карта экранов изменилась после разбора. Сборка переснимет прежние действия
            честно, но человек хотел бы увидеть новые элементы — и узнать об этом ДО
            записи, а не после просмотра ролика. -->
-      <UiInlineMessage v-if="scriptOutdated" tone="warning">
-        {{ SCRIPT_OUTDATED_TEXT }}
-        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
-      </UiInlineMessage>
+          <UiInlineMessage v-if="scriptOutdated" tone="warning">
+            {{ SCRIPT_OUTDATED_TEXT }}
+            <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
+          </UiInlineMessage>
 
-      <!-- Выбор «О чём ролик» сменили после разбора, а новый разбор не прошёл: сцены
+          <!-- Выбор «О чём ролик» сменили после разбора, а новый разбор не прошёл: сцены
            рассказывают о прежнем, и человек должен узнать это до сборки. -->
-      <UiInlineMessage v-if="sourceOutdated" tone="warning" data-role="source-outdated">
-        {{ SOURCE_OUTDATED_TEXT }}
-        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
-      </UiInlineMessage>
+          <UiInlineMessage v-if="sourceOutdated" tone="warning" data-role="source-outdated">
+            {{ SOURCE_OUTDATED_TEXT }}
+            <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
+          </UiInlineMessage>
 
-      <div class="film__stage">
-        <div class="film__main">
           <section v-if="project.latestFinal" class="film__final" aria-labelledby="showcase-final-title">
             <div class="film__block-head">
               <h3 id="showcase-final-title">
@@ -156,16 +198,16 @@
               <span class="film__meta">{{ orderedScenes.length }} {{ t('settings.from') }} {{ maxScenes }}</span>
             </div>
 
-        <ShowcaseTimeline
-          :scenes="orderedScenes"
-          :selected-id="selectedScene?.id ?? null"
-          :changed-ids="changedIds"
-          :busy="busy"
-          :frame-url="artifactUrl"
-          :starts-ms="startsMs"
-          @select="select"
-          @reshoot="emit('reshoot-scene', $event)"
-        />
+            <ShowcaseTimeline
+              :scenes="orderedScenes"
+              :selected-id="selectedScene?.id ?? null"
+              :changed-ids="changedIds"
+              :busy="busy"
+              :frame-url="artifactUrl"
+              :starts-ms="startsMs"
+              @select="select"
+              @reshoot="emit('reshoot-scene', $event)"
+            />
 
             <UiDisclosureButton v-model:open="addOpen" controls="showcase-add-scene" density="compact">
               {{ addOpen ? t('core.showcaseSkrytFormuStseny') : t('core.showcaseDobavitStsenu') }}
@@ -175,53 +217,6 @@
             </div>
           </section>
 
-          <!-- Свёрнутый блок скрыт, а не снят: черновик человека переживает сворачивание. -->
-          <section class="film__source" aria-labelledby="showcase-source-title">
-            <div class="film__block-head">
-              <UiDisclosureButton v-model:open="sourceOpen" controls="showcase-source-body" density="compact">
-                <span id="showcase-source-title">{{ t('core.showcaseOChemRolik') }}</span>
-              </UiDisclosureButton>
-              <span class="film__meta">{{ project.source ? t('core.showcaseSvoyVybor') : t('settings.diagnosticSourceDefault') }}</span>
-            </div>
-            <div id="showcase-source-body">
-              <ShowcaseSourcePanel
-                v-show="sourceOpen"
-                :project="project"
-                :busy="busy"
-                @apply="emit('apply-source', $event)"
-              />
-            </div>
-          </section>
-
-          <section class="film__brief" aria-labelledby="showcase-brief-title">
-            <div class="film__block-head">
-              <UiDisclosureButton v-model:open="briefOpen" controls="showcase-brief-body" density="compact">
-                <span id="showcase-brief-title">{{ briefTitle }}</span>
-              </UiDisclosureButton>
-              <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">{{ t('core.showcaseRazobratZanovo') }}</UiButton>
-            </div>
-            <div v-show="briefOpen" id="showcase-brief-body">
-              <ol v-if="project.brief.length" class="film__brief-list">
-                <li v-for="(point, index) in project.brief" :key="index">{{ point }}</li>
-              </ol>
-              <p v-else class="film__note"> {{ t('core.showcasePlanSobiraetsyaPoTekstu') }} </p>
-            </div>
-            <!-- Чего карта экранов не дала показать — справка при плане, а не
-                 предупреждение над роликом: решать это оператору не нужно. -->
-            <ShowcaseScriptGaps :gaps="project.scriptGaps" />
-          </section>
-
-          <ShowcaseStandPanel
-            v-if="project.target?.status === 'ready'"
-            :project="project"
-            :seed="seed"
-            :busy="busy"
-            @seed="emit('seed', $event)"
-            @data-updated="emit('data-updated')"
-          />
-        </div>
-
-        <aside class="film__side">
           <ShowcaseSceneEditor
             v-if="selectedScene"
             :key="selectedScene.id"
@@ -250,9 +245,9 @@
             @continue="emit('scene-continues', { id: selectedScene.id, value: $event })"
             @generate-bindings="generateBindings"
           />
-        </aside>
+        </template>
       </div>
-    </template>
+    </div>
   </section>
 </template>
 
@@ -431,6 +426,10 @@ const manifestUnavailable = computed(() => (
 ));
 
 const targetText = computed(() => {
+  if (!props.project.ref) {
+    return t('core.showcaseStendNeVybran');
+  }
+
   if (props.project.target?.status !== 'ready') {
     return t('core.showcaseTselPokazaNedostupna');
   }
@@ -634,49 +633,45 @@ function seekTo(startMs: number): void {
 
 <style scoped>
 .film {
+  container: showcase-film / inline-size;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
 .film__head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 16px;
-  align-items: start;
-  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.film__crumbs {
-  grid-column: 1 / -1;
-  margin-left: -10px;
-}
-
-.film__heading {
-  min-width: 0;
-}
-
+.film__heading,
 .film__title-row {
+  min-width: 0;
+}
+
+.film__title-row,
+.film__head-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
 }
 
 .film__title-row h2 {
   margin: 0;
-  font-size: 21px;
-  line-height: 1.25;
-  letter-spacing: -0.025em;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
 
 .film__title-row svg {
   width: 15px;
   height: 15px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .film__target,
@@ -684,156 +679,147 @@ function seekTo(startMs: number): void {
 .film__meta {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 12.5px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .film__target {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
-.film__head-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
+.film__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
 }
 
-.film__analysis,
-.film__empty {
+.film__setup {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 14px;
+  gap: 18px;
   min-width: 0;
-  padding: 18px 20px;
+  padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.film__setup-head,
+.film__block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.film__setup-head h3,
+.film__block-head h3,
+.film__manual h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.film__setup-head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.film__canvas {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .film__analysis {
-  gap: 6px;
+  padding: 32px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 
 .film__analysis-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
-/* Текст стоит под заголовком с тем же отступом, что и заголовок после спиннера:
-   спиннер 18px + зазор 10px. */
 .film__analysis-copy {
-  max-width: 640px;
-  margin: 0;
-  padding-left: 28px;
+  margin: 8px 0 0;
   color: var(--ink-mid);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
-.film__empty-copy {
-  min-width: 0;
-}
-
-.film__source-empty {
+.film__empty {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   min-width: 0;
 }
 
-.film__source-empty h3 {
+.film__empty-copy h3 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 660;
-}
-
-.film__empty-copy strong {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .film__empty-copy p {
-  max-width: 640px;
-  margin: 5px 0 0;
+  max-width: 440px;
+  margin: 6px 0 0;
   color: var(--ink-mid);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
-.film__stage {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  align-items: start;
-  gap: 16px;
-}
-
-.film__main {
+.film__manual {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.film__side {
-  position: sticky;
-  top: 12px;
-  min-width: 0;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
 .film__final,
-.film__scenes,
-.film__source,
-.film__brief {
+.film__scenes {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  box-shadow: inset 0 1px 0 #ffffff08;
+  border-radius: 6px;
+  background: var(--surface);
 }
 
-.film__block-head {
+.film__voice,
+.film__source,
+.film__brief {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 10px;
-  flex-wrap: wrap;
   min-width: 0;
-}
-
-.film__block-head h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 660;
-  letter-spacing: -0.01em;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 .film__stale {
   margin-right: 6px;
-  padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--line));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warn) 6%, var(--ground));
   color: var(--warn);
-  font-size: 10.5px;
 }
 
-.film__downloads {
+.film__downloads,
+.film__phrase-list {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -843,48 +829,89 @@ function seekTo(startMs: number): void {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 0;
   color: var(--ink-mid);
   font-size: 12px;
-}
-
-.film__phrase-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 
 .film__brief-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
-  padding-left: 20px;
-  font-size: 13.5px;
-}
-
-.film__brief-list li {
-  padding-left: 3px;
+  padding-left: 18px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
-@media (max-width: 980px) {
-  .film__stage {
+.film--empty .film__workspace {
+  display: flex;
+  flex-direction: column;
+}
+
+.film--empty .film__setup {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 20px;
+  width: 100%;
+}
+
+.film--empty .film__setup-head {
+  grid-column: 1 / -1;
+}
+
+.film--empty .film__voice,
+.film--empty .film__source {
+  padding: 0 0 0 20px;
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+
+.film--empty .film__canvas {
+  width: 100%;
+}
+
+@container showcase-film (max-width: 960px) {
+  .film__workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .film__side {
-    position: static;
+  .film__setup,
+  .film__canvas {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .film__setup {
+    order: 2;
+  }
+
+  .film--empty .film__setup {
+    order: 0;
+    display: flex;
+  }
+
+  .film--empty .film__voice,
+  .film--empty .film__source {
+    padding: 16px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 }
 
-@media (max-width: 640px) {
+@container showcase-film (max-width: 600px) {
   .film__head {
     grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
   }
 
   .film__head-actions {
     flex-wrap: wrap;
+  }
+
+  .film__setup,
+  .film__scenes,
+  .film__final {
+    padding: 12px;
   }
 }
 </style>

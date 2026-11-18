@@ -8,273 +8,290 @@
       <span class="scene__state" :data-tone="state.tone">{{ state.label }}</span>
     </header>
 
-    <!-- Что запись покажет на экране. Действия задаёт карта профиля через разбор:
+    <div class="scene__workspace">
+      <div class="scene__visual">
+        <!-- Что запись покажет на экране. Действия задаёт карта профиля через разбор:
          править их руками здесь нельзя, но видеть — обязательно. -->
-    <p class="scene__plan" :data-static="actions ? 'no' : 'yes'">
-      <span v-if="continues" class="scene__plan-chain">{{ continuationLabel() }}</span>
-      <span class="scene__plan-screen">{{ screenTitle }}</span>
-      <span>{{ actions || t('core.showcaseBezDeystviyNepodvizhnyyEkran') }}</span>
-    </p>
-
-    <!-- Откуда сцена начинается: со своего экрана или там, где закончилась
-         предыдущая. Это решение о записи, а не текст, поэтому уходит сразу, без
-         черновика и кнопки «Сохранить». -->
-    <div class="scene__start">
-      <UiSwitch
-        :model-value="continues"
-        :disabled="busy || first"
-        data-role="scene-continues"
-        @update:model-value="emit('continue', Boolean($event))"
-      > {{ t('core.showcaseNachinatTamGdeZakonchilas') }} </UiSwitch>
-      <p class="scene__hint">{{ startHint }}</p>
-    </div>
-
-    <!-- Запись и звук самой сцены: увидеть, что сняли, можно без просмотра всего
-         ролика. Пока записи нет, место честно говорит, когда она появится. -->
-    <div class="scene__preview">
-      <UiVideo v-if="clipUrl" :src="clipUrl" :label="t('core.showcaseZapisStsenyTitle', { title: scene.title })" />
-      <div v-else class="scene__placeholder">
-        <strong>{{ t('core.showcaseZapisiEscheNet') }}</strong>
-        <span>{{ t('core.showcaseZapisEkranaPoyavitsyaPosle') }}</span>
-      </div>
-      <UiAudio v-if="audioUrl" :src="audioUrl" :label="t('core.showcaseZvukStsenyTitle', { title: scene.title })" />
-      <div v-if="canJump" class="scene__jump">
-        <UiButton variant="outline" @click="emit('jump')">{{ t('core.showcaseSmotretVRolike') }}</UiButton>
-      </div>
-    </div>
-
-    <UiField :label="t('core.showcaseNazvanieStseny')">
-      <UiInput
-        :model-value="draft.title"
-        :disabled="busy"
-        @update:model-value="patch('title', $event)"
-      />
-    </UiField>
-
-    <UiField
-      :label="t('core.showcaseTekstOzvuchki')"
-      :hint="t('core.showcaseUdareniePeredGlasnoyZ')"
-    >
-      <UiTextarea
-        :model-value="draft.narration"
-        :disabled="busy"
-        rows="4"
-        @update:model-value="patch('narration', $event)"
-      />
-    </UiField>
-
-    <section
-      class="scene__pronunciation"
-      data-role="scene-pronunciation"
-      aria-labelledby="scene-pronunciation-title"
-    >
-      <div class="scene__pronunciation-head">
-        <div>
-          <strong id="scene-pronunciation-title">{{ t('core.showcaseKakZvuchitReplika') }}</strong>
-          <p class="scene__hint"> {{ t('core.showcaseProslushivanieIspolzuetNesohranennyyTekst') }} </p>
-        </div>
-        <UiButton
-          variant="outline"
-          data-role="preview-narration"
-          :disabled="busy || !voiceRef || !canonicalNarration"
-          :loading="previewing"
-          @click="previewNarration"
-        > {{ t('core.showcaseProslushatRepliku') }} </UiButton>
-      </div>
-
-      <p class="scene__voice-support" :data-state="capabilityState(voiceCapabilities?.stress)">
-        {{ stressSupportText }}
-      </p>
-
-      <UiField
-        :label="t('core.showcaseFragmentDlyaYavnogoProiznosheniya')"
-        :hint="t('core.showcaseVydeliteSlovoIliFrazu')"
-      >
-        <UiTextarea
-          :model-value="canonicalNarration"
-          :disabled="busy"
-          readonly
-          rows="3"
-          data-role="pronunciation-narration"
-          @select="rememberPronunciationSelection"
-        />
-      </UiField>
-
-      <p class="scene__selection">
-        {{ pronunciationSelectedText
-          ? t('core.showcaseVybranoPronunciationselectedtext', { pronunciationSelectedText })
-          : t('core.showcaseFragmentEscheNeVybran') }}
-      </p>
-
-      <div class="scene__pronunciation-controls">
-        <UiField :label="t('core.showcaseProiznestiKak')">
-          <UiInput
-            :model-value="pronunciationDraft"
-            :disabled="busy || !voiceRef"
-            :placeholder="t('core.showcaseNaprimerZamOk')"
-            data-role="pronunciation-value"
-            @update:model-value="pronunciationDraft = String($event ?? '')"
-          />
-        </UiField>
-        <UiButton
-          :disabled="busy || !canAddPronunciation"
-          data-role="add-pronunciation"
-          @click="addPronunciation"
-        >
-          {{ replacingPronunciation ? t('core.showcaseZamenitIspravlenie') : t('core.showcaseDobavitIspravlenie') }}
-        </UiButton>
-      </div>
-
-      <p
-        v-if="pronunciationError || pronunciationConflict"
-        class="scene__pronunciation-error"
-        role="alert"
-      >
-        {{ pronunciationError || t('core.showcaseVybrannyyFragmentPeresekaetsyaS') }}
-      </p>
-
-      <ul v-if="draft.pronunciationOverrides.length" class="scene__pronunciation-list">
-        <li
-          v-for="(entry, entryIndex) in draft.pronunciationOverrides"
-          :key="pronunciationKey(entry, entryIndex)"
-          :data-status="pronunciationStatus(entry)"
-        >
-          <span>
-            <strong>«{{ pronunciationSource(entry) }}» → «{{ entry.pronunciation }}»</strong>
-            <small>{{ pronunciationStatusText(entry) }}</small>
-          </span>
-          <UiButton
-            variant="ghost"
-            tone="danger"
-            :disabled="busy"
-            @click="removePronunciation(entryIndex)"
-          > {{ t('core.taskDelete') }} </UiButton>
-        </li>
-      </ul>
-
-      <p v-if="previewNote" class="scene__preview-note" role="status">{{ previewNote }}</p>
-      <p v-if="previewError" class="scene__pronunciation-error" role="alert">
-        {{ previewError }}
-      </p>
-    </section>
-
-    <section class="scene__bindings" data-role="scene-bindings" aria-labelledby="scene-bindings-title">
-      <div class="scene__bindings-head">
-        <div>
-          <strong id="scene-bindings-title">{{ t('core.showcaseRechIDeystviya') }}</strong>
-          <p class="scene__hint">{{ t('core.showcaseSvyazVybiraetsyaPoFragmentu') }}</p>
-        </div>
-        <UiButton
-          variant="ghost"
-          :disabled="busy"
-          data-role="generate-bindings"
-          @click="emit('generate-bindings')"
-        > {{ t('core.showcasePostroitPrivyazki') }} </UiButton>
-      </div>
-
-      <p class="scene__binding-state" :data-status="visibleBindingStatus">
-        {{ bindingStatusText }}
-      </p>
-
-      <template v-if="bindableActions.length && canonicalNarration">
-        <UiField
-          :label="t('core.showcaseFragmentRechi')"
-          :hint="t('core.showcaseVydeliteSlovaVKanonicheskom')"
-        >
-          <UiTextarea
-            :model-value="canonicalNarration"
-            :disabled="busy"
-            readonly
-            rows="3"
-            data-role="binding-narration"
-            @select="rememberSelection"
-          />
-        </UiField>
-
-        <p class="scene__selection">
-          {{ selectedText ? t('core.showcaseVybranoSelectedtext', { selectedText }) : t('core.showcaseFragmentEscheNeVybran') }}
+        <p class="scene__plan" :data-static="actions ? 'no' : 'yes'">
+          <span v-if="continues" class="scene__plan-chain">{{ continuationLabel() }}</span>
+          <span class="scene__plan-screen">{{ screenTitle }}</span>
+          <span>{{ actions || t('core.showcaseBezDeystviyNepodvizhnyyEkran') }}</span>
         </p>
 
-        <div class="scene__binding-controls">
-          <UiField :label="t('core.showcaseDeystvie')">
-            <UiSelect v-model.number="bindingActionIndex" :disabled="busy">
-              <option v-for="item in bindableActions" :key="item.index" :value="item.index">
-                {{ item.label }}
-              </option>
-            </UiSelect>
-          </UiField>
-          <UiField :label="t('core.showcaseSvyaz')">
-            <UiSelect v-model="bindingKind" :disabled="busy">
-              <option
-                v-for="item in BINDING_KIND_OPTIONS"
-                :key="item.value"
-                :value="item.value"
-                :disabled="!kindAllowed(item.value, bindingActionIndex)"
-              >
-                {{ item.label }}
-              </option>
-            </UiSelect>
-          </UiField>
-          <UiButton :disabled="busy || !canAddBinding" @click="addBinding">
-            {{ boundAction ? t('core.showcaseZamenitSvyaz') : t('core.showcaseDobavitSvyaz') }}
-          </UiButton>
+        <!-- Откуда сцена начинается: со своего экрана или там, где закончилась
+         предыдущая. Это решение о записи, а не текст, поэтому уходит сразу, без
+         черновика и кнопки «Сохранить». -->
+        <div class="scene__start">
+          <UiSwitch
+            :model-value="continues"
+            :disabled="busy || first"
+            data-role="scene-continues"
+            @update:model-value="emit('continue', Boolean($event))"
+          > {{ t('core.showcaseNachinatTamGdeZakonchilas') }} </UiSwitch>
+          <p class="scene__hint">{{ startHint }}</p>
         </div>
-      </template>
-      <p v-else class="scene__hint"> {{ t('core.showcaseUStsenyNetDeystviya') }} </p>
 
-      <ul v-if="draft.syncCues.length" class="scene__binding-list">
-        <li v-for="cue in draft.syncCues" :key="cue.id ?? cueKey(cue)">
-          <span>
-            <strong>«{{ cueText(cue) }}»</strong>
-            <small>
-              {{ bindingKindLabel(cue.kind) }} · {{ actionLabel(cue.actionIndex) }} ·
-              {{ cue.origin === 'manual' ? t('core.showcaseVruchnuyu') : t('core.showcaseAvtomaticheski') }}
-            </small>
-          </span>
-          <UiButton variant="ghost" tone="danger" :disabled="busy" @click="removeBinding(cue)"> {{ t('core.taskDelete') }} </UiButton>
-        </li>
-      </ul>
-    </section>
+        <!-- Запись и звук самой сцены: увидеть, что сняли, можно без просмотра всего
+         ролика. Пока записи нет, место честно говорит, когда она появится. -->
+        <div class="scene__preview">
+          <UiVideo v-if="clipUrl" :src="clipUrl" :label="t('core.showcaseZapisStsenyTitle', { title: scene.title })" />
+          <div v-else class="scene__placeholder">
+            <strong>{{ t('core.showcaseZapisiEscheNet') }}</strong>
+            <span>{{ t('core.showcaseZapisEkranaPoyavitsyaPosle') }}</span>
+          </div>
+          <UiAudio v-if="audioUrl" :src="audioUrl" :label="t('core.showcaseZvukStsenyTitle', { title: scene.title })" />
+          <div v-if="canJump" class="scene__jump">
+            <UiButton variant="outline" @click="emit('jump')">{{ t('core.showcaseSmotretVRolike') }}</UiButton>
+          </div>
+        </div>
 
-    <UiField :label="t('core.showcasePodpisNaEkrane')" :hint="t('core.showcaseKorotkayaNeDoslovnyySubtitr')">
-      <UiInput
-        :model-value="draft.caption"
-        :disabled="busy"
-        @update:model-value="patch('caption', $event)"
-      />
-    </UiField>
+      </div>
+      <div class="scene__fields">
+        <UiField :label="t('core.showcaseNazvanieStseny')">
+          <UiInput
+            :model-value="draft.title"
+            :disabled="busy"
+            @update:model-value="patch('title', $event)"
+          />
+        </UiField>
 
-    <ul v-if="speechChecks.length" class="scene__checks">
-      <li v-for="check in speechChecks" :key="check.id" :data-status="check.status">
-        <span class="scene__check-dot" aria-hidden="true"></span>
-        <span>{{ CHECK_TEXT[check.status] }}: {{ check.reason }}</span>
-        <span v-for="hint in check.suggestions" :key="hint" class="scene__hint">{{ hint }}</span>
-      </li>
-    </ul>
+        <UiField
+          :label="t('core.showcaseTekstOzvuchki')"
+          :hint="t('core.showcaseUdareniePeredGlasnoyZ')"
+        >
+          <UiTextarea
+            :model-value="draft.narration"
+            :disabled="busy"
+            rows="4"
+            @update:model-value="patch('narration', $event)"
+          />
+        </UiField>
 
-    <UiDisclosureButton v-model:open="moreOpen" :controls="`${scene.id}-more`" density="compact">
-      {{ moreOpen ? t('core.showcaseSkrytSubtitrISvoy') : t('core.showcaseSubtitrISvoyZvuk') }}
-    </UiDisclosureButton>
+        <section
+          class="scene__pronunciation"
+          data-role="scene-pronunciation"
+          aria-labelledby="scene-pronunciation-title"
+        >
+          <div class="scene__pronunciation-head">
+            <div>
+              <UiDisclosureButton v-model:open="pronunciationOpen" :controls="`${scene.id}-pronunciation`"
+                density="compact">
+                <span id="scene-pronunciation-title">{{ t('core.showcaseKakZvuchitReplika') }}</span>
+              </UiDisclosureButton>
+              <p class="scene__hint"> {{ t('core.showcaseProslushivanieIspolzuetNesohranennyyTekst') }} </p>
+            </div>
+            <UiButton
+              variant="outline"
+              data-role="preview-narration"
+              :disabled="busy || !voiceRef || !canonicalNarration"
+              :loading="previewing"
+              @click="previewNarration"
+            > {{ t('core.showcaseProslushatRepliku') }} </UiButton>
+          </div>
 
-    <div v-show="moreOpen" :id="`${scene.id}-more`" class="scene__more">
-      <UiField :label="t('core.showcaseSubtitr')" :hint="t('core.showcaseTotZheSmyslChto')">
-        <UiTextarea
-          :model-value="draft.subtitleText"
-          :disabled="busy"
-          rows="2"
-          @update:model-value="patch('subtitleText', $event)"
-        />
-      </UiField>
+          <div v-show="pronunciationOpen" :id="`${scene.id}-pronunciation`" class="scene__details">
+            <p class="scene__voice-support" :data-state="capabilityState(voiceCapabilities?.stress)">
+              {{ stressSupportText }}
+            </p>
 
-      <div class="scene__media-block">
-        <span class="scene__media-title">{{ t('core.showcaseSvoyZvukVmestoSinteza') }}</span>
-        <p class="scene__hint"> {{ t('core.showcaseZagruzhennuyuZapisOzvuchkaNe') }} </p>
-        <UiFilePicker
-          accept="audio/wav,audio/x-wav,.wav"
-          :disabled="busy"
-          :label="scene.audioSource.kind === 'recorded' ? t('core.showcaseZamenitZvuk') : t('core.showcaseZagruzitZvuk')"
-          @change="pickAudio"
-        />
+            <UiField
+              :label="t('core.showcaseFragmentDlyaYavnogoProiznosheniya')"
+              :hint="t('core.showcaseVydeliteSlovoIliFrazu')"
+            >
+              <UiTextarea
+                :model-value="canonicalNarration"
+                :disabled="busy"
+                readonly
+                rows="3"
+                data-role="pronunciation-narration"
+                @select="rememberPronunciationSelection"
+              />
+            </UiField>
+
+            <p class="scene__selection">
+              {{ pronunciationSelectedText
+          ? t('core.showcaseVybranoPronunciationselectedtext', { pronunciationSelectedText })
+          : t('core.showcaseFragmentEscheNeVybran') }}
+            </p>
+
+            <div class="scene__pronunciation-controls">
+              <UiField :label="t('core.showcaseProiznestiKak')">
+                <UiInput
+                  :model-value="pronunciationDraft"
+                  :disabled="busy || !voiceRef"
+                  :placeholder="t('core.showcaseNaprimerZamOk')"
+                  data-role="pronunciation-value"
+                  @update:model-value="pronunciationDraft = String($event ?? '')"
+                />
+              </UiField>
+              <UiButton
+                :disabled="busy || !canAddPronunciation"
+                data-role="add-pronunciation"
+                @click="addPronunciation"
+              >
+                {{ replacingPronunciation ? t('core.showcaseZamenitIspravlenie') : t('core.showcaseDobavitIspravlenie') }}
+              </UiButton>
+            </div>
+
+            <p
+              v-if="pronunciationError || pronunciationConflict"
+              class="scene__pronunciation-error"
+              role="alert"
+            >
+              {{ pronunciationError || t('core.showcaseVybrannyyFragmentPeresekaetsyaS') }}
+            </p>
+
+            <ul v-if="draft.pronunciationOverrides.length" class="scene__pronunciation-list">
+              <li
+                v-for="(entry, entryIndex) in draft.pronunciationOverrides"
+                :key="pronunciationKey(entry, entryIndex)"
+                :data-status="pronunciationStatus(entry)"
+              >
+                <span>
+                  <strong>«{{ pronunciationSource(entry) }}» → «{{ entry.pronunciation }}»</strong>
+                  <small>{{ pronunciationStatusText(entry) }}</small>
+                </span>
+                <UiButton
+                  variant="ghost"
+                  tone="danger"
+                  :disabled="busy"
+                  @click="removePronunciation(entryIndex)"
+                > {{ t('core.taskDelete') }} </UiButton>
+              </li>
+            </ul>
+
+          </div>
+          <p v-if="previewNote" class="scene__preview-note" role="status">{{ previewNote }}</p>
+          <p v-if="previewError" class="scene__pronunciation-error" role="alert">
+            {{ previewError }}
+          </p>
+        </section>
+
+        <section class="scene__bindings" data-role="scene-bindings" aria-labelledby="scene-bindings-title">
+          <div class="scene__bindings-head">
+            <div>
+              <UiDisclosureButton v-model:open="bindingsOpen" :controls="`${scene.id}-bindings`"
+                density="compact">
+                <span id="scene-bindings-title">{{ t('core.showcaseRechIDeystviya') }}</span>
+              </UiDisclosureButton>
+              <p class="scene__hint">{{ t('core.showcaseSvyazVybiraetsyaPoFragmentu') }}</p>
+            </div>
+            <UiButton
+              variant="ghost"
+              :disabled="busy"
+              data-role="generate-bindings"
+              @click="emit('generate-bindings')"
+            > {{ t('core.showcasePostroitPrivyazki') }} </UiButton>
+          </div>
+
+          <p class="scene__binding-state" :data-status="visibleBindingStatus">
+            {{ bindingStatusText }}
+          </p>
+
+          <div v-show="bindingsOpen" :id="`${scene.id}-bindings`" class="scene__details">
+            <template v-if="bindableActions.length && canonicalNarration">
+              <UiField
+                :label="t('core.showcaseFragmentRechi')"
+                :hint="t('core.showcaseVydeliteSlovaVKanonicheskom')"
+              >
+                <UiTextarea
+                  :model-value="canonicalNarration"
+                  :disabled="busy"
+                  readonly
+                  rows="3"
+                  data-role="binding-narration"
+                  @select="rememberSelection"
+                />
+              </UiField>
+
+              <p class="scene__selection">
+                {{ selectedText ? t('core.showcaseVybranoSelectedtext', { selectedText }) : t('core.showcaseFragmentEscheNeVybran') }}
+              </p>
+
+              <div class="scene__binding-controls">
+                <UiField :label="t('core.showcaseDeystvie')">
+                  <UiSelect v-model.number="bindingActionIndex" :disabled="busy">
+                    <option v-for="item in bindableActions" :key="item.index" :value="item.index">
+                      {{ item.label }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+                <UiField :label="t('core.showcaseSvyaz')">
+                  <UiSelect v-model="bindingKind" :disabled="busy">
+                    <option
+                      v-for="item in BINDING_KIND_OPTIONS"
+                      :key="item.value"
+                      :value="item.value"
+                      :disabled="!kindAllowed(item.value, bindingActionIndex)"
+                    >
+                      {{ item.label }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+                <UiButton :disabled="busy || !canAddBinding" @click="addBinding">
+                  {{ boundAction ? t('core.showcaseZamenitSvyaz') : t('core.showcaseDobavitSvyaz') }}
+                </UiButton>
+              </div>
+            </template>
+            <p v-else class="scene__hint"> {{ t('core.showcaseUStsenyNetDeystviya') }} </p>
+
+            <ul v-if="draft.syncCues.length" class="scene__binding-list">
+              <li v-for="cue in draft.syncCues" :key="cue.id ?? cueKey(cue)">
+                <span>
+                  <strong>«{{ cueText(cue) }}»</strong>
+                  <small>
+                    {{ bindingKindLabel(cue.kind) }} · {{ actionLabel(cue.actionIndex) }} ·
+                    {{ cue.origin === 'manual' ? t('core.showcaseVruchnuyu') : t('core.showcaseAvtomaticheski') }}
+                  </small>
+                </span>
+                <UiButton variant="ghost" tone="danger" :disabled="busy" @click="removeBinding(cue)"> {{ t('core.taskDelete') }} </UiButton>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <UiField :label="t('core.showcasePodpisNaEkrane')" :hint="t('core.showcaseKorotkayaNeDoslovnyySubtitr')">
+          <UiInput
+            :model-value="draft.caption"
+            :disabled="busy"
+            @update:model-value="patch('caption', $event)"
+          />
+        </UiField>
+
+        <ul v-if="speechChecks.length" class="scene__checks">
+          <li v-for="check in speechChecks" :key="check.id" :data-status="check.status">
+            <span class="scene__check-dot" aria-hidden="true"></span>
+            <span>{{ CHECK_TEXT[check.status] }}: {{ check.reason }}</span>
+            <span v-for="hint in check.suggestions" :key="hint" class="scene__hint">{{ hint }}</span>
+          </li>
+        </ul>
+
+        <UiDisclosureButton v-model:open="moreOpen" :controls="`${scene.id}-more`" density="compact">
+          {{ moreOpen ? t('core.showcaseSkrytSubtitrISvoy') : t('core.showcaseSubtitrISvoyZvuk') }}
+        </UiDisclosureButton>
+
+        <div v-show="moreOpen" :id="`${scene.id}-more`" class="scene__more">
+          <UiField :label="t('core.showcaseSubtitr')" :hint="t('core.showcaseTotZheSmyslChto')">
+            <UiTextarea
+              :model-value="draft.subtitleText"
+              :disabled="busy"
+              rows="2"
+              @update:model-value="patch('subtitleText', $event)"
+            />
+          </UiField>
+
+          <div class="scene__media-block">
+            <span class="scene__media-title">{{ t('core.showcaseSvoyZvukVmestoSinteza') }}</span>
+            <p class="scene__hint"> {{ t('core.showcaseZagruzhennuyuZapisOzvuchkaNe') }} </p>
+            <UiFilePicker
+              accept="audio/wav,audio/x-wav,.wav"
+              :disabled="busy"
+              :label="scene.audioSource.kind === 'recorded' ? t('core.showcaseZamenitZvuk') : t('core.showcaseZagruzitZvuk')"
+              @change="pickAudio"
+            />
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -379,6 +396,8 @@ const CHECK_TEXT: Record<ShowcaseCheck['status'], string> = {
 };
 
 const moreOpen = ref(false);
+const pronunciationOpen = ref(false);
+const bindingsOpen = ref(false);
 const selectedRange = ref({ from: 0, to: 0 });
 const pronunciationRange = ref({ from: 0, to: 0 });
 const pronunciationDraft = ref('');
@@ -909,19 +928,15 @@ function pickAudio(files: File[]): void {
 
 <style scoped>
 .scene {
+  container: showcase-scene / inline-size;
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 12px;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  box-shadow: inset 0 1px 0 #ffffff08;
+  border-radius: 6px;
+  background: var(--surface);
 }
 
 .scene[data-stale='yes'] {
@@ -1159,10 +1174,11 @@ function pickAudio(files: File[]): void {
   justify-content: center;
   gap: 3px;
   aspect-ratio: 16 / 9;
+  max-height: 220px;
   padding: 16px;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-2) 28%, transparent);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--ground);
   color: var(--ink-mid);
   font-size: 12.5px;
   text-align: center;
@@ -1267,5 +1283,34 @@ function pickAudio(files: File[]): void {
 
 .scene__spacer {
   flex: 1 1 auto;
+}
+
+.scene__workspace,
+.scene__visual,
+.scene__fields,
+.scene__details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.scene__details {
+  padding-top: 8px;
+}
+
+.scene__pronunciation-head,
+.scene__bindings-head,
+.scene__actions {
+  flex-wrap: wrap;
+}
+
+@container showcase-scene (min-width: 640px) {
+  .scene__workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    align-items: start;
+    gap: 20px;
+  }
 }
 </style>

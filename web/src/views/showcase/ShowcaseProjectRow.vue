@@ -1,5 +1,5 @@
 <template>
-  <UiSelectableRow class="row" :data-state="project.state" @select="emit('open', project.id)">
+  <UiSelectableRow class="row" data-context="workspace-catalog" :data-state="project.state" @select="emit('open', project.id)">
     <span class="row__body">
       <span class="row__mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
@@ -28,7 +28,12 @@
         variant="ghost"
         @click="emit('cancel', activeJob.id)"
       > {{ t('core.trackerCancel') }} </UiButton>
-      <UiButton variant="ghost" tone="danger" :loading="busy" @click="emit('remove', project.id)"> {{ t('core.taskDelete') }} </UiButton>
+      <UiIconButton variant="ghost" :label="t('core.showcaseUdalitRolik')" :loading="busy"
+                    @click="emit('remove', project.id)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v5 M14 11v5" />
+        </svg>
+      </UiIconButton>
     </template>
   </UiSelectableRow>
 </template>
@@ -36,7 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiButton, UiSelectableRow, t, uiLocale } from '../../ui';
+import { UiButton, UiIconButton, UiSelectableRow, t, uiLocale } from '../../ui';
 import type {
   ShowcaseJob,
   ShowcaseProjectSummary,
@@ -207,9 +212,7 @@ function isRunning(state: ShowcaseJob['state']): boolean {
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--ground));
+
   color: var(--accent);
 }
 
@@ -238,7 +241,7 @@ function isRunning(state: ShowcaseJob['state']): boolean {
 
 .row__title {
   overflow: hidden;
-  font-size: 14px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

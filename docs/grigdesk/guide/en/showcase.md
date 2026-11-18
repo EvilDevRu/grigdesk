@@ -11,7 +11,7 @@ text to providers and incur charges.
 
 ## What to do
 
-1. Click New video. The editor opens; creation does not start a build.
+1. Click New video in the section header. The editor opens; creation does not start a build.
 2. Choose a permanent project environment or sandbox and click Attach environment.
    Running-attempt and unresponsive-interface warnings are shown before attaching.
    Use Open sandboxes to raise an environment in its own section.
@@ -39,6 +39,12 @@ text to providers and incur charges.
    rerecording such clips.
 9. Watch and listen to the full result; download MP4 and separate SRT.
    Speech checks can detect silence and missing words, but do not prove intonation or stress.
+
+On the main page, use Find a video to search by title or environment.
+In an empty editor, environment, voice, and source settings sit side by side on wide
+screens and stack on narrow screens. Once scenes exist, settings move to the right,
+or below the scenes in a narrow workspace. Expand How the line sounds and Speech
+and actions for additional scene fields; collapsing them preserves your input.
 
 ## Result
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { writeFile } from 'node:fs/promises';
-import { extraProps, extraPorts } from './fixtures/loading/extraCases.mjs';
+import { extraPorts } from './fixtures/loading/extraCases.mjs';
 import { frames, startLoadingBrowser } from './fixtures/loading/browser.mjs';
 
 let browser;
@@ -237,7 +237,7 @@ test('LOAD-REDUCE: уменьшение движения останавлива�
 });
 
 const surfaceGeometry = [
-    ...[...extraProps, ...extraPorts].map((item) => [item.id, ...item.geometry]),
+    ...extraPorts.map((item) => [item.id, ...item.geometry]),
     ['projects-list', 'row', '[data-role="project-row"]', ['x', 'width', 'height']],
     ['settings-mcp', 'row', '.mcprow', ['x', 'width', 'height']],
     ['document-file', 'metadata', '.document-meta', ['y', 'height']],

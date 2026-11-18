@@ -2546,3 +2546,66 @@ test('предупреждение выбранного стенда видно 
 
   assert.match(wrapper.text(), /идущая попытка/u);
 });
+
+test('поиск роликов учитывает название и стенд, очистка возвращает список', async (t) => {
+  const { wrapper, flushPromises } = await mountView(t, {
+    opened: null,
+    projects: [
+      summary({
+        id: 'first',
+        title: 'Обзор фильтров',
+        targetLabel: 'Демо',
+      }),
+      summary({
+        id: 'second',
+        title: 'Настройки',
+        targetLabel: 'Каталог',
+      }),
+    ],
+  });
+  const search = wrapper.find('[data-testid="showcase-search"]');
+
+  await search.setValue('  ФИЛЬТР  ');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.row').length, 1);
+  assert.match(wrapper.find('.row').text(), /Обзор фильтров/u);
+
+  await search.setValue('каталог');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.row').length, 1);
+  assert.match(wrapper.find('.row').text(), /Настройки/u);
+
+  await search.setValue('несуществующий');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.row').length, 0);
+  assert.match(wrapper.text(), /Ролики не найдены/u);
+
+  await buttonByText(wrapper, 'Очистить поиск').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.row').length, 2);
+});
+
+test('сворачивание произношения сохраняет ввод и не скрывает отказ прослушивания', async (t) => {
+  const { wrapper, flushPromises } = await mountView(t, {
+    voices: readyVoiceCatalog(),
+    narrationPreview: async () => {
+      throw new Error('Не удалось прослушать реплику');
+    },
+  });
+  const details = wrapper.find('.scene__pronunciation .scene__details');
+
+  assert.equal(details.isVisible(), false);
+  await buttonByText(wrapper, 'Как звучит реплика').trigger('click');
+  assert.equal(details.isVisible(), true);
+
+  const input = wrapper.find('.scene__pronunciation-controls input');
+
+  await input.setValue('сохранённый вариант');
+  await buttonByText(wrapper, 'Как звучит реплика').trigger('click');
+  await buttonByText(wrapper, 'Прослушать реплику').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.find('.scene__pronunciation-error').isVisible(), true);
+
+  await buttonByText(wrapper, 'Как звучит реплика').trigger('click');
+  assert.equal(input.element.value, 'сохранённый вариант');
+});

@@ -7,27 +7,36 @@
         @select="emit('select', scene.id)"
       >
         <span class="timeline__card" :data-testid="`showcase-timeline-${scene.id}`">
-        <img
-          v-if="scene.frame"
-          class="timeline__frame"
-          :src="frameUrl(scene.frame.id)"
-          :alt="t('core.showcaseKadrSceny', { title: scene.title })"
-          loading="lazy"
-        />
-        <span v-else class="timeline__frame timeline__frame--empty" aria-hidden="true"></span>
-        <span class="timeline__order">{{ scene.order }}</span>
-        <span class="timeline__title">{{ scene.title }}</span>
-        <span class="timeline__meta">
-          {{ sceneStateOf(scene).label }}
-          <template v-if="timecodeOf(scene.id)"> · {{ timecodeOf(scene.id) }}</template>
-          <template v-if="changedIds.includes(scene.id)"> · {{ t('core.showcaseNeSohraneno') }}</template>
-        </span>
-        <span v-if="speechWarning(scene)" class="timeline__check">
-          {{ t('core.showcaseOzvuchka') }}: {{ speechWarning(scene) }}
-        </span>
-        <span v-if="index > 0 && scene.continuesPrevious" class="timeline__continues">
-          {{ continuationLabel() }}
-        </span>
+          <img
+            v-if="scene.frame"
+            class="timeline__frame"
+            :src="frameUrl(scene.frame.id)"
+            :alt="t('core.showcaseKadrSceny', { title: scene.title })"
+            loading="lazy"
+          />
+          <span v-else class="timeline__frame timeline__frame--empty" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="m10 9 5 3-5 3z" />
+            </svg>
+          </span>
+          <span class="timeline__title-line">
+            <span class="timeline__order">{{ scene.order }}</span>
+            <span class="timeline__title">{{ scene.title }}</span>
+          </span>
+          <span class="timeline__meta">
+            {{ sceneStateOf(scene).label }}
+            <template v-if="timecodeOf(scene.id)"> · {{ timecodeOf(scene.id) }}</template>
+            <span v-if="changedIds.includes(scene.id)" class="timeline__changed">
+            · {{ t('core.showcaseNeSohraneno') }}
+            </span>
+          </span>
+          <span v-if="speechWarning(scene)" class="timeline__check">
+            {{ t('core.showcaseOzvuchka') }}: {{ speechWarning(scene) }}
+          </span>
+          <span v-if="index > 0 && scene.continuesPrevious" class="timeline__continues">
+            {{ continuationLabel() }}
+          </span>
         </span>
       </UiSelectableRow>
       <UiButton
@@ -85,45 +94,86 @@ function speechWarning(scene: ShowcaseScene): string {
 <style scoped>
 .timeline {
   display: flex;
-  gap: 0.5rem;
+  gap: 10px;
   overflow-x: auto;
-  padding: 0.5rem 0;
+  padding: 2px 0 8px;
   list-style: none;
   margin: 0;
+  min-width: 0;
+  overscroll-behavior-inline: contain;
 }
 
 .timeline__item {
   display: flex;
+  flex: 0 0 172px;
   flex-direction: column;
-  gap: 0.25rem;
-  min-width: 9rem;
+  gap: 4px;
+  min-width: 0;
 }
 
 .timeline__card {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 7px;
   min-width: 0;
-  width: 9rem;
 }
 
 .timeline__frame {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 0.25rem;
-  background: var(--ui-surface-muted);
+  border-radius: 3px;
+  background: var(--ground);
+}
+
+.timeline__frame--empty {
+  display: grid;
+  place-items: center;
+  color: var(--ink-low);
+}
+
+.timeline__frame svg {
+  width: 26px;
+  height: 26px;
+}
+
+.timeline__title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.timeline__order {
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .timeline__title {
+  font-size: 12px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.timeline__meta {
-  color: var(--ui-text-muted);
-  font-size: 0.8rem;
+.timeline__meta,
+.timeline__continues {
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.timeline__changed,
+.timeline__check {
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.timeline__continues {
+  color: var(--accent);
 }
 </style>

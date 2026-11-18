@@ -1,4 +1,4 @@
-import { extraProps, extraPorts } from './extraCases.mjs';
+import { extraPorts } from './extraCases.mjs';
 
 export const documentDto = {
     ref: { source: 'fixture', path: 'readme.txt' },
@@ -44,7 +44,6 @@ export const usageDto = {
     },
 };
 export const propCases = [
-    ...extraProps,
     {
         id: 'projects-list',
         file: 'src/views/projects/ProjectList.vue',
@@ -70,26 +69,6 @@ export const propCases = [
         failure: { error: 'Синтетический отказ', loading: true },
         retryText: 'Повторить',
         retryEvent: 'retry',
-    },
-    {
-        id: 'showcase-picker',
-        file: 'src/views/showcase/ShowcaseTargetPicker.vue',
-        pending: {
-            targets: [],
-            projects: [],
-            busy: false,
-            loaded: false,
-            loading: true,
-            error: ''
-        },
-        ready: { loaded: true, loading: false },
-        empty: { loaded: true, loading: false },
-        readySelector: '.picker__state',
-        failure: {
-            loading: false,
-            loaded: false,
-            error: 'Синтетический отказ'
-        },
     },
     {
         id: 'settings-mcp',

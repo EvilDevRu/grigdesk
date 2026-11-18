@@ -283,7 +283,7 @@ test('таймлайн упорядочивает сцены, показывае
 
   primary.element.focus();
   assert.equal(primary.attributes('aria-pressed'), 'true');
-  assert.equal(primary.element.ownerDocument.activeElement, primary.element);
+  assert.equal(primary.element.ownerDocument.activeElement === primary.element, true);
   await wrapper.find('[data-testid="showcase-reshoot-second"]').trigger('click');
   assert.deepEqual(wrapper.emitted('reshoot-scene'), [['second']]);
 });

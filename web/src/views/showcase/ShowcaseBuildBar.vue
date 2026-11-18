@@ -406,10 +406,8 @@ function describeJob(job: ShowcaseJob): string {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  padding: 13px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .build__idle,

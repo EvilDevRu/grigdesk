@@ -1,6 +1,6 @@
 <template>
-  <section class="stand-picker" data-testid="showcase-stand-picker" aria-labelledby="showcase-stand-title">
-    <h3 id="showcase-stand-title">{{ t('core.showcaseStendDlyaZapisi') }}</h3>
+  <section class="stand-picker" data-testid="showcase-stand-picker" aria-labelledby="showcase-stand-picker-title">
+    <h3 id="showcase-stand-picker-title">{{ t('core.showcaseStendDlyaZapisi') }}</h3>
 
     <UiInlineMessage v-if="!project.ref" tone="warning">
       {{ t('core.showcaseStendNeVybranPodklyuchite') }}
@@ -112,13 +112,41 @@ function attach() {
 </script>
 
 <style scoped>
+.stand-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stand-picker h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stand-picker__current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .stand-picker__row {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
 }
 
 .stand-picker__error {
-  color: var(--ui-danger);
+  margin: 0;
+  color: var(--bad);
+  font-size: 12px;
 }
 </style>

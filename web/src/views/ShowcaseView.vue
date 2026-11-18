@@ -1,139 +1,145 @@
 <template>
-  <UiWorkspacePage aria-labelledby="showcase-title">
-      <template v-if="!store.opened" #title><h1 id="showcase-title">{{ t('core.navShowcase') }}</h1></template>
-      <template v-if="!store.opened" #actions>
-        <UiIconButton :label="t('core.trackerUpdate')" data-context="workspace-toolbar"
-                      :loading="store.loading" @click="loadShowcase(store)">
-          <UiRefreshIcon />
-        </UiIconButton>
-      </template>
+  <UiWorkspacePage data-ui-workspace aria-labelledby="showcase-title">
+    <template v-if="!store.opened" #title><h1 id="showcase-title">{{ t('core.navShowcase') }}</h1></template>
+    <template v-if="!store.opened" #actions>
+      <UiButton variant="solid" tone="accent" :loading="creating"
+        data-testid="showcase-new-film" @click="createFree">
+        <span aria-hidden="true">＋</span> {{ t('core.showcaseNovyyRolik') }}
+      </UiButton>
+      <UiIconButton :label="t('core.trackerUpdate')" data-context="workspace-toolbar"
+        :loading="store.loading" @click="loadShowcase(store)">
+        <UiRefreshIcon />
+      </UiIconButton>
+    </template>
     <h1 v-if="store.opened" id="showcase-title" class="ui-visually-hidden">{{ t('core.navShowcase') }}</h1>
     <div class="showcase" :class="{ 'showcase--film': store.opened }">
-    <p v-if="!store.opened" class="ui-workspace-intro"> {{ t('core.showcaseRolikiOGotovoyRabote') }} </p>
+      <p v-if="!store.opened" class="ui-workspace-intro"> {{ t('core.showcaseRolikiOGotovoyRabote') }} </p>
 
-    <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
+      <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
-    <!-- Экран следует за состоянием ролика на сервере, а не за памятью вкладки:
+      <!-- Экран следует за состоянием ролика на сервере, а не за памятью вкладки:
          открытый ролик живёт в адресе, и после F5 человек видит его же. -->
-    <ShowcaseFilm
-      ref="film"
-      v-if="store.opened"
-      :project="store.opened"
-      :targets="store.targets"
-      :seed="seed"
-      :jobs="store.jobsOf(store.opened.id)"
-      :build-run="store.latestBuildOf(store.opened.id)"
-      :manifest="store.currentManifest"
-      :manifest-status="store.manifestStatus"
-      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id || applyingSource || adapting"
-      :analyzing="store.analyzing === store.opened.id"
-      :max-scenes="store.limits.maxScenes"
-      :target-url="openedTargetUrl"
-      :artifact-url="artifactUrl"
-      :voice-ref="effectiveVoiceRef"
-      :voice-capabilities="effectiveVoiceCapabilities"
-      :load-scene-preview="loadShowcaseNarrationPreview"
-      @close="close"
-      @build="build"
-      @generate-bindings="generateBindings"
-      @analyze="analyze"
-      @rename="rename"
-      @remove-project="remove(store.opened.id)"
-      @seed="prepareData"
-      @data-updated="markDataUpdated"
-      @cancel="cancel"
-      @cancel-build="cancelBuild"
-      @add-scene="addScene"
-      @save-scene="saveScene"
-      @remove-scene="removeScene"
-      @move-scene="moveScene"
-      @scene-continues="setSceneContinues"
-      @scene-audio="uploadAudio"
-      @select-scene="selectedSceneId = $event"
-      @apply-source="applySource"
-      @attach-target="attachTarget"
-      @reshoot-scene="reshootScene"
-    >
-      <template #voice>
+      <ShowcaseFilm
+        ref="film"
+        v-if="store.opened"
+        :project="store.opened"
+        :targets="store.targets"
+        :seed="seed"
+        :jobs="store.jobsOf(store.opened.id)"
+        :build-run="store.latestBuildOf(store.opened.id)"
+        :manifest="store.currentManifest"
+        :manifest-status="store.manifestStatus"
+        :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id || applyingSource || adapting"
+        :analyzing="store.analyzing === store.opened.id"
+        :max-scenes="store.limits.maxScenes"
+        :target-url="openedTargetUrl"
+        :artifact-url="artifactUrl"
+        :voice-ref="effectiveVoiceRef"
+        :voice-capabilities="effectiveVoiceCapabilities"
+        :load-scene-preview="loadShowcaseNarrationPreview"
+        @close="close"
+        @build="build"
+        @generate-bindings="generateBindings"
+        @analyze="analyze"
+        @rename="rename"
+        @remove-project="remove(store.opened.id)"
+        @seed="prepareData"
+        @data-updated="markDataUpdated"
+        @cancel="cancel"
+        @cancel-build="cancelBuild"
+        @add-scene="addScene"
+        @save-scene="saveScene"
+        @remove-scene="removeScene"
+        @move-scene="moveScene"
+        @scene-continues="setSceneContinues"
+        @scene-audio="uploadAudio"
+        @select-scene="selectedSceneId = $event"
+        @apply-source="applySource"
+        @attach-target="attachTarget"
+        @reshoot-scene="reshootScene"
+      >
+        <template #voice>
+          <ShowcaseVoicePanel
+            mode="choice"
+            :catalog="store.voices"
+            :dictionary="store.dictionary"
+            :busy="store.voiceBusy || store.isBusy(store.opened.id) || store.analyzing === store.opened.id || adapting"
+            :voice-ref="projectVoiceRef"
+            :pace="projectPace"
+            :load-preview="loadShowcaseVoicePreview"
+            @install="installVoice"
+            @cancel="cancelVoiceInstall"
+            @change="changeVoice"
+            :can-adapt="store.opened.scenes.some((scene) => scene.audioSource.kind === 'tts')"
+            @adapt="adaptNarration"
+            @save-dictionary="saveDictionary"
+          />
+        </template>
+      </ShowcaseFilm>
+
+      <template v-else>
+        <!-- Готовность установки показывается только когда она мешает: зелёный список
+           «всё готово» ничего не решает, а красная строка называет, что чинить. -->
+        <UiInlineMessage v-if="doctorBlockers.length" tone="warning">
+          <span class="showcase__blockers">
+            <strong>{{ t('core.showcaseZapisiMeshaet') }}</strong>
+            <span v-for="operation in doctorBlockers" :key="operation.id">
+              {{ operation.title }} — {{ operation.reason }}
+            </span>
+            <UiButton variant="ghost" @click="openSettings({ pageId: 'tools.showcase' })"> {{ t('core.showcaseOtkrytNastroyki') }} </UiButton>
+          </span>
+        </UiInlineMessage>
+
         <ShowcaseVoicePanel
-          mode="choice"
+          v-if="store.voices && !voiceReady"
+          mode="setup"
           :catalog="store.voices"
-          :dictionary="store.dictionary"
-          :busy="store.voiceBusy || store.isBusy(store.opened.id) || store.analyzing === store.opened.id || adapting"
-          :voice-ref="projectVoiceRef"
-          :pace="projectPace"
-          :load-preview="loadShowcaseVoicePreview"
+          :busy="store.voiceBusy"
           @install="installVoice"
           @cancel="cancelVoiceInstall"
-          @change="changeVoice"
-          :can-adapt="store.opened.scenes.some((scene) => scene.audioSource.kind === 'tts')"
-          @adapt="adaptNarration"
-          @save-dictionary="saveDictionary"
         />
+
+        <section class="showcase__library" aria-labelledby="showcase-list-title">
+          <div class="showcase__library-head">
+            <div class="showcase__block-head">
+              <h2 id="showcase-list-title">{{ t('core.showcaseRoliki') }}</h2>
+              <span class="showcase__count">{{ store.projects.length }}</span>
+            </div>
+            <div v-if="store.projects.length" class="showcase__search">
+              <UiSearchInput v-model="search" :aria-label="t('core.showcaseSearchFilms')"
+                :placeholder="t('core.showcaseSearchFilms')" data-testid="showcase-search" />
+            </div>
+          </div>
+
+          <div v-if="!store.projects.length" class="showcase__empty">
+            <svg class="showcase__empty-icon" viewBox="0 0 48 48" fill="none"
+              stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="7" y="10" width="34" height="28" rx="3" />
+              <path d="m20 18 11 6-11 6z M7 16h34 M7 32h34 M14 10v6m10-6v6m10-6v6" />
+            </svg>
+            <strong>{{ store.loaded ? t('core.showcaseRolikovEscheNet') : t('core.showcaseChitaemSostoyanie') }}</strong>
+            <p v-if="store.loaded">{{ t('core.showcaseCreateFirstHint') }}</p>
+            <UiButton v-if="store.loaded" variant="solid" tone="accent" :loading="creating"
+              @click="createFree">{{ t('core.showcaseNovyyRolik') }}</UiButton>
+          </div>
+          <div v-else-if="!visibleProjects.length" class="showcase__empty" role="status">
+            <strong>{{ t('core.showcaseNoSearchResults') }}</strong>
+            <UiButton variant="ghost" @click="search = ''">{{ t('core.clearSearch') }}</UiButton>
+          </div>
+          <div v-else class="showcase__list">
+            <ShowcaseProjectRow
+              v-for="project in visibleProjects"
+              :key="project.id"
+              :project="project"
+              :jobs="store.jobsOf(project.id)"
+              :busy="store.isBusy(project.id)"
+              @open="open"
+              @remove="remove"
+              @cancel="cancel"
+            />
+          </div>
+        </section>
       </template>
-    </ShowcaseFilm>
-
-    <template v-else>
-      <section class="showcase__panel" aria-labelledby="showcase-create-title">
-        <div class="showcase__panel-head">
-          <h2 id="showcase-create-title">{{ t('core.showcaseNovyyRolik') }}</h2>
-          <p>{{ t('core.showcaseSozdayteRolikBezStenda') }}</p>
-        </div>
-        <UiButton
-          variant="outline"
-          :loading="creating"
-          data-testid="showcase-new-film"
-          @click="createFree"
-        > {{ t('core.showcaseNovyyRolik') }} </UiButton>
-      </section>
-
-      <!-- Готовность установки показывается только когда она мешает: зелёный список
-           «всё готово» ничего не решает, а красная строка называет, что чинить. -->
-      <UiInlineMessage v-if="doctorBlockers.length" tone="warning">
-        <span class="showcase__blockers">
-          <strong>{{ t('core.showcaseZapisiMeshaet') }}</strong>
-          <span v-for="operation in doctorBlockers" :key="operation.id">
-            {{ operation.title }} — {{ operation.reason }}
-          </span>
-          <UiButton variant="ghost" @click="openSettings({ pageId: 'tools.showcase' })"> {{ t('core.showcaseOtkrytNastroyki') }} </UiButton>
-        </span>
-      </UiInlineMessage>
-
-      <ShowcaseVoicePanel
-        v-if="store.voices && !voiceReady"
-        mode="setup"
-        :catalog="store.voices"
-        :busy="store.voiceBusy"
-        @install="installVoice"
-        @cancel="cancelVoiceInstall"
-      />
-
-      <section class="showcase__block" aria-labelledby="showcase-list-title">
-        <div class="showcase__block-head">
-          <h2 id="showcase-list-title">{{ t('core.showcaseRoliki') }}</h2>
-          <span v-if="store.projects.length" class="showcase__count">
-            {{ store.projects.length }}
-          </span>
-        </div>
-
-        <div v-if="!store.projects.length" class="showcase__empty">
-          <strong>{{ store.loaded ? t('core.showcaseRolikovEscheNet') : t('core.showcaseChitaemSostoyanie') }}</strong>
-          <p v-if="store.loaded"> {{ t('core.showcaseNazhmiteSnyatRolikU') }} </p>
-        </div>
-        <div v-else class="showcase__list">
-          <ShowcaseProjectRow
-            v-for="project in store.projects"
-            :key="project.id"
-            :project="project"
-            :jobs="store.jobsOf(project.id)"
-            :busy="store.isBusy(project.id)"
-            @open="open"
-            @remove="remove"
-            @cancel="cancel"
-          />
-        </div>
-      </section>
-    </template>
     </div>
   </UiWorkspacePage>
 </template>
@@ -144,7 +150,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import { useRoute, useRouter } from 'vue-router';
 
 import {
-  UiActionLink, UiButton, UiInlineMessage, UiIconButton, UiWorkspacePage, UiRefreshIcon,
+  UiButton, UiInlineMessage, UiIconButton, UiWorkspacePage, UiRefreshIcon, UiSearchInput,
   confirmDialog, promptDialog, t, messageRef,
 } from '../ui';
 import {
@@ -206,6 +212,14 @@ const router = useRouter();
 const showcaseContext = useUiContextSource('showcase', { layer: 'page', active: false });
 
 const creating = ref(false);
+const search = ref('');
+const visibleProjects = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase();
+
+  return store.projects.filter((project) => (
+    `${project.title} ${project.targetLabel ?? ''}`.toLocaleLowerCase().includes(query)
+  ));
+});
 const doctor = ref<ShowcaseDoctor | null>(null);
 const seed = ref<SeedStatus | null>(null);
 let seedRequest = 0;
@@ -876,68 +890,46 @@ async function check() {
 
 <style scoped>
 .showcase {
-  width: 100%;
-  margin-inline: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
 }
 
-.showcase__panel,
-.showcase__block {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.showcase__library {
   min-width: 0;
 }
 
-.showcase__panel {
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: 15px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  box-shadow: inset 0 1px 0 #ffffff08;
-}
-
-.showcase__panel-head h2,
-.showcase__block-head h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 660;
-  letter-spacing: -0.01em;
-}
-
-.showcase__panel-head p {
-  margin: 4px 0 0;
-  color: var(--ink-mid);
-  font-size: 12.5px;
-  line-height: 1.45;
-}
-
+.showcase__library-head,
 .showcase__block-head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+}
+
+.showcase__library-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.showcase__block-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .showcase__count {
-  display: inline-flex;
-  min-width: 23px;
-  min-height: 21px;
-  align-items: center;
-  justify-content: center;
-  padding-inline: 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-2);
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.showcase__search {
+  flex: 0 1 300px;
+  min-width: 0;
 }
 
 .showcase__blockers {
@@ -950,35 +942,45 @@ async function check() {
 .showcase__empty {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 18px 20px;
-  border: 1px dashed var(--line-2);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-2) 28%, transparent);
+  align-items: center;
+  gap: 12px;
+  padding: 64px 20px;
+  text-align: center;
+}
+
+.showcase__empty-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  color: var(--ink-low);
 }
 
 .showcase__empty strong {
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .showcase__empty p {
-  max-width: 520px;
-  margin: 0;
+  max-width: 360px;
+  margin: 0 0 8px;
   color: var(--ink-mid);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .showcase__list {
   display: grid;
-  gap: 8px;
+  gap: 1px;
+  padding-top: 6px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 600px) {
+  .showcase__search {
+    flex-basis: 100%;
+  }
 
-  .showcase__panel {
-    padding: 15px;
+  .showcase__empty {
+    padding: 40px 12px;
   }
 }
 </style>

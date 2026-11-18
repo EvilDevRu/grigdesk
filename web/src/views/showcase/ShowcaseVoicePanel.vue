@@ -610,19 +610,11 @@ onBeforeUnmount(resetPreview);
   min-width: 0;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  box-shadow: inset 0 1px 0 #ffffff08;
+
 }
 
 .voice__pace {
-  flex: 1 1 260px;
+  flex: 1 1 220px;
   min-width: 0;
 }
 
@@ -678,7 +670,7 @@ onBeforeUnmount(resetPreview);
 }
 
 .voice__field {
-  flex: 1 1 260px;
+  flex: 1 1 180px;
   min-width: 0;
 }
 
