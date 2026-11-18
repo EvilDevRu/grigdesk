@@ -528,6 +528,35 @@ function blockTokenText(value: Token | Tokens.ListItem | null | undefined): stri
 }
 
 /**
+ * Lexer marked отдаёт строчный текст уже экранированным для HTML (`'` → `&#39;`):
+ * в теле сообщения сущности раскодирует браузер, а превью показывает строку как есть.
+ * Декодируем одним проходом, поэтому набранная человеком `&amp;#39;` остаётся литералом.
+ */
+function decodePreviewEntities(value: string): string {
+  return value.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|apos|nbsp));/g,
+    (whole, dec: string, hex: string, named: string) => {
+      if (dec) {
+        return String.fromCodePoint(Number(dec));
+      }
+
+      if (hex) {
+        return String.fromCodePoint(parseInt(hex, 16));
+      }
+
+      const namedChars: Record<string, string> = {
+        amp: '&',
+        lt: '<',
+        gt: '>',
+        quot: '"',
+        apos: "'",
+        nbsp: ' ',
+      };
+
+      return namedChars[named] ?? whole;
+    });
+}
+
+/**
  * Однострочное превью без служебного синтаксиса. Разбирается тем же lexer'ом, что и
  * основное сообщение: вложенные конструкции и незакрытая разметка тогда деградируют
  * предсказуемо, а не по-разному в наборе регулярок.
@@ -535,10 +564,10 @@ function blockTokenText(value: Token | Tokens.ListItem | null | undefined): stri
 export function mdToText(src: unknown): string {
   const tokens = marked.lexer(String(src || ''), { gfm: true, breaks: true });
 
-  return tokens
+  return decodePreviewEntities(tokens
     .map(blockTokenText)
     .filter(Boolean)
-    .join(' ')
+    .join(' '))
     .replace(/\s+/g, ' ')
     .trim();
 }

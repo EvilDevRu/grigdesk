@@ -77,6 +77,15 @@ test('реальный Markdown остаётся читаемым на обре�
   }
 });
 
+test('спецсимволы превью читаются как в теле сообщения, набранная сущность остаётся литералом', () => {
+  const cache = createChatListPreviewCache();
+
+  assert.equal(cache.get('a', "The fixture's selectChat is a stub"), "The fixture's selectChat is a stub");
+  assert.equal(cache.get('b', 'кавычки " и & и <tag>'), 'кавычки " и & и <tag>');
+  assert.equal(cache.get('c', '&amp;#39;'), '&#39;');
+  assert.equal(cache.get('d', 'a&nbsp;b'), 'a b');
+});
+
 test('серверный поиск по всему тексту; порядок, ожидание, архив и черновик актуальны', async (t) => {
   const chat = await chatStoreFixture({
     sessions: [{
