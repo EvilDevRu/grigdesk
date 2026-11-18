@@ -8,6 +8,34 @@ A backup must cover every location you use.
 Identify the selected machine and its actual data folder. The default is `~/.grigdesk`;
 explicit configuration may choose another path.
 
+## Data folder layout
+
+Paths are relative to the data folder; the `GRIGDESK_HOME` environment variable selects another folder.
+Folders are created on demand: a missing folder means the feature has not been used yet.
+
+| Folder | Contents |
+| --- | --- |
+| `.env` | Machine settings and executor keys |
+| `chats/` | Conversation history and attachments (see below) |
+| `state/` | Server state: settings, model registry, sessions and keys, SSH/DB profiles, logs, plugin data, speech and presentation resources |
+| `artifacts/` | Agent working folder: snapshots, dumps, scripts and verification reports |
+| `factory/` | Pipeline: engine state and executor homes, routes and drafts, task triage |
+| `qwen-runtime/` | Qwen Code session homes: memory and executor session bindings |
+| `runtimes/` | Standalone server and DeepSeek delivery caches |
+| `profiles/` | Factory project profiles (binary delivery) |
+| `plugins/` | Installed user plugins; working data lives in `state/plugins/` |
+| `drivers/`, `db-engines/` | External tracker drivers and database engines |
+| `telegram/`, `github/` | Inbox archives and account settings; tokens live in `state/` |
+| `mobile/` | Phone access: TLS keys, devices, relays |
+| `3d/` | Library of the 3D section |
+| `browser/`, `provider-cli-leases/` | Browser relay socket and external CLI executor leases |
+
+Each chat is a separate file `chats/YYYY-MM/<id>.json`, where `YYYY-MM` is the chat's creation month;
+attachments live in `chats/attachments/`, defaults for new chats in `meta.json`, and deletion records
+in `deleted.json`. To find a chat by ID, look for `<id>.json` inside the month folders; if the creation
+month is unknown, check every `YYYY-MM/` folder. The chat ID is visible in the interface address.
+Reading conversations is only allowed with explicit human permission.
+
 ## What to do
 
 1. Finish agent turns, recordings, installations and jobs. Stop processes using the data through

@@ -37,7 +37,7 @@ An older server that only provides Russian articles displays a language notice i
 - [Getting started](getting-started.md)
 - [Installing the application](installation.md)
 - [Updates and rollback](updates.md)
-- [Data, backups and cleanup without blocking young data](data-and-backups.md)
+- [Data, data folder layout, backups and cleanup without blocking young data](data-and-backups.md)
 - [Conversations with agents](chats.md)
 - [Conversation memory and context](chat-context.md)
 - [Conversation working folder](chat-workdir.md)

@@ -57,7 +57,11 @@
       "backup",
       "restore",
       "cleanup",
-      "artifacts"
+      "artifacts",
+      "data folder",
+      "layout",
+      "chats",
+      "history"
     ]
   },
   {
