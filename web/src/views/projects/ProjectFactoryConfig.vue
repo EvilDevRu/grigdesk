@@ -1,6 +1,6 @@
 <template>
   <section class="factory-config" data-test="factory-config" :data-profile="detail.id">
-    <UiDisclosureButton v-model:open="expanded" :controls="bodyId" wrap>
+    <UiDisclosureButton v-model:open="expanded" :controls="bodyId" data-test="config-toggle" wrap>
       {{ t('core.projectKonfiguratsiyaFabriki') }}
     </UiDisclosureButton>
     <div v-show="expanded" :id="bodyId" class="factory-config__body">
@@ -17,39 +17,67 @@
       <p v-if="session?.notice === 'interrupted'" role="status">{{ t('core.projectConfigInterrupted') }}</p>
       <p v-if="session?.notice === 'saved'" role="status">{{ t('core.projectConfigSaved') }}</p>
       <template v-if="session?.snapshot">
-        <p data-test="profile-capabilities">
-          {{ t('core.projectConfigCapabilities') }}: {{ session.snapshot.capabilities.join(', ') || '—' }}
+        <p v-if="session.snapshot.capabilities.length" class="factory-config__capabilities"
+           data-test="profile-capabilities">
+          {{ t('core.projectConfigCapabilities') }}
+          <code>{{ session.snapshot.capabilities.join(', ') }}</code>
         </p>
-        <UiField v-for="row in model.rows" :key="row.id" :label="rowLabel(row)"
-                 data-context="workspace-property">
-          <template v-if="row.editable">
-            <UiInput :model-value="session.edits[row.id] ?? row.value ?? ''"
-                     :disabled="locked" :data-test="`field-${row.name}`"
-                     @update:model-value="edit(row, String($event ?? ''))" />
-            <span class="factory-config__fact" :data-test="`fact-${row.name}`">
-              {{ t('core.projectConfigActual') }}: {{ display(row.value) }}
-            </span>
-          </template>
-          <span v-else :data-test="`readonly-${row.name}`">
-            {{ display(row.value) }} — {{ readonlyReason(row) }}
-          </span>
-        </UiField>
+        <section v-for="group in editableGroups" :key="group.id" class="factory-config__section">
+          <UiDisclosureButton :open="openGroup === group.id" :controls="`${bodyId}-${group.id}`"
+                              :data-test="`config-group-${group.id}`" variant="outline" wrap
+                              @update:open="openGroup = $event ? group.id : null">
+            {{ t('core.projectConfigGroup', { title: group.title, count: group.rows.length }) }}
+          </UiDisclosureButton>
+          <div v-show="openGroup === group.id" :id="`${bodyId}-${group.id}`"
+               class="factory-config__group factory-config__fields">
+            <UiField v-for="row in group.rows" :key="row.id" :label="row.name">
+              <UiInput :model-value="session.edits[row.id] ?? row.value ?? ''"
+                       :placeholder="display(row.id in session.edits || row.value !== null ? '' : null)"
+                       :disabled="locked" :data-test="`field-${row.name}`"
+                       @update:model-value="edit(row, String($event ?? ''))" />
+              <span v-show="row.id in session.edits"
+                    class="factory-config__fact" :data-test="`fact-${row.name}`">
+                {{ t('core.projectConfigActual') }}: {{ display(row.value) }}
+              </span>
+            </UiField>
+          </div>
+        </section>
+        <template v-if="readonlyRows.length">
+          <UiDisclosureButton v-model:open="readonlyExpanded" :controls="readonlyId"
+                              data-test="config-readonly-toggle" variant="outline" wrap>
+            {{ t('core.projectConfigReadonly', { count: readonlyRows.length }) }}
+          </UiDisclosureButton>
+          <div v-show="readonlyExpanded" :id="readonlyId" class="factory-config__readonly">
+            <section v-for="group in readonlyGroups" :key="group.title" class="factory-config__group">
+              <h4>{{ group.title }}</h4>
+              <dl class="factory-config__facts">
+                <div v-for="row in group.rows" :key="row.id">
+                  <dt><code>{{ row.name }}</code><small v-if="row.file">{{ row.file }}</small></dt>
+                  <dd :data-test="`readonly-${row.name}`">{{ display(row.value) }}</dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+        </template>
         <ul v-if="plan?.blocked.length" class="factory-config__blocked" role="status">
           <li v-for="id in plan.blocked" :key="id">
             {{ id }}: {{ session.edits[id] }} — {{ t('core.projectConfigPendingUnavailable') }}
           </li>
         </ul>
       </template>
-      <UiFormActions>
-        <UiButton data-test="reload-config" data-context="workspace-form" :disabled="busy"
-                  @click="session && reload(session)">{{ t('core.projectConfigReload') }}</UiButton>
-        <UiButton data-test="discard-config" data-context="workspace-form" :disabled="locked || !dirty"
-                  @click="discard">{{ t('core.projectConfigDiscard') }}</UiButton>
-        <UiButton data-test="apply-config" data-context="workspace-form" :disabled="!canApply"
-                  :loading="session?.saving" @click="openSummary">
-          {{ t('core.projectPrimenitIzmeneniya') }}
-        </UiButton>
-      </UiFormActions>
+      <footer class="factory-config__footer">
+        <UiFormActions>
+          <UiButton data-test="reload-config" data-context="workspace-form-wrap" :disabled="busy"
+                    @click="session && reload(session)">{{ t('core.projectConfigReload') }}</UiButton>
+          <UiButton v-show="dirty" data-test="discard-config" data-context="workspace-form-wrap"
+                    :disabled="locked || !dirty"
+                    @click="discard">{{ t('core.projectConfigDiscard') }}</UiButton>
+          <UiButton v-show="dirty" data-test="apply-config" data-context="workspace-form-wrap" :disabled="!canApply"
+                    :loading="session?.saving" @click="openSummary">
+            {{ t('core.projectPrimenitIzmeneniya') }}
+          </UiButton>
+        </UiFormActions>
+      </footer>
     </div>
     <UiDialog :open="Boolean(confirmation)" :title="t('core.projectChtoIzmenitsya')"
               :busy="session?.saving" :persistent="session?.saving" size="content"
@@ -108,14 +136,54 @@ interface ConfigSession {
 const props = defineProps<{ detail: { id: string }; readonly?: boolean }>();
 const sessions = new Map<string, ConfigSession>();
 const session = shallowRef<ConfigSession | null>(null);
-const expanded = ref(true);
+const expanded = ref(false);
+const readonlyExpanded = ref(false);
+const openGroup = ref<string | null>(null);
 const bodyId = `factory-config-${useId()}`;
+const readonlyId = `factory-config-readonly-${useId()}`;
 const confirmation = shallowRef<{ session: ConfigSession; plan: ConfigSavePlan } | null>(null);
 let selectionVersion = 0;
 let alive = true;
 
-const model = computed(() => session.value?.snapshot
-  ? configFormModel(session.value.snapshot) : { rows: [], groups: [] });
+const rows = computed(() => session.value?.snapshot ? configFormModel(session.value.snapshot).rows : []);
+const editableRows = computed(() => rows.value.filter((row) => row.editable));
+const editableGroups = computed(() => [
+  {
+    id: 'profile',
+    title: t('core.projectConfigProfileVariables'),
+    rows: editableRows.value.filter((row) => row.file === 'profile.sh'),
+  },
+  {
+    id: 'dashboard',
+    title: t('core.projectConfigDashboardVariables'),
+    rows: editableRows.value.filter((row) => row.file === 'dashboard.env'),
+  },
+  {
+    id: 'runners',
+    title: t('core.projectConfigRunners'),
+    rows: editableRows.value.filter((row) => !row.file && !row.name.startsWith('MODEL_')),
+  },
+  {
+    id: 'models',
+    title: t('core.projectConfigModels'),
+    rows: editableRows.value.filter((row) => !row.file && row.name.startsWith('MODEL_')),
+  },
+].filter((group) => group.rows.length));
+const readonlyRows = computed(() => rows.value.filter((row) => !row.editable));
+const readonlyGroups = computed(() => [
+  {
+    title: t('core.projectConfigVariableReadonly'),
+    rows: readonlyRows.value.filter((row) => row.reason === 'variable'),
+  },
+  {
+    title: t('core.projectConfigFileReadonly'),
+    rows: readonlyRows.value.filter((row) => row.reason === 'file'),
+  },
+  {
+    title: t('core.projectConfigRunnerReadonly'),
+    rows: readonlyRows.value.filter((row) => row.reason === 'runner'),
+  },
+].filter((group) => group.rows.length));
 const plan = computed(() => session.value?.snapshot
   ? configSavePlan(session.value.snapshot, session.value.edits) : null);
 const dirty = computed(() => Object.keys(session.value?.edits ?? {}).length > 0);
@@ -126,25 +194,6 @@ const canApply = computed(() => !locked.value && !session.value?.needsRefresh
 
 function display(value: string | null): string {
   return value === null ? t('core.projectConfigAbsent') : value || t('core.projectConfigEmpty');
-}
-
-function rowLabel(row: ConfigFormRow): string {
-  return row.file ? `${row.file}: ${row.name}` : row.name;
-}
-
-/**
- * Read-only причина относится к типу ограничения, а не к динамическому тексту
- * shell. Серверный код причины никогда не интерпретируется как ключ перевода.
- */
-function readonlyReason(row: ConfigFormRow): string {
-  if (row.reason === 'runner') {
-    return t('core.projectConfigRunnerReadonly');
-  }
-  if (row.reason === 'file') {
-    return t('core.projectConfigFileReadonly');
-  }
-
-  return t('core.projectConfigVariableReadonly');
 }
 
 /**
@@ -203,6 +252,8 @@ async function reload(current: ConfigSession): Promise<void> {
 function selectProfile(profile: string): void {
   selectionVersion += 1;
   confirmation.value = null;
+  readonlyExpanded.value = false;
+  openGroup.value = null;
 
 
   let current = sessions.get(profile);
@@ -338,10 +389,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .factory-config,
-.factory-config__body {
+.factory-config__body,
+.factory-config__readonly,
+.factory-config__section {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.factory-config__body,
+.factory-config__readonly {
+  gap: 12px;
 }
 
 .factory-config p {
@@ -349,10 +407,84 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.factory-config__capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.factory-config__capabilities code {
+  color: var(--ink);
+}
+
+.factory-config__group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+}
+
+.factory-config__group h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.factory-config__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+  gap: 12px 16px;
+}
+
+.factory-config__fields > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .factory-config__fact {
   display: block;
   color: var(--ink-mid);
+  font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.factory-config__facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.factory-config__facts > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 2px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.factory-config__facts dt,
+.factory-config__facts dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.factory-config__facts small {
+  margin-inline-start: 8px;
+  color: var(--ink-mid);
+}
+
+.factory-config__facts dd {
+  color: var(--ink-mid);
+}
+
+.factory-config__footer {
+  padding-block: 8px;
+  border-top: 1px solid var(--line);
 }
 
 .factory-config__summary,

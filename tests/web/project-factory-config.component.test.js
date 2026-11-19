@@ -158,6 +158,26 @@ export const api = {
   await t.test('RE-B3-01: переменная, read-only и полный preview пары/модели', async (s) => {
     const f = await fixture(s, () => ({}));
 
+    const toggle = f.wrapper.get('[data-test="config-toggle"]');
+    assert.equal(toggle.attributes('aria-expanded'), 'false');
+    await f.click('config-toggle');
+    assert.equal(f.wrapper.get('[data-test="apply-config"]').isVisible(), false);
+
+    const profileGroup = f.wrapper.get('[data-test="config-group-profile"]');
+    assert.equal(profileGroup.attributes('aria-expanded'), 'false');
+    await f.click('config-group-profile');
+    assert.equal(profileGroup.attributes('aria-expanded'), 'true');
+    assert.equal(f.field('PROFILE_LOOP_MAX_ROUNDS').isVisible(), true);
+    await f.click('config-group-runners');
+    assert.equal(f.field('PROFILE_LOOP_MAX_ROUNDS').isVisible(), false);
+    assert.equal(f.field('PROJECT_RUNNER_PRIMARY').isVisible(), true);
+
+    const readonly = f.wrapper.get('[data-test="config-readonly-toggle"]');
+    assert.equal(readonly.attributes('aria-expanded'), 'false');
+    assert.match(readonly.text(), /2/);
+    await f.click('config-readonly-toggle');
+    assert.equal(readonly.attributes('aria-expanded'), 'true');
+
     assert.equal(f.wrapper.find('[data-test="profile-capabilities"]').exists(), true);
     assert.equal(f.wrapper.find('[data-test="profile-capabilities"]').text().includes('route-v2'), true);
     assert.equal(f.wrapper.find('[data-test="field-PROFILE_DYNAMIC"]').exists(), false);
@@ -166,6 +186,7 @@ export const api = {
     await f.field('PROFILE_LOOP_MAX_ROUNDS').setValue('40');
     await f.field('PROJECT_RUNNER_PRIMARY').setValue('qwen');
     await f.field('MODEL_DEFAULT_CODEX_EXACT').setValue('model-b');
+    assert.equal(f.wrapper.get('[data-test="apply-config"]').isVisible(), true);
     await f.click('apply-config');
 
     const summary = browser.document.querySelector('[data-test="config-summary"]');

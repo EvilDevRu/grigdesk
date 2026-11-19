@@ -60,10 +60,11 @@ You can also start a conversation in the active project's working folder.
 
 ## Factory configuration
 
-For an existing project with a factory profile, expand Factory configuration. It shows capabilities,
-variables, runners and models. Edit an available field, choose Apply changes, review the complete
+For an existing project with a factory profile, expand Factory configuration. Open the group
+for the variables, runners, or models you want to edit. Expand Read-only to see the remaining values and the
+reasons they cannot be edited. Edit a field, choose Apply changes, review the complete
 summary and confirm Write to profile. Failover and unchanged model fields appear when their group
-is sent. Last value read shows the server fact separately from your input. Profile metadata are
+is sent. Edited fields show the last server value next to the input. Profile metadata are
 read without executing Bash.
 
 After a conflict or partial failure, wait for reload, compare actual values and confirm the remaining
