@@ -94,6 +94,50 @@ test('итог-отказ хода из очереди снимает «ждёт
   assert.deepEqual(deleted, ['/api/chat/pending/turn-res-000002']);
 });
 
+test('ошибка перезапуска закрывает именно свой веб-ход и сохраняет полученные шаги', async () => {
+  const turnId = 'turn-crash-legacy';
+  const runId = 'run-crash-legacy';
+  const nextTurnId = 'turn-after-restart';
+  const chat = await chatStoreFixture({
+    sessions: [chatWith([userTurn('Первый', turnId), userTurn('Следующий', nextTurnId, { queued: true })])],
+  });
+  const session = chat.sessions[0];
+  const steps = [{ k: 'tool', id: 'first-tool', name: 'Проверка' }];
+  const failed = {
+    id: turnId,
+    turnId,
+    role: 'error',
+    reply: 'Сервер остановился',
+    interruptedBy: 'server_shutdown',
+  };
+
+  chat._setRuntimeRun(session.id, { runId, turnId });
+  session.sending = true;
+  session.steps = steps;
+  chat._applyPending(session, failed);
+
+  assert.equal(chat.runtimeFor(session.id).active, false);
+  assert.equal(session.sending, true, 'следующий ход остаётся в очереди');
+  assert.equal(session.messages.at(-1).runId, runId);
+  assert.equal(session.messages.at(-1).steps[0].id, 'first-tool');
+
+  const nextRunId = 'run-after-restart';
+
+  chat._setRuntimeRun(session.id, { runId: nextRunId, turnId: nextTurnId });
+  session.steps = [{ k: 'tool', id: 'next-tool' }];
+  chat._applyPending(session, { ...failed, id: 'late-recovery', runId });
+
+  assert.equal(chat.runtimeFor(session.id).runId, nextRunId);
+  assert.equal(chat.runtimeFor(session.id).active, true);
+  assert.deepEqual(session.messages.at(-1).steps, []);
+
+  chat._applyPending(session, { ...failed, id: nextTurnId, turnId: nextTurnId, runId: nextRunId });
+
+  assert.equal(chat.runtimeFor(session.id).active, false);
+  assert.equal(session.sending, false);
+  assert.equal(session.messages.at(-1).steps[0].id, 'next-tool');
+});
+
 test('pending подтверждается только после того, как история с ответом записана', async () => {
   const chat = await chatStoreFixture({
     sessions: [chatWith([userTurn('вопрос', 'turn-res-000003')])],

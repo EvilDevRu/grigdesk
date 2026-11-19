@@ -1935,6 +1935,7 @@
   "chatSkopirovano": "Copied",
   "chatKopirovatSoobschenie": "Copy message",
   "chatProdolzhitHod": "▶ Continue turn",
+  "chatInterruptedByServerShutdown": "The GrigDesk server stopped before the turn finished. The final reply is unavailable.",
   "chatSvyazSServeromPrervalas": "📡 Connection to the server was lost — the turn continues; the reply will appear when the connection returns.",
   "chatVysotaPolyaVvoda": "Input field height",
   "chatPotyaniVysotaPolyaVvoda": "Drag — input field height. Double click — restore default",

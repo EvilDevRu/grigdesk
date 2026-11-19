@@ -1955,6 +1955,7 @@
   "chatSkopirovano": "Скопировано",
   "chatKopirovatSoobschenie": "Копировать сообщение",
   "chatProdolzhitHod": "▶ Продолжить ход",
+  "chatInterruptedByServerShutdown": "Сервер GrigDesk остановился до завершения хода. Итоговый ответ недоступен.",
   "chatSvyazSServeromPrervalas": "📡 Связь с сервером прервалась — ход продолжается, ответ появится, когда связь вернётся.",
   "chatVysotaPolyaVvoda": "Высота поля ввода",
   "chatPotyaniVysotaPolyaVvoda": "Потяни — высота поля ввода. Двойной клик — вернуть обычную",

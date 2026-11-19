@@ -490,7 +490,8 @@
                             @click="onMarkdownClick" />
               <UiInlineMessage v-else-if="m.role === 'error'" tone="danger"
                                :heading="t('core.error')" data-context="chat-turn-error">
-                <span class="chat-error-reason">{{ m.text }}</span>
+                <span class="chat-error-reason">{{ m.interruptedBy === 'server_shutdown'
+                  ? t('core.chatInterruptedByServerShutdown') : m.text }}</span>
                 <template #actions>
                   <HelpArticleLink variant="ghost" data-role="chat-error-help" />
                 </template>

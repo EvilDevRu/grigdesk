@@ -4264,7 +4264,13 @@ export const useChatStore = defineStore('chat', {
       // всплывала бы в переписке отдельным «сообщением пользователя».
       const userText = stripSeed(p.userText);
       const current = this.runtimeRuns[s.id];
-      const ownsRuntime = !current?.active || (!!p.runId && p.runId === current.runId);
+      // Старый сервер мог восстановить ошибку без runId. Связываем её с видимой
+      // лентой только по точному совпадению принятого хода, чтобы не задеть следующий.
+      const interruptedRun = p.role === 'error' && p.interruptedBy === 'server_shutdown'
+        && p.turnId && current?.turnId === p.turnId && (!p.runId || p.runId === current.runId)
+        ? current : null;
+      const runId = p.runId || interruptedRun?.runId;
+      const ownsRuntime = !current?.active || (!!runId && runId === current.runId);
 
       if (p.title) {
         const provisional = provisionalChatTitle(userText, { hasAttachments: !!p.hadAttachments });
@@ -4274,6 +4280,23 @@ export const useChatStore = defineStore('chat', {
       // Итог принятого хода: его реплика больше не ждёт ни приёма, ни очереди.
       if (p.turnId) {
         this._settleTurnMessage(s, p.turnId, { finished: true });
+      }
+      if (interruptedRun?.active) {
+        interruptedRun.active = false;
+        delete interruptedRun.finishing;
+        this._touchRun(s.id);
+        this._closeInTurnDrafts(s.id, runId);
+
+        const inTurn = this.inTurnRuns[s.id];
+
+        if (inTurn && inTurn.runId === runId) {
+          inTurn.active = false;
+        }
+
+        if (!s.inflight) {
+          s.sending = s.messages.some((message) => message.role === 'user' && message.queued);
+          s.stopping = false;
+        }
       }
 
       const seen = (s.messages || []).some((m) => m.pid === p.id);
@@ -4314,7 +4337,7 @@ export const useChatStore = defineStore('chat', {
       // Видимый хвост запуска доказывает, что вопрос уже находится в старшей части ленты.
       // Частичная загрузка не должна восстанавливать его копию после финального ответа.
       const representedRun = (s.messages || []).some((m) =>
-        !!p.runId && m.runId === p.runId || !!p.turnId && m.parentTurnId === p.turnId);
+        !!runId && m.runId === runId || !!p.turnId && m.parentTurnId === p.turnId);
 
       if (userText && !restored && !representedRun) {
         const sentAt = messageSentAt(p.userSentAt);
@@ -4330,12 +4353,12 @@ export const useChatStore = defineStore('chat', {
 
       const role = p.role || 'assistant';
 
-      applyAssistantFinal(s.messages, p, {
+      applyAssistantFinal(s.messages, { ...p, runId }, {
         role,
         text: p.reply || tr('core.corePusto'),
         cost: p.cost ?? null,
         pid: p.id,
-        steps: p.steps || [],
+        steps: p.steps?.length ? p.steps : interruptedRun ? s.steps || [] : [],
         model: p.model || '',
         actualModel: p.actualModel || '',
         effort: p.effort || '',

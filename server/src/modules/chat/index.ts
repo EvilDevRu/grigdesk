@@ -538,8 +538,7 @@ const SHUTDOWN_CUT_REPLY = '⏹ Ход прерван перезапуском �
 const QUEUED_CUT_REPLY = 'Сервер перезапускается — сообщение не выполнено.'
   + ' Отправь его ещё раз, когда он вернётся.';
 // Итоги ходов, которые прошлый процесс принял, но не довёл до конца (падение без слива).
-const CRASH_RUNNING_REPLY = 'Ход прерван: сервер GrigDesk остановился посреди работы,'
-  + ' ответ и лента хода не сохранились.';
+const CRASH_RUNNING_REPLY = 'Сервер GrigDesk остановился до завершения хода. Итоговый ответ недоступен.';
 const CRASH_QUEUED_REPLY = 'Сообщение не выполнено: сервер GrigDesk перезапустился до начала хода.'
   + ' Отправь его ещё раз.';
 const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -3915,6 +3914,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     channel.runId = runId;
 
     try {
+      if (channel.turnId) {
+        await turnLedger.update(channel.turnId, { runId });
+      }
       if (chatKey) {
         activeRuns.set(chatKey, runRec);
         backgroundRuns.hide(chatKey);
@@ -3979,9 +3981,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         }, { once: true });
       }
 
-      if (channel.turnId && turnLedger.get(channel.turnId)?.mobileOwner) {
-        await turnLedger.update(channel.turnId, { runId });
-      }
       if (chatKey && target.record && turnLedger.mobileTurns(chatKey).length) {
         // Новый запуск владеет памятью до executor, даже если завершится ошибкой.
         // Обычные чаты без mobile ownership сохраняют прежнее число записей истории.
@@ -6203,11 +6202,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const wasRunning = entry.state === 'running';
 
     try {
-      if (entry.mobileOwner && recoveredPending.some((pending) =>
-        pending.chatKey === entry.chatKey && String(pending.turnId || pending.id) === entry.turnId)) {
-        // Сначала завершается ledger по доказанному pending, затем материализуется ответ.
-        // Падение между этими записями не заменяет готовый результат ошибкой recovery.
-        await mobileHistory.reconcile(entry.chatKey);
+      const saved = recoveredPending.find((pending) => pending?.chatKey === entry.chatKey
+        && String(pending.turnId || pending.id) === entry.turnId && typeof pending.reply === 'string'
+        && (!entry.runId || !pending.runId || pending.runId === entry.runId));
+
+      if (saved) {
+        // Итог успел лечь в pending. Доводим журнал до конца, не заменяя ответ ошибкой.
+        if (entry.mobileOwner) {
+          await mobileHistory.reconcile(entry.chatKey);
+        } else {
+          await turnLedger.update(entry.turnId, {
+            state: 'done',
+            finishedAt: typeof saved.at === 'number' ? saved.at : Date.now(),
+            outcome: saved.interruptedBy ? 'interrupted' : outcomeOf(saved),
+          });
+        }
 
         continue;
       }

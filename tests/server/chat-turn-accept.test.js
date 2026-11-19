@@ -4,6 +4,8 @@
 // запуск. Теперь окно шлёт устойчивый turnId, сервер коротко подтверждает приём,
 // повтор с тем же turnId ничего не запускает второй раз, а итог приходит через pending.
 import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -338,6 +340,10 @@ test('после падения сервера незавершённые ход
   await quick(post(crashed.app, turnBody('crash-chat', 'turn-crash-0002', 'ждал')), 'второй');
   await first.waitForRuns(1);
 
+  const { active } = (await crashed.app.inject({ method: 'GET', url: '/api/chat/active' })).json();
+
+  assert.ok(active[0].runId);
+
   // Падение: процесс исчез без слива — ни ответа, ни записи в pending.
   const second = controlledExecutor();
   const restarted = await chatAppFixture(t, { executor: second.executor, root: crashed.root });
@@ -350,13 +356,43 @@ test('после падения сервера незавершённые ход
 
   assert.equal(byId['turn-crash-0001'].role, 'error');
   assert.equal(byId['turn-crash-0001'].interruptedBy, 'server_shutdown', 'окно предложит продолжить ход');
+  assert.equal(byId['turn-crash-0001'].runId, active[0].runId, 'ошибка остаётся в ленте своего запуска');
+  assert.match(byId['turn-crash-0001'].reply, /Итоговый ответ недоступен/u);
+  assert.doesNotMatch(byId['turn-crash-0001'].reply, /лента.*не сохранил/u);
   assert.equal(byId['turn-crash-0002'].role, 'error');
+  assert.equal(byId['turn-crash-0002'].runId, undefined);
   assert.equal(byId['turn-crash-0002'].userText, 'ждал');
   assert.equal(second.runs.length, 0, 'после рестарта старые ходы сами не перезапускаются');
 
   const retry = await quick(post(restarted.app, turnBody('crash-chat', 'turn-crash-0002', 'ждал')), 'повтор');
 
   assert.equal(retry.json().duplicate, true, 'повтор с прежним turnId не превращается в новый запуск');
+  assert.equal(second.runs.length, 0);
+});
+
+test('перезапуск сохраняет готовый веб-ответ, если он записан раньше отметки в журнале', async (t) => {
+  const first = controlledExecutor();
+  const { app, root } = await chatAppFixture(t, { executor: first.executor });
+  const turnId = 'turn-saved-0001';
+  const chatKey = 'saved-chat';
+
+  await saveChat(app, chatKey);
+  await quick(post(app, turnBody(chatKey, turnId)), 'приём хода');
+  await first.waitForRuns(1);
+
+  const directory = path.join(root, 'chats', 'pending');
+  const saved = { id: turnId, turnId, chatKey, role: 'assistant', reply: 'Готовый ответ', at: Date.now() };
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, `${turnId}.json`), JSON.stringify(saved));
+
+  const second = controlledExecutor();
+  const restarted = await chatAppFixture(t, { executor: second.executor, root });
+  const turns = await turnsOf(restarted.app, [turnId]);
+
+  assert.deepEqual(await pendingOf(restarted.app), [saved]);
+  assert.equal(turns[turnId].state, 'done');
+  assert.equal(turns[turnId].outcome, 'reply');
   assert.equal(second.runs.length, 0);
 });
 

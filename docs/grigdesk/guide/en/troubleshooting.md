@@ -24,6 +24,9 @@ Do not include keys, pairing QR codes or full private conversations.
 6. Enable diagnostics, reproduce once and save a limited log with event time.
 
 Chat errors have a separate Error card with the complete reason; long paths/messages wrap.
+When the server stops during a turn, the card says that the final reply is unavailable.
+Any available steps stay with that turn. In an idle chat, use “Continue turn” on the last
+interrupted turn to resume work.
 Troubleshooting beneath it opens this article over the chat while preserving the draft,
 without retrying the operation or sending an agent message.
 

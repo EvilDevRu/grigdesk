@@ -10,7 +10,7 @@ import { compileChatSession as compileChatSessionHarness } from './helpers/chat-
 
 process.env.NODE_ENV = 'test';
 
-const compileChatSession = () => compileChatSessionHarness('__resumeCut');
+const compileChatSession = () => compileChatSessionHarness('__resumeCut', { realSteps: true });
 
 const PROVIDERS = [{
   id: 'claude',
@@ -179,6 +179,26 @@ test('перезапуск сервера: текст продолжения п�
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /перезапустился/);
   assert.doesNotMatch(sent[0].text, /оборвал сам CLI/);
+});
+
+test('старая ошибка перезапуска в ленте со шагами говорит только о недоступности итогового ответа', async (t) => {
+  const { wrapper } = await mountChat(t, [
+    { role: 'user', text: 'Запусти проверку' },
+    {
+      role: 'error',
+      text: 'Ход прерван: сервер GrigDesk остановился посреди работы, ответ и лента хода не сохранились.',
+      interruptedBy: 'server_shutdown',
+      runId: 'restart-run',
+      steps: [{ k: 'text', text: 'Проверка начата', at: 1 }],
+    },
+  ]);
+  const turn = wrapper.get('[data-role="chat-turn"]');
+
+  await turn.get('[data-context="chat-activity-summary"]').trigger('click');
+  assert.match(turn.text(), /Проверка начата/u);
+  assert.match(turn.get('.chat-error-reason').text(), /Итоговый ответ недоступен/u);
+  assert.equal(turn.find('[data-role="chat-status"]').exists(), false);
+  assert.equal(resumeButton(turn).exists(), true);
 });
 
 test('ошибка без метки прерывания кнопку не получает', async (t) => {
