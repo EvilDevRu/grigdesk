@@ -4,6 +4,8 @@ Plugins add tools and panels. System features and external installable packages 
 
 ## Before you begin
 
+Built-in plugins are enabled by default. If you've toggled a plugin, your saved choice takes precedence.
+
 External packages need a trusted source and compatible version.
 Official and Community describe origin, rather than a security assessment.
 
@@ -13,7 +15,7 @@ Official and Community describe origin, rather than a security assessment.
    System plugin settings are on their relevant settings pages.
 2. Choose a package/version or Install from Git with a repository and exact tag.
 3. Read the prepared source, version, changes and warnings. Application needs separate confirmation.
-4. A new package without saved enabled status starts disabled. Enable it and open its declared panel.
+4. A new external package without saved enabled status starts disabled. Enable it and open its declared panel.
    Incompatibilities appear in its card. Saved status for the same ID applies after confirmed installation.
 5. Configure parameters and placements, then apply. Disabling a placement hides that block without disabling the plugin.
 6. Review updates or rollback packages. Resolve an unknown current operation before starting another.

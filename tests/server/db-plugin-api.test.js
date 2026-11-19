@@ -16,7 +16,7 @@ async function dbModule() {
   }
 }
 
-test('плагин «Базы» зарегистрирован системным и выключен по умолчанию', () => {
+test('плагин «Базы» зарегистрирован системным и включён по умолчанию', () => {
   const db = SYSTEM.find((plugin) => plugin.id === 'db');
 
   assert.deepEqual({
@@ -26,8 +26,8 @@ test('плагин «Базы» зарегистрирован системны�
     nav: db?.nav,
   }, {
     system: true,
-    defaultEnabled: false,
-    enabledWithoutPrefs: false,
+    defaultEnabled: true,
+    enabledWithoutPrefs: true,
     nav: {
       path: '/db',
       label: 'Базы',

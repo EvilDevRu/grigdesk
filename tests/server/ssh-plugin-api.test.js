@@ -30,7 +30,7 @@ async function pluginFixture(t, initial = {}) {
   return { app, readPrefs: () => prefsData };
 }
 
-test('SSH зарегистрирован системным плагином и выключен по умолчанию', () => {
+test('SSH зарегистрирован системным плагином и включён по умолчанию', () => {
   const ssh = SYSTEM.find((plugin) => plugin.id === 'ssh');
 
   assert.deepEqual({
@@ -40,8 +40,8 @@ test('SSH зарегистрирован системным плагином и 
     nav: ssh?.nav,
   }, {
     system: true,
-    defaultEnabled: false,
-    enabledWithoutPrefs: false,
+    defaultEnabled: true,
+    enabledWithoutPrefs: true,
     nav: {
       path: '/ssh',
       label: 'SSH',

@@ -215,10 +215,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'telegram',
     system: true,
-    // Системный (нужны своя страница, адаптер трекера и запуск конвейера), но
-    // ВЫКЛЮЧЕН по умолчанию: раздел просит токен бота, и появляться сам, без
-    // спроса, у всех установок он не должен.
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'Телеграм',
     version: '0.1.0',
     description: 'Подключение Telegram Bot API, нативный архив и allowlist чатов для общего раздела «Входящие».',
@@ -234,7 +231,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'github',
     system: true,
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'GitHub Issues',
     version: '0.1.0',
     description: 'Подключение одного GitHub repository: новые Issues поступают в общий раздел «Входящие» через подписанный webhook и REST-сверку.',
@@ -250,7 +247,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'ssh',
     system: true,
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'SSH',
     version: '0.1.0',
     description: 'Терминал и SFTP для человека, надзорное выполнение команд для агента.',
@@ -284,7 +281,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'db',
     system: true,
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'Базы',
     version: '0.1.0',
     description: 'Надзорный доступ человека и агента к базам данных без хранения паролей.',
@@ -374,9 +371,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'docker',
     system: true,
-    // Выключен по умолчанию: панель показывает контейнеры ВСЕЙ машины, а не только
-    // стенды GrigDesk, и появляться сама, без спроса, у каждой установки не должна.
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'Докер',
     version: '0.1.0',
     description: 'Обзор локального Docker: контейнеры и compose-проекты, порты, образы, '
@@ -438,10 +433,7 @@ export const SYSTEM: PluginManifest[] = [
   {
     id: 'showcase',
     system: true,
-    // Выключен по умолчанию: раздел открывает браузер по адресу стенда, синтезирует
-    // речь у внешнего поставщика и складывает видео. Такое не должно появляться
-    // само у каждой установки — его включает человек, объявив контракт профиля.
-    defaultEnabled: false,
+    defaultEnabled: true,
     name: 'Презентации',
     version: '0.1.0',
     description: 'Ролик о готовой работе по сценам: сценарий, озвучка, запись браузера '

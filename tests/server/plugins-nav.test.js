@@ -64,7 +64,7 @@ test('системные инструменты имеют явные group/orde
     [['attachPhotos', true], ['attachVideos', false]],
   );
   assert.deepEqual(telegram.settings, []);
-  assert.equal(github.defaultEnabled, false);
+  assert.equal(github.defaultEnabled, true);
 
   const warnings = [];
 

@@ -19,12 +19,10 @@ plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ вхо
 SSH также гейтит каждый HTTP/WebSocket route живой проверкой; выключение закрывает его
 server-owned сессии и ожидания без рестарта. Полный контракт — [ssh.md](ssh.md).
 
-**Умолчание вкл/выкл объявляет манифест, а не сорт плагина.** `isEnabled(prefsData, manifest)`
-берёт явный выбор человека из prefs, иначе — `manifest.defaultEnabled ?? !!manifest.system`.
-Признак `system` тоже живёт в манифесте (в `SYSTEM` и в скане), `modules/plugins` его больше
-не дописывает: вторая копия правды разошлась бы с первой. Inbox включён по умолчанию;
-Telegram и GitHub системные, но выключены: их страницы просят provider credentials и не
-должны появляться сами у каждой установки.
+**Все встроенные плагины включены по умолчанию.** `isEnabled(prefsData, manifest)`
+берёт явный выбор человека из prefs, иначе использует `manifest.defaultEnabled ?? !!manifest.system`.
+Манифест содержит признак `system` и может задавать собственное значение `defaultEnabled`.
+Telegram и GitHub требуют отдельной настройки подключения.
 
 Панель объявляется в contributes.panels и entrypoints.web, использует общие
 фасады Vue/UI: [модульные панели](plugin-ui-modules.md). Фронт: `stores/plugins.ts`, VideoView,

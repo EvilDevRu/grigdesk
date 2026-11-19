@@ -5,7 +5,7 @@ separate subtitles. A video can be created before choosing an environment.
 
 ## Before you begin
 
-Enable Presentations. Check the recording browser, ffmpeg, storage and script model.
+Presentations is enabled by default. Check the recording browser, ffmpeg, storage and script model.
 Use a suitable voice or your own audio. Cloud speech and model requests may send
 text to providers and incur charges.
 

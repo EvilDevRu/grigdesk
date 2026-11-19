@@ -5,7 +5,7 @@ Open it from the right rail or Ctrl+Shift+6.
 
 ## Before you begin
 
-Enable the plugin and configure server access to Docker.
+The plugin is enabled by default. Configure server access to Docker.
 Check the selected environment: actions affect a real daemon.
 
 ## What to do

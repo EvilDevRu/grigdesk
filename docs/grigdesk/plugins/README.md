@@ -59,7 +59,7 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Пакет до npm: безопасные пути, manifest, lock graph и digest результата](user-plugin-package-validation.md)
 - [Git-источник: точный тег, tree до checkout, закрытая конфигурация и NUL diff](user-plugin-git-source.md)
 - [Команды подготовки: durable ACK, группы потомков и предел рабочего каталога](plugin-command-supervisor.md)
-- [Плагины GrigDesk](plugin-architecture.md)
+- [Плагины GrigDesk: встроенные включены по умолчанию, сохранённый выбор имеет приоритет](plugin-architecture.md)
 - [Иконки плагинов: файл манифеста, резервный знак и единые размеры картинок и SVG](plugin-icons.md)
 - [Runtime пользовательского плагина: загрузка, авторизация и границы долгих заданий](user-plugin-runtime.md)
 - [Серверный набор ядра: возможности без ключей, изолированная сеть, identity flock, события и допуск](server-core-api.md)
