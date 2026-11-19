@@ -151,7 +151,19 @@ URL с одним хостом вида `http://<host>:<port>` без пути. 
 | `profile_route_node_evidence_check ...` | trusted-проверка evidence exact run и снимок его артефактов |
 | `profile_stage_result_check <TASK> <RUN_KEY>` | путь исполняемой предпроверки сдачи, которую `stage-result.sh` зовёт до записи `done/skipped` |
 | `profile_route_volatile_paths <TASK>` | runtime-пути проверочного инструментария, которые сторож `state-only` терпит |
-| `profile_agent_control_start <TASK> <RUN_KEY>` / `profile_agent_control_stop <TASK> <RUN_KEY> <RC>` | краткоживущий project control channel для exact stage |
+| `profile_agent_control_start <TASK> <RUN_KEY>` / `profile_agent_control_stop <TASK> <RUN_KEY> <RC>` | Linux. Краткоживущий канал управления для точного этапа |
+| `profile_agent_control_darwin_v1 <TASK> <RUN_KEY>` | macOS. Объявляет команды брокера и парного закрытия |
+
+Канал macOS использует JSON с полями `version: 1`, `brokerArgv` и `closeArgv`.
+Оба списка начинаются с проверенного абсолютного пути внутри профиля или
+движка. Команды читают JSON-контекст через `GRIGDESK_PROFILE_CONTEXT_FD`.
+В контексте есть task, attempt, stage, visit, ID канала, optional txid и
+каталог интерфейса с его физической идентичностью. Брокер после готовности
+пишет одну строку JSON с `version: 1` и `channelId` в `GRIGDESK_PROFILE_READY_FD`.
+Команда закрытия получает дополнительно код исхода, фазу permit и проверенную
+живую identity брокера, если она существует. Завершение подтверждается после
+выхода сессии и освобождения ресурсов канала. Профиль без канала не объявляет
+эти хуки.
 
 Хуки выбора runner/model в `.sh` не являются частью контракта и runtime их не читает.
 
@@ -525,7 +537,15 @@ Shared-профиль дополнительно реализует:
 |---|---|
 | `profile_service_ports TASK` | одна строка `FE_PORT<TAB>API_PORT` |
 | `profile_exclusive_resources TASK` | стабильные строки ресурсов, включая exact `workspace:<path>` и `stand:<name>`; общий GPU объявляется одинаковым ключом |
-| `profile_instrumentation_restored TASK SCOPE_FILE` | exact sync восстановленного scope во внешний стенд и health; без создания/удаления ресурсов |
+| `profile_instrumentation_restored TASK SCOPE_FILE` | Linux. Синхронизация восстановленного scope и health действующего стенда. macOS в режиме `live-checkout` только проверяет health |
+| `profile_instrumentation_restore_mode` | macOS. Возвращает `live-checkout` или `copy-snapshot` |
+| `profile_instrumentation_restored_from_snapshot TASK MANIFEST SHA256` | macOS `copy-snapshot`. Синхронизирует указанные файлы или их отсутствие по readonly manifest, проверяет назначение и health, возвращает JSON `version: 1` и `appliedSHA256` |
+
+Копирующий hook получает отдельный снимок подтверждённого baseline. `files`
+описывает физический `repo`, `relative`, `type` и метаданные каждого объекта.
+Для обычных файлов `source` относится к каталогу манифеста. Для ссылки цель
+передаётся через `targetBase64`. `appliedSHA256` подтверждает эффект по той же
+описи после чтения назначения. Само объявление режима проверяется до запуска.
 
 Движок захватывает каждый exclusive resource CAS-арендой в trusted control root.
 Аренда закреплена за exact task/attempt, переживает завершение foreground-команды и
@@ -702,6 +722,8 @@ source engine/lib/route-runtime.sh; _route_v2_command_result RESULT_JSON
 ## Status protocol v2
 
 Попытка этапа получает `run_id`, `epoch` и capability token через унаследованный FD.
+На Darwin для прямого status-канала путь к проверенному читателю задаёт сам
+host запуска. Профиль продолжает отдавать статус теми же командами.
 
 Terminal результат:
 

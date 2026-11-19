@@ -1129,8 +1129,23 @@ PYDECISION
 
 # --- один синхронный прогон агента для этапа ---
 # $1=TASK $2=промпт. Выбранный runner делает ОДИН этап и завершается; bash ждёт.
+_factory_agent_control_finish() {
+  local rc=$1 task=$2
+  case "${agent_control_started:-}" in
+    darwin)
+      agent_control_started=""
+      factory_darwin_profile_channel_close "$task" "$V2_ATTEMPT" "$rc"
+      ;;
+    linux)
+      agent_control_started=""
+      profile_agent_control_stop "$task" "$agent_control_stage" "$rc"
+      ;;
+  esac
+}
+
 run_agent() {
   local t=$1 prompt=$2 stage=${3:-}
+  FACTORY_HOST_RUN_RESULT=""
   [[ -n "$stage" ]] || return 2
   # Рабочий каталог — WORKTREE ЗАДАЧИ, если профиль умеет его назвать. Пока cwd был общим
   # репозиторием, агенты складывали туда скриншоты, правили код и запускали eslint --fix
@@ -1254,23 +1269,47 @@ run_agent() {
   # Это не lifecycle стенда: broker только исполняет заранее разрешённые команды
   # существующего ресурса. Codex сам монтирует control dir read-only — добавлять
   # его в общий writable --add-dir нельзя.
-  local agent_control_started=0 runner_rc stop_rc=0
+  local agent_control_started="" agent_control_stage=$stage runner_rc stop_rc=0 host_result owner=$BASHPID
   local has_agent_control_start=0 has_agent_control_stop=0
-  declare -F profile_agent_control_start >/dev/null && has_agent_control_start=1
-  declare -F profile_agent_control_stop >/dev/null && has_agent_control_stop=1
-  (( has_agent_control_start == has_agent_control_stop )) || return 78
-  if (( has_agent_control_start )); then
-    profile_agent_control_start "$t" "$stage" || return
-    agent_control_started=1
-    if [[ -n "${PROFILE_AGENT_CONTROL_DIR:-}" ]]; then
-      RUNNER_CLAUDE_ADD_DIRS+=" $PROFILE_AGENT_CONTROL_DIR"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local PROFILE_AGENT_CONTROL_DIR=""
+    factory_darwin_profile_abi || return
+    if declare -F profile_agent_control_darwin_v1 >/dev/null; then
+      agent_control_started=darwin
+      if ! PROFILE_AGENT_CONTROL_DIR=$(factory_darwin_profile_channel_open "$t" "$stage" "$owner"); then
+        _factory_agent_control_finish 78 "$t" || true
+        FACTORY_HOST_RUN_RESULT=release_task_cleanup_required
+        return 78
+      fi
+      export PROFILE_AGENT_CONTROL_DIR
     fi
+  else
+    declare -F profile_agent_control_start >/dev/null && has_agent_control_start=1
+    declare -F profile_agent_control_stop >/dev/null && has_agent_control_stop=1
+    (( has_agent_control_start == has_agent_control_stop )) || return 78
+    if (( has_agent_control_start )); then
+      profile_agent_control_start "$t" "$stage" || return
+      agent_control_started=linux
+    fi
+  fi
+  if [[ -n "$agent_control_started" ]]; then
+    [[ -z "${PROFILE_AGENT_CONTROL_DIR:-}" ]] || RUNNER_CLAUDE_ADD_DIRS+=" $PROFILE_AGENT_CONTROL_DIR"
     export RUNNER_CODEX_ADD_DIRS RUNNER_CLAUDE_ADD_DIRS
   fi
   multi_runner_run "$t" "$prompt" "$stage" "$tmo"
   runner_rc=$?
-  if (( agent_control_started )); then
-    profile_agent_control_stop "$t" "$stage" "$runner_rc" || stop_rc=$?
+  host_result=$FACTORY_HOST_RUN_RESULT
+  _factory_agent_control_finish "$runner_rc" "$t" || stop_rc=$?
+  if [[ "$OSTYPE" == darwin* && "$stop_rc" == 78 ]]; then
+    host_result=release_task_cleanup_required
+  fi
+  if [[ "$host_result" == release_task_cleanup_required ]]; then
+    FACTORY_HOST_RUN_RESULT=$host_result
+    (( stop_rc == 0 )) || printf 'profile_agent_control_stop: rc=%s\n' "$stop_rc" >&2
+    return 78
+  fi
+  if [[ "$OSTYPE" == darwin* && "$stop_rc" == 75 ]]; then
+    FACTORY_HOST_RUN_RESULT=profile_control_hook_failed
   fi
   (( stop_rc == 0 )) || return 75
   return "$runner_rc"

@@ -25,6 +25,8 @@ import type { ArbiterConversationStore } from './arbiterConversationStore.ts';
 import type { ArbiterStopContext } from './arbiterStopContext.ts';
 import type { ArbiterExecutor } from './factoryArbiter.ts';
 import type { FactoryArbiterLive } from './factoryArbiterLive.ts';
+import { FactoryLaunchAdmissionError, type FactoryAdmissionReference, type FactoryLaunchAdmission }
+  from './factoryLaunchAdmission.ts';
 
 export interface ConversationAck {
   conversationId: string;
@@ -36,6 +38,7 @@ export interface ConversationAck {
 
 export interface ConversationServiceDeps {
   store: ArbiterConversationStore;
+  factoryAdmission?: FactoryLaunchAdmission;
   readContext: (task: string) => Promise<ArbiterStopContext | null>;
   capabilities: (context: ArbiterStopContext) => Promise<ArbiterCapabilities>;
   prepareRun: (context: ArbiterStopContext) => Promise<{
@@ -230,147 +233,196 @@ export class ArbiterConversationService {
         }
       }
 
-      if (this.jobs.has(task)) {
-        throw new ArbiterConversationError('conversation_busy', 'Разбор или действие уже выполняется.', 409);
-      }
-
-      let doc = conversationId ? await this.store.read(task, conversationId) : null;
-
-      if (conversationId && !doc) {
-        throw new ArbiterConversationError('not_found', 'Разбор не найден.', 404);
-      }
-
-      if (kind === 'resume') {
-        if (!doc || !this.deps.resume) {
-          throw new ArbiterConversationError('not_available', 'Повтор запуска недоступен.', 409);
-        }
-
-        return this.launchResume(doc, raw, fingerprint);
-      }
-
-      const expected = decodeStopIdentity(raw.expectedStop);
-      const context = await this.deps.readContext(task);
-
-      if (expected.task !== task || !context || !sameStop(expected, context.identity)
-        || (doc && !sameStop(doc.identity, expected))) {
-        throw new ArbiterConversationError('stale_stop', 'Остановка уже изменилась. Откройте текущую.', 409);
-      }
-
-      if (automatic && !doc) {
-        doc = documents.find((row) => sameStop(row.identity, context.identity)) || null;
-      }
-
-      if (automatic && doc?.operations.length) {
-        return this.ack(doc, doc.operations.at(-1)!);
-      }
-
-      const capabilities = await this.deps.capabilities(context);
-
-      doc ||= await this.store.create(context.identity, capabilities, automatic);
-
-      if (kind !== 'start' && (raw.decisionRevision !== doc.decisionRevision
-        || !Number.isSafeInteger(raw.decisionRevision))) {
-        throw new ArbiterConversationError('stale_decision', 'Варианты решения уже изменились.', 409);
-      }
-
-      const payload = Object.fromEntries(Object.entries(raw).filter(([key]) =>
-        !['requestId', 'expectedStop', 'decisionRevision', 'originalProposalId'].includes(key)));
-      const intent = kind === 'start' ? {} : decodeHumanIntent(kind, payload);
-      let humanText = '';
-      let answeredQuestion: ArbiterOperation['answeredQuestion'];
-
-      if (kind === 'discuss') {
-        const discussion = this.discussion(doc, intent);
-
-        humanText = discussion.text;
-        answeredQuestion = discussion.answeredQuestion;
-      } else if (kind === 'diagnose') {
-        const proposal = doc.result?.proposals.find((row) => row.id === intent.proposalId);
-
-        if (!proposal || proposal.kind !== 'diagnose') {
-          throw new ArbiterConversationError('proposal_unknown', 'Вариант диагностики уже недоступен.', 409);
-        }
-
-        humanText = `Дополнительная диагностика: ${proposal.diagnosticInstruction}`;
-      }
-
-      if (kind === 'apply') {
-        return this.launchApply(doc, raw, fingerprint, capabilities);
-      }
-
-      const prepared = await this.deps.prepareRun(context);
-
-      if (this.closed) {
-        throw new ArbiterConversationError('server_restarting', 'Сервер завершает работу.', 503);
-      }
-
-      const operation = this.operation(kind, String(raw.requestId), fingerprint);
-      const previous = doc.result;
-
-      if (answeredQuestion) {
-        operation.answeredQuestion = answeredQuestion;
-      }
-
-      doc = await this.store.update(task, doc.id, (latest) => {
-        Object.assign(latest, invalidateDecision(latest));
-        latest.state = 'analyzing';
-        latest.automatic ||= automatic;
-        latest.capabilities = capabilities;
-        latest.operations.push(operation);
-
-        if (!latest.messages.length) {
-          addRunnerMessage(latest, 'node', context.sourceText);
-          latest.messages.at(-1)!.sourceKind = context.targets
-            .find((row) => row.node === context.identity.node)
-            ?.executorKind;
-        }
-
-        if (humanText) {
-          addRunnerMessage(latest, 'human', humanText, operation.id);
-        }
-      });
-
-      const controller = new AbortController();
-
-      if (this.closed) {
-        controller.abort(new Error('Сервер завершает работу.'));
-      }
-
-      const doneLive = this.deps.live?.begin(
-        task,
-        {
-          actor: automatic ? 'auto' : 'human',
-          runId: operation.id
-        }
+      const accept = () => this.acceptIntent(
+        task, conversationId, kind, raw, automatic, documents, fingerprint,
       );
-      const runDoc = { ...doc, result: previous };
 
-      const completion = Promise.resolve().then(() => runArbiterConversation({
-        store: this.store,
-        doc: runDoc,
-        context,
-        operationId: operation.id,
-        ...prepared,
-        intent: kind,
-        controller,
-        timeoutMs: this.deps.turnTimeoutMs,
-        readCurrent: () => this.deps.readContext(task),
-        onExecution: (execution) => {
-          const job = this.jobs.get(task);
+      if (!this.deps.factoryAdmission) {
+        return accept();
+      }
 
-          if (job?.operationId === operation.id) {
-            job.execution = execution;
-          }
-        },
-      })).finally(() => {
-        doneLive?.();
-        this.jobs.delete(task);
-      });
-
-      this.track(task, operation, controller, completion);
-
-      return this.ack(doc, operation);
+      return this.acceptWithFactoryAdmission(task, accept);
     });
+  }
+
+  /**
+   * Допуск выдаётся только после exact lookup прежнего ACK и до первого эффекта.
+   * Job сохраняет ту же ссылку до записи исхода, включая вложенный resume.
+   */
+  private async acceptWithFactoryAdmission(task: string, accept: () => Promise<ConversationAck>) {
+    const admission = this.deps.factoryAdmission!;
+    let reference: FactoryAdmissionReference | undefined;
+    let transferred = false;
+
+    try {
+      reference = admission.retain(task);
+
+      const ack = await reference.run(accept);
+
+      void ack.completion.finally(reference.release).catch(() => {});
+      transferred = true;
+
+      return ack;
+    } catch (error) {
+      if (error instanceof FactoryLaunchAdmissionError) {
+        throw new ArbiterConversationError(error.code, 'Запуск временно закрыт.', error.status);
+      }
+
+      throw error;
+    } finally {
+      if (!transferred) {
+        reference?.release();
+      }
+    }
+  }
+
+  /**
+   * Новый запрос может читать capabilities и менять журнал только под допуском.
+   * Исход уже принятого UUID обрабатывается входом submit до этой ветки.
+   */
+  private async acceptIntent(task: string, conversationId: string | null, kind: IntentKind,
+    raw: Record<string, unknown>, automatic: boolean, documents: ArbiterConversation[], fingerprint: string,
+  ): Promise<ConversationAck> {
+    if (this.jobs.has(task)) {
+      throw new ArbiterConversationError('conversation_busy', 'Разбор или действие уже выполняется.', 409);
+    }
+
+    let doc = conversationId ? await this.store.read(task, conversationId) : null;
+
+    if (conversationId && !doc) {
+      throw new ArbiterConversationError('not_found', 'Разбор не найден.', 404);
+    }
+
+    if (kind === 'resume') {
+      if (!doc || !this.deps.resume) {
+        throw new ArbiterConversationError('not_available', 'Повтор запуска недоступен.', 409);
+      }
+
+      return this.launchResume(doc, raw, fingerprint);
+    }
+
+    const expected = decodeStopIdentity(raw.expectedStop);
+    const context = await this.deps.readContext(task);
+
+    if (expected.task !== task || !context || !sameStop(expected, context.identity)
+      || (doc && !sameStop(doc.identity, expected))) {
+      throw new ArbiterConversationError('stale_stop', 'Остановка уже изменилась. Откройте текущую.', 409);
+    }
+
+    if (automatic && !doc) {
+      doc = documents.find((row) => sameStop(row.identity, context.identity)) || null;
+    }
+
+    if (automatic && doc?.operations.length) {
+      return this.ack(doc, doc.operations.at(-1)!);
+    }
+
+    const capabilities = await this.deps.capabilities(context);
+
+    doc ||= await this.store.create(context.identity, capabilities, automatic);
+
+    if (kind !== 'start' && (raw.decisionRevision !== doc.decisionRevision
+      || !Number.isSafeInteger(raw.decisionRevision))) {
+      throw new ArbiterConversationError('stale_decision', 'Варианты решения уже изменились.', 409);
+    }
+
+    const payload = Object.fromEntries(Object.entries(raw).filter(([key]) =>
+      !['requestId', 'expectedStop', 'decisionRevision', 'originalProposalId'].includes(key)));
+    const intent = kind === 'start' ? {} : decodeHumanIntent(kind, payload);
+    let humanText = '';
+    let answeredQuestion: ArbiterOperation['answeredQuestion'];
+
+    if (kind === 'discuss') {
+      const discussion = this.discussion(doc, intent);
+
+      humanText = discussion.text;
+      answeredQuestion = discussion.answeredQuestion;
+    } else if (kind === 'diagnose') {
+      const proposal = doc.result?.proposals.find((row) => row.id === intent.proposalId);
+
+      if (!proposal || proposal.kind !== 'diagnose') {
+        throw new ArbiterConversationError('proposal_unknown', 'Вариант диагностики уже недоступен.', 409);
+      }
+
+      humanText = `Дополнительная диагностика: ${proposal.diagnosticInstruction}`;
+    }
+
+    if (kind === 'apply') {
+      return this.launchApply(doc, raw, fingerprint, capabilities);
+    }
+
+    const prepared = await this.deps.prepareRun(context);
+
+    if (this.closed) {
+      throw new ArbiterConversationError('server_restarting', 'Сервер завершает работу.', 503);
+    }
+
+    const operation = this.operation(kind, String(raw.requestId), fingerprint);
+    const previous = doc.result;
+
+    if (answeredQuestion) {
+      operation.answeredQuestion = answeredQuestion;
+    }
+
+    doc = await this.store.update(task, doc.id, (latest) => {
+      Object.assign(latest, invalidateDecision(latest));
+      latest.state = 'analyzing';
+      latest.automatic ||= automatic;
+      latest.capabilities = capabilities;
+      latest.operations.push(operation);
+
+      if (!latest.messages.length) {
+        addRunnerMessage(latest, 'node', context.sourceText);
+        latest.messages.at(-1)!.sourceKind = context.targets
+          .find((row) => row.node === context.identity.node)
+          ?.executorKind;
+      }
+
+      if (humanText) {
+        addRunnerMessage(latest, 'human', humanText, operation.id);
+      }
+    });
+
+    const controller = new AbortController();
+
+    if (this.closed) {
+      controller.abort(new Error('Сервер завершает работу.'));
+    }
+
+    const doneLive = this.deps.live?.begin(
+      task,
+      {
+        actor: automatic ? 'auto' : 'human',
+        runId: operation.id
+      }
+    );
+    const runDoc = { ...doc, result: previous };
+
+    const completion = Promise.resolve().then(() => runArbiterConversation({
+      store: this.store,
+      doc: runDoc,
+      context,
+      operationId: operation.id,
+      ...prepared,
+      intent: kind,
+      controller,
+      timeoutMs: this.deps.turnTimeoutMs,
+      readCurrent: () => this.deps.readContext(task),
+      onExecution: (execution) => {
+        const job = this.jobs.get(task);
+
+        if (job?.operationId === operation.id) {
+          job.execution = execution;
+        }
+      },
+    })).finally(() => {
+      doneLive?.();
+      this.jobs.delete(task);
+    });
+
+    this.track(task, operation, controller, completion);
+
+    return this.ack(doc, operation);
   }
 
   /**

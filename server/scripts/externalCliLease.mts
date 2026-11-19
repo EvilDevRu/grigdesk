@@ -1,19 +1,47 @@
 import { spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { fstatSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
+import { once } from 'node:events';
 import type { StdioOptions } from 'node:child_process';
+import type { Writable } from 'node:stream';
+
+import {
+  configureDarwinProcessHelper, darwinFactoryToolEnvironment, readDarwinProcessIdentity,
+  signalDarwinBuildMember, type DarwinProcessIdentity,
+} from '../../shared/node/processIdentity.ts';
 
 import { isDirectRun } from '../src/lib/helperEntry.ts';
 import { executableIdentity } from '../src/lib/providerInstall/executableIdentity.ts';
 import { acquireCliLease } from '../src/lib/providerInstall/leases.ts';
 import { InstallEnvironmentError } from '../src/lib/providerInstall/npmEnvironment.ts';
+import { runtimeKind, runtimeRoot } from '../src/lib/runtimePaths.ts';
+import { inspectDarwinSession } from '../src/lib/factoryDarwinSessions.ts';
+import {
+  reserveDarwinExternalProvider, waitDarwinExternalProvider,
+} from '../src/lib/providerInstall/darwinExternalProvider.ts';
 
 /**
  * Стадийный протокол передаёт статус и события отдельными fd выше 2.
  * Хелпер обязан пропустить их в CLI, иначе factory-стадия теряет отчёт инструмента.
  */
 async function inheritedStdio(): Promise<StdioOptions> {
+  if (process.platform === 'darwin') {
+    const inherited: StdioOptions = ['inherit', 'inherit', 'inherit'];
+
+    if (process.env.FACTORY_RUN_TASK && process.env.FACTORY_STATUS_MODE !== 'request') {
+      const status = fstatSync(7);
+
+      if (!status.isFile() || status.uid !== process.getuid!() || (status.mode & 0o7777) !== 0o600) {
+        throw new Error('darwin_external_provider_status_fd_invalid');
+      }
+
+      inherited.push('ignore', 'ignore', 'ignore', 'ignore', 'inherit');
+    }
+
+    return inherited;
+  }
+
   const fds = (await fs.readdir('/proc/self/fd'))
     .filter((entry) => /^\d+$/u.test(entry))
     .map(Number)
@@ -22,6 +50,16 @@ async function inheritedStdio(): Promise<StdioOptions> {
 
   return Array.from({ length: max + 1 }, (_, fd) =>
     fd < 3 || fds.includes(fd) ? 'inherit' : 'ignore');
+}
+
+/** Отдельная сессия CLI принимает сигнал только по подтверждённым участникам. */
+async function signalDarwinProvider(identity: DarwinProcessIdentity, signal: 'TERM' | 'INT' | 'KILL') {
+  const current = await inspectDarwinSession(identity, undefined, [], true);
+
+  if (current.state === 'alive') {
+    await Promise.all(current.members.map((member) =>
+      signalDarwinBuildMember(member, signal, AbortSignal.timeout(2500))));
+  }
 }
 
 /**
@@ -82,8 +120,32 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 2;
   }
 
-  const stat = await fs.readFile(`/proc/${process.pid}/stat`, 'utf8');
-  const sessionId = Number(stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/u)[3]);
+  const darwin = process.platform === 'darwin';
+  let owner: DarwinProcessIdentity | null = null;
+  let setsid = '';
+  let sessionId: number;
+
+  if (darwin) {
+    const tools = await darwinFactoryToolEnvironment({ root: runtimeRoot(), packaged: runtimeKind() === 'packaged' });
+
+    await configureDarwinProcessHelper(tools.FACTORY_DARWIN_PROCESS_HELPER!,
+      tools.FACTORY_DARWIN_PROCESS_HELPER_SHA256!);
+    const processOwner = await readDarwinProcessIdentity(process.pid);
+
+    if (processOwner.state !== 'alive') {
+      throw new Error('darwin_external_provider_scope_invalid');
+    }
+
+    owner = processOwner.identity;
+    sessionId = owner.sid;
+    setsid = tools.FACTORY_DARWIN_SETSID!;
+  } else {
+    const stat = await fs.readFile(`/proc/${process.pid}/stat`, 'utf8');
+
+    sessionId = Number(stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/u)[3]);
+  }
+
+  const stdio = await inheritedStdio();
   const lease = await acquireCliLease({
     directory,
     providerId,
@@ -102,16 +164,32 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Helper-лидер уже владеет сессией: CLI остаётся в его группе и умирает вместе с ней.
   // В factory helper не лидер, поэтому CLI получает собственную сессию для учёта потомков.
   const childOwnsSession = sessionId !== process.pid;
-  const child = spawn(command, args, {
-    stdio: await inheritedStdio(),
+  const binding = owner ? await reserveDarwinExternalProvider(owner).catch(async (error) => {
+    await lease.release();
+
+    throw error;
+  }) : null;
+  const held = darwin && childOwnsSession;
+
+  if (held && Array.isArray(stdio)) {
+    while (stdio.length < 9) {
+      stdio.push('ignore');
+    }
+    stdio.push('pipe');
+  }
+
+  const child = spawn(held ? setsid : command, held ? ['--permit-fd', '9', '--', command, ...args] : args, {
+    stdio,
     env: process.env,
-    detached: childOwnsSession,
+    detached: !darwin && childOwnsSession,
   });
   const closed = new Promise<number>((resolve) => {
     child.once('error', () => resolve(127));
     child.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)));
   });
   let killTimer: ReturnType<typeof setTimeout> | null = null;
+  let nativeChild: DarwinProcessIdentity | null = null;
+  let interrupted = false;
 
   /**
    * Своя сессия CLI завершается группой; в общей сессии сигнал получает сам процесс.
@@ -119,6 +197,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
    */
   const signalGroup = (signal: NodeJS.Signals) => {
     if (!child.pid) {
+      return;
+    }
+    if (darwin) {
+      interrupted = true;
+      if (nativeChild) {
+        const action = signal === 'SIGINT' ? 'INT' : signal === 'SIGKILL' ? 'KILL' : 'TERM';
+
+        void signalDarwinProvider(nativeChild, action).catch(() => {});
+      } else if (!held) {
+        child.kill(signal);
+      }
+
       return;
     }
     if (childOwnsSession) {
@@ -145,7 +235,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   process.on('SIGINT', interrupt);
 
   try {
-    if (child.pid) {
+    if (held && child.pid) {
+      const permit = child.stdio[9] as Writable;
+
+      try {
+        nativeChild = await waitDarwinExternalProvider(child.pid, AbortSignal.timeout(3500));
+        await binding?.bind(nativeChild);
+        await lease.attachSession(nativeChild.sid);
+        await lease.attachChild(nativeChild.pid);
+        if (interrupted) {
+          return 143;
+        }
+        const accepted = once(permit, 'finish');
+
+        permit.end(Buffer.from([1]));
+        await accepted;
+      } finally {
+        permit.end();
+        if (interrupted) {
+          await closed;
+        }
+      }
+    } else if (child.pid) {
       if (childOwnsSession) {
         await lease.attachSession(child.pid).catch(() => {});
       }
@@ -171,6 +282,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     for (;;) {
       try {
         await lease.release();
+        await binding?.release();
         break;
       } catch (error) {
         if (!(error instanceof InstallEnvironmentError) || error.code !== 'provider_in_use') {

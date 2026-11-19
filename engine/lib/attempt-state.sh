@@ -122,7 +122,13 @@ attempt_state_v2_task_root() {
   local task state
   task=$(_attempt_state_task_id "${1:-}") || return
   state=$(_attempt_state_state_dir) || return
-  printf '%s/protocol-v2/tasks/t%s\n' "$state" "$task"
+  _attempt_state_v2_task_path "$state" "$task"
+}
+
+_attempt_state_v2_task_path() {
+  local root=$1 task
+  task=$(_attempt_state_task_id "${2:-}") || return
+  printf '%s/protocol-v2/tasks/t%s\n' "$root" "$task"
 }
 
 _attempt_state_routes_dir() {
@@ -929,16 +935,27 @@ attempt_state_select_route_v2() {
 }
 
 attempt_state_resume_v2() {
-  local task expected=${2:-} root lock_fd attempt dir profile routes catalog
-  local terminal_rc route_rc catalog_output route_file route_id route_hash verified_hash rc
+  local task expected=${2:-} root lock_fd rc=0
   task=$(_attempt_state_task_id "${1:-}") || return
   if [[ -n "$expected" ]]; then
     expected=$(_attempt_state_attempt_id "$expected") || return
   fi
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
-  _attempt_state_protocol_locked "$root"
-  rc=$?
+  _attempt_state_resume_locked "$root" "$task" "$expected" writer || rc=$?
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
+_attempt_state_resume_locked() {
+  local root=$1 task=$2 expected=$3 mode=$4 attempt dir profile routes catalog
+  local terminal_rc route_rc catalog_output route_file route_id route_hash verified_hash rc=0
+  local scratch=${5:-$root}
+  if [[ "$mode" == reader ]]; then
+    _attempt_state_json validate-protocol "$root/protocol.json" || return
+  else
+    _attempt_state_protocol_locked "$root" || return
+  fi
   if (( rc == 0 )); then
     attempt=$(_attempt_state_require_active_locked "$root" "$task" "$expected")
     rc=$?
@@ -972,7 +989,7 @@ attempt_state_resume_v2() {
     (( route_rc == 3 )) && route_file=""
   fi
   if (( rc == 0 )); then
-    catalog_output=$(mktemp "$root/.catalog.XXXXXX") || rc=1
+    catalog_output=$(mktemp "$scratch/.catalog.XXXXXX") || rc=1
   fi
   if (( rc == 0 )); then
     "$(_attempt_state_route_tool)" \
@@ -1004,7 +1021,6 @@ attempt_state_resume_v2() {
     _attempt_state_json make-resume "$dir/pins.json" "$route_file"
     rc=$?
   fi
-  _attempt_state_unlock "$lock_fd"
   return "$rc"
 }
 

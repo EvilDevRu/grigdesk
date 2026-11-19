@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
+import type { DirectoryLockOptions } from '../../../shared/node/directoryLock.ts';
 import {
   PACKAGE_ID,
   RUNTIME_TOKEN,
@@ -44,17 +45,28 @@ export interface FactoryRuntimeSelection {
   node: string;
 }
 
-/**
- * Probe читает только уже опубликованную authority exact попытки.
- * Missing pin не создаёт registry, reservation, index или совместимую миграцию.
- */
-export async function readExistingFactoryRuntimePin(input: FactoryRuntimeRoots & {
+type FactoryRuntimeAttemptInput = FactoryRuntimeRoots & {
   cacheDir: string;
   task: string;
   attempt: string;
   profile: string;
-}): Promise<FactoryRuntimePin | null> {
+};
+
+interface LegacyRuntimeIntent {
+  format: 1;
+  attemptSha256: string;
+  pin: FactoryRuntimePin;
+}
+
+/**
+ * Probe читает только уже опубликованную authority exact попытки.
+ * Missing pin не создаёт registry, reservation, index или совместимую миграцию.
+ */
+export async function readExistingFactoryRuntimePin(
+  input: FactoryRuntimeAttemptInput,
+): Promise<FactoryRuntimePin | null> {
   await validateFactoryRuntimeRoots(input);
+  await rejectPendingRuntimeMigration(input);
 
   const scope = factoryRuntimeScope(input);
   const file = path.join(input.controlRoot, 'server-runtimes', scope, `${input.attempt}.json`);
@@ -73,14 +85,79 @@ export async function readExistingFactoryRuntimePin(input: FactoryRuntimeRoots &
   const pin = decodeFactoryRuntimePin(value);
   const identity = await readFactoryRuntimeAttempt(input, input.task, input.attempt);
 
-  if (identity.profile !== input.profile || pin.scope !== scope
-    || pin.task !== input.task || pin.attempt !== input.attempt) {
+  if (identity.profile !== input.profile) {
+    throw runtimeError('factory_runtime_attempt_invalid');
+  }
+  if (pin.scope !== scope || pin.task !== input.task || pin.attempt !== input.attempt) {
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  await validateFactoryRuntime(pin, input.cacheDir).catch(() => {
+    throw runtimeError('factory_runtime_pin_missing');
+  });
+
+  return pin;
+}
+
+function legacyIntentFile(controlRoot: string, task: string, attempt: string): string {
+  if (!TASK.test(task) || !ATTEMPT.test(attempt)) {
     throw runtimeError('factory_runtime_attempt_invalid');
   }
 
-  await validateFactoryRuntime(pin, input.cacheDir);
+  return path.join(controlRoot, 'runtime-migration-intents', `t${task}`, `${attempt}.json`);
+}
 
-  return pin;
+/**
+ * Reads the exact pre-CAS intent before considering materialized authority.
+ * The file key has no profile root component, so an alias cannot mask a pending migration.
+ */
+async function readLegacyRuntimeIntent(
+  input: FactoryRuntimeAttemptInput,
+): Promise<LegacyRuntimeIntent | null> {
+  const file = legacyIntentFile(input.controlRoot, input.task, input.attempt);
+  let value: unknown;
+
+  try {
+    value = await readRuntimeJson(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  const record = value as LegacyRuntimeIntent;
+
+  if (!exactKeys(value, ['format', 'attemptSha256', 'pin']) || record.format !== 1
+    || !PACKAGE_ID.test(record.attemptSha256)) {
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  const pin = decodeFactoryRuntimePin(record.pin);
+  const attempt = await readFactoryRuntimeAttempt(input, input.task, input.attempt);
+
+  if (pin.scope !== factoryRuntimeScope(input) || pin.task !== input.task || pin.attempt !== input.attempt
+    || pin.reservationToken !== null || attempt.profile !== input.profile
+    || sha256(attempt.bytes) !== record.attemptSha256) {
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  await validateFactoryRuntime(pin, input.cacheDir).catch(() => {
+    throw runtimeError('factory_runtime_pin_missing');
+  });
+
+  return record;
+}
+
+/**
+ * Protects a pending short-decision intent during resume and rebind.
+ * Linux uses the existing authority path without an intent.
+ */
+export async function rejectPendingRuntimeMigration(input: FactoryRuntimeAttemptInput): Promise<void> {
+  if (process.platform === 'darwin' && await readLegacyRuntimeIntent(input)) {
+    throw runtimeError('factory_runtime_pin_migration_pending');
+  }
 }
 
 export interface FactoryRuntimeReservation extends FactoryRuntimeRoots, FactoryRuntimeSelection {
@@ -248,11 +325,100 @@ async function registryForRegistration(cacheDir: string): Promise<RuntimeRootReg
       throw runtimeError('factory_runtime_registry_invalid');
     }
 
-    await privateRuntimeDirectory(path.join(cacheDir, 'state'));
-    await writeRuntimeJson(marker, { format: 1 });
-
     return { format: 1, roots: [] };
   }
+}
+
+type RuntimeRegistryCheckpoint = (phase: 'before-registry' | 'before-marker') => Promise<void>;
+
+/**
+ * The registry is durable before the initialized marker can be visible.
+ * A retry with a registry-only state verifies its schema before completing publication.
+ */
+async function publishRuntimeRegistry(cacheDir: string, registry: RuntimeRootRegistry,
+  checkpoint?: RuntimeRegistryCheckpoint): Promise<void> {
+  const marker = path.join(cacheDir, 'state/control-roots.initialized.json');
+  const initialized = await readRuntimeJson(marker).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+
+    return null;
+  });
+
+  if (initialized !== null && (!exactKeys(initialized, ['format'])
+    || (initialized as { format: unknown }).format !== 1)) {
+    throw runtimeError('factory_runtime_registry_invalid');
+  }
+
+  await checkpoint?.('before-registry');
+  await writeRuntimeJson(path.join(cacheDir, 'state/control-roots.json'), registry);
+
+  if (initialized === null) {
+    await checkpoint?.('before-marker');
+    await writeRuntimeJson(marker, { format: 1 });
+  }
+}
+
+/**
+ * Короткий Darwin preflight выбирает published authority или совместимую legacy
+ * попытку без sidecar. След существующего pin исключает переход на текущую версию.
+ */
+export async function readFactoryDecisionRuntime(input: FactoryRuntimeRoots & {
+  cacheDir: string;
+  task: string;
+  attempt: string;
+  profile: string;
+  current: FactoryRuntimeSelection;
+}): Promise<FactoryRuntimeSelection> {
+  await validateFactoryRuntimeRoots(input);
+
+  const pending = process.platform === 'darwin' ? await readLegacyRuntimeIntent(input) : null;
+
+  if (pending) {
+    return pending.pin;
+  }
+
+  const pinned = await readExistingFactoryRuntimePin(input);
+
+  if (pinned) {
+    return pinned;
+  }
+
+  const identity = await readFactoryRuntimeAttempt(input, input.task, input.attempt);
+
+  if (identity.profile !== input.profile) {
+    throw runtimeError('factory_runtime_attempt_invalid');
+  }
+
+  const scope = factoryRuntimeScope(input);
+  const indexed = await fs.lstat(path.join(input.cacheDir, 'attempt-pins', scope, `${input.attempt}.json`))
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+
+      return null;
+    });
+  const registry = await registryForRegistration(input.cacheDir);
+  const root = registry.roots.find((entry) => factoryRuntimeScope(entry) === scope);
+
+  if (indexed || root?.references.some((reference) => reference.attempt === input.attempt)) {
+    throw runtimeError('factory_runtime_pin_missing');
+  }
+
+  for (const reference of root?.references ?? []) {
+    if (reference.packageId && (await inspectFactoryRuntimePins({
+      cacheDir: input.cacheDir,
+      packageId: reference.packageId,
+    })).state === 'unknown') {
+      throw runtimeError('factory_runtime_pin_missing');
+    }
+  }
+
+  await validateFactoryRuntime(input.current, input.cacheDir);
+
+  return await readExistingFactoryRuntimePin(input) ?? input.current;
 }
 
 /**
@@ -299,7 +465,7 @@ export async function reserveFactoryRuntime(input: FactoryRuntimeRoots & Factory
       packageId: input.packageId,
       token,
     });
-    await writeRuntimeJson(path.join(input.cacheDir, 'state/control-roots.json'), registry);
+    await publishRuntimeRegistry(input.cacheDir, registry);
     await input.checkpoint?.('registry');
 
     const reservation = path.join(input.controlRoot, 'server-runtimes/reservations', `${token}.json`);
@@ -426,11 +592,19 @@ export function decodeFactoryRuntimePin(value: unknown): FactoryRuntimePin {
  * Разные package locks также не могут перезаписать один scope/attempt другим поколением.
  */
 async function publishAuthority(file: string, pin: FactoryRuntimePin): Promise<void> {
+  await publishImmutableRuntimeRecord(file, pin);
+}
+
+/**
+ * Links synced bytes to one final name and verifies an existing record on retry.
+ * The caller holds the relevant GC and package locks before publication.
+ */
+async function publishImmutableRuntimeRecord(file: string, record: unknown): Promise<void> {
   await privateRuntimeDirectory(path.dirname(file));
 
   const temporary = path.join(path.dirname(file), `.pin-${randomUUID()}`);
 
-  await writeRuntimeJson(temporary, pin);
+  await writeRuntimeJson(temporary, record);
 
   try {
     try {
@@ -440,9 +614,9 @@ async function publishAuthority(file: string, pin: FactoryRuntimePin): Promise<v
         throw error;
       }
 
-      const previous = decodeFactoryRuntimePin(await readRuntimeJson(file));
+      const previous = await readRuntimeJson(file);
 
-      if (canonicalJson(previous) !== canonicalJson(pin)) {
+      if (canonicalJson(previous) !== canonicalJson(record)) {
         throw runtimeError('factory_runtime_pin_conflict');
       }
     }
@@ -452,6 +626,220 @@ async function publishAuthority(file: string, pin: FactoryRuntimePin): Promise<v
     await fs.unlink(temporary);
     await syncRuntimeDirectory(path.dirname(file));
   }
+}
+
+type LegacyRuntimeMigrationCheckpoint = (phase: 'intent' | 'registry' | 'authority') => Promise<void>;
+type LegacyRuntimeLockPhase = Parameters<NonNullable<DirectoryLockOptions['checkpoint']>>[0];
+
+/**
+ * Completes only an exact decision's migration. Registry discovery is durable
+ * before the intent, and the intent protects the selected runtime until all three
+ * derived records match. Retry never reads a newer runtime from the current generation.
+ */
+export async function commitLegacyFactoryRuntime(input: FactoryRuntimeAttemptInput & {
+  selected: FactoryRuntimeSelection;
+  attemptSha256: string;
+  signal?: AbortSignal;
+  checkpoint?: LegacyRuntimeMigrationCheckpoint;
+  lockCheckpoint?: (lock: 'gc' | 'package', phase: LegacyRuntimeLockPhase) => Promise<void>;
+}): Promise<FactoryRuntimePin> {
+  const { cacheDir, task, attempt, profile, signal } = input;
+  const scope = factoryRuntimeScope(input);
+  const target = legacyIntentFile(input.controlRoot, task, attempt);
+  const lockOptions = (lock: 'gc' | 'package'): DirectoryLockOptions => ({
+    signal,
+    checkpoint: input.lockCheckpoint && ((phase) => input.lockCheckpoint!(lock, phase)),
+  });
+
+  await validateFactoryRuntimeRoots(input);
+
+  return withRuntimeGcLock(cacheDir, async () => {
+    const pending = await readLegacyRuntimeIntent(input);
+    const selected = pending?.pin ?? input.selected;
+
+    if (canonicalJson(runtimeSelection(selected)) !== canonicalJson(runtimeSelection(input.selected))) {
+      throw runtimeError('factory_runtime_pin_conflict');
+    }
+
+    return withPackageLock(cacheDir, selected.packageId ?? scope, async () => {
+      signal?.throwIfAborted();
+
+      const identity = await readFactoryRuntimeAttempt(input, task, attempt);
+
+      if (identity.profile !== profile || sha256(identity.bytes) !== input.attemptSha256) {
+        throw runtimeError('factory_runtime_attempt_invalid');
+      }
+
+      const registry = await registryForRegistration(cacheDir);
+      const reference = registry.roots.find((entry) => factoryRuntimeScope(entry) === scope);
+      const root: RegistryRoot = reference ?? {
+        controlRoot: input.controlRoot,
+        stateRoot: input.stateRoot,
+        profileRoot: input.profileRoot,
+        references: [],
+      };
+      const authority = path.join(input.controlRoot, 'server-runtimes', scope, `${attempt}.json`);
+      const index = path.join(cacheDir, 'attempt-pins', scope, `${attempt}.json`);
+
+      if (!pending) {
+        const existing = await readExistingFactoryRuntimePin(input);
+
+        if (existing) {
+          if (canonicalJson(runtimeSelection(existing)) !== canonicalJson(runtimeSelection(selected))) {
+            throw runtimeError('factory_runtime_pin_conflict');
+          }
+
+          return existing;
+        }
+
+        await readFactoryDecisionRuntime({ ...input, current: selected });
+      }
+
+      if (!reference) {
+        registry.roots.push(root);
+        await publishRuntimeRegistry(cacheDir, registry);
+      }
+
+      const pin: FactoryRuntimePin = pending?.pin ?? {
+        ...runtimeSelection(selected),
+        format: 1,
+        scope,
+        task,
+        attempt,
+        reservationToken: null,
+        protocol: 'route-v2',
+      };
+      const intent: LegacyRuntimeIntent = {
+        format: 1,
+        attemptSha256: input.attemptSha256,
+        pin,
+      };
+
+      signal?.throwIfAborted();
+      await publishImmutableRuntimeRecord(target, intent);
+      await input.checkpoint?.('intent');
+      signal?.throwIfAborted();
+
+      const refs = root.references.filter((ref) =>
+        ref.token === null && ref.task === task && ref.attempt === attempt);
+
+      if (refs.length > 1 || refs.some((ref) => ref.packageId !== pin.packageId)) {
+        throw runtimeError('factory_runtime_pin_conflict');
+      }
+      if (refs.length === 0) {
+        root.references.push({
+          scope,
+          token: null,
+          packageId: pin.packageId,
+          task,
+          attempt,
+        });
+      }
+
+      await publishRuntimeRegistry(cacheDir, registry);
+      await input.checkpoint?.('registry');
+      signal?.throwIfAborted();
+      await publishAuthority(authority, pin);
+      await input.checkpoint?.('authority');
+      signal?.throwIfAborted();
+      await publishImmutableRuntimeRecord(index, pin);
+
+      const confirmed = decodeFactoryRuntimePin(await readRuntimeJson(authority));
+
+      if (canonicalJson(confirmed) !== canonicalJson(pin)) {
+        throw runtimeError('factory_runtime_pin_conflict');
+      }
+
+      await fs.unlink(target);
+      await syncRuntimeDirectory(path.dirname(target));
+
+      return confirmed;
+    }, lockOptions('package'));
+  }, lockOptions('gc'));
+}
+
+function runtimeSelection(selected: FactoryRuntimeSelection): FactoryRuntimeSelection {
+  return {
+    packageId: selected.packageId,
+    runtimeRoot: selected.runtimeRoot,
+    engineHome: selected.engineHome,
+    engineBin: selected.engineBin,
+    node: selected.node,
+  };
+}
+
+/**
+ * Inventories exact, validated intents before looking at package references.
+ * An unpublished temporary inode cannot confer authority or hide a committed intent.
+ */
+async function runtimeMigrations(root: RegistryRoot, cacheDir: string,
+  registry: RuntimeRootRegistry): Promise<LegacyRuntimeIntent[]> {
+  const base = path.join(root.controlRoot, 'runtime-migration-intents');
+
+  try {
+    await privateRuntimeDirectory(base, false);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const records: LegacyRuntimeIntent[] = [];
+
+  for (const taskDir of await fs.readdir(base)) {
+    const task = taskDir.slice(1);
+    const directory = path.join(base, taskDir);
+
+    if (!taskDir.startsWith('t') || !TASK.test(task)) {
+      throw runtimeError('factory_runtime_pin_invalid');
+    }
+
+    await privateRuntimeDirectory(directory, false);
+
+    for (const name of await fs.readdir(directory)) {
+      if (/^\.(?:pin|write)-[a-f0-9-]{36}$/u.test(name)) {
+        continue;
+      }
+
+      const attempt = name.slice(0, -5);
+
+      if (!name.endsWith('.json') || !ATTEMPT.test(attempt)) {
+        throw runtimeError('factory_runtime_pin_invalid');
+      }
+
+      // Несколько зарегистрированных профилей могут использовать один control.
+      const saved = await readRuntimeJson(path.join(directory, name)) as LegacyRuntimeIntent;
+      const scope = decodeFactoryRuntimePin(saved.pin).scope;
+
+      if (scope !== factoryRuntimeScope(root)) {
+        if (registry.roots.some((entry) => entry.controlRoot === root.controlRoot
+          && factoryRuntimeScope(entry) === scope)) {
+          continue;
+        }
+
+        throw runtimeError('factory_runtime_pin_invalid');
+      }
+
+      const { profile } = await readFactoryRuntimeAttempt(root, task, attempt);
+      const intent = await readLegacyRuntimeIntent({
+        ...root,
+        cacheDir,
+        task,
+        attempt,
+        profile,
+      });
+
+      if (!intent) {
+        throw runtimeError('factory_runtime_pin_invalid');
+      }
+
+      records.push(intent);
+    }
+  }
+
+  return records;
 }
 
 /**
@@ -738,6 +1126,14 @@ export async function inspectFactoryRuntimePins(input: { cacheDir: string; packa
     await validateRuntimeIndexes(input.cacheDir, registry);
 
     for (const root of registry.roots) {
+      const pending = process.platform === 'darwin'
+        ? await runtimeMigrations(root, input.cacheDir, registry) : [];
+      const protectedAttempts = pending.filter(({ pin }) => pin.packageId === input.packageId);
+
+      if (protectedAttempts.length > 0) {
+        reasons.push('pending-migration');
+      }
+
       const refs = root.references.filter((ref) => ref.packageId === input.packageId);
 
       if (refs.length === 0) {
@@ -748,6 +1144,11 @@ export async function inspectFactoryRuntimePins(input: { cacheDir: string; packa
 
       for (const ref of refs) {
         if (ref.token === null) {
+          if (protectedAttempts.some(({ pin }) =>
+            pin.scope === ref.scope && pin.task === ref.task && pin.attempt === ref.attempt)) {
+            continue;
+          }
+
           const file = path.join(root.controlRoot, 'server-runtimes', ref.scope, `${ref.attempt}.json`);
           const pin = decodeFactoryRuntimePin(await readRuntimeJson(file));
 
@@ -847,6 +1248,7 @@ export async function resolveFactoryRuntimePin(input: FactoryRuntimeRoots & {
   current: FactoryRuntimeSelection;
 }): Promise<FactoryRuntimePin> {
   await validateFactoryRuntimeRoots(input);
+  await rejectPendingRuntimeMigration(input);
 
   const scope = factoryRuntimeScope(input);
   const file = path.join(input.controlRoot, 'server-runtimes', scope, `${input.attempt}.json`);
@@ -896,6 +1298,8 @@ export async function resolveFactoryRuntimePin(input: FactoryRuntimeRoots & {
 
   return withRuntimeGcLock(input.cacheDir, () => withPackageLock(input.cacheDir,
     input.current.packageId ?? scope, async () => {
+      await rejectPendingRuntimeMigration(input);
+
       const raced = await readRuntimeJson(file).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'ENOENT') {
           throw error;
@@ -975,7 +1379,7 @@ export async function resolveFactoryRuntimePin(input: FactoryRuntimeRoots & {
         });
       }
 
-      await writeRuntimeJson(path.join(input.cacheDir, 'state/control-roots.json'), registry);
+      await publishRuntimeRegistry(input.cacheDir, registry);
       await privateRuntimeDirectory(path.join(input.controlRoot, 'server-runtimes'));
       await publishAuthority(file, pin);
       await writeRuntimeJson(index, pin);
@@ -988,11 +1392,12 @@ export async function resolveFactoryRuntimePin(input: FactoryRuntimeRoots & {
  * Первый host usage объявляет пустой registry до появления любых authority pin-ов.
  * Утрата уже инициализированного registry остаётся ошибкой и не забывает прежние roots.
  */
-export async function initializeFactoryRuntimeRegistry(cacheDir: string): Promise<void> {
+export async function initializeFactoryRuntimeRegistry(cacheDir: string,
+  checkpoint?: RuntimeRegistryCheckpoint): Promise<void> {
   await withRuntimeGcLock(cacheDir, async () => {
     const registry = await registryForRegistration(cacheDir);
 
-    await writeRuntimeJson(path.join(cacheDir, 'state/control-roots.json'), registry);
+    await publishRuntimeRegistry(cacheDir, registry, checkpoint);
   });
 }
 
@@ -1022,6 +1427,8 @@ export async function unpinFactoryRuntimeAttempt(input: FactoryRuntimeRoots & {
   }
 
   return withRuntimeGcLock(input.cacheDir, () => withPackageLock(input.cacheDir, scope, async () => {
+    await rejectPendingRuntimeMigration(input);
+
     const file = path.join(input.controlRoot, 'server-runtimes', scope, `${input.attempt}.json`);
     const index = path.join(input.cacheDir, 'attempt-pins', scope, `${input.attempt}.json`);
 

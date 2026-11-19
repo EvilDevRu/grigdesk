@@ -14,6 +14,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -59,13 +60,44 @@ def utc_now() -> str:
 
 
 def boot_id() -> str:
-    try:
-        value = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
-    except OSError:
-        fail("boot id is unavailable", 78)
+    if sys.platform == "darwin":
+        value = darwin_process_probe("boot-id").lower()
+    else:
+        try:
+            value = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        except OSError:
+            fail("boot id is unavailable", 78)
     if not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", value):
         fail("boot id is invalid", 78)
     return value
+
+
+def darwin_process_probe(*args: str) -> str:
+    """Проба использует проверенный helper, переданный выбранным runtime."""
+    helper = os.environ.get("FACTORY_DARWIN_PROCESS_HELPER", "")
+    try:
+        if not os.path.isabs(helper) or os.path.realpath(helper) != helper:
+            fail("darwin process helper is unavailable", 78)
+        stat_info = os.lstat(helper)
+        if not stat.S_ISREG(stat_info.st_mode) or stat_info.st_uid != os.geteuid():
+            fail("darwin process helper is invalid", 78)
+        result = subprocess.run(
+            [helper, *args],
+            cwd="/",
+            env={},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 3:
+            fail("process identity is unavailable", 73)
+        if result.returncode != 0 or len(result.stdout) > 4096:
+            fail("darwin process proof is unavailable", 78)
+        return result.stdout.decode("utf-8", "strict").strip()
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        fail("darwin process proof is unavailable", 78)
 
 
 def strict_json(raw: str, where: str) -> Any:
@@ -195,6 +227,23 @@ def process_identity(pid_raw: str) -> dict[str, Any]:
     if not re.fullmatch(r"[1-9][0-9]*", pid_raw):
         fail("invalid pid")
     pid = int(pid_raw)
+    if sys.platform == "darwin":
+        row = strict_json(darwin_process_probe("identity", pid_raw), "darwin process identity")
+        if (
+            not isinstance(row, dict)
+            or row.get("pid") != pid
+            or row.get("uid") != os.geteuid()
+            or any(type(row.get(key)) is not int or row[key] <= 0 for key in ("pgid", "sid"))
+            or not isinstance(row.get("starttime"), str)
+            or not re.fullmatch(r"\d{7,26}", row["starttime"])
+        ):
+            fail("darwin process identity is malformed", 78)
+        return {
+            "pid": pid,
+            "processGroupId": row["pgid"],
+            "sessionId": row["sid"],
+            "startTimeTicks": row["starttime"],
+        }
     try:
         stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:

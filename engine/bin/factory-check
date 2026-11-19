@@ -112,8 +112,11 @@ caps = data.get("capabilities") if isinstance(data, dict) else None
 raise SystemExit(0 if isinstance(caps, list) and "route-v2" in caps else 1)
 PY
   then
-    route_miss=$(bash -c "
-      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' || { echo 'project.json: профиль не загружен'; exit 1; }
+    route_miss=$(BASH_ENV= ENV= "$BASH" -c "
+      source \"\$1\" || { echo 'project.json: профиль не загружен'; exit 1; }
+      source \"\$2/lib/shared-restore.sh\"
+      source \"\$2/lib/darwin-profile-abi.sh\"
+      factory_darwin_profile_abi 2>&1
       for f in profile_workspace_mode profile_repositories profile_project_context \
         profile_source_branch profile_container profile_stand_alive; do
         declare -F \$f >/dev/null || echo \"нет route-хука \$f\"
@@ -122,10 +125,12 @@ PY
       [[ \"\$mode\" == isolated || \"\$mode\" == shared ]] ||
         echo 'profile_workspace_mode должен вернуть isolated или shared'
       if [[ \"\$mode\" == shared ]]; then
-        for f in profile_service_ports profile_exclusive_resources \
-          profile_instrumentation_restored; do
+        for f in profile_service_ports profile_exclusive_resources; do
           declare -F \$f >/dev/null || echo \"нет shared-хука \$f\"
         done
+        factory_shared_restore_mode 3>&1 1>/dev/null 2>&3 || {
+          [[ \"\$OSTYPE\" == darwin* ]] || echo 'нет shared-хука profile_instrumentation_restored'
+        }
         # Ветка закреплена НА РЕПОЗИТОРИЙ — сверяем фактический HEAD каждого checkout.
         # Без этой проверки расхождение всплывает только отказом 78 на первом же
         # действии движка, включая приёмку уже сделанной работы.
@@ -155,7 +160,7 @@ PY
           fi
         done < <(profile_repositories 1 2>/dev/null)
       fi
-    ")
+    " factory-check-profile "$FACTORY_PROFILES_DIR/$prof/profile.sh" "$FACTORY_HOME")
     if [[ -n "$route_miss" ]]; then
       echo "$route_miss" | sed 's/^/✗ route: /'
       RC=1

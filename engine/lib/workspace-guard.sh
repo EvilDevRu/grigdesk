@@ -256,6 +256,29 @@ _workspace_guard_sensitive_records() {
   _workspace_guard_batch_records SENSITIVE '' 3<"$list_file"
 }
 
+# Все Darwin Git probes получают отдельный index одного подтверждённого образа.
+# Linux продолжает читать репозиторий штатным через git -C.
+_workspace_guard_git() {
+  if [[ -n "$guard_git_scratch" ]]; then
+    python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" probe "$guard_git_scratch" "$@"
+  else
+    git -C "$root" "$@"
+  fi
+}
+
+# Одиночный Git probe для TX marker scan использует ту же пару captured/verified.
+# Код grep 1 означает отсутствие маркера, а ошибка самого Git остаётся отказом.
+workspace_guard_darwin_git_once() (
+  local root=$1 guard_git_scratch rc=0
+  shift
+  guard_git_scratch=$(mktemp -d /private/tmp/grigdesk-guard.XXXXXX) || return 78
+  trap 'rm -rf -- "$guard_git_scratch"' EXIT
+  python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" prepare "$guard_git_scratch" "$root" || return 78
+  _workspace_guard_git "$@" || rc=$?
+  python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" verify "$guard_git_scratch" || return 78
+  return "$rc"
+)
+
 # workspace_guard_snapshot <output> <git-root-or-child>...
 #
 # Формат — детерминированный TSV. Пути и symlink targets кодируются base64, поэтому
@@ -266,7 +289,7 @@ workspace_guard_snapshot() {
   shift
   (( $# > 0 )) || return 2
 
-  local output_dir tmp candidate root root64 head worktree_hash index_hash rel
+  local output_dir tmp candidate root root64 head worktree_hash index_hash rel guard_git_scratch=""
   output_dir=$(dirname "$output")
   mkdir -p "$output_dir"
   tmp=$(mktemp "$output_dir/.workspace-guard.XXXXXX") || return 1
@@ -287,19 +310,30 @@ workspace_guard_snapshot() {
   fi
 
   (
+    if [[ "$OSTYPE" == darwin* ]]; then
+      set -o pipefail
+      trap '[[ -z "$guard_git_scratch" ]] || rm -rf -- "$guard_git_scratch"' EXIT
+    fi
     printf 'SCHEMA\t1\n'
     while IFS= read -r -d '' root; do
       root64=$(printf '%s' "$root" | workspace_guard_b64)
-      head=$(git -C "$root" rev-parse --verify HEAD 2>/dev/null || printf 'UNBORN')
+      if [[ "$OSTYPE" == darwin* ]]; then
+        guard_git_scratch=$(mktemp -d /private/tmp/grigdesk-guard.XXXXXX) || exit 78
+        python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" prepare "$guard_git_scratch" "$root" ||
+          exit 78
+        head=$(python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" head "$guard_git_scratch") || exit 78
+      else
+        head=$(git -C "$root" rev-parse --verify HEAD 2>/dev/null || printf 'UNBORN')
+      fi
       worktree_hash=$(
         if [[ "$head" == UNBORN ]]; then
-          git -C "$root" diff --binary --no-ext-diff --
+          _workspace_guard_git diff --binary --no-ext-diff --
         else
-          git -C "$root" diff --binary --no-ext-diff HEAD --
+          _workspace_guard_git diff --binary --no-ext-diff HEAD --
         fi | workspace_guard_sha256_stream
       ) || exit 1
       index_hash=$(
-        git -C "$root" diff --cached --binary --no-ext-diff -- |
+        _workspace_guard_git diff --cached --binary --no-ext-diff -- |
           workspace_guard_sha256_stream
       ) || exit 1
       printf 'ROOT\t%s\n' "$root64"
@@ -308,29 +342,58 @@ workspace_guard_snapshot() {
       printf 'INDEX_DIFF\t%s\t%s\n' "$root64" "$index_hash"
 
       if [[ "$head" != UNBORN ]]; then
+        local tracked_fd
+        if [[ -n "$guard_git_scratch" ]]; then
+          _workspace_guard_git diff --name-only -z --no-ext-diff --no-renames HEAD -- |
+            sort -z >"$guard_git_scratch/tracked" || exit 78
+          exec {tracked_fd}<"$guard_git_scratch/tracked"
+        else
+          exec {tracked_fd}< <(_workspace_guard_git diff --name-only -z --no-ext-diff --no-renames HEAD -- |
+            sort -z)
+        fi
         while IFS= read -r -d '' rel; do
           local path_hash path64
           path64=$(printf '%s' "$rel" | workspace_guard_b64)
           path_hash=$(
-            git -C "$root" diff --binary --no-ext-diff --no-renames HEAD -- "$rel" |
+            _workspace_guard_git diff --binary --no-ext-diff --no-renames HEAD -- "$rel" |
               workspace_guard_sha256_stream
           ) || exit 1
           printf 'TRACKED_WORKTREE\t%s\t%s\t%s\n' "$root64" "$path64" "$path_hash"
-        done < <(git -C "$root" diff --name-only -z --no-ext-diff --no-renames HEAD -- | sort -z)
+        done <&"$tracked_fd"
+        exec {tracked_fd}<&-
       fi
 
+      local index_fd
+      if [[ -n "$guard_git_scratch" ]]; then
+        _workspace_guard_git diff --cached --name-only -z --no-ext-diff --no-renames -- |
+          sort -z >"$guard_git_scratch/staged" || exit 78
+        exec {index_fd}<"$guard_git_scratch/staged"
+      else
+        exec {index_fd}< <(_workspace_guard_git diff --cached --name-only -z --no-ext-diff --no-renames -- |
+          sort -z)
+      fi
       while IFS= read -r -d '' rel; do
         local path_hash path64
         path64=$(printf '%s' "$rel" | workspace_guard_b64)
         path_hash=$(
-          git -C "$root" diff --cached --binary --no-ext-diff --no-renames -- "$rel" |
+          _workspace_guard_git diff --cached --binary --no-ext-diff --no-renames -- "$rel" |
             workspace_guard_sha256_stream
         ) || exit 1
         printf 'TRACKED_INDEX\t%s\t%s\t%s\n' "$root64" "$path64" "$path_hash"
-      done < <(git -C "$root" diff --cached --name-only -z --no-ext-diff --no-renames -- | sort -z)
+      done <&"$index_fd"
+      exec {index_fd}<&-
 
-      _workspace_guard_batch_records UNTRACKED "$root" \
-        3< <(git -C "$root" ls-files --others --exclude-standard -z | sort -z) || exit 1
+      if [[ -n "$guard_git_scratch" ]]; then
+        _workspace_guard_git ls-files --others --exclude-standard -z |
+          sort -z >"$guard_git_scratch/untracked" || exit 78
+        _workspace_guard_batch_records UNTRACKED "$root" 3<"$guard_git_scratch/untracked" || exit 78
+        python3 "$FACTORY_HOME/lib/workspace-guard-darwin.py" verify "$guard_git_scratch" || exit 78
+        rm -rf -- "$guard_git_scratch"
+        guard_git_scratch=""
+      else
+        _workspace_guard_batch_records UNTRACKED "$root" \
+          3< <(_workspace_guard_git ls-files --others --exclude-standard -z | sort -z) || exit 1
+      fi
     done <"$roots_file"
 
     _workspace_guard_sensitive_records

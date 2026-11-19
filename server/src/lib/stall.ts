@@ -12,6 +12,7 @@
 // формулирует её так, чтобы по ней было понятно, что делать.
 import { stallFailureLabel } from '../../../shared/pipeline/stallPresentation.ts';
 import type { StallDetails, StallPresentation } from '../../../shared/pipeline/stallPresentation.ts';
+import type { FactoryCleanupAction } from '../../../shared/runtime/factoryOwnership.ts';
 
 import { parseStagesLog } from './stagesParse.ts';
 import type { BootstrapStop } from './factoryBootstrapLedger.ts';
@@ -131,6 +132,7 @@ export interface StallInput {
   timeline?: StallEvent[];
   logText?: string;
   daemonAlive: boolean;
+  cleanupAction?: FactoryCleanupAction | null;
 }
 
 // Ответ классификатора. `kind` отделяет объявленную остановку от молчаливого обрыва.
@@ -540,8 +542,27 @@ const AFTER_FINISH = /^(?:route:\s+)?(?:отложено находок: |выг
  * null — конвейер не стоит: идёт, доделан или ждёт решения на воротах.
  */
 export function detectStall(
-  { registry = {}, timeline, logText, daemonAlive }: StallInput,
+  { registry = {}, timeline, logText, daemonAlive, cleanupAction }: StallInput,
 ): StallInfo | null {
+  if (cleanupAction) {
+    const title = 'Очистка остановки ещё не подтверждена';
+    const hint = cleanupAction.mode === 'stop'
+      ? 'Восстановите исходные файлы и Git index, затем повторите «Стоп».'
+      : 'Повторите «Стоп» или продолжите попытку для восстановления.';
+
+    return {
+      kind: 'human',
+      stage: null,
+      title,
+      hint,
+      detail: null,
+      since: null,
+      fails: null,
+      comment: null,
+      presentation: presentation(title, title, hint),
+    };
+  }
+
   const events = timeline || (logText ? parseStagesLog(logText) : []);
   const stalled = registry.STALLED_HUMAN === '1';
 

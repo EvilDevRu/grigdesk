@@ -39,7 +39,11 @@ factory_token_hash() {
 factory_control_init() {
   local token=${1:?control token} root tmp
   root=$(factory_control_root) || return
-  mkdir -p "$root"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    python3 "$FACTORY_HOME/lib/darwin-owned-directory.py" "$root" >/dev/null || return 78
+  else
+    mkdir -p "$root"
+  fi
   [[ ! -L "$root" && "$(realpath -e -- "$root" 2>/dev/null)" == "$root" ]] || return 78
   chmod 700 "$root" 2>/dev/null || true
   tmp=$(mktemp "$root/.control.XXXXXX")

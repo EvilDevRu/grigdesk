@@ -134,6 +134,11 @@ dispatcher_run_chain() {
       export FACTORY_LIFECYCLE_CANDIDATE_ORDINAL=$candidate_ordinal
       export FACTORY_LIFECYCLE_RUN_REASON=$lifecycle_reason
       "$invoke_fn" "$provider" "$family" "$model"
+      if [[ "${FACTORY_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+        runtime_lifecycle_dispatch_finish_v2 interrupted cleanup_failed interrupted \
+          "$candidate_ordinal" "${MULTI_LAST_RUN_ID:-}" >/dev/null || true
+        return 78
+      fi
       result=$DISPATCH_INVOKE_RESULT
       started=$DISPATCH_INVOKE_STARTED
       runner_result_class_valid "$result" || result=unknown

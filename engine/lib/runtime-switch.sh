@@ -179,7 +179,7 @@ runtime_signal_active() {
   runner_process_matches "$pid" "$pgid" "$starttime" || return 73
   # Сигнал идёт всей сессии раннера, а не одной группе лидера: у провайдера
   # под GNU timeout собственная группа, и TERM в группу лидера его не достанет.
-  _runner_signal_runtime TERM "$pgid" "$session"
+  _runner_signal_runtime TERM "$pgid" "$session" "$starttime"
 }
 
 runtime_switch_consume() {
@@ -324,6 +324,9 @@ runtime_interrupt_trusted_active() {
   identity=$(runner_trusted_identity_read \
     "$task" "$expected_stage" "$expected_run" "$expected_epoch")
   rc=$?
+  if (( rc == 3 )) && [[ "$OSTYPE" == darwin* ]] && ! runner_darwin_intent_absent "$task"; then
+    return 78
+  fi
   (( rc == 0 )) || return "$rc"
   read -r stage run_id epoch runner pid pgid session starttime <<<"$identity"
   if [[ "${BROWSER_RUN_TASK:-}" == "$task" && "${BROWSER_RUN_STAGE:-}" == "$stage" &&

@@ -9,6 +9,8 @@ import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
+import { resolveDarwinFlock } from './factoryDarwinRuntime.ts';
+
 // Отказ замка называется кодом: вызывающий разводит «занято» и «недоступно» по нему,
 // а не по тексту. Класс ошибки при этом принадлежит вызывающему — он и подставляет
 // свой `errorFactory`, чтобы отказ читался в терминах его подсистемы.
@@ -58,13 +60,23 @@ export async function acquireKernelFileLock({
   lockPath,
   mode = 'exclusive',
   timeoutMs = 5_000,
-  binary = 'flock',
+  binary,
   timeoutCode = 'FILE_LOCK_TIMEOUT',
   unavailableCode = 'FILE_LOCK_UNAVAILABLE',
   lostCode = 'FILE_LOCK_LOST',
   label = lockPath,
   errorFactory = plainError,
 }: KernelFileLockOptions): Promise<KernelFileLock> {
+  let executable = binary ?? 'flock';
+
+  if (binary === undefined && process.platform === 'darwin') {
+    try {
+      executable = await resolveDarwinFlock();
+    } catch (error) {
+      throw errorFactory(unavailableCode, failureText(error));
+    }
+  }
+
   await fs.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
   let handle: FileHandle;
 
@@ -80,9 +92,11 @@ export async function acquireKernelFileLock({
       `Не удалось открыть kernel lock ${label}: ${failureText(error)}`,
     );
   }
+
   let stderr = '';
+
   try {
-    const child = spawn(binary, [
+    const child = spawn(executable, [
       mode === 'shared' ? '--shared' : '--exclusive',
       '--timeout',
       String(Math.max(0.001, Number(timeoutMs) / 1000)),

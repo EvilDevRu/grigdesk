@@ -4,6 +4,33 @@
 # file descriptors. The sandbox writes an authenticated-by-context request; runner-launcher,
 # which still owns the capability token, validates and applies it outside the sandbox.
 
+# Единый читатель capability для progress и result.
+# Код 1 означает отсутствие прямого FD, а ошибка чтения с найденным FD возвращает 74.
+read_status_token() {
+  local fd=$1 result
+
+  [[ "$fd" =~ ^[0-9]+$ ]] || return 1
+
+  if [[ "$OSTYPE" == darwin* ]]; then
+    [[ "${FACTORY_STATUS_MODE:-}" != request ]] || return 1
+
+    local helper=${FACTORY_DARWIN_PROCESS_HELPER:-}
+    [[ "$helper" == /* && -f "$helper" && -x "$helper" && ! -L "$helper" ]] || return 74
+
+    "$helper" status-token "$fd"
+    result=$?
+
+    case "$result" in
+      0) return 0 ;;
+      3) return 1 ;;
+      *) return 74 ;;
+    esac
+  fi
+
+  [[ -r "/proc/self/fd/$fd" ]] || return 1
+  head -1 "/proc/self/fd/$fd" || return 74
+}
+
 _status_request_b64() {
   printf '%s' "$1" | base64 | tr -d '\n'
 }

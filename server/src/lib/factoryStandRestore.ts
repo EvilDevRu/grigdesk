@@ -10,11 +10,13 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 
 import { PROFILE_RE } from './profiles.ts';
+import { prepareFactoryRouteLaunch, type FactoryRouteLaunchPaths } from './factoryLaunch.ts';
+import { macEngineDependency, type MacEngineTool } from './factoryDarwinRuntime.ts';
 
 import type { ExecFileException } from 'node:child_process';
 
 // Корни, без которых профиль не прочитать и реестр песочницы не найти.
-export interface StandRestoreConfig {
+export interface StandRestoreConfig extends Partial<FactoryRouteLaunchPaths> {
   profilesDir: string;
   factoryHome: string;
   stateDir: string;
@@ -25,6 +27,7 @@ export interface StandRestoreRequest {
   profile: string;
   task: string;
   standOwnership: string;
+  attempt?: string;
   timeoutMs?: number;
 }
 
@@ -32,7 +35,11 @@ export interface StandRestoreRequest {
 // хуки или не читается. Решение тогда остаётся за движком, как до появления хука.
 export type StandRestoreResult =
   | { ok: true; outcome: 'alive' | 'started' | 'skipped' }
-  | { ok: false; message: string };
+  | {
+    ok: false;
+    message: string;
+    tool?: MacEngineTool;
+  };
 
 const TASK_RE = /^[1-9][0-9]{0,18}$/;
 // stand.sh grigdesk ждёт ответа стенда до 90 с; запас — на проверки до и после подъёма.
@@ -93,7 +100,7 @@ function failureMessage(error: ExecFileException, stderr: string, timeoutMs: num
  */
 export async function restoreTaskStand(
   config: StandRestoreConfig,
-  { profile, task, standOwnership, timeoutMs = DEFAULT_TIMEOUT_MS }: StandRestoreRequest,
+  { profile, task, attempt, standOwnership, timeoutMs = DEFAULT_TIMEOUT_MS }: StandRestoreRequest,
 ): Promise<StandRestoreResult> {
   if (standOwnership !== 'task') {
     return { ok: true, outcome: 'skipped' };
@@ -103,16 +110,44 @@ export async function restoreTaskStand(
   }
 
   const profileFile = path.join(config.profilesDir, profile, 'profile.sh');
+  let runtimeEnv: Record<string, string> = {};
+
+  if (process.platform === 'darwin') {
+    if (!config.rootDir || !config.factoryControlDir || !config.factoryBin
+      || !config.factoryConfigRoot || !attempt) {
+      return { ok: false, message: 'стенд задачи не поднялся: нет закреплённого runtime' };
+    }
+
+    try {
+      const selected = await prepareFactoryRouteLaunch(config as FactoryRouteLaunchPaths,
+        [task, 'check', '--profile', profile, '--attempt', attempt]);
+
+      config = selected.config;
+      runtimeEnv = selected.config.runtimeHostEnv!;
+    } catch (error) {
+      const tool = macEngineDependency(error);
+      const message = tool ? `Для конвейера macOS требуется «${tool}».`
+        : 'Закреплённый runtime стенда недоступен.';
+
+      return {
+        ok: false,
+        message,
+        ...(tool ? { tool } : {}),
+      };
+    }
+  }
 
   return new Promise<StandRestoreResult>((resolve) => {
-    execFile('timeout', [`--kill-after=${KILL_AFTER_SECONDS}`, String(timeoutMs / 1000),
-      'bash', '--noprofile', '--norc', '-c', RESTORE_SCRIPT,
+    execFile(runtimeEnv.FACTORY_DARWIN_TIMEOUT ?? 'timeout',
+      [`--kill-after=${KILL_AFTER_SECONDS}`, String(timeoutMs / 1000),
+      runtimeEnv.FACTORY_DARWIN_BASH ?? 'bash', '--noprofile', '--norc', '-c', RESTORE_SCRIPT,
       'factory-stand-restore', profileFile, task], {
       env: {
         ...process.env,
         FACTORY_HOME: config.factoryHome,
         FACTORY_PROFILES_DIR: config.profilesDir,
         STATE_DIR: config.stateDir,
+        ...runtimeEnv,
       },
       timeout: timeoutMs + KILL_AFTER_SECONDS * 1000 + EXEC_BACKSTOP_MS,
       maxBuffer: 1024 * 1024,

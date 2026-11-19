@@ -300,7 +300,7 @@ def main() -> None:
             result = view["stop"]
         else:
             result = append_event(attempt, expected, events, "stop", visit_id, payload)
-    elif op == "answer":
+    elif op in ("answer", "check-answer"):
         visit_id, stop_hash, answer_file = rest
         answer = text_value(Path(answer_file).read_text(encoding="utf-8"), "ответ")
         confirmed = next((event for event in events if event["kind"] == "decision"
@@ -314,7 +314,7 @@ def main() -> None:
             or view["stop"]["recordHash"] != stop_hash
         ):
             fail("bootstrap: устаревший визит или stop hash", 75)
-        else:
+        elif op == "answer":
             result = append_event(attempt, expected, events, "decision", visit_id, {
                 "stopHash": stop_hash, "answer": answer,
             })

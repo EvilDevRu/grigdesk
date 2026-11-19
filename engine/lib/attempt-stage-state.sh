@@ -2343,13 +2343,18 @@ PY
 
 # Заполняет глобальные ASTAGE_* после проверки активной попытки, неизменяемых пинов,
 # терминального состояния, выбранного маршрута и самого закреплённого бандла.
+# Read-only допуск передаёт внешний scratch, чтобы не писать в каталог попытки.
 _attempt_stage_state_load_locked() {
-  local task=$1 attempt=$2 expected_route=${3:-} read_terminal=${4:-0}
+  local task=$1 attempt=$2 expected_route=${3:-} read_terminal=${4:-0} scratch=${5:-}
   local root dir profile routes catalog route_pin route route_hash
   local terminal_rc description entry rc
 
   root=$(attempt_state_v2_task_root "$task") || return
-  _attempt_state_protocol_locked "$root" || return
+  if [[ -n "$scratch" ]]; then
+    _attempt_state_json validate-protocol "$root/protocol.json" || return
+  else
+    _attempt_state_protocol_locked "$root" || return
+  fi
   dir=$(_attempt_state_validate_attempt_locked "$root" "$task" "$attempt") || return
   profile=$(_attempt_state_json get "$dir/attempt.json" profile) || return
   routes=$(_attempt_state_json get "$dir/attempt.json" routesDir) || return
@@ -2381,7 +2386,7 @@ _attempt_stage_state_load_locked() {
     return 75
   fi
 
-  description=$(mktemp "$dir/.route-description.XXXXXX") || return 1
+  description=$(mktemp "${scratch:-$dir}/.route-description.XXXXXX") || return 1
   "$(_attempt_state_route_tool)" \
     --routes-dir "$routes" \
     --profile "$profile" \
@@ -2425,8 +2430,8 @@ _attempt_stage_state_validate_internal_locked() {
 }
 
 _attempt_stage_state_validate_locked() {
-  local task=$1 attempt=$2 runtime_tmp rc
-  runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-output.XXXXXX") || return 1
+  local task=$1 attempt=$2 scratch=${3:-$ASTAGE_ATTEMPT_DIR} runtime_tmp rc
+  runtime_tmp=$(mktemp "$scratch/.runtime-output.XXXXXX") || return 1
   _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
   rc=$?
   if (( rc == 0 )); then

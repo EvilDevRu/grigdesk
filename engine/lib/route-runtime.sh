@@ -1059,6 +1059,9 @@ _route_v2_guard_verify() {
 _route_v2_transaction_active_id() {
   local task=$1 active
   active="$(instrumentation_tx_root "$task")/active.env"
+  if [[ "$OSTYPE" == darwin* && ( -L "$active" || ( -e "$active" && ! -f "$active" ) ) ]]; then
+    return 78
+  fi
   [[ -f "$active" && ! -L "$active" ]] || return 3
   _instrumentation_tx_get "$active" TRANSACTION_ID
 }
@@ -1067,7 +1070,7 @@ _route_v2_transaction_active_id() {
 # начинается с позиции журнала и пропускает только завершённые транзакции: после
 # no-result или resume журнал ещё не сдвинулся, а история cleanup уже сохранена.
 _route_v2_transaction_id() {
-  local task=$1 attempt=$2 sequence=$3 txid dir state rc
+  local task=$1 attempt=$2 sequence=$3 txid dir state rc disposition root
   txid=$(_route_v2_transaction_active_id "$task")
   rc=$?
   if (( rc == 0 )); then
@@ -1078,9 +1081,17 @@ _route_v2_transaction_id() {
   (( rc == 3 )) || return "$rc"
   [[ "$sequence" =~ ^[0-9]{1,18}$ ]] || return 78
   sequence=$((10#$sequence))
+  root=$(instrumentation_tx_root "$task") || return
   while :; do
     txid="v2-${attempt#*_}-s${sequence}"
     dir=$(instrumentation_tx_dir "$task" "$txid") || return
+    if [[ "$OSTYPE" == darwin* && -d "$root" ]]; then
+      disposition=$(instrumentation_tx_darwin_disposition "$task" "$txid") || return
+      if [[ "$disposition" == retired ]]; then
+        sequence=$((sequence + 1))
+        continue
+      fi
+    fi
     if [[ ! -e "$dir" && ! -L "$dir" ]]; then
       printf '%s\n' "$txid"
       return 0
@@ -1093,6 +1104,13 @@ _route_v2_transaction_id() {
         sequence=$((sequence + 1))
         ;;
       active|cleaning|stalled)
+        if [[ "$OSTYPE" == darwin* && "$state" == active &&
+              -f "${dir%/*}/$txid.begin-intent.json" &&
+              ! -e "${dir%/*}/$txid.begin-committed.json" &&
+              ! -L "${dir%/*}/$txid.begin-committed.json" ]]; then
+          printf '%s\n' "$txid"
+          return 0
+        fi
         return 75
         ;;
       *)
@@ -1122,12 +1140,17 @@ _route_v2_transaction_before() {
     [[ "$isolation" == exclusive-worktree-v1 ||
        "$isolation" == exclusive-shared-checkout-v1 ]] || return 78
     FACTORY_INSTRUMENTATION_ISOLATION="$isolation" \
+    FACTORY_INSTRUMENTATION_CURSOR_NODE="$node" \
+    FACTORY_INSTRUMENTATION_CURSOR_SEQUENCE="$sequence" \
       instrumentation_tx_begin \
         "$task" "$txid" "$scope" "FACTORY-TRACE:t${task}" "${ROUTE_V2_ROOTS[@]}" || return
   elif [[ "$node" == proof && $active_rc -ne 0 ]]; then
     return 78
   elif (( active_rc != 0 && active_rc != 3 )); then
     return "$active_rc"
+  elif [[ "$OSTYPE" == darwin* && $active_rc -eq 0 ]]; then
+    [[ "$txid" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 75
+    instrumentation_tx_ensure_darwin_begin "$task" "$txid" || return
   fi
 }
 
@@ -1156,8 +1179,30 @@ _route_v2_log_transaction_stall() {
   return 0
 }
 
+# Общая точка завершения транзакции у postamble и явного Stop.
+# Darwin сохраняет restored до завершения проверяемого восстановления стенда.
+_route_v2_transaction_finalize() {
+  local task=$1 attempt=$2 txid=$3 dir
+  instrumentation_tx_cleanup "$task" "$txid" "$attempt" || return
+  if [[ "$OSTYPE" == darwin* ]]; then
+    instrumentation_tx_verify_restored_darwin "$task" "$txid" || return
+  fi
+  if declare -F route_v2_instrumentation_restored >/dev/null; then
+    dir=$(instrumentation_tx_dir "$task" "$txid") || return
+    if [[ "$OSTYPE" == darwin* ]]; then
+      route_v2_instrumentation_restored "$task" "$dir/scope.list" "$txid" || return
+    else
+      route_v2_instrumentation_restored "$task" "$dir/scope.list" || return
+    fi
+  fi
+  if [[ "$OSTYPE" == darwin* ]]; then
+    instrumentation_tx_verify_restored_darwin "$task" "$txid" || return
+    instrumentation_tx_finish_restore "$task" "$attempt" "$txid" || return
+  fi
+}
+
 _route_v2_transaction_after() {
-  local task=$1 node=$2 txid rc
+  local task=$1 node=$2 attempt=$3 txid rc
   txid=$(_route_v2_transaction_active_id "$task") || return 78
   instrumentation_tx_checkpoint "$task" "$txid" || {
     rc=$?
@@ -1167,15 +1212,11 @@ _route_v2_transaction_after() {
   # Топология instrument → proof держит одну транзакцию между двумя узлами. Любой другой
   # транзакционный узел владеет отдельной полной транзакцией; route id здесь не участвует.
   if [[ "$node" != instrument ]]; then
-    instrumentation_tx_cleanup "$task" "$txid" || {
+    _route_v2_transaction_finalize "$task" "$attempt" "$txid" || {
       rc=$?
       _route_v2_log_transaction_stall "$task" "$txid"
       return "$rc"
     }
-    if declare -F route_v2_instrumentation_restored >/dev/null; then
-      route_v2_instrumentation_restored "$task" "$(instrumentation_tx_dir "$task" "$txid")/scope.list" ||
-        return
-    fi
   fi
 }
 
@@ -1249,6 +1290,8 @@ _route_v2_run_agent_node() {
   local _r2_context_file _r2_prompt_file active before_signature after_signature
   local result run_id verdict_b64 run_epoch comment_b64
   local guard_before="" guard_after=""
+  local ROUTE_V2_DARWIN_TX="" ROUTE_V2_DARWIN_TX_CURSOR=$sequence
+  ROUTE_V2_HOST_RUN_RESULT=""
   # rc 75 неоднозначен (нет результата ИЛИ guard поймал нарушение) — ретраить
   # можно только первое, поэтому источник помечается флагом.
   ROUTE_V2_NO_RESULT=0
@@ -1337,6 +1380,12 @@ _route_v2_run_agent_node() {
       rm -f -- "$_r2_context_file" "$_r2_prompt_file"
       return "$rc"
     }
+    if [[ "$OSTYPE" == darwin* ]]; then
+      ROUTE_V2_DARWIN_TX=$(_route_v2_transaction_active_id "$task") || {
+        rm -f -- "$_r2_context_file" "$_r2_prompt_file"
+        return 78
+      }
+    fi
   fi
 
   mkdir -p -- "$STATE_DIR/logs" || return 1
@@ -1347,6 +1396,7 @@ _route_v2_run_agent_node() {
   # должен сойти за класс этого захода, если до диспетчера дело не дошло.
   DISPATCH_RESULT_KIND=""
   BROWSER_TRANSPORT_ERROR=""
+  FACTORY_HOST_RUN_RESULT=""
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -1363,6 +1413,15 @@ _route_v2_run_agent_node() {
     run_agent "$task" "$(cat "$_r2_prompt_file")" "$run_key" \
       >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
   local agent_rc=$?
+  if [[ "${FACTORY_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+    ROUTE_V2_HOST_RUN_RESULT=$FACTORY_HOST_RUN_RESULT
+    rm -f -- "$_r2_context_file" "$_r2_prompt_file"
+    return 78
+  fi
+  if [[ "${FACTORY_HOST_RUN_RESULT:-}" == profile_control_hook_failed ]]; then
+    rm -f -- "$_r2_context_file" "$_r2_prompt_file"
+    return 75
+  fi
   # Диспетчер работает в этом же процессе и оставляет класс последнего запуска в
   # DISPATCH_RESULT_KIND; фейковый run_agent тестов его не ставит — тогда класс пуст.
   ROUTE_V2_NO_RESULT_CLASS=${DISPATCH_RESULT_KIND:-}
@@ -1438,7 +1497,7 @@ _route_v2_run_agent_node() {
   }
 
   if [[ "$policy" == transactional-write ]]; then
-    _route_v2_transaction_after "$task" "$node" || {
+    _route_v2_transaction_after "$task" "$node" "$attempt" || {
       local rc=$?
       rm -f -- "$_r2_context_file" "$_r2_prompt_file"
       return "$rc"
@@ -1976,10 +2035,22 @@ CONTEXT
     FACTORY_ROUTE_FANOUT_DEGRADE="$fanout_degrade" \
     FACTORY_STAGE_RETRY="$attempt_no" \
     FACTORY_STAGE_RETRY_REASON=no-result \
+    FACTORY_DARWIN_BOOTSTRAP_VISIT="$visit_id" \
     FACTORY_STAGE_BOOTSTRAP_DECISION_FILE="$decision_file" \
       run_agent "$task" "$(cat "$_r2_prompt_file")" SCOUT \
         >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
     agent_rc=$?
+    case "${FACTORY_HOST_RUN_RESULT:-}" in
+      release_task_cleanup_required)
+        ROUTE_V2_HOST_RUN_RESULT=$FACTORY_HOST_RUN_RESULT
+        _route_v2_bootstrap_abort_lifecycle_v2 "$lifecycle_active" "$execution_open" "$retry_after" cleanup_failed
+        return 78
+        ;;
+      profile_control_hook_failed)
+        _route_v2_bootstrap_abort_lifecycle_v2 "$lifecycle_active" "$execution_open" "$retry_after" cleanup_failed
+        return 75
+        ;;
+    esac
     guard_after=$(_route_v2_guard_snapshot "$task" "$attempt" scout "$visit_id-$attempt_no" after) || return
     _route_v2_guard_verify SCOUT scout "$guard_before" "$guard_after" || {
       rc=$?
@@ -2364,6 +2435,13 @@ route_v2_dispatch_next() {
       ROUTE_V2_NODE_RETRY_REASON="$retry_reason" _route_v2_run_agent_node \
         "$task" "$attempt" "$node" "$run_key" "$policy" "$sequence"
       rc=$?
+      if [[ "${ROUTE_V2_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+        runtime_lifecycle_node_execution_finish_v2 interrupted cleanup_failed \
+          "$retry_before" '' none '' "${ROUTE_V2_FINAL_RUN_ID:-}" >/dev/null || true
+        runtime_lifecycle_node_visit_finish_v2 interrupted cleanup_failed attempt_interrupted '' '' \
+          >/dev/null || true
+        return "$rc"
+      fi
       if (( rc == 75 )) && [[ "${ROUTE_V2_NO_RESULT:-0}" == 1 ]]; then
         runtime_lifecycle_node_execution_finish_v2 failed no_result \
           "$(( tries_left > 0 ? tries_left - 1 : 0 ))" '' none '' \
@@ -2884,13 +2962,52 @@ route_v2_work_time() {
 # области приводит к закрытому отказу. Устойчивое состояние `cleaning` продолжается после
 # SIGKILL напрямую, а `completed` лишь исправляет устаревший указатель active.
 _route_v2_cleanup_active_instrumentation_impl() {
-  local task attempt txid dir state rc
+  local task attempt txid dir state rc pending
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   _route_v2_load_attempt "$task" "$attempt" || return
+  if [[ "$OSTYPE" == darwin* ]]; then
+    factory_darwin_profile_channel_close "$task" "$attempt" 143 || return
+  fi
   txid=$(_route_v2_transaction_active_id "$task")
   rc=$?
+  if [[ "$OSTYPE" == darwin* && ( $rc == 0 || $rc == 3 ) ]]; then
+    local recovered_begin begin_rc=0
+    recovered_begin=$(instrumentation_tx_recover_published_darwin_begin "$task" "$attempt") || begin_rc=$?
+    if (( begin_rc == 0 )); then
+      [[ -z "$txid" || "$txid" == "$recovered_begin" ]] || return 78
+      txid=$recovered_begin
+      rc=0
+    elif (( begin_rc != 3 )); then
+      return "$begin_rc"
+    fi
+  fi
+  if (( rc == 3 )) && [[ "$OSTYPE" == darwin* ]]; then
+    pending=$(_instrumentation_tx_finalization_read "$task" "$attempt")
+    rc=$?
+    if (( rc == 0 )); then
+      txid=$(jq -er .txid <<<"$pending") || return 78
+      if [[ "$(jq -er .phase <<<"$pending")" == synced ]]; then
+        local required_status=0
+        python3 "$FACTORY_HOME/lib/darwin-transaction-begin.py" manual-check \
+          "$(instrumentation_tx_root "$task")" "$task" "$txid" || required_status=$?
+        if (( required_status == 0 )); then
+          [[ "${FACTORY_DARWIN_EXPLICIT_STOP:-0}" == 1 ]] || return 75
+          instrumentation_tx_verify_restored_darwin "$task" "$txid" &&
+            instrumentation_tx_finish_restore "$task" "$attempt" "$txid"
+          return
+        fi
+        (( required_status == 3 )) || return "$required_status"
+        instrumentation_tx_retire_darwin_begin "$task" "$attempt"
+        return
+      fi
+    fi
+    if (( rc == 3 )); then
+      instrumentation_tx_retire_darwin_begin "$task" "$attempt"
+      return
+    fi
+  fi
   (( rc == 3 )) && return 3
   (( rc == 0 )) || return "$rc"
   [[ "$txid" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 75
@@ -2904,7 +3021,7 @@ _route_v2_cleanup_active_instrumentation_impl() {
   # руками, не зная даже, что дело в транзакции, а не в раннере.
   case "$state" in
     active)
-      instrumentation_tx_checkpoint "$task" "$txid" || {
+      instrumentation_tx_checkpoint "$task" "$txid" cleanup || {
         rc=$?
         _route_v2_log_transaction_stall "$task" "$txid"
         return "$rc"
@@ -2912,19 +3029,22 @@ _route_v2_cleanup_active_instrumentation_impl() {
       ;;
     cleaning|completed)
       ;;
+    stalled)
+      [[ "$OSTYPE" == darwin* && "${FACTORY_DARWIN_EXPLICIT_STOP:-0}" == 1 ]] || {
+        _route_v2_log_transaction_stall "$task" "$txid"
+        return 75
+      }
+      ;;
     *)
       _route_v2_log_transaction_stall "$task" "$txid"
       return 75
       ;;
   esac
-  instrumentation_tx_cleanup "$task" "$txid" || {
+  _route_v2_transaction_finalize "$task" "$attempt" "$txid" || {
     rc=$?
     _route_v2_log_transaction_stall "$task" "$txid"
     return "$rc"
   }
-  if declare -F route_v2_instrumentation_restored >/dev/null; then
-    route_v2_instrumentation_restored "$task" "$dir/scope.list" || return
-  fi
   return 0
 }
 
@@ -2997,6 +3117,22 @@ _route_v2_quiesce_runner_before_recovery() {
   (( rc == 0 || rc == 3 )) || return "$rc"
 }
 
+_route_v2_resume_unreleased_instrumentation() {
+  local task=$1 attempt=$2 snapshot state node sequence rc=0
+  runner_darwin_intent_absent "$task" || return 78
+  snapshot=$(mktemp "$(factory_control_root)/.route-v2-unreleased.XXXXXX") || return 78
+  if ! attempt_stage_state_read_v2 "$task" "$attempt" >"$snapshot" ||
+     ! IFS=$'\t' read -r state node sequence < <(_route_v2_json cursor "$snapshot"); then
+    rc=78
+  elif [[ "$state" != ready ]]; then
+    rc=3
+  else
+    instrumentation_tx_resume_darwin_begin "$task" "$attempt" "$node" "$sequence" || rc=$?
+  fi
+  rm -f -- "$snapshot"
+  return "$rc"
+}
+
 # Вызывается только из явных путей resume/gate. Функция не создаёт попытку и перед
 # обращением к транзакции загружает точные активные пины. Если сбой произошёл в окне
 # инструментации, сначала завершается очистка, затем переход `failed` закреплённого
@@ -3009,6 +3145,14 @@ route_v2_recover_instrumentation() {
   _route_v2_load_attempt "$task" "$attempt" || return
 
   _route_v2_quiesce_runner_before_recovery "$task" || return
+  if [[ "$OSTYPE" == darwin* ]]; then
+    factory_darwin_profile_channel_close "$task" "$attempt" 143 || return
+  fi
+  if [[ "$OSTYPE" == darwin* && "${MODE:-}" == resume ]]; then
+    _route_v2_resume_unreleased_instrumentation "$task" "$attempt"
+    rc=$?
+    (( rc == 3 )) || return "$rc"
+  fi
   route_v2_cleanup_active_instrumentation "$task" "$attempt"
   cleanup_rc=$?
   (( cleanup_rc == 0 || cleanup_rc == 3 )) || return "$cleanup_rc"

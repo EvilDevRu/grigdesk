@@ -3,7 +3,10 @@ import path from 'node:path';
 
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import { PACKAGE_ID, runtimeError } from '../binary/leases.ts';
+import { prepareDarwinFactoryEnvironment } from './factoryDarwinRuntime.ts';
+import { legacyRuntimeContext } from './factoryLegacyRuntimeContext.ts';
 import {
+  readFactoryDecisionRuntime,
   reserveFactoryRuntime,
   resolveFactoryRuntimePin,
   type FactoryRuntimeSelection,
@@ -116,6 +119,32 @@ function selectedRuntimeHelper(runtime: FactoryRuntimeSelection) {
 }
 
 /**
+ * Инструменты Darwin вычисляются для выбранного runtime до резервации или запуска.
+ * Источник PATH и нативных helper остаётся у хоста даже при наличии профиля.
+ */
+export async function withDarwinFactoryEnvironment<T extends FactoryRouteLaunchPaths>(config: T,
+  packaged: boolean): Promise<T> {
+  if (process.platform !== 'darwin') {
+    return config;
+  }
+
+  const env = await prepareDarwinFactoryEnvironment({
+    root: config.rootDir,
+    packaged,
+    controlRoot: config.factoryControlDir,
+    node: config.runtimeNode ?? nodeExecutable(),
+  });
+
+  return {
+    ...config,
+    runtimeHostEnv: {
+      ...config.runtimeHostEnv,
+      ...env,
+    },
+  };
+}
+
+/**
  * До engine spawn выбирается pin существующей попытки либо reservation нового start.
  * Административные команды и прежние source/v3 без host context сохраняют свой запуск.
  */
@@ -124,17 +153,19 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     config: T;
     command: string;
     args: string[];
+    runtimeContext?: string;
   }> {
-  const raw = {
-    config,
+  const raw = async () => ({
+    config: await withDarwinFactoryEnvironment(config,
+      runtimeMode() === 'payload' || Boolean(config.runtime?.packageId)),
     command: config.factoryBin,
     args,
-  };
+  });
   const task = args[0] ?? '';
   const action = args[1] ?? '';
 
   if (!/^[1-9][0-9]{0,18}$/u.test(task)) {
-    return raw;
+    return raw();
   }
 
   const attemptIndex = args.indexOf('--attempt');
@@ -150,16 +181,16 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
   } : null);
 
   if (!context && !attempt) {
-    return raw;
+    return raw();
   }
 
   if (!context && !(await fs.lstat(path.join(config.factoryControlDir,
     'protocol-v2/tasks', `t${task}`, 'attempts', attempt, 'attempt.json')).catch(() => null))) {
-    return raw;
+    return raw();
   }
 
   if (!attempt && action !== 'start' && action !== 'recover') {
-    return raw;
+    return raw();
   }
 
   const roots = {
@@ -180,7 +211,10 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     throw runtimeError('factory_runtime_pin_invalid');
   }
 
-  const selected = attempt ? await resolveFactoryRuntimePin({
+  const selectRuntime = process.platform === 'darwin'
+    && ['check', 'gate', 'goto', 'abandon', 'bootstrap-answer', 'stop-cleanup'].includes(action)
+    ? readFactoryDecisionRuntime : resolveFactoryRuntimePin;
+  const selected = attempt ? await selectRuntime({
     ...roots,
     task,
     attempt,
@@ -188,13 +222,36 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     current,
     cacheDir: current.cacheDir,
   }) : current;
-  const prepared = selectedFactoryRuntimeConfig(config, selected);
+  const prepared = await withDarwinFactoryEnvironment(
+    selectedFactoryRuntimeConfig(config, selected), selected.packageId !== null,
+  );
+  let runtimeContext: string | undefined;
+
+  if (process.platform === 'darwin' && attempt
+    && ['gate', 'goto', 'abandon', 'bootstrap-answer'].includes(action)) {
+    const writer = selectedRuntimeHelper(selected);
+
+    runtimeContext = await legacyRuntimeContext({
+      ...roots,
+      cacheDir: current.cacheDir,
+      task,
+      profile,
+      attempt,
+    }, selected);
+    prepared.runtimeHostEnv = {
+      ...prepared.runtimeHostEnv,
+      GRIGDESK_SERVER_RUNTIME_NODE: writer.command,
+      GRIGDESK_SERVER_RUNTIME_PIN_HELPER: writer.args[0]!,
+    };
+    args = [...args, '--require-host-runtime-context'];
+  }
 
   if (selected.packageId === null) {
     return {
       config: prepared,
       command: selected.engineBin,
       args,
+      runtimeContext,
     };
   }
 
@@ -221,5 +278,6 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     command: helper.command,
     args: [...helper.args, 'run', '--cache-dir', current.cacheDir,
       '--package-id', selected.packageId, '--engine', selected.engineBin, '--', ...args],
+    runtimeContext,
   };
 }

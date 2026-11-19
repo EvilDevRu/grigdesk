@@ -6,8 +6,9 @@ import { promisify } from 'node:util';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { USER_CLI_PARENT_KEY } from '../../../../shared/node/userCliParentEnvironment.ts';
+import { darwinSetsidPath } from '../../../../shared/node/processIdentity.ts';
 import { applyAccessEnvironment } from '../accessProfiles/runtime.ts';
-import { helperCommand } from '../runtimePaths.ts';
+import { helperCommand, runtimeKind, runtimeRoot } from '../runtimePaths.ts';
 
 export interface ExternalCliProcessContext {
   providerId: string;
@@ -114,7 +115,9 @@ function launchArguments(file: string, rest: unknown[], mode: 'spawn' | 'execFil
   ]);
 
   // execFile не переносит detached в свой spawn; setsid создаёт тот же session scope без shell.
-  const executable = mode === 'execFile' ? '/usr/bin/setsid' : helper.command;
+  const launcher = () => process.platform === 'darwin'
+    ? darwinSetsidPath({ root: runtimeRoot(), packaged: runtimeKind() === 'packaged' }) : '/usr/bin/setsid';
+  const executable = mode === 'execFile' ? launcher() : helper.command;
   const helperArgs = mode === 'execFile' ? [helper.command, ...helper.args] : helper.args;
 
   return [executable, helperArgs, {
@@ -146,7 +149,7 @@ export function externalCliSpawnSpec(file: string, args: string[], options: {
  * Без этого timeout убивал бы только посредника, оставляя CLI и reader живыми навсегда.
  */
 function ownGroup<T extends ChildProcess>(file: string, child: T): T {
-  if (contexts.getStore()?.executable !== file) {
+  if (contexts.getStore()?.executable !== file || process.platform === 'darwin') {
     return child;
   }
 

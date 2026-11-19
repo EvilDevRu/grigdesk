@@ -136,6 +136,7 @@ export async function registerArbiterConversationRuntime(
   };
   const service = new ArbiterConversationService({
     store,
+    factoryAdmission: options.factoryAdmission,
     readContext,
     capabilities: async (context) => ({
       ...await probeFactoryGotoCapability(config, context.identity), targets: context.targets,

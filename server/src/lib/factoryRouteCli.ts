@@ -22,9 +22,13 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { errorMessage } from '../../../shared/lib/errors.ts';
+import { runDarwinBuildProcess } from '../../../cli/darwinBuildProcesses.ts';
 import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs, prepareFactoryRouteLaunch } from './factoryLaunch.ts';
+import { spawnDarwinRouteProcess } from './factoryDarwinLaunch.ts';
+import { macEngineDependency, type MacEngineTool } from './factoryDarwinRuntime.ts';
+import { verifyDarwinOwnershipRoots } from './factoryDarwinOwnershipRoots.ts';
 import type { FactoryRuntimeSelection } from './factoryRuntimePins.ts';
 import { grigDeskCliPath } from './cliPath.ts';
 import { getProviderAdapters } from './executors/index.ts';
@@ -33,7 +37,7 @@ import { GLM_ROUTE_KEY_ENV } from './glm/env.ts';
 import {
   buildFactoryExternalCliDescriptor, factoryExternalCliDescriptorPath,
 } from './providerInstall/factoryExternalCli.ts';
-import { nodeExecutable } from './runtimePaths.ts';
+import { nodeExecutable, runtimeKind } from './runtimePaths.ts';
 import { accessService, type AccessProfileService } from './accessProfiles/service.ts';
 
 /**
@@ -86,6 +90,14 @@ const ROUTE_HOST_NAMES = [
   'FACTORY_HOME',
   'FACTORY_PROFILES_DIR',
   'FACTORY_CONFIG_ROOT',
+  'FACTORY_CONTROL_ROOT',
+  'FACTORY_DARWIN_PROCESS_HELPER',
+  'FACTORY_DARWIN_PROCESS_HELPER_SHA256',
+  'FACTORY_DARWIN_SETSID',
+  'FACTORY_DARWIN_BASH',
+  'FACTORY_DARWIN_TIMEOUT',
+  'FACTORY_DARWIN_LAUNCH_ID',
+  'FACTORY_DARWIN_LAUNCH_BOOT_ID',
   'PYTHONDONTWRITEBYTECODE',
   'NODE_BIN',
   'GRIGDESK_SERVER_RUNTIME_RESERVATION',
@@ -148,6 +160,7 @@ export interface RouteFailure {
   runners?: string[];
   expectedCatalogHash?: string;
   actualCatalogHash?: string | null;
+  tool?: MacEngineTool;
 }
 
 // Сводка чистого времени попытки из проверенного журнала.
@@ -194,6 +207,16 @@ export function routeCheckArgs(config: RouteConfig, { profile, route, expectedCa
     args.push('--expected-catalog-hash', expectedCatalogHash);
   }
   return [...args, '--routes-dir', config.routesDir];
+}
+
+/**
+ * Проверяет объявления ABI закреплённого профиля до восстановления среды.
+ * Task и attempt заставляют выбрать тот же runtime, что у последующего resume.
+ */
+export function routeAttemptPlatformCheckArgs(
+  config: RouteConfig, { task, profile, attempt }: RouteIdentityArgs,
+): string[] {
+  return [String(task), 'check', '--profile', profile, '--attempt', attempt, ...routePathArgs(config)];
 }
 
 export function routeStartArgs(config: RouteConfig, {
@@ -341,6 +364,18 @@ export function routeAbandonArgs(
 ): string[] {
   return [String(task), 'abandon', '--profile', profile, '--attempt', attempt,
     '--reason', reason, ...routePathArgs(config)];
+}
+
+/**
+ * Адресует проверенную попытку для завершения её очистки после выхода процессов.
+ * Использует те же каталоги и закреплённый runtime, что и обычное продолжение.
+ */
+export function routeStopCleanupArgs(
+  config: RouteConfig, { task, profile, attempt }: RouteIdentityArgs, explicit = false, expected?: string,
+): string[] {
+  return [String(task), 'stop-cleanup', '--profile', profile, '--attempt', attempt,
+    ...(explicit ? ['--confirm-manual-restore'] : []), ...(expected ? ['--expected-cleanup', expected] : []),
+    ...routePathArgs(config)];
 }
 
 /** Read-only сводка чистого времени из проверенного журнала попытки. */
@@ -540,8 +575,25 @@ export function stageAutoCompactEnv(
  * Ошибка выбора закреплённого runtime возвращается до любых engine mutations.
  * Код и человеческая причина одинаковы у синхронной и transient веток запуска.
  */
-function runtimeLaunchFailure(error: unknown): RouteFailure {
-  const code = (error as NodeJS.ErrnoException).code ?? 'factory_runtime_pin_invalid';
+export function runtimeLaunchFailure(error: unknown): RouteFailure {
+  const tool = macEngineDependency(error);
+
+  if (tool) {
+    return {
+      error: 'macos_engine_dependency_missing',
+      tool,
+      message: `Для конвейера macOS требуется «${tool}».`,
+    };
+  }
+
+  const code = (error as NodeJS.ErrnoException | null)?.code ?? 'factory_runtime_pin_invalid';
+
+  if (code === 'factory_runtime_pin_migration_pending') {
+    return {
+      error: code,
+      message: 'Закрепление runtime не завершено. Повторите разрешённое решение по попытке.',
+    };
+  }
 
   return {
     error: code.startsWith('factory_runtime_') ? code : 'factory_runtime_pin_invalid',
@@ -570,7 +622,7 @@ export async function runRouteEngine(
       ok: false,
       timedOut: false,
       stdout: '',
-      stderr: `FACTORY_ERROR=${failure.error}`,
+      stderr: `FACTORY_ERROR=${failure.error}${failure.tool ? ` TOOL=${failure.tool}` : ''}`,
       message: failure.message,
       failure,
     };
@@ -578,10 +630,54 @@ export async function runRouteEngine(
 
   config = prepared.config;
 
+  const env = { ...process.env, ...routeLaunchEnv(config) };
+
+  if (prepared.runtimeContext !== undefined) {
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    const result = await runDarwinBuildProcess({
+      file: prepared.command,
+      args: prepared.args,
+      cwd: config.rootDir,
+      env,
+      setsid: config.runtimeHostEnv!.FACTORY_DARWIN_SETSID!,
+      output: 'pipe',
+      timeoutMs: timeout,
+      contextFd3: prepared.runtimeContext,
+      capture: async (child, signal) => {
+        await Promise.all([
+          readDecisionOutput(child.stdout!, stdout, signal),
+          readDecisionOutput(child.stderr!, stderr, signal),
+        ]);
+      },
+    });
+    const text = Buffer.concat(stdout).toString('utf8');
+    const errors = Buffer.concat(stderr).toString('utf8');
+    const code = result.reason ?? result.code ?? 1;
+    const reported = routeFailure(errors || text);
+    const cleanupConfirmed = result.cleanupConfirmed && reported?.error !== 'release_activity_unknown';
+    const timedOut = cleanupConfirmed && (result.reason === 124 || result.code === 124);
+
+    return {
+      code: cleanupConfirmed ? code : 78,
+      ok: code === 0 && cleanupConfirmed,
+      timedOut,
+      stdout: text,
+      stderr: errors,
+      message: timedOut ? `движок не уложился за ${timeout / 1000} с`
+        : !cleanupConfirmed ? 'Не подтверждено завершение процесса решения'
+        : routeMessage(code, errors || text),
+      failure: !cleanupConfirmed ? {
+        error: 'release_activity_unknown',
+        message: 'Не подтверждено завершение процесса решения',
+      } : timedOut ? null : reported,
+    };
+  }
+
   return new Promise<RouteEngineResult>((resolve) => {
     execFile(prepared.command, prepared.args, {
       timeout,
-      env: { ...process.env, ...routeLaunchEnv(config) },
+      env,
       maxBuffer: 1024 * 1024,
     }, (err, stdout, stderr) => {
       const rawCode = (err as { code?: unknown } | null)?.code;
@@ -600,6 +696,26 @@ export async function runRouteEngine(
       });
     });
   });
+}
+
+/**
+ * Preserves complete stdout or stderr only below the same limit as execFile.
+ * An overflow stops the native scope before the caller sees a decision result.
+ */
+async function readDecisionOutput(stream: AsyncIterable<Buffer>, output: Buffer[],
+  signal: AbortSignal): Promise<void> {
+  let bytes = 0;
+
+  for await (const chunk of stream) {
+    signal.throwIfAborted();
+    bytes += chunk.length;
+
+    if (bytes > 1024 * 1024) {
+      throw new Error('factory_decision_output_limit');
+    }
+
+    output.push(chunk);
+  }
 }
 
 /**
@@ -646,6 +762,35 @@ export async function readRouteWorkTime(
  */
 export function routeFailure(output: string | null | undefined): RouteFailure | null {
   const text = String(output || '');
+
+  if (/^FACTORY_ERROR=release_activity_unknown\r?$/mu.test(text)) {
+    return { error: 'release_activity_unknown', message: 'Не подтверждено завершение процесса решения' };
+  }
+
+  if (/^FACTORY_ERROR=unsupported_macos_profile HOOK=agent_control\r?$/mu.test(text)) {
+    return {
+      error: 'unsupported_macos_profile',
+      message: 'Профилю с каналом управления требуется profile_agent_control_darwin_v1 на macOS.',
+    };
+  }
+
+  if (/^FACTORY_ERROR=macos_shared_restore_hook_required\r?$/mu.test(text)) {
+    return {
+      error: 'macos_shared_restore_hook_required',
+      message: 'Общий профиль macOS должен объявить режим восстановления live-checkout или copy-snapshot.',
+    };
+  }
+
+  if (/^FACTORY_ERROR=release_task_cleanup_required\r?$/mu.test(text)) {
+    return {
+      error: 'release_task_cleanup_required',
+      message: 'Очистка остановки не подтверждена. Повтори «Стоп» для этой попытки.',
+    };
+  }
+
+  if (/^FACTORY_ERROR=release_drain_busy\r?$/mu.test(text)) {
+    return { error: 'release_drain_busy', message: 'Конвейер занят другой защищённой операцией.' };
+  }
 
   if (/FACTORY_ERROR=stale_stage\b/u.test(text)) {
     return { error: 'stale_stage', message: 'Остановка уже изменилась; решение не применено.' };
@@ -1041,6 +1186,25 @@ export async function spawnRouteEngine(config: RouteConfig, {
   // launch.log переиспользуется задачей. Typed-ошибку разрешено брать только из
   // текущего запуска, иначе старый preflight замаскирует новый несвязанный отказ.
   const logOffset = await logLength(logFile);
+
+  if (process.platform === 'darwin' && runtimeKind() === 'packaged'
+    && process.env.GRIGDESK_ENGINE_MODE !== 'external') {
+    try {
+      await verifyDarwinOwnershipRoots({ ...config, dataHome: config.dataHome ?? runtimeConfig.dataHome });
+    } catch {
+      const message = 'Не удалось подтвердить каталоги состояния конвейера на macOS.';
+
+      return {
+        ok: false,
+        unit: null,
+        logFile,
+        logOffset,
+        message,
+        failure: { error: 'release_activity_unknown', message },
+      };
+    }
+  }
+
   let secrets: Record<string, string>;
   const service = config.accessProfiles ?? accessService({ stateDir: config.stateDir });
   let accessEnv: NodeJS.ProcessEnv = {};
@@ -1124,6 +1288,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
       logOffset,
       message: failure.message,
       failure,
+      ...(failure.tool ? { failedBeforeSpawn: true as const } : {}),
     };
   }
 
@@ -1160,6 +1325,69 @@ export async function spawnRouteEngine(config: RouteConfig, {
 
   for (const key of accessKeys) {
     delete env[key];
+  }
+
+  if (process.platform === 'darwin') {
+    const attempt = args.indexOf('--attempt');
+    const dispatch = args.indexOf('--queue-dispatch-id');
+    const launch = await spawnDarwinRouteProcess({
+      task: String(task),
+      attempt: attempt < 0 ? null : args[attempt + 1] ?? null,
+      dispatch: dispatch < 0 ? null : args[dispatch + 1] ?? null,
+      controlRoot: config.factoryControlDir,
+      command: prepared.command,
+      args,
+      env: detachedRouteEnv(env, secrets, accessKeys),
+      logFile,
+    }).catch(() => ({ state: 'unknown' } as const));
+
+    if (launch.state === 'before-spawn') {
+      await rollback();
+
+      return {
+        ok: false,
+        unit: null,
+        logFile,
+        logOffset,
+        failedBeforeSpawn: true,
+        message: 'Запуск конвейера на macOS остановлен до выдачи разрешения.',
+      };
+    }
+
+    if (launch.state !== 'launched') {
+      const message = 'Не удалось подтвердить состояние запуска конвейера на macOS.';
+
+      return {
+        ok: false,
+        unit: null,
+        logFile,
+        logOffset,
+        message,
+        failure: { error: 'release_activity_unknown', message },
+      };
+    }
+
+    if (launch.exit) {
+      const output = await readLogSince(logFile, logOffset, { lines: 10, limit: 2000 });
+
+      return {
+        ok: false,
+        unit: null,
+        logFile,
+        logOffset,
+        exited: launch.exit,
+        message: routeMessage(launch.exit, output),
+        failure: routeFailure(output),
+      };
+    }
+
+    return {
+      ok: true,
+      unit: null,
+      logFile,
+      logOffset,
+      exited: launch.exit,
+    };
   }
 
   const haveSystemd = await new Promise<boolean>((res) => {

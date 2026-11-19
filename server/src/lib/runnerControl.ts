@@ -2,8 +2,12 @@ import { config as runtimeConfig } from '../config.ts';
 
 import { execFile } from 'node:child_process';
 import type { ExecFileOptions } from 'node:child_process';
-import { routePathArgs, runRouteEngine } from './factoryRouteCli.ts';
+import { routeLaunchEnv, routePathArgs, runRouteEngine } from './factoryRouteCli.ts';
 import type { RouteConfig } from './factoryRouteCli.ts';
+import { dataPath } from '../../../shared/runtime/dataHome.ts';
+import { runtimeError } from '../binary/leases.ts';
+import { selectedFactoryRuntimeConfig, withDarwinFactoryEnvironment } from './factoryLaunch.ts';
+import { readExistingFactoryRuntimePin } from './factoryRuntimePins.ts';
 import {
   decodeStageRunnerApply, decodeStageRunnerIdentity, decodeStageRunnerOptions, stageRunnerSelectionError,
 } from '../../../shared/pipeline/stageRunnerSettings.ts';
@@ -14,6 +18,8 @@ import type {
 const TASK_RE = /^\d+$/;
 const STAGE_RE = /^[A-Z][A-Z0-9_]*$/;
 const PROVIDER_RE = /^[a-z][a-z0-9_-]*$/;
+
+type RunnerAttempt = Pick<StageRunnerIdentity, 'attempt' | 'profile'>;
 
 export class RunnerControlInputError extends Error {}
 export class RunnerControlCommandError extends Error {}
@@ -191,10 +197,49 @@ export class FactoryRunnerControl {
     }
   }
 
-  async exec(args: string[]): Promise<RunnerControlResult> {
+  /**
+   * Короткие команды на Darwin запускаются с pinned Bash и инструментами
+   * той же попытки. Публичные аргументы CLI сохраняют прежнюю форму.
+   */
+  async exec(args: string[], identity?: RunnerAttempt): Promise<RunnerControlResult> {
+    let command = this.factoryBin;
+    let argv = args;
+    let hostEnv: NodeJS.ProcessEnv = {};
+
+    if (process.platform === 'darwin' && this.routeConfig) {
+      const config = this.routeConfig;
+
+      if (!identity) {
+        throw runtimeError('factory_runtime_attempt_invalid');
+      }
+
+      const cacheDir = config.runtime?.cacheDir
+        ?? dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime');
+      const selected = await readExistingFactoryRuntimePin({
+        controlRoot: config.factoryControlDir,
+        profileRoot: config.profilesDir,
+        stateRoot: config.stateDir,
+        cacheDir,
+        task: args[0] ?? '',
+        attempt: identity.attempt,
+        profile: identity.profile,
+      });
+
+      if (!selected) {
+        throw runtimeError('factory_runtime_pin_missing');
+      }
+
+      const prepared = await withDarwinFactoryEnvironment(selectedFactoryRuntimeConfig(config, selected),
+        selected.packageId !== null);
+
+      hostEnv = routeLaunchEnv(prepared);
+      command = prepared.runtimeHostEnv!.FACTORY_DARWIN_BASH!;
+      argv = [selected.engineBin, ...args];
+    }
+
     const { stdout } = await this.run(
-      this.factoryBin,
-      args,
+      command,
+      argv,
       {
         shell: false,
         timeout: 15_000,
@@ -209,48 +254,55 @@ export class FactoryRunnerControl {
           STATE_DIR: this.stateDir,
           FACTORY_CONFIG_ROOT: this.configRoot,
           ...(this.profilesDir ? { FACTORY_PROFILES_DIR: this.profilesDir } : {}),
+          ...hostEnv,
         },
       },
     );
     return { ok: true, output: stdout.trim() };
   }
 
-  async switch({ task, stage, target }: {
+  async switch({ task, stage, target, identity }: {
     task: unknown;
     stage: unknown;
     target: unknown;
+    identity?: RunnerAttempt;
   }): Promise<RunnerControlResult> {
     if (!TASK_RE.test(String(task || ''))
         || !STAGE_RE.test(String(stage || ''))
         || !PROVIDER_RE.test(String(target || ''))) {
       throw new RunnerControlInputError('Некорректные параметры переключения исполнителя.');
     }
-    return this.exec([String(task), 'runner', 'switch', String(stage), String(target)]);
+
+    return this.exec([String(task), 'runner', 'switch', String(stage), String(target)], identity);
   }
 
   /** Stage-level override: primary этапа пишется в реестр задачи через CLI движка. */
-  async setStage({ task, stage, primary }: {
+  async setStage({ task, stage, primary, identity }: {
     task: unknown;
     stage: unknown;
     primary: unknown;
+    identity?: RunnerAttempt;
   }): Promise<RunnerControlResult> {
     if (!TASK_RE.test(String(task || ''))
         || !STAGE_RE.test(String(stage || ''))
         || !PROVIDER_RE.test(String(primary || ''))) {
       throw new RunnerControlInputError('Некорректные параметры назначения исполнителя этапа.');
     }
-    return this.exec([String(task), 'runner', 'set', String(stage), String(primary)]);
+
+    return this.exec([String(task), 'runner', 'set', String(stage), String(primary)], identity);
   }
 
   /** Снять stage-level override. Идемпотентно: движок просто убирает ключ реестра. */
-  async clearStage({ task, stage }: {
+  async clearStage({ task, stage, identity }: {
     task: unknown;
     stage: unknown;
+    identity?: RunnerAttempt;
   }): Promise<RunnerControlResult> {
     if (!TASK_RE.test(String(task || ''))
         || !STAGE_RE.test(String(stage || ''))) {
       throw new RunnerControlInputError('Некорректные параметры снятия исполнителя этапа.');
     }
-    return this.exec([String(task), 'runner', 'clear', String(stage)]);
+
+    return this.exec([String(task), 'runner', 'clear', String(stage)], identity);
   }
 }

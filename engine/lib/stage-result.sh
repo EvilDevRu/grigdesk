@@ -68,11 +68,12 @@ if [[ "$result" != failed && -n "${FACTORY_STAGE_RESULT_CHECK:-}" ]]; then
 fi
 
 status_fd=${FACTORY_STATUS_FD:-7}
-if [[ "$status_fd" =~ ^[0-9]+$ && -r "/proc/self/fd/$status_fd" ]]; then
-  token=$(head -1 "/proc/self/fd/$status_fd") || exit 74
+if token=$(read_status_token "$status_fd"); then
   run_state_apply_result \
     "$task" "$stage" "$run_id" "$epoch" "$token" "$result" "$comment" "$verdict_b64"
 else
+  status_rc=$?
+  (( status_rc == 1 )) || exit 74
   status_request_result \
     "$task" "$stage" "$run_id" "$epoch" "$result" "$comment" "$verdict_b64"
 fi

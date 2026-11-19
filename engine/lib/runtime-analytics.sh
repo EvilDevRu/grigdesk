@@ -73,9 +73,14 @@ runtime_lifecycle_set_context_v2() {
        "$route_hash" =~ ^[a-f0-9]{64}$ ]] || return 2
   fi
   if [[ -z "$session_id" ]]; then
-    local process_start
-    process_start=$(awk '{ tail=$0; sub(/^.*\) /,"",tail); split(tail,f," "); print f[20] }' \
-      "/proc/$BASHPID/stat" 2>/dev/null) || return 78
+    local process_start owner_pid=$BASHPID process_record
+    if [[ "$OSTYPE" == darwin* ]]; then
+      process_record=$(runtime_analytics_python_v2 process "$owner_pid") || return 78
+      process_start=$(jq -er .startTimeTicks <<<"$process_record") || return 78
+    else
+      process_start=$(awk '{ tail=$0; sub(/^.*\) /,"",tail); split(tail,f," "); print f[20] }' \
+        "/proc/$BASHPID/stat" 2>/dev/null) || return 78
+    fi
     session_id=$(runtime_analytics_id_v2 os "$attempt" "$$" "$BASHPID" "$process_start") || return
   fi
   [[ "$session_id" =~ ^os_[a-f0-9]{32}$ ]] || return 2

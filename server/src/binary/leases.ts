@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { acquireDirectoryLock, type DirectoryLockOptions } from '../../../shared/node/directoryLock.ts';
+import { darwinProcessOwnerState, readDarwinProcessIdentity } from '../../../shared/node/processIdentity.ts';
 import type { ExtractionOptions } from './cache.ts';
 
 export interface RuntimeOwner {
@@ -201,11 +202,12 @@ export async function withPackageLock<T>(cacheDir: string, packageId: string,
  * Общий lock сериализует registry, usage и GC без удержания attempt lock движка.
  * Внутри допускается package lock; обратный порядок создавал бы дедлок с bind.
  */
-export async function withRuntimeGcLock<T>(cacheDir: string, action: () => Promise<T>): Promise<T> {
+export async function withRuntimeGcLock<T>(cacheDir: string, action: () => Promise<T>,
+  options?: DirectoryLockOptions): Promise<T> {
   await privateRuntimeDirectory(cacheDir);
   await privateRuntimeDirectory(path.join(cacheDir, '.locks'));
 
-  const lock = await acquireDirectoryLock(path.join(cacheDir, '.locks', 'gc'));
+  const lock = await acquireDirectoryLock(path.join(cacheDir, '.locks', 'gc'), options);
 
   try {
     return await action();
@@ -235,6 +237,10 @@ export async function runtimeOwnerState(owner: RuntimeOwner,
     return 'unknown';
   }
 
+  if (process.platform === 'darwin' && probe === actualProbe) {
+    return darwinProcessOwnerState(owner);
+  }
+
   try {
     const fields = statFields(await probe.readStat(owner.pid), owner.pid);
     const starttime = fields[19];
@@ -256,6 +262,16 @@ export async function runtimeOwnerState(owner: RuntimeOwner,
 export async function readProcessOwner(pid: number): Promise<RuntimeOwner> {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw runtimeError('server_lease_owner_unknown');
+  }
+
+  if (process.platform === 'darwin') {
+    const result = await readDarwinProcessIdentity(pid);
+
+    if (result.state !== 'alive') {
+      throw runtimeError('server_lease_owner_unknown');
+    }
+
+    return { pid, starttime: result.identity.starttime };
   }
 
   const fields = statFields(await actualProbe.readStat(pid), pid);

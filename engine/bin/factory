@@ -168,6 +168,15 @@ canonical_created_dir() {
   canonical_existing_dir "$value" "$label"
 }
 
+# На Darwin видимое имя control после сбоя требует повторного sync всей цепочки.
+canonical_control_dir() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    python3 "$FACTORY_HOME/lib/darwin-owned-directory.py" "$1"
+  else
+    canonical_created_dir "$1" control-dir
+  fi
+}
+
 canonical_file() {
   local value=${1:-} label=${2:-file} canonical
   [[ -n "$value" && "$value" == /* && "$value" != *$'\n'* &&
@@ -284,6 +293,10 @@ BE_BASE_REF=""
 FE_BASE_REF=""
 TASK_COMMENT=0
 HOLD_START=0
+CONFIRM_MANUAL_RESTORE=0
+EXPECTED_CLEANUP=""
+V2_LOCK_FD=""
+FACTORY_RUNTIME_CONTEXT_REQUIRED=0
 declare -a INSTRUMENTATION_SPECS=()
 declare -a DELIVERY_TARGETS=()
 
@@ -357,7 +370,7 @@ fi
 
 while (( $# > 0 )); do
   case "$1" in
-    check|start|resume|gate|abandon|recover|goto|work-time|findings-export|bootstrap-answer)
+    check|start|resume|gate|abandon|recover|goto|stop-cleanup|work-time|findings-export|bootstrap-answer)
       [[ -z "$MODE" ]] || die "режим указан повторно"
       MODE=$1
       shift
@@ -396,6 +409,22 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || die "после --attempt нужен id"
       [[ -z "$EXPECTED_ATTEMPT" ]] || die "--attempt указан повторно"
       EXPECTED_ATTEMPT=$2
+      shift 2
+      ;;
+    --require-host-runtime-context)
+      [[ "$OSTYPE" == darwin* && "$FACTORY_RUNTIME_CONTEXT_REQUIRED" == 0 ]] ||
+        die "недопустимый host runtime context"
+      FACTORY_RUNTIME_CONTEXT_REQUIRED=1
+      shift
+      ;;
+    --confirm-manual-restore)
+      CONFIRM_MANUAL_RESTORE=1
+      shift
+      ;;
+    --expected-cleanup)
+      (( $# >= 2 )) || die "после --expected-cleanup нужен SHA-256"
+      [[ -z "$EXPECTED_CLEANUP" && "$2" =~ ^[a-f0-9]{64}$ ]] || die "неверный --expected-cleanup"
+      EXPECTED_CLEANUP=$2
       shift 2
       ;;
     --expected-stage)
@@ -524,7 +553,7 @@ done
 
 [[ "$MODE" == check || "$MODE" == start || "$MODE" == resume ||
    "$MODE" == gate || "$MODE" == abandon || "$MODE" == recover ||
-   "$MODE" == goto || "$MODE" == work-time || "$MODE" == findings-export ||
+   "$MODE" == goto || "$MODE" == stop-cleanup || "$MODE" == work-time || "$MODE" == findings-export ||
    "$MODE" == bootstrap-answer ]] ||
   die "укажи check, start, resume, gate, abandon, recover, goto или work-time/findings-export"
 # Exact stage CAS адресует gate и goto; старые CLI без флага сохраняют прежний контракт.
@@ -543,6 +572,8 @@ fi
 # созданную попытку, у которой решение о старте принял человек.
 [[ "$MODE" == start || "$HOLD_START" == 0 ]] ||
   die "--hold-start допустим только при start"
+[[ "$MODE" == stop-cleanup || ( "$CONFIRM_MANUAL_RESTORE" == 0 && -z "$EXPECTED_CLEANUP" ) ]] ||
+  die "параметры завершения очистки допустимы только при stop-cleanup"
 [[ "$MODE" == check || "$MODE" == start || -z "$EXPECTED_CATALOG_HASH" ]] ||
   die "--expected-catalog-hash допустим только при check или start"
 [[ "$MODE" == start || -z "$QUEUE_DISPATCH_ID" ]] ||
@@ -572,12 +603,26 @@ if [[ "$MODE" == bootstrap-answer ]]; then
      ${#INSTRUMENTATION_SPECS[@]} -eq 0 && ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 ]] ||
     die "bootstrap-answer не принимает параметры запуска или смены маршрута"
   BOOTSTRAP_ANSWER_FILE=$(canonical_file "$BOOTSTRAP_ANSWER_FILE" answer-file) || exit 78
-  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
-  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  if [[ "$OSTYPE" == darwin* ]]; then
+    V2_STATE=$(canonical_existing_dir "$V2_STATE" state-dir) || exit 78
+    CONTROL_ROOT=$(canonical_existing_dir "$CONTROL_ROOT" control-dir) || exit 78
+  else
+    V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+    CONTROL_ROOT=$(canonical_control_dir "$CONTROL_ROOT") || exit 78
+  fi
   paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
   export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
   unset BASH_ENV ENV
   source "$FACTORY_HOME/lib/bootstrap-state.sh"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    source "$FACTORY_HOME/lib/darwin-decision-admission.sh"
+    factory_darwin_admit_existing bootstrap-answer "$CONTROL_ROOT" "$V2_STATE" "$TASK" \
+      "$EXPECTED_ATTEMPT" "$PROFILE" '' '' "$BOOTSTRAP_VISIT" "$BOOTSTRAP_STOP_HASH" \
+      "$BOOTSTRAP_ANSWER_FILE" "$ROUTES_DIR" || exit $?
+    attempt_bootstrap_journal_v2 answer "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" \
+      "$BOOTSTRAP_VISIT" "$BOOTSTRAP_STOP_HASH" "$BOOTSTRAP_ANSWER_FILE"
+    exit $?
+  fi
   attempt_bootstrap_answer_v2 "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" \
     "$BOOTSTRAP_VISIT" "$BOOTSTRAP_STOP_HASH" "$BOOTSTRAP_ANSWER_FILE"
   exit $?
@@ -597,7 +642,7 @@ if [[ "$MODE" == findings-export ]]; then
   [[ "${EXPORT_FORMAT:-json}" == json || "$EXPORT_FORMAT" == markdown ]] ||
     die "findings-export: format должен быть json или markdown"
   V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
-  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  CONTROL_ROOT=$(canonical_control_dir "$CONTROL_ROOT") || exit 78
   paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
   export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
   unset BASH_ENV ENV
@@ -627,7 +672,7 @@ CURRENT_CATALOG=""
 CURRENT_ROUTE_JSON=""
 CURRENT_ROUTE_DELIVERY=""
 CURRENT_ROUTE_INSTRUMENTATION=""
-if [[ "$MODE" == check || "$MODE" == start ]]; then
+if [[ "$MODE" == start || ( "$MODE" == check && -z "$TASK$EXPECTED_ATTEMPT" ) ]]; then
   CURRENT_JSON=$(
     "$FACTORY_HOME/bin/factory-route" \
       --routes-dir "$ROUTES_DIR" --profile "$PROFILE" current
@@ -658,8 +703,32 @@ if [[ "$MODE" == check || "$MODE" == start ]]; then
 fi
 
 if [[ "$MODE" == check ]]; then
-  [[ -z "$TASK" && -z "$EXPECTED_ATTEMPT" && -z "$TICKET_JSON" ]] ||
-    die "check не принимает task, attempt или ticket"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    [[ -z "$TICKET_JSON" ]] || die "check не принимает ticket"
+    if [[ -n "$TASK$EXPECTED_ATTEMPT" ]]; then
+      [[ "$TASK" =~ ^[1-9][0-9]{0,18}$ && "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ && -z "$ROUTE" ]] ||
+        die "проверка попытки требует exact task и attempt"
+      CONTROL_ROOT=$(canonical_existing_dir "$CONTROL_ROOT" control-dir) || exit 78
+      export FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+      source "$FACTORY_HOME/lib/darwin-decision-admission.sh"
+      factory_darwin_admit_existing check "$CONTROL_ROOT" "$V2_STATE" "$TASK" "$EXPECTED_ATTEMPT" \
+        "$PROFILE" "$PF_FILE" || exit $?
+    fi
+    /usr/bin/env -i PATH="$PATH" HOME="$FACTORY_USER_HOME" LC_ALL=C PROFILE_NAME="$PROFILE" \
+      FACTORY_HOME="$FACTORY_HOME" FACTORY_PROFILES_DIR="$FACTORY_PROFILES_DIR" "$BASH" -c '
+        source "$1" >&2 || exit 78
+        source "$FACTORY_HOME/lib/darwin-profile-abi.sh"
+        source "$FACTORY_HOME/lib/shared-restore.sh"
+        factory_darwin_profile_abi || exit $?
+        mode=$(profile_workspace_mode) || exit 78
+        if [[ "$mode" == shared ]]; then
+          factory_shared_restore_mode >/dev/null || exit $?
+        fi
+      ' factory-check-profile "$PF_FILE" || exit $?
+  else
+    [[ -z "$TASK" && -z "$EXPECTED_ATTEMPT" && -z "$TICKET_JSON" ]] ||
+      die "check не принимает task, attempt или ticket"
+  fi
   printf 'OK profile=%s catalog=%s' "$PROFILE" "$CURRENT_CATALOG"
   if [[ -n "$ROUTE" ]]; then
     printf ' route=%s delivery=%s instrumentation=%s' \
@@ -741,6 +810,8 @@ if [[ "$MODE" == recover ]]; then
   [[ -n "$ROUTE" ]] || die "recover требует --route для новой попытки"
 elif [[ "$MODE" == abandon ]]; then
   [[ -z "$ROUTE" ]] || die "--route не используется в abandon"
+elif [[ "$MODE" == stop-cleanup ]]; then
+  [[ "$OSTYPE" == darwin* && -z "$ROUTE" ]] || die "stop-cleanup требует Darwin и exact attempt"
 fi
 if [[ "$MODE" == gate ]]; then
   [[ "$GATE_NODE" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] ||
@@ -752,8 +823,22 @@ elif [[ -n "$GATE_DECISION" || -n "$GATE_COMMENT" || "$GATE_COMMIT_ONLY" == 1 ]]
   die "gate arguments допустимы только в режиме gate"
 fi
 
-V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
-CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+if [[ "$OSTYPE" == darwin* && "$MODE" =~ ^(resume|gate|goto|abandon|stop-cleanup)$ ]]; then
+  V2_STATE=$(canonical_existing_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_existing_dir "$CONTROL_ROOT" control-dir) || exit 78
+  paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || exit 78
+  source "$FACTORY_HOME/lib/darwin-decision-admission.sh"
+  factory_darwin_admit_existing "$MODE" "$CONTROL_ROOT" "$V2_STATE" "$TASK" "$EXPECTED_ATTEMPT" \
+    "$PROFILE" "$PF_FILE" "$EXPECTED_STAGE" "$GATE_NODE" || exit $?
+  if [[ -n "$EXPECTED_CLEANUP" ]]; then
+    actual_cleanup=$(python3 "$FACTORY_HOME/lib/darwin-transaction-begin.py" cleanup-identity \
+      "$CONTROL_ROOT" "$TASK" "$EXPECTED_ATTEMPT") || exit 75
+    [[ "$actual_cleanup" == "$EXPECTED_CLEANUP" ]] || exit 75
+  fi
+else
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_control_dir "$CONTROL_ROOT") || exit 78
+fi
 paths_disjoint "$V2_STATE" "$CONTROL_ROOT" ||
   die "provider-writable state и trusted control должны быть непересекающимися"
 
@@ -774,6 +859,8 @@ source "$FACTORY_HOME/lib/attempt-state.sh"
 source "$FACTORY_HOME/lib/route-runtime.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/profile-preflight.sh"
+source "$FACTORY_HOME/lib/darwin-profile-abi.sh"
+source "$FACTORY_HOME/lib/shared-restore.sh"
 source "$FACTORY_HOME/lib/bootstrap-sandbox.sh"
 source "$FACTORY_HOME/lib/findings-export.sh"
 
@@ -1067,11 +1154,25 @@ v2_log() {
 }
 
 v2_lock() {
-  local lock_dir
+  local lock_dir saved_mask open_rc=0
+  if [[ "$OSTYPE" == darwin* && -n "$V2_LOCK_FD" ]]; then
+    return 0
+  fi
   lock_dir="$(factory_control_root)/protocol-v2/orchestrators"
   mkdir -p -- "$lock_dir" || return 1
   [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 78
-  exec {V2_LOCK_FD}>"$lock_dir/t${TASK}.lock" || return 1
+  if [[ "$OSTYPE" == darwin* ]]; then
+    [[ ! -L "$lock_dir/t${TASK}.lock" ]] || return 78
+    saved_mask=$(umask) || return 78
+    umask 077
+    exec {V2_LOCK_FD}>>"$lock_dir/t${TASK}.lock" || open_rc=$?
+    umask "$saved_mask"
+    (( open_rc == 0 )) || return 78
+    [[ $("$FACTORY_DARWIN_PROCESS_HELPER" runner-fd-stat 3 3<&"$V2_LOCK_FD") == "$(id -u):600:1" ]] ||
+      return 78
+  else
+    exec {V2_LOCK_FD}>"$lock_dir/t${TASK}.lock" || return 1
+  fi
   flock -n "$V2_LOCK_FD" || return 73
 }
 
@@ -1982,14 +2083,42 @@ instrumentation_tx_shared_lease_invariant() {
 }
 
 route_v2_instrumentation_restored() {
-  local task=$1 scope_file=$2
+  local task=$1 scope_file=$2 txid=${3:-} mode dir record manifest_sha effect_sha reply
   [[ "$task" == "$TASK" && -f "$scope_file" && ! -L "$scope_file" ]] || return 78
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     v2_shared_lease_require "$V2_ATTEMPT" || return 75
-    declare -F profile_instrumentation_restored >/dev/null ||
-      return 78
-    profile_instrumentation_restored "$TASK" "$scope_file"
+    mode=$(factory_shared_restore_mode) || return
+    if [[ "$mode" == legacy || "$mode" == live-checkout ]]; then
+      profile_instrumentation_restored "$TASK" "$scope_file"
+      return
+    fi
+    dir=$(instrumentation_tx_dir "$TASK" "$txid") || return
+    record=$(python3 "$FACTORY_HOME/lib/darwin-stand-snapshot.py" snapshot "$dir" "$TASK") || return
+    IFS=$'\t' read -r manifest_sha effect_sha <<<"$record" || return 78
+    reply=$(profile_instrumentation_restored_from_snapshot "$TASK" \
+      "$dir/stand-snapshot/manifest.json" "$manifest_sha") || return
+    jq -e -s --arg expected "$effect_sha" \
+      'length == 1 and .[0] == {version:1, appliedSHA256:$expected}' <<<"$reply" >/dev/null || return 78
+    [[ "$(python3 "$FACTORY_HOME/lib/darwin-stand-snapshot.py" snapshot "$dir" "$TASK")" == "$record" ]] || return 78
   fi
+}
+
+# Stop после исчезновения оркестратора работает под его обычным lock.
+# Команда не поднимает стенд, не запускает модель и не передвигает курсор.
+v2_stop_cleanup() {
+  local cleanup_rc
+  local FACTORY_DARWIN_EXPLICIT_STOP=$CONFIRM_MANUAL_RESTORE
+  v2_lock || return 78
+  _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+  V2_ATTEMPT=$EXPECTED_ATTEMPT
+  runner_darwin_intent_absent "$TASK" || return 78
+  runner_trusted_identity_read "$TASK" >/dev/null
+  [[ $? == 3 ]] || return 78
+  [[ "$V2_WORKSPACE_MODE" != shared ]] || v2_shared_lease_require "$V2_ATTEMPT" || return
+  route_v2_cleanup_active_instrumentation "$TASK" "$EXPECTED_ATTEMPT"
+  cleanup_rc=$?
+  (( cleanup_rc == 0 || cleanup_rc == 3 )) || return "$cleanup_rc"
+  set_st "$TASK" STOPPED_SIGNAL 1 ORCH_PID ""
 }
 
 route_v2_sensitive_files() {
@@ -2824,6 +2953,12 @@ v2_on_signal() {
   runtime_interrupt_trusted_active "$TASK" "" "" "" \
     "${FACTORY_TERM_GRACE_SECONDS:-5}"
   stop_rc=$?
+  if [[ "$OSTYPE" == darwin* ]] && (( stop_rc == 3 )) && runner_darwin_intent_absent "$TASK"; then
+    stop_rc=0
+  fi
+  if (( stop_rc == 0 )); then
+    _factory_agent_control_finish "$rc" "$TASK" || stop_rc=$?
+  fi
   if (( stop_rc == 0 )) && [[ -n "$V2_ATTEMPT" ]]; then
     route_v2_cleanup_active_instrumentation "$TASK" "$V2_ATTEMPT"
     cleanup_rc=$?
@@ -2985,6 +3120,12 @@ v2_main() {
   local bootstrap_journal bootstrap_decision_hash=""
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  if [[ "$MODE" != gate || "$GATE_COMMIT_ONLY" != 1 ]]; then
+    factory_darwin_profile_abi || return
+  fi
+  if [[ "$OSTYPE" == darwin* && "$V2_WORKSPACE_MODE" == shared ]]; then
+    factory_shared_restore_mode >/dev/null || return
+  fi
   trap 'v2_on_signal TERM' TERM
   trap 'v2_on_signal INT' INT
   trap v2_on_exit EXIT
@@ -3342,6 +3483,12 @@ v2_main() {
   _route_v2_load_attempt "$TASK" "$attempt" || return
   route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
     rc=$?
+    if [[ "${ROUTE_V2_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+      V2_LIFECYCLE_EXIT_STATUS=interrupted
+      V2_LIFECYCLE_EXIT_REASON=cleanup_failed
+      v2_log 'FACTORY_ERROR=release_task_cleanup_required'
+      return "$rc"
+    fi
     if (( rc == 22 )); then
       v2_bootstrap_pause "$attempt"
       return $?
@@ -3421,6 +3568,12 @@ v2_main() {
   v2_prepare_dispatch "$attempt"
   route_v2_dispatch_until_pause "$TASK" "$attempt" "$V2_DISPATCH_STEP_LIMIT"
   rc=$?
+  if [[ "${ROUTE_V2_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+    V2_LIFECYCLE_EXIT_STATUS=interrupted
+    V2_LIFECYCLE_EXIT_REASON=cleanup_failed
+    v2_log 'FACTORY_ERROR=release_task_cleanup_required'
+    return "$rc"
+  fi
   case "$rc" in
     20)
       cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
@@ -3547,6 +3700,9 @@ v2_admin_main() {
   local rc out recovery_runner recovery_failover terminal_file stage_hash transition
   mkdir -p "$STATE_DIR/logs"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  if [[ "$MODE" == goto ]]; then
+    factory_darwin_profile_abi || return
+  fi
   trap v2_on_exit EXIT
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     case "$MODE" in
@@ -3778,7 +3934,9 @@ v2_admin_main() {
   printf '%s\n' "$out"
 }
 
-if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
+if [[ "$MODE" == stop-cleanup ]]; then
+  v2_stop_cleanup
+elif [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   v2_admin_main
 else
   v2_main

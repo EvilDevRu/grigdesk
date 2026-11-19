@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { readDarwinProcessCensus, readDarwinProcessIdentity } from '../../../../shared/node/processIdentity.ts';
 import {
   acquireDirectoryLock, processOwnerState, type DirectoryLockOwner,
 } from '../../../../shared/node/directoryLock.ts';
@@ -55,6 +56,16 @@ const fieldsOf = (stat: string): string[] => stat.slice(stat.lastIndexOf(')') + 
  * Ошибка чтения владельца запрещает допуск, а не превращается в пустую блокировку.
  */
 async function identity(pid: number, token: string): Promise<DirectoryLockOwner> {
+  if (process.platform === 'darwin') {
+    const owner = await readDarwinProcessIdentity(pid);
+
+    if (owner.state !== 'alive') {
+      throw new Error('Не удалось установить владельца CLI lease');
+    }
+
+    return { pid, starttime: owner.identity.starttime, token };
+  }
+
   const fields = fieldsOf(await fs.readFile(`/proc/${pid}/stat`, 'utf8'));
   const starttime = fields[19];
 
@@ -76,6 +87,24 @@ async function identity(pid: number, token: string): Promise<DirectoryLockOwner>
 async function sessionAlive(record: LeaseRecord): Promise<boolean> {
   if (record.sessionId === null) {
     return false;
+  }
+
+  if (process.platform === 'darwin') {
+    const signal = AbortSignal.timeout(4500);
+
+    try {
+      for (let check = 0; check < 2; check += 1) {
+        const rows = await readDarwinProcessCensus(signal);
+
+        if (rows.some((row) => row.pid !== record.owner.pid && row.sid === record.sessionId)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch {
+      return true;
+    }
   }
 
   const entries = await fs.readdir('/proc');
@@ -369,6 +398,14 @@ function leasePaths(input: { directory: string; providerId: string }): {
  * из-за возраста, даже если цифра окажется заниженной.
  */
 async function ownerAgeSeconds(owner: DirectoryLockOwner): Promise<number> {
+  if (process.platform === 'darwin') {
+    const state = await readDarwinProcessIdentity(owner.pid);
+    const seconds = Date.now() / 1000 - Number(owner.starttime) / 1_000_000;
+
+    return state.state === 'alive' && state.identity.starttime === owner.starttime
+      && Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  }
+
   try {
     const uptime = Number((await fs.readFile('/proc/uptime', 'utf8')).split(/\s+/u)[0]);
     const seconds = uptime - Number(owner.starttime) / 100;

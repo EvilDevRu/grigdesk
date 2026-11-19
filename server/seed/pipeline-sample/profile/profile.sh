@@ -78,6 +78,10 @@ profile_instrumentation_restored() {
   profile_stand_alive "$1"
 }
 
+profile_instrumentation_restore_mode() {
+  printf '%s\n' live-checkout
+}
+
 profile_route_command() {
   python3 -B "$_SAMPLE_PROFILE_DIR/verify.py" "$@"
 }

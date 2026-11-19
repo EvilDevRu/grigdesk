@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import type { ArbiterCapabilities, StopIdentity } from '../../../shared/pipeline/arbiterConversation.ts';
 import { config as runtimeConfig } from '../config.ts';
-import { selectedFactoryRuntimeConfig } from './factoryLaunch.ts';
+import { selectedFactoryRuntimeConfig, withDarwinFactoryEnvironment } from './factoryLaunch.ts';
 import { readExistingFactoryRuntimePin } from './factoryRuntimePins.ts';
 import type { FactoryRuntimeSelection } from './factoryRuntimePins.ts';
 import { routeLaunchEnv } from './factoryRouteCli.ts';
@@ -94,7 +94,8 @@ async function probeFactoryCapability(
   }
 
   try {
-    const prepared = selectedFactoryRuntimeConfig(config, selected);
+    const prepared = await withDarwinFactoryEnvironment(selectedFactoryRuntimeConfig(config, selected),
+      selected.packageId !== null);
     const response = await (deps.exec || execute)(selected.engineBin, ['capabilities', '--format', 'json'], {
       env: { ...process.env, ...routeLaunchEnv(prepared) },
       timeout: 5000,

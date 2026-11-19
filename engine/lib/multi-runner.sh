@@ -351,7 +351,7 @@ _multi_postamble_reclassify_v2() {
 _multi_invoke() {
   local provider=$1 family=$2 model=$3
   local run_id epoch token run_dir rc result request_id target fanout_count active_reason
-  local denial_count
+  local denial_count darwin_tx=${ROUTE_V2_DARWIN_TX:-} saved_term='' saved_int=''
   if ! runner_call "$provider" probe >/dev/null 2>&1; then
     DISPATCH_INVOKE_RESULT=unavailable_preflight
     DISPATCH_INVOKE_STARTED=0
@@ -375,22 +375,35 @@ _multi_invoke() {
   run_id=$(_multi_new_id)
   token=$(_multi_new_token)
   run_dir="$STATE_DIR/logs/runs/t${MULTI_TASK}/${MULTI_STAGE}/${run_id}"
-  MULTI_LAST_RUN_ID=$run_id
-  MULTI_LAST_RUN_EPOCH=$epoch
-  MULTI_LAST_RUNNER=$provider
+  if [[ -z "$darwin_tx" ]]; then
+    MULTI_LAST_RUN_ID=$run_id
+    MULTI_LAST_RUN_EPOCH=$epoch
+    MULTI_LAST_RUNNER=$provider
+  else
+    saved_term=$(trap -p TERM)
+    saved_int=$(trap -p INT)
+    RUNNER_LAUNCH_DEFERRED_SIGNAL=""
+    trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-TERM}' TERM
+    trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-INT}' INT
+  fi
   # Настройки могут измениться после resolver. До создания capability перечитываем
   # целый снимок; повтор пересобирает цепочку и не расходует автоматический retry.
   local settings_before=${MULTI_SETTINGS:-null} admission_lock admission_rc admission_task_lock=""
-  pipeline_lock_acquire "$MULTI_TASK" admission_lock || return 1
-  if [[ -n "${MULTI_SETTINGS_IDENTITY:-}" ]]; then
+  pipeline_lock_acquire "$MULTI_TASK" admission_lock || {
+    [[ -z "$darwin_tx" ]] || _runner_launch_restore_signal_traps "$saved_term" "$saved_int"
+    return 1
+  }
+  if [[ -n "${MULTI_SETTINGS_IDENTITY:-}$darwin_tx" ]]; then
     _attempt_state_lock "$MULTI_TASK" admission_task_lock || {
       pipeline_lock_release "$admission_lock"
+      [[ -z "$darwin_tx" ]] || _runner_launch_restore_signal_traps "$saved_term" "$saved_int"
       return 1
     }
   fi
   _stage_settings_load "$MULTI_TASK" "$MULTI_STAGE" || {
     [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
     pipeline_lock_release "$admission_lock"
+    [[ -z "$darwin_tx" ]] || _runner_launch_restore_signal_traps "$saved_term" "$saved_int"
     DISPATCH_INVOKE_RESULT=invalid_config
     DISPATCH_INVOKE_STARTED=0
     return 0
@@ -398,20 +411,38 @@ _multi_invoke() {
   if [[ "$settings_before" != "$MULTI_SETTINGS" ]]; then
     [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
     pipeline_lock_release "$admission_lock"
+    [[ -z "$darwin_tx" ]] || _runner_launch_restore_signal_traps "$saved_term" "$saved_int"
     MULTI_SETTINGS_RETRY=1
     DISPATCH_INVOKE_RESULT=invalid_config
     DISPATCH_INVOKE_STARTED=0
     return 0
   fi
-  run_state_begin_unlocked "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token"
-  admission_rc=$?
+  admission_rc=0
+  if [[ -n "$darwin_tx" ]] &&
+     { ! instrumentation_tx_checkpoint "$MULTI_TASK" "$darwin_tx" admission ||
+       [[ -n "$RUNNER_LAUNCH_DEFERRED_SIGNAL" ]]; }; then
+    FACTORY_HOST_RUN_RESULT=release_task_cleanup_required
+    admission_rc=78
+  else
+    run_state_begin_unlocked "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token" || admission_rc=$?
+  fi
   [[ -z "$admission_task_lock" ]] || _attempt_state_unlock "$admission_task_lock"
   pipeline_lock_release "$admission_lock"
+  if [[ -n "$darwin_tx" ]]; then
+    if [[ -n "$RUNNER_LAUNCH_DEFERRED_SIGNAL" ]]; then
+      FACTORY_HOST_RUN_RESULT=release_task_cleanup_required
+      admission_rc=78
+    fi
+    _runner_launch_restore_signal_traps "$saved_term" "$saved_int"
+  fi
   if (( admission_rc != 0 )); then
     DISPATCH_INVOKE_RESULT=unknown
     DISPATCH_INVOKE_STARTED=0
     return 0
   fi
+  MULTI_LAST_RUN_ID=$run_id
+  MULTI_LAST_RUN_EPOCH=$epoch
+  MULTI_LAST_RUNNER=$provider
   # Bash передаёт local-переменные вызывающей функции динамически: dispatcher
   # держит здесь доказанную причину перехода (limit/preflight/manual). Публикуем
   # её до запуска provider, иначе весь долгий run GrigDesk показывает устаревшую
@@ -730,6 +761,10 @@ _multi_runner_run() {
     dispatcher_run_chain "$task" "$stage" "$primary" "$failover" "$(date +%s)" \
       _multi_resolve _multi_invoke "$human_choice"
     rc=$?
+    if [[ "${FACTORY_HOST_RUN_RESULT:-}" == release_task_cleanup_required ]]; then
+      _multi_catalog_cleanup
+      return 78
+    fi
     if [[ "$MULTI_SETTINGS_RETRY" == 1 ]]; then
       admission_retries=$((admission_retries + 1))
       if (( admission_retries >= 3 )); then

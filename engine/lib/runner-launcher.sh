@@ -8,10 +8,18 @@ source "$FACTORY_HOME/lib/status-request.sh"
 source "$FACTORY_HOME/lib/runtime-analytics.sh"
 source "$FACTORY_HOME/lib/provider-lineage-state.sh"
 source "$FACTORY_HOME/lib/browser-transport.sh"
+source "$FACTORY_HOME/lib/runner-fds.sh"
 
 _runner_process_full_identity() {
   local pid=${1:?pid} stat tail
   local -a fields=()
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local helper=${FACTORY_DARWIN_PROCESS_HELPER:-}
+    [[ "$helper" == /* && -x "$helper" ]] || return 1
+    stat=$("$helper" identity "$pid") || return 1
+    jq -er '[.pgid, .sid, .starttime, .state, .ppid] | @tsv' <<< "$stat"
+    return $?
+  fi
   # Читаем редиректом, а не `cat`: identity опрашивается в циклах ожидания
   # тишины, и форк на каждый процесс обходился дороже самой остановки.
   # Порядок редиректов важен: stderr гасим ДО открытия файла, иначе процесс,
@@ -124,12 +132,72 @@ _runner_pgid_recycled() {
   [[ "$leader_starttime" != "$expected_starttime" ]]
 }
 
+# Полный снимок одной POSIX-сессии. Замена PID лидера и неполный census
+# означают неизвестное состояние, даже если в выводе ни одной строки сессии.
+_runner_darwin_session_rows() {
+  local session=$1 starttime=$2 require_leader=${3:-no}
+  local helper=${FACTORY_DARWIN_PROCESS_HELPER:-} control
+  [[ "$session" =~ ^[1-9][0-9]*$ && "$starttime" =~ ^[0-9]+$ &&
+     "$helper" == /* && -f "$helper" && -x "$helper" && ! -L "$helper" ]] || return 2
+  control=$(factory_control_root) || return 2
+  python3 "$FACTORY_HOME/lib/darwin-provider-census.py" "$control" "$helper" \
+    "$session" "$starttime" "$require_leader" || return 2
+}
+
+# Сигнал получают отдельные подтверждённые PID. Helper повторяет сверку
+# времени старта, UID, PGID и SID в том же вызове, который отправляет сигнал.
+_runner_darwin_signal_rows() {
+  local sig=$1 rows=$2 members pid started sid pgid rc
+  members=$(jq -er 'map([.pid, .starttime, .sid, .pgid] | @tsv) | join("\n")' <<< "$rows") || return 2
+  [[ -n "$members" ]] || return 0
+  while read -r pid started sid pgid; do
+    rc=0
+    "$FACTORY_DARWIN_PROCESS_HELPER" signal-stage-member "$pid" "$started" "$sid" "$pgid" "$sig" || rc=$?
+    (( rc == 0 || rc == 3 )) || return 2
+  done <<< "$members"
+}
+
+# TERM ставится в очередь до CONT остановленного барьера. После grace применяем
+# KILL только к подтверждённым участникам этой же сессии.
+_runner_darwin_quiesce_runtime() {
+  local pgid=$1 session=$2 starttime=$3 grace_s=$4 rows observed deadline sig
+  rows=$(_runner_darwin_session_rows "$session" "$starttime" yes) || return 2
+  if [[ "$rows" == '[]' ]]; then
+    runner_runtime_absent "$pgid" "$session" "$starttime"
+    return $?
+  fi
+  _runner_darwin_signal_rows TERM "$rows" || return $?
+  _runner_darwin_signal_rows CONT "$rows" || return $?
+  for sig in TERM KILL; do
+    deadline=$((SECONDS + grace_s + 1))
+    while (( SECONDS < deadline )); do
+      runner_runtime_absent "$pgid" "$session" "$starttime" && return 0
+      sleep 0.05
+    done
+    if [[ "$sig" == TERM ]]; then
+      # После выхода лидера можно адресовать KILL участникам прежнего точного
+      # снимка. Имя новой инкарнации сессии само по себе права не выдаёт.
+      if observed=$(_runner_darwin_session_rows "$session" "$starttime" yes); then
+        rows=$observed
+      fi
+      _runner_darwin_signal_rows KILL "$rows" || return $?
+    fi
+  done
+  return 1
+}
+
 _runner_runtime_present() {
   local expected_pgid=${1:?pgid} expected_session=${2:?session}
   local expected_starttime=${3:-} attempt
   [[ "$expected_pgid" =~ ^[0-9]+$ && "$expected_session" =~ ^[0-9]+$ &&
      ( -z "$expected_starttime" || "$expected_starttime" =~ ^[0-9]+$ ) ]] ||
     return 2
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local rows
+    rows=$(_runner_darwin_session_rows "$expected_session" "$expected_starttime") || return 2
+    [[ "$rows" != '[]' ]]
+    return $?
+  fi
   # Дешёвый вопрос ядру про исходную группу идёт первым, и пока раннер жив,
   # им всё и заканчивается: скан сессии даже одним форком стоит десятки
   # миллисекунд, а этим путём идут циклы ожидания и хвост каждого этапа.
@@ -150,6 +218,14 @@ _runner_runtime_present() {
 }
 
 runner_runtime_absent() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local first second
+    first=$(_runner_darwin_session_rows "$2" "${3:-}") || return 1
+    [[ "$first" == '[]' ]] || return 1
+    second=$(_runner_darwin_session_rows "$2" "${3:-}") || return 1
+    [[ "$second" == '[]' ]]
+    return $?
+  fi
   ! _runner_runtime_present "$1" "$2" "${3:-}"
 }
 
@@ -190,6 +266,14 @@ _runner_groups_present() {
 
 _runner_signal_runtime() {
   local sig=${1:?sig} pgid=${2:?pgid} session=${3:?session} groups
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local rows own
+    own=$(_runner_own_session) || return 2
+    [[ "$session" != "$own" ]] || return 2
+    rows=$(_runner_darwin_session_rows "$session" "${4:-}" yes) || return 2
+    _runner_darwin_signal_rows "$sig" "$rows"
+    return $?
+  fi
   groups=$(_runner_runtime_groups "$pgid" "$session")
   _runner_signal_groups "$sig" "$groups"
 }
@@ -215,6 +299,10 @@ _runner_quiesce_owned_runtime() {
   # ошибка в идентити не имеет права снести оркестратор, который её запросил.
   own_session=$(_runner_own_session) || return 2
   [[ "$session" != "$own_session" ]] || return 2
+  if [[ "$OSTYPE" == darwin* ]]; then
+    _runner_darwin_quiesce_runtime "$pgid" "$session" "$starttime" "$grace_s"
+    return $?
+  fi
 
   runner_runtime_absent "$pgid" "$session" "$starttime" && {
     _runner_reap_if_zombie "$pid" "$pgid" "$starttime"
@@ -277,10 +365,12 @@ _runner_trusted_identity_prepare() {
   mkdir -p -- "$dir" || return 1
   chmod 700 "$dir" 2>/dev/null || return 1
   uid=$(id -u)
-  [[ -d "$dir" && ! -L "$dir" &&
-     "$(realpath -e -- "$dir" 2>/dev/null)" == "$dir" &&
-     "$(stat -c '%u:%a:%h' "$dir" 2>/dev/null)" == "$uid:700:2" ]] ||
-    return 78
+  [[ -d "$dir" && ! -L "$dir" && "$(realpath -e -- "$dir" 2>/dev/null)" == "$dir" ]] || return 78
+  if [[ "$OSTYPE" == darwin* ]]; then
+    [[ "$(/usr/bin/stat -f '%u:%Lp' "$dir" 2>/dev/null)" == "$uid:700" ]] || return 78
+  else
+    [[ "$(stat -c '%u:%a:%h' "$dir" 2>/dev/null)" == "$uid:700:2" ]] || return 78
+  fi
 }
 
 runner_trusted_identity_read() {
@@ -311,7 +401,14 @@ runner_trusted_identity_read() {
   done
   [[ -n "$fd" ]] || return 78
   uid=$(id -u)
-  meta=$(stat -Lc '%u:%a:%h' -- "/proc/self/fd/$fd" 2>/dev/null)
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local helper=${FACTORY_DARWIN_PROCESS_HELPER:-}
+    if [[ "$helper" == /* && -x "$helper" ]]; then
+      meta=$("$helper" runner-fd-stat 3 3<&"$fd") || meta=
+    fi
+  else
+    meta=$(stat -Lc '%u:%a:%h' -- "/proc/self/fd/$fd" 2>/dev/null)
+  fi
   # Число ссылок 0 — запись сняли ровно в момент открытия: снимок валиден, но
   # активной identity больше нет.
   case "$meta" in
@@ -369,8 +466,8 @@ runner_trusted_identity_publish() {
     if [[ "$existing" == "$stage $run_id $epoch $runner $pid $pgid $session $starttime" ]]; then
       return 0
     fi
-    _runner_runtime_present \
-      "$existing_pgid" "$existing_session" "$existing_starttime" && return 76
+    runner_runtime_absent \
+      "$existing_pgid" "$existing_session" "$existing_starttime" || return 76
     rm -f -- "$file" || return 1
   fi
   tmp=$(mktemp "$dir/.runner-identity.XXXXXX") || return 1
@@ -394,10 +491,18 @@ runner_trusted_identity_publish() {
     rm -f -- "$tmp"
     return 1
   }
+  if [[ "$OSTYPE" == darwin* ]] &&
+     ! "$FACTORY_DARWIN_PROCESS_HELPER" sync-runner-fd 3 3<"$tmp"; then
+    rm -f -- "$tmp"
+    return 78
+  fi
   mv -f -- "$tmp" "$file" || {
     rm -f -- "$tmp"
     return 1
   }
+  if [[ "$OSTYPE" == darwin* ]]; then
+    "$FACTORY_DARWIN_PROCESS_HELPER" sync-runner-fd 3 3<"$dir" || return 78
+  fi
   runner_trusted_identity_read "$task" "$stage" "$run_id" "$epoch" >/dev/null ||
     return 78
   runner_process_full_matches "$pid" "$pgid" "$session" "$starttime" || return 73
@@ -425,8 +530,14 @@ runner_trusted_identity_clear() {
     return 73
   local browser_binding_root
   browser_binding_root=$(factory_control_root) || return
-  rm -f -- "$browser_binding_root/browser-runs/t${task}/${run_id}.json"
-  rm -f -- "$file"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    _runner_darwin_scope_clear "$file" || return
+    rm -f -- "$browser_binding_root/browser-runs/t${task}/${run_id}.json" || return
+    runtime_analytics_durable_unlink_v2 "$file"
+  else
+    rm -f -- "$browser_binding_root/browser-runs/t${task}/${run_id}.json"
+    rm -f -- "$file"
+  fi
 }
 
 RUNNER_LAUNCH_ACTIVE_TASK=""
@@ -586,6 +697,18 @@ _runner_runtime_usage_call() {
   local events_write_fd=${RUNNER_RUNTIME_EVENTS_WRITE_FD:-}
   local run_dir_fd=${RUNNER_RUNTIME_RUN_DIR_FD:-}
   [[ -n "$node_bin" && -x "$node_bin" ]] || node_bin=$(command -v node 2>/dev/null) || return 78
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local bridge="$FACTORY_HOME/lib/runtime-usage.mjs"
+    case "$operation" in
+      prepare) _runner_darwin_usage_exec p "$node_bin" "$bridge" prepare "$context" ;;
+      publish) _runner_darwin_usage_exec u "$node_bin" "$bridge" publish "$context" "$prepared" ;;
+      invalidate) "$node_bin" "$bridge" invalidate "$context" "$prepared" ;;
+      meta-initial) _runner_darwin_usage_exec m "$node_bin" "$bridge" meta "$context" initial ;;
+      meta-final) _runner_darwin_usage_exec f "$node_bin" "$bridge" meta "$context" final "$prepared" "$result_class" ;;
+      *) return 2 ;;
+    esac
+    return $?
+  fi
   [[ "$run_dir_fd" =~ ^[0-9]+$ ]] || return 78
   case "$operation" in
     prepare)
@@ -1049,6 +1172,30 @@ runner_inflight_barrier_quiesce() {
 
 _runner_terminate_barrier_child() {
   local pid=${1:?pid} identity pgid session starttime state ppid own_pgid poll
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local text rc=0
+    text=$("$FACTORY_DARWIN_PROCESS_HELPER" identity "$pid") || rc=$?
+    if (( rc == 3 )); then
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    (( rc == 0 )) || return 76
+    identity=$(jq -er '[.pgid, .sid, .starttime, .state, .ppid] | @tsv' <<< "$text") || return 76
+    read -r pgid session starttime state ppid <<< "$identity"
+    [[ "$ppid" == "$BASHPID" &&
+       ( -z "$RUNNER_LAUNCH_ACTIVE_STARTTIME" || "$starttime" == "$RUNNER_LAUNCH_ACTIVE_STARTTIME" ) ]] ||
+      return 76
+    if [[ "$pgid:$session" == "$pid:$pid" ]]; then
+      _runner_quiesce_owned_runtime "$pid" "$pgid" "$session" "$starttime" 1 || return 76
+    else
+      rc=0
+      "$FACTORY_DARWIN_PROCESS_HELPER" signal-stage-member "$pid" "$starttime" "$session" "$pgid" KILL ||
+        rc=$?
+      (( rc == 0 || rc == 3 )) || return 76
+    fi
+    wait "$pid" 2>/dev/null || true
+    return 0
+  fi
   identity=$(_runner_process_full_identity "$pid") || {
     wait "$pid" 2>/dev/null || true
     return 0
@@ -1072,6 +1219,10 @@ _runner_terminate_barrier_child() {
 }
 
 _runner_launch_close_telemetry_fds_v2() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    _runner_darwin_fd_close
+    return
+  fi
   if [[ "${RUNNER_RUNTIME_EVENTS_READ_FD:-}" =~ ^[0-9]+$ ]]; then
     exec {RUNNER_RUNTIME_EVENTS_READ_FD}<&- 2>/dev/null || true
   fi
@@ -1119,7 +1270,7 @@ _runner_launch_pre_release_abort_v2() {
   local runner_id=$1 task=$2 stage=$3 run_id=$4 epoch=$5 pid=$6 pgid=$7
   local session=$8 starttime=$9 started_ns=${10:-0} lifecycle_started=${11:-0}
   local quiesced_at quiesced_ns clock_boot evidence never_evidence
-  _runner_terminate_barrier_child "$pid"
+  _runner_terminate_barrier_child "$pid" || return $?
   IFS=$'\t' read -r quiesced_at quiesced_ns clock_boot < <(runtime_analytics_now_v2) || return 78
   evidence=$(runtime_analytics_hash_string_v2 \
     "quiesced:$runner_id:$task:$stage:$run_id:$epoch:$pid:$pgid:$session:$starttime:$quiesced_ns") || return
@@ -1139,36 +1290,8 @@ _runner_launch_pre_release_abort_v2() {
     "$pid" "$pgid" "$session" "$starttime" 2>/dev/null || true
 }
 
-runner_launch() {
-  local runner_id=$1 task=$2 prompt=$3 stage=$4 model=$5 effort=$6 timeout_s=$7
-  local run_dir=$8 run_id=$9 epoch=${10} status_token=${11}
-  local module control_root token_file token_fd pid identity pgid session starttime process_ppid
-  local rc result_class own_pgid group_rc=0
-  local saved_term_trap="" saved_int_trap=""
-  local capabilities status_mode=status_fd request_dir="" request_rc=0 consume_rc=0
-  local terminal_state=""
-  local run_parent run_dir_fd events_write_fd events_read_fd old_umask noclobber_was_on=0
-  local run_dir_dev run_dir_ino events_dev events_ino usage_dir dialect context_file=""
-  local prepared_file="" replacement_file="" publication_file="" event_output=""
-  local started_at started_ns clock_boot quiesced_at quiesced_ns quiescence_evidence
-  local runner_started_hash scope_event_hash finished_event_hash usage_event_hash
-  local observed_scope="" source_evidence="" process_complete=false analytics_enabled=0
-  local provider_mode requested_scope parent_ref normalizer_parent lineage_generation
-  local source_rc=0 lifecycle_rc=0 analytics_rc=0 meta_rc=0 reconcile_rc=0 publication_ready=0
-  local family=${FACTORY_DEBUG_FAMILY:-exact}
-  RUNNER_LAUNCH_LAST_STARTED=0
-  BROWSER_TRANSPORT_ERROR=""
-  module=$(runner_module_path "$runner_id") || return 2
-  runner_contract_check "$runner_id" || return 2
-  run_parent=$(dirname -- "$run_dir")
-  mkdir -p -- "$run_parent" || return 1
-  chmod 700 -- "$run_parent" 2>/dev/null || true
-  if ! mkdir -m 700 -- "$run_dir" 2>/dev/null; then
-    echo "runner launcher refused existing run directory: $run_dir" >&2
-    return 73
-  fi
-  run_dir=$(realpath -e -- "$run_dir" 2>/dev/null) || return 78
-  [[ -d "$run_dir" && ! -L "$run_dir" ]] || return 78
+# Открывает прежние Linux FD в динамической области runner_launch.
+_runner_linux_prepare_fds() {
   exec {run_dir_fd}<"$run_dir" || return 1
   RUNNER_RUNTIME_RUN_DIR_FD=$run_dir_fd
   export RUNNER_RUNTIME_RUN_DIR_FD
@@ -1217,6 +1340,44 @@ runner_launch() {
     return 1
   }
   chmod 600 -- "/proc/self/fd/$run_dir_fd/stderr.log" 2>/dev/null || true
+}
+
+runner_launch() {
+  local runner_id=$1 task=$2 prompt=$3 stage=$4 model=$5 effort=$6 timeout_s=$7
+  local run_dir=$8 run_id=$9 epoch=${10} status_token=${11}
+  local module control_root token_file token_fd pid identity pgid session starttime process_ppid
+  local rc result_class own_pgid group_rc=0
+  local saved_term_trap="" saved_int_trap=""
+  local capabilities status_mode=status_fd request_dir="" request_rc=0 consume_rc=0
+  local terminal_state=""
+  local run_parent run_dir_fd events_write_fd events_read_fd old_umask noclobber_was_on=0
+  local broker_dir= broker_pid= broker_read= broker_write= fd_nonce= fd_trace=0
+  local runner_intent_file= runner_intent_record= runner_intent_owned=0
+  export -n fd_nonce
+  local run_dir_dev run_dir_ino events_dev events_ino usage_dir dialect context_file=""
+  local prepared_file="" replacement_file="" publication_file="" event_output=""
+  local started_at started_ns clock_boot quiesced_at quiesced_ns quiescence_evidence
+  local runner_started_hash scope_event_hash finished_event_hash usage_event_hash
+  local observed_scope="" source_evidence="" process_complete=false analytics_enabled=0
+  local provider_mode requested_scope parent_ref normalizer_parent lineage_generation
+  local source_rc=0 lifecycle_rc=0 analytics_rc=0 meta_rc=0 reconcile_rc=0 publication_ready=0
+  local family=${FACTORY_DEBUG_FAMILY:-exact}
+  RUNNER_LAUNCH_LAST_STARTED=0
+  BROWSER_TRANSPORT_ERROR=""
+  module=$(runner_module_path "$runner_id") || return 2
+  runner_contract_check "$runner_id" || return 2
+  run_parent=$(dirname -- "$run_dir")
+  mkdir -p -- "$run_parent" || return 1
+  chmod 700 -- "$run_parent" 2>/dev/null || true
+  if ! mkdir -m 700 -- "$run_dir" 2>/dev/null; then
+    echo "runner launcher refused existing run directory: $run_dir" >&2
+    return 73
+  fi
+  run_dir=$(realpath -e -- "$run_dir" 2>/dev/null) || return 78
+  [[ -d "$run_dir" && ! -L "$run_dir" ]] || return 78
+  if [[ "$OSTYPE" != darwin* ]]; then
+    _runner_linux_prepare_fds || return $?
+  fi
   capabilities=$(runner_call "$runner_id" capabilities 2>/dev/null || true)
   if [[ " $capabilities " == *" status_request "* ]]; then
     status_mode=request
@@ -1244,6 +1405,10 @@ runner_launch() {
   [[ ! -L "$control_root" && "$(realpath -e -- "$control_root" 2>/dev/null)" == "$control_root" ]] ||
     { _runner_launch_close_telemetry_fds_v2; return 78; }
   chmod 700 "$control_root" "$control_root/tokens" 2>/dev/null || true
+  if [[ "$OSTYPE" == darwin* ]] && ! _runner_darwin_fd_prepare "$task" "$run_id" "$epoch"; then
+    _runner_launch_close_telemetry_fds_v2
+    return 78
+  fi
   token_file=$(mktemp "$control_root/tokens/.capability.XXXXXX") || {
     _runner_launch_close_telemetry_fds_v2
     return 1
@@ -1256,7 +1421,6 @@ runner_launch() {
       return "$rc"
     }
   rm -f -- "$token_file"
-
   runtime_lifecycle_enabled_v2 && analytics_enabled=1
   if (( analytics_enabled )); then
     usage_dir="$(attempt_state_v2_task_root "$task")/attempts/$FACTORY_LIFECYCLE_ATTEMPT_ID/lifecycle/usage"
@@ -1273,9 +1437,7 @@ runner_launch() {
   _runner_lineage_reserve_v2 "$runner_id" "$run_id" "$capabilities" "$usage_dir" "$dialect" || {
     rc=$?
     exec {token_fd}<&-
-    exec {events_read_fd}<&-
-    exec {events_write_fd}>&-
-    exec {run_dir_fd}<&-
+    _runner_launch_close_telemetry_fds_v2
     return "$rc"
   }
   provider_mode=$RUNNER_LINEAGE_MODE
@@ -1284,13 +1446,19 @@ runner_launch() {
   normalizer_parent=$RUNNER_LINEAGE_NORMALIZER_PARENT
   lineage_generation=$RUNNER_LINEAGE_GENERATION
 
-  factory_exec_check local setsid || {
+  local darwin_setsid=${FACTORY_DARWIN_SETSID:-}
+  if [[ "$OSTYPE" == darwin* ]]; then
+    if [[ "$darwin_setsid" != /* || ! -f "$darwin_setsid" || ! -x "$darwin_setsid" ||
+          -L "$darwin_setsid" || "$BASH" != /* ]]; then
+      exec {token_fd}<&-
+      _runner_launch_close_telemetry_fds_v2
+      return 126
+    fi
+  elif ! factory_exec_check local setsid; then
     exec {token_fd}<&-
-    exec {events_read_fd}<&-
-    exec {events_write_fd}>&-
-    exec {run_dir_fd}<&-
+    _runner_launch_close_telemetry_fds_v2
     return 126
-  }
+  fi
   RUNNER_LAUNCH_ACTIVE_TASK=$task
   RUNNER_LAUNCH_ACTIVE_PID=""
   RUNNER_LAUNCH_ACTIVE_PGID=""
@@ -1303,8 +1471,15 @@ runner_launch() {
   saved_int_trap=$(trap -p INT)
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-TERM}' TERM
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-INT}' INT
-  browser_transport_prepare "$task" "$stage" "$run_id" "$epoch" "$request_dir" "$token_fd" || {
+  if browser_transport_prepare "$task" "$stage" "$run_id" "$epoch" "$request_dir" "$token_fd" &&
+     { [[ "$OSTYPE" != darwin* ]] ||
+       { _runner_darwin_intent_prepare "$task" "$stage" "$run_id" "$epoch" && _runner_darwin_fd_grant r; }; }; then
+    :
+  else
     rc=$?
+    if [[ "$OSTYPE" == darwin* ]]; then
+      _runner_darwin_intent_clear || rc=78
+    fi
     # Резервация lineage уже сделана, но fork ещё не происходил.
     # Отмена с доказательством never-started сохраняет право на следующий resume.
     quiescence_evidence=$(runtime_analytics_hash_string_v2 \
@@ -1314,19 +1489,41 @@ runner_launch() {
     _runner_launch_held_cleanup_v2 \
       "$token_fd" "$saved_term_trap" "$saved_int_trap" ""
     return "$rc"
-  }
-  FACTORY_LAUNCH_BARRIER=1 \
-  FACTORY_RUN_TASK="$task" FACTORY_RUN_STAGE="$stage" \
-  FACTORY_RUN_ID="$run_id" FACTORY_RUN_EPOCH="$epoch" \
-  FACTORY_PROVIDER_SESSION_MODE="$provider_mode" \
-  FACTORY_PROVIDER_RESUME_SCOPE="$requested_scope" \
-  FACTORY_PROVIDER_LINEAGE_GENERATION="$lineage_generation" \
-  FACTORY_PROVIDER_PARENT_USAGE_REF="$parent_ref" \
-  FACTORY_STATUS_MODE="$status_mode" FACTORY_STATUS_REQUEST_DIR="$request_dir" \
-  setsid bash "$FACTORY_HOME/lib/runner-bridge.sh" "$module" "$runner_id" run \
-    "$task" "$prompt" "$stage" "$model" "$effort" "$timeout_s" "$run_dir" \
-    7<&"$token_fd" >&"$events_write_fd" 2>"/proc/self/fd/$run_dir_fd/stderr.log" &
-  pid=$!
+  fi
+  if [[ "$OSTYPE" == darwin* ]]; then
+    if [[ "$-" == *x* ]]; then
+      fd_trace=1
+      set +x
+    fi
+    FACTORY_LAUNCH_BARRIER=1 \
+    FACTORY_RUN_TASK="$task" FACTORY_RUN_STAGE="$stage" \
+    FACTORY_RUN_ID="$run_id" FACTORY_RUN_EPOCH="$epoch" \
+    FACTORY_PROVIDER_SESSION_MODE="$provider_mode" \
+    FACTORY_PROVIDER_RESUME_SCOPE="$requested_scope" \
+    FACTORY_PROVIDER_LINEAGE_GENERATION="$lineage_generation" \
+    FACTORY_PROVIDER_PARENT_USAGE_REF="$parent_ref" \
+    FACTORY_STATUS_MODE="$status_mode" FACTORY_STATUS_REQUEST_DIR="$request_dir" \
+    "$FACTORY_DARWIN_PROCESS_HELPER" runner-fd-exec "$broker_dir" r "$darwin_setsid" \
+      "$BASH" "$FACTORY_HOME/lib/runner-bridge.sh" "$module" "$runner_id" run \
+      "$task" "$prompt" "$stage" "$model" "$effort" "$timeout_s" "$run_dir" \
+      7<&"$token_fd" 4< <(printf '%s' "$fd_nonce") &
+    pid=$!
+    fd_nonce=
+    (( fd_trace == 0 )) || set -x
+  else
+    FACTORY_LAUNCH_BARRIER=1 \
+    FACTORY_RUN_TASK="$task" FACTORY_RUN_STAGE="$stage" \
+    FACTORY_RUN_ID="$run_id" FACTORY_RUN_EPOCH="$epoch" \
+    FACTORY_PROVIDER_SESSION_MODE="$provider_mode" \
+    FACTORY_PROVIDER_RESUME_SCOPE="$requested_scope" \
+    FACTORY_PROVIDER_LINEAGE_GENERATION="$lineage_generation" \
+    FACTORY_PROVIDER_PARENT_USAGE_REF="$parent_ref" \
+    FACTORY_STATUS_MODE="$status_mode" FACTORY_STATUS_REQUEST_DIR="$request_dir" \
+    setsid bash "$FACTORY_HOME/lib/runner-bridge.sh" "$module" "$runner_id" run \
+      "$task" "$prompt" "$stage" "$model" "$effort" "$timeout_s" "$run_dir" \
+      7<&"$token_fd" >&"$events_write_fd" 2>"/proc/self/fd/$run_dir_fd/stderr.log" &
+    pid=$!
+  fi
   RUNNER_LAUNCH_ACTIVE_PID=$pid
   RUNNER_LAUNCH_STATE=barrier
 
@@ -1344,8 +1541,17 @@ runner_launch() {
     sleep 0.01
   done
   if [[ -z "$identity" || "$process_state" != T ]]; then
-    kill -KILL "$pid" 2>/dev/null || true
-    wait "$pid"; rc=$?
+    if [[ "$OSTYPE" == darwin* ]]; then
+      _runner_terminate_barrier_child "$pid" || {
+        _runner_launch_held_cleanup_v2 "$token_fd" "$saved_term_trap" "$saved_int_trap"
+        return 76
+      }
+      rc=78
+      _runner_darwin_intent_clear || rc=76
+    else
+      kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid"; rc=$?
+    fi
     quiescence_evidence=$(runtime_analytics_hash_string_v2 \
       "barrier-not-reached:$runner_id:$task:$stage:$run_id:$epoch:$pid") || true
     _runner_lineage_cancel_v2 "$runner_id" "$run_id" \
@@ -1409,6 +1615,15 @@ runner_launch() {
     }
   RUNNER_LAUNCH_ACTIVE_PUBLISHED=1
   RUNNER_LAUNCH_STATE=published
+  if [[ "$OSTYPE" == darwin* ]] &&
+     { ! _runner_darwin_scope_publish "$task" || ! _runner_darwin_intent_clear; }; then
+    _runner_launch_pre_release_abort_v2 \
+      "$runner_id" "$task" "$stage" "$run_id" "$epoch" \
+      "$pid" "$pgid" "$session" "$starttime" 0 0 || true
+    _runner_launch_held_cleanup_v2 \
+      "$token_fd" "$saved_term_trap" "$saved_int_trap" ""
+    return 76
+  fi
   _runner_launch_fault_v2 after_identity_publish || {
     rc=$?
     _runner_launch_pre_release_abort_v2 \
@@ -1544,10 +1759,33 @@ runner_launch() {
       "$token_fd" "$saved_term_trap" "$saved_int_trap" "$context_file"
     return "$rc"
   }
+  if [[ "$OSTYPE" == darwin* && -n "${ROUTE_V2_DARWIN_TX:-}" ]]; then
+    local dispatch_boot
+    if [[ -n "$RUNNER_LAUNCH_DEFERRED_SIGNAL" ]] ||
+       ! dispatch_boot=$("$FACTORY_DARWIN_PROCESS_HELPER" boot-id) ||
+       ! instrumentation_tx_darwin_permit "$task" "$ROUTE_V2_DARWIN_TX" \
+         "$stage" "$run_id" "$epoch" "$ROUTE_V2_DARWIN_TX_CURSOR" "${dispatch_boot,,}" \
+         "$pid" "$session" "$pgid" "$starttime" || [[ -n "$RUNNER_LAUNCH_DEFERRED_SIGNAL" ]]; then
+      FACTORY_HOST_RUN_RESULT=release_task_cleanup_required
+      _runner_launch_pre_release_abort_v2 \
+        "$runner_id" "$task" "$stage" "$run_id" "$epoch" \
+        "$pid" "$pgid" "$session" "$starttime" "$started_ns" 1 || true
+      _runner_launch_held_cleanup_v2 \
+        "$token_fd" "$saved_term_trap" "$saved_int_trap" "$context_file"
+      return 78
+    fi
+  fi
   _runner_launch_restore_signal_traps \
     "$saved_term_trap" "$saved_int_trap"
 
-  if ! kill -CONT "$pid" 2>/dev/null; then
+  local resumed=0
+  if [[ "$OSTYPE" == darwin* ]]; then
+    "$FACTORY_DARWIN_PROCESS_HELPER" signal-stage-member "$pid" "$starttime" "$session" "$pgid" CONT ||
+      resumed=$?
+  else
+    kill -CONT "$pid" 2>/dev/null || resumed=$?
+  fi
+  if (( resumed != 0 )); then
     _runner_launch_pre_release_abort_v2 \
       "$runner_id" "$task" "$stage" "$run_id" "$epoch" \
       "$pid" "$pgid" "$session" "$starttime" "$started_ns" 1 || true
@@ -1588,7 +1826,7 @@ runner_launch() {
   # пока не исчезнет каждый участник.
   browser_transport_stop
   RUNNER_LAUNCH_STATE=quiescing
-  if _runner_runtime_present "$pgid" "$session" "$starttime"; then
+  if ! runner_runtime_absent "$pgid" "$session" "$starttime"; then
     _runner_quiesce_owned_runtime "$pid" "$pgid" "$session" "$starttime" 1 ||
       group_rc=$?
   fi

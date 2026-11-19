@@ -1,10 +1,17 @@
 import { constants } from 'node:fs';
 import { factoryTicketHash } from '../lib/factoryTaskSources.ts';
 import { readContainedText } from '../../../shared/node/readContainedText.ts';
+import { readDarwinFactoryOwnerState } from '../../../shared/node/processIdentity.ts';
+import {
+  describeDarwinCleanup, inspectDarwinTaskRuntime, readDarwinTaskOwnership, type FactoryAdmissionSnapshot,
+} from '../lib/factoryDarwinInventory.ts';
+import type { OwnershipPaths } from '../lib/factoryDarwinOwnershipRoots.ts';
+import type { FactoryCleanupAction } from '../../../shared/runtime/factoryOwnership.ts';
+import { runtimeKind } from '../lib/runtimePaths.ts';
 // FactoryStateAdapter — единственная точка чтения состояния фабрики.
 // Изолирует хрупкий файловый источник (`factory/state` в папке данных) от остального
 // сервера: читает `tNNNN.pipeline` (реестр), `logs/tNNNN.stages.log` (таймлайн), проверяет
-// живость демона по `/proc/<ORCH_PID>`. Только ЧТЕНИЕ — мутации идут через factory-cli.
+// живость демона через системный порт. Только чтение, мутации идут через factory-cli.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -143,6 +150,8 @@ export class FactoryStateAdapter {
   // Реестр в памяти намеренно: передачу ведёт HTTP-запрос этого процесса, и после
   // рестарта отметка обязана исчезнуть вместе с ним, а не висеть фантомом.
   private readonly _handoffs = new Map<string, number>();
+
+  private readonly _observedOwnershipTasks = new Set<string>();
 
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
@@ -324,6 +333,11 @@ export class FactoryStateAdapter {
   isDaemonAlive(orchPid: unknown, task: string | number) {
     const pid = Number(orchPid);
     if (!pid || Number.isNaN(pid)) return false;
+
+    if (process.platform === 'darwin') {
+      return readDarwinFactoryOwnerState(pid, String(task)) === 'alive';
+    }
+
     try {
       const raw = fs.readFileSync(`/proc/${pid}/cmdline`);
       const argv = raw.toString('utf8').split('\0').filter(Boolean);
@@ -373,6 +387,37 @@ export class FactoryStateAdapter {
    */
   isRunLive(orchPid: unknown, task: string | number) {
     return this.isDaemonAlive(orchPid, task) || this._handoffs.has(String(task));
+  }
+
+  /**
+   * У Stop отдельный tri-state порт с проверкой trusted attempt.
+   * Признак живости из обычных карточек остаётся проекцией для интерфейса.
+   */
+  inspectTaskRuntime(paths: OwnershipPaths, task: string) {
+    return inspectDarwinTaskRuntime(paths, task,
+      (registry) => this.readTrustedAttempt(task, registry).catch(() => null));
+  }
+
+  /**
+   * Строгий порт учитывает задачи без реестра и уже замеченные незакрытые ID.
+   * Этот обход выполняется только при запросе проверки владения.
+   */
+  readTaskOwnership(paths: OwnershipPaths, admission: () => FactoryAdmissionSnapshot) {
+    return readDarwinTaskOwnership(paths, this._observedOwnershipTasks, admission,
+      (task, registry) => this.readTrustedAttempt(task, registry).catch(() => null));
+  }
+
+  /**
+   * Право на действие выдаётся только открытой локальной попытке. Чтение
+   * карточки проверяет файл состояния без запуска движка и записи в ledger.
+   */
+  async cleanupAction(task: string | number, trusted: TrustedAttempt | null, alive: boolean) {
+    if (!this.controlDir || !trusted || trusted.terminal || alive || process.platform !== 'darwin'
+      || runtimeKind() !== 'packaged' || process.env.GRIGDESK_ENGINE_MODE === 'external') {
+      return null;
+    }
+
+    return describeDarwinCleanup(this.controlDir, String(task), trusted.attempt).catch(() => null);
   }
 
   /** Список номеров задач из единственного runtime root. */
@@ -571,6 +616,8 @@ export class FactoryStateAdapter {
     // в списке, не открывая карточку. Иначе движок ждёт человека, а в интерфейсе это
     // выглядит обычным «○ стоит», как у доделанной задачи.
     const timeline = await this.readTimeline(task);
+    const cleanupAction = await this.cleanupAction(task, trusted, daemonAlive);
+
     return {
       task,
       route,
@@ -595,7 +642,8 @@ export class FactoryStateAdapter {
       needsRun: registry.NEEDS_RUN === '1',
       stalledHuman: trusted?.bootstrapStop?.state === 'waiting' || registry.STALLED_HUMAN === '1',
       bootstrapStop: trusted?.terminal ? null : trusted?.bootstrapStop || null,
-      stall: await this.summaryStall({ registry, timeline, daemonAlive, trusted, task }),
+      ...(cleanupAction ? { cleanupAction } : {}),
+      stall: await this.summaryStall({ registry, timeline, daemonAlive, trusted, task, cleanupAction }),
       // Молчание идущего хода. detectStall сюда не дотягивается по устройству: он
       // отвечает на «почему конвейер СТОИТ», а зависший агент формально работает —
       // демон жив, этап running, флага остановки нет. Порог не применяем, отдаём
@@ -614,18 +662,19 @@ export class FactoryStateAdapter {
    * платить чтением событий за каждую живую задачу нельзя (та же грабля, что убила
    * карточку «Слоты запуска», — дорогое чтение на частом пути).
    */
-  async summaryStall({ registry, timeline, daemonAlive, trusted, task }: {
+  async summaryStall({ registry, timeline, daemonAlive, trusted, task, cleanupAction }: {
     registry: Registry;
     timeline: StallEvent[];
     daemonAlive: boolean;
     trusted: TrustedAttempt | null;
     task: string | number;
+    cleanupAction?: FactoryCleanupAction | null;
   }) {
     const bootstrap = trusted?.terminal ? null : bootstrapStall(
       trusted?.bootstrapStop, registry.BOOTSTRAP_ENV_ERROR,
     );
 
-    if (bootstrap) {
+    if (bootstrap && !cleanupAction) {
       return bootstrap;
     }
 
@@ -635,7 +684,7 @@ export class FactoryStateAdapter {
       registry,
       timeline,
       attempt: trusted?.attempt,
-      stall: detectStall({ registry, timeline, daemonAlive }),
+      stall: detectStall({ registry, timeline, daemonAlive, cleanupAction }),
     });
     if (!stall || trusted?.cursor?.state !== 'stopped') return stall;
 
@@ -759,7 +808,8 @@ export class FactoryStateAdapter {
     const bootstrapNode = Object.entries(nodeOrigins || {}).find(([, origin]) => (
       origin.scope === 'bootstrap' && origin.originId === 'scout'
     ))?.[0] || null;
-    const bootstrap = trusted?.terminal ? null : bootstrapStall(
+    const cleanupAction = await this.cleanupAction(task, trusted, alive);
+    const bootstrap = trusted?.terminal || cleanupAction ? null : bootstrapStall(
       trusted?.bootstrapStop, registry.BOOTSTRAP_ENV_ERROR,
     );
     const timeline = await this.readTimeline(task);
@@ -773,6 +823,7 @@ export class FactoryStateAdapter {
         registry,
         timeline,
         daemonAlive: alive,
+        cleanupAction,
       }),
     });
 
@@ -784,7 +835,8 @@ export class FactoryStateAdapter {
 
     // Имя узла остановки берём у журнала, когда строка журнала его не назвала: старые
     // записи движка писали остановку без узла, и подсвечивать на схеме было нечего.
-    const stallNode = (bootstrap ? bootstrapNode : null) || stallNodeId(def, statuses, detectedStall?.stage)
+    const cleanupNode = cleanupAction ? trusted?.cursor?.node || bootstrapNode : null;
+    const stallNode = cleanupNode || (bootstrap ? bootstrapNode : null) || stallNodeId(def, statuses, detectedStall?.stage)
       || (stopVerdict && def.pos[stopVerdict.node] !== undefined ? stopVerdict.node : null);
 
     // Берётся ли за неё арбитр — решает ОДНО правило, общее с его собственным гейтом.
@@ -803,7 +855,7 @@ export class FactoryStateAdapter {
       ? {
         ...detectedStall,
         node: stallNode,
-        arbitrable: bootstrap ? false : arbitrable,
+        arbitrable: bootstrap || cleanupAction ? false : arbitrable,
         // Человеческая формулировка того же затыка, если арбитр его уже разбирал.
         arbiter: this.arbiterCards?.read(task, trusted?.attempt) || null,
         conversation: trusted ? this.arbiterConversations?.readSummary(
@@ -950,6 +1002,7 @@ export class FactoryStateAdapter {
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
       daemonAlive: alive,
+      ...(cleanupAction ? { cleanupAction } : {}),
       // Создание без старта: готовая попытка ждёт ручного запуска (held) либо
       // ещё поднимает стенд (holdPending). Демон при этом штатно завершён.
       held: registry.HELD_START === '1',

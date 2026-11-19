@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 import { canonicalJson } from '../../server/src/lib/analytics/canonical.ts';
 import {
@@ -131,7 +132,58 @@ function finalFstatHash(snapshot) {
   }), 'utf8'));
 }
 
+/**
+ * Передаёт проверенный dirfd нативному порту без разрешения имени каталога заново.
+ * Стандартный вывод ограничен коротким ответом, метаданные передаются только в stdin.
+ */
+function darwinRunDirectoryCall(operation, input) {
+  const helper = process.env.FACTORY_DARWIN_PROCESS_HELPER;
+  const stat = helper?.startsWith('/') && lstatSync(helper, { throwIfNoEntry: false });
+
+  if (!stat || !stat.isFile() || stat.uid !== process.getuid()
+    || ![0o500, 0o555].includes(stat.mode & 0o7777)) {
+    return { status: null, stdout: '' };
+  }
+
+  return spawnSync(helper, [operation, '3'], {
+    cwd: '/',
+    env: {},
+    encoding: 'utf8',
+    input,
+    stdio: [input ? 'pipe' : 'ignore', 'pipe', 'ignore', RUN_DIRECTORY_FD],
+    timeout: 5000,
+    maxBuffer: 4096,
+  });
+}
+
+/**
+ * Сверяет имя events с уже удерживаемым каталогом до и после чтения данных.
+ * Только подтверждённое отсутствие имени превращается в eventsPathMissing на Darwin.
+ */
 function namedEventsSnapshot() {
+  if (process.platform === 'darwin') {
+    let result;
+
+    try {
+      result = darwinRunDirectoryCall('run-events-stat');
+    } catch {
+      fail('eventsIdentityMismatch', 'Could not inspect retained events name.');
+    }
+
+    if (result.status === 3) {
+      fail('eventsPathMissing', 'events.jsonl path disappeared before sealing.');
+    }
+    if (result.status !== 0) {
+      fail('eventsIdentityMismatch', 'Could not inspect retained events name.');
+    }
+
+    try {
+      return Object.freeze(JSON.parse(result.stdout));
+    } catch {
+      fail('eventsIdentityMismatch', 'Retained events name returned an invalid fingerprint.');
+    }
+  }
+
   try {
     return fingerprint(lstatSync(`/proc/self/fd/${RUN_DIRECTORY_FD}/events.jsonl`, {
       bigint: true,
@@ -591,6 +643,56 @@ function validateRunDirectory(context) {
   return opened;
 }
 
+/**
+ * Публикует диагностическое зеркало относительно открытого каталога своей платформы.
+ * Имя ссылки не открывается, после замены повторно проверяется исходный каталог.
+ */
+function writeMetaMirror(bytes, context) {
+  if (process.platform === 'darwin') {
+    let result;
+
+    try {
+      result = darwinRunDirectoryCall('write-run-meta', bytes);
+    } catch {
+      fail('metaMirrorIoFailure', 'Atomic meta mirror publication failed.');
+    }
+
+    if (result.status !== 0) {
+      fail('metaMirrorIoFailure', 'Atomic meta mirror publication failed.');
+    }
+
+    validateRunDirectory(context);
+
+    return;
+  }
+
+  const temp = `.meta.env.${process.pid}.${randomBytes(12).toString('hex')}`;
+  const tempPath = `/proc/self/fd/${RUN_DIRECTORY_FD}/${temp}`;
+  const targetPath = `/proc/self/fd/${RUN_DIRECTORY_FD}/meta.env`;
+  let fd = null;
+
+  try {
+    fd = openSync(tempPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600);
+    fchmodSync(fd, 0o600);
+    writeFileSync(fd, bytes);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tempPath, targetPath);
+    fsyncSync(RUN_DIRECTORY_FD);
+    validateRunDirectory(context);
+  } catch (error) {
+    if (fd !== null) {
+      try { closeSync(fd); } catch {}
+    }
+    try { unlinkSync(tempPath); } catch {}
+    if (error instanceof RuntimeUsageError) throw error;
+    fail('metaMirrorIoFailure', 'Atomic meta mirror publication failed.');
+  }
+}
+
 function meta(contextPath, phase, preparedPath = null, resultClass = null) {
   const context = validateContext(exactJsonFile(contextPath, MAX_CONTEXT_BYTES));
   if (!['initial', 'final'].includes(phase)) fail('inputInvalid', 'Unknown meta phase.');
@@ -661,30 +763,8 @@ function meta(contextPath, phase, preparedPath = null, resultClass = null) {
     );
   }
   const bytes = Buffer.from(fields.map(([key, value]) => assertMetaValue(key, value)).join(''), 'utf8');
-  const temp = `.meta.env.${process.pid}.${randomBytes(12).toString('hex')}`;
-  const tempPath = `/proc/self/fd/${RUN_DIRECTORY_FD}/${temp}`;
-  const targetPath = `/proc/self/fd/${RUN_DIRECTORY_FD}/meta.env`;
-  let fd = null;
-  try {
-    fd = openSync(tempPath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600);
-    fchmodSync(fd, 0o600);
-    writeFileSync(fd, bytes);
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = null;
-    renameSync(tempPath, targetPath);
-    fsyncSync(RUN_DIRECTORY_FD);
-    validateRunDirectory(context);
-  } catch (error) {
-    if (fd !== null) {
-      try { closeSync(fd); } catch {}
-    }
-    try { unlinkSync(tempPath); } catch {}
-    if (error instanceof RuntimeUsageError) throw error;
-    fail('metaMirrorIoFailure', 'Atomic meta mirror publication failed.');
-  }
+
+  writeMetaMirror(bytes, context);
   process.stdout.write(`${canonicalJson({ schemaVersion: 1, outcome: 'published', bytes: bytes.length })}\n`);
 }
 

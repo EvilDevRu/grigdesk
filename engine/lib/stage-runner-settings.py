@@ -230,7 +230,7 @@ def durable_write(directory, identity, record):
             os.unlink(temporary)
 
 
-# Живой факт подтверждается control identity, lifecycle binding и процессом из /proc.
+# Живой факт подтверждается control identity, lifecycle binding и системным владельцем.
 # Диагностическая telemetry даёт только собственную пару уже установленного run.
 def actual_read(root, identity):
     process = env_file(root / "runner-processes" / ("t" + identity["task"] + ".active"))
@@ -242,10 +242,17 @@ def actual_read(root, identity):
     if bound is not None and bound != active["RUN_ID"] + ":" + active["EPOCH"]:
         return None
     try:
-        raw = Path("/proc", process["PID"], "stat").read_text().rsplit(")", 1)[1].split()
-        if raw[19] != process["STARTTIME"] or raw[0] == "Z":
-            return None
-    except (KeyError, OSError):
+        if sys.platform == "darwin":
+            port = runpy.run_path(str(Path(__file__).with_name("runtime-analytics.py")))
+            native = port["process_identity"](process["PID"])
+            if native["startTimeTicks"] != process["STARTTIME"] or native["pid"] != int(process["PID"]) \
+                    or native["sessionId"] != int(process["SESSION"]) or native["processGroupId"] != int(process["PGID"]):
+                return None
+        else:
+            raw = Path("/proc", process["PID"], "stat").read_text().rsplit(")", 1)[1].split()
+            if raw[19] != process["STARTTIME"] or raw[0] == "Z":
+                return None
+    except (KeyError, OSError, ValueError, IndexError, SystemExit):
         return None
     meta = env_file(Path(os.environ["STATE_DIR"]) / "logs/runs" / ("t" + identity["task"])
                     / identity["stage"] / active["RUN_ID"] / "meta.env")
