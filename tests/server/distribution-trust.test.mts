@@ -37,6 +37,36 @@ test('RUN-RECORD: приватная запись читается только 
   assert.equal((await readRunRecord(runDir, created.runId)).stage, 'verified');
 });
 
+test('RUN-RECORD: отмена оставляет building; терминальный writer единственный', async (t) => {
+  const runDir = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'dist-terminal-'));
+
+  t.after(() => fs.rm(runDir, { recursive: true, force: true }));
+
+  const { runId } = await createRunRecord(runDir, {
+    realArtifactsRoot: path.join(runDir, 'release-artifacts'),
+    sourceCommit: 'c'.repeat(40),
+    sourceDigest: 'd'.repeat(64),
+    recipeDigest: 'e'.repeat(64),
+    manifestDigest: '',
+  });
+  const signal = AbortSignal.abort(143);
+
+  await assert.rejects(completeRunRecord(runDir, runId, 'verified', [], { signal }),
+    (error) => error === 143);
+  assert.equal((await readRunRecord(runDir, runId)).stage, 'building');
+
+  const attempts = await Promise.allSettled([
+    completeRunRecord(runDir, runId, 'failed', []),
+    completeRunRecord(runDir, runId, 'failed', []),
+  ]);
+
+  assert.equal(attempts.filter(({ status }) => status === 'fulfilled').length, 1);
+  await assert.rejects(completeRunRecord(runDir, runId, 'verified', []),
+    /distribution_run_already_terminal/u);
+  assert.equal((await readRunRecord(runDir, runId)).stage, 'failed');
+  assert.deepEqual((await readRunRecord(runDir, runId)).artifacts, []);
+});
+
 test('LOCAL-RUN-TRUST: запись доверяет ключ run-а, --from тот же каталог отвергает', async (t) => {
   const box = await acceptanceBox(t);
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dist-trust-'));

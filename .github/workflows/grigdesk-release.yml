@@ -4,13 +4,21 @@ name: Релиз GrigDesk — сборка и публикация
 on:
   workflow_dispatch:
     inputs:
+      linux:
+        description: Собрать Linux x64
+        type: boolean
+        default: true
+      macos:
+        description: Собрать macOS Apple Silicon
+        type: boolean
+        default: true
       channel:
         description: Канал выпуска
         type: choice
         options:
           - release
           - dev
-        default: release
+        default: dev
         required: true
       publish:
         description: Опубликовать проверенный выпуск
@@ -42,18 +50,39 @@ permissions:
 concurrency:
   group: grigdesk-release
   cancel-in-progress: false
+run-name: "${{ inputs.channel }}: ${{ inputs.test_mode }} — выпуск #${{ github.run_number }}"
 jobs:
   plan:
     name: План и допуск выпуска
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
+      platforms: ${{ steps.accepted.outputs.platforms }}
+      candidate_plan_sha256: ${{ steps.candidate_plan.outputs.digest }}
+      recipe_digest: ${{ steps.candidate_plan.outputs.recipe_digest }}
+      version: ${{ steps.candidate_plan.outputs.version }}
+      previous_version: ${{ steps.candidate_plan.outputs.previous_version }}
+      commit: ${{ steps.candidate_plan.outputs.commit }}
+      release_id: ${{ steps.candidate_plan.outputs.release_id }}
       run_tests: ${{ steps.checks.outputs.run_tests }}
       require_pipeline_receipt: ${{ steps.checks.outputs.mode == 'full' && 'true' || 'false' }}
       mode: ${{ steps.checks.outputs.mode }}
       artifact_id: ${{ steps.plan_artifact.outputs.artifact-id }}
       source_digest: ${{ steps.source_identity.outputs.source_digest }}
     steps:
+      - name: Выбор платформ
+        id: accepted
+        env:
+          BUILD_LINUX: ${{ inputs.linux }}
+          BUILD_MACOS: ${{ inputs.macos }}
+        run: |
+          case "$BUILD_LINUX/$BUILD_MACOS" in
+            true/true) platforms=linux-and-macos ;;
+            true/false) platforms=linux ;;
+            false/true) platforms=macos ;;
+            *) printf '::error::Выберите Linux x64 или macOS Apple Silicon.\n'; exit 1 ;;
+          esac
+          printf 'platforms=%s\n' "$platforms" >> "$GITHUB_OUTPUT"
       - name: Исходники
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -77,7 +106,21 @@ jobs:
           const digest = await sourceFingerprint(process.cwd());
           await fs.appendFile(process.env.GITHUB_OUTPUT, `source_digest=${digest}\n`);
           NODE
+      - name: План кандидатов
+        if: ${{ inputs.macos }}
+        id: candidate_plan
+        env:
+          CANDIDATE_PLATFORMS: ${{ steps.accepted.outputs.platforms }}
+          CANDIDATE_CHANNEL: ${{ inputs.channel }}
+          CANDIDATE_PUBLISH: ${{ inputs.publish }}
+          CANDIDATE_TEST_MODE: ${{ inputs.test_mode }}
+          CANDIDATE_SKIP_REASON: ${{ inputs.skip_reason }}
+          CANDIDATE_VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          mkdir release-plan
+          node tools/platformCandidate.mts plan release-plan/candidate-plan.json
       - name: Идентичность выпуска
+        if: ${{ steps.accepted.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -91,13 +134,14 @@ jobs:
       - name: План проверок
         id: checks
         run: |-
-          mkdir release-plan
+          mkdir -p release-plan
           node tools/releaseChecks.mts plan release-plan/release-checks.json
         env:
           TEST_MODE: ${{ inputs.test_mode }}
           TEST_SKIP_REASON: ${{ inputs.skip_reason }}
           VALIDATION_RUN: ${{ inputs.validation_run }}
       - name: Подтверждение прежних проверок
+        if: ${{ steps.accepted.outputs.platforms == 'linux' }}
         id: validation
         run: node tools/releaseValidation.mts
         env:
@@ -113,6 +157,8 @@ jobs:
           if-no-files-found: error
   server:
     name: Сервер, shared и руководство
+    outputs:
+      receipt_id: ${{ steps.suite_receipt.outputs.artifact-id }}
     if: ${{ needs.plan.outputs.run_tests == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
@@ -148,7 +194,13 @@ jobs:
           sudo rm -rf -- /usr/share/dotnet /usr/local/.ghcup /opt/ghc /opt/hostedtoolcache/CodeQL
 
           df -h "$GITHUB_WORKSPACE"
+      - name: Идентичность кандидатов
+        if: ${{ needs.plan.outputs.platforms != 'linux' }}
+        env:
+          CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+        run: node tools/platformCandidate.mts identity
       - name: Идентичность выпуска
+        if: ${{ needs.plan.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -202,6 +254,7 @@ jobs:
           GRIGDESK_PIPELINE_RECEIPTS: ${{ runner.temp }}/pipeline-receipts
           GRIGDESK_RELEASE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
       - name: Выгрузка receipts прогона
+        id: suite_receipt
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -212,6 +265,8 @@ jobs:
       - plan
   web:
     name: Web-проверки
+    outputs:
+      receipt_id: ${{ steps.suite_receipt.outputs.artifact-id }}
     if: ${{ needs.plan.outputs.run_tests == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -235,7 +290,13 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Идентичность кандидатов
+        if: ${{ needs.plan.outputs.platforms != 'linux' }}
+        env:
+          CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+        run: node tools/platformCandidate.mts identity
       - name: Идентичность выпуска
+        if: ${{ needs.plan.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -263,6 +324,7 @@ jobs:
           GRIGDESK_PIPELINE_RECEIPTS: ${{ runner.temp }}/pipeline-receipts
           GRIGDESK_RELEASE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
       - name: Выгрузка receipts прогона
+        id: suite_receipt
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -277,7 +339,7 @@ jobs:
       - plan
       - server
       - web
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.platforms == 'linux' && needs.plan.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
@@ -420,7 +482,7 @@ jobs:
     needs:
       - plan
       - build
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.platforms == 'linux' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -467,7 +529,7 @@ jobs:
       - build
       - verify
     if: >-
-      ${{ !cancelled() && inputs.publish && needs.plan.result == 'success' &&
+      ${{ !cancelled() && inputs.publish && needs.plan.outputs.platforms == 'linux' && needs.plan.result == 'success' &&
       needs.build.result == 'success' && needs.verify.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -523,4 +585,495 @@ jobs:
           RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
           RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
           RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}
-run-name: "${{ inputs.channel }}: ${{ inputs.test_mode }} — выпуск #${{ github.run_number }}"
+
+  linux_candidate_build:
+    name: Сборка кандидата Linux x64
+    needs: [plan, server, web]
+    environment: platform-candidate
+    if: ${{ success() && needs.plan.outputs.platforms == 'linux-and-macos' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CANDIDATE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      CANDIDATE_PLAN_SHA256: ${{ needs.plan.outputs.candidate_plan_sha256 }}
+      CANDIDATE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
+      CANDIDATE_RECIPE_DIGEST: ${{ needs.plan.outputs.recipe_digest }}
+      CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+      CANDIDATE_PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+      CANDIDATE_PUBLIC_KEY_B64: ${{ vars.CANDIDATE_PUBLIC_KEY_B64 }}
+      CANDIDATE_NOTES_JSON: ${{ inputs.notes }}
+    outputs:
+      artifact_id: ${{ steps.candidate_upload.outputs.artifact-id }}
+      public_key: ${{ steps.seal.outputs.public_key }}
+      signer_fingerprint: ${{ steps.seal.outputs.signer_fingerprint }}
+      manifest_digest: ${{ steps.seal.outputs.current_digest }}
+      file_digest: ${{ steps.seal.outputs.current_file_digest }}
+      previous_manifest_digest: ${{ steps.seal.outputs.previous_digest }}
+      previous_file_digest: ${{ steps.seal.outputs.previous_file_digest }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Ubuntu для сборки кандидата
+        run: |
+          test "$(uname -s)-$(uname -m)" = Linux-x86_64
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo rm -rf -- /usr/share/dotnet /usr/local/.ghcup /opt/ghc /opt/hostedtoolcache/CodeQL
+          bash tools/ci/provision-ubuntu.sh --disposable-environment
+      - name: План кандидатов по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-plan
+          merge-multiple: true
+      - name: Серверный receipt по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.server.outputs.receipt_id }}
+          path: ${{ runner.temp }}/suite-server
+          merge-multiple: true
+      - name: Web receipt по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.web.outputs.receipt_id }}
+          path: ${{ runner.temp }}/suite-web
+          merge-multiple: true
+      - name: Подтверждение общих проверок
+        run: node tools/platformCandidate.mts receipts "$RUNNER_TEMP/suite-server" "$RUNNER_TEMP/suite-web"
+      - name: Рабочий каталог кандидата
+        run: mkdir -m 700 "$RUNNER_TEMP/candidate-work"
+      - name: Сборка двух версий без ключа подписи
+        run: |
+          for part in previous current; do
+            scope="$RUNNER_TEMP/candidate-work/$part"
+            mkdir -m 700 "$scope"
+            node tools/platformCandidate.mts scope "$scope/source"
+            node tools/ci/stage-platform-candidate.mts "$scope/source" "$scope/staging" "$part"
+          done
+      - name: Подпись проверенного staging
+        id: seal
+        env:
+          SIGNING_KEY: ${{ secrets.CANDIDATE_SIGNING_KEY }}
+        run: |
+          umask 077
+          key=$(mktemp "$RUNNER_TEMP/grigdesk-candidate-key.XXXXXXXX")
+          trap 'rm -f "$key"' EXIT
+          test -n "$SIGNING_KEY"
+          printf '%s' "$SIGNING_KEY" > "$key"
+          unset SIGNING_KEY
+          export CANDIDATE_SIGNING_KEY_FILE="$key"
+          mkdir -m 700 "$RUNNER_TEMP/sealed-candidate"
+          for part in previous current; do
+            scope="$RUNNER_TEMP/candidate-work/$part"
+            node "$scope/source/tools/platformCandidate.mts" seal linux-x64 "$part" \
+              "$scope/staging/unsigned" "$scope/staging/unsigned.sha256" "$RUNNER_TEMP/sealed-candidate/$part"
+          done
+      - name: Промежуточные файлы кандидата
+        id: candidate_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-linux-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/sealed-candidate/
+          if-no-files-found: error
+  linux_candidate_verify:
+    name: Проверка кандидата Linux x64
+    needs: [plan, linux_candidate_build]
+    if: ${{ success() && needs.plan.outputs.platforms == 'linux-and-macos' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      CANDIDATE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      CANDIDATE_PLAN_SHA256: ${{ needs.plan.outputs.candidate_plan_sha256 }}
+      CANDIDATE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
+      CANDIDATE_RECIPE_DIGEST: ${{ needs.plan.outputs.recipe_digest }}
+      CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+      CANDIDATE_PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+      BUILD_PUBLIC_KEY: ${{ needs.linux_candidate_build.outputs.public_key }}
+      BUILD_SIGNER_FINGERPRINT: ${{ needs.linux_candidate_build.outputs.signer_fingerprint }}
+      BUILD_MANIFEST_DIGEST: ${{ needs.linux_candidate_build.outputs.manifest_digest }}
+      BUILD_FILE_DIGEST: ${{ needs.linux_candidate_build.outputs.file_digest }}
+      BUILD_PREVIOUS_MANIFEST_DIGEST: ${{ needs.linux_candidate_build.outputs.previous_manifest_digest }}
+      BUILD_PREVIOUS_FILE_DIGEST: ${{ needs.linux_candidate_build.outputs.previous_file_digest }}
+    outputs:
+      artifact_id: ${{ steps.verified_upload.outputs.artifact-id }}
+      public_key: ${{ steps.validation.outputs.public_key }}
+      signer_fingerprint: ${{ steps.validation.outputs.signer_fingerprint }}
+      manifest_digest: ${{ steps.validation.outputs.manifest_digest }}
+      file_digest: ${{ steps.validation.outputs.file_digest }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Системные зависимости проверки
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libfuse2t64 ffmpeg ripgrep iproute2 strace
+      - name: План кандидатов по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-plan
+          merge-multiple: true
+      - name: Готовые A и B по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.linux_candidate_build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-input
+          merge-multiple: true
+      - name: Проверка готовых комплектов
+        id: validation
+        run: |
+          keep=RUNNER_TEMP,GITHUB_SHA,GITHUB_OUTPUT,CANDIDATE_PLAN_SHA256,CANDIDATE_SOURCE_DIGEST
+          keep+=,GITHUB_REF,GITHUB_RUN_NUMBER,GITHUB_RUN_ATTEMPT,GITHUB_RUN_ID
+          keep+=,CANDIDATE_RECIPE_DIGEST,CANDIDATE_VERSION,CANDIDATE_PREVIOUS_VERSION,CANDIDATE_PLATFORMS
+          keep+=,BUILD_PUBLIC_KEY,BUILD_SIGNER_FINGERPRINT,BUILD_MANIFEST_DIGEST,BUILD_FILE_DIGEST
+          keep+=,BUILD_PREVIOUS_MANIFEST_DIGEST,BUILD_PREVIOUS_FILE_DIGEST
+          sudo --preserve-env="$keep" /usr/bin/unshare --net /bin/bash -euc '
+            /usr/sbin/ip link set lo up
+            uid=$1 gid=$2 runner_path=$3 runner_home=$4
+            shift 4
+            exec /usr/bin/setpriv --reuid "$uid" --regid "$gid" --init-groups \
+              /usr/bin/env PATH="$runner_path" HOME="$runner_home" GRIGDESK_ACCEPTANCE_NETNS=1 "$@"
+          ' bash "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$(command -v node)" \
+            tools/platformCandidate.mts verify linux-x64 "$RUNNER_TEMP/candidate-input/current" \
+            "$RUNNER_TEMP/candidate-input/previous" "$RUNNER_TEMP/verified-candidate"
+      - name: Промежуточный проверенный комплект
+        id: verified_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-verified-linux-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-candidate/
+          if-no-files-found: error
+  macos_build:
+    name: Сборка кандидата macOS ARM64
+    needs: [plan, server, web]
+    environment: platform-candidate
+    if: >-
+      ${{ success() && (needs.plan.outputs.platforms == 'macos' ||
+          needs.plan.outputs.platforms == 'linux-and-macos') }}
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      CANDIDATE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      CANDIDATE_PLAN_SHA256: ${{ needs.plan.outputs.candidate_plan_sha256 }}
+      CANDIDATE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
+      CANDIDATE_RECIPE_DIGEST: ${{ needs.plan.outputs.recipe_digest }}
+      CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+      CANDIDATE_PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+      CANDIDATE_PUBLIC_KEY_B64: ${{ vars.CANDIDATE_PUBLIC_KEY_B64 }}
+      CANDIDATE_NOTES_JSON: ${{ inputs.notes }}
+    outputs:
+      artifact_id: ${{ steps.candidate_upload.outputs.artifact-id }}
+      public_key: ${{ steps.seal.outputs.public_key }}
+      signer_fingerprint: ${{ steps.seal.outputs.signer_fingerprint }}
+      manifest_digest: ${{ steps.seal.outputs.current_digest }}
+      file_digest: ${{ steps.seal.outputs.current_file_digest }}
+      previous_manifest_digest: ${{ steps.seal.outputs.previous_digest }}
+      previous_file_digest: ${{ steps.seal.outputs.previous_file_digest }}
+      source_pin_id: ${{ steps.source_pin_upload.outputs.artifact-id }}
+      source_pin_sha256: ${{ steps.source_pin.outputs.sha256 }}
+      process_identity_sha256: ${{ steps.native_tools.outputs.process_sha }}
+      setsid_sha256: ${{ steps.native_tools.outputs.setsid_sha }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime-darwin-arm64.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Нативное окружение Apple Silicon
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          /usr/bin/xcrun --sdk macosx --show-sdk-path
+          /bin/df -Pk "$RUNNER_TEMP"
+          test "$(/bin/df -Pk "$RUNNER_TEMP" | /usr/bin/awk 'NR == 2 { print $4 }')" -ge 16777216
+          /opt/homebrew/bin/brew bundle --file=tools/ci/Brewfile.macos
+      - name: План кандидатов по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-plan
+          merge-multiple: true
+      - name: Серверный receipt по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.server.outputs.receipt_id }}
+          path: ${{ runner.temp }}/suite-server
+          merge-multiple: true
+      - name: Web receipt по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.web.outputs.receipt_id }}
+          path: ${{ runner.temp }}/suite-web
+          merge-multiple: true
+      - name: Подтверждение общих проверок
+        run: node tools/platformCandidate.mts receipts "$RUNNER_TEMP/suite-server" "$RUNNER_TEMP/suite-web"
+      - name: Рабочий каталог кандидата
+        run: mkdir -m 700 "$RUNNER_TEMP/candidate-work"
+      - name: Подготовка нативных process identity и setsid
+        id: native_tools
+        run: node tools/ci/mac-candidate-bootstrap.mts compile "$RUNNER_TEMP/candidate-work/native"
+      - name: Сборка двух версий без ключа подписи
+        run: |
+          for part in previous current; do
+            scope="$RUNNER_TEMP/candidate-work/$part"
+            mkdir -m 700 "$scope"
+            node tools/platformCandidate.mts scope "$scope/source"
+            node tools/ci/stage-platform-candidate.mts "$scope/source" "$scope/staging" "$part"
+          done
+      - name: Устойчивый результат source runtime pin
+        id: source_pin
+        run: |
+          file="$RUNNER_TEMP/candidate-work/current/staging/receipts/mac-runtime-pin-source.json"
+          test -f "$file"
+          printf 'sha256=%s\n' "$(/usr/bin/shasum -a 256 "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Отдельный исходный runtime receipt
+        id: source_pin_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-macos-source-pin-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate-work/current/staging/receipts/mac-runtime-pin-source.json
+          if-no-files-found: error
+      - name: Подпись проверенного staging
+        id: seal
+        env:
+          SIGNING_KEY: ${{ secrets.CANDIDATE_SIGNING_KEY }}
+        run: |
+          umask 077
+          key=$(mktemp "$RUNNER_TEMP/grigdesk-candidate-key.XXXXXXXX")
+          trap 'rm -f "$key"' EXIT
+          test -n "$SIGNING_KEY"
+          printf '%s' "$SIGNING_KEY" > "$key"
+          unset SIGNING_KEY
+          export CANDIDATE_SIGNING_KEY_FILE="$key"
+          mkdir -m 700 "$RUNNER_TEMP/sealed-candidate"
+          for part in previous current; do
+            scope="$RUNNER_TEMP/candidate-work/$part"
+            node "$scope/source/tools/platformCandidate.mts" seal darwin-arm64 "$part" \
+              "$scope/staging/unsigned" "$scope/staging/unsigned.sha256" "$RUNNER_TEMP/sealed-candidate/$part"
+          done
+      - name: Нативные инструменты для отдельного verify
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/sealed-candidate/verify-tools"
+          cp "$GRIGDESK_BUILD_PROCESS_HELPER" "$RUNNER_TEMP/sealed-candidate/verify-tools/process-identity"
+          cp "$GRIGDESK_TEST_SETSID_BIN" "$RUNNER_TEMP/sealed-candidate/verify-tools/setsid"
+      - name: Промежуточные файлы кандидата
+        id: candidate_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-darwin-arm64-${{ github.run_id }}
+          path: ${{ runner.temp }}/sealed-candidate/
+          if-no-files-found: error
+  macos_verify:
+    name: Проверка кандидата macOS ARM64
+    needs: [plan, macos_build]
+    if: >-
+      ${{ success() && (needs.plan.outputs.platforms == 'macos' ||
+          needs.plan.outputs.platforms == 'linux-and-macos') }}
+    runs-on: macos-15
+    timeout-minutes: 80
+    env:
+      CANDIDATE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      CANDIDATE_PLAN_SHA256: ${{ needs.plan.outputs.candidate_plan_sha256 }}
+      CANDIDATE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
+      CANDIDATE_RECIPE_DIGEST: ${{ needs.plan.outputs.recipe_digest }}
+      CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+      CANDIDATE_PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+      BUILD_PUBLIC_KEY: ${{ needs.macos_build.outputs.public_key }}
+      BUILD_SIGNER_FINGERPRINT: ${{ needs.macos_build.outputs.signer_fingerprint }}
+      BUILD_MANIFEST_DIGEST: ${{ needs.macos_build.outputs.manifest_digest }}
+      BUILD_FILE_DIGEST: ${{ needs.macos_build.outputs.file_digest }}
+      BUILD_PREVIOUS_MANIFEST_DIGEST: ${{ needs.macos_build.outputs.previous_manifest_digest }}
+      BUILD_PREVIOUS_FILE_DIGEST: ${{ needs.macos_build.outputs.previous_file_digest }}
+      MAC_SOURCE_PIN_ID: ${{ needs.macos_build.outputs.source_pin_id }}
+      MAC_SOURCE_PIN_SHA256: ${{ needs.macos_build.outputs.source_pin_sha256 }}
+    outputs:
+      artifact_id: ${{ steps.verified_upload.outputs.artifact-id }}
+      public_key: ${{ steps.validation.outputs.public_key }}
+      signer_fingerprint: ${{ steps.validation.outputs.signer_fingerprint }}
+      manifest_digest: ${{ steps.validation.outputs.manifest_digest }}
+      file_digest: ${{ steps.validation.outputs.file_digest }}
+      source_runtime_pin_receipt_id: ${{ steps.validation.outputs.source_pin_id }}
+      source_runtime_pin_receipt_sha256: ${{ steps.validation.outputs.source_pin_sha256 }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime-darwin-arm64.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Инструменты движка Apple Silicon
+        run: |
+          test "$(uname -s)-$(uname -m)" = Darwin-arm64
+          /opt/homebrew/bin/brew bundle --file=tools/ci/Brewfile.macos
+      - name: План кандидатов по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-plan
+          merge-multiple: true
+      - name: Готовые A и B по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.macos_build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-input
+          merge-multiple: true
+      - name: Source runtime pin receipt по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.macos_build.outputs.source_pin_id }}
+          path: ${{ runner.temp }}/source-pin
+          merge-multiple: true
+      - name: Подтверждение готовых нативных инструментов
+        env:
+          MAC_PROCESS_IDENTITY_SHA256: ${{ needs.macos_build.outputs.process_identity_sha256 }}
+          MAC_SETSID_SHA256: ${{ needs.macos_build.outputs.setsid_sha256 }}
+        run: node tools/ci/mac-candidate-bootstrap.mts adopt "$RUNNER_TEMP/candidate-input/verify-tools"
+      - name: Проверка готовых комплектов
+        id: validation
+        run: |
+          node tools/platformCandidate.mts verify darwin-arm64 "$RUNNER_TEMP/candidate-input/current" \
+            "$RUNNER_TEMP/candidate-input/previous" "$RUNNER_TEMP/verified-candidate"
+      - name: Промежуточный проверенный комплект
+        id: verified_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-verified-darwin-arm64-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-candidate/
+          if-no-files-found: error
+  candidate_artifacts:
+    name: Выдача проверенных кандидатов
+    needs: [plan, linux_candidate_verify, macos_verify]
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.macos_verify.result == 'success' &&
+          ((needs.plan.outputs.platforms == 'macos' && needs.linux_candidate_verify.result == 'skipped') ||
+           (needs.plan.outputs.platforms == 'linux-and-macos' && needs.linux_candidate_verify.result == 'success')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CANDIDATE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      CANDIDATE_PLAN_SHA256: ${{ needs.plan.outputs.candidate_plan_sha256 }}
+      CANDIDATE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
+      CANDIDATE_RECIPE_DIGEST: ${{ needs.plan.outputs.recipe_digest }}
+      CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
+      CANDIDATE_PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+      LINUX_PUBLIC_KEY: ${{ needs.linux_candidate_verify.outputs.public_key }}
+      LINUX_SIGNER_FINGERPRINT: ${{ needs.linux_candidate_verify.outputs.signer_fingerprint }}
+      LINUX_MANIFEST_DIGEST: ${{ needs.linux_candidate_verify.outputs.manifest_digest }}
+      LINUX_FILE_DIGEST: ${{ needs.linux_candidate_verify.outputs.file_digest }}
+      MAC_PUBLIC_KEY: ${{ needs.macos_verify.outputs.public_key }}
+      MAC_SIGNER_FINGERPRINT: ${{ needs.macos_verify.outputs.signer_fingerprint }}
+      MAC_MANIFEST_DIGEST: ${{ needs.macos_verify.outputs.manifest_digest }}
+      MAC_FILE_DIGEST: ${{ needs.macos_verify.outputs.file_digest }}
+      MAC_SOURCE_PIN_ID: ${{ needs.macos_verify.outputs.source_runtime_pin_receipt_id }}
+      MAC_SOURCE_PIN_SHA256: ${{ needs.macos_verify.outputs.source_runtime_pin_receipt_sha256 }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          python3 -c 'import json, os; v=json.load(open("server/build/node-runtime.json"))["version"]; print("version="+v, file=open(os.environ["GITHUB_OUTPUT"], "a"))'
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: План кандидатов по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: ${{ runner.temp }}/candidate-plan
+          merge-multiple: true
+      - name: Проверенный Linux по ID
+        if: ${{ needs.plan.outputs.platforms == 'linux-and-macos' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.linux_candidate_verify.outputs.artifact_id }}
+          path: ${{ runner.temp }}/verified-linux
+          merge-multiple: true
+      - name: Проверенный Mac по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.macos_verify.outputs.artifact_id }}
+          path: ${{ runner.temp }}/verified-macos
+          merge-multiple: true
+      - name: Закреплённый Mac source receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.macos_verify.outputs.source_runtime_pin_receipt_id }}
+          path: ${{ runner.temp }}/source-pin
+          merge-multiple: true
+      - name: Сверка выбранных платформ
+        id: collect
+        run: |
+          node tools/platformCandidate.mts collect "$RUNNER_TEMP/verified-linux" \
+            "$RUNNER_TEMP/verified-macos" verified-candidates
+      - name: Кандидат linux-x64
+        id: linux
+        if: ${{ needs.plan.outputs.platforms == 'linux-and-macos' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-candidate-linux-x64-${{ needs.plan.outputs.version }}
+          path: verified-candidates/linux-x64
+          if-no-files-found: error
+      - name: Кандидат darwin-arm64
+        id: macos
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-candidate-darwin-arm64-${{ needs.plan.outputs.version }}
+          path: verified-candidates/darwin-arm64
+          if-no-files-found: error
+      - name: Итог проверки
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+          LINUX_ID: ${{ steps.linux.outputs.artifact-id }}
+          MACOS_ID: ${{ steps.macos.outputs.artifact-id }}
+          LINUX_SHA: ${{ steps.collect.outputs.linux_installer_sha256 }}
+          MACOS_SHA: ${{ steps.collect.outputs.macos_installer_sha256 }}
+        run: |
+          printf '## GrigDesk %s\n\nCommit `%s`\n\n' "$VERSION" "$COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Платформа | Artifact ID | SHA-256 установщика | Проверки |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| --- | --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CANDIDATE_PLATFORMS" = linux-and-macos ]; then
+            printf '| Linux x64 | %s | %s | Пройдены |\n' "$LINUX_ID" "$LINUX_SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf '| macOS ARM64 | %s | %s | Пройдены |\n' "$MACOS_ID" "$MACOS_SHA" >> "$GITHUB_STEP_SUMMARY"

@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "build": "node scripts/build.mts",
     "dist": "npm run build && electron-builder --linux AppImage --x64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dir --arm64 --publish never",
     "postinstall": "install-electron"
   },
   "devDependencies": {
@@ -52,6 +53,14 @@
       ],
       "category": "Network",
       "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dir",
+      "executableName": "grigdesk",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "15.0",
+      "category": "public.app-category.developer-tools"
     },
     "win": {
       "target": [

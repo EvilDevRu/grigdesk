@@ -452,6 +452,13 @@ export async function runContainedKimi({
   // прежний bwrap-профиль. Отсутствие ключа трактуем как contained: старые вызовы
   // и тесты без обновлённого конфига получают прежнее, более строгое поведение.
   const launchMode = config.kimiLaunchMode === 'host' ? 'host' : 'contained';
+
+  if (process.platform === 'darwin' && launchMode === 'contained') {
+    throw Object.assign(new Error('Профиль Kimi contained требует изоляции Linux'), {
+      code: 'platform_capability_unsupported',
+    });
+  }
+
   const commandSettings = {
     blockDirectSsh: providerSettings?.blockDirectSsh !== false,
     blockDirectDb: providerSettings?.blockDirectDb === true,

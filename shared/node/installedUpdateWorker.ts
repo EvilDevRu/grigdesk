@@ -3,14 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 
 import { canonicalJson } from '../lib/canonicalJson.ts';
-import { acquireInstallLock } from './binaryInstall.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
 import { launchInstalledProcess } from './installedProcess.ts';
+import { assertInstallationReleaseTrust } from './bundleLayout.ts';
+import { acceptDarwinRollback, markDarwinRollback } from './darwinRollbackAttempt.ts';
+import {
+  launchDarwinUpdatedDesktop, matchesDarwinDesktopBoot, stopDarwinUpdatedDesktop,
+} from './darwinDesktopUpdate.ts';
 import { API_VERSION } from '../client/apiVersion.ts';
 import { checkReleaseCompatibility } from '../runtime/releaseCompatibility.ts';
 import type { ServerApi } from '../runtime/releaseCompatibility.ts';
 import { pruneCompletedUpdate } from './installedUpdateCleanup.ts';
-import { readInstallation, readInstallationJson,
+import { acquireInstalledUpdateLock, readInstallation, readInstalledPointer, readInstallationJson,
   writeInstallationJson } from './installedLayout.ts';
 import type { InstallationReceipt } from './installedLayout.ts';
 import { readInstalledUpdate } from './installedUpdateState.ts';
@@ -21,7 +25,7 @@ import { verifyInstalledGeneration } from './installedUpdateApply.ts';
 import { readUpdateProcess } from './updateProcessOwner.ts';
 import { inspectInstalledServer, stopInstalledServer,
   startInstalledServer, proveInstalledServer, updateProcessAlive,
-  inspectUpdateActivity, stopUpdatePipelines } from './installedServer.ts';
+  inspectUpdateActivity, stopUpdatePipelines, installedServerRequest } from './installedServer.ts';
 import type { InstalledServerOwner, UpdateProcess, UpdateActivity } from './installedServer.ts';
 
 export interface UpdateHandoff {
@@ -80,7 +84,7 @@ export async function createUpdateHandoff(root: string, jobId: string, input: {
  */
 export async function resumeDesktopHandoff(root: string, jobId: string): Promise<UpdateHandoff> {
   const receipt = await readInstallation(root);
-  const lock = await acquireInstallLock(path.join(root, 'update/installation'), { waitMs: 0 });
+  const lock = await acquireInstalledUpdateLock(root);
 
   try {
     const job = await readInstalledUpdate(receipt);
@@ -93,7 +97,7 @@ export async function resumeDesktopHandoff(root: string, jobId: string): Promise
 
     const handoff = await readHandoff(receipt, job);
 
-    handoff.desktop = await readUpdateProcess(process.pid);
+    handoff.desktop = await readUpdateProcess(process.pid, path.join(root, 'update/maintenance'));
     await writeInstallationJson(root, 'update/handoff.json', handoff);
 
     return handoff;
@@ -112,7 +116,8 @@ async function readHandoff(receipt: InstallationReceipt, job: InstalledUpdateJob
   if (!job.intent || handoff.jobId !== job.id || handoff.nonce !== job.intent.nonce
     || handoff.installationId !== receipt.installationId || handoff.manifestDigest !== job.manifestDigest
     || (job.scope === 'server') !== (handoff.desktop === null)
-    || job.scope === 'pair' && !handoff.server) {
+    || job.scope === 'pair' && !handoff.server
+    || process.platform === 'darwin' && receipt.mode === 'remote' && handoff.server !== null) {
     throw new Error('release_handoff_invalid');
   }
 
@@ -139,7 +144,7 @@ export async function writeDesktopBootProof(root: string, identity: {
     nonce: job.intent.nonce,
     installationId: receipt.installationId,
     ...identity,
-    process: await readUpdateProcess(process.pid),
+    process: await readUpdateProcess(process.pid, path.join(root, 'update/maintenance')),
   });
 }
 
@@ -153,6 +158,79 @@ async function launchDesktop(receipt: InstallationReceipt): Promise<void> {
 }
 
 /**
+ * На Mac новые ходы закрыты от повторного осмотра до dispatch выключения.
+ * При откате новой программе нельзя передавать разрешение от прежнего запуска.
+ */
+async function stopDarwinUpdateServer(input: {
+  receipt: InstallationReceipt;
+  owner: InstalledServerOwner;
+  job: InstalledUpdateJob;
+  handoff: UpdateHandoff;
+  worker: UpdateProcess;
+  expectOriginal: boolean;
+  markStopDispatched?: () => void;
+}): Promise<void> {
+  const { receipt, owner, job, handoff, worker, expectOriginal, markStopDispatched } = input;
+  const original = owner.instanceId === handoff.server?.instanceId
+    && canonicalJson(owner.process) === canonicalJson(handoff.server?.process ?? null);
+
+  if (!owner.instanceId || !job.intent || expectOriginal && !original) {
+    throw new Error('release_server_owner_changed');
+  }
+
+  const body = {
+    jobId: job.id,
+    nonce: job.intent.nonce,
+    installationId: receipt.installationId,
+    instanceId: owner.instanceId,
+    manifestDigest: job.manifestDigest,
+    workerPid: worker.pid,
+    workerStart: worker.starttime,
+  };
+  const route = '/api/system/factory-drain-admission';
+  const response = await installedServerRequest(receipt, route,
+    { ...body, action: 'acquire' }, undefined, 'admission') as { admissionId?: unknown } | null;
+  const admissionId = response?.admissionId;
+
+  if (typeof admissionId !== 'string' || !/^[a-f0-9-]{36}$/u.test(admissionId)) {
+    throw new Error('release_activity_unknown');
+  }
+
+  let dispatched = false;
+
+  try {
+    const activity = await inspectUpdateActivity(receipt);
+    const allowed = original ? handoff.activity : null;
+
+    if (allowed
+      ? activity.active > allowed.active || activity.queued > allowed.queued
+        || activity.tasks.some((task) => !allowed.tasks.includes(task))
+      : activity.active + activity.queued + activity.tasks.length > 0) {
+      throw new Error('release_activity_changed_confirm_again');
+    }
+
+    await stopUpdatePipelines(receipt);
+    await installedServerRequest(receipt, route, {
+      ...body,
+      action: 'confirm',
+      admissionId,
+    }, undefined, 'admission');
+    await stopInstalledServer(receipt, owner, job, admissionId, () => {
+      dispatched = true;
+      markStopDispatched?.();
+    });
+  } finally {
+    if (!dispatched) {
+      await installedServerRequest(receipt, route, {
+        ...body,
+        action: 'release',
+        admissionId,
+      }, undefined, 'admission').catch(() => {});
+    }
+  }
+}
+
+/**
  * Процессный порт связывает атомарную замену с реальным drain и двумя boot proofs.
  * При повторе после прерывания управляются только процессы подтверждённой установки.
  * Rollback — явный возврат к previous из состояний без штатного пути отката.
@@ -161,8 +239,12 @@ export async function runInstalledUpdateWorker(
   root: string,
   jobId: string,
   action: 'apply' | 'recover' | 'rollback' = 'apply',
+  attemptId?: string,
 ): Promise<void> {
   const receipt = await readInstallation(root);
+
+  assertInstallationReleaseTrust(receipt);
+
   const initial = await readInstalledUpdate(receipt);
 
   if (!initial || initial.id !== jobId) {
@@ -180,11 +262,21 @@ export async function runInstalledUpdateWorker(
   }
 
   const handoff = await readHandoff(receipt, initial);
+  const worker = await readUpdateProcess(process.pid);
+  const nativeRollback = process.platform === 'darwin' && action === 'rollback';
 
-  await writeInstallationJson(root, 'update/worker-process.json', {
-    jobId,
-    process: await readUpdateProcess(process.pid),
-  });
+  if (nativeRollback !== Boolean(attemptId)) {
+    throw new Error('release_rollback_attempt_invalid');
+  }
+
+  const rollback = attemptId ? await acceptDarwinRollback(receipt, jobId, attemptId, worker) : null;
+
+  if (!rollback) {
+    await writeInstallationJson(root, 'update/worker-process.json', {
+      jobId,
+      process: worker,
+    });
+  }
 
   let serverStopped = false;
   let desktopStopped = false;
@@ -245,19 +337,39 @@ export async function runInstalledUpdateWorker(
      * После ACK main ждёт drain, сливает stdout и сохраняет настройки до собственного exit.
      * Worker не подменяет этот протокол таймаутом обычного quit.
      */
-    async stop(job: InstalledUpdateJob) {
+    async stop(job: InstalledUpdateJob, markStopDispatched?: () => void) {
       if (handoff.server) {
         const owner = await inspectInstalledServer(receipt);
 
         if (owner.running) {
-          await stopUpdatePipelines(receipt);
-          await stopInstalledServer(receipt, owner, job);
+          if (process.platform === 'darwin') {
+            await stopDarwinUpdateServer({
+              receipt,
+              owner,
+              job,
+              handoff,
+              worker,
+              expectOriginal: action === 'apply' && job.stage === 'stopping' && !serverStopped,
+              markStopDispatched,
+            });
+          } else {
+            await stopUpdatePipelines(receipt);
+            await stopInstalledServer(receipt, owner, job);
+          }
+        } else if (process.platform === 'darwin' && handoff.server.running) {
+          markStopDispatched?.();
         }
 
         serverStopped = true;
       }
 
-      if (handoff.desktop && !desktopStopped) {
+      const previouslyStopped = desktopStopped;
+
+      if (handoff.desktop && !previouslyStopped) {
+        if (process.platform === 'darwin') {
+          markStopDispatched?.();
+        }
+
         await signal('drained');
 
         const deadline = Date.now() + 30000;
@@ -271,7 +383,15 @@ export async function runInstalledUpdateWorker(
         }
 
         desktopStopped = true;
-      } else if (handoff.desktop) {
+      }
+
+      if (handoff.desktop && process.platform === 'darwin') {
+        const current = await readInstalledPointer(receipt);
+
+        if (current.desktop === job.target.desktop || action !== 'apply') {
+          await stopDarwinUpdatedDesktop(receipt, job);
+        }
+      } else if (handoff.desktop && previouslyStopped) {
         // При rollback новый main завершает только bound apply через защищённый boot ACK.
         const proof = await readInstallationJson(root, 'update/desktop-boot.json') as {
           jobId: string;
@@ -312,7 +432,9 @@ export async function runInstalledUpdateWorker(
         await startInstalledServer(receipt);
       }
 
-      if (handoff.desktop) {
+      if (handoff.desktop && process.platform === 'darwin') {
+        await launchDarwinUpdatedDesktop(receipt, job, rollback);
+      } else if (handoff.desktop) {
         await launchDesktop(receipt);
       }
     },
@@ -322,7 +444,11 @@ export async function runInstalledUpdateWorker(
      */
     async prove(job: InstalledUpdateJob, rollback: boolean): Promise<'running' | 'stopped'> {
       if (handoff.desktop) {
-        const expected = (rollback ? job.previous : job.target).desktop?.split('/')[1];
+        const relative = (rollback ? job.previous : job.target).desktop!;
+        const expected = relative.split('/')[1];
+        const releaseId = process.platform === 'darwin' && rollback
+          ? (await verifyInstalledGeneration(receipt, relative, 'desktop')).payload.releaseId
+          : job.envelope.payload.releaseId;
         const deadline = Date.now() + 90000;
         let accepted = false;
 
@@ -339,7 +465,9 @@ export async function runInstalledUpdateWorker(
 
             if (proof.jobId === job.id && proof.nonce === handoff.nonce
               && proof.installationId === receipt.installationId && proof.version === expected
-              && (rollback || proof.releaseId === job.envelope.payload.releaseId)
+              && (rollback && process.platform !== 'darwin' || proof.releaseId === releaseId)
+              && (process.platform !== 'darwin'
+                || await matchesDarwinDesktopBoot(receipt, job, proof.process))
               && await updateProcessAlive(proof.process)) {
               accepted = true;
               break;
@@ -386,7 +514,20 @@ export async function runInstalledUpdateWorker(
     if (finished?.stage === 'completed') {
       await pruneCompletedUpdate(receipt, finished);
     }
+
+    if (rollback) {
+      if (finished?.stage !== 'rolled_back') {
+        throw new Error(finished?.error?.code ?? 'release_recovery_not_available');
+      }
+
+      await markDarwinRollback(root, rollback, 'rolled_back');
+    }
   } catch (error) {
+    if (rollback) {
+      await markDarwinRollback(root, rollback, 'failed',
+        error instanceof Error ? error.message : 'release_apply_failed');
+    }
+
     if (acknowledged) {
       await signal('failed', error instanceof Error ? error.message : 'release_apply_failed');
     }
@@ -399,10 +540,19 @@ export async function runInstalledUpdateWorker(
  * Независимая transient unit выводит helper из app/server cgroup до подтверждения handoff.
  * Без user-systemd используется отдельная сессия и собственный файл вывода.
  */
-export async function launchUpdateWorker(root: string, jobId: string, action = 'apply'): Promise<void> {
+export async function launchUpdateWorker(
+  root: string, jobId: string, action = 'apply', attemptId?: string,
+): Promise<void> {
   const receipt = await readInstallation(root);
 
-  await launchInstalledProcess(receipt, [action, jobId], `update-${jobId}-${action}`);
+  assertInstallationReleaseTrust(receipt);
+
+  if (action === 'prepare' && receipt.format === 2) {
+    throw new Error('candidate_source_required');
+  }
+
+  await launchInstalledProcess(receipt,
+    attemptId ? [action, jobId, attemptId] : [action, jobId], `update-${jobId}-${action}`);
 }
 
 /**
@@ -410,13 +560,15 @@ export async function launchUpdateWorker(root: string, jobId: string, action = '
  * Ошибка либо timeout возвращают управление приложению без разрешения pointer switch.
  */
 export async function waitUpdateWorker(root: string, handoff: UpdateHandoff,
-  desired: WorkerSignal['state']): Promise<void> {
+  desired: WorkerSignal['state'], signal?: AbortSignal): Promise<void> {
   // До accepted worker повторно хеширует все staged-файлы; до drained укладывает
   // stop конвейеров (20с), systemctl stop (65с) и ожидание drain-пруфа (55с).
   // Бюджеты покрывают сумму худших случаев, а не типичный путь.
   const deadline = Date.now() + (desired === 'drained' ? 200000 : 90000);
 
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
+
     let marker: WorkerSignal | null = null;
 
     try {
@@ -444,7 +596,7 @@ export async function waitUpdateWorker(root: string, handoff: UpdateHandoff,
       throw new Error(job.error.code);
     }
 
-    await pause(100);
+    await pause(100, undefined, { signal });
   }
 
   throw new Error('release_handoff_timeout');

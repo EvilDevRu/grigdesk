@@ -211,10 +211,47 @@ test('JOB-PROFILE: смена профиля и latest не меняет гот�
 });
 
 /**
+ * Server-задание принадлежит CLI/серверу: десктоп не применяет и не возобновляет его,
+ * даже когда локальный профиль не выбран и задание готово. Intent остаётся нетронутым.
+ */
+test('APPLY-SERVER-SCOPE: десктоп не мутирует готовое server-задание', async (t) => {
+  const box = await installedFixture(t, { mode: 'server' });
+  const { createApplicationUpdates } = await loadInstalledModule(t, 'desktop/src/applicationUpdates.ts',
+    box.release.publicKeyPem);
+  let applied = 0;
+
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(box.release.index)));
+
+  const app = createApplicationUpdates({
+    root: box.root,
+    runningVersion: '0.2.0',
+    localSelected: () => false,
+    prepare: async (job) => box.manager.prepare(job.id),
+    apply: async () => {
+      applied += 1;
+    },
+  });
+
+  t.after(() => app.close());
+  await app.start();
+
+  const created = await box.create();
+  await box.manager.prepare(created.id);
+  const ready = await box.job();
+
+  assert.equal(ready.stage, 'ready');
+  assert.equal(ready.scope, 'server');
+  await assert.rejects(app.port.action('apply', { confirmed: true }), /return_to_confirmed_profile/);
+  await assert.rejects(app.port.action('resume', {}), /return_to_confirmed_profile/);
+  assert.equal(applied, 0);
+  assert.deepEqual(await box.job(), ready);
+});
+
+/**
  * Закрытие окна считается подтверждением только для готового задания своего профиля.
  * Чужой профиль и отсутствие задания дают idle без диалога и без запуска worker.
  */
-test('QUIT-APPLY: чужой профиль и пустой журнал дают idle без confirm и worker', async (t) => {
+test('QUIT-APPLY: чужой профиль и пустой журнал дают idle без диалога и без запуска worker', async (t) => {
   const box = await installedFixture(t);
   const { createInstalledApplication } = await loadInstalledModule(t,
     'desktop/src/installedApplication.ts', box.release.publicKeyPem);

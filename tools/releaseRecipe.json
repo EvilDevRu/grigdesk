@@ -344,6 +344,250 @@
         "build"
       ],
       "timeoutMs": 7200000
+    },
+    {
+      "id": "mac-install",
+      "group": "mac-prepare",
+      "argv": [
+        "bash",
+        "-c",
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix tracker ci && npm --prefix routes ci --include=dev && npm --prefix voice ci --include=dev && npm --prefix relay ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "mac-deepseek",
+      "group": "mac-prepare",
+      "argv": [
+        "bash",
+        "-c",
+        "npm --prefix deepseek run prepare:runtime -- --node-cache-dir \"$GRIGDESK_DEEPSEEK_NODE_CACHE\""
+      ],
+      "timeoutMs": 1800000,
+      "needs": [
+        "mac-install"
+      ]
+    },
+    {
+      "id": "mac-deepseek-vendor",
+      "group": "mac-prepare",
+      "argv": [
+        "bash",
+        "-c",
+        "node --input-type=module <<'NODE'\nimport { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';\nawait materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');\nNODE"
+      ],
+      "timeoutMs": 1800000,
+      "needs": [
+        "mac-install"
+      ]
+    },
+    {
+      "id": "mac-browser",
+      "group": "mac-prepare",
+      "argv": [
+        "node",
+        "server/node_modules/playwright-core/cli.js",
+        "install",
+        "chromium"
+      ],
+      "needs": [
+        "mac-install"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "mac-env",
+      "group": "mac-prepare",
+      "needs": [
+        "mac-deepseek",
+        "mac-deepseek-vendor",
+        "mac-browser"
+      ],
+      "argv": [
+        "node",
+        "tools/releaseEnvironment.mts",
+        "--require-native-ready"
+      ],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "mac-server-typecheck",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "server",
+        "run",
+        "typecheck"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "mac-web-tests",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "web",
+        "test"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--test-reporter=tap"
+      },
+      "timeoutMs": 5400000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "mac-shared-contracts",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-node-tests-safe.sh",
+        "--test",
+        "--test-concurrency=2",
+        "tests/shared/release-channel-contracts.test.mts",
+        "tests/shared/release-compatibility.test.mts",
+        "tests/server/release-platform.test.mts",
+        "tests/server/maintenance-runtime-info.test.mts",
+        "tests/server/release-desktop-build.test.mts",
+        "tests/server/macos-app-archive.test.mts",
+        "tests/server/macos-launchd.test.mts",
+        "tests/desktop/exit-controller.test.js",
+        "tests/server/macos-runtime-context.test.mts",
+        "tests/server/runtime-pin-evidence.test.mts",
+        "tests/server/platform-candidate.test.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "mac-doctor-contract",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-node-tests-safe.sh",
+        "--test",
+        "--test-concurrency=2",
+        "--test-name-pattern=^ENVIRONMENT-DARWIN",
+        "tests/server/release-environment.test.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "mac-sea-native",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-node-tests-safe.sh",
+        "--test",
+        "--test-concurrency=1",
+        "tests/server/macos-sea-build.e2e.mts"
+      ],
+      "timeoutMs": 3600000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 1
+      }
+    },
+    {
+      "id": "mac-dist-contract",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-node-tests-safe.sh",
+        "--test",
+        "tests/server/macos-dist-build.e2e.mts"
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 1
+      }
+    },
+    {
+      "id": "mac-runtime-pin-source",
+      "group": "mac-check",
+      "needs": [
+        "mac-prepare"
+      ],
+      "argv": [
+        "node",
+        "tools/ci/run-macos-runtime-pin-tests.mts",
+        "source"
+      ],
+      "timeoutMs": 3600000
+    },
+    {
+      "id": "mac-web-build",
+      "group": "mac-build",
+      "needs": [
+        "mac-check"
+      ],
+      "argv": [
+        "npm",
+        "--prefix",
+        "web",
+        "run",
+        "build"
+      ],
+      "timeoutMs": 7200000
+    },
+    {
+      "id": "candidate-release-package",
+      "group": "candidate-build",
+      "needs": [
+        "web-build"
+      ],
+      "argv": [
+        "node",
+        "tools/ci/stage-release-bundle.mts"
+      ],
+      "timeoutMs": 7200000
+    },
+    {
+      "id": "mac-release-package",
+      "group": "mac-build",
+      "needs": [
+        "mac-web-build"
+      ],
+      "argv": [
+        "node",
+        "tools/ci/stage-release-bundle.mts"
+      ],
+      "timeoutMs": 7200000
     }
   ]
 }

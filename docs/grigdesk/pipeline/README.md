@@ -83,7 +83,7 @@
 ### Данные фабрики
 
 - [Диалог разбора остановки: история, явный выбор, CAS и восстановление](arbiter-stop-dialog.md)
-- [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md)
+- [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md) — допуск после «Стоп» на macOS.
 - [Данные фабрики](factory-data.md)
 - [разбор СОХРАНЯЕТСЯ и виден в карточке остановки](persistent-stall-analysis.md)
 
@@ -155,6 +155,9 @@
 - [Задача в UI «замирает»: SSE смотрит не в runtime root](sse-runtime-root.md)
 - [Замечание человека доезжало до агента огрызком: две независимые обрезки подряд](human-comment-truncation.md)
 - [Запуск фабрики — ТОЛЬКО в отдельный systemd-scope (иначе рестарт GrigDesk убивает прогоны)](factory-systemd-scope.md)
+- [Запуск фабрики на Darwin: сессия, сохраняемая запись и разрешение на старт](../server/darwin-process-identity.md#запуск-конвейера)
+- [Снимок владельцев конвейера и допуск обновления на Darwin](../server/darwin-process-identity.md#владение-задачами-при-обновлении)
+- [Восстановление транзакции и повтор Stop на Darwin](../server/darwin-process-identity.md#восстановление-транзакции-при-stop)
 - [Каталог маршрутов сверяется внутри движка, а не в HTTP-preflight](route-catalog-pinning.md)
 - [Контракт запуска — по состоянию, не по stdout](launch-state-contract.md)
 - [Повтор после отказа подготовки CLI](cli-preparation-retry.md) — proof до spawn,

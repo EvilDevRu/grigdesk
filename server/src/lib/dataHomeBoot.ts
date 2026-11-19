@@ -3,11 +3,15 @@ import * as nodeFs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseEnv } from 'node:util';
+import { readDarwinStarttimeSync } from '../../../shared/node/processIdentity.ts';
+import {
+  canonicalDataPath, checkDataHomePlacement, DataHomeError,
+} from '../../../shared/node/dataHomePlacement.ts';
 import { dataHome, dataHomeExplicit, dataPath, envFilePath } from '../../../shared/runtime/dataHome.ts';
 
 export type BootFs = typeof nodeFs;
 
-export class DataHomeError extends Error {}
+export { DataHomeError };
 
 export interface CheckInput {
   codeRoot: string;
@@ -63,36 +67,6 @@ function stat(file: string, fs: BootFs): nodeFs.Stats | null {
   }
 }
 
-// Канонизируем существующих предков, не создавая ещё отсутствующую папку.
-// Ссылка в существующем предке учитывается и для ещё не созданного потомка.
-function canonical(file: string, fs: BootFs): string {
-  try {
-    return fs.realpathSync(file);
-  } catch (error) {
-    if (!missing(error) || path.dirname(file) === file || stat(file, fs)?.isSymbolicLink()) {
-      throw error;
-    }
-
-    return path.join(canonical(path.dirname(file), fs), path.basename(file));
-  }
-}
-
-function contains(parent: string, child: string): boolean {
-  return child === parent || child.startsWith(parent + path.sep);
-}
-
-// Проверяем реальные границы и при явной папке: это защита от выбора кода или HOME.
-// Проверка выполняется до любой записи и работает также для ссылок.
-function checkPlacement(selected: string, input: CheckInput, fs: BootFs): void {
-  const target = canonical(selected, fs);
-  const code = canonical(path.resolve(input.codeRoot), fs);
-  const home = canonical(path.resolve(input.home), fs);
-
-  if (target === home || contains(code, target) || contains(target, code)) {
-    throw new DataHomeError('Папка данных не должна совпадать с HOME, лежать внутри кода или содержать его.');
-  }
-}
-
 // В старой раскладке смотрим только вид записи и имена верхнего уровня, без чтения данных.
 // Совместимые ссылки и единственная отслеживаемая заглушка не считаются данными.
 export function findLegacyData(codeRoot: string, fs: BootFs): string[] {
@@ -126,7 +100,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
   try {
     const selected = dataHome(input);
 
-    checkPlacement(selected, input, fs);
+    checkDataHomePlacement(selected, input, fs);
 
     if (dataHomeExplicit(input)) {
       return selected;
@@ -145,7 +119,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
         continue;
       }
 
-      const expected = canonical(dataPath(selected, target), fs);
+      const expected = canonicalDataPath(dataPath(selected, target), fs);
       let actual: string;
 
       try {
@@ -188,7 +162,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
       throw migrationError(`Найдена старая раскладка: ${legacy.join(', ')}.`);
     }
 
-    return canonical(selected, fs);
+    return canonicalDataPath(selected, fs);
   } catch (error) {
     if (error instanceof DataHomeError) {
       throw error;
@@ -394,6 +368,10 @@ export function prepareDataHome(input: CheckInput, deps: PrepareDeps): { home: s
 // starttime различает повторное использование PID; отсутствие proc сохраняет проверку kill.
 // Имя процесса может содержать пробелы и скобки, поэтому поля считаются после последней скобки.
 export function processStarttime(pid: number): string | null {
+  if (process.platform === 'darwin') {
+    return readDarwinStarttimeSync(pid).starttime;
+  }
+
   try {
     const text = nodeFs.readFileSync(`/proc/${pid}/stat`, 'utf8');
 
@@ -406,6 +384,10 @@ export function processStarttime(pid: number): string | null {
 // EPERM означает существующий процесс, даже когда проверяющему запрещён сигнал.
 // Любая другая ошибка сигнала считается отсутствием процесса.
 export function processAlive(pid: number): boolean {
+  if (process.platform === 'darwin') {
+    return !readDarwinStarttimeSync(pid).dead;
+  }
+
   try {
     process.kill(pid, 0);
 

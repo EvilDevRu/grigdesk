@@ -22,6 +22,9 @@ Contained сохраняет прежний network invariant независим
 сохранённом `blockDirectSsh: false` отдельная сеть и egress allowlist пропускают только API
 Kimi. Выключение не расширяет contained-сеть; оно важно при будущей смене режима на host.
 
+На macOS запрос профиля contained возвращает `platform_capability_unsupported` перед
+проверкой версии CLI и подготовкой процессов. Режим запуска выбирается конфигурацией.
+
 Что осознанно отключается относительно contained:
 
 - mount/pid/net namespace изоляция и маски control state: процесс видит host FS целиком,

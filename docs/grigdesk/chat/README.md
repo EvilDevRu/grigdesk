@@ -99,7 +99,7 @@
 - [Kimi host: причина прежней блокировки ходов с плагином БД](kimi-db-policy.md)
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
 - [Kimi ACP: результаты contract spike](kimi-acp-spike.md)
-- [KimiRuntime: security gate](kimi-runtime-security.md)
+- [KimiRuntime: security gate и ограничение contained на macOS](kimi-runtime-security.md)
 - [Авторизация Kimi: официальный и scoped credential](kimi-scoped-credentials.md)
 
 ### Чат

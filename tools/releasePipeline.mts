@@ -1,14 +1,22 @@
 import fs from 'node:fs/promises';
+import { renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 import { canonicalJson } from '../shared/lib/canonicalJson.ts';
 import { collectBuildProcesses, terminateBuildProcesses, type BuildProcess }
   from '../cli/buildProcesses.ts';
+import { runDarwinBuildProcess } from '../cli/darwinBuildProcesses.ts';
+import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
+import { readTargetNodeRuntime, serverNodeRuntimeManifest } from '../shared/node/nodeRuntime.ts';
+import { readDarwinBuildSetsid } from './darwinBuildTools.mts';
+import { assertRuntimePinDirectory, checkRuntimePinOutcomes, readRuntimePinJson }
+  from './ci/runtimePinEvidence.mts';
 
 export interface RecipeStage {
   id: string;
@@ -49,6 +57,20 @@ export interface PipelineResult {
   reason: null | 130 | 143 | 124;
   cleanupConfirmed: boolean;
   outcomes: Record<string, StageOutcome>;
+}
+
+/**
+ * A successful aggregate cannot stand in for an omitted mandatory build stage.
+ * Uses the selected groups from the pinned recipe.
+ */
+export function requireBuildOutcomes(
+  recipe: ReleaseRecipe, groups: readonly string[], result: PipelineResult,
+) {
+  if (result.code !== 0 || !result.cleanupConfirmed || recipe.stages.some(({ id, group, required }) =>
+    groups.includes(group) && required !== false
+    && (result.outcomes[id]?.status !== 'success' || result.outcomes[id]?.exitCode !== 0))) {
+    throw new Error('release_pipeline_receipt_missing');
+  }
 }
 
 export interface PipelineObserver {
@@ -109,11 +131,21 @@ export function recipeDigest(recipe: ReleaseRecipe, runnerBytes: Buffer): string
  * Отпечаток рецепта покрывает также окружение, provisioning и управление процессами.
  * CI и локальный ctl читают ровно тот же набор файлов из собственного снимка.
  */
-export async function recipeImplementationBytes(root: string): Promise<Buffer> {
+export async function recipeImplementationBytes(root: string, darwin = false): Promise<Buffer> {
   const files = ['tools/releasePipeline.mts', 'tools/releaseEnvironment.mts',
     'tools/ci/provision-ubuntu.sh', 'tools/ci/run-release-server-tests.sh',
     'tools/ci/prepare-release-desktop.sh', 'cli/buildProcesses.ts'];
   const chunks: Buffer[] = [];
+
+  if (darwin) {
+    files.push('cli/darwinBuildProcesses.ts', 'shared/node/processIdentity.ts',
+      'tools/darwinBuildTools.mts', 'tools/macos/process-identity.c', 'tools/macos/runner-fds.h',
+      'tools/macos/setsid.c', 'tools/ci/runtimePinEvidence.mts',
+      'tools/ci/runtime-pin-reporter.mjs', 'tools/ci/run-macos-runtime-pin-tests.mts',
+      'tools/ci/Brewfile.macos', 'server/build/node-runtime-darwin-arm64.json',
+      'tools/ci/stage-platform-candidate.mts', 'tools/ci/mac-candidate-bootstrap.mts',
+      'tools/installedBundle.mts', 'tools/buildDesktopRelease.mts', 'tools/verifyInstallation.mts');
+  }
 
   for (const file of files) {
     chunks.push(Buffer.from(file + '\0'), await fs.readFile(path.join(root, file)));
@@ -147,8 +179,18 @@ export async function runStages(input: {
   groups?: string[];
   sourceDigest?: string;
   observer?: PipelineObserver;
+  signal?: AbortSignal;
+  darwinToolchain?: { nodeVersion: string; npmVersion: string };
+  candidateRecipe?: boolean;
+  sourceReceiptIdentity?: {
+    commit: string;
+    sourceDigest: string;
+    recipeDigest: string;
+  };
 }): Promise<PipelineResult> {
   const recipe = decodeRecipe(input.recipe);
+  const project = path.resolve(import.meta.dirname, '..');
+  const darwin = process.platform === 'darwin';
 
   if (input.groups?.some((group) => !recipe.stages.some((stage) => stage.group === group))) {
     throw new Error('pipeline_group_unknown');
@@ -162,6 +204,18 @@ export async function runStages(input: {
   let trackingInFlight: Promise<void> | null = null;
   let currentChildPid: number | null = null;
   let terminate: Promise<void> | null = null;
+  let setsid: string | undefined;
+  let runtimePinDirectory: string | undefined;
+  const sourceStage = darwin ? recipe.stages.find((stage) => stage.id === 'mac-runtime-pin-source'
+    && (input.groups === undefined || input.groups.includes(stage.group))) : undefined;
+  const controller = new AbortController();
+
+  if (sourceStage && (!/^[a-f0-9]{40}$/u.test(input.sourceReceiptIdentity?.commit ?? '')
+    || !/^[a-f0-9]{64}$/u.test(input.sourceReceiptIdentity?.sourceDigest ?? '')
+    || !/^[a-f0-9]{64}$/u.test(input.sourceReceiptIdentity?.recipeDigest ?? '')
+    || input.sourceReceiptIdentity?.sourceDigest !== input.sourceDigest)) {
+    throw new Error('mac_runtime_pin_source_identity_invalid');
+  }
 
   await fs.mkdir(path.dirname(input.logFile), { recursive: true, mode: 0o700 });
 
@@ -194,11 +248,56 @@ export async function runStages(input: {
     }
 
     reason = signal === 'SIGINT' ? 130 : 143;
-    terminate = terminateStageTree();
+
+    if (darwin) {
+      controller.abort(reason);
+    } else {
+      terminate = terminateStageTree();
+    }
   };
 
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const onAbort = () => {
+    const value = input.signal?.reason;
+
+    onSignal(value === 130 || value?.code === 130 ? 'SIGINT' : 'SIGTERM');
+  };
+
+  if (darwin && input.signal) {
+    input.signal.addEventListener('abort', onAbort, { once: true });
+
+    if (input.signal.aborted) {
+      onAbort();
+    }
+  } else {
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+  }
+
+  /**
+   * Журнал получает исходные байты в обоих режимах вывода.
+   * В Darwin вывод ограничивается deadline даже при зависшем downstream.
+   */
+  const capture = async (stream: AsyncIterable<Buffer>, channel: 'stdout' | 'stderr',
+    signal?: AbortSignal) => {
+    const output = input.observer?.output;
+    const decoder = output ? new StringDecoder('utf8') : undefined;
+
+    for await (const chunk of stream) {
+      signal?.throwIfAborted();
+
+      if (output && decoder) {
+        output(decoder.write(chunk), channel);
+      } else if (!process[channel].write(chunk) && signal) {
+        await once(process[channel], 'drain', { signal });
+      }
+
+      await log.write(chunk);
+    }
+
+    if (output && decoder) {
+      output(decoder.end(), channel);
+    }
+  };
 
   /**
    * Стадия запускается в собственной группе, вывод читается в stream и журнал.
@@ -214,16 +313,80 @@ export async function runStages(input: {
     })}\n`);
     input.observer?.start(stage);
 
+    const cwd = stage.cwd ? path.resolve(input.cwd, stage.cwd) : input.cwd;
+    const env: NodeJS.ProcessEnv = {
+      ...input.env,
+      ...stage.env,
+      ...stage.memory ? {
+        NODE_TEST_MAX_RSS_MB: String(stage.memory.rssMb),
+        NODE_TEST_HEAP_MB: String(stage.memory.heapMb),
+      } : {},
+    };
+
+    if (stage === sourceStage) {
+      const receiptRoot = await fs.realpath(input.receiptDir);
+
+      runtimePinDirectory = await fs.mkdtemp(path.join(receiptRoot, 'runtime-pin-'));
+      await assertRuntimePinDirectory(runtimePinDirectory);
+      env.GRIGDESK_RUNTIME_PIN_REPORT_DIR = runtimePinDirectory;
+    }
+
+    if (reason !== null) {
+      return blockedStage(stage, 'cancelled');
+    }
+
+    if (setsid) {
+      env.GRIGDESK_BUILD_PROCESS_HELPER = input.env.GRIGDESK_BUILD_PROCESS_HELPER;
+      env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256 = input.env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256;
+      env.GRIGDESK_TEST_SETSID_BIN = setsid;
+      env.GRIGDESK_BUILD_SETSID_SHA256 = input.env.GRIGDESK_BUILD_SETSID_SHA256;
+
+      const result = await runDarwinBuildProcess({
+        file: stage.argv[0]!,
+        args: stage.argv.slice(1),
+        cwd,
+        env,
+        setsid,
+        output: 'pipe',
+        timeoutMs: stage.timeoutMs,
+        signal: controller.signal,
+        onStopReason: (value) => {
+          reason ??= value;
+        },
+        capture: async (child, signal) => {
+          await Promise.all([
+            capture(child.stdout!, 'stdout', signal), capture(child.stderr!, 'stderr', signal),
+          ]);
+        },
+      });
+
+      reason ??= result.reason;
+      cleanupConfirmed = result.cleanupConfirmed;
+
+      if (!cleanupConfirmed || result.error) {
+        const detail = !cleanupConfirmed ? 'не подтверждено завершение процессов'
+          : (result.error as Error).message;
+
+        await log.write(`\n[${stage.id}] ${detail}\n`);
+      }
+
+      const status = reason === 124 ? 'failed' : reason !== null ? 'cancelled'
+        : result.code === 0 && result.cleanupConfirmed ? 'success' : 'failed';
+
+      return {
+        id: stage.id,
+        group: stage.group,
+        status,
+        exitCode: result.code,
+        signal: result.signal,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      };
+    }
+
     const child = spawn(stage.argv[0]!, stage.argv.slice(1), {
-      cwd: stage.cwd ? path.resolve(input.cwd, stage.cwd) : input.cwd,
-      env: {
-        ...input.env,
-        ...stage.env,
-        ...stage.memory ? {
-          NODE_TEST_MAX_RSS_MB: String(stage.memory.rssMb),
-          NODE_TEST_HEAP_MB: String(stage.memory.heapMb),
-        } : {},
-      },
+      cwd,
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -259,28 +422,6 @@ export async function runStages(input: {
       }
     }, stage.timeoutMs);
 
-    /**
-     * Журнал получает исходные байты в обоих режимах вывода.
-     * У наблюдателя отдельный декодер каждого потока сохраняет границы UTF-8.
-     */
-    const capture = async (stream: AsyncIterable<Buffer>, channel: 'stdout' | 'stderr') => {
-      const output = input.observer?.output;
-      const decoder = output ? new StringDecoder('utf8') : undefined;
-
-      for await (const chunk of stream) {
-        if (output && decoder) {
-          output(decoder.write(chunk), channel);
-        } else {
-          process[channel].write(chunk);
-        }
-
-        await log.write(chunk);
-      }
-
-      if (output && decoder) {
-        output(decoder.end(), channel);
-      }
-    };
     const streams = Promise.all([
       capture(child.stdout!, 'stdout'), capture(child.stderr!, 'stderr'),
     ]);
@@ -316,8 +457,27 @@ export async function runStages(input: {
   };
 
   try {
+    if (sourceStage) {
+      await fs.mkdir(input.receiptDir, { recursive: true, mode: 0o700 });
+    }
+
+    if (darwin && reason === null) {
+      const pin = await readTargetNodeRuntime(path.join(input.cwd, serverNodeRuntimeManifest('darwin-arm64')),
+        'darwin-arm64');
+
+      if (process.arch !== 'arm64' || input.darwinToolchain?.nodeVersion !== `v${pin.version}`
+        || !/^\d+\.\d+\.\d+$/u.test(input.darwinToolchain.npmVersion)) {
+        throw new Error('release_toolchain_invalid');
+      }
+
+      await configureDarwinBuildProcessHelper(input.env);
+      setsid = await readDarwinBuildSetsid(input.env);
+    }
+
     for (const stage of recipe.stages) {
-      if (input.groups !== undefined && !input.groups.includes(stage.group)) {
+      if (!darwin && stage.group.startsWith('mac-')
+        || stage.group === 'candidate-build' && !input.candidateRecipe
+        || input.groups !== undefined && !input.groups.includes(stage.group)) {
         outcomes[stage.id] = blockedStage(stage, 'skipped');
 
         continue;
@@ -325,6 +485,12 @@ export async function runStages(input: {
 
       if (reason !== null) {
         outcomes[stage.id] = blockedStage(stage, 'cancelled');
+
+        continue;
+      }
+
+      if (darwin && !cleanupConfirmed) {
+        outcomes[stage.id] = blockedStage(stage, 'blocked');
 
         continue;
       }
@@ -342,15 +508,74 @@ export async function runStages(input: {
       }
 
       outcomes[stage.id] = await runStage(stage);
+
+      if (stage === sourceStage && outcomes[stage.id]!.status === 'success' && reason === null) {
+        try {
+          const file = path.join(runtimePinDirectory ?? '', 'runtime-pin-outcomes.json');
+          const outcomes = checkRuntimePinOutcomes('source', await readRuntimePinJson(file, true));
+
+          await fs.writeFile(path.join(input.receiptDir, 'mac-runtime-pin-source.json'), canonicalJson({
+            format: 1,
+            ...input.sourceReceiptIdentity,
+            stage: stage.id,
+            code: 0,
+            outcomes,
+          }) + '\n', { flag: 'wx', mode: 0o600 });
+        } catch (error) {
+          outcomes[stage.id]!.status = 'failed';
+          await log.write(String(error) + '\n');
+        }
+      }
+
       input.observer?.finish(outcomes[stage.id]!);
     }
 
     if (terminate !== null) {
       await terminate;
     }
+
+    if (darwin) {
+      const digest = input.sourceReceiptIdentity?.recipeDigest
+        ?? recipeDigest(recipe, await recipeImplementationBytes(project, true));
+
+      await fs.mkdir(input.receiptDir, { recursive: true, mode: 0o700 });
+
+      const failed = recipe.stages.some((stage) => stage.required !== false
+        && outcomes[stage.id]?.status !== 'success' && outcomes[stage.id]?.status !== 'skipped');
+      const result: PipelineResult = {
+        runId,
+        code: reason ?? (failed || !cleanupConfirmed ? 1 : 0),
+        reason,
+        cleanupConfirmed,
+        outcomes,
+      };
+      const receipt = path.join(input.receiptDir, `pipeline-${runId}.json`);
+      const temporary = `${receipt}.tmp`;
+
+      writeFileSync(temporary, canonicalJson({
+        format: 1,
+        recipeDigest: digest,
+        sourceDigest: input.sourceDigest ?? null,
+        environment: {
+          ...input.darwinToolchain,
+          os: os.platform(),
+          arch: os.arch(),
+          kernel: os.release(),
+          ...setsid ? {
+            processIdentitySha256: input.env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256,
+            setsidSha256: input.env.GRIGDESK_BUILD_SETSID_SHA256,
+          } : {},
+        },
+        ...result,
+      }) + '\n', { mode: 0o600, flag: 'wx' });
+      renameSync(temporary, receipt);
+
+      return result;
+    }
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    input.signal?.removeEventListener('abort', onAbort);
     await log.close();
   }
 
@@ -365,7 +590,7 @@ export async function runStages(input: {
     outcomes
   };
   const digest = recipeDigest(recipe,
-    await recipeImplementationBytes(path.resolve(import.meta.dirname, '..')));
+    await recipeImplementationBytes(path.resolve(import.meta.dirname, '..'), input.candidateRecipe));
 
   const probe = async (command: string) => promisify(execFile)(command, ['--version'], {
     env: input.env,
@@ -404,6 +629,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
     cwd: process.cwd(),
     env: process.env,
     groups,
+    candidateRecipe: process.env.GRIGDESK_RELEASE_DUAL === '1',
+    sourceReceiptIdentity: process.env.GRIGDESK_RELEASE_RECIPE_DIGEST ? {
+      commit: process.env.GRIGDESK_RELEASE_COMMIT ?? '',
+      sourceDigest: process.env.GRIGDESK_RELEASE_SOURCE_DIGEST ?? '',
+      recipeDigest: process.env.GRIGDESK_RELEASE_RECIPE_DIGEST,
+    } : undefined,
+    darwinToolchain: process.platform === 'darwin' ? {
+      nodeVersion: process.env.GRIGDESK_RELEASE_NODE_VERSION ?? '',
+      npmVersion: process.env.GRIGDESK_RELEASE_NPM_VERSION ?? '',
+    } : undefined,
     sourceDigest: process.env.GRIGDESK_RELEASE_SOURCE_DIGEST,
     logFile: process.env.GRIGDESK_PIPELINE_LOG ?? 'pipeline.log',
     receiptDir: process.env.GRIGDESK_PIPELINE_RECEIPTS ?? '.'

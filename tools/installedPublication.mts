@@ -246,12 +246,20 @@ export async function publishInstalledRelease(
 
   verifyReleaseEnvelope(index.latest, publicKey);
 
+  if (index.latest.payload.platform.os !== 'linux') {
+    throw new Error('release_publish_platform_unsupported');
+  }
+
   const proof = await fs.readFile(path.join(directory, 'grigdesk-install.sha256'), 'utf8');
   const signature = await fs.readFile(path.join(directory, 'grigdesk-install.sig'), 'utf8');
 
   await verifyReleaseInstaller(path.join(directory, 'grigdesk-install'), index.latest,
     proof, signature, publicKey);
-  await verifyBootstrapFiles(directory, { envelope: index.latest, publicKey });
+  const bootstrap = await verifyBootstrapFiles(directory, { envelope: index.latest, publicKey });
+
+  if (bootstrap.delivery) {
+    throw new Error('release_local_build_not_publishable');
+  }
 
   for (const component of ['desktop', 'server'] as const) {
     const artifact = index.latest.payload.artifacts[component];

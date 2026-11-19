@@ -3,9 +3,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { isSea, getAsset } from 'node:sea';
 
-import { readInstallation, readInstalledPointer, writeInstallationJson }
+import { assertInstallationPath, readInstallation, readInstalledPointer, writeInstallationJson }
   from '../shared/node/installedLayout.ts';
+import { assertInstallationReleaseTrust, installedExecutableSuffix } from '../shared/node/bundleLayout.ts';
 import { readUpdateProcess } from '../shared/node/updateProcessOwner.ts';
+import { readDarwinProcessIdentity, tryDarwinInstallLease } from '../shared/node/processIdentity.ts';
 import { InstalledUpdateService } from '../shared/node/installedUpdateService.ts';
 import { runInstalledUpdateWorker } from '../shared/node/installedUpdateWorker.ts';
 import { registerInstalledServerLaunch } from '../shared/node/installedServer.ts';
@@ -17,6 +19,11 @@ import { installRelease } from './installRelease.mts';
 import { copyInstallerArchive, verifyInstallerArchive } from '../shared/node/installerArchiveTail.ts';
 import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+import { DARWIN_SERVICE_MARKER } from '../shared/node/darwinServiceRegistration.ts';
+import { darwinInstalledService } from '../shared/node/launchdInstalledService.ts';
+import { acceptDarwinDesktopLaunch } from '../shared/node/darwinDesktopUpdate.ts';
+import { rollbackAttemptPattern } from '../shared/node/darwinRollbackAttempt.ts';
+import { stopDarwinVerificationServer } from '../shared/node/darwinVerificationStartup.ts';
 
 /**
  * В SEA хранится только небольшое подписанное описание, архивы читаются из хвоста ELF.
@@ -45,8 +52,36 @@ function installerRelease(): ReleaseEnvelope {
  * Служебные команды принимают только известные действия и installation-bound job id.
  */
 export async function runMaintenance(argv: string[]): Promise<number> {
-  const root = path.resolve(path.dirname(process.execPath), '..');
   const [action, ...args] = argv;
+
+  if (action === 'install-lock-fd' && !args.length && process.platform === 'darwin' && isSea()) {
+    return await tryDarwinInstallLease(3) ? 0 : 75;
+  }
+
+  if (action === 'inspect-process' && args.length === 1 && /^[1-9][0-9]*$/u.test(args[0]!)
+    && process.platform === 'darwin' && isSea()) {
+    const result = await readDarwinProcessIdentity(Number(args[0]));
+
+    if (result.state !== 'alive') {
+      return result.state === 'dead' ? 3 : 74;
+    }
+
+    process.stdout.write(JSON.stringify(result.identity) + '\n');
+
+    return 0;
+  }
+
+  if (action === '--runtime-info' && args.length === 1 && args[0] === '--json') {
+    process.stdout.write(JSON.stringify({
+      kind: 'grigdesk-maintenance',
+      platform: process.platform,
+      arch: process.arch,
+      node: process.versions.node,
+      sea: isSea(),
+    }) + '\n');
+
+    return 0;
+  }
 
   if (action === 'install-online') {
     return runInstallOnline(args);
@@ -129,16 +164,38 @@ export async function runMaintenance(argv: string[]): Promise<number> {
     }
   }
 
+  const root = path.resolve(path.dirname(process.execPath), '..');
   const receipt = await readInstallation(root);
 
-  if (['apply', 'recover', 'rollback'].includes(action ?? '') && args.length === 1
+  if (process.platform === 'darwin' && action === 'rollback' && args.length === 2
+    && args.every((value) => rollbackAttemptPattern.test(value))) {
+    await runInstalledUpdateWorker(root, args[0]!, 'rollback', args[1]!);
+
+    return 0;
+  }
+
+  if (['apply', 'recover', ...(process.platform === 'darwin' ? [] : ['rollback'])].includes(action ?? '')
+    && args.length === 1
     && /^[a-f0-9-]{36}$/u.test(args[0]!)) {
     await runInstalledUpdateWorker(root, args[0]!, action as 'apply' | 'recover' | 'rollback');
 
     return 0;
   }
 
+  if (action === 'launch-update-desktop' && process.platform === 'darwin' && args.length === 2
+    && args.every((value) => rollbackAttemptPattern.test(value))) {
+    await acceptDarwinDesktopLaunch(receipt, args[0]!, args[1]!);
+
+    return runMaintenance(['launch', 'desktop']);
+  }
+
   if (action === 'prepare' && args.length === 1 && /^[a-f0-9-]{36}$/u.test(args[0]!)) {
+    assertInstallationReleaseTrust(receipt);
+
+    if (receipt.format === 2) {
+      throw new Error('candidate_source_required');
+    }
+
     await writeInstallationJson(root, 'update/prepare-process.json', {
       jobId: args[0],
       process: await readUpdateProcess(process.pid),
@@ -157,9 +214,20 @@ export async function runMaintenance(argv: string[]): Promise<number> {
       throw new Error('installation_component_missing');
     }
 
-    const executable = path.join(root, selected, component === 'server' ? 'bin/grigdesk-server' : 'GrigDesk');
-    const env = Object.fromEntries(Object.entries(process.env)
-      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+    const executable = await assertInstallationPath(root,
+      selected + '/' + installedExecutableSuffix(component));
+    const launchAgent = process.platform === 'darwin' && component === 'server'
+      && process.env[DARWIN_SERVICE_MARKER] !== undefined;
+    const service = launchAgent ? await darwinInstalledService(receipt) : null;
+
+    if (service && (service.pid !== process.pid || service.state !== 'loaded'
+      || process.env[DARWIN_SERVICE_MARKER] !== service.registration.receipt.label)) {
+      throw new Error('release_foreign_service');
+    }
+
+    const env = service ? { ...service.registration.env }
+      : Object.fromEntries(Object.entries(process.env)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
 
     env.GRIGDESK_HOME = receipt.dataHome;
     env.GRIGDESK_DESKTOP_DATA_DIR = receipt.userData;
@@ -169,7 +237,8 @@ export async function runMaintenance(argv: string[]): Promise<number> {
       delete env[key];
     }
 
-    const cgroup = await fs.readFile('/proc/self/cgroup', 'utf8');
+    const cgroup = process.platform === 'linux' && component === 'server'
+      ? await fs.readFile('/proc/self/cgroup', 'utf8') : '';
 
     if (component === 'desktop'
       || !cgroup.split(/[\n/]/u).includes('grigdesk-server.service')) {
@@ -182,7 +251,7 @@ export async function runMaintenance(argv: string[]): Promise<number> {
       env.PATH = path.join(root, selected, 'bin') + ':' + (env.PATH ?? '/usr/bin:/bin');
       delete env.GRIGDESK_DESKTOP_CHILD;
       delete env.GRIGDESK_DESKTOP_PARENT;
-      await registerInstalledServerLaunch(root);
+      await registerInstalledServerLaunch(root, executable, service ? 'service' : 'manual');
     }
 
     if (!process.execve) {
@@ -196,6 +265,13 @@ export async function runMaintenance(argv: string[]): Promise<number> {
 
   if (action === 'ctl') {
     return runInstalledCli(root, args);
+  }
+
+  if (action === 'verify-stop-server' && process.platform === 'darwin'
+    && args.length === 2 && args.every((arg) => arg.length <= 8192)) {
+    await stopDarwinVerificationServer(receipt, JSON.parse(args[0]!), JSON.parse(args[1]!));
+
+    return 0;
   }
 
   throw new Error('maintenance_action_invalid');

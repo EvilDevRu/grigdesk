@@ -4,7 +4,7 @@ import type { BrowserWindow } from 'electron';
 import { delayWithAbort } from '../../shared/lib/delay.ts';
 import { isRecord } from '../../shared/lib/objects.ts';
 import {
-  decodeDesktopExitDecision, decodeDesktopExitSnapshot,
+  decodeDesktopExitDecision, decodeDesktopExitSnapshot, decodeStrictDesktopExitInspection,
 } from '../../shared/desktop/desktopExitContract.ts';
 import type {
   DesktopExitCommandType, DesktopExitSnapshot,
@@ -26,7 +26,14 @@ export interface DesktopExitContext {
   address: string;
   selectedOrigin: string | null;
   local: boolean;
+  strict?: boolean;
   supervisor: ExitSupervisor;
+}
+
+interface StrictAdmission {
+  confirm(signal: AbortSignal): Promise<void>;
+  proveOwnedServerStopped(signal: AbortSignal): Promise<void>;
+  release(): Promise<void>;
 }
 
 interface ExitOperation {
@@ -46,7 +53,9 @@ interface ExitOptions {
   revealed(): boolean;
   quitting(): boolean;
   preference(): DesktopExitPreference;
-  applyUpdate?(): Promise<boolean> | null;
+  applyUpdate?(signal?: AbortSignal): Promise<boolean | 'applied' | 'idle' | 'blocked'> | null;
+  acquireStrictAdmission?(signal: AbortSignal, expectsOwnedServer: boolean): Promise<StrictAdmission>;
+  warnStrict?(): void;
   log(message: string): void;
   exit(): void;
 }
@@ -58,6 +67,7 @@ interface ExitOptions {
 export function createDesktopExitController(options: ExitOptions) {
   let active: ExitOperation | null = null;
   let nativeClose = false;
+  let strictCommitted = false;
 
   /**
    * Вопрос касается выбранного местного происхождения независимо от владения сервером:
@@ -66,7 +76,8 @@ export function createDesktopExitController(options: ExitOptions) {
    * путь отказа старта, а удалённая машина идёт мимо предварительной фазы.
    */
   function eligible(context: DesktopExitContext): boolean {
-    return options.revealed() && context.window.isVisible() && !context.window.isDestroyed()
+    return (context.strict || options.revealed() && context.window.isVisible())
+      && !context.window.isDestroyed()
       && context.local && context.address === context.selectedOrigin;
   }
 
@@ -83,6 +94,7 @@ export function createDesktopExitController(options: ExitOptions) {
       && !!context && context.window === captured.window && context.origin === captured.origin
       && context.profileId === captured.profileId && context.address === captured.address
       && context.selectedOrigin === captured.selectedOrigin && context.local
+      && context.strict === captured.strict
       && context.supervisor === captured.supervisor && context.supervisor.generation === operation.generation
       && (!requireOwned || context.supervisor.ownership === operation.ownership) && operation.bridge.valid();
   }
@@ -118,6 +130,7 @@ export function createDesktopExitController(options: ExitOptions) {
 
     if (finishing) {
       operation.phase = 'finishing';
+      strictCommitted = operation.context.strict === true;
     } else {
       await send(operation, 'cancel', 2000);
 
@@ -140,6 +153,30 @@ export function createDesktopExitController(options: ExitOptions) {
   }
 
   /**
+   * Отменяет только текущий строгий выход. Renderer получает отмену, а предупреждение
+   * остаётся привязанным к тому же окну для повторного решения.
+   */
+  async function cancelStrict(operation: ExitOperation): Promise<void> {
+    if (active !== operation) {
+      return;
+    }
+
+    clearTimeout(operation.deadline);
+    operation.controller.abort();
+    await operation.bridge.request({
+      type: 'cancel',
+      requestId: operation.id,
+      expiresAt: Date.now() + 1200,
+      strict: true,
+    }, AbortSignal.timeout(1200)).catch(() => {});
+
+    if (active === operation) {
+      clear();
+      options.warnStrict?.();
+    }
+  }
+
+  /**
    * Срок команды фиксируется при отправке, а не при её позднем исполнении в renderer.
    * Каждая доставка повторно проверяет весь захваченный контекст.
    */
@@ -158,6 +195,7 @@ export function createDesktopExitController(options: ExitOptions) {
       requestId: operation.id,
       expiresAt: Date.now() + duration,
       ...(snapshot ? { snapshot } : {}),
+      ...(operation.context.strict ? { strict: true } : {}),
     }, operation.controller.signal);
   }
 
@@ -171,7 +209,7 @@ export function createDesktopExitController(options: ExitOptions) {
     const shown = await send(operation, 'prompt', 2000, snapshot);
 
     if (!isRecord(shown) || shown.ok !== true) {
-      await closeNative(operation, false);
+      await (operation.context.strict ? cancelStrict(operation) : closeNative(operation, false));
 
       return false;
     }
@@ -219,7 +257,7 @@ export function createDesktopExitController(options: ExitOptions) {
       }
     }
 
-    await closeNative(operation, false);
+    await (operation.context.strict ? cancelStrict(operation) : closeNative(operation, false));
 
     return false;
   }
@@ -232,11 +270,115 @@ export function createDesktopExitController(options: ExitOptions) {
     operation.phase = 'stopping';
     operation.deadline = setTimeout(() => {
       if (active === operation) {
+        if (operation.context.strict) {
+          void cancelStrict(operation);
+
+          return;
+        }
+
         options.log(desktopText('desktop.exitDeadline'));
         clear();
         options.exit();
       }
     }, 90000);
+  }
+
+  /** Проверяет strict envelope на каждой границе чтения выбранного local origin. */
+  async function strictSnapshot(operation: ExitOperation): Promise<DesktopExitSnapshot> {
+    const result = decodeStrictDesktopExitInspection(await send(operation, 'inspect', 5000));
+
+    if (!current(operation) || result?.state !== 'ready') {
+      throw new Error('release_activity_unknown');
+    }
+
+    return result.snapshot;
+  }
+
+  /**
+   * Пользовательский macOS quit удерживает допуск до последнего доказательства.
+   * Внешняя подтверждённая служба остаётся запущенной после закрытия окна.
+   */
+  async function runStrict(operation: ExitOperation): Promise<void> {
+    const initial = await strictSnapshot(operation);
+    const hasActivity = initial.chats.length + initial.pipelines.length > 0;
+
+    if (hasActivity && !options.preference().get()) {
+      if (!await ask(operation, initial)) {
+        return;
+      }
+    } else {
+      startDeadline(operation);
+    }
+
+    // Строгий updater ждёт drain-proof дольше общего срока: на время ожидания срок снят.
+    const update = options.applyUpdate?.(operation.controller.signal);
+
+    if (update) {
+      clearTimeout(operation.deadline);
+      operation.deadline = undefined;
+
+      const outcome = await update;
+
+      if (outcome === true || outcome === 'applied') {
+        return;
+      }
+      if (!current(operation) || outcome === 'blocked') {
+        throw new Error('release_activity_unknown');
+      }
+
+      startDeadline(operation);
+    }
+
+    const signal = operation.controller.signal;
+    const ownsServer = operation.ownership === 'owned';
+    const admission = await options.acquireStrictAdmission?.(signal, ownsServer);
+
+    if (!admission) {
+      throw new Error('release_activity_unknown');
+    }
+
+    try {
+      const fresh = await strictSnapshot(operation);
+      const tasks = new Set(initial.pipelines.map(({ task }) => task));
+      const chats = new Set(initial.chats.map(({ chatKey }) => chatKey));
+
+      if (fresh.pipelines.some(({ task }) => !tasks.has(task))
+        || fresh.chats.some(({ chatKey }) => !chats.has(chatKey))) {
+        throw new Error('release_activity_unknown');
+      }
+
+      const shown = await send(operation, 'stopping', 2000, fresh);
+
+      if (!current(operation) || !isRecord(shown) || shown.ok !== true) {
+        throw new Error('release_activity_unknown');
+      }
+
+      const stop = await send(operation, 'stop-pipelines', 20000, fresh);
+
+      if (!current(operation) || !isRecord(stop)
+        || Object.keys(stop).join(',') !== 'ok' || stop.ok !== true) {
+        throw new Error('release_activity_unknown');
+      }
+
+      await admission.confirm(signal);
+      await remember(operation);
+
+      if (!current(operation)) {
+        throw new Error('release_activity_unknown');
+      }
+      if (ownsServer) {
+        await operation.context.supervisor.stop();
+        await admission.proveOwnedServerStopped(signal);
+      }
+
+      if (!current(operation, false)) {
+        throw new Error('release_activity_unknown');
+      }
+
+      await closeNative(operation, true);
+    } finally {
+      await admission.release().catch(() => {});
+    }
   }
 
   /**
@@ -317,7 +459,9 @@ export function createDesktopExitController(options: ExitOptions) {
         clearTimeout(operation.deadline);
         operation.deadline = undefined;
 
-        if (await update) {
+        const outcome = await update;
+
+        if (outcome === true || outcome === 'applied') {
           return;
         }
 
@@ -353,8 +497,8 @@ export function createDesktopExitController(options: ExitOptions) {
   }
 
   /**
-   * Close удерживается синхронно и запускает ровно одну предварительную операцию.
-   * Ни before-quit, ни дополнительные окна этот обработчик не используют.
+   * Close главного окна и обычный before-quit macOS используют один допуск.
+   * Синхронная остановка закрытия сохраняет окно до решения renderer и main.
    */
   function close(event: { preventDefault(): void }): boolean {
     if (nativeClose || options.quitting()) {
@@ -375,6 +519,15 @@ export function createDesktopExitController(options: ExitOptions) {
 
     event.preventDefault();
 
+    if (context.strict && (context.window.isMinimized() || !context.window.isVisible())) {
+      if (context.window.isMinimized()) {
+        context.window.restore();
+      }
+
+      context.window.show();
+      context.window.focus();
+    }
+
     const operation: ExitOperation = {
       id: randomUUID(),
       context,
@@ -386,13 +539,23 @@ export function createDesktopExitController(options: ExitOptions) {
     };
 
     active = operation;
-    void run(operation).catch(() => closeNative(operation, false));
+
+    const execute = context.strict ? runStrict(operation) : run(operation);
+
+    void execute.catch(() => context.strict ? cancelStrict(operation) : closeNative(operation, false));
 
     return true;
   }
 
   return {
     close,
+    takeStrictCommit() {
+      const committed = strictCommitted;
+
+      strictCommitted = false;
+
+      return committed;
+    },
     get finishing() {
       return active?.phase === 'finishing';
     },

@@ -6,16 +6,25 @@ import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readNodeRuntime, SEA_FUSE } from '../../shared/node/nodeRuntime.ts';
+import { runDarwinBuildProcess } from '../../cli/darwinBuildProcesses.ts';
+import {
+  readTargetNodeRuntime, SEA_FUSE, seaHostTarget, serverNodeRuntimeManifest,
+} from '../../shared/node/nodeRuntime.ts';
+import { injectSea } from '../../shared/node/seaBuild.ts';
+import {
+  configureDarwinBuildProcessHelper, stageDarwinProcessAssets,
+} from '../../shared/node/processIdentity.ts';
+import { readDarwinBuildSetsid } from '../../tools/darwinBuildTools.mts';
 import { postjectCli } from './sea/buildSteps.mts';
 import { executeBinaryBuild, localRuntimeArchive, parseBuildArgs, readBuildInputs,
   type BinaryBuildOptions, type BinarySmokeMetrics } from './binary/buildSteps.mts';
+import { serverExecutableGuard } from './binary/installFiles.mts';
 import type { ServerPackageManifest } from '../src/binary/metadata.ts';
 
 const sourceRoot = path.resolve(import.meta.dirname, '../..');
 
 /**
- * Каждая стадия работает на переднем плане под timeout и пишет собственные log/exit.
+ * Каждая стадия работает под сторожем платформы и пишет собственные log/exit.
  * Вывод компилятора не накапливается в памяти и не смешивается с JSON результата сборки.
  */
 export async function loggedStage(input: {
@@ -26,6 +35,8 @@ export async function loggedStage(input: {
   env: NodeJS.ProcessEnv;
   prefix: string;
   streamOutput?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }) {
   const logFile = `${input.prefix}${input.name}.log`;
   const exitFile = `${input.prefix}${input.name}.exit`;
@@ -35,18 +46,13 @@ export async function loggedStage(input: {
   process.stdout.write(`Стадия ${input.name}: ${logFile}\n`);
 
   try {
-    const child = spawn('/usr/bin/timeout', ['--foreground', '3600', input.file, ...input.args], {
-      cwd: input.cwd,
-      env: input.env,
-      stdio: ['ignore', input.streamOutput ? 'pipe' : log.fd, input.streamOutput ? 'pipe' : log.fd],
-    });
     let pending = Promise.resolve();
 
     /**
      * Полные строки сохраняются общей очередью без перемешивания их частичных порций.
      * Незавершённая строка ограничена 256 КиБ, а drain ограничивает буфер внешнего потока.
      */
-    async function mirror(source: Readable, destination: Writable): Promise<void> {
+    async function mirror(source: Readable, destination: Writable, signal?: AbortSignal): Promise<void> {
       let partial = Buffer.alloc(0);
 
       for await (const chunk of source) {
@@ -65,8 +71,10 @@ export async function loggedStage(input: {
           await pending;
         }
 
+        signal?.throwIfAborted();
+
         if (!destination.write(chunk)) {
-          await once(destination, 'drain');
+          await once(destination, 'drain', { signal });
         }
       }
 
@@ -77,6 +85,42 @@ export async function loggedStage(input: {
         await pending;
       }
     }
+
+    if (process.platform === 'darwin') {
+      await configureDarwinBuildProcessHelper(input.env);
+
+      const setsid = await readDarwinBuildSetsid(input.env);
+      const result = await runDarwinBuildProcess({
+        ...input,
+        setsid,
+        output: input.streamOutput ? 'pipe' : log.fd,
+        timeoutMs: input.timeoutMs ?? 3600000,
+        capture: input.streamOutput ? async (child, signal) => {
+          await Promise.all([
+            mirror(child.stdout!, process.stdout, signal), mirror(child.stderr!, process.stderr, signal),
+          ]);
+        } : undefined,
+      });
+
+      code = result.reason ?? result.code ?? 1;
+
+      if (code !== 0 || !result.cleanupConfirmed) {
+        const detail = !result.cleanupConfirmed ? 'не подтверждено завершение процессов'
+          : (result.error as Error | undefined)?.message ?? `код ${code}`;
+
+        throw Object.assign(new Error(`Стадия ${input.name}: ${detail}; журнал ${logFile}`, {
+          cause: result.error,
+        }), { code: code || 1, cleanupConfirmed: result.cleanupConfirmed });
+      }
+
+      return { stdout: '', stderr: '' };
+    }
+
+    const child = spawn('/usr/bin/timeout', ['--foreground', '3600', input.file, ...input.args], {
+      cwd: input.cwd,
+      env: input.env,
+      stdio: ['ignore', input.streamOutput ? 'pipe' : log.fd, input.streamOutput ? 'pipe' : log.fd],
+    });
 
     const streams = input.streamOutput
       ? Promise.all([mirror(child.stdout!, process.stdout), mirror(child.stderr!, process.stderr)])
@@ -106,13 +150,13 @@ export async function loggedStage(input: {
  * Builder объединяет проверенные стадии, не собирая старый tar или внутренний SEA сервера.
  * Единственная публикация ELF происходит после metadata/full verify/authenticated HTTP/IPC E0.
  */
-export async function buildBinary(options: BinaryBuildOptions) {
+async function buildBinaryWithSignal(options: BinaryBuildOptions, signal?: AbortSignal) {
   const streamOutput = process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1';
-  const runtime = readNodeRuntime(JSON.parse(await readFile(
-    path.join(sourceRoot, 'server/build/node-runtime.json'), 'utf8',
-  )), 'server/build/node-runtime.json');
+  const target = seaHostTarget();
+  const manifestPath = path.join(sourceRoot, serverNodeRuntimeManifest(target));
+  const runtime = await readTargetNodeRuntime(manifestPath, target);
   const archive = await localRuntimeArchive(options.cacheDir, runtime);
-  const buildInputs = await readBuildInputs(sourceRoot);
+  const buildInputs = await readBuildInputs(sourceRoot, target);
   const runRoot = path.dirname(options.outDir);
   const prefix = path.join(runRoot, `s22-${Date.now().toString(36)}-`);
   const home = path.join(options.cacheDir, 'build-home');
@@ -129,6 +173,13 @@ export async function buildBinary(options: BinaryBuildOptions) {
     NODE_TEST_MAX_RSS_MB: '4096',
   };
 
+  if (target === 'darwin-arm64') {
+    env.GRIGDESK_BUILD_PROCESS_HELPER = process.env.GRIGDESK_BUILD_PROCESS_HELPER;
+    env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256 = process.env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256;
+    env.GRIGDESK_TEST_SETSID_BIN = process.env.GRIGDESK_TEST_SETSID_BIN;
+    env.GRIGDESK_BUILD_SETSID_SHA256 = process.env.GRIGDESK_BUILD_SETSID_SHA256;
+  }
+
   await mkdir(home, { recursive: true });
   await mkdir(temporary, { recursive: true });
 
@@ -141,6 +192,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
     env,
     prefix,
     streamOutput,
+    signal,
   });
 
   return executeBinaryBuild(options, {
@@ -155,6 +207,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
       env: { ...env, ...context.env },
       prefix,
       streamOutput,
+      signal,
     }),
     prepare: async (work) => {
       await writeFile(path.join(work, 'build-input.json'), JSON.stringify({
@@ -175,17 +228,34 @@ export async function buildBinary(options: BinaryBuildOptions) {
       return JSON.parse(await readFile(path.join(work, 'prepared-manifest.json'), 'utf8')) as
         ServerPackageManifest;
     },
+    assets: target === 'darwin-arm64' ? stageDarwinProcessAssets : undefined,
     postject: async (work) => {
-      await loggedStage({
-        name: 'postject',
-        file: path.join(work, 'bin/node'),
-        args: [await postjectCli(path.join(sourceRoot, 'server')), 'grigdesk-server', 'NODE_SEA_BLOB',
-          'sea-prep.blob', '--sentinel-fuse', SEA_FUSE],
-        cwd: work,
-        env,
-        prefix,
-        streamOutput,
+      await injectSea({
+        target,
+        work,
+        node: path.join(work, 'bin/node'),
+        postject: await postjectCli(path.join(sourceRoot, 'server')),
+        executable: 'grigdesk-server',
+        fuse: SEA_FUSE,
+        run: (file, args, { cwd }) => loggedStage({
+          name: file === '/usr/bin/codesign' ? `postject-${args[0]!.slice(2)}` : 'postject',
+          file,
+          args,
+          cwd,
+          env,
+          prefix,
+          streamOutput,
+          signal,
+        }),
       });
+
+      const executable = await open(path.join(work, 'grigdesk-server'), 'r');
+
+      try {
+        await serverExecutableGuard(target)(executable);
+      } finally {
+        await executable.close();
+      }
     },
     smoke: async (binary, manifest, work) => {
       const entry = path.join(work, 'e0.test.mjs');
@@ -215,6 +285,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
         env,
         prefix,
         streamOutput,
+        signal,
       });
 
       const report = JSON.parse(await readFile(reportFile, 'utf8')) as BinarySmokeMetrics;
@@ -225,7 +296,35 @@ export async function buildBinary(options: BinaryBuildOptions) {
         warmRatioNote: report.warmRatioNote,
       };
     },
+    beforePublish: () => signal?.throwIfAborted(),
   });
+}
+
+/**
+ * На Mac одна причина отмены действует до публикации готового бинарника.
+ * Linux оставляет обработку сигналов своему существующему окружению сборки.
+ */
+export async function buildBinary(options: BinaryBuildOptions) {
+  if (process.platform !== 'darwin') {
+    return buildBinaryWithSignal(options);
+  }
+
+  const controller = new AbortController();
+  const cancel = (signal: NodeJS.Signals) => {
+    const code = signal === 'SIGINT' ? 130 : 143;
+
+    controller.abort(Object.assign(new Error('Сборка отменена'), { code }));
+  };
+
+  process.on('SIGINT', cancel);
+  process.on('SIGTERM', cancel);
+
+  try {
+    return await buildBinaryWithSignal(options, controller.signal);
+  } finally {
+    process.off('SIGINT', cancel);
+    process.off('SIGTERM', cancel);
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -239,7 +338,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.stdout.write(`${JSON.stringify(result)}\n`);
     }, (error: unknown) => {
       process.stderr.write(`Сборка серверного ELF не удалась: ${(error as Error).message}\n`);
-      process.exitCode = 1;
+
+      const code = (error as { code?: unknown } | null)?.code;
+
+      process.exitCode = process.platform === 'darwin' && (code === 124 || code === 130 || code === 143)
+        ? code : 1;
     });
   }
 }

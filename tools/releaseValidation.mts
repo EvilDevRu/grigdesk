@@ -8,6 +8,23 @@ import { parseProductVersion } from '../shared/runtime/productReleaseVersion.ts'
 
 const WORKFLOW = '.github/workflows/grigdesk-release.yml';
 const PREVIOUS_FULL_WORKFLOW = '327853e9c7720731964077c47570ca1e0be46f6b';
+const CLASSIC_WORKFLOWS = new Set([
+  '48a9468743794c93e8450336b400725e4b4d5079',
+  '72167dafed76d675529dbdb1f162ac524cb48398',
+]);
+const CLASSIC_JOBS = new Map<string, readonly string[]>([
+  ['План и допуск выпуска', []],
+  ['Сервер, shared и руководство', ['Общий прогон серверных проверок']],
+  ['Web-проверки', ['Общий прогон web-проверок']],
+  ['Сборка и подпись', ['Общая сборка web', 'Ключ подписи', 'Сборка комплекта', 'Deb-пакет',
+    'Свидетельство проверок']],
+  ['Проверка готовых пакетов', ['Проверка готовых пакетов']],
+  ['Публикация на сайт', []],
+]);
+const CANDIDATE_JOBS = new Set([
+  'Сборка кандидата Linux x64', 'Проверка кандидата Linux x64',
+  'Сборка кандидата macOS ARM64', 'Проверка кандидата macOS ARM64', 'Выдача пары кандидатов',
+]);
 const ORCHESTRATION = new Set([
   WORKFLOW,
   'tools/releaseValidation.mts',
@@ -40,6 +57,54 @@ interface ValidationInput {
 }
 
 type Reader = (route: string) => Promise<Record<string, unknown>>;
+
+/**
+ * Допустим только целый классический граф выбранного workflow attempt.
+ * Активный кандидат, неожиданный job или пропущенный test step дисквалифицируют reuse.
+ */
+function verifyClassicJobs(
+  jobs: unknown[], pairedWorkflow: boolean, runId: number, headSha: string,
+): void {
+  const expected = new Set([...CLASSIC_JOBS.keys(), ...(pairedWorkflow ? CANDIDATE_JOBS : [])]);
+
+  for (const job of jobs) {
+    if (!isRecord(job) || typeof job.name !== 'string' || !expected.delete(job.name)
+      || job.status !== 'completed' || !Array.isArray(job.steps)
+      || pairedWorkflow && (job.run_id !== runId || job.head_sha !== headSha)) {
+      throw new Error('release_validation_jobs_incomplete');
+    }
+
+    const skippedWithEmptySteps = job.conclusion === 'skipped' && job.steps.length === 0;
+
+    if (CANDIDATE_JOBS.has(job.name)) {
+      if (!skippedWithEmptySteps) {
+        throw new Error('release_validation_candidate_run');
+      }
+
+      continue;
+    }
+
+    if (job.name === 'Публикация на сайт' && skippedWithEmptySteps) {
+      continue;
+    }
+
+    if (job.conclusion !== 'success' || job.steps.some((step) => !isRecord(step))) {
+      throw new Error('release_validation_job_not_successful');
+    }
+
+    for (const name of CLASSIC_JOBS.get(job.name) ?? []) {
+      const steps = job.steps.filter((step) => step.name === name);
+
+      if (steps.length !== 1 || steps[0]?.status !== 'completed' || steps[0]?.conclusion !== 'success') {
+        throw new Error('release_validation_required_check_missing');
+      }
+    }
+  }
+
+  if (expected.size) {
+    throw new Error('release_validation_jobs_incomplete');
+  }
+}
 
 /**
  * Полная Git-опись сравнивает bytes и modes каждого файла, включая тесты и guide.
@@ -125,49 +190,58 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
     throw new Error('release_validation_run_not_successful');
   }
 
-  const [current, prior, jobs] = await Promise.all([
+  const [current, prior] = await Promise.all([
     commitFiles(input.currentCommit, read),
     commitFiles(run.head_sha, read),
-    read(`/actions/runs/${input.runId}/jobs?per_page=100`),
   ]);
   const currentWorkflow = current.find((entry) => entry.path === WORKFLOW)?.sha;
   const priorWorkflow = prior.find((entry) => entry.path === WORKFLOW)?.sha;
 
   if (!currentWorkflow || !priorWorkflow
-    || (priorWorkflow !== currentWorkflow && priorWorkflow !== PREVIOUS_FULL_WORKFLOW)) {
+    || priorWorkflow !== currentWorkflow && priorWorkflow !== PREVIOUS_FULL_WORKFLOW
+      && !CLASSIC_WORKFLOWS.has(priorWorkflow)) {
     throw new Error('release_validation_workflow_untrusted');
   }
+
+  const legacy = priorWorkflow === PREVIOUS_FULL_WORKFLOW;
+  const pairedWorkflow = !legacy && !CLASSIC_WORKFLOWS.has(priorWorkflow);
+  const attempt = run.run_attempt;
+
+  if (pairedWorkflow && (!Number.isSafeInteger(attempt) || Number(attempt) <= 0)) {
+    throw new Error('release_validation_attempt_invalid');
+  }
+
+  const jobsRoute = `/actions/runs/${input.runId}`
+    + (pairedWorkflow ? `/attempts/${attempt}` : '') + '/jobs?per_page=100';
+  const jobs = await read(jobsRoute);
 
   if (!Array.isArray(jobs.jobs) || jobs.total_count !== jobs.jobs.length || !jobs.jobs.length) {
     throw new Error('release_validation_jobs_incomplete');
   }
 
-  const steps: Record<string, unknown>[] = [];
+  const checks = legacy ? CHECKS : [...CHECKS, 'Проверка готовых пакетов'];
 
-  for (const job of jobs.jobs) {
-    if (isRecord(job) && priorWorkflow === currentWorkflow && job.name === 'Публикация на сайт'
-      && job.status === 'completed' && job.conclusion === 'skipped'
-      && Array.isArray(job.steps) && job.steps.length === 0) {
-      continue;
+  if (legacy) {
+    const steps: Record<string, unknown>[] = [];
+
+    for (const job of jobs.jobs) {
+      if (!isRecord(job) || job.status !== 'completed' || job.conclusion !== 'success'
+        || !Array.isArray(job.steps) || job.steps.some((step) => !isRecord(step))) {
+        throw new Error('release_validation_job_not_successful');
+      }
+
+      steps.push(...job.steps as Record<string, unknown>[]);
     }
 
-    if (!isRecord(job) || job.status !== 'completed' || job.conclusion !== 'success'
-      || !Array.isArray(job.steps) || job.steps.some((step) => !isRecord(step))) {
-      throw new Error('release_validation_job_not_successful');
+    for (const name of checks) {
+      const matches = steps.filter((step) => step.name === name);
+
+      if (matches.length !== 1 || matches[0]?.status !== 'completed' || matches[0]?.conclusion !== 'success') {
+        throw new Error('release_validation_required_check_missing');
+      }
     }
-
-    steps.push(...job.steps as Record<string, unknown>[]);
-  }
-
-  const checks = priorWorkflow === currentWorkflow ? [...CHECKS, 'Проверка готовых пакетов'] : CHECKS;
-
-  for (const name of checks) {
-    const matches = steps.filter((step) => step.name === name);
-    const match = matches.length === 1 ? matches[0] : null;
-
-    if (!match || match.status !== 'completed' || match.conclusion !== 'success') {
-      throw new Error('release_validation_required_check_missing');
-    }
+  } else {
+    verifyClassicJobs(jobs.jobs, pairedWorkflow, Number(input.runId), run.head_sha);
   }
 
   const product = (files: TreeEntry[]) => JSON.stringify(

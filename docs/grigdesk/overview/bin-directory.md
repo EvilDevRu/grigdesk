@@ -43,11 +43,21 @@
   и `build:pipeline`;
 - `routes/` — отдельный пакет CLI авторинга маршрутов: `npm --prefix routes run build`
   выпускает `bin/routes`. Общий SEA-протокол находится в `shared/node/cliSeaBuild.ts`;
-  в `grigdesk-ctl build all` одна tasks-цепочка последовательно собирает tracker, pipeline и routes;
+  в Linux `grigdesk-ctl build all` одна tasks-цепочка последовательно собирает tracker, pipeline и routes;
 - `voice/` — TypeScript-исходник команды `voice` и её сборщик (`npm --prefix voice run build`;
   цель «Всё» и релизный bundle собирают его прямо в `bin/voice`);
 - `tools/` — инструменты разработчика: `release` и `release-check` (выпуск GrigDesk), `mobile`
   (сборка APK), `relay` (сборка посредника), `upgrade-publish-contract` (переход старых установок).
+
+На Apple Silicon `grigdesk-ctl build all` и пункт «Сборка → Всё» запускают
+`dist build --channel dev`. Нативный рецепт включает приложение macOS, сервер,
+maintenance и SEA CLI. Он собирается из отдельного снимка исходников. После
+успешной приёмки команда выдаёт UUID для `dist check` и `dist install`.
+Приватная запись этого UUID закрепляет хеши нативных инструментов проверки.
+До публикации результата SIGINT и SIGTERM завершают сборку без verified-записи.
+При отмене `dist check` очистка сверяет исходный plist, порт из временной папки
+данных и PID со временем старта сервера, подтверждённого командой Start.
+При утрате подтверждения команда печатает путь к временной установке и журналам.
 
 `bash tools/server-sea-check` явно собирает прежний SEA-каталог и выполняет его изолированную
 приёмку. Обычные `tools/release-check` и `tools/release` этот gate не вызывают:

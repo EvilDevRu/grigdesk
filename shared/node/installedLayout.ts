@@ -1,12 +1,14 @@
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { canonicalJson } from '../lib/canonicalJson.ts';
 import { parseProductVersion } from '../runtime/productReleaseVersion.ts';
 import { syncDirectory } from './files.ts';
 import { decodeInstallationReceipt } from './bundleLayout.ts';
+import { acquireInstallLock } from './binaryInstall.ts';
+import { sha256 } from './hash.ts';
 import type { InstallationReceipt } from './bundleLayout.ts';
 
 export { readInstallationSync } from './bundleLayout.ts';
@@ -17,6 +19,187 @@ export interface InstalledPointer {
   installationId: string;
   desktop: string | null;
   server: string | null;
+}
+
+export interface InstallationFileProof {
+  mode: number;
+  size: number;
+  sha256: string;
+}
+
+/**
+ * Квитанция согласованной публикации фиксирует те же bytes и окончательные права,
+ * которые получит inode до появления имени файла.
+ */
+export function installationFileProof(text: string | Buffer, mode: number): InstallationFileProof {
+  return {
+    mode,
+    size: Buffer.byteLength(text),
+    sha256: sha256(text),
+  };
+}
+
+/**
+ * Проверяет только обычный принадлежащий uid файл, используя один fd.
+ * Возврат возможен лишь когда тот же inode всё ещё доступен по имени.
+ */
+async function inspectInstallationFile(file: string, expected: {
+  mode: number;
+  limit: number;
+  proof?: InstallationFileProof;
+}): Promise<Buffer | null> {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+
+  try {
+    const stat = await handle.stat();
+
+    if (!stat.isFile() || stat.uid !== process.getuid!() || (stat.mode & 0o7777) !== expected.mode
+      || stat.size > expected.limit || expected.proof && stat.size !== expected.proof.size) {
+      throw new Error('installation_incomplete_conflict');
+    }
+
+    let bytes: Buffer | null = null;
+
+    if (expected.proof) {
+      const hash = createHash('sha256');
+      const buffer = Buffer.alloc(Math.min(stat.size || 1, 1024 * 1024));
+      let offset = 0;
+
+      while (offset < stat.size) {
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, stat.size - offset),
+          offset);
+
+        if (!bytesRead) {
+          throw new Error('installation_incomplete_conflict');
+        }
+
+        hash.update(buffer.subarray(0, bytesRead));
+        offset += bytesRead;
+      }
+
+      if (hash.digest('hex') !== expected.proof.sha256) {
+        throw new Error('installation_incomplete_conflict');
+      }
+    } else {
+      bytes = Buffer.alloc(stat.size);
+
+      const { bytesRead } = await handle.read(bytes, 0, stat.size, 0);
+
+      if (bytesRead !== stat.size) {
+        throw new Error('installation_incomplete_conflict');
+      }
+    }
+
+    const named = await fs.lstat(file).catch(() => {
+      throw new Error('installation_incomplete_conflict');
+    });
+
+    if (!named.isFile() || stat.dev !== named.dev || stat.ino !== named.ino || stat.size !== named.size
+      || stat.uid !== named.uid || stat.mode !== named.mode || stat.mtimeMs !== named.mtimeMs) {
+      throw new Error('installation_incomplete_conflict');
+    }
+
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Intent и proof читаются как ограниченный приватный JSON. Только ENOENT
+ * означает отсутствие записи, а повреждённый или чужой файл блокирует повтор.
+ */
+export async function readInstallPublication(file: string): Promise<unknown | null> {
+  const bytes = await inspectInstallationFile(file, { mode: 0o600, limit: 1024 * 1024 })
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+
+      throw error;
+    });
+
+  if (!bytes) {
+    return null;
+  }
+
+  const text = bytes.toString('utf8');
+  let value: unknown;
+
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('installation_incomplete_conflict');
+  }
+
+  if (value === null || text !== canonicalJson(value) + '\n') {
+    throw new Error('installation_incomplete_conflict');
+  }
+
+  return value;
+}
+
+/**
+ * Повтор допускает только совпадающий файл исходной публикации.
+ * SHA считается по открытому inode, включая закрытый от записи helper.
+ */
+export async function verifyInstallPublication(file: string, proof: InstallationFileProof) {
+  await inspectInstallationFile(file, {
+    mode: proof.mode,
+    limit: proof.size,
+    proof,
+  });
+}
+
+/**
+ * Публикует файл атомарно и без замены. Существующий файл засчитывается
+ * только после повторной проверки uid, прав, inode, размера и SHA.
+ */
+export async function publishInstallFile(
+  file: string, bytes: string | Buffer, mode: number, temporaryDirectory = path.dirname(file),
+) {
+  const directory = path.dirname(file);
+  const temporary = path.join(temporaryDirectory, '.grigdesk-install-' + randomUUID());
+  const proof = installationFileProof(bytes, mode);
+  const handle = await fs.open(temporary, 'wx', 0o600);
+
+  try {
+    try {
+      await handle.writeFile(bytes);
+      await handle.chmod(mode);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    try {
+      await fs.link(temporary, file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+    }
+
+    await verifyInstallPublication(file, proof);
+    await syncDirectory(directory);
+  } finally {
+    await fs.unlink(temporary);
+  }
+
+  return proof;
+}
+
+/**
+ * Все владельцы обновления используют одну блокировку I. Electron может
+ * передать FD стабильному maintenance, который уже содержит native helper.
+ */
+export async function acquireInstalledUpdateLock(root: string) {
+  await assertInstallationPath(root, 'update');
+
+  return acquireInstallLock(path.join(root, 'update/installation'), {
+    waitMs: 0,
+    darwinMaintenance: path.join(root, 'update/maintenance'),
+  });
 }
 
 /**

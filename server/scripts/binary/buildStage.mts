@@ -6,7 +6,9 @@ import { build } from 'esbuild';
 
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import { sha256, sha256File } from '../../../shared/node/hash.ts';
-import { readNodeRuntime } from '../../../shared/node/nodeRuntime.ts';
+import {
+  readTargetNodeRuntime, seaHostTarget, serverNodeRuntimeManifest,
+} from '../../../shared/node/nodeRuntime.ts';
 import { createServerManifest } from '../../src/binary/metadata.ts';
 import { buildPayload } from './buildPayload.mts';
 import { bundleLauncher } from './bundle.mts';
@@ -26,9 +28,10 @@ async function main(): Promise<void> {
     archive: string;
     buildInputs: Record<string, string>;
   };
-  const runtime = readNodeRuntime(JSON.parse(await readFile(
-    path.join(input.sourceRoot, 'server/build/node-runtime.json'), 'utf8',
-  )), 'server/build/node-runtime.json');
+  const target = seaHostTarget();
+  const runtime = await readTargetNodeRuntime(
+    path.join(input.sourceRoot, serverNodeRuntimeManifest(target)), target,
+  );
 
   if (stage === 'prepare') {
     const bootstrap = path.join(input.work, 'worker-bootstrap.cjs');
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
       directory: path.join(input.work, 'payload'),
       outputFile: path.join(input.work, 'payload.zip'),
     });
-    const buildInputs = await readBuildInputs(input.sourceRoot);
+    const buildInputs = await readBuildInputs(input.sourceRoot, target);
 
     if (canonicalJson(buildInputs) !== canonicalJson(input.buildInputs)) {
       throw new Error('Входные контракты сборки изменились во время подготовки payload');
@@ -78,6 +81,12 @@ async function main(): Promise<void> {
       engineSha256: sha256(canonicalJson(payload.entries.filter((entry) =>
         entry.path.startsWith('engine/') || entry.path.startsWith('schemas/analytics/')))),
       buildInputs,
+      runtime: target === 'darwin-arm64' ? {
+        platform: 'darwin',
+        arch: 'arm64',
+        node: '24.21.0',
+        abi: '137',
+      } : undefined,
     });
 
     await writeFile(path.join(input.work, 'prepared-manifest.json'), JSON.stringify(manifest));

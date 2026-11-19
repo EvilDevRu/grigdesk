@@ -7,7 +7,7 @@ import {
   readInstallation, readInstalledPointer, assertInstallationPath,
 } from '../shared/node/installedLayout.ts';
 import { InstalledUpdateService } from '../shared/node/installedUpdateService.ts';
-import { inspectInstalledServer, startInstalledServer, stopInstalledServer }
+import { inspectInstalledServer, startInstalledServer, stopInstalledServerFromCli }
   from '../shared/node/installedServer.ts';
 import { installedServerUnit, INSTALLED_SERVER_UNIT } from '../shared/node/installedServer.ts';
 import { readInstalledUpdate } from '../shared/node/installedUpdateState.ts';
@@ -20,6 +20,10 @@ import { runArtifactsCleanupMenu } from './artifactsCleanupMenu.ts';
 import { runUpdateCommand } from './updates.ts';
 import { cliTranslator } from './i18n.ts';
 import { TerminalSession, terminalText } from './terminal.ts';
+import { assertOutsideDarwinOwner } from '../shared/node/darwinInstalledOwner.ts';
+import { readDarwinServiceRegistration } from '../shared/node/launchdInstalledService.ts';
+import { launchInstalledProcess } from '../shared/node/installedProcess.ts';
+import { candidateNeedsInstaller } from '../shared/runtime/applicationUpdateContracts.ts';
 
 const updateActions = ['check-updates', 'update', 'update-status', 'resume-update', 'update-channel'];
 
@@ -32,7 +36,7 @@ async function runInstalledMenu(root: string): Promise<number> {
   const service = new InstalledUpdateService(root);
   const session = new TerminalSession();
   const { t } = cliTranslator();
-  const items = ['check-updates', 'update', 'update-status', 'resume-update',
+  const allItems = ['check-updates', 'update', 'update-status', 'resume-update',
     'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'relay-setup', 'relay-restore',
     'artifactsCleanup', 'exit'];
   let selected = 0;
@@ -41,6 +45,10 @@ async function runInstalledMenu(root: string): Promise<number> {
   let result = '';
   let actionActive = false;
   let cleanupFailure = 0;
+  const menuItems = () => allItems.filter((item) => status.source === 'channel'
+    || !['check-updates', 'update', 'channel-release', 'channel-dev'].includes(item)
+      && (item !== 'resume-update' || status.source !== 'local-test'
+        && !candidateNeedsInstaller(status.source, status.job?.stage)));
 
   return session.run(async () => {
     /**
@@ -49,11 +57,17 @@ async function runInstalledMenu(root: string): Promise<number> {
      */
     const render = () => {
       const width = Math.max(1, Math.min(80, session.columns - 1));
+      const items = menuItems();
+      const offline = status.source === 'local-test' ? 'localTestSource'
+        : candidateNeedsInstaller(status.source, status.job?.stage) ? 'candidateResume' : 'candidateSource';
+
+      selected = Math.min(selected, items.length - 1);
 
       session.draw([
         `GrigDesk ${status.installed.server ?? status.installed.desktop ?? '—'} · ${receipt.channel}`,
-        t(`updates.${status.check.state}`)
-          + (status.check.state === 'available' ? `: ${status.check.envelope?.payload.version ?? ''}` : ''),
+        status.source === 'channel' ? t(`updates.${status.check.state}`)
+          + (status.check.state === 'available' ? `: ${status.check.envelope?.payload.version ?? ''}` : '')
+          : t(`updates.${offline}`),
         ...items.flatMap((item, index) => [
           ...item === 'artifactsCleanup' ? [t('menuGroups.developer')] : [],
           {
@@ -66,17 +80,21 @@ async function runInstalledMenu(root: string): Promise<number> {
     };
 
     render();
-    void service.checkUpdates().then(async () => {
-      status = await service.status();
 
-      if (!closed && !actionActive) {
-        render();
-      }
-    }).catch(() => {});
+    if (status.source === 'channel') {
+      void service.checkUpdates().then(async () => {
+        status = await service.status();
+
+        if (!closed && !actionActive) {
+          render();
+        }
+      }).catch(() => {});
+    }
 
     try {
       while (true) {
         const key = await session.nextKey();
+        const items = menuItems();
 
         if (['escape', 'eof', 'interrupt', 'terminate'].includes(key.name)) {
           return key.name === 'interrupt' ? 130 : key.name === 'terminate' ? 143 : cleanupFailure;
@@ -258,7 +276,9 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
     const guarded = args.kind === 'open' || args.kind === 'server'
       && (['stop', 'restart'].includes(args.action ?? '') || args.restart || args.rollback);
 
-    if (guarded && !args.force) {
+    if (guarded && process.platform === 'darwin') {
+      await assertOutsideDarwinOwner(receipt);
+    } else if (guarded && !args.force) {
       const cgroup = await fs.readFile('/proc/self/cgroup', 'utf8');
 
       if (cgroup.split(/[\n/]/u).some((part) => part === 'grigdesk-server.service'
@@ -293,6 +313,13 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
     }
 
     if (args.kind === 'server' && args.action === 'logs') {
+      if (process.platform === 'darwin') {
+        await readDarwinServiceRegistration(receipt);
+
+        return followInstalledCommand('/usr/bin/tail', ['-n', String(args.lines),
+          ...args.follow ? ['-f'] : [], path.join(receipt.root, 'update/server.log')]);
+      }
+
       if (await installedServerUnit(receipt)) {
         return followInstalledCommand('journalctl', ['--user', '-u', INSTALLED_SERVER_UNIT,
           '-n', String(args.lines), '--no-pager', ...args.follow ? ['-f'] : []]);
@@ -307,7 +334,7 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
 
       if (args.kind === 'server' && args.action !== 'status') {
         if (args.action === 'stop' || args.action === 'restart') {
-          await stopInstalledServer(receipt, state);
+          await stopInstalledServerFromCli(receipt, state);
         }
 
         if (args.action === 'start' || args.action === 'restart') {
@@ -345,6 +372,12 @@ export async function runInstalledCli(root: string, argv: string[]): Promise<num
     }
 
     if (args.kind === 'open' && receipt.mode !== 'server') {
+      if (process.platform === 'darwin') {
+        await launchInstalledProcess(receipt, ['launch', 'desktop'], 'open');
+
+        return 0;
+      }
+
       const child = spawn(path.join(root, 'update/maintenance'), ['launch', 'desktop'], {
         detached: true,
         stdio: 'ignore',

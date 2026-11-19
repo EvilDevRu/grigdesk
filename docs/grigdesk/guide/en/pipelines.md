@@ -101,6 +101,11 @@ Fix that installation/settings and relaunch the same task without restarting Gri
 but only once it is confirmed the engine received no launch and created no run artifacts.
 Once handed to the engine, wait for the attempt and Resume it normally.
 
+On macOS, a profile with a control channel must declare a compatible interface.
+A shared environment also declares its recovery mode. The error identifies the
+missing interface or mode. If stop cleanup is still pending, resolve the reported
+issue and use Stop again on the same attempt.
+
 After a write failure, Resume can restore a verified result without rerunning the agent.
 If it requires a human decision, open the indicated node: its question/comment remain and Resume does not answer for you.
 Use Go here to rerun a stage. A route's readiness check may repair its own services within a limited budget

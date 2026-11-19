@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs';
 import { assertInstallParents } from './installPaths.mts';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -8,20 +10,23 @@ import { promisify } from 'node:util';
 import type { ReleaseEnvelope } from '../shared/runtime/installedUpdateContracts.ts';
 import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+import { assertReleasePlatform } from '../shared/node/releaseChannel.ts';
 import { extractReleaseArtifact } from '../shared/node/releaseArchive.ts';
 import { copyInstallFile, lstatOrNull, acquireInstallLock }
   from '../shared/node/binaryInstall.ts';
-import { writeInstallationJson, assertInstallationPath, readInstallation }
+import { writeInstallationJson, assertInstallationPath }
   from '../shared/node/installedLayout.ts';
-import { readInstalledPointer } from '../shared/node/installedLayout.ts';
 import type { InstallationReceipt, InstalledPointer } from '../shared/node/installedLayout.ts';
 import { shellQuote } from '../shared/lib/shellQuote.ts';
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../shared/desktop/desktopRuntime.ts';
 import { InstalledUpdateManager } from '../shared/node/installedUpdate.ts';
 import { probeInstalledComponent } from '../shared/node/installedUpdateService.ts';
 import { readUpdateProcess } from '../shared/node/updateProcessOwner.ts';
-import { verifyInstalledGeneration } from '../shared/node/installedUpdateApply.ts';
 import { syncDirectory } from '../shared/node/files.ts';
+import { checkDataHomePlacement } from '../shared/node/dataHomePlacement.ts';
+import { dataHome } from '../shared/runtime/dataHome.ts';
+import { installDarwinRelease, retireDarwinInstallIntent } from './installDarwinRelease.mts';
+import { installationTrustFields } from '../shared/node/bundleLayout.ts';
 
 const execute = promisify(execFile);
 
@@ -38,13 +43,26 @@ export interface InstallReleaseInput {
   archive(component: 'desktop' | 'server'): Promise<string>;
 }
 
+interface InstallReleaseResult {
+  status: 'fresh-installed' | 'same-version' | 'update-prepared';
+  receipt: InstallationReceipt;
+}
+
+/**
+ * Исторические и программные callers по-прежнему получают receipt.
+ * Shell использует расширенный outcome решения под lock.
+ */
+export async function installRelease(input: InstallReleaseInput): Promise<InstallationReceipt> {
+  return (await installReleaseWithResult(input)).receipt;
+}
+
 /**
  * Первая установка раскладывает только готовые подписанные компоненты вне папки данных.
  * Чужой или неполный root не удаляется и не чинится молча: повтор объясняет состояние,
  * а данные и профиль живут вне root и не затрагиваются. current.json появляется
  * последним — после unit, descriptor и ярлыков.
  */
-export async function installRelease(input: InstallReleaseInput): Promise<InstallationReceipt> {
+export async function installReleaseWithResult(input: InstallReleaseInput): Promise<InstallReleaseResult> {
   const payload = input.envelope.payload;
 
   decodeReleaseChannelIndex({
@@ -55,6 +73,9 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
   });
 
   const digest = verifyReleaseEnvelope(input.envelope);
+  const darwin = payload.platform.os === 'darwin';
+
+  await assertReleasePlatform(payload.platform);
 
   if (!['local', 'remote', 'server'].includes(input.mode)
     || [input.root, input.dataHome, input.userData, input.binDirectory, input.applicationsDirectory,
@@ -65,6 +86,13 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
     || [input.dataHome, input.userData].some((name) => name === input.root
       || name.startsWith(input.root + path.sep))) {
     throw new Error('installation_input_invalid');
+  }
+
+  if (darwin) {
+    const home = os.homedir();
+    const selected = dataHome({ env: { GRIGDESK_HOME: input.dataHome }, home });
+
+    checkDataHomePlacement(selected, { codeRoot: input.root, home }, nodeFs);
   }
 
   const launchers = [path.join(input.binDirectory, 'grigdesk-ctl'),
@@ -82,11 +110,22 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
 
   try {
     const target = await lstatOrNull(input.root);
-    const publishedInstallation = await lstatOrNull(path.join(input.root, 'installation.json'));
-    const publishedPointer = await lstatOrNull(path.join(input.root, 'current.json'));
 
     if (target?.isSymbolicLink()) {
       throw new Error('installation_path_invalid');
+    }
+
+    if (target && !target.isDirectory()) {
+      throw new Error('installation_target_not_empty');
+    }
+
+    const publishedInstallation = await lstatOrNull(path.join(input.root, 'installation.json'));
+    const publishedPointer = await lstatOrNull(path.join(input.root, 'current.json'));
+
+    if (darwin && !publishedPointer) {
+      const receipt = await installDarwinRelease(input, digest, Boolean(target));
+
+      return { status: 'fresh-installed', receipt };
     }
 
     if (target && (!publishedInstallation || !publishedPointer)) {
@@ -94,57 +133,25 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
     }
 
     if (target) {
-      const receipt = await readInstallation(input.root);
-
-      if (receipt.mode !== input.mode || receipt.dataHome !== input.dataHome
-        || receipt.userData !== input.userData || receipt.channel !== payload.channel) {
-        throw new Error('installation_collision_use_update_status');
-      }
-
-      const current = await readInstalledPointer(receipt);
-      const components = input.mode === 'local' ? ['desktop', 'server'] as const
-        : [input.mode === 'remote' ? 'desktop' as const : 'server' as const];
-
-      if (components.every((component) => current[component]?.split('/')[1] === payload.version)) {
-        for (const component of components) {
-          const installed = await verifyInstalledGeneration(receipt, current[component]!, component);
-
-          if (verifyReleaseEnvelope(installed) !== digest) {
-            throw new Error('release_generation_identity_invalid');
-          }
-        }
-
-        return receipt;
-      }
-
       const manager = new InstalledUpdateManager({
-        root: receipt.root,
-        channel: { latest: async () => input.envelope },
+        root: input.root,
         probe: probeInstalledComponent,
       });
-      const job = await manager.createJob({
-        requestId: `installer-${digest}`,
-        manifestDigest: digest,
-        scope: input.mode === 'local' ? 'pair' : input.mode === 'remote' ? 'desktop' : 'server',
-      });
+      const { receipt, job } = await manager.admitInstaller(input, input.envelope, digest);
 
-      if (['queued', 'failed'].includes(job.stage)) {
-        const directory = path.join(input.root, 'update', job.id);
-
-        await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-
-        for (const component of job.scope === 'pair' ? ['desktop', 'server'] as const : [job.scope]) {
-          const archive = path.join(directory, `${component}.tar.gz`);
-
-          if (!await lstatOrNull(archive)) {
-            await copyInstallFile(await input.archive(component), archive);
-          }
+      if (!job) {
+        if (darwin) {
+          await retireDarwinInstallIntent(input.root, digest, receipt.installationId);
         }
 
-        await manager.prepare(job.id);
+        return { status: 'same-version', receipt };
       }
 
-      return receipt;
+      if (job.stage !== 'ready') {
+        await manager.prepareFromCandidate(job.id, digest, input.archive);
+      }
+
+      return { status: 'update-prepared', receipt };
     }
 
     const unitFile = input.mode === 'remote' || !input.unitDirectory ? null
@@ -204,7 +211,7 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
     await fs.mkdir(input.root, { mode: 0o700 });
 
     const receipt: InstallationReceipt = {
-      format: 1,
+      ...installationTrustFields(),
       installationId: randomUUID(),
       uid: process.getuid!(),
       root: input.root,
@@ -221,8 +228,10 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
     await fs.mkdir(path.join(input.root, 'bin'), { mode: 0o700 });
 
     for (const component of components) {
-      await extractReleaseArtifact(archives.get(component)!,
-        path.join(generation, component), payload.artifacts[component]);
+      const directory = path.join(generation, component);
+      const artifact = payload.artifacts[component];
+
+      await extractReleaseArtifact(archives.get(component)!, directory, artifact);
     }
 
     await copyInstallFile(input.maintenance, path.join(input.root, 'update/maintenance'));
@@ -330,7 +339,7 @@ export async function installRelease(input: InstallReleaseInput): Promise<Instal
     await writeInstallationJson(input.root, 'current.json', pointer);
     await syncDirectory(input.root);
 
-    return receipt;
+    return { status: 'fresh-installed', receipt };
   } finally {
     await lock.release();
   }

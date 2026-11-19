@@ -100,6 +100,169 @@ test('EX04: пустой snapshot закрывает окно без вопро�
   assert.equal(f.calls.includes('stop-pipelines'), false);
 });
 
+for (const source of ['close', 'before-quit']) {
+  test(`EX-MAC-${source}: неизвестное владение сохраняет окно и допускает повтор`, async (t) => {
+    let ready = false;
+    const f = await exitMain(t, {
+      ownership: 'external',
+      visible: source === 'close',
+      minimized: source === 'before-quit',
+      /**
+       * Отвечает через тот же bridge для закрытия окна и App Quit. До восстановления
+       * renderer возвращает неопределённое владение вместо списка работ.
+       */
+      renderer(command) {
+        assert.equal(command.strict, true);
+
+        if (command.type === 'inspect') {
+          return ready ? { state: 'ready', snapshot: { chats: [], pipelines: [] } }
+            : { state: 'unknown', reason: 'release_activity_unknown' };
+        }
+
+        return { ok: true };
+      },
+    });
+
+    f.module.setUpdateFixture({
+      strictLocalQuit: () => true,
+      canApplyReadyOnQuit: () => false,
+      async acquireQuitAdmission(_signal, ownsServer) {
+        assert.equal(ownsServer, false);
+        f.calls.push('admission');
+
+        return {
+          async confirm() {
+            f.calls.push('admission-confirmed');
+          },
+          async proveOwnedServerStopped() {
+            assert.fail('Внешнему серверу не требуется доказательство завершения');
+          },
+          async release() {
+            f.calls.push('admission-released');
+          },
+        };
+      },
+    });
+
+    /**
+     * Входит через обычное событие главного окна или before-quit. Синхронный
+     * preventDefault проверяется одинаково в обеих точках входа.
+     */
+    const request = () => {
+      if (source === 'close') {
+        return f.window.close();
+      }
+
+      const event = {
+        defaultPrevented: false,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+      };
+
+      f.app.emit('before-quit', event);
+
+      return event;
+    };
+
+    assert.equal(request().defaultPrevented, true);
+    await f.settle();
+    assert.ok(f.calls.includes('native-warning'));
+    assert.equal(f.window.isDestroyed(), false);
+    assert.equal(f.window.isMinimized(), false);
+    assert.equal(f.calls.includes('window-restored'), source === 'before-quit');
+    assert.equal(f.calls.includes('admission'), false);
+    assert.equal(f.calls.includes('exit:0'), false);
+
+    const selected = f.stored.selected;
+    const dispatched = f.commands.length;
+
+    f.stored.selected = 'missing-local-profile';
+    assert.equal(request().defaultPrevented, true);
+    assert.equal(f.window.isDestroyed(), false);
+    assert.equal(f.commands.length, dispatched);
+    f.stored.selected = selected;
+    ready = true;
+    assert.equal(request().defaultPrevented, true);
+    await f.settle();
+    assert.ok(f.calls.includes('admission-confirmed'));
+    assert.ok(f.calls.includes('native-close'));
+    assert.ok(f.calls.includes('admission-released'));
+    assert.equal(f.calls.includes('server-stop'), false);
+  });
+}
+
+test('EX-MAC-owned: выход ждёт подтверждения смерти launcher и worker', async (t) => {
+  const snapshot = { chats: [], pipelines: [] };
+  const f = await exitMain(t, {
+    snapshot,
+    renderer: (command) => command.type === 'inspect' ? { state: 'ready', snapshot } : { ok: true },
+  });
+
+  f.module.setUpdateFixture({
+    strictLocalQuit: () => true,
+    canApplyReadyOnQuit: () => false,
+    async acquireQuitAdmission(_signal, ownsServer) {
+      assert.equal(ownsServer, true);
+
+      return {
+        async confirm() {},
+        async proveOwnedServerStopped() {
+          assert.ok(f.calls.includes('server-stopped'));
+          f.calls.push('process-unconfirmed');
+
+          throw new Error('release_activity_unknown');
+        },
+        async release() {
+          f.calls.push('admission-released');
+        },
+      };
+    },
+  });
+
+  assert.equal(f.window.close().defaultPrevented, true);
+  await f.settle();
+  assert.ok(f.calls.includes('process-unconfirmed'));
+  assert.ok(f.calls.includes('admission-released'));
+  assert.ok(f.calls.includes('native-warning'));
+  assert.equal(f.calls.includes('native-close'), false);
+  assert.equal(f.window.isDestroyed(), false);
+});
+
+/**
+ * Строгий выход ждёт drain-proof updater дольше общего 90-с срока: на время ожидания
+ * срок снят, поэтому медленный штатный drain не отменяет выход и не гасит окно.
+ */
+test('EX-MAC-slow-drain: 90-с срок не отменяет строгий выход во время ожидания updater', async (t) => {
+  const snapshot = { chats: [], pipelines: [] };
+  const f = await exitMain(t, {
+    snapshot,
+    renderer: (command) => command.type === 'inspect' ? { state: 'ready', snapshot } : { ok: true },
+  });
+  const update = Promise.withResolvers();
+
+  f.module.setUpdateFixture({
+    strictLocalQuit: () => true,
+    canApplyReadyOnQuit: () => true,
+    applyReadyOnQuit: () => update.promise,
+    async acquireQuitAdmission() {
+      return { async confirm() {}, async proveOwnedServerStopped() {}, async release() {} };
+    },
+  });
+
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 0 });
+  assert.equal(f.window.close().defaultPrevented, true);
+  await f.settle();
+
+  await advance(t, f, 91000);
+  assert.equal(f.window.isDestroyed(), false);
+  assert.equal(f.calls.includes('native-warning'), false);
+  assert.equal(f.commands.some((command) => command.type === 'cancel'), false);
+
+  update.resolve('applied');
+  await f.settle();
+});
+
 test('EX05: render → Stop конвейеров → свой server.stop → native close → старый quit', async (t) => {
   const f = await held(t, {
     decision: 'confirm',

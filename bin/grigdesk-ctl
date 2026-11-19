@@ -713,6 +713,13 @@ case "$CMD" in
       fi
     done
 
+    if [[ "$CMD" == build && $# -le 2 && "${2-all}" == all && "$(uname -s)" == Darwin ]]; then
+      cd "$DIR"
+      source "$DIR/deploy/lib/runtime-env.sh"
+      grigdesk_require_node source
+      exec node "$DIR/tools/distribution.mts" build --channel dev
+    fi
+
     # Только валидная ручная сборка попадает в экран прогресса.
     # Внутренний ребёнок и старые ошибки аргументов сохраняют обычный путь.
     if [[ "$CMD" == build && -t 0 && -t 1 && "${GRIGDESK_CTL_BUILD_CHILD:-}" != 1 \

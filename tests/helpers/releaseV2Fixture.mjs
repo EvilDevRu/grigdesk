@@ -8,7 +8,7 @@ export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex'
  * Синтетические компоненты содержат настоящие суммы одних и тех же байтов.
  * Это вход декодера и канала; распаковка и исполнение здесь не подменяются.
  */
-function artifact(component, identity) {
+function artifact(component, identity, origin = 'https://grigdesk.test') {
   const bytes = Buffer.from(`${component}:${identity.releaseId}\n`);
   const files = [{
     path: component === 'desktop' ? 'GrigDesk' : 'bin/grigdesk-server',
@@ -18,7 +18,7 @@ function artifact(component, identity) {
   }];
 
   return {
-    url: `https://grigdesk.test/releases/${identity.version}/${component}.tar.gz`,
+    url: `${origin}/releases/${identity.version}/${component}.tar.gz`,
     size: bytes.length,
     sha256: sha256(bytes),
     unpackedSize: bytes.length,
@@ -57,8 +57,8 @@ export function signedIndex(options = {}) {
       glibc: '2.28',
     },
     artifacts: {
-      desktop: artifact('desktop', identity),
-      server: artifact('server', identity),
+      desktop: artifact('desktop', identity, options.origin),
+      server: artifact('server', identity, options.origin),
     },
     ...options.payload,
   };
@@ -78,4 +78,50 @@ export function signedIndex(options = {}) {
       latest: envelope,
     },
   };
+}
+
+/**
+ * Опись Apple Silicon использует отдельные URLs каждого компонента.
+ * Проба формата получает такую же подпись, как обычный Linux fixture.
+ */
+export function signedMacIndex(options = {}) {
+  const keys = options.keys ?? generateKeyPairSync('ed25519');
+  const { envelope: { payload } } = signedIndex({ ...options, keys });
+
+  payload.platform = {
+    os: 'darwin',
+    arch: 'arm64',
+    minMacOS: '15.0',
+  };
+
+  const origin = options.origin ?? 'https://grigdesk.test';
+
+  for (const component of ['desktop', 'server']) {
+    payload.artifacts[component].url =
+      `${origin}/releases/darwin-arm64/${payload.version}/${component}.tar.gz`;
+  }
+
+  const desktop = payload.artifacts.desktop;
+  const entries = ['GrigDesk.app.tree.json', 'GrigDesk.app.zip'].map((path) => {
+    const bytes = Buffer.from(path);
+
+    return {
+      path,
+      size: bytes.length,
+      sha256: sha256(bytes),
+      mode: 0o444,
+    };
+  });
+
+  desktop.files = entries;
+  desktop.unpackedSize = entries.reduce((size, file) => size + file.size, 0);
+  desktop.filesDigest = sha256(canonicalJson(entries));
+  desktop.unpackedBundleBytes = 17;
+  Object.assign(desktop, options.desktop);
+
+  return signedIndex({
+    ...options,
+    keys,
+    payload,
+  });
 }

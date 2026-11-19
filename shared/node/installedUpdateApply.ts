@@ -3,12 +3,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { canonicalJson } from '../lib/canonicalJson.ts';
-import { acquireInstallLock } from './binaryInstall.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
 import { sha256File } from './hash.ts';
+import { verifyMacDesktop } from './macosAppArchive.ts';
+import { assertReleasePlatform } from './releaseChannel.ts';
 import { syncDirectory } from './files.ts';
+import { assertInstallationReleaseTrust } from './bundleLayout.ts';
 import { assertUpdateSpace } from './installedUpdate.ts';
-import { readInstallation, readInstalledPointer, assertInstallationPath,
+import { acquireInstalledUpdateLock, readInstallation, readInstalledPointer, assertInstallationPath,
   writeInstallationJson, readInstallationJson } from './installedLayout.ts';
 import type { InstallationReceipt } from './installedLayout.ts';
 import { readInstalledUpdate, saveInstalledUpdate } from './installedUpdateState.ts';
@@ -20,6 +22,12 @@ import type { ReleaseEnvelope, ReleaseArtifact } from '../runtime/installedUpdat
  * Проверка годится как для staging, так и для удержанного поколения перед rollback.
  */
 async function verifyComponent(receipt: InstallationReceipt, relative: string, artifact: ReleaseArtifact) {
+  if (artifact.unpackedBundleBytes !== undefined) {
+    await verifyMacDesktop(await assertInstallationPath(receipt.root, relative), artifact);
+
+    return;
+  }
+
   const expected = new Map(artifact.files.map((file) => [file.path, file]));
   const directories = [''];
 
@@ -64,6 +72,7 @@ export async function verifyInstalledGeneration(
     `${path.posix.dirname(relative)}/release.json`) as ReleaseEnvelope;
 
   verifyReleaseEnvelope(envelope, key);
+  await assertReleasePlatform(envelope.payload.platform);
 
   if (relative !== `generations/${envelope.payload.version}/${component}`) {
     throw new Error('release_generation_identity_invalid');
@@ -77,9 +86,36 @@ export async function verifyInstalledGeneration(
 export interface UpdateApplyPorts {
   publicKeyPem?: string;
   recheck(job: InstalledUpdateJob): Promise<void>;
-  stop(job: InstalledUpdateJob): Promise<void>;
+  stop(job: InstalledUpdateJob, markStopDispatched?: () => void): Promise<void>;
   start(job: InstalledUpdateJob, rollback: boolean): Promise<void>;
   prove(job: InstalledUpdateJob, rollback: boolean): Promise<'running' | 'stopped'>;
+}
+
+/**
+ * Rechecks both retained components before publishing a rollback pointer.
+ * The signed previous generation and the active pointer must belong to this job.
+ */
+async function verifyPreviousDarwinGeneration(receipt: InstallationReceipt, job: InstalledUpdateJob,
+  publicKey?: string): Promise<void> {
+  if (job.envelope.payload.platform.os !== 'darwin') {
+    return;
+  }
+
+  const components = job.scope === 'pair' ? ['desktop', 'server'] as const : [job.scope];
+
+  for (const component of components) {
+    const previous = job.previous[component];
+
+    if (!previous) {
+      throw new Error('release_generation_identity_invalid');
+    }
+
+    const confirmed = await verifyInstalledGeneration(receipt, previous, component, publicKey);
+
+    if (confirmed.payload.platform.os !== 'darwin') {
+      throw new Error('release_generation_identity_invalid');
+    }
+  }
 }
 
 /**
@@ -88,7 +124,10 @@ export interface UpdateApplyPorts {
  */
 export async function confirmInstalledUpdate(root: string, jobId: string): Promise<InstalledUpdateJob> {
   const receipt = await readInstallation(root);
-  const lock = await acquireInstallLock(path.join(root, 'update/installation'), { waitMs: 0 });
+
+  assertInstallationReleaseTrust(receipt);
+
+  const lock = await acquireInstalledUpdateLock(root);
 
   try {
     const job = await readInstalledUpdate(receipt);
@@ -111,9 +150,13 @@ export async function confirmInstalledUpdate(root: string, jobId: string): Promi
  * Версия на диске и version-probe сами по себе не подтверждают запущенное приложение.
  */
 async function verifyPrepared(receipt: InstallationReceipt, job: InstalledUpdateJob, key?: string) {
+  assertInstallationReleaseTrust(receipt, key);
+
   if (verifyReleaseEnvelope(job.envelope, key) !== job.manifestDigest) {
     throw new Error('release_manifest_digest_invalid');
   }
+
+  await assertReleasePlatform(job.envelope.payload.platform);
 
   const components = job.scope === 'pair' ? ['desktop', 'server'] as const : [job.scope];
 
@@ -164,9 +207,11 @@ export async function applyInstalledUpdate(
   ports: UpdateApplyPorts,
 ): Promise<InstalledUpdateJob> {
   const receipt = await readInstallation(root);
-  const lock = await acquireInstallLock(path.join(root, 'update/installation'), { waitMs: 0 });
+  const lock = await acquireInstalledUpdateLock(root);
   let switched = false;
   let stopped = false;
+  let stopDispatched = false;
+  let accepted = false;
   let job: InstalledUpdateJob | null = null;
 
   try {
@@ -176,7 +221,10 @@ export async function applyInstalledUpdate(
       throw new Error('release_apply_consent_required');
     }
 
+    accepted = true;
+
     await verifyPrepared(receipt, job, ports.publicKeyPem);
+    await verifyPreviousDarwinGeneration(receipt, job, ports.publicKeyPem);
     await assertUpdateSpace(root, job);
     await ports.recheck(job);
 
@@ -186,7 +234,9 @@ export async function applyInstalledUpdate(
 
     job.stage = 'stopping';
     await saveInstalledUpdate(receipt, job);
-    await ports.stop(job);
+    await ports.stop(job, () => {
+      stopDispatched = true;
+    });
     stopped = true;
     await ports.recheck(job);
 
@@ -235,8 +285,23 @@ export async function applyInstalledUpdate(
 
     return job;
   } catch (error) {
-    if (job && stopped) {
+    if (!job || !accepted) {
+      throw error;
+    }
+
+    if (stopped) {
       try {
+        if (job.envelope.payload.platform.os === 'darwin') {
+          const current = canonicalJson(await readInstalledPointer(receipt));
+
+          if (current !== canonicalJson(job.previous) && current !== canonicalJson(job.target)) {
+            throw new Error('release_current_changed');
+          }
+
+          switched = current === canonicalJson(job.target);
+          await verifyPreviousDarwinGeneration(receipt, job, ports.publicKeyPem);
+        }
+
         if (switched) {
           await ports.stop(job);
           await writeInstallationJson(root, 'current.json', job.previous);
@@ -248,18 +313,19 @@ export async function applyInstalledUpdate(
       } catch {
         job.stage = 'manual_recovery_required';
       }
-    } else if (job && ['ready', 'stopping'].includes(job.stage)) {
+    } else if (job.envelope.payload.platform.os === 'darwin' && stopDispatched) {
+      // Запрос уже мог остановить часть A. Для явного отката нужен прежний intent.
+      job.stage = 'manual_recovery_required';
+    } else if (['ready', 'stopping'].includes(job.stage)) {
       job.stage = 'ready';
       job.intent = null;
     }
 
-    if (job) {
-      job.error = {
-        code: error instanceof Error ? error.message : 'release_apply_failed',
-        nextAction: 'resume-update',
-      };
-      await saveInstalledUpdate(receipt, job);
-    }
+    job.error = {
+      code: error instanceof Error ? error.message : 'release_apply_failed',
+      nextAction: 'resume-update',
+    };
+    await saveInstalledUpdate(receipt, job);
 
     throw error;
   } finally {
@@ -276,7 +342,10 @@ export async function applyInstalledUpdate(
 export async function recoverInstalledUpdate(root: string, ports: UpdateApplyPorts,
   options: { rollback?: boolean } = {}): Promise<void> {
   const receipt = await readInstallation(root);
-  const lock = await acquireInstallLock(path.join(root, 'update/installation'), { waitMs: 0 });
+
+  assertInstallationReleaseTrust(receipt, ports.publicKeyPem);
+
+  const lock = await acquireInstalledUpdateLock(root);
 
   try {
     const job = await readInstalledUpdate(receipt);
@@ -308,6 +377,7 @@ export async function recoverInstalledUpdate(root: string, ports: UpdateApplyPor
     }
 
     try {
+      await verifyPreviousDarwinGeneration(receipt, job, ports.publicKeyPem);
       job.stage = 'stopping';
       await saveInstalledUpdate(receipt, job);
       await ports.stop(job);

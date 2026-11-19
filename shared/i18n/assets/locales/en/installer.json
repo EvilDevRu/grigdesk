@@ -10,6 +10,8 @@
   "cancelled": "Installation cancelled.",
   "missingTools": "Missing required command",
   "platform": "Linux x86_64 with glibc >= 2.28 is required.",
+  "platformMac": "This candidate requires macOS 15 or newer on Apple Silicon.",
+  "sourceRequired": "Pass --source-dir with the absolute path of the downloaded candidate.",
   "space": "Not enough free space for the declared download.",
   "launchWarning": "Window launch prerequisites not found; installation continues, launching later needs GUI and FUSE.",
   "launchUnavailable": "Launch after install requires GUI and FUSE; install them or drop --launch.",

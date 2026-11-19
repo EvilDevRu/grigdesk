@@ -127,8 +127,12 @@ npm --prefix server run build:binary -- \
 ```
 
 Сборщик выпускает `grigdesk-server` и `build-result.json` без установки. Стадии работают
-на переднем плане с timeout и отдельными log/exit. Ошибка подготовки, bundle, package,
-blob, postject или smoke сохраняет прежний опубликованный ELF.
+с ограничением времени и отдельными log/exit. Ошибка подготовки, bundle, package,
+blob, postject или smoke сохраняет прежний опубликованный бинарник. Darwin-ветка
+берёт `server/build/node-runtime-darwin-arm64.json` и проверенные `process-identity`
+и `setsid` из окружения сборки. При неподтверждённом завершении стадии она сохраняет
+staging для диагностики. Приёмка на Apple Silicon остаётся открытой.
+[Контракт процессов Darwin](darwin-process-identity.md).
 
 Перед сборкой проверяют свободный диск с учётом staging, ZIP, cache, двух поколений и backup.
 Ранние ворота E0 включают metadata, prepare, verify, authenticated HTTP/IPC, пустой PATH,

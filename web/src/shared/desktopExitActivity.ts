@@ -1,5 +1,6 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
+import { decodeCompleteFactoryOwnership } from '../../../shared/runtime/factoryOwnership.ts';
 import type { DesktopExitSnapshot } from '../../../shared/desktop/desktopExitContract.ts';
 
 import { t } from '../ui.ts';
@@ -33,6 +34,7 @@ function taskRows(value: unknown): Record<string, unknown>[] {
 export async function inspectDesktopExitActivity(
   sessions: readonly ChatTitle[],
   signal: AbortSignal,
+  strict = false,
 ): Promise<DesktopExitSnapshot | { unavailable: true }> {
   const request = {
     signal,
@@ -43,7 +45,7 @@ export async function inspectDesktopExitActivity(
   try {
     const [activeValue, tasksValue] = await Promise.all([
       api.get('/api/chat/active', request),
-      api.get('/api/tasks', request),
+      api.get(strict ? '/api/tasks?updateOwnership=1' : '/api/tasks', request),
     ]);
 
     if (!isRecord(activeValue) || !Array.isArray(activeValue.active) || !Array.isArray(activeValue.queued)) {
@@ -60,8 +62,11 @@ export async function inspectDesktopExitActivity(
       keys.add(row.chatKey);
     }
 
-    const pipelines: Pipeline[] = taskRows(tasksValue)
-      .filter((row) => row.daemonAlive === true && !row.readOnly)
+    const tasks = strict ? decodeCompleteFactoryOwnership(tasksValue)
+      .filter((row) => row.orchestrator !== 'dead' || row.runner !== 'dead' || row.finalization !== 'done')
+      .map((row) => ({ task: row.task, title: undefined }))
+      : taskRows(tasksValue).filter((row) => row.daemonAlive === true && !row.readOnly);
+    const pipelines: Pipeline[] = tasks
       .map((row) => {
         const task = String(row.task);
 
@@ -105,6 +110,7 @@ async function stopPipeline(
   pipeline: Pipeline,
   result: PipelineExitResult,
   signal: AbortSignal,
+  strict: boolean,
 ): Promise<void> {
   const request = {
     signal,
@@ -115,6 +121,32 @@ async function stopPipeline(
   try {
     const route = `/api/tasks/${encodeURIComponent(pipeline.task)}/stop`;
     const response = await api.post(route, undefined, request);
+
+    if (strict) {
+      if (!isRecord(response) || Object.keys(response).sort().join(',') !== 'ok,outcome'
+        || response.ok !== true || !['stopped', 'not_running'].includes(String(response.outcome))) {
+        result.state = 'unknown';
+
+        return;
+      }
+
+      while (!signal.aborted) {
+        const rows = decodeCompleteFactoryOwnership(await api.get('/api/tasks?updateOwnership=1', request));
+        const row = rows.find((item) => item.task === pipeline.task);
+
+        if (row?.orchestrator === 'dead' && row.runner === 'dead' && row.finalization === 'done') {
+          result.state = 'stopped';
+
+          return;
+        }
+
+        await delayWithAbort(250, signal);
+      }
+
+      result.state = 'unknown';
+
+      return;
+    }
 
     if (isRecord(response) && ['stopped', 'not_running'].includes(String(response.outcome))) {
       result.state = 'stopped';
@@ -153,6 +185,7 @@ export async function stopDesktopExitPipelines(
   pipelines: readonly Pipeline[],
   expiresAt: number,
   parent: AbortSignal,
+  strict = false,
 ): Promise<PipelineExitResult[]> {
   const controller = new AbortController();
   const results: PipelineExitResult[] = [...new Set(pipelines.map((pipeline) => pipeline.task))]
@@ -172,7 +205,7 @@ export async function stopDesktopExitPipelines(
 
   try {
     const stopping = results.map((result) => stopPipeline(
-      { task: result.task, title: '' }, result, controller.signal,
+      { task: result.task, title: '' }, result, controller.signal, strict,
     ));
 
     await Promise.race([Promise.all(stopping), deadline]);

@@ -14,6 +14,29 @@ export interface DesktopExitCommand {
   requestId: string;
   expiresAt: number;
   snapshot?: DesktopExitSnapshot;
+  strict?: boolean;
+}
+
+export type StrictDesktopExitInspection =
+  | { state: 'ready'; snapshot: DesktopExitSnapshot }
+  | { state: 'unknown'; reason: 'release_activity_unknown' };
+
+/** Строгий ответ передаёт только актуальный снимок либо явный отказ владения. */
+export function decodeStrictDesktopExitInspection(value: unknown): StrictDesktopExitInspection | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const keys = Object.keys(value).sort().join(',');
+
+  if (keys === 'reason,state' && value.state === 'unknown' && value.reason === 'release_activity_unknown') {
+    return { state: 'unknown', reason: 'release_activity_unknown' };
+  }
+
+  const snapshot = keys === 'snapshot,state' && value.state === 'ready'
+    ? decodeDesktopExitSnapshot(value.snapshot) : null;
+
+  return snapshot ? { state: 'ready', snapshot } : null;
 }
 
 export type DesktopExitDecision = {
@@ -83,7 +106,7 @@ export function decodeDesktopExitSnapshot(value: unknown): DesktopExitSnapshot |
 export function decodeDesktopExitCommand(value: unknown, now: number): DesktopExitCommand | null {
   if (!isRecord(value) || typeof value.requestId !== 'string' || !value.requestId
     || typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt)
-    || value.expiresAt <= now) {
+    || value.expiresAt <= now || value.strict !== undefined && typeof value.strict !== 'boolean') {
     return null;
   }
 
@@ -104,6 +127,7 @@ export function decodeDesktopExitCommand(value: unknown, now: number): DesktopEx
     requestId: value.requestId,
     expiresAt: value.expiresAt,
     ...(snapshot ? { snapshot } : {}),
+    ...(value.strict === true ? { strict: true } : {}),
   };
 }
 

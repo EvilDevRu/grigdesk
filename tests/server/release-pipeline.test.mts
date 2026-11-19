@@ -9,7 +9,7 @@ import type { TestContext } from 'node:test';
 
 import { collectBuildProcesses } from '../../cli/buildProcesses.ts';
 import {
-  runStages, decodeRecipe, recipeDigest, type ReleaseRecipe, type RecipeStage,
+  runStages, decodeRecipe, recipeDigest, type PipelineObserver, type ReleaseRecipe, type RecipeStage,
 } from '../../tools/releasePipeline.mts';
 
 /**
@@ -37,7 +37,7 @@ async function pipelineFixture(t: TestContext) {
         argv: [process.execPath, '-e', source, ...argv]
       };
     },
-    run(recipe: ReleaseRecipe) {
+    run(recipe: ReleaseRecipe, observer?: PipelineObserver) {
       // Каждому прогону — собственный лог-файл: флаг wx не допускает повторного
       // открытия, а receipt-ы и так разделяются по runId.
       serial += 1;
@@ -51,7 +51,8 @@ async function pipelineFixture(t: TestContext) {
           TMPDIR: workDir
         },
         logFile: path.join(workDir, `pipeline-${serial}.log`),
-        receiptDir
+        receiptDir,
+        observer,
       });
     },
   };
@@ -77,6 +78,25 @@ test('PIPELINE-FAIL: ошибка теста не запускает упако�
   assert.equal(result.outcomes['tests-a']!.exitCode, 7);
   assert.equal(result.outcomes['tests-b']!.status, 'success');
   assert.equal(result.outcomes.bundle!.status, 'blocked');
+  await assert.rejects(fs.stat(box.marker), { code: 'ENOENT' });
+});
+
+test('PIPELINE-CANCEL-BEFORE-SPAWN: сигнал после заголовка запрещает старт', async (t) => {
+  const box = await pipelineFixture(t);
+  const stage = box.step('bundle', 'build', 'require("fs").writeFileSync(process.argv[1], "bad")', [],
+    [box.marker]);
+
+  const result = await box.run({ format: 1, stages: [stage] }, {
+    start() {
+      process.emit('SIGTERM', 'SIGTERM');
+    },
+    finish() {},
+  });
+
+  assert.equal(result.code, 143);
+  assert.equal(result.reason, 143);
+  assert.equal(result.outcomes.bundle?.exitCode, null);
+  assert.equal(result.outcomes.bundle?.status, 'cancelled');
   await assert.rejects(fs.stat(box.marker), { code: 'ENOENT' });
 });
 

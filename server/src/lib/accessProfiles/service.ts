@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { processOwnerState } from '../../../../shared/node/directoryLock.ts';
+import { readDarwinProcessIdentity } from '../../../../shared/node/processIdentity.ts';
 import type { DirectoryLockOwner } from '../../../../shared/node/directoryLock.ts';
 import type {
   AccessAttempt, AccessProfileList, AccessSnapshot,
@@ -52,6 +53,16 @@ const services = new Map<string, AccessProfileService>();
  * Это позволяет отличить аварийный рестарт от работы второго процесса с общим store.
  */
 async function processIdentity(token: string, pid = process.pid): Promise<DirectoryLockOwner> {
+  if (process.platform === 'darwin') {
+    const owner = await readDarwinProcessIdentity(pid);
+
+    if (owner.state !== 'alive') {
+      throw new Error('Не удалось определить владельца попытки входа');
+    }
+
+    return { pid, starttime: owner.identity.starttime, token };
+  }
+
   const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
   const starttime = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/u)[19];
 

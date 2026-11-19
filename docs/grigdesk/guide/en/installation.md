@@ -2,7 +2,7 @@
 
 Download a small terminal script from the website. It obtains its helper and only the selected
 components of a ready-made release. Internet access is required; system Node/npm and source code are not.
-New complete offline packages are no longer produced.
+This installation method applies to the Linux releases on the website.
 
 ## Before you begin
 
@@ -36,6 +36,27 @@ The script pins exact hashes and sizes for the index and helper. The helper veri
 before installing components. Failed integrity checks prevent execution.
 The old `--verify` command does not apply to the shell script: installation includes verification.
 
+## Apple Silicon candidate
+
+In GitHub Actions, **Run workflow** selects Linux x64 and macOS Apple Silicon by default.
+Clear Linux to get only the Mac bundle. Mac candidates use the `dev` channel and are
+delivered as Actions artifacts.
+
+Use macOS 15 or later for a downloaded development candidate. Open Terminal in the
+extracted candidate directory and run:
+
+```sh
+sh ./grigdesk-install --source-dir "$PWD"
+```
+
+You can select the same three modes. Installation uses the downloaded files and macOS
+system tools. Use a separate data folder with an absolute path that contains no spaces.
+If installation is interrupted, repeat the command with the same candidate, mode and paths.
+For server modes, run `grigdesk-ctl server start --wait` to start the service,
+`grigdesk-ctl server stop` to stop it, or `grigdesk-ctl server logs` to view its log.
+For window modes, run `grigdesk-ctl open` to open the application.
+Native acceptance for the macOS candidate runs separately.
+
 ## Alternative: deb package
 
 Install `grigdesk_<version>_amd64.deb` with `sudo apt install ./grigdesk_<version>_amd64.deb`.
@@ -61,14 +82,25 @@ grigdesk-ctl dist check --local-run <UUID>
 
 Checks install all three modes into temporary profiles. “Install for testing” asks for the mode,
 separate paths and confirmation. A local candidate trusts only its own private run record and cannot
-be published; `--from` uses the official product key. `dist doctor` reports host limitations.
+be published; `--from` uses the official product key.
 `dist build` runs the full release recipe in a source snapshot. The terminal command and the
 “Build distribution” menu item show the share of completed stages, the current stage and its
 latest output line. The log directory appears after the snapshot is prepared, and the bar
-reaches 100% once the verified candidate is recorded. The native server tests require a
-running user systemd manager so the build can create a dedicated scope. Fast `build` commands remain available.
-Building the AppImage requires curl, unzip and 7z on the host.
-Verification uses isolated working folders and removes temporary files when it finishes.
+reaches 100% once the verified candidate is recorded. On Linux the native server tests
+use a dedicated scope in the user systemd manager. Building the AppImage requires curl, unzip, and 7z.
+
+On Apple Silicon, **Build → All** and `grigdesk-ctl build all` run
+`dist build --channel dev`. This requires macOS 15 or later, the Xcode tools,
+native Node, and the Homebrew formulas in `tools/ci/Brewfile.macos`.
+The build checks its environment. On a new machine or after a setup error, you can run
+`bin/grigdesk-ctl dist doctor` from the repository root and review `ok` and `checks`
+in the JSON report. After verification, use the run UUID
+with `dist install --local-run <UUID>` and specify the installation mode and paths.
+Official candidates have their own signing key.
+
+Verification uses isolated working folders. On macOS, Ctrl+C waits for the server started by that check.
+This includes a service that is still starting.
+If ownership or shutdown cannot be confirmed, the command prints the retained installation and log path.
 Preparation caches are stored separately from verification results.
 
 ## Limits and recovery

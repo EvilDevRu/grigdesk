@@ -15,9 +15,44 @@ import {
 } from '../../server/src/lib/dataHomeBoot.ts';
 import type { LockDeps, LockOwner } from '../../server/src/lib/dataHomeBoot.ts';
 import { referencesOf } from '../../tools/entrypointGraph.mts';
+import { checkDataHomePlacement } from '../../shared/node/dataHomePlacement.ts';
 import { freePort, isolatedEnv } from './helpers/pluginBootFixture.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+test('MAC-PLACEMENT: вложенность и псевдонимы проверяются до создания корней', (t) => {
+  const f = fixture(t);
+  const codeRoot = path.join(f.root, 'Program');
+  const aliases = [path.join(f.root, 'program'), path.join(f.root, 'program/data')];
+
+  for (const selected of aliases) {
+    assert.throws(() => checkDataHomePlacement(selected, { codeRoot, home: f.home }, fs, 'darwin'),
+      DataHomeError);
+  }
+
+  assert.throws(() => checkDataHomePlacement(aliases[0]!, {
+    codeRoot: path.join(codeRoot, 'nested'),
+    home: f.home,
+  }, fs, 'darwin'), DataHomeError);
+  assert.throws(() => checkDataHomePlacement(f.home, { codeRoot, home: f.home }, fs, 'darwin'),
+    DataHomeError);
+  assert.doesNotThrow(() => checkDataHomePlacement(path.join(f.root, 'data'), {
+    codeRoot: path.join(f.root, 'Program Files'),
+    home: f.home,
+  }, fs, 'darwin'));
+  assert.throws(() => checkDataHomePlacement(path.join(f.root, 'data'), {
+    codeRoot: path.join(f.root, 'Prögram'),
+    home: f.home,
+  }, fs, 'darwin'), /installation_data_placement_ambiguous/u);
+
+  fs.mkdirSync(codeRoot);
+  fs.symlinkSync(codeRoot, path.join(f.root, 'physical-alias'));
+
+  assert.throws(() => checkDataHomePlacement(path.join(f.root, 'physical-alias', 'next'), {
+    codeRoot,
+    home: f.home,
+  }, fs, 'darwin'), DataHomeError);
+});
 
 // Любая проверка файловой системы ограничена собственным временным деревом.
 // Удаление регистрируется вместе с созданием и не зависит от результата assertions.

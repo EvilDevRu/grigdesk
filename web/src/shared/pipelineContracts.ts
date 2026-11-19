@@ -7,6 +7,7 @@ import type { StallPresentation } from '../../../shared/pipeline/stallPresentati
 import type { AgentSilence } from '../../../shared/pipeline/agentActivity.ts';
 import type { PipelineGraph } from '../../../shared/pipeline/pipelineWait.ts';
 import type { ArbiterConversationSummary } from '../../../shared/pipeline/arbiterConversation.ts';
+import type { FactoryCleanupAction } from '../../../shared/runtime/factoryOwnership.ts';
 
 const t = localeTranslator(uiLocalePort);
 
@@ -21,6 +22,7 @@ export interface PipelineTask extends Record<string, unknown> {
   arbitrating?: import('../../../shared/pipeline/factoryGraphContracts.ts').ArbiterRun | null;
   attempt?: string | number | null;
   daemonAlive?: boolean;
+  cleanupAction?: FactoryCleanupAction;
   // Создание без старта: held — конвейер готов и ждёт ручного запуска,
   // holdPending — попытка создана, стенд ещё поднимается.
   held?: boolean;

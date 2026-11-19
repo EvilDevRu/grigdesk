@@ -62,6 +62,12 @@ export async function buildDeb(input: { root: string; artifacts: string }): Prom
     throw new Error('deb_release_index_empty');
   }
 
+  const payload = index.latest.payload;
+
+  if (payload.platform.os !== 'linux') {
+    throw new Error('deb_release_platform_unsupported');
+  }
+
   const script = await fs.readFile(path.join(input.artifacts, 'grigdesk-install'));
 
   if (script.length > 64 * 1024 || script.includes(0)
@@ -69,7 +75,6 @@ export async function buildDeb(input: { root: string; artifacts: string }): Prom
     throw new Error('deb_installer_not_script');
   }
 
-  const payload = index.latest.payload;
   const control = [
     'Package: grigdesk',
     `Version: ${payload.version}`,

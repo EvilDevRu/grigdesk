@@ -1,9 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { acquireInstallLock } from './binaryInstall.ts';
 import { parseProductVersion } from '../runtime/productReleaseVersion.ts';
-import { readInstalledPointer } from './installedLayout.ts';
+import { acquireInstalledUpdateLock, readInstalledPointer } from './installedLayout.ts';
 import type { InstallationReceipt } from './installedLayout.ts';
 import type { InstalledUpdateJob } from './installedUpdateState.ts';
 
@@ -64,9 +63,7 @@ export async function pruneCompletedUpdate(
   try {
     await removeJobArtifacts(receipt, job);
 
-    const lock = await acquireInstallLock(
-      path.join(receipt.root, 'update/installation'), { waitMs: 0 },
-    );
+    const lock = await acquireInstalledUpdateLock(receipt.root);
 
     try {
       await pruneGenerations(receipt, job);

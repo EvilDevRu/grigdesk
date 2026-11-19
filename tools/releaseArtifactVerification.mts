@@ -4,15 +4,19 @@ import path from 'node:path';
 import { decodeReleaseChannelIndex, type ReleaseEnvelope }
   from '../shared/runtime/installedUpdateContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+import { assertReleasePlatform } from '../shared/node/releaseChannel.ts';
 import { sha256File } from '../shared/node/hash.ts';
 import { verifyBootstrapFiles, type BootstrapMetadata }
   from './installBootstrap.mts';
+import type { ReleaseDistributionSource } from '../shared/runtime/releaseChannelContracts.ts';
 
 export interface DistributionTrust {
-  purpose: 'official' | 'local';
+  purpose: 'official' | 'local' | 'candidate';
   publicKeyPem: string;
   expectedCommit: string;
   expectedManifestDigest?: string;
+  requireHostPlatform?: boolean;
+  expectedDelivery?: ReleaseDistributionSource;
 }
 
 export interface VerifiedDistribution {
@@ -28,7 +32,9 @@ export { verifyReleaseInstaller } from './installerProof.mts';
  * gzip helper и SHA/размеры обоих архивов. Никакие файлы не исполняются.
  */
 export async function verifyDistributionArtifacts(directory: string,
-  trust: DistributionTrust): Promise<VerifiedDistribution> {
+  trust: DistributionTrust, signal?: AbortSignal): Promise<VerifiedDistribution> {
+  signal?.throwIfAborted();
+
   const names = (await fs.readdir(directory))
     .filter((name) => name === 'release.json' || name === 'dev.json');
 
@@ -49,6 +55,10 @@ export async function verifyDistributionArtifacts(directory: string,
   }
 
   const manifestDigest = verifyReleaseEnvelope(index.latest, trust.publicKeyPem);
+
+  if (trust.requireHostPlatform) {
+    await assertReleasePlatform(index.latest.payload.platform);
+  }
 
   if (trust.expectedManifestDigest !== undefined
     && trust.expectedManifestDigest !== manifestDigest) {
@@ -72,16 +82,24 @@ export async function verifyDistributionArtifacts(directory: string,
 
   const bootstrap = await verifyBootstrapFiles(directory,
     { envelope: index.latest, publicKey: trust.publicKeyPem });
+  const expectedDelivery = trust.expectedDelivery ?? (trust.purpose === 'official' ? 'channel'
+    : trust.purpose === 'candidate' ? 'candidate-file' : undefined);
+
+  if (expectedDelivery && (bootstrap.delivery ?? 'channel') !== expectedDelivery) {
+    throw new Error('installation_release_trust_mismatch');
+  }
 
   for (const component of ['desktop', 'server'] as const) {
     const artifact = index.latest.payload.artifacts[component];
     const file = path.join(directory, `${component}.tar.gz`);
 
-    if (await sha256File(file) !== artifact.sha256
+    if (await sha256File(file, signal) !== artifact.sha256
       || (await fs.stat(file)).size !== artifact.size) {
       throw new Error('release_archive_integrity_invalid');
     }
   }
+
+  signal?.throwIfAborted();
 
   return { envelope: index.latest, bootstrap };
 }

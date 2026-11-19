@@ -4,6 +4,7 @@ import path from 'node:path';
 import { readInstallation, readInstalledPointer } from './installedLayout.ts';
 import type { InstallationReceipt } from './installedLayout.ts';
 import { installationCandidate } from './bundleLayout.ts';
+import { readDarwinProcessIdentity } from './processIdentity.ts';
 
 export { installationForExecutableSync } from './bundleLayout.ts';
 
@@ -29,13 +30,31 @@ export async function installationForExecutable(executable: string): Promise<Ins
  * PID связывается с uid, временем старта и executable перед любым управлением.
  * Переиспользованный PID либо ошибка доступа не разрешают отправить сигнал.
  */
-export async function readUpdateProcess(pid: number): Promise<{
+export async function readUpdateProcess(pid: number, maintenance?: string): Promise<{
   pid: number;
   starttime: string;
   executable: string;
 }> {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw new Error('release_process_owner_invalid');
+  }
+
+  if (process.platform === 'darwin') {
+    const result = await readDarwinProcessIdentity(pid, maintenance);
+
+    if (result.state === 'alive') {
+      const { starttime, executable } = result.identity;
+
+      return {
+        pid,
+        starttime,
+        executable,
+      };
+    }
+
+    const error = new Error('release_process_owner_invalid');
+
+    throw result.state === 'dead' ? Object.assign(error, { code: 'ESRCH' }) : error;
   }
 
   const directory = `/proc/${pid}`;

@@ -35,6 +35,7 @@ function probesWith(overrides: {
   ]);
 
   return {
+    host: () => ({ platform: 'linux', arch: 'x64' }),
     run: async (file, argv) => {
       if (file === process.execPath && argv[0] === '--version') {
         return { stdout: `${overrides.node ?? 'v24.21.0'}\n`, stderr: '' };
@@ -70,6 +71,65 @@ function probesWith(overrides: {
     },
     diskFreeKiB: async () => overrides.disk ?? 64 * 1024 * 1024,
   };
+}
+
+for (const unavailable of [null, 'xcrun', 'sw_vers', 'jq', 'chromium'] as const) {
+  test('ENVIRONMENT-DARWIN: ' + (unavailable ?? 'нативный host и SDK'), async () => {
+    const calls: string[] = [];
+    const linux = probesWith({});
+    const report = await runEnvironmentReport(repository, {
+      requireBrowser: true,
+      probes: {
+        ...linux,
+        host: () => ({ platform: 'darwin', arch: 'arm64' }),
+        browserCachePresent: async () => true,
+        run: async (file, argv) => {
+          const command = path.basename(file);
+          const probe = file === process.execPath && argv[0] === '-e' ? 'chromium' : command;
+
+          calls.push([command, ...argv].join(' '));
+
+          if (probe === unavailable) {
+            throw new Error('missing');
+          }
+
+          const output = {
+            uname: argv[0] === '-m' ? 'arm64' : 'Darwin',
+            sw_vers: '15.0',
+            xcrun: '/Applications/Xcode.app/MacOSX.sdk',
+            brew: '/opt/homebrew/opt/' + argv[1],
+          }[command];
+
+          if (output) {
+            return { stdout: output, stderr: '' };
+          }
+
+          if (file.startsWith('/opt/homebrew/opt/')) {
+            assert.ok(['/opt/homebrew/opt/ffmpeg/bin/ffmpeg',
+              '/opt/homebrew/opt/ffmpeg/bin/ffprobe'].includes(file)
+              ? argv[0] === '-version' : argv[0] === '--version');
+
+            return { stdout: command + ' 1.0', stderr: '' };
+          }
+
+          return linux.run!(file, argv);
+        },
+      },
+    });
+
+    const checkIds = {
+      xcrun: 'macos-sdk',
+      sw_vers: 'macos-version',
+      jq: 'jq',
+      chromium: 'chromium-present',
+    } as const;
+
+    assert.deepEqual(report.checks.filter((check) => check.mandatory && !check.ok)
+      .map((check) => check.id), unavailable ? [checkIds[unavailable]] : []);
+    assert.equal(report.ok, unavailable === null);
+    assert.ok(calls.includes('xcrun --sdk macosx --show-sdk-path'));
+    assert.ok(!calls.some((call) => /^(bwrap|unshare|xvfb-run)\b/u.test(call)));
+  });
 }
 
 test('ENVIRONMENT-DEGRADED: doctor перечисляет несоответствия до тестов', async (t) => {

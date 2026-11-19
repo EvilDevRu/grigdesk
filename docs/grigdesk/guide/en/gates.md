@@ -44,6 +44,9 @@ Decision history stays with the attempt.
 
 ## Limits and recovery
 
+On macOS, if you see a message about unfinished cleanup, use Stop for that attempt.
+Once cleanup is confirmed, return to the question and submit your answer.
+
 Resume may restore an already verified result after write failure without rerunning the agent.
 Human questions and comments remain; Resume does not answer them.
 Go here with an explanation reruns a stage.

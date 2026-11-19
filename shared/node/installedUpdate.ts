@@ -5,15 +5,24 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '../lib/canonicalJson.ts';
 import { compareProductVersions } from '../runtime/productReleaseVersion.ts';
 import type { ReleaseChannel } from '../runtime/productReleaseVersion.ts';
-import type { ReleaseEnvelope } from '../runtime/installedUpdateContracts.ts';
+import type { ReleaseArtifact, ReleaseEnvelope } from '../runtime/installedUpdateContracts.ts';
 import { checkReleaseCompatibility } from '../runtime/releaseCompatibility.ts';
-import { acquireInstallLock } from './binaryInstall.ts';
 import { sha256File } from './hash.ts';
-import { ReleaseChannelService } from './releaseChannel.ts';
+import { assertReleasePlatform, ReleaseChannelService } from './releaseChannel.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
-import { downloadReleaseArtifact, extractReleaseArtifact } from './releaseArchive.ts';
-import { readInstallation, readInstalledPointer, assertInstallationPath } from './installedLayout.ts';
+import { downloadReleaseArtifact, extractReleaseArtifact, releaseArtifactDiskBytes }
+  from './releaseArchive.ts';
+import { materializeMacDesktop } from './macosAppArchive.ts';
+import {
+  acquireInstalledUpdateLock, readInstallation, readInstalledPointer, assertInstallationPath,
+  readInstallationJson,
+} from './installedLayout.ts';
 import type { InstallationReceipt } from './installedLayout.ts';
+import { assertInstallationReleaseTrust } from './bundleLayout.ts';
+import { copyInstallFile, lstatOrNull } from './binaryInstall.ts';
+import { syncDirectory } from './files.ts';
+import { verifyInstalledGeneration } from './installedUpdateApply.ts';
+import { readUpdateProcess } from './updateProcessOwner.ts';
 import { readInstalledUpdate, saveInstalledUpdate, PENDING_UPDATE_STAGES } from './installedUpdateState.ts';
 import type { InstalledUpdateJob, UpdateScope } from './installedUpdateState.ts';
 
@@ -25,6 +34,16 @@ export interface InstalledUpdateOptions {
   probe(component: 'desktop' | 'server', directory: string, job: InstalledUpdateJob): Promise<void>;
 }
 
+type Component = 'desktop' | 'server';
+type ArchiveSource = (component: Component) => Promise<string>;
+type UpdateRequest = {
+  requestId: string;
+  manifestDigest: string;
+  scope: UpdateScope;
+};
+
+const prepareStages = ['queued', 'verifying', 'downloading', 'preparing', 'failed'];
+
 /**
  * До подготовки и перед применением резервируется место для архивов, распаковки и журнала.
  * Ошибка statfs не считается достаточностью ресурсов и не разрешает остановку программы.
@@ -34,7 +53,7 @@ export async function assertUpdateSpace(root: string, job: InstalledUpdateJob): 
   const bytes = updateComponents(job.scope).reduce((sum, component) => {
     const artifact = job.envelope.payload.artifacts[component];
 
-    return sum + artifact.size + artifact.unpackedSize;
+    return sum + releaseArtifactDiskBytes(artifact);
   }, 64 * 1024 * 1024);
 
   if (space.bavail * space.bsize < bytes) {
@@ -42,8 +61,80 @@ export async function assertUpdateSpace(root: string, job: InstalledUpdateJob): 
   }
 }
 
-function updateComponents(scope: UpdateScope): ('desktop' | 'server')[] {
+function updateComponents(scope: UpdateScope): Component[] {
   return scope === 'pair' ? ['desktop', 'server'] : [scope];
+}
+
+/**
+ * Архив проверяется заново при повторе. Символическая ссылка или чужой
+ * inode останавливают подготовку до удаления или записи.
+ */
+async function matchArchive(file: string, artifact: ReleaseArtifact): Promise<boolean> {
+  const observed = await lstatOrNull(file);
+
+  if (!observed) {
+    return false;
+  }
+
+  if (!observed.isFile() || observed.uid !== process.getuid!() || observed.mode & 0o022) {
+    throw new Error('release_archive_owner_invalid');
+  }
+
+  return observed.size === artifact.size && await sha256File(file) === artifact.sha256;
+}
+
+/**
+ * Под lock публикуются только полностью проверенные локальные байты.
+ * Crash на копировании оставляет лишь частный временный файл этого job.
+ */
+async function copyCandidateArchive(source: string, archive: string, artifact: ReleaseArtifact) {
+  const temporary = archive + '.' + randomUUID() + '.part';
+
+  try {
+    await copyInstallFile(source, temporary);
+
+    if (!await matchArchive(temporary, artifact)) {
+      throw new Error('install_online_source_invalid');
+    }
+
+    await fs.rename(temporary, archive);
+    await syncDirectory(path.dirname(archive));
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
+/**
+ * Live prepare worker не может пересекаться с повтором installer.
+ * Неподтверждённая identity не выдаётся за завершение процесса.
+ */
+async function assertPrepareWorkerInactive(receipt: InstallationReceipt, jobId: string) {
+  const marker = await readInstallationJson(receipt.root, 'update/prepare-process.json')
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+
+      throw error;
+    }) as { jobId: string; process: Awaited<ReturnType<typeof readUpdateProcess>> } | null;
+
+  if (!marker || marker.jobId !== jobId) {
+    return;
+  }
+
+  const saved = marker.process;
+  const maintenance = path.join(receipt.root, 'update/maintenance');
+  const current = await readUpdateProcess(saved.pid, maintenance).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ESRCH' || error.code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (current && current.starttime === saved.starttime) {
+    throw new Error('release_worker_active');
+  }
 }
 
 /**
@@ -61,98 +152,180 @@ export class InstalledUpdateManager {
    * Повтор с requestId возвращает прежнюю цель, даже если сайт уже опубликовал следующую.
    * Новое задание сверяет свежий подписанный digest под общим installation lock.
    */
-  async createJob(request: {
-    requestId: string;
-    manifestDigest: string;
-    scope: UpdateScope;
-  }): Promise<InstalledUpdateJob> {
-    const receipt = await readInstallation(this.options.root);
-
-    await fs.mkdir(path.join(receipt.root, 'update'), { recursive: true, mode: 0o700 });
-    await assertInstallationPath(receipt.root, 'update');
-
-    const lock = await acquireInstallLock(path.join(receipt.root, 'update/installation'), { waitMs: 0 });
+  async createJob(request: UpdateRequest): Promise<InstalledUpdateJob> {
+    const lock = await acquireInstalledUpdateLock(this.options.root);
 
     try {
-      const previousJob = await readInstalledUpdate(receipt);
+      const receipt = await readInstallation(this.options.root);
 
-      if (previousJob?.requestId === request.requestId) {
-        return previousJob;
+      assertInstallationReleaseTrust(receipt, this.options.publicKeyPem);
+
+      if (receipt.format === 2) {
+        throw new Error(receipt.source === 'local-test'
+          ? 'installation_release_trust_mismatch' : 'candidate_source_required');
       }
 
-      if (previousJob && PENDING_UPDATE_STAGES.includes(previousJob.stage)) {
-        throw new Error('release_update_in_progress');
-      }
+      return await this.createJobLocked(receipt, request, async () => {
+        const channel = this.options.channel ?? new ReleaseChannelService({
+          channel: receipt.channel,
+          publicKeyPem: this.options.publicKeyPem,
+        });
 
-      if (!request.requestId || request.requestId.length > 128
-        || !['pair', 'desktop', 'server'].includes(request.scope)
-        || receipt.mode === 'remote' && request.scope !== 'desktop'
-        || receipt.mode === 'server' && request.scope !== 'server'
-        || receipt.mode === 'local' && request.scope === 'server') {
-        throw new Error('pair_update_required');
-      }
-
-      const channel = this.options.channel ?? new ReleaseChannelService({
-        channel: receipt.channel, publicKeyPem: this.options.publicKeyPem,
+        return channel.latest(true);
       });
-      const envelope = await channel.latest(true);
-
-      if (!envelope || envelope.payload.channel !== receipt.channel
-        || verifyReleaseEnvelope(envelope, this.options.publicKeyPem) !== request.manifestDigest) {
-        throw new Error('release_target_changed');
-      }
-
-      const previous = await readInstalledPointer(receipt);
-      const components = updateComponents(request.scope);
-
-      let newer = false;
-
-      for (const component of components) {
-        const installed = previous[component]?.split('/')[1];
-
-        if (!installed || compareProductVersions(envelope.payload.version, installed) < 0) {
-          throw new Error('release_not_newer');
-        }
-
-        newer ||= compareProductVersions(envelope.payload.version, installed) > 0;
-      }
-
-      if (!newer) {
-        throw new Error('release_not_newer');
-      }
-
-      const target = { ...previous };
-
-      for (const component of components) {
-        target[component] = `generations/${envelope.payload.version}/${component}`;
-      }
-
-      const now = new Date().toISOString();
-      const job: InstalledUpdateJob = {
-        format: 1,
-        id: randomUUID(),
-        requestId: request.requestId,
-        installationId: receipt.installationId,
-        manifestDigest: request.manifestDigest,
-        envelope,
-        scope: request.scope,
-        previous,
-        target,
-        stage: 'queued',
-        createdAt: now,
-        updatedAt: now,
-        progress: null,
-        error: null,
-        intent: null,
-      };
-
-      await assertUpdateSpace(receipt.root, job);
-      await saveInstalledUpdate(receipt, job);
-
-      return job;
     } finally {
       await lock.release();
     }
+  }
+
+  /**
+   * Installer сверяет происхождение и все установленные части A до раннего
+   * возврата по requestId. Same-version использует те же подписанные байты.
+   */
+  async admitInstaller(input: Pick<InstallationReceipt, 'mode' | 'dataHome' | 'userData'>,
+    envelope: ReleaseEnvelope, manifestDigest: string) {
+    const lock = await acquireInstalledUpdateLock(this.options.root);
+
+    try {
+      const receipt = await readInstallation(this.options.root);
+
+      assertInstallationReleaseTrust(receipt, this.options.publicKeyPem);
+
+      if (receipt.mode !== input.mode || receipt.dataHome !== input.dataHome
+        || receipt.userData !== input.userData || receipt.channel !== envelope.payload.channel) {
+        throw new Error('installation_collision_use_update_status');
+      }
+
+      const pointer = await readInstalledPointer(receipt);
+      const scope = receipt.mode === 'local' ? 'pair' : receipt.mode === 'remote' ? 'desktop' : 'server';
+      const installed = [];
+
+      for (const component of updateComponents(scope)) {
+        try {
+          const current = await verifyInstalledGeneration(receipt, pointer[component]!, component,
+            this.options.publicKeyPem);
+
+          if (canonicalJson(current.payload.platform) !== canonicalJson(envelope.payload.platform)) {
+            throw new Error('installation_release_trust_mismatch');
+          }
+
+          installed.push(current);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'release_signature_invalid') {
+            throw new Error('installation_release_trust_mismatch', { cause: error });
+          }
+
+          throw error;
+        }
+      }
+
+      if (installed.every((current) => current.payload.version === envelope.payload.version)) {
+        const digests = installed.map((current) => verifyReleaseEnvelope(current, this.options.publicKeyPem));
+
+        if (digests.some((digest) => digest !== manifestDigest)) {
+          throw new Error('release_generation_identity_invalid');
+        }
+
+        return { receipt, job: null };
+      }
+
+      if (receipt.format === 2 && receipt.source === 'local-test') {
+        throw new Error('installation_release_trust_mismatch');
+      }
+
+      const job = await this.createJobLocked(receipt, {
+        requestId: 'installer-' + manifestDigest,
+        manifestDigest,
+        scope,
+      }, async () => envelope);
+
+      return { receipt, job };
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /**
+   * Общая публикация queued job вызывается при удерживаемом update lock.
+   * Source и установленная trust policy уже сверены вызывающим входом.
+   */
+  private async createJobLocked(receipt: InstallationReceipt, request: UpdateRequest,
+    latest: () => Promise<ReleaseEnvelope | null>): Promise<InstalledUpdateJob> {
+    const previousJob = await readInstalledUpdate(receipt);
+
+    if (previousJob?.requestId === request.requestId) {
+      return previousJob;
+    }
+
+    if (previousJob && PENDING_UPDATE_STAGES.includes(previousJob.stage)) {
+      throw new Error('release_update_in_progress');
+    }
+
+    if (!request.requestId || request.requestId.length > 128
+      || !['pair', 'desktop', 'server'].includes(request.scope)
+      || receipt.mode === 'remote' && request.scope !== 'desktop'
+      || receipt.mode === 'server' && request.scope !== 'server'
+      || receipt.mode === 'local' && request.scope === 'server') {
+      throw new Error('pair_update_required');
+    }
+
+    const envelope = await latest();
+
+    if (!envelope || envelope.payload.channel !== receipt.channel
+      || verifyReleaseEnvelope(envelope, this.options.publicKeyPem) !== request.manifestDigest) {
+      throw new Error('release_target_changed');
+    }
+
+    await assertReleasePlatform(envelope.payload.platform);
+
+    const previous = await readInstalledPointer(receipt);
+    const components = updateComponents(request.scope);
+
+    let newer = false;
+
+    for (const component of components) {
+      const installed = previous[component]?.split('/')[1];
+
+      if (!installed || compareProductVersions(envelope.payload.version, installed) < 0) {
+        throw new Error('release_not_newer');
+      }
+
+      newer ||= compareProductVersions(envelope.payload.version, installed) > 0;
+    }
+
+    if (!newer) {
+      throw new Error('release_not_newer');
+    }
+
+    const target = { ...previous };
+
+    for (const component of components) {
+      target[component] = `generations/${envelope.payload.version}/${component}`;
+    }
+
+    const now = new Date().toISOString();
+    const job: InstalledUpdateJob = {
+      format: 1,
+      id: randomUUID(),
+      requestId: request.requestId,
+      installationId: receipt.installationId,
+      manifestDigest: request.manifestDigest,
+      envelope,
+      scope: request.scope,
+      previous,
+      target,
+      stage: 'queued',
+      createdAt: now,
+      updatedAt: now,
+      progress: null,
+      error: null,
+      intent: null,
+    };
+
+    await assertUpdateSpace(receipt.root, job);
+    await saveInstalledUpdate(receipt, job);
+
+    return job;
   }
 
   /**
@@ -160,9 +333,50 @@ export class InstalledUpdateManager {
    * После ready повторная команда не скачивает и не устанавливает те же компоненты.
    */
   async prepare(jobId: string): Promise<InstalledUpdateJob> {
-    const receipt = await readInstallation(this.options.root);
-    const lock = await acquireInstallLock(path.join(receipt.root, 'update/installation'), { waitMs: 0 });
+    const lock = await acquireInstalledUpdateLock(this.options.root);
+
+    try {
+      const receipt = await readInstallation(this.options.root);
+
+      assertInstallationReleaseTrust(receipt, this.options.publicKeyPem);
+
+      if (receipt.format === 2) {
+        throw new Error('candidate_source_required');
+      }
+
+      return await this.prepareLocked(receipt, jobId);
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /**
+   * Только вызов скачанного installer может довести неполный offline job
+   * до ready. С момента проверки owner до распаковки удерживается один lock.
+   */
+  async prepareFromCandidate(jobId: string, digest: string, source: ArchiveSource) {
+    const lock = await acquireInstalledUpdateLock(this.options.root);
+
+    try {
+      const receipt = await readInstallation(this.options.root);
+
+      assertInstallationReleaseTrust(receipt, this.options.publicKeyPem);
+      await assertPrepareWorkerInactive(receipt, jobId);
+
+      return await this.prepareLocked(receipt, jobId, { digest, source });
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /**
+   * Подготавливает уже закреплённую пару либо компонент под общим lock.
+   * Скачанный installer получает отдельный порт архивов с запретом fetch.
+   */
+  private async prepareLocked(receipt: InstallationReceipt, jobId: string,
+    local?: { digest: string; source: ArchiveSource }): Promise<InstalledUpdateJob> {
     let job: InstalledUpdateJob | null = null;
+    let preparationStarted = false;
 
     try {
       job = await readInstalledUpdate(receipt);
@@ -171,34 +385,26 @@ export class InstalledUpdateManager {
         throw new Error('release_job_mismatch');
       }
 
+      if (verifyReleaseEnvelope(job.envelope, this.options.publicKeyPem) !== job.manifestDigest
+        || local && local.digest !== job.manifestDigest
+        || canonicalJson(await readInstalledPointer(receipt)) !== canonicalJson(job.previous)) {
+        throw new Error('release_target_changed');
+      }
+
+      await assertReleasePlatform(job.envelope.payload.platform);
+
       if (job.stage === 'ready') {
         return job;
       }
 
-      if (!['queued', 'verifying', 'downloading', 'preparing', 'failed'].includes(job.stage) || job.intent) {
+      if (!prepareStages.includes(job.stage) || job.intent) {
         throw new Error('release_job_stage_invalid');
       }
 
       job.error = null;
       job.stage = 'verifying';
       await saveInstalledUpdate(receipt, job);
-
-      if (verifyReleaseEnvelope(job.envelope, this.options.publicKeyPem) !== job.manifestDigest
-        || canonicalJson(await readInstalledPointer(receipt)) !== canonicalJson(job.previous)) {
-        throw new Error('release_target_changed');
-      }
-
-      const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } };
-      const glibc = report.header?.glibcVersionRuntime;
-      const minimum = job.envelope.payload.platform.glibc;
-      const compare = (version: string) => version.split('.').map(Number);
-      const [major = 0, minor = 0] = compare(glibc ?? '0.0');
-      const [minMajor = 0, minMinor = 0] = compare(minimum);
-
-      if (process.platform !== 'linux' || process.arch !== 'x64' || !glibc
-        || major < minMajor || major === minMajor && minor < minMinor) {
-        throw new Error('release_platform_incompatible');
-      }
+      preparationStarted = true;
 
       const compatibility = checkReleaseCompatibility({
         candidate: job.envelope.payload,
@@ -230,7 +436,13 @@ export class InstalledUpdateManager {
         job.progress = { downloadedBytes, totalBytes };
         await saveInstalledUpdate(receipt, job);
 
-        if (await sha256File(archive).catch(() => '') !== artifact.sha256) {
+        const valid = await matchArchive(archive, artifact);
+
+        if (!valid && local) {
+          await copyCandidateArchive(await local.source(component), archive, artifact);
+        } else if (!valid && receipt.format === 2) {
+          throw new Error('candidate_source_required');
+        } else if (!valid) {
           await fs.rm(archive, { force: true });
 
           let savedAt = 0;
@@ -255,9 +467,20 @@ export class InstalledUpdateManager {
         await saveInstalledUpdate(receipt, job);
 
         const directory = path.join(work, component);
+        const previous = await lstatOrNull(directory);
+
+        if (previous && (!previous.isDirectory() || previous.uid !== receipt.uid
+          || (previous.mode & 0o7777) !== 0o700)) {
+          throw new Error('release_staged_ownership_invalid');
+        }
 
         await fs.rm(directory, { recursive: true, force: true });
         await extractReleaseArtifact(archive, directory, artifact);
+
+        if (component === 'desktop' && job.envelope.payload.platform.os === 'darwin') {
+          await materializeMacDesktop(directory, artifact);
+        }
+
         await this.options.probe(component, directory, job);
       }
 
@@ -266,7 +489,7 @@ export class InstalledUpdateManager {
 
       return job;
     } catch (error) {
-      if (job && ['queued', 'verifying', 'downloading', 'preparing'].includes(job.stage)) {
+      if (preparationStarted && job && prepareStages.includes(job.stage)) {
         job.stage = 'failed';
         job.error = {
           code: error instanceof Error ? error.message : 'release_prepare_failed',
@@ -276,8 +499,6 @@ export class InstalledUpdateManager {
       }
 
       throw error;
-    } finally {
-      await lock.release();
     }
   }
 }

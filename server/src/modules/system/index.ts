@@ -2,6 +2,12 @@ import { runtimeBuildContext } from '../../lib/runtimeBuildContext.ts';
 import { readInstalledPointer, writeInstallationJson } from '../../../../shared/node/installedLayout.ts';
 import { readInstalledUpdate } from '../../../../shared/node/installedUpdateState.ts';
 import { installationForExecutable } from '../../../../shared/node/updateProcessOwner.ts';
+import { darwinProcessOwnerState, readDarwinProcessIdentity }
+  from '../../../../shared/node/processIdentity.ts';
+import { FactoryLaunchAdmissionError, type FactoryLaunchAdmission }
+  from '../../lib/factoryLaunchAdmission.ts';
+import { factoryUpdateDrainOwnerDead, readFactoryUpdateDrainOwner, type UpdateDrainOwner }
+  from '../../lib/factoryUpdateDrainOwner.ts';
 // Модуль system — нагрузка домашнего ПК (CPU/RAM) + жизненный цикл самого сервера
 // (режим запуска, перезапуск, автозапуск и ярлык — из «Настройки → Сервер»).
 import fp from 'fastify-plugin';
@@ -88,6 +94,7 @@ interface SystemModuleConfig {
 export interface SystemModuleOptions {
   system: SystemAdapter;
   config: SystemModuleConfig;
+  factoryAdmission?: FactoryLaunchAdmission;
   releases?: GrigDeskReleaseService | PackagedReleaseService;
   updates?: GrigDeskUpdateManager | PackagedUpdateManager;
   // Подмена для тестов: реальный билд в них не гоняем.
@@ -436,6 +443,243 @@ async function systemModule(
   });
 
   let updateDrainScheduled = false;
+  const admission = opts.factoryAdmission;
+  const uuidPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
+
+  /**
+   * Освобождение по смерти владельца опирается на нативный exact probe.
+   * Таймер выключается при release и не удерживает штатное завершение сервера.
+   */
+  function monitorDrainOwner(id: string, owner: UpdateDrainOwner): void {
+    const timer = setTimeout(async () => {
+      if (!admission?.owns(id, owner.key)) {
+        return;
+      }
+
+      const dead = await factoryUpdateDrainOwnerDead(owner).catch(() => false);
+      const shutdownPending = updateDrainScheduled || fastify.shutdown?.active === true;
+
+      if (dead && admission.reapDeadOwner(id, owner.key, shutdownPending)) {
+        return;
+      }
+
+      monitorDrainOwner(id, owner);
+    }, 1000);
+
+    timer.unref();
+  }
+
+  if (admission && registeredInstallation) {
+    fastify.post<{
+      Body: {
+        action: 'acquire' | 'confirm' | 'release';
+        jobId: string;
+        nonce: string;
+        installationId: string;
+        instanceId: string;
+        manifestDigest: string;
+        workerPid: number;
+        workerStart: string;
+        admissionId?: string;
+      };
+    }>('/api/system/factory-drain-admission', {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'action', 'jobId', 'nonce', 'installationId', 'instanceId',
+            'manifestDigest', 'workerPid', 'workerStart',
+          ],
+          properties: {
+            action: { enum: ['acquire', 'confirm', 'release'] },
+            jobId: { type: 'string', maxLength: 36 },
+            nonce: { type: 'string', maxLength: 128 },
+            installationId: { type: 'string', maxLength: 36 },
+            instanceId: { type: 'string', maxLength: 36 },
+            manifestDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            workerPid: { type: 'integer', minimum: 2 },
+            workerStart: { type: 'string', pattern: '^[0-9]{7,26}$' },
+            admissionId: { type: 'string', maxLength: 36 },
+          },
+        },
+      },
+    }, async (request, reply) => {
+      if (request.authKind !== 'cli') {
+        return reply.code(403).send({ error: 'cli_token_required' });
+      }
+
+      const body = request.body;
+      const denied = () => reply.code(409).send({ error: 'release_activity_unknown' });
+
+      try {
+        const current = (await releases.getStatus()).running;
+        const job = await readInstalledUpdate(registeredInstallation);
+
+        if (!job?.intent || job.id !== body.jobId || job.intent.nonce !== body.nonce
+          || job.installationId !== body.installationId || job.manifestDigest !== body.manifestDigest
+          || current.instanceId !== body.instanceId || !current.instanceId
+          || !['stopping', 'applying', 'starting'].includes(job.stage)) {
+          return denied();
+        }
+
+        const owner = await readFactoryUpdateDrainOwner(registeredInstallation, job, current.instanceId, {
+          pid: body.workerPid,
+          starttime: body.workerStart,
+        });
+
+        if (body.action === 'acquire' && body.admissionId === undefined) {
+          const id = admission.acquire(owner.key);
+
+          monitorDrainOwner(id, owner);
+
+          return { admissionId: id };
+        }
+
+        if (body.action === 'acquire' || !uuidPattern.test(body.admissionId ?? '')) {
+          return denied();
+        }
+
+        if (body.action === 'confirm') {
+          await admission.confirm(body.admissionId!, owner.key, async () => {
+            const result = await fastify.inject({
+              method: 'GET',
+              url: '/api/tasks?updateOwnership=1',
+              headers: request.headers,
+            });
+
+            return result.json();
+          });
+        } else {
+          admission.release(body.admissionId!, owner.key);
+        }
+
+        return { ok: true };
+      } catch (error) {
+        if (error instanceof FactoryLaunchAdmissionError) {
+          return reply.code(error.status).send({ error: error.code });
+        }
+
+        return denied();
+      }
+    });
+  }
+
+  if (process.platform === 'darwin' && admission && registeredInstallation?.mode !== 'remote'
+    && registeredInstallation) {
+    fastify.post<{
+      Body: {
+        action: 'acquire' | 'confirm' | 'release';
+        pid: number;
+        installationId: string;
+        instanceId: string;
+        purpose?: 'desktop-quit' | 'server-stop';
+        admissionId?: string;
+      };
+    }>('/api/system/factory-quit-admission', {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['action', 'pid', 'installationId', 'instanceId'],
+          properties: {
+            action: { enum: ['acquire', 'confirm', 'release'] },
+            pid: { type: 'integer', minimum: 2 },
+            installationId: { type: 'string', maxLength: 36 },
+            instanceId: { type: 'string', maxLength: 36 },
+            purpose: { enum: ['desktop-quit', 'server-stop'] },
+            admissionId: { type: 'string', maxLength: 36 },
+          },
+        },
+      },
+    }, async (request, reply) => {
+      if (request.authKind !== 'cli') {
+        return reply.code(403).send({ error: 'cli_token_required' });
+      }
+
+      const body = request.body;
+      const reject = () => reply.code(409).send({ error: 'release_activity_unknown' });
+
+      try {
+        const running = (await releases.getStatus()).running;
+        const probe = await readDarwinProcessIdentity(body.pid);
+
+        if (probe.state !== 'alive' || running.instanceId !== body.instanceId
+          || body.installationId !== registeredInstallation.installationId) {
+          return reject();
+        }
+
+        const owner = probe.identity;
+        const purpose = body.purpose ?? 'desktop-quit';
+
+        if (purpose === 'server-stop') {
+          if (owner.executable !== path.join(registeredInstallation.root, 'update/maintenance')) {
+            return reject();
+          }
+        } else {
+          const source = await installationForExecutable(owner.executable);
+
+          if (registeredInstallation.mode !== 'local'
+            || source?.installationId !== registeredInstallation.installationId
+            || !/\/grigdesk\.app\/Contents\/MacOS\/grigdesk$/u.test(owner.executable)) {
+            return reject();
+          }
+        }
+
+        const key = `${purpose}:${body.instanceId}:${owner.pid}:${owner.starttime}`;
+
+        if (body.action === 'acquire' && body.admissionId === undefined) {
+          const id = admission.acquire(key);
+          /** Подтверждённая смерть окна освобождает его токен. */
+          const check = () => {
+            const timer = setTimeout(async () => {
+              if (!admission.owns(id, key)) {
+                return;
+              }
+
+              if (await darwinProcessOwnerState(owner) === 'dead'
+                && admission.reapDeadOwner(id, key, fastify.shutdown?.active === true)) {
+                return;
+              }
+
+              check();
+            }, 1000);
+
+            timer.unref();
+          };
+
+          check();
+
+          return { admissionId: id };
+        }
+
+        if (body.action === 'acquire' || !uuidPattern.test(body.admissionId ?? '')) {
+          return reject();
+        }
+        if (body.action === 'confirm') {
+          await admission.confirm(body.admissionId!, key, async () => {
+            const result = await fastify.inject({
+              method: 'GET',
+              url: '/api/tasks?updateOwnership=1',
+              headers: request.headers,
+            });
+
+            return result.json();
+          });
+        } else {
+          admission.release(body.admissionId!, key);
+        }
+
+        return { ok: true };
+      } catch (error) {
+        if (error instanceof FactoryLaunchAdmissionError) {
+          return reply.code(error.status).send({ error: error.code });
+        }
+
+        return reject();
+      }
+    });
+  }
 
   // Подтверждение пишется только после всех шагов слива и close Fastify.
   // Forced exit и ошибка шага не дают worker разрешение заменить программу.
@@ -461,18 +705,19 @@ async function systemModule(
       jobId: string;
       installationId: string;
       manifestDigest: string;
+      factoryAdmissionId?: string;
     };
   }>('/api/system/update-drain', {
     schema: {
       body: {
         type: 'object',
         additionalProperties: false,
-        required: ['jobId', 'installationId', 'manifestDigest'],
-        propertyNames: { enum: ['jobId', 'installationId', 'manifestDigest'] },
+        required: ['jobId', 'installationId', 'manifestDigest', ...(admission ? ['factoryAdmissionId'] : [])],
         properties: {
           jobId: { type: 'string', pattern: '^[0-9a-f-]{36}$' },
           installationId: { type: 'string', pattern: '^[0-9a-f-]{36}$' },
           manifestDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+          ...(admission ? { factoryAdmissionId: { type: 'string', maxLength: 36 } } : {}),
         },
       },
     },
@@ -496,6 +741,26 @@ async function systemModule(
 
     if (!fastify.shutdown) {
       return reply.code(503).send({ error: 'shutdown_unavailable' });
+    }
+
+    if (admission) {
+      try {
+        const instanceId = (await releases.getStatus()).running.instanceId;
+
+        if (!instanceId || !uuidPattern.test(request.body.factoryAdmissionId ?? '')) {
+          return reply.code(409).send({ error: 'release_activity_unknown' });
+        }
+
+        const owner = await readFactoryUpdateDrainOwner(registeredInstallation, job, instanceId);
+
+        admission.dispatch(request.body.factoryAdmissionId!, owner.key);
+      } catch (error) {
+        if (error instanceof FactoryLaunchAdmissionError) {
+          return reply.code(error.status).send({ error: error.code });
+        }
+
+        return reply.code(409).send({ error: 'release_activity_unknown' });
+      }
     }
 
     if (!updateDrainScheduled && !fastify.shutdown.active) {

@@ -3412,6 +3412,7 @@ async function stopArbiter(task: PipelineViewTask) {
 // (holdPending), старт недоступен: resume упёрся бы в частичную песочницу.
 function canResume(t: PipelineViewTask) {
   return !t.readOnly && !t.daemonAlive && !t.holdPending && !!t.attempt
+    && t.cleanupAction?.mode !== 'stop'
     && !['completed', 'abandoned'].includes(t.result || '');
 }
 
@@ -3519,7 +3520,7 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
     }
   }
 
-  if (canStop(t)) {
+  if (canStop(t) || !t.readOnly && !t.daemonAlive && t.cleanupAction) {
     add('stop', translate('core.coreOstanovit'), translate('core.coreOstanovitProgonPopytkuMozhno'),
       translate('core.coreOstanavlivayuProgon'), 'sbstop');
   }
@@ -3561,7 +3562,7 @@ function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
     stopArbiter: () => stopArbiter(t),
     retry: () => sandboxRetry(t.task),
     resume: () => resumeRun(t.task, t.held === true),
-    stop: () => stopRun(t.task),
+    stop: () => stopRun(t.task, t.daemonAlive ? undefined : t.cleanupAction?.identity),
     down: () => sandboxDown(t.task),
     close: () => closeTask(t),
   };
@@ -3717,7 +3718,7 @@ async function runBulkAction(action: BulkAction, scope: BulkScope) {
  * Останавливает работающий прогон после подтверждения человека.
  * Состояние перечитывается перед снятием блокировки повторной команды.
  */
-async function stopRun(task: TaskId) {
+async function stopRun(task: TaskId, expectedCleanup?: string) {
   if (pendingCardActions.value.has(task)) {
     return;
   }
@@ -3731,7 +3732,11 @@ async function stopRun(task: TaskId) {
   pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'stop');
 
   try {
-    await api.post(`/api/tasks/${task}/stop`);
+    if (expectedCleanup) {
+      await api.post(`/api/tasks/${task}/stop`, { expectedCleanup });
+    } else {
+      await api.post(`/api/tasks/${task}/stop`);
+    }
     await load();
   }
   catch (e) {

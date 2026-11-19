@@ -6,13 +6,15 @@ import { randomUUID } from 'node:crypto';
 
 import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+import { assertReleasePlatform } from '../shared/node/releaseChannel.ts';
 import { downloadReleaseArtifact } from '../shared/node/releaseArchive.ts';
 import { acquireInstallLock, lstatOrNull } from '../shared/node/binaryInstall.ts';
 import { assertInstallationPath } from '../shared/node/installedLayout.ts';
 import { sha256File } from '../shared/node/hash.ts';
 import { syncDirectory } from '../shared/node/files.ts';
 import type { ReleaseEnvelope } from '../shared/runtime/installedUpdateContracts.ts';
-import { installRelease } from './installRelease.mts';
+import { installReleaseWithResult } from './installRelease.mts';
+import { RELEASE_DISTRIBUTION_SOURCE } from '../shared/runtime/releaseChannelContracts.ts';
 
 const FLAGS = ['--release', '--mode', '--root', '--data-home', '--user-data', '--bin-dir',
   '--applications-dir', '--unit-dir', '--source-dir', '--cache-dir'];
@@ -144,6 +146,34 @@ export async function runInstallOnline(argv: string[]): Promise<number> {
   }
 
   const manifestDigest = verifyReleaseEnvelope(index.latest);
+
+  await assertReleasePlatform(index.latest.payload.platform);
+
+  const input = {
+    root: options.root,
+    mode: options.mode,
+    dataHome: options.dataHome,
+    userData: options.userData,
+    binDirectory: options.binDirectory,
+    applicationsDirectory: options.applicationsDirectory,
+    unitDirectory: options.unitDirectory,
+    envelope: index.latest,
+    maintenance: process.execPath,
+  };
+
+  if (index.latest.payload.platform.os === 'darwin' || RELEASE_DISTRIBUTION_SOURCE !== 'channel') {
+    if (!options.sourceDir) {
+      throw new Error('candidate_source_required');
+    }
+
+    const outcome = await installReleaseWithResult({
+      ...input,
+      archive: obtainArchives(index.latest, '', options.sourceDir),
+    });
+
+    return outcome.status === 'update-prepared' ? 10 : 0;
+  }
+
   const cacheRoot = options.cacheDir ?? path.join(
     process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), '.cache'),
     'grigdesk', 'install', manifestDigest);
@@ -155,23 +185,12 @@ export async function runInstallOnline(argv: string[]): Promise<number> {
   const cacheLock = await acquireInstallLock(cacheRoot);
 
   try {
-    const archive = obtainArchives(index.latest, cacheRoot, options.sourceDir);
-    const existing = await lstatOrNull(path.join(options.root, 'installation.json'));
-
-    await installRelease({
-      root: options.root,
-      mode: options.mode,
-      dataHome: options.dataHome,
-      userData: options.userData,
-      binDirectory: options.binDirectory,
-      applicationsDirectory: options.applicationsDirectory,
-      unitDirectory: options.unitDirectory,
-      envelope: index.latest,
-      maintenance: process.execPath,
-      archive,
+    const outcome = await installReleaseWithResult({
+      ...input,
+      archive: obtainArchives(index.latest, cacheRoot, options.sourceDir),
     });
 
-    return existing ? 10 : 0;
+    return outcome.status === 'fresh-installed' ? 0 : 10;
   } finally {
     await cacheLock.release();
   }

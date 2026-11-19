@@ -4,9 +4,20 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createGunzip } from 'node:zlib';
 
-import type { ReleaseArtifact } from '../runtime/installedUpdateContracts.ts';
+import { MAC_APP_ARCHIVE, type ReleaseArtifact } from '../runtime/installedUpdateContracts.ts';
 import { sha256File } from './hash.ts';
 import { syncDirectory } from './files.ts';
+
+/**
+ * Для Mac учитываются дерево и приватная копия ZIP до распаковки.
+ * Linux по-прежнему резервирует исходный tar и его обычные файлы.
+ */
+export function releaseArtifactDiskBytes(artifact: ReleaseArtifact): number {
+  const privateZip = artifact.unpackedBundleBytes
+    ? artifact.files.find((entry) => entry.path === MAC_APP_ARCHIVE)?.size ?? 0 : 0;
+
+  return artifact.size + artifact.unpackedSize + (artifact.unpackedBundleBytes ?? 0) + privateZip;
+}
 
 /**
  * Загрузка ограничена подписанным размером, HTTPS и общим таймаутом.
@@ -83,6 +94,8 @@ export async function extractReleaseArtifact(
   await fs.mkdir(destination, { mode: 0o700 });
 
   const expected = new Map(artifact.files.map((entry) => [entry.path, entry]));
+  const physicalDestination = path.resolve(destination);
+  const directories = new Set<string>();
   const source = createReadStream(archive);
   const unpack = source.pipe(createGunzip());
 
@@ -184,8 +197,16 @@ export async function extractReleaseArtifact(
         }
 
         const target = path.join(destination, name);
+        const parent = path.dirname(target);
 
-        await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+        await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+
+        if (process.platform === 'darwin') {
+          for (let dir = path.resolve(parent); dir !== physicalDestination; dir = path.dirname(dir)) {
+            directories.add(dir);
+          }
+        }
+
         output = await fs.open(target, 'wx', 0o600);
         remaining = size;
         padding = (512 - size % 512) % 512;
@@ -196,6 +217,10 @@ export async function extractReleaseArtifact(
     if (output || remaining || padding || pending.some((byte) => byte !== 0)
       || endBlocks < 2 || expected.size) {
       throw new Error('release_archive_incomplete');
+    }
+
+    for (const directory of [...directories].sort((left, right) => right.length - left.length)) {
+      await syncDirectory(directory);
     }
 
     await syncDirectory(destination);

@@ -1,7 +1,9 @@
+import path from 'node:path';
+
 import type { ReleaseIdentity } from '../../shared/runtime/installedUpdateContracts.ts';
 import type { InstalledUpdateJob } from '../../shared/node/installedUpdateState.ts';
 import { installationForExecutable, readUpdateProcess } from '../../shared/node/updateProcessOwner.ts';
-import { inspectInstalledServer, inspectUpdateActivity, installedServerUnit,
+import { acquireInstalledDesktopDrain, inspectInstalledServer, inspectUpdateActivity, installedServerUnit,
   startInstalledServer } from '../../shared/node/installedServer.ts';
 import { createUpdateHandoff, launchUpdateWorker, waitUpdateWorker,
   writeDesktopBootProof, resumeDesktopHandoff } from '../../shared/node/installedUpdateWorker.ts';
@@ -48,9 +50,11 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
     return null;
   }
 
-  let quitApplyFlight: Promise<'applied' | 'idle'> | null = null;
+  let quitApplyFlight: Promise<'applied' | 'idle' | 'blocked'> | null = null;
   let applyFlight: Promise<void> | null = null;
   let closed = false;
+  const strictLocal = () =>
+    process.platform === 'darwin' && receipt.mode === 'local' && ports.localSelected();
 
   /**
    * Закрытие окна с готовым обновлением считается подтверждением применения:
@@ -58,7 +62,7 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
    * Явная кнопка применения сохраняет диалог последствий с числом прерываемых ходов.
    */
   const runApply = async (job: Pick<InstalledUpdateJob, 'id' | 'scope'>,
-    confirmed: boolean): Promise<void> => {
+    confirmed: boolean, signal?: AbortSignal): Promise<void> => {
     if (closed) {
       return;
     }
@@ -99,22 +103,26 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
 
     // После согласия кнопка применения и закрытие окна делят один handoff и ожидание drain.
     applyFlight = (async () => {
+      signal?.throwIfAborted();
+
       if ((job.scope === 'pair') !== (receipt.mode === 'local' && ports.localSelected())) {
         throw new Error('release_return_to_confirmed_profile');
       }
 
       const handoff = await createUpdateHandoff(receipt.root, job.id, {
-        desktop: await readUpdateProcess(process.pid),
+        desktop: await readUpdateProcess(process.pid, path.join(receipt.root, 'update/maintenance')),
         stopLocal: job.scope === 'pair' || ports.ownsLocal(),
         remoteApi: ports.remoteApi(),
       });
 
       await launchUpdateWorker(receipt.root, job.id);
-      await waitUpdateWorker(receipt.root, handoff, 'accepted');
-      await waitUpdateWorker(receipt.root, handoff, 'drained');
+      await waitUpdateWorker(receipt.root, handoff, 'accepted', signal);
+      await waitUpdateWorker(receipt.root, handoff, 'drained', signal);
+      signal?.throwIfAborted();
       await ports.save();
       await ports.flushCookies();
       await ports.drainLogs();
+      signal?.throwIfAborted();
       await ports.exit();
     })();
 
@@ -167,6 +175,9 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
 
   return {
     ...updates,
+    strictLocalQuit: strictLocal,
+    acquireQuitAdmission: (signal: AbortSignal, expectsOwnedServer: boolean) =>
+      acquireInstalledDesktopDrain(receipt, signal, expectsOwnedServer),
     canApplyReadyOnQuit: () => !closed && Boolean(applyFlight || quitApplyFlight || readyOnQuit()),
     close() {
       closed = true;
@@ -177,7 +188,7 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
      * Повторные события выхода ждут то же обещание, включая отказ применения.
      * Результат idle возвращает управление обычной остановке без второго handoff.
      */
-    applyReadyOnQuit(): Promise<'applied' | 'idle'> {
+    applyReadyOnQuit(signal?: AbortSignal): Promise<'applied' | 'idle' | 'blocked'> {
       if (closed) {
         return Promise.resolve('idle');
       }
@@ -186,7 +197,7 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
         return quitApplyFlight;
       }
 
-      quitApplyFlight = (async (): Promise<'applied' | 'idle'> => {
+      quitApplyFlight = (async (): Promise<'applied' | 'idle' | 'blocked'> => {
         try {
           if (applyFlight) {
             await applyFlight;
@@ -200,14 +211,14 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
             return 'idle';
           }
 
-          await runApply(job, true);
+          await runApply(job, true, signal);
 
           return 'applied';
         } catch (error) {
           console.warn('installed-quit-apply-failed',
             error instanceof Error ? error.message : 'release_quit_apply_failed');
 
-          return 'idle';
+          return strictLocal() ? 'blocked' : 'idle';
         }
       })().finally(() => {
         quitApplyFlight = null;

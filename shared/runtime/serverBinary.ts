@@ -12,8 +12,8 @@ const decodeInfo = decode.objectOf({
   runtime: decode.objectOf({
     node: decode.oneOf('24.21.0'),
     abi: decode.oneOf('137'),
-    platform: decode.oneOf('linux'),
-    arch: decode.oneOf('x64'),
+    platform: decode.oneOf('linux', 'darwin'),
+    arch: decode.oneOf('x64', 'arm64'),
   }),
   capabilities: decode.listOf(decode.oneOf(...requiredCapabilities)),
   engine: decode.objectOf({
@@ -73,6 +73,10 @@ function sha256Text(value: unknown, field: string): string {
  */
 export function decodeServerBinaryInfo(value: unknown): ServerBinaryInfo {
   const info = decodeInfo(value, 'runtime-info');
+
+  if ((info.runtime.platform === 'darwin') !== (info.runtime.arch === 'arm64')) {
+    invalidMetadata('runtime-info.runtime');
+  }
 
   if (info.capabilities.length !== requiredCapabilities.length
     || new Set(info.capabilities).size !== requiredCapabilities.length) {

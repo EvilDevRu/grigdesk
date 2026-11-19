@@ -1,4 +1,9 @@
-import { decodeReleaseChannelIndex, type ReleaseEnvelope } from '../runtime/installedUpdateContracts.ts';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+import {
+  decodeReleaseChannelIndex, type ReleaseEnvelope, type ReleasePlatform,
+} from '../runtime/installedUpdateContracts.ts';
 import type { ReleaseChannel } from '../runtime/productReleaseVersion.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
 
@@ -14,6 +19,46 @@ const SOURCE_TIMEOUT_MS = 5000;
 const DOCUMENT_LIMIT = 1024 * 1024;
 const FRESH_MS = 5 * 60_000;
 const COOLDOWN_MS = 30_000;
+const execute = promisify(execFile);
+
+const nativeHost = {
+  platform: process.platform,
+  arch: process.arch,
+  async macVersion() {
+    const { stdout } = await execute('/usr/bin/sw_vers', ['-productVersion'], {
+      timeout: 5000,
+      maxBuffer: 1024,
+    });
+
+    return stdout.trim();
+  },
+  glibcVersion() {
+    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } };
+
+    return report?.header?.glibcVersionRuntime;
+  },
+};
+
+/**
+ * Отклоняет несовместимое подписанное описание до чтения архивов.
+ * На Darwin номер ОС читается штатным бинарником по абсолютному пути.
+ */
+export async function assertReleasePlatform(platform: ReleasePlatform, host = nativeHost) {
+  if (host.platform !== platform.os || host.arch !== platform.arch) {
+    throw new Error('release_platform_incompatible');
+  }
+
+  const actual = platform.os === 'darwin'
+    ? await host.macVersion().catch(() => '') : host.glibcVersion();
+  const minimum = platform.os === 'darwin' ? platform.minMacOS : platform.glibc;
+  const [major = -1, minor = -1] = (actual ?? '').split('.').map(Number);
+  const [minMajor = 0, minMinor = 0] = minimum.split('.').map(Number);
+
+  if (!actual || !/^\d+\.\d+(?:\.\d+)?$/u.test(actual)
+    || major < minMajor || major === minMajor && minor < minMinor) {
+    throw new Error('release_platform_incompatible');
+  }
+}
 
 /**
  * Канал релизов читается по образцу каталога плагинов: HTTPS без redirects, короткий

@@ -13,6 +13,13 @@ independently of website retention.
 
 Updates need a verified published release and a trusted key. The owner publishes manually;
 commits and tags alone do not publish. Finished binaries undergo separate acceptance checks.
+For a downloaded development candidate, run the next candidate's installer with
+`--source-dir "$PWD"` and the same installation mode and paths. It prepares the update
+from local files. If preparation is interrupted, run the installer again from that
+candidate. Apply the ready pair separately in the window. On Apple Silicon,
+`grigdesk-ctl server resume-update --rollback` can restore the previous generation after
+an interrupted apply even with the window closed. Use a separate installation folder for
+each local test build.
 If the owner explicitly skipped the full CI suite, the update description says so.
 Signature, integrity and binary startup checks still run; you decide whether to apply that release.
 
@@ -37,6 +44,10 @@ Signature, integrity and binary startup checks still run; you decide whether to 
 
 After confirmed restart, a separate process continues the update. Closing the old window then does not
 require reinstalling. If process state cannot be read, resolve that error and resume the existing job.
+
+On macOS, GrigDesk can hold window close or Cmd+Q when it cannot confirm the state of the local server.
+GrigDesk waits for a server it started to exit. A separately started server of the same installation
+keeps running after the window closes. If the window stays open, try quitting again once the connection returns.
 
 ## Standalone server
 

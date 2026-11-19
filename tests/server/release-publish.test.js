@@ -103,6 +103,7 @@ test('RP-2: без окружения отказ с перечнем перем�
 
 const { installedBuild, loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
 const { isolatedEnvironment } = await import('../helpers/installedUpdateFixture.mjs');
+const { signedMacIndex } = await import('../helpers/releaseV2Fixture.mjs');
 const { compileHelpSources } = await import('../../shared/node/helpSources.ts');
 const { HELP_LOCALES, helpResourceFile } = await import('../../shared/help/helpContracts.ts');
 
@@ -320,4 +321,26 @@ test('PUB-OFFICIAL-KEY: удаление marker и override ключа не ра
   isolatedEnvironment(t, { RELEASE_SIGNING_PUBLIC_KEY_FILE: keyFile });
   await assert.rejects(box.publishInstalledRelease(other.directory, box.targets, true),
     /release_signature_invalid/u);
+});
+
+test('PUB-MAC-PLATFORM: подписанный Mac index отклоняется до файлов и SSH', async (t) => {
+  const fixture = signedMacIndex();
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'gd-publish-mac-'));
+  const bins = await stubBins(t);
+  const { publishInstalledRelease } = await loadInstalledModule(t, 'tools/installedPublication.mts',
+    fixture.publicKeyPem);
+
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  isolatedEnvironment(t, { PATH: `${bins.dir}:/usr/bin:/bin` });
+  await fs.writeFile(path.join(directory, 'release.json'), JSON.stringify(fixture.index));
+
+  await assert.rejects(publishInstalledRelease(directory, [{
+    host: 'fixture',
+    user: 'fixture',
+    port: '22',
+    key: path.join(directory, 'unavailable-key'),
+    origin: 'https://grigdesk.test',
+    dir: 'unavailable-root',
+  }]), /release_publish_platform_unsupported/u);
+  await assert.rejects(fs.lstat(bins.sshLog), { code: 'ENOENT' });
 });

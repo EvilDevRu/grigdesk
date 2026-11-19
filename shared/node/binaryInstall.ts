@@ -2,10 +2,12 @@ import type { BigIntStats } from 'node:fs';
 import { constants } from 'node:fs';
 import fs, { type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as pause } from 'node:timers/promises';
 
 import { acquireDirectoryLock, type DirectoryLockOptions } from './directoryLock.ts';
 import { syncDirectory } from './files.ts';
 import { sha256File } from './hash.ts';
+import { tryDarwinInstallLease } from './processIdentity.ts';
 
 export interface InstallReceipt {
   format: 1;
@@ -254,9 +256,52 @@ export async function approveInstallReceipt(
 }
 
 /**
- * Все установщики сериализуют target одинаковым PID/starttime/token lock.
- * Возвращённый handle снимает только своё владение; stage cleanup остаётся у потребителя.
+ * Linux сохраняет directory lock, Darwin удерживает открытый kernel lease.
+ * Постоянный lock-файл macOS проверяется до и после захвата, pathname не удаляется.
  */
-export async function acquireInstallLock(target: string, options: DirectoryLockOptions = {}) {
-  return acquireDirectoryLock(`${target}.install-lock`, { waitMs: 120000, ...options });
+export async function acquireInstallLock(
+  target: string,
+  options: DirectoryLockOptions & { darwinMaintenance?: string } = {},
+) {
+  const file = `${target}.install-lock`;
+
+  if (process.platform !== 'darwin') {
+    return acquireDirectoryLock(file, { waitMs: 120000, ...options });
+  }
+
+  const flags = constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  const handle = await fs.open(file, flags, 0o600);
+  const deadline = Date.now() + (options.waitMs ?? 120000);
+
+  try {
+    const check = async () => {
+      const stat = await handle.stat();
+      const named = await fs.lstat(file);
+
+      if (!stat.isFile() || stat.uid !== process.getuid!() || stat.nlink !== 1
+        || (stat.mode & 0o7777) !== 0o600 || !named.isFile()
+        || stat.dev !== named.dev || stat.ino !== named.ino) {
+        throw new Error('installation_lock_unverified');
+      }
+    };
+
+    await check();
+
+    while (!await tryDarwinInstallLease(handle.fd, options.darwinMaintenance)) {
+      if (Date.now() >= deadline) {
+        throw new Error('installation_lock_busy');
+      }
+
+      await pause(options.pollMs ?? 50);
+      await check();
+    }
+
+    await check();
+
+    return { release: () => handle.close() };
+  } catch (error) {
+    await handle.close();
+
+    throw error;
+  }
 }

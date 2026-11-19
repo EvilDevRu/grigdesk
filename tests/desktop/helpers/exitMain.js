@@ -42,6 +42,7 @@ export async function exitMain(t, options = {}) {
   const address = options.remote ? 'https://remote.invalid' : 'http://127.0.0.1:19998';
   const state = {
     visible: options.visible ?? true,
+    minimized: options.minimized ?? false,
     ownership: options.ownership ?? 'owned',
     generation: 1,
     decision: options.decision ?? 'pending',
@@ -214,6 +215,17 @@ export async function exitMain(t, options = {}) {
     isVisible() {
       return state.visible;
     }
+    isMinimized() {
+      return state.minimized;
+    }
+    restore() {
+      state.minimized = false;
+      calls.push('window-restored');
+    }
+    show() {
+      state.visible = true;
+    }
+    focus() {}
     isMaximized() {
       return false;
     }
@@ -376,7 +388,10 @@ export async function exitMain(t, options = {}) {
       const display = { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
       export const screen = { getPrimaryDisplay: () => display,
         getDisplayMatching: () => display, getAllDisplays: () => [display] };
-      export const dialog = { showErrorBox() {}, showMessageBox: async () => ({ response: 0 }) };
+      export const dialog = {
+        showErrorBox() {},
+        showMessageBox: async () => { f.calls.push('native-warning'); return { response: 0 }; },
+      };
       export const safeStorage = {};
       export const clipboard = {};
       export const shell = { openExternal: async () => {} };

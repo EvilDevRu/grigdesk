@@ -30,6 +30,7 @@ export function createServerManifest(payload: PayloadDescriptor, input: {
   launcherSha256: string;
   engineSha256: string;
   buildInputs: Record<string, string>;
+  runtime?: ServerBinaryInfo['runtime'];
 }): ServerPackageManifest {
   if (!parseProductVersion(input.version)) {
     throw Object.assign(new Error('Некорректная продуктовая версия серверного пакета'), {
@@ -42,7 +43,7 @@ export function createServerManifest(payload: PayloadDescriptor, input: {
     hostContract: 1 as const,
     version: input.version,
     packagingVersion: 2 as const,
-    runtime: {
+    runtime: input.runtime ?? {
       node: '24.21.0',
       abi: '137',
       platform: 'linux',

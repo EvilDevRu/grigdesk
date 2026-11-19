@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 
 const pipelineEntry = 'tools/releasePipeline.mts tools/releaseRecipe.json';
 const repository = path.resolve(import.meta.dirname, '../..');
@@ -172,7 +174,7 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   const desktopPreparation = 'tools/ci/prepare-release-desktop.sh';
   const desktopStep = build.steps.findIndex((step) => (step.run ?? '').includes(desktopPreparation));
   const bundleStep = build.steps.findIndex((step) => step.name === 'Сборка комплекта');
-  const localBundle = await fs.readFile(path.join(repository, 'tools/bundle.mts'), 'utf8');
+  const localBundle = await fs.readFile(path.join(repository, 'tools/buildDesktopRelease.mts'), 'utf8');
 
   assert.ok(desktopStep >= 0 && desktopStep < bundleStep);
   assert.ok(localBundle.includes(desktopPreparation));
@@ -195,6 +197,105 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
     assert.match(cleanup.run, /RUNNER_ENVIRONMENT:-.*github-hosted/u);
     assert.match(cleanup.run, /sudo rm -rf -- \/usr\/share\/dotnet \/usr\/local\/\.ghcup/u);
     assert.doesNotMatch(cleanup.run, /android|\/node\b|\/python\b|chromium/u);
+  }
+});
+
+test('RW-PLATFORMS: переключатели задают сборку и ворота выдачи', async (t) => {
+  const yaml = await import('../../server/node_modules/yaml/dist/index.js');
+  const workflow = await fs.readFile(path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8');
+  const doc = yaml.parse(workflow);
+  const inputs = doc.on.workflow_dispatch.inputs;
+  const selection = doc.jobs.plan.steps.find((step) => step.id === 'accepted');
+  const {
+    linux_candidate_build: linuxBuild,
+    linux_candidate_verify: linuxVerify,
+    macos_build: macBuild,
+    macos_verify: macVerify,
+    candidate_artifacts: output,
+  } = doc.jobs;
+
+  for (const checkbox of [inputs.linux, inputs.macos]) {
+    assert.equal(checkbox.type, 'boolean');
+    assert.equal(checkbox.default, true);
+  }
+
+  assert.equal(inputs.platforms, undefined);
+  assert.equal(inputs.channel.default, 'dev');
+  assert.equal(doc.jobs.plan.steps[0], selection);
+
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'release-inputs-'));
+  const selectedFile = path.join(temporary, 'selected.txt');
+
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+
+  for (const [linux, macos, expected] of [
+    ['true', 'true', 'linux-and-macos'],
+    ['true', 'false', 'linux'],
+    ['false', 'true', 'macos'],
+    ['false', 'false', null],
+  ]) {
+    await fs.writeFile(selectedFile, '');
+
+    const observed = spawnSync('/bin/bash', ['-e', '-c', selection.run], {
+      env: {
+        BUILD_LINUX: linux,
+        BUILD_MACOS: macos,
+        GITHUB_OUTPUT: selectedFile,
+      },
+      encoding: 'utf8',
+    });
+
+    assert.equal(observed.status, expected ? 0 : 1, observed.stderr);
+    assert.equal(await fs.readFile(selectedFile, 'utf8'), expected ? `platforms=${expected}\n` : '');
+
+    if (!expected) {
+      assert.match(observed.stdout, /^::error::/u);
+    }
+  }
+
+  for (const build of [linuxBuild, macBuild]) {
+    assert.deepEqual(build.needs, ['plan', 'server', 'web']);
+    assert.equal(build.environment, 'platform-candidate');
+    assert.equal(build.steps.filter((step) => /secrets\./u.test(JSON.stringify(step))).length, 1);
+  }
+
+  for (const linux of [linuxBuild, linuxVerify]) {
+    assert.equal(linux.if, "${{ success() && needs.plan.outputs.platforms == 'linux-and-macos' }}");
+  }
+
+  for (const mac of [macBuild, macVerify]) {
+    assert.match(mac.if, /success\(\).*platforms == 'macos'.*\|\|\s+.*platforms == 'linux-and-macos'/u);
+  }
+
+  assert.equal(linuxBuild['runs-on'], 'ubuntu-24.04');
+  assert.equal(linuxVerify['runs-on'], 'ubuntu-24.04');
+  assert.equal(macBuild['runs-on'], 'macos-15');
+  assert.equal(macVerify['runs-on'], 'macos-15');
+  assert.deepEqual(linuxVerify.needs, ['plan', 'linux_candidate_build']);
+  assert.deepEqual(macVerify.needs, ['plan', 'macos_build']);
+  assert.deepEqual(output.needs, ['plan', 'linux_candidate_verify', 'macos_verify']);
+  assert.match(output.if, /!cancelled\(\).*needs\.plan\.result == 'success'/u);
+  assert.match(output.if, /needs\.macos_verify\.result == 'success'/u);
+  assert.match(output.if, /platforms == 'macos' && needs.linux_candidate_verify.result == 'skipped'/u);
+  assert.match(output.if,
+    /platforms == 'linux-and-macos' && needs.linux_candidate_verify.result == 'success'/u);
+
+  for (const job of [linuxVerify, macVerify, output]) {
+    assert.doesNotMatch(JSON.stringify(job), /secrets\./u);
+    assert.equal(job['continue-on-error'], undefined);
+  }
+
+  for (const platform of ['linux-x64', 'darwin-arm64']) {
+    const upload = output.steps.find((step) => step.with?.path === `verified-candidates/${platform}`);
+    const selected = "${{ needs.plan.outputs.platforms == 'linux-and-macos' }}";
+
+    assert.match(upload?.uses ?? '', /^actions\/upload-artifact@/u);
+    assert.equal(upload.with['if-no-files-found'], 'error');
+    assert.equal(upload.if, platform === 'linux-x64' ? selected : undefined);
+  }
+
+  for (const name of ['build', 'verify', 'publish']) {
+    assert.match(doc.jobs[name].if, /needs\.plan\.outputs\.platforms == 'linux'/u);
   }
 });
 

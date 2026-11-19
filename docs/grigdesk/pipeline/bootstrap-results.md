@@ -81,7 +81,14 @@ Summary и graph читают bootstrapStop при cursor=null. Bootstrap-вер
 --visit VISIT --stop-hash HASH --answer-file ABS` — короткий CAS. Команда берёт control lock
 оркестратора и task lock, проверяет exact identity, текущий stop и непустой ответ до 20000
 символов. Повтор того же подтверждённого ответа идемпотентен; иной ответ, stale visit/hash
-и живой конкурирующий оркестратор дают отказ. Pin не меняется. Модель и среда не запускаются.
+и живой конкурирующий оркестратор дают отказ. Модель и среда не запускаются.
+
+На macOS существующее закрепление сохраняется. Для совместимой старой попытки сервер
+закрепляет выбранную поставку после read-only допуска и до первой записи ответа.
+Открытый канал профиля требует завершить «Стоп» даже без транзакции инструментации.
+Ответ получает 409 `release_task_cleanup_required` до записи решения или закрепления.
+Утраченное или повреждённое закрепление возвращает соответственно
+`factory_runtime_pin_missing` или `factory_runtime_pin_invalid`.
 
 `POST /api/tasks/:id/bootstrap-answer` принимает profile, attempt, phase=bootstrap,
 node=scout, visitId, stopHash, answer. Текст передаётся CLI файлом. Сервер проверяет exact

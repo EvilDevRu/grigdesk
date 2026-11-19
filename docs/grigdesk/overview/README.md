@@ -38,7 +38,7 @@
 - [Типы чата и живого конвейера](typed-chat-pipeline-boundaries.md)
 - [Типы доски и карточки задачи: справочники, вложения и каталог запуска](typed-task-views.md)
 - [Модули сервера (server/src/modules/)](server-modules.md)
-- [Что лежит в bin/: единая команда, агентские SEA, сервер, посредник и окно](bin-directory.md)
+- [Единая команда в bin/, нативная сборка и проверка владельца при отмене dist check](bin-directory.md)
 - [Слои](layers.md)
 
 ## Грабли

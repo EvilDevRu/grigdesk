@@ -23,15 +23,22 @@ export interface RuntimeVerificationPorts {
 export async function verifyRuntimePorts(input: {
   full: boolean;
   native: string[];
+  expectedRuntime?: ServerBinaryInfo['runtime'];
 }, ports: RuntimeVerificationPorts) {
   if (!input.full) {
     return null;
   }
 
   const runtime = await ports.checkNode();
+  const expected = input.expectedRuntime ?? {
+    node: '24.21.0',
+    abi: '137',
+    platform: 'linux',
+    arch: 'x64',
+  };
 
-  if (runtime.node !== '24.21.0' || runtime.abi !== '137'
-    || runtime.platform !== 'linux' || runtime.arch !== 'x64') {
+  if (runtime.node !== expected.node || runtime.abi !== expected.abi
+    || runtime.platform !== expected.platform || runtime.arch !== expected.arch) {
     throw Object.assign(new Error('Node runtime или ABI серверной поставки не совпал'), {
       code: 'server_runtime_invalid',
     });
@@ -118,7 +125,7 @@ export async function verifyPreparedRuntime(input: {
     throw new Error('Защищённый index требует два native bindings');
   }
 
-  const proof = await verifyRuntimePorts({ full: true, native }, {
+  const proof = await verifyRuntimePorts({ full: true, native, expectedRuntime: input.manifest.runtime }, {
     checkNode: async () => {
       const result = await execute(node, ['-p', 'JSON.stringify({node:process.versions.node,'
         + 'abi:process.versions.modules,platform:process.platform,arch:process.arch})'], options);

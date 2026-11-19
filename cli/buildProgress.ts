@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { constants } from 'node:os';
 import os from 'node:os';
 import path from 'node:path';
@@ -562,10 +563,24 @@ export async function runBuildProgress(
   root: string, variant: string, parent?: TerminalSession,
 ): Promise<number> {
   const session = parent ?? new TerminalSession();
+  /**
+   * Освобождает терминал на время работы.
+   * Darwin all пользуется собственным наблюдателем дистрибутива.
+   */
   const action = async (): Promise<number> => {
     session.suspend();
 
     try {
+      if (process.platform === 'darwin' && variant === 'all') {
+        const child = spawn('/bin/bash', [path.join(root, 'bin/grigdesk-ctl'), 'build', 'all'], {
+          cwd: root,
+          stdio: 'inherit',
+        });
+        const [code, signal] = await once(child, 'exit');
+
+        return code ?? (signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 1);
+      }
+
       return await observeBuild(root, variant, session, Boolean(parent));
     } finally {
       session.resume();

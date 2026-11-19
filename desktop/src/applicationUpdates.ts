@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { ApplicationUpdatePort, ApplicationUpdateSnapshot }
   from '../../shared/runtime/applicationUpdateContracts.ts';
+import { candidateNeedsInstaller } from '../../shared/runtime/applicationUpdateContracts.ts';
 import { InstalledUpdateService } from '../../shared/node/installedUpdateService.ts';
 import type { InstalledUpdateJob } from '../../shared/node/installedUpdateState.ts';
 import { compareProductVersions } from '../../shared/runtime/productReleaseVersion.ts';
@@ -84,6 +85,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
 
     const next: ApplicationUpdateSnapshot = {
       channel: status.channel,
+      source: status.source,
       running: options.runningVersion,
       targetVersion: job?.envelope.payload.version ?? status.check.envelope?.payload.version ?? null,
       notes: job ? job.envelope.payload.notes : status.check.envelope?.payload.notes ?? null,
@@ -135,6 +137,10 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
      */
     async action(action, body) {
       if (action === 'check' && Object.keys(body).length === 0) {
+        if ((await service.status()).source !== 'channel') {
+          throw new Error('candidate_source_required');
+        }
+
         await check();
 
         return;
@@ -158,6 +164,10 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
         try {
           const status = await service.status();
           const previous = status.job;
+
+          if (status.source !== 'channel') {
+            throw new Error('candidate_source_required');
+          }
 
           const pending = ['queued', 'verifying', 'downloading', 'preparing', 'ready'];
 
@@ -189,7 +199,9 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
       if (action === 'apply' && Object.keys(body).length === 1 && body.confirmed === true) {
         const job = (await service.status()).job;
 
-        if (!job || job.stage !== 'ready' || (job.scope === 'pair') !== options.localSelected()) {
+        // Server-задание принадлежит CLI/серверу: десктоп не мутирует чужой intent.
+        if (!job || job.stage !== 'ready' || job.scope === 'server'
+          || (job.scope === 'pair') !== options.localSelected()) {
           throw new Error('release_return_to_confirmed_profile');
         }
 
@@ -199,13 +211,17 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
       }
 
       if (action === 'resume' && Object.keys(body).length === 0) {
-        const job = (await service.status()).job;
+        const { job, source } = await service.status();
 
-        if (!job || (job.scope === 'pair') !== options.localSelected()) {
+        if (!job || job.scope === 'server' || (job.scope === 'pair') !== options.localSelected()) {
           throw new Error('release_return_to_confirmed_profile');
         }
 
         if (['failed', 'queued', 'verifying', 'downloading', 'preparing'].includes(job.stage)) {
+          if (candidateNeedsInstaller(source, job.stage) || source === 'local-test') {
+            throw new Error('candidate_source_required');
+          }
+
           await options.prepare(job);
         } else if (options.recover && ['stopping', 'applying', 'starting',
           'manual_recovery_required'].includes(job.stage)) {
@@ -232,10 +248,13 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
     async start() {
       await refresh();
       timer = setInterval(() => void refresh().catch(() => {}), 1000);
-      autoTimer = setInterval(() => void check().catch(() => {}), 6 * 60 * 60_000);
       timer.unref();
-      autoTimer.unref();
-      void check().catch(() => {});
+
+      if (!snapshot.source || snapshot.source === 'channel') {
+        autoTimer = setInterval(() => void check().catch(() => {}), 6 * 60 * 60_000);
+        autoTimer.unref();
+        void check().catch(() => {});
+      }
     },
     /**
      * Закрытие владельца освобождает таймеры и подписчиков без отмены сохранённого задания.

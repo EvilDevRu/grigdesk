@@ -181,6 +181,14 @@ primary/failover и нормализуется uppercase с `-` → `_`. Все 
 | `profile_route_volatile_paths TASK` | Необязательные строки `имя-repo<TAB>относительный-путь` untracked-артефактов проверок. Нет хука — исключений нет. Tracked-файлы остаются под сторожем; абсолютные пути, `..`, `.git` и неизвестные repo запрещены. |
 | `profile_agent_control_start TASK RUN_KEY` | Только в паре со `stop`: создаёт временный доверенный канал exact stage и экспортирует `PROFILE_AGENT_CONTROL_DIR`. Без пары канал не включается; половина пары — ошибка. |
 | `profile_agent_control_stop TASK RUN_KEY RC` | Парный cleanup после любого результата runner; `RC` — его код возврата. Проверяет завершение брокера и освобождает канал. |
+| `profile_agent_control_darwin_v1 TASK RUN_KEY` | Канал macOS объявляет брокер и закрытие через JSON v1. Движок открывает канал, ждёт признак готовности и сверяет завершение перед продолжением. |
+
+Пара `profile_agent_control_start/stop` используется на Linux. Для общего
+стенда macOS профиль объявляет `profile_instrumentation_restore_mode`.
+Режим `live-checkout` выполняет проверку здоровья на исходном checkout.
+В режиме `copy-snapshot` команда `profile_instrumentation_restored_from_snapshot`
+получает подтверждённые bytes отдельно от checkout и возвращает хеш
+файлов, проверенных на стенде. [Контракт профиля](../../engine/PROFILE-CONTRACT.md)
 
 Классы времени: `planning`, `standard`, `review`, `delivery`, `check` — 1800 секунд;
 `test`, `build` — 3600; `diagnostic`, `browser` — 5400. Неизвестный класс не принимается.

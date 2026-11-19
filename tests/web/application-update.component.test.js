@@ -89,6 +89,37 @@ async function mountedUpdates(t, browser) {
   };
 }
 
+test('UI-CANDIDATE: прерванное обновление предлагает повторить installer', async (t) => {
+  const view = await mountedUpdates(t, await installUiBrowser(t));
+
+  view.snapshot.source = 'candidate-file';
+  view.snapshot.job = {
+    id: 'offline-fixture',
+    version: view.snapshot.targetVersion,
+    scope: 'pair',
+    stage: 'preparing',
+    recoverable: true,
+    downloadedBytes: null,
+    totalBytes: null,
+    nextAction: null,
+  };
+
+  await view.nextTick();
+
+  const description = view.browser.document.body.textContent ?? '';
+  const buttons = Array.from(view.browser.document.querySelectorAll('button'))
+    .map((button) => button.textContent ?? '');
+
+  assert.match(description, /Повторите установку из того же скачанного кандидата/u);
+  assert.equal(buttons.some((label) => /Продолжить|Проверить обновления/u.test(label)), false);
+  assert.equal(view.calls.length, 0);
+
+  view.snapshot.job.stage = 'ready';
+  await view.nextTick();
+
+  assert.match(view.browser.document.body.textContent ?? '', /Применить и перезапустить/u);
+});
+
 test('Обновление приложения в production dialog/store', async (t) => {
   const browser = await installUiBrowser(t);
 

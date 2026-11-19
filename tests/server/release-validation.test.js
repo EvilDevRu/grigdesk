@@ -84,6 +84,10 @@ function fixture() {
     input,
     run: () => data['/actions/runs/42'],
     jobs: () => data['/actions/runs/42/jobs?per_page=100'],
+    attemptJobs: (jobs) => {
+      data['/actions/runs/42/attempts/1/jobs?per_page=100'] = { total_count: jobs.length, jobs };
+      data['/actions/runs/42'].run_attempt = 1;
+    },
     tree: () => data[`/git/trees/${currentTree}?recursive=1`],
     source: () => data[`/git/trees/${priorTree}?recursive=1`],
     async verify() {
@@ -107,17 +111,90 @@ test('reuse: совпадающий продукт допускает новые
   assert.deepEqual(proof.checks, names);
 });
 
-test('reuse: текущая версия полного workflow также принимается', async () => {
+/**
+ * Exact классические jobs и пять только skipped jobs входят в новый граф.
+ * Metadata fixture намеренно поддерживает исключительно JSON-маршруты.
+ */
+function classicJobs(paired = true) {
+  const steps = (list) => list.map((name) => ({
+    name,
+    status: 'completed',
+    conclusion: 'success',
+  }));
+  const owner = {
+    run_id: 42,
+    head_sha: prior,
+    status: 'completed',
+  };
+  const job = (name, list) => ({
+    ...owner,
+    name,
+    conclusion: 'success',
+    steps: steps(list),
+  });
+  const skipped = (name) => ({
+    ...owner,
+    name,
+    conclusion: 'skipped',
+    steps: [],
+  });
+  const candidates = ['Сборка кандидата Linux x64', 'Проверка кандидата Linux x64',
+    'Сборка кандидата macOS ARM64', 'Проверка кандидата macOS ARM64', 'Выдача пары кандидатов'];
+
+  return [
+    job('План и допуск выпуска', []),
+    job('Сервер, shared и руководство', names.slice(0, 1)),
+    job('Web-проверки', names.slice(1, 2)),
+    job('Сборка и подпись', names.slice(2)),
+    job('Проверка готовых пакетов', ['Проверка готовых пакетов']),
+    skipped('Публикация на сайт'),
+    ...(paired ? candidates.map(skipped) : []),
+  ];
+}
+
+test('reuse: обычный полный запуск нового workflow принимается по exact job attempt', async () => {
   const f = fixture();
 
   f.source().tree.at(-1).sha = 'c'.repeat(40);
-  f.jobs().jobs[0].steps.push({
-    name: 'Проверка готовых пакетов',
-    status: 'completed',
-    conclusion: 'success',
-  });
+  f.attemptJobs(classicJobs());
   assert.equal((await f.verify()).validatedCommit, prior);
 });
+
+for (const priorBlob of ['48a9468743794c93e8450336b400725e4b4d5079',
+  '72167dafed76d675529dbdb1f162ac524cb48398']) {
+  test('reuse: классический полный граф ' + priorBlob.slice(0, 8), async () => {
+    const f = fixture();
+    const jobs = classicJobs(false);
+
+    f.source().tree.at(-1).sha = priorBlob;
+    f.jobs().jobs = jobs;
+    f.jobs().total_count = jobs.length;
+    assert.equal((await f.verify()).validatedCommit, prior);
+  });
+}
+
+for (const variant of ['candidate', 'duplicate', 'foreign-attempt', 'skipped-server']) {
+  test('reuse: новый граф отклоняет ' + variant, async () => {
+    const f = fixture();
+    const jobs = classicJobs();
+
+    f.source().tree.at(-1).sha = 'c'.repeat(40);
+
+    if (variant === 'candidate') {
+      jobs.at(-1).conclusion = 'success';
+    } else if (variant === 'duplicate') {
+      jobs.push(jobs.at(-1));
+    } else if (variant === 'foreign-attempt') {
+      jobs[0].run_id = 172;
+    } else {
+      jobs[1].conclusion = 'skipped';
+      jobs[1].steps = [];
+    }
+
+    f.attemptJobs(jobs);
+    await assert.rejects(f.verify(), /release_validation_/u);
+  });
+}
 
 test('CLI без validation_run сохраняет полный набор и не требует GitHub token', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'release-validation-'));

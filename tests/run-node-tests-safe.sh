@@ -62,6 +62,20 @@ isolate_test_file() {
 }
 
 TESTS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+TEST_SETSID=setsid
+RSS_PS=(ps -eo pgid=,rss=)
+
+if [[ "$(/usr/bin/uname -s)" == Darwin ]]; then
+  TEST_SETSID=${GRIGDESK_TEST_SETSID_BIN:-}
+  RSS_PS=(/bin/ps -A -o pgid=,rss=)
+
+  if [[ "$TEST_SETSID" != /* || ! -f "$TEST_SETSID" || -L "$TEST_SETSID" || ! -x "$TEST_SETSID" ]]; then
+    printf '%s\n' 'node-test-watchdog: требуется подготовленный абсолютный GRIGDESK_TEST_SETSID_BIN' >&2
+    exit 2
+  fi
+fi
+
 isolate_test_file "$TESTS_ROOT/server/chat-list-benchmark.test.mjs" 2048 benchmark "$@"
 isolate_test_file "$TESTS_ROOT/server/deepseek-upstream-update.test.js" 1024 source-sync "$@"
 isolate_test_file "$TESTS_ROOT/deepseek/buildInputs.test.mts" 1024 package-builder "$@"
@@ -132,7 +146,7 @@ fi
 
 # Пути живого .env (сервер передаёт его ключи агентам) тоже не наследуются: иначе тесты
 # с ...process.env писали бы журнал и версии интерфейса в настоящую папку данных.
-setsid env -u GRIGDESK_ENV_FILE -u GRIGDESK_UI_RELEASES_DIR -u GRIGDESK_LOG \
+"$TEST_SETSID" env -u GRIGDESK_ENV_FILE -u GRIGDESK_UI_RELEASES_DIR -u GRIGDESK_LOG \
   ${ARTIFACTS_ENV[@]+"${ARTIFACTS_ENV[@]}"} \
   NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$HEAP_MB" \
   GRIGDESK_HOME="$TEST_DATA_HOME" node "$@" &
@@ -142,7 +156,7 @@ trap forward_signal INT TERM HUP
 
 while kill -0 "$TEST_PID" 2>/dev/null; do
   CURRENT_RSS_KB="$(
-    ps -eo pgid=,rss= \
+    "${RSS_PS[@]}" \
       | awk -v pgid="$TEST_PID" '$1 == pgid { sum += $2 } END { print sum + 0 }'
   )"
 

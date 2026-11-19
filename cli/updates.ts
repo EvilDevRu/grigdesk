@@ -14,6 +14,9 @@ import { createUpdateHandoff, launchUpdateWorker, waitUpdateWorker }
   from '../shared/node/installedUpdateWorker.ts';
 import { inspectInstalledServer, inspectUpdateActivity, INSTALLED_SERVER_UNIT }
   from '../shared/node/installedServer.ts';
+import { assertOutsideDarwinOwner } from '../shared/node/darwinInstalledOwner.ts';
+import { candidateNeedsInstaller } from '../shared/runtime/applicationUpdateContracts.ts';
+import { requestDarwinRollback, waitDarwinRollback } from '../shared/node/darwinRollbackAttempt.ts';
 
 export interface UpdateOutput {
   write(text: string): void;
@@ -29,7 +32,13 @@ const PREPARE_STALL_MS = 120000;
  * Тот же cgroup-сторож, что у stop/restart: остановка сервера из хода агента
  * или окна убьёт сам сеанс. Интерактивное подтверждение не отменяет сторож.
  */
-async function assertOutsideOwnerScope(args: CliArgs): Promise<void> {
+async function assertOutsideOwnerScope(args: CliArgs, root: string): Promise<void> {
+  if (process.platform === 'darwin') {
+    await assertOutsideDarwinOwner(await readInstallation(root));
+
+    return;
+  }
+
   if (args.force) {
     return;
   }
@@ -49,6 +58,7 @@ function failureText(code: string, t: (key: string, params?: Record<string, stri
   const friendly: Record<string, string> = {
     release_apply_pending_check_status: t('updates.applyTimeout'),
     release_prepare_stalled_check_status: t('updates.prepareStalled'),
+    candidate_source_required: t('updates.candidateResume'),
   };
 
   return friendly[code] ?? t('updates.failure', { code });
@@ -68,14 +78,32 @@ export async function runUpdateCommand(args: CliArgs, root: string, output: Upda
     if (args.action === 'update-channel') {
       await service.setChannel(args.channel!);
       status = await service.status();
-    } else if (args.action === 'check-updates' || args.action === 'update'
-      && (!status.job || !PENDING_UPDATE_STAGES.includes(status.job.stage))) {
+    } else if (status.source === 'channel' && (args.action === 'check-updates' || args.action === 'update'
+      && (!status.job || !PENDING_UPDATE_STAGES.includes(status.job.stage)))) {
       await service.checkUpdates();
       status = await service.status();
     }
 
+    if (status.source !== 'channel' && args.action === 'check-updates') {
+      output.write(args.json ? JSON.stringify(status) + '\n'
+        : t(status.source === 'local-test' ? 'updates.localTestSource' : 'updates.candidateSource') + '\n');
+
+      return 0;
+    }
+
+    if (status.source !== 'channel' && args.action === 'update') {
+      throw new Error('candidate_source_required');
+    }
+
+    if (args.action === 'resume-update' && candidateNeedsInstaller(status.source, status.job?.stage)) {
+      throw new Error('candidate_source_required');
+    }
+
     if (args.action === 'update' || args.action === 'resume-update') {
-      if (status.mode !== 'server') {
+      const clientRollback = process.platform === 'darwin' && args.action === 'resume-update'
+        && args.rollback && status.mode !== 'server';
+
+      if (status.mode !== 'server' && !clientRollback) {
         throw new Error('pair_update_required');
       }
 
@@ -104,12 +132,18 @@ export async function runUpdateCommand(args: CliArgs, root: string, output: Upda
       }
 
       const receipt = await readInstallation(root);
+      const clientScope = status.mode === 'local' ? 'pair' : 'desktop';
 
-      if (args.rollback && !ROLLBACK_STAGES.includes(job.stage)) {
+      if (args.rollback && (!ROLLBACK_STAGES.includes(job.stage) || clientRollback
+        && (job.stage === 'applied_not_started' || job.scope !== clientScope))) {
         throw new Error('release_recovery_not_available');
       }
 
       if (PREPARE_STAGES.includes(job.stage)) {
+        if (candidateNeedsInstaller(status.source, job.stage) || status.source === 'local-test') {
+          throw new Error('candidate_source_required');
+        }
+
         if (!status.workerActive) {
           await launchUpdateWorker(root, job.id, 'prepare');
         }
@@ -161,10 +195,11 @@ export async function runUpdateCommand(args: CliArgs, root: string, output: Upda
       const interactive = !args.json && process.stdin.isTTY && process.stdout.isTTY;
 
       if (confirmed || interactive) {
-        await assertOutsideOwnerScope(args);
+        await assertOutsideOwnerScope(args, root);
 
-        const owner = await inspectInstalledServer(receipt);
-        const activity = owner.running ? await inspectUpdateActivity(receipt) : null;
+        const owner = clientRollback && status.mode === 'remote' ? null
+          : await inspectInstalledServer(receipt);
+        const activity = owner?.running ? await inspectUpdateActivity(receipt) : null;
 
         if (!args.json) {
           output.write(t('updates.activity', {
@@ -189,7 +224,12 @@ export async function runUpdateCommand(args: CliArgs, root: string, output: Upda
         }
       }
 
-      if (confirmed) {
+      if (confirmed && args.rollback && process.platform === 'darwin') {
+        const attempt = await requestDarwinRollback(root, job.id);
+
+        await launchUpdateWorker(root, job.id, 'rollback', attempt.id);
+        await waitDarwinRollback(root, attempt);
+      } else if (confirmed) {
         if (args.rollback) {
           await launchUpdateWorker(root, job.id, 'rollback');
         } else if (job.stage === 'ready') {

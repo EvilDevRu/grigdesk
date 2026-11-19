@@ -19,14 +19,20 @@ export interface SourceSnapshot {
  * Отпечаток источника: HEAD, бинарный diff и опись untracked с SHA каждого файла.
  * Одинаковые отпечатки до и после копирования доказывают неизменность входа.
  */
-export async function sourceFingerprint(root: string): Promise<string> {
-  const commit = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root }))
+export async function sourceFingerprint(root: string, signal?: AbortSignal): Promise<string> {
+  const commit = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root, signal }))
     .stdout.trim();
   const diff = (await execute('git', ['diff', '--binary', 'HEAD'], {
-    cwd: root, maxBuffer: 512 * 1024 * 1024,
+    cwd: root,
+    maxBuffer: 512 * 1024 * 1024,
+    signal,
   })).stdout;
   const untracked = (await execute('git',
-    ['ls-files', '-z', '--others', '--exclude-standard'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }))
+    ['ls-files', '-z', '--others', '--exclude-standard'], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+      signal,
+    }))
     .stdout.split('\0').filter(Boolean);
   const inventory: {
     path: string;
@@ -37,6 +43,8 @@ export async function sourceFingerprint(root: string): Promise<string> {
   const physicalRoot = await fs.realpath(root);
 
   for (const relative of untracked.sort()) {
+    signal?.throwIfAborted();
+
     const file = path.join(root, relative);
     const physicalParent = await fs.realpath(path.dirname(file));
 
@@ -95,26 +103,31 @@ export async function sourceFingerprint(root: string): Promise<string> {
 export async function createSourceSnapshot(input: {
   root: string;
   runDir: string;
+  signal?: AbortSignal;
 }): Promise<SourceSnapshot> {
-  const before = await sourceFingerprint(input.root);
-  const commit = (await execute('git', ['rev-parse', 'HEAD'], { cwd: input.root }))
+  const { signal } = input;
+  const before = await sourceFingerprint(input.root, signal);
+  const commit = (await execute('git', ['rev-parse', 'HEAD'], { cwd: input.root, signal }))
     .stdout.trim();
   const cloneRoot = path.join(input.runDir, 'source-clone');
 
   await fs.mkdir(input.runDir, { recursive: true, mode: 0o700 });
-  await execute('git', ['clone', '--no-hardlinks', input.root, cloneRoot]);
-  await execute('git', ['checkout', '--detach', commit], { cwd: cloneRoot });
+  await execute('git', ['clone', '--no-hardlinks', input.root, cloneRoot], { signal });
+  await execute('git', ['checkout', '--detach', commit], { cwd: cloneRoot, signal });
 
   const diff = (await execute('git', ['diff', '--binary', 'HEAD'], {
-    cwd: input.root, maxBuffer: 512 * 1024 * 1024,
+    cwd: input.root,
+    maxBuffer: 512 * 1024 * 1024,
+    signal,
   })).stdout;
 
   if (diff.length > 0) {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn('git', ['apply', '--binary', '-'], { cwd: cloneRoot });
+      const child = spawn('git', ['apply', '--binary', '-'], { cwd: cloneRoot, signal });
       const fail = (error: Error) => reject(error);
 
       child.on('error', fail);
+      child.stdin.on('error', fail);
       child.stderr.setEncoding('utf8');
       child.on('close', (code) => {
         if (code === 0) {
@@ -128,11 +141,17 @@ export async function createSourceSnapshot(input: {
   }
 
   const untracked = (await execute('git',
-    ['ls-files', '-z', '--others', '--exclude-standard'], { cwd: input.root, maxBuffer: 64 * 1024 * 1024 }))
+    ['ls-files', '-z', '--others', '--exclude-standard'], {
+      cwd: input.root,
+      maxBuffer: 64 * 1024 * 1024,
+      signal,
+    }))
     .stdout.split('\0').filter(Boolean);
   const physicalRoot = await fs.realpath(input.root);
 
   for (const relative of untracked) {
+    signal?.throwIfAborted();
+
     const source = path.join(input.root, relative);
     const stat = await fs.lstat(source);
 
@@ -173,7 +192,7 @@ export async function createSourceSnapshot(input: {
     }
   }
 
-  const after = await sourceFingerprint(input.root);
+  const after = await sourceFingerprint(input.root, signal);
 
   if (before !== after) {
     throw new Error('source_changed_retry');

@@ -141,6 +141,44 @@ test('SB22: публикация после smoke выдаёт SHA/size/packageI
     result);
 });
 
+test('MAC-BUILD-TARGET: Darwin archive и manifest относятся к одному ARM64 runtime', async (t) => {
+  const input = await fixture(t);
+  const runtime = {
+    node: '24.21.0',
+    abi: '137',
+    platform: 'darwin',
+    arch: 'arm64',
+  };
+  const manifest = createServerManifest(input.manifest.payload, {
+    version: input.manifest.version,
+    launcherSha256: input.manifest.launcher.sha256,
+    engineSha256: input.manifest.engine.sha256,
+    buildInputs: input.manifest.inputs,
+    runtime,
+  });
+  const previousResult = path.join(input.options.outDir, 'build-result.json');
+
+  await writeFile(path.join(input.options.cacheDir, 'node-v24.21.0-darwin-arm64.tar.xz'), 'archive');
+  Object.assign(input.steps, {
+    platform: 'darwin',
+    arch: 'arm64',
+    package: async () => manifest,
+  });
+
+  await assert.rejects(executeBinaryBuild(input.options, input.steps), /pin Node/u);
+  assert.deepEqual(input.events, []);
+  assert.equal(await readFile(input.target, 'utf8'), 'previous');
+  assert.equal(await readFile(previousResult, 'utf8'), 'previous-result');
+
+  input.steps.runtime.platform = 'darwin-arm64';
+
+  const result = await executeBinaryBuild(input.options, input.steps);
+
+  assert.deepEqual(manifest.runtime, runtime);
+  assert.deepEqual(JSON.parse(await readFile(previousResult, 'utf8')).runtime, runtime);
+  assert.equal(result.packageId, manifest.packageId);
+});
+
 /**
  * Порты заменяют процессы, но реальный smoke выбирает baseline и проверяет свои ворота.
  * Builder публикует тот же отчёт и ELF, поэтому тест видит сквозной контракт build-result.

@@ -1,9 +1,12 @@
 import { readProductBuildVersion } from '../../../shared/node/releaseBuild.ts';
-import { cp, copyFile, readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { makeReadOnlyTree } from '../../../shared/node/files.ts';
+import { sha256 } from '../../../shared/node/hash.ts';
 import type { NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
+import { stageDarwinProcessAssets } from '../../../shared/node/processIdentity.ts';
+import { readDarwinBuildSetsid } from '../../../tools/darwinBuildTools.mts';
 import { bundlePayloadServer } from '../sea/bundle.mts';
 import { collectLicenses } from '../sea/dependencies.mts';
 import { prepareRelease } from '../sea/prepare.mts';
@@ -96,6 +99,23 @@ export async function buildPayload(input: {
     outfile: path.join(input.directory, 'server/payload.cjs'),
   });
   await copyFile(input.bootstrap, path.join(input.directory, 'server/worker-bootstrap.cjs'));
+
+  if (input.runtime.platform === 'darwin-arm64') {
+    const directory = path.join(input.directory, 'server/runtime/darwin-tools');
+    const setsid = await readDarwinBuildSetsid(process.env);
+    const bytes = await readFile(setsid);
+    const digest = sha256(bytes);
+
+    if (digest !== process.env.GRIGDESK_BUILD_SETSID_SHA256) {
+      throw new Error('darwin_build_tool_invalid');
+    }
+
+    await mkdir(directory, { mode: 0o700 });
+    await stageDarwinProcessAssets(directory);
+    await writeFile(path.join(directory, 'setsid'), bytes, { flag: 'wx', mode: 0o500 });
+    await writeFile(path.join(directory, 'setsid.sha256'), digest, { flag: 'wx', mode: 0o400 });
+  }
+
   await collectLicenses(input.directory, { extraPackages: helpPackages });
   await cp(path.join(input.directory, 'licenses'), path.join(input.directory, 'server/help/site/licenses'), {
     recursive: true,

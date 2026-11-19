@@ -32,6 +32,7 @@ export interface ServerBinaryProbeOptions {
   home?: string;
   expectPackageId?: string;
   timeoutMs?: number;
+  expectedHost?: Pick<ServerBinaryInfo['runtime'], 'platform' | 'arch'>;
   run?: (file: string, args: string[], options: {
     cwd: string;
     env: NodeJS.ProcessEnv;
@@ -157,6 +158,13 @@ export async function prepareServerBinary(binary: string,
  */
 export async function verifyServerBinary(binary: string,
   options: ServerBinaryProbeOptions & { home: string }): Promise<ServerBinaryVerification> {
+  const expectedHost = options.expectedHost ?? process;
+
+  if (!(expectedHost.platform === 'linux' && expectedHost.arch === 'x64')
+    && !(expectedHost.platform === 'darwin' && expectedHost.arch === 'arm64')) {
+    invalidRuntime();
+  }
+
   const args = ['--verify', '--json'];
 
   if (options.expectPackageId) {
@@ -174,10 +182,10 @@ export async function verifyServerBinary(binary: string,
     invalidRuntime();
   }
 
-  const runtime = result.runtime as ServerBinaryInfo['runtime'];
+  const runtime = exact(result.runtime, ['node', 'abi', 'platform', 'arch']);
 
-  if (runtime?.node !== '24.21.0' || runtime.abi !== '137'
-    || runtime.platform !== 'linux' || runtime.arch !== 'x64') {
+  if (runtime.node !== '24.21.0' || runtime.abi !== '137'
+    || runtime.platform !== expectedHost.platform || runtime.arch !== expectedHost.arch) {
     invalidRuntime();
   }
 

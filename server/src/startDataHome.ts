@@ -2,6 +2,7 @@
 import * as fs from 'node:fs';
 import os from 'node:os';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
+import { configureDarwinBuildProcessHelperSync } from '../../shared/node/processIdentity.ts';
 import { captureUserCliParent, USER_CLI_PARENT_KEY } from '../../shared/node/userCliParentEnvironment.ts';
 import {
   nodeExecutable, runtimeInstallationRoot, runtimeKind, runtimeRoot,
@@ -10,15 +11,18 @@ import {
   prepareDataHome, releaseDataHomeLock, processAlive, processStarttime,
 } from './lib/dataHomeBoot.ts';
 
-const root = runtimeRoot();
-const owner = {
-  pid: process.pid,
-  starttime: processStarttime(process.pid) ?? '',
-  root,
-  startedAt: new Date().toISOString(),
-};
-
 try {
+  if (process.platform === 'darwin' && runtimeKind() === 'source'
+    && (process.env.GRIGDESK_BUILD_PROCESS_HELPER || process.env.GRIGDESK_BUILD_PROCESS_HELPER_SHA256)) {
+    configureDarwinBuildProcessHelperSync();
+  }
+
+  const owner = {
+    pid: process.pid,
+    starttime: processStarttime(process.pid) ?? '',
+    root: runtimeRoot(),
+    startedAt: new Date().toISOString(),
+  };
   const prepared = prepareDataHome({
     codeRoot: runtimeInstallationRoot(),
     home: os.homedir(),

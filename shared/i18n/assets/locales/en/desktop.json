@@ -115,6 +115,7 @@
   "exitChatFallback": "Chat {id}",
   "exitTaskFallback": "Task #{task}",
   "exitActivityUnavailable": "Could not check active work.",
+  "exitStrictBlocked": "GrigDesk could not confirm the stop. The window is still open. Check the connection to the local server and try quitting again.",
   "exitStopUnknown": "Stop not confirmed",
   "exitAskSetting": "Ask before quitting while work is active",
   "exitSettingHint": "Saved immediately for the desktop app.",

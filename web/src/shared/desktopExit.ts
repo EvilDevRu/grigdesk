@@ -73,7 +73,7 @@ export function createDesktopExitRenderer(options: {
    * Inspect ограничивает всю цепочку чтения, включая недостающие названия чатов.
    * По сроку возвращается unavailable, а поздние сетевые ответы не меняют модал.
    */
-  async function inspect(expiresAt: number): Promise<unknown> {
+  async function inspect(expiresAt: number, strict: boolean): Promise<unknown> {
     const controller = new AbortController();
     const cancel = () => controller.abort();
     const timer = setTimeout(cancel, Math.max(0, Math.min(5000, expiresAt - Date.now())));
@@ -85,16 +85,18 @@ export function createDesktopExitRenderer(options: {
 
     try {
       const activity = await Promise.race([
-        inspectDesktopExitActivity(options.sessions(), controller.signal), unavailable,
+        inspectDesktopExitActivity(options.sessions(), controller.signal, strict), unavailable,
       ]);
 
       if ('unavailable' in activity) {
-        return activity;
+        return strict ? { state: 'unknown', reason: 'release_activity_unknown' } : activity;
       }
 
       const update = options.update();
 
-      return update ? { ...activity, update } : activity;
+      const snapshot = update ? { ...activity, update } : activity;
+
+      return strict ? { state: 'ready', snapshot } : snapshot;
     } finally {
       clearTimeout(timer);
       lifetime.signal.removeEventListener('abort', cancel);
@@ -119,7 +121,7 @@ export function createDesktopExitRenderer(options: {
 
     switch (command.type) {
       case 'inspect':
-        return inspect(command.expiresAt);
+        return inspect(command.expiresAt, command.strict === true);
       case 'prompt':
         if (state.phase === 'idle' && decision.decision === 'pending') {
           state.snapshot = command.snapshot!;
@@ -145,13 +147,16 @@ export function createDesktopExitRenderer(options: {
           return { unavailable: true };
         }
 
-        stopping ??= stopDesktopExitPipelines(state.snapshot.pipelines, command.expiresAt, lifetime.signal)
+        stopping ??= stopDesktopExitPipelines(state.snapshot.pipelines, command.expiresAt, lifetime.signal,
+          command.strict === true)
           .then((results) => {
             if (requestId === command.requestId && !disposed) {
               state.results = results;
             }
 
-            return { ok: results.every((result) => result.state === 'stopped'), results };
+            const ok = results.every((result) => result.state === 'stopped');
+
+            return command.strict ? { ok } : { ok, results };
           });
 
         return stopping;

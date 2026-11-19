@@ -294,6 +294,24 @@ function desktopExitPreference() {
   return exitPreference;
 }
 
+/** Пользователь может повторить выход из того же окна после восстановления связи. */
+function showStrictExitWarning(): void {
+  writeLog('GrigDesk: release_activity_unknown');
+
+  const options = {
+    type: 'warning' as const,
+    title: 'GrigDesk',
+    message: desktopText('desktop.exitStrictBlocked'),
+  };
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow();
+    void dialog.showMessageBox(mainWindow, options).catch(() => {});
+  } else {
+    void dialog.showMessageBox(options).catch(() => {});
+  }
+}
+
 const desktopExit = createDesktopExitController({
   context: () => {
     const profile = settings?.profiles.find((item) => item.id === settings?.selected);
@@ -304,6 +322,7 @@ const desktopExit = createDesktopExitController({
       profileId: profile.id,
       address: profile.address,
       local: profile.kind === 'local',
+      strict: applicationUpdates?.strictLocalQuit?.() === true && profile.address === selectedOrigin,
       selectedOrigin,
       supervisor,
     } : null;
@@ -311,7 +330,15 @@ const desktopExit = createDesktopExitController({
   revealed: () => revealed(),
   quitting: () => quit.stopping,
   preference: () => desktopExitPreference(),
-  applyUpdate: () => tryApplyUpdateOnQuit(),
+  applyUpdate: (signal) => tryApplyUpdateOnQuit(signal),
+  warnStrict: showStrictExitWarning,
+  acquireStrictAdmission: async (signal, expectsOwnedServer) => {
+    if (!applicationUpdates?.strictLocalQuit?.()) {
+      throw new Error('release_activity_unknown');
+    }
+
+    return applicationUpdates.acquireQuitAdmission(signal, expectsOwnedServer);
+  },
   log: writeLog,
   exit: () => {
     exiting = true;
@@ -910,6 +937,13 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
       return;
     }
 
+    if (!exiting && !quit.stopping && !desktopExit.finishing && applicationUpdates?.strictLocalQuit?.()) {
+      event.preventDefault();
+      showStrictExitWarning();
+
+      return;
+    }
+
     if (revealed() && !quit.stopping) {
       saveMainWindow();
     }
@@ -921,6 +955,13 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   });
   window.on('closed', () => {
     mainWindow = null;
+
+    if (desktopExit.takeStrictCommit()) {
+      void quit.request({ reason: 'main-closed', exitCode: 0 });
+
+      return;
+    }
+
     void quitOrApply('main-closed');
   });
   window.webContents.on('did-navigate', (_event, url, httpResponseCode) => {
@@ -1683,13 +1724,13 @@ const quit = createQuitController({
  * Перед обычной остановкой отдаёт готовое задание строгому updater выбранного профиля.
  * Начавшийся обычный stop запрещает поздний apply: его SIGKILL не доказывает update-drain.
  */
-function tryApplyUpdateOnQuit(): Promise<boolean> | null {
+function tryApplyUpdateOnQuit(signal?: AbortSignal): Promise<'applied' | 'idle' | 'blocked'> | null {
   if (exiting || quit.stopping || supervisor.stopping || !applicationUpdates?.canApplyReadyOnQuit()) {
     return null;
   }
 
-  return applicationUpdates.applyReadyOnQuit()
-    .then((outcome) => outcome === 'applied', () => false);
+  return applicationUpdates.applyReadyOnQuit(signal)
+    .catch(() => applicationUpdates?.strictLocalQuit?.() ? 'blocked' : 'idle');
 }
 
 /**
@@ -1702,7 +1743,13 @@ async function quitOrApply(reason: 'user' | 'main-closed'): Promise<void> {
     return;
   }
 
-  if (await tryApplyUpdateOnQuit()) {
+  if (applicationUpdates?.strictLocalQuit?.()) {
+    showStrictExitWarning();
+
+    return;
+  }
+
+  if (await tryApplyUpdateOnQuit() === 'applied') {
     return;
   }
 
@@ -1751,6 +1798,15 @@ if (process.argv.includes('--grigdesk-release-probe')) {
     }
   });
   app.on('before-quit', (event) => {
+    if (!exiting && !quit.stopping && applicationUpdates?.strictLocalQuit?.()) {
+      if (!desktopExit.close(event)) {
+        event.preventDefault();
+        showStrictExitWarning();
+      }
+
+      return;
+    }
+
     desktopExit.bypass();
     settingsRequest?.dispose();
     helpRequest?.dispose();

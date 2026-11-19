@@ -8,15 +8,73 @@ import type { TestContext } from 'node:test';
 
 import { installedRelease } from '../helpers/installedUpdateFixture.mjs';
 import { loadInstalledModule } from '../helpers/installedBuildFixture.mjs';
+import { signedMacIndex } from '../helpers/releaseV2Fixture.mjs';
+import { publishInstallFile, readInstallPublication } from '../../shared/node/installedLayout.ts';
+
+test('INSTALL-MAC-PLATFORM: несовместимый хост не запрашивает архивы', {
+  skip: process.platform !== 'linux',
+}, async (t) => {
+  const fixture = signedMacIndex();
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-other-platform-'));
+  const root = path.join(directory, 'program');
+  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts',
+    fixture.publicKeyPem);
+  let archives = 0;
+
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await assert.rejects(installRelease({
+    mode: 'remote',
+    root,
+    dataHome: path.join(directory, 'data'),
+    userData: path.join(directory, 'profile'),
+    binDirectory: path.join(directory, 'bin'),
+    applicationsDirectory: path.join(directory, 'Applications'),
+    envelope: fixture.envelope,
+    maintenance: path.join(directory, 'unavailable-helper'),
+    archive: async () => {
+      archives += 1;
+
+      return '';
+    },
+  }), /release_platform_incompatible/u);
+  assert.equal(archives, 0);
+  assert.deepEqual(await fs.readdir(directory), []);
+});
+
+test('INSTALL-DURABLE-PUBLICATION: совпавший повтор и конкурент не заменяют inode', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-publication-'));
+  const file = path.join(directory, 'intent.json');
+
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await publishInstallFile(file, '{"format":1}\n', 0o600);
+
+  const original = await fs.stat(file);
+
+  await publishInstallFile(file, '{"format":1}\n', 0o600);
+  await assert.rejects(publishInstallFile(file, '{"format":2}\n', 0o600),
+    /installation_incomplete_conflict/u);
+  assert.deepEqual(await readInstallPublication(file), { format: 1 });
+  assert.equal((await fs.stat(file)).ino, original.ino);
+  assert.deepEqual(await fs.readdir(directory), ['intent.json']);
+});
 
 /**
  * Настоящие signed tar и installRelease используют только отдельный временный root.
  * Подменяется pinned test key, а подпись, распаковка и запись программы остаются настоящими.
  */
-async function makeInstallInput(t: TestContext, mode: 'remote' | 'server') {
+async function makeInstallInput(t: TestContext, mode: 'remote' | 'server', candidate = false) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'first-install-'));
   const release = installedRelease();
-  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts', release.publicKeyPem);
+  const contractsFile = 'shared/runtime/releaseChannelContracts.ts';
+  const contracts = candidate ? await fs.readFile(path.resolve(import.meta.dirname, '../..', contractsFile),
+    'utf8') : '';
+  const stubs = candidate ? {
+    [contractsFile]: contracts.replace(/export const RELEASE_SIGNING_PUBLIC_KEY = [^;]+;/u,
+      `export const RELEASE_SIGNING_PUBLIC_KEY = ${JSON.stringify(release.publicKeyPem)};`)
+      .replace("ReleaseDistributionSource = 'channel';", "ReleaseDistributionSource = 'candidate-file';"),
+  } : {};
+  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts',
+    release.publicKeyPem, stubs);
   const maintenance = path.join(temporary, 'maintenance');
   const archives = new Map<string, string>();
 
@@ -188,6 +246,46 @@ test('INSTALL-LEGACY-HELPER: существующая установка гот�
       'utf8')).installationId);
   assert.ok(jobs.length >= 1);
   assert.equal(await fs.readFile(legacyHelper, 'utf8'), legacyBytes.toString('utf8'));
+});
+
+test('INSTALL-OFFLINE-RETRY: тот же B повторяет задачу и оставляет A текущим', {
+  skip: process.platform !== 'linux',
+}, async (t) => {
+  const box = await makeInstallInput(t, 'remote', true);
+  const first = await box.installRelease(box.input);
+  const root = box.input.root;
+  const current = path.join(root, 'current.json');
+  const before = await fs.readFile(current);
+  const candidate = installedRelease({ version: '9.9.9', keys: box.keys });
+  const { installRelease: channelInstaller } = await loadInstalledModule(t, 'tools/installRelease.mts',
+    candidate.publicKeyPem);
+  const input = { ...box.input, envelope: candidate.envelope };
+
+  assert.equal(first.format, 2);
+  assert.equal(first.source, 'candidate-file');
+  await assert.rejects(channelInstaller(input), /installation_release_trust_mismatch/u);
+  await assert.rejects(fs.readFile(path.join(root, 'update/job.json')), { code: 'ENOENT' });
+  await assert.rejects(box.installRelease({
+    ...input,
+    archive: async () => {
+      throw new Error('fixture_archive_interrupted');
+    },
+  }), /fixture_archive_interrupted/u);
+
+  const jobFile = path.join(root, 'update/job.json');
+  const failed = JSON.parse(await fs.readFile(jobFile, 'utf8'));
+  const ownedArchive = path.join(root, 'update', failed.id, 'desktop.tar.gz');
+  const source = path.join(path.dirname(root), 'candidate-desktop.tar.gz');
+
+  await fs.writeFile(ownedArchive, 'частичный архив');
+  await fs.writeFile(source, candidate.archives.get(candidate.envelope.payload.artifacts.desktop.url)!);
+  await box.installRelease({ ...input, archive: async () => source });
+
+  const ready = JSON.parse(await fs.readFile(jobFile, 'utf8'));
+
+  assert.equal(ready.id, failed.id);
+  assert.equal(ready.stage, 'ready');
+  assert.deepEqual(await fs.readFile(current), before);
 });
 
 test('INSTALL-ROOT-REJECTED: корневой путь отвергается до эффектов', async (t) => {

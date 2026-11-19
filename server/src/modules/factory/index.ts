@@ -5,6 +5,14 @@ import {
 } from '../../../../shared/pipeline/stageRunnerSettings.ts';
 import type { StageRunnerIdentity } from '../../../../shared/pipeline/stageRunnerSettings.ts';
 import { probeFactoryStageRunnerSettingsCapability } from '../../lib/factoryRuntimeCapabilities.ts';
+import { hasPendingDarwinLaunch, retryUnreleasedDarwinLaunch } from '../../lib/factoryDarwinLaunch.ts';
+import { verifyDarwinOwnershipRoots } from '../../lib/factoryDarwinOwnershipRoots.ts';
+import { stopDarwinOrchestrator } from '../../lib/factoryDarwinStop.ts';
+import { describeDarwinCleanup } from '../../lib/factoryDarwinInventory.ts';
+import { FactoryLaunchAdmissionError, type FactoryLaunchAdmission }
+  from '../../lib/factoryLaunchAdmission.ts';
+import { FACTORY_TASK_ID } from '../../../../shared/runtime/factoryOwnership.ts';
+import { runtimeKind } from '../../lib/runtimePaths.ts';
 import { StageRunnerCommandError } from '../../lib/runnerControl.ts';
 import { FactoryTaskSources, factoryTicketHash } from '../../lib/factoryTaskSources.ts';
 import { resolveTaskTarget, taskSource } from '../../lib/trackers/taskTarget.ts';
@@ -31,7 +39,7 @@ import os from 'node:os';
 
 import { config as runtimeConfig } from '../../config.ts';
 import { dataPath } from '../../../../shared/runtime/dataHome.ts';
-import { unpinFactoryRuntimeAttempt } from '../../lib/factoryRuntimePins.ts';
+import { rejectPendingRuntimeMigration, unpinFactoryRuntimeAttempt } from '../../lib/factoryRuntimePins.ts';
 import {
   factoryMobileIdentity, factoryPreludeIdentity, factorySnapshotHash, sameFactoryIdentity,
 } from '../../lib/mobile/factoryIdentity.ts';
@@ -67,9 +75,9 @@ import {
   runRouteEngine, runRouteDecision, ROUTE_DECISION_TIMEOUT_MS, spawnRouteEngine, routeUnitActive,
   routeFailure, startRegistryIdentity, heldRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
-  routeFindingsArgs,
+  routeFindingsArgs, routeStopCleanupArgs, routeAttemptPlatformCheckArgs,
   routeBootstrapAnswerArgs,
-  stageAutoCompactEnv,
+  stageAutoCompactEnv, runtimeLaunchFailure,
 } from '../../lib/factoryRouteCli.ts';
 import {
   FactoryRunnerControl,
@@ -238,6 +246,7 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
 
 export interface FactoryModuleOptions {
   factoryState: FactoryStateAdapter;
+  factoryAdmission?: FactoryLaunchAdmission;
   config: FactoryModuleConfig;
   prefs: PrefsStore;
   tracker?: TrackerPort | null;
@@ -339,7 +348,7 @@ async function factoryModule(
 ): Promise<void> {
   const {
     factoryState, config, prefs, tracker, analyzer, internalToken = '', arbiterCards = null,
-    arbiterLive = null,
+    arbiterLive = null, factoryAdmission,
   } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
   const runnerControl = new FactoryRunnerControl({
@@ -356,6 +365,18 @@ async function factoryModule(
   const taskLaunchTails = new Map<string, Promise<void>>();
   const taskLaunchPending = new Map<string, { startedAt: number }>();
   const taskMutationContext = new AsyncLocalStorage<{ key: string; held: boolean }>();
+  let ownershipGeneration = 0;
+
+  factoryAdmission?.bindPending(() => taskLaunchPending.size > 0 || taskLaunchTails.size > 0);
+
+  const darwinBundled = process.platform === 'darwin' && runtimeKind() === 'packaged'
+    && process.env.GRIGDESK_ENGINE_MODE !== 'external';
+  const ownershipPaths = { ...config, dataHome: config.dataHome ?? runtimeConfig.dataHome };
+  const bootstrapInspection: LaunchInspection = {
+    kind: 'bootstrap',
+    identity: null,
+    origin: null,
+  };
 
   /**
    * Допуск охватывает все HTTP-мутации одной задачи, включая клики веба и пульта.
@@ -374,6 +395,7 @@ async function factoryModule(
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.catch(() => {}).then(() => gate);
     taskLaunchTails.set(key, tail);
+    ownershipGeneration += 1;
     await previous.catch(() => {});
 
     const lease = { key, held: true };
@@ -382,6 +404,7 @@ async function factoryModule(
     finally {
       lease.held = false;
       release();
+      ownershipGeneration += 1;
       if (taskLaunchTails.get(key) === tail) taskLaunchTails.delete(key);
     }
   }
@@ -398,10 +421,20 @@ async function factoryModule(
     // Сверка и эффект принадлежат одному допуску фабрики; внешнее окно не обходит его.
     // Engine gate дополнительно сравнивает sequence/head внутри своего durable task lock.
     route.handler = async function guardedTaskMutation(request, reply) {
-      const id = String((request.params as { id?: string }).id || '');
+      const params = request.params as { id?: string };
+      const rawId = String(params.id || '');
+      const id = darwinBundled ? rawId.replace(/[^0-9]/gu, '').replace(/^0+/u, '') : rawId;
       const body = request.body as Record<string, unknown> | undefined;
 
-      return withTaskLaunchLock(id, async () => {
+      if (darwinBundled) {
+        if (!FACTORY_TASK_ID.test(id)) {
+          return reply.code(400).send({ error: 'bad_task_id' });
+        }
+
+        params.id = id;
+      }
+
+      const operation = () => withTaskLaunchLock(id, async () => {
         if (body?.expectedMobile !== undefined) {
           const managed = await managedRegistry(id, reply);
 
@@ -484,6 +517,21 @@ async function factoryModule(
 
         return handler.call(this, request, reply);
       });
+
+      if (!factoryAdmission || route.url === '/api/tasks/:id/stop'
+        || route.url.startsWith('/api/tasks/:id/arbiter-conversations')) {
+        return operation();
+      }
+
+      try {
+        return await factoryAdmission.run(id, operation);
+      } catch (error) {
+        if (error instanceof FactoryLaunchAdmissionError) {
+          return reply.code(error.status).send({ error: error.code });
+        }
+
+        throw error;
+      }
     };
   });
 
@@ -655,7 +703,24 @@ async function factoryModule(
     ? new FactoryTaskSources(config.factoryTaskSourcesPath) : null;
 
   // Список всех задач с картой статусов этапов.
-  fastify.get<FactoryRoute>('/api/tasks', async (request) => {
+  fastify.get<FactoryRoute>('/api/tasks', async (request, reply) => {
+    if (darwinBundled && request.query.updateOwnership === '1') {
+      if (request.authKind !== 'cli') {
+        return reply.code(403).send({ error: 'cli_token_required' });
+      }
+
+      return factoryState.readTaskOwnership(ownershipPaths, () => {
+        const writers = factoryAdmission?.snapshot();
+
+        return {
+          generation: ownershipGeneration + (writers?.generation ?? 0),
+          tasks: [...new Set([
+            ...taskLaunchTails.keys(), ...taskLaunchPending.keys(), ...(writers?.tasks ?? []),
+          ])].sort(),
+        };
+      });
+    }
+
     const tasks = await factoryState.listTasks();
     const extended = request.query.sources === '1';
     let sourceRecords: Awaited<ReturnType<FactoryTaskSources['read']>>['entries'] = {};
@@ -1083,13 +1148,15 @@ async function factoryModule(
     const stand = await restoreTaskStand(config, {
       profile,
       task: id,
+      attempt,
       standOwnership,
     });
 
     if (!stand.ok) {
       const failure: RouteFailure = {
-        error: 'stand_unavailable',
+        error: stand.tool ? 'macos_engine_dependency_missing' : 'stand_unavailable',
         message: stand.message,
+        ...(stand.tool ? { tool: stand.tool } : {}),
       };
 
       fastify.log.warn(
@@ -1196,6 +1263,16 @@ async function factoryModule(
 
         migrated = unpinned.unpinned;
       } catch (error) {
+        if ((error as { code?: unknown } | null)?.code === 'factory_runtime_pin_migration_pending') {
+          const failure = runtimeLaunchFailure(error);
+
+          return {
+            ...resumed,
+            failure,
+            message: failure.message,
+          };
+        }
+
         fastify.log.warn(
           { task: id, err: (error as Error).message },
           'route resume: перепривязка рантайма попытки не выполнена',
@@ -1302,14 +1379,23 @@ async function factoryModule(
       route: wanted,
       expectedCatalogHash: pinnedCatalogHash,
     }));
+
     if (!check.ok) {
       const failure = check.failure;
+      const typed = failure?.error === 'catalog_changed' || failure?.error === 'unsupported_macos_profile'
+        || failure?.error === 'macos_shared_restore_hook_required'
+        || failure?.error === 'macos_engine_dependency_missing';
+
       return {
         ok: false,
         result: {
           status: 409,
-          body: failure?.error === 'catalog_changed'
-            ? { error: failure.error, message: failure.message }
+          body: typed
+            ? {
+              error: failure.error,
+              message: failure.message,
+              ...(failure.tool ? { tool: failure.tool } : {}),
+            }
             : { error: 'route_check_failed', message: check.message || 'профиль или маршрут не приняты движком' },
         },
       };
@@ -1476,7 +1562,7 @@ async function factoryModule(
       }
     }
 
-    return true;
+    return !await pendingDarwinLaunch(id);
   }
 
   /**
@@ -1596,6 +1682,7 @@ async function factoryModule(
           ...(launch.failure ? {
             error: launch.failure.error,
             runners: launch.failure.runners,
+            ...(launch.failure.tool ? { tool: launch.failure.tool } : {}),
           } : {}),
           message: launch.message || 'прогон не запустился',
         },
@@ -1726,11 +1813,32 @@ async function factoryModule(
     };
   }
 
-  function failClosedPendingInspection(id: string, inspection: LaunchInspection): LaunchInspection {
-    if (inspection?.kind === 'absent' && taskLaunchPending.has(String(id))) {
-      return { kind: 'bootstrap', identity: null, origin: null };
+  /**
+   * Проверяет durable границу после рестарта Darwin worker.
+   * Нечитаемая или подменённая запись сохраняет bootstrap очереди.
+   */
+  async function pendingDarwinLaunch(id: string): Promise<boolean> {
+    if (!darwinBundled) {
+      return false;
     }
-    return inspection;
+
+    try {
+      await verifyDarwinOwnershipRoots(ownershipPaths);
+
+      return await hasPendingDarwinLaunch(config.factoryControlDir, id);
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Даже при отсутствии реестра очередь удерживает ранее выданную резервацию.
+   * Проверка читает process-local и записанную на диск границы запуска.
+   */
+  async function failClosedPendingInspection(id: string,
+    inspection: LaunchInspection): Promise<LaunchInspection> {
+    return inspection?.kind === 'absent' && (taskLaunchPending.has(id) || await pendingDarwinLaunch(id))
+      ? bootstrapInspection : inspection;
   }
 
   /**
@@ -1752,17 +1860,19 @@ async function factoryModule(
     if (!registry) {
       const reserved = hasSlotReservation({ stateDir: config.stateDir, task: id });
       const unit = reserved ? false : await routeUnitActive(id);
+
       return failClosedPendingInspection(id, reserved || unit
-        ? { kind: 'bootstrap', identity: null, origin: null }
+        ? bootstrapInspection
         : { kind: 'absent', identity: null, origin: null });
     }
     if (!hasRouteProjectionIdentity(registry)
         || typeof factoryState.readTrustedAttempt !== 'function') {
-      return { kind: 'bootstrap', identity: null, origin: null };
+      return bootstrapInspection;
     }
     let trusted;
+
     try { trusted = await factoryState.readTrustedAttempt(id, registry); }
-    catch { return { kind: 'bootstrap', identity: null, origin: null }; }
+    catch { return bootstrapInspection; }
     const identity = compactLaunchIdentity(trusted);
     if (trusted.terminal) {
       return { kind: 'terminal', identity, origin: trusted.origin || null };
@@ -1918,6 +2028,17 @@ async function factoryModule(
         body: { error: 'run_exists', message: 'Прогон уже открыт — используй «Продолжить».' },
       };
     }
+
+    if (await pendingDarwinLaunch(id)) {
+      return {
+        status: 409,
+        body: {
+          error: 'release_activity_unknown',
+          message: 'Состояние предыдущего запуска конвейера на macOS ещё не подтверждено.',
+        },
+      };
+    }
+
     if (Object.prototype.hasOwnProperty.call(opts, 'ticket')) {
       return {
         status: 400,
@@ -1933,11 +2054,53 @@ async function factoryModule(
     return { status: null, prepared: { options, routePreflight } };
   }
 
+  /**
+   * Точный откат до permit можно досинхронизировать под тем же task lock.
+   * Другой незакрытый запуск удерживает допуск до подтверждения движком.
+   */
   async function startPipeline(
     id: string,
     opts: LaunchOptions = {},
     auth: { dynamicSections?: boolean } = {},
   ): Promise<RouteReply> {
+    if (!factoryAdmission) {
+      return launchNewPipeline(id, opts, auth);
+    }
+
+    try {
+      return await factoryAdmission.run(id, () =>
+        withTaskLaunchLock(id, () => launchNewPipeline(id, opts, auth)));
+    } catch (error) {
+      if (error instanceof FactoryLaunchAdmissionError) {
+        return {
+          status: error.status,
+          body: { error: error.code },
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Проверки и файловые эффекты нового старта выполняются в пределах task lock.
+   * Повтор учитывает pending состояние предыдущей передачи движку.
+   */
+  async function launchNewPipeline(id: string, opts: LaunchOptions,
+    auth: { dynamicSections?: boolean }): Promise<RouteReply> {
+    if (darwinBundled && taskLaunchPending.has(id)) {
+      const lock = taskMutationContext.getStore();
+
+      if (lock?.held && lock.key === id) {
+        const retired = await verifyDarwinOwnershipRoots(ownershipPaths)
+          .then(() => retryUnreleasedDarwinLaunch(config.factoryControlDir, id)).catch(() => false);
+
+        if (retired && await launchArtifactsAbsent(id)) {
+          taskLaunchPending.delete(id);
+        }
+      }
+    }
+
     if (taskLaunchPending.has(String(id))) {
       let inspection = null;
       try { inspection = await inspectLaunchState(id); } catch { /* marker остаётся fail-closed */ }
@@ -2293,7 +2456,7 @@ async function factoryModule(
       }));
 
       if (!recorded.ok) {
-        return reply.code(409).send({ error: 'bootstrap_answer_conflict', message: recorded.message });
+        return reply.code(409).send(darwinDecisionFailure(recorded, 'bootstrap_answer_conflict'));
       }
 
       const decision = JSON.parse(recorded.stdout);
@@ -2393,7 +2556,7 @@ async function factoryModule(
           return reply;
         }
       } else if (!committed.ok) {
-        return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
+        return reply.code(409).send(darwinDecisionFailure(committed, 'gate_rejected'));
       }
 
       const resumed = await resumeRouteAttempt(id, {
@@ -2466,7 +2629,13 @@ async function factoryModule(
           return reply;
         }
       } else if (!rewound.ok) {
-        return reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+        const code = rewound.failure?.error;
+        const typed = code === 'unsupported_macos_profile' || code === 'macos_shared_restore_hook_required'
+          || code === 'release_task_cleanup_required';
+
+        return reply.code(409).send(typed
+          ? { error: code, message: rewound.message }
+          : darwinDecisionFailure(rewound, 'goto_rejected'));
       }
 
       const resumed = await resumeRouteAttempt(id, {
@@ -2540,6 +2709,10 @@ async function factoryModule(
         profile: trusted.profile,
       });
     } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === 'factory_runtime_pin_migration_pending') {
+        return reply.code(409).send(runtimeLaunchFailure(error));
+      }
+
       fastify.log.warn(
         { task: id, err: (error as Error).message },
         'runtime-rebind: закрепление не снято',
@@ -2591,7 +2764,51 @@ async function factoryModule(
    * Подготовка стенда и запуск защищены от параллельного старта нового разбора.
    */
   function resumeRouteAttempt(id: string, params: Parameters<typeof launchRouteAttempt>[1]) {
-    return conversationService.withReadStopped(id, () => launchRouteAttempt(id, params));
+    /**
+     * Проверяет ABI именно закреплённой попытки до операций над стендом
+     * и до передачи арбитру запроса на остановку чтения.
+     */
+    const operation = async () => {
+      if (process.platform === 'darwin') {
+        try {
+          await rejectPendingRuntimeMigration({
+            controlRoot: config.factoryControlDir,
+            stateRoot: config.stateDir,
+            profileRoot: config.profilesDir,
+            cacheDir: config.runtime?.cacheDir
+              ?? dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime'),
+            task: id,
+            attempt: params.attempt,
+            profile: params.profile,
+          });
+        } catch (error) {
+          const failure = runtimeLaunchFailure(error);
+
+          return {
+            ok: false,
+            message: failure.message,
+            failure,
+          };
+        }
+      }
+
+      if (darwinBundled) {
+        const args = routeAttemptPlatformCheckArgs(config, { ...params, task: id });
+        const check = await runRouteEngine(config, args);
+
+        if (!check.ok) {
+          return {
+            ok: false,
+            message: check.message,
+            failure: check.failure,
+          };
+        }
+      }
+
+      return conversationService.withReadStopped(id, () => launchRouteAttempt(id, params));
+    };
+
+    return factoryAdmission ? factoryAdmission.run(id, () => withTaskLaunchLock(id, operation)) : operation();
   }
 
   /**
@@ -2729,8 +2946,18 @@ async function factoryModule(
       await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(target, id,
         managed.trusted.attempt, graph.daemonAlive);
 
-      return await runnerControl.switch({ task: id, stage, target });
+      return await runnerControl.switch({
+        task: id,
+        stage,
+        target,
+        identity: managed.trusted,
+      });
     } catch (err) {
+      const failure = runtimeLaunchFailure(err);
+
+      if (failure.tool) {
+        return reply.code(409).send(failure);
+      }
       if (err instanceof RunnerControlInputError) {
         return reply.code(400).send({ error: 'bad_runner_switch', message: errorMessage(err) });
       }
@@ -2792,10 +3019,25 @@ async function factoryModule(
         await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(primary, id,
           managed.trusted.attempt, graph.daemonAlive);
 
-        return await runnerControl.setStage({ task: id, stage, primary });
+        return await runnerControl.setStage({
+          task: id,
+          stage,
+          primary,
+          identity: managed.trusted,
+        });
       }
-      return await runnerControl.clearStage({ task: id, stage });
+
+      return await runnerControl.clearStage({
+        task: id,
+        stage,
+        identity: managed.trusted,
+      });
     } catch (err) {
+      const failure = runtimeLaunchFailure(err);
+
+      if (failure.tool) {
+        return reply.code(409).send(failure);
+      }
       if (err instanceof RunnerControlInputError) {
         return reply.code(400).send({ error: 'bad_runner_override', message: errorMessage(err) });
       }
@@ -2888,58 +3130,66 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/sandbox/down', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     return withTaskLaunchLock(id, async () => {
-    const lifecycle = await managedLifecycle(id, reply);
-    if (!lifecycle) return reply;
-    const { registry, trusted } = lifecycle;
-    if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
-      return reply.code(409).send({
-        error: 'shared_workspace_lifecycle_forbidden',
-        message: 'Общий checkout и существующий стенд нельзя сносить из GrigDesk.',
-      });
-    }
-    const stateDir = config.stateDir;
-    // Архивировать реестр из-под живого процесса нельзя:
-    // оркестратор продолжит писать в исчезнувшую проекцию и оставит полупрогон.
-    if (registry && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
-      return reply.code(409).send({ error: 'running', message: 'прогон идёт — сначала останови его' });
-    }
-    const cmd = await sandboxDownCmd(id, trusted.profile);
-    if (!cmd) return reply.code(501).send({ error: 'not_configured', message: NOT_CONFIGURED });
+      const lifecycle = await managedLifecycle(id, reply);
+      if (!lifecycle) return reply;
+      const { registry, trusted } = lifecycle;
 
-    let attemptClosed = null;
-    const attempt = trusted.attempt;
-    const terminal = Boolean(trusted.terminal);
-
-    if (!terminal) {
-      const done = await runRouteDecision(config, routeAbandonArgs(config, {
-        task: id,
-        profile: trusted.profile,
-        attempt,
-        reason: 'стенд снесён из GrigDesk',
-      }));
-      // 73 означает, что попытка успела стать терминальной сама — сносу это не мешает.
-      if (!done.ok && done.code !== 73) {
-        return reply.code(409).send({ error: 'abandon_failed', message: done.message });
+      if (await mustStopDarwinTask(id, trusted.attempt, reply)) {
+        return reply;
       }
-      attemptClosed = done.ok ? 'abandoned' : 'already_terminal';
-    } else {
-      attemptClosed = trusted.terminal;
-    }
 
-    const down = await runSandboxDown(id, cmd, stateDir);
-    if (!down.ok) return reply.code(500).send({ error: 'sandbox_down_failed', message: down.message });
-    try {
-      const archived = await archiveTaskFiles(id, stateDir);
-      taskLaunchPending.delete(String(id));
-      return { ok: true, output: down.output, archived, attempt: attemptClosed };
-    } catch (err) {
-      fastify.log.error({ task: id, err: errorMessage(err) }, 'стенд снесён, но реестр не перенесён в архив');
-      return reply.code(500).send({
-        error: 'sandbox_archive_failed',
-        message: `стенд снесён, но убрать прогон с экрана не удалось: ${errorMessage(err)}`,
-      });
-    }
+      if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
+        return reply.code(409).send({
+          error: 'shared_workspace_lifecycle_forbidden',
+          message: 'Общий checkout и существующий стенд нельзя сносить из GrigDesk.',
+        });
+      }
+
+      const stateDir = config.stateDir;
+      // Архивировать реестр из-под живого процесса нельзя:
+      // оркестратор продолжит писать в исчезнувшую проекцию и оставит полупрогон.
+      if (registry && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+        return reply.code(409).send({ error: 'running', message: 'прогон идёт — сначала останови его' });
+      }
+      const cmd = await sandboxDownCmd(id, trusted.profile);
+      if (!cmd) return reply.code(501).send({ error: 'not_configured', message: NOT_CONFIGURED });
+
+      let attemptClosed = null;
+      const attempt = trusted.attempt;
+      const terminal = Boolean(trusted.terminal);
+
+      if (!terminal) {
+        const done = await runRouteDecision(config, routeAbandonArgs(config, {
+          task: id,
+          profile: trusted.profile,
+          attempt,
+          reason: 'стенд снесён из GrigDesk',
+        }));
+        // 73 означает, что попытка успела стать терминальной сама — сносу это не мешает.
+        if (!done.ok && done.code !== 73) {
+          return reply.code(409).send(darwinDecisionFailure(done, 'abandon_failed'));
+        }
+        attemptClosed = done.ok ? 'abandoned' : 'already_terminal';
+      } else {
+        attemptClosed = trusted.terminal;
+      }
+
+      const down = await runSandboxDown(id, cmd, stateDir);
+      if (!down.ok) return reply.code(500).send({ error: 'sandbox_down_failed', message: down.message });
+      try {
+        const archived = await archiveTaskFiles(id, stateDir);
+        taskLaunchPending.delete(String(id));
+        return { ok: true, output: down.output, archived, attempt: attemptClosed };
+      } catch (err) {
+        fastify.log.error({ task: id, err: errorMessage(err) },
+          'стенд снесён, но реестр не перенесён в архив');
+        return reply.code(500).send({
+          error: 'sandbox_archive_failed',
+          message: `стенд снесён, но убрать прогон с экрана не удалось: ${errorMessage(err)}`,
+        });
+      }
     });
   });
 
@@ -2949,73 +3199,83 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/close', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     return withTaskLaunchLock(id, async () => {
-    const lifecycle = await managedLifecycle(id, reply);
-    if (!lifecycle) return reply;
-    const { registry, trusted, env, sandbox } = lifecycle;
-    const stateDir = config.stateDir;
-    if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
-      return reply.code(409).send({ error: 'running', message: 'конвейер идёт — сначала останови прогон' });
-    }
-    const shared = trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external';
-    if (!shared && env.FE_PORT) {
-      return reply.code(409).send({ error: 'sandbox_alive', message: 'стенд ещё жив — сначала снеси стенд' });
-    }
+      const lifecycle = await managedLifecycle(id, reply);
+      if (!lifecycle) return reply;
+      const { registry, trusted, env, sandbox } = lifecycle;
 
-    // Активную попытку обязан закрыть движок. Без этого следующий прогон той же
-    // задачи упрётся в 73 («попытка уже активна»), а человек увидит отказ на пустом
-    // месте. Судить о завершении по WF_STATUS нельзя: это только вторичная
-    // проекция активности; точный terminal marker несёт trusted attempt-ledger.
-    let attemptClosed = null;
-    const attempt = trusted.attempt;
-    const terminal = Boolean(trusted.terminal);
-
-    if (!terminal) {
-      const done = await runRouteDecision(config, routeAbandonArgs(config, {
-        task: id, profile: trusted.profile, attempt, reason: 'задача закрыта из GrigDesk',
-      }));
-      // 73 здесь означает «попытка и так уже терминальна» — закрытию это не мешает.
-      if (!done.ok && done.code !== 73) {
-        return reply.code(409).send({ error: 'abandon_failed', message: done.message });
+      if (await mustStopDarwinTask(id, trusted.attempt, reply)) {
+        return reply;
       }
-      attemptClosed = done.ok ? 'abandoned' : 'already_terminal';
-    } else {
-      attemptClosed = trusted.terminal;
-    }
 
-    // Ветки задачи ищем по worktree-путям из env прогона; репозиторий — их основной
-    // checkout. Пустая (0 коммитов от базы) удаляется, непустая остаётся с отчётом.
-    const branches = [];
-    const sandboxRepos = sandbox.repos;
-    const branch = trusted.sourceBranch;
-    // Shared checkout никогда не участвует в branch lifecycle: даже read-only probe,
-    // за которым следует `branch -D`, слишком опасен для основного рабочего дерева.
-    const repos = shared
-      ? []
-      : trusted.repositories.map((repo) => ({ key: repo.name, name: repo.name, path: repo.source }));
-    for (const repo of repos) {
-      const repoBranch = sandboxRepos.find((item) => item.name === (repo.key || repo.name))?.branch
-        || branch;
-      if (!repoBranch || !repo?.path) continue;
-      const kept = await new Promise((resolve) => {
-        execFile('git', ['-C', repo.path, 'rev-list', '--count', `HEAD..refs/heads/${repoBranch}`],
-          { timeout: 15000 }, (err, stdout) => {
-            if (err) return resolve({ repo: repo.name || repo.path, state: 'нет ветки' });
-            if (String(stdout).trim() !== '0') return resolve({ repo: repo.name || repo.path, state: `оставлена: коммитов ${String(stdout).trim()}` });
-            execFile('git', ['-C', repo.path, 'branch', '-D', repoBranch], { timeout: 15000 }, (delErr) => {
-              resolve({ repo: repo.name || repo.path, state: delErr ? `не удалена: ${delErr.message.slice(-120)}` : 'удалена (пустая)' });
+      const stateDir = config.stateDir;
+      if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+        return reply.code(409).send({ error: 'running', message: 'конвейер идёт — сначала останови прогон' });
+      }
+      const shared = trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external';
+
+      if (!shared && env.FE_PORT) {
+        return reply.code(409).send({
+          error: 'sandbox_alive',
+          message: 'стенд ещё жив — сначала снеси стенд',
+        });
+      }
+
+      // Активную попытку обязан закрыть движок. Без этого следующий прогон той же
+      // задачи упрётся в 73 («попытка уже активна»), а человек увидит отказ на пустом
+      // месте. Судить о завершении по WF_STATUS нельзя: это только вторичная
+      // проекция активности; точный terminal marker несёт trusted attempt-ledger.
+      let attemptClosed = null;
+      const attempt = trusted.attempt;
+      const terminal = Boolean(trusted.terminal);
+
+      if (!terminal) {
+        const done = await runRouteDecision(config, routeAbandonArgs(config, {
+          task: id, profile: trusted.profile, attempt, reason: 'задача закрыта из GrigDesk',
+        }));
+        // 73 здесь означает «попытка и так уже терминальна» — закрытию это не мешает.
+        if (!done.ok && done.code !== 73) {
+          return reply.code(409).send(darwinDecisionFailure(done, 'abandon_failed'));
+        }
+        attemptClosed = done.ok ? 'abandoned' : 'already_terminal';
+      } else {
+        attemptClosed = trusted.terminal;
+      }
+
+      // Ветки задачи ищем по worktree-путям из env прогона; репозиторий — их основной
+      // checkout. Пустая (0 коммитов от базы) удаляется, непустая остаётся с отчётом.
+      const branches = [];
+      const sandboxRepos = sandbox.repos;
+      const branch = trusted.sourceBranch;
+      // Shared checkout никогда не участвует в branch lifecycle: даже read-only probe,
+      // за которым следует `branch -D`, слишком опасен для основного рабочего дерева.
+      const repos = shared
+        ? []
+        : trusted.repositories.map((repo) => ({ key: repo.name, name: repo.name, path: repo.source }));
+      for (const repo of repos) {
+        const repoBranch = sandboxRepos.find((item) => item.name === (repo.key || repo.name))?.branch
+          || branch;
+        if (!repoBranch || !repo?.path) continue;
+        const kept = await new Promise((resolve) => {
+          execFile('git', ['-C', repo.path, 'rev-list', '--count', `HEAD..refs/heads/${repoBranch}`],
+            { timeout: 15000 }, (err, stdout) => {
+              if (err) return resolve({ repo: repo.name || repo.path, state: 'нет ветки' });
+              if (String(stdout).trim() !== '0') return resolve({ repo: repo.name || repo.path, state: `оставлена: коммитов ${String(stdout).trim()}` });
+              execFile('git', ['-C', repo.path, 'branch', '-D', repoBranch], { timeout: 15000 }, (delErr) => {
+                resolve({ repo: repo.name || repo.path, state: delErr ? `не удалена: ${delErr.message.slice(-120)}` : 'удалена (пустая)' });
+              });
             });
-          });
-      });
-      branches.push(kept);
-    }
+        });
+        branches.push(kept);
+      }
 
-    const moved = await archiveTaskFiles(id, stateDir);
-    taskLaunchPending.delete(String(id));
-    return {
-      ok: true, archived: moved, branch: branch || null, branches, attempt: attemptClosed,
-      workspaceMode: trusted.workspaceMode,
-    };
+      const moved = await archiveTaskFiles(id, stateDir);
+      taskLaunchPending.delete(String(id));
+      return {
+        ok: true, archived: moved, branch: branch || null, branches, attempt: attemptClosed,
+        workspaceMode: trusted.workspaceMode,
+      };
     });
   });
 
@@ -3039,11 +3299,17 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/sandbox/retry', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     return withTaskLaunchLock(id, async () => {
 
       const lifecycle = await managedLifecycle(id, reply);
       if (!lifecycle) return reply;
       const { registry: reg, trusted } = lifecycle;
+
+      if (await mustStopDarwinTask(id, trusted.attempt, reply)) {
+        return reply;
+      }
+
       if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
         return reply.code(409).send({
           error: 'shared_workspace_lifecycle_forbidden',
@@ -3067,8 +3333,9 @@ async function factoryModule(
         const done = await runRouteDecision(config, routeAbandonArgs(config, {
           task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из GrigDesk',
         }));
+
         if (!done.ok && done.code !== 73) {
-          return reply.code(409).send({ error: 'abandon_failed', message: done.message });
+          return reply.code(409).send(darwinDecisionFailure(done, 'abandon_failed'));
         }
       }
 
@@ -3146,10 +3413,18 @@ async function factoryModule(
       why: 'по кнопке',
       standOwnership: trusted.standOwnership,
     });
+
     if (!launch.ok) {
-      return reply.code(500).send({
+      const code = launch.failure?.error;
+      const status = code === 'unsupported_macos_profile' || code === 'macos_shared_restore_hook_required'
+        || code === 'release_task_cleanup_required' || code === 'release_drain_busy'
+        || code === 'factory_runtime_pin_migration_pending'
+        || code === 'macos_engine_dependency_missing' ? 409 : 500;
+
+      return reply.code(status).send({
         error: launch.failure?.error || 'resume_failed',
         ...(launch.failure ? { runners: launch.failure.runners } : {}),
+        ...(launch.failure?.tool ? { tool: launch.failure.tool } : {}),
         message: launch.message,
       });
     }
@@ -3163,6 +3438,30 @@ async function factoryModule(
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
 
+    if (darwinBundled) {
+      if (request.body?.expectedCleanup !== undefined) {
+        const expected = request.body.expectedCleanup;
+
+        if (Object.keys(request.body).join(',') !== 'expectedCleanup'
+          || typeof expected !== 'string' || !/^[a-f0-9]{64}$/u.test(expected)) {
+          return reply.code(400).send({ error: 'bad_cleanup_identity' });
+        }
+
+        return stopExpectedDarwinCleanup(id, expected, reply);
+      }
+
+      const stop = await stopDarwinOrchestrator(config.factoryControlDir, id,
+        () => factoryState.inspectTaskRuntime(ownershipPaths, id),
+        async (identity) => (await runRouteDecision(config,
+          routeStopCleanupArgs(config, { ...identity, task: id }, !factoryAdmission?.isDraining()))).ok);
+
+      if (!stop.ok) {
+        return reply.code(409).send({ error: stop.error });
+      }
+
+      return stop;
+    }
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { registry } = managed;
@@ -3175,6 +3474,91 @@ async function factoryModule(
     if (!stop.ok) return reply.code(500).send({ error: 'stop_failed', message: stop.message });
     return stop;
   });
+
+  /** Сохраняет управляемый отказ Darwin для обычных API решений. */
+  function darwinDecisionFailure(
+    result: { failure: RouteFailure | null; message: string }, fallback: string,
+  ) {
+    const code = result.failure?.error ?? '';
+    const safe = ['release_task_cleanup_required', 'release_drain_busy', 'release_activity_unknown',
+      'macos_engine_dependency_missing',
+      'factory_runtime_attempt_invalid', 'factory_runtime_pin_invalid', 'factory_runtime_pin_missing',
+      'factory_runtime_pin_migration_pending'];
+
+    return darwinBundled && result.failure && safe.includes(code)
+      ? result.failure : { error: fallback, message: result.message };
+  }
+
+  /**
+   * Проверяет обязательный Stop до операций с веткой и стендом.
+   * Неизвестное владение закрывает операцию до изменения архива.
+   */
+  async function mustStopDarwinTask(task: string, attempt: string, reply: FastifyReply) {
+    if (!darwinBundled) {
+      return false;
+    }
+
+    try {
+      await verifyDarwinOwnershipRoots(ownershipPaths);
+
+      const action = await describeDarwinCleanup(config.factoryControlDir, task, attempt);
+
+      if (action?.mode !== 'stop') {
+        return false;
+      }
+
+      reply.code(409).send({ error: 'release_task_cleanup_required' });
+    } catch {
+      reply.code(409).send({ error: 'release_activity_unknown' });
+    }
+
+    return true;
+  }
+
+  /**
+   * Привязывает завершение очистки к stopped записи точной попытки.
+   * После команды заново проверяет владельцев и исход финализации.
+   */
+  async function stopExpectedDarwinCleanup(id: string, expected: string, reply: FastifyReply) {
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    const { attempt, profile, terminal } = managed.trusted;
+    const stale = () => reply.code(409).send({ error: 'release_task_cleanup_required' });
+
+    if (terminal || factoryAdmission?.isDraining()) {
+      return stale();
+    }
+
+    try {
+      await verifyDarwinOwnershipRoots(ownershipPaths);
+
+      const current = await factoryState.inspectTaskRuntime(ownershipPaths, id);
+      const action = await describeDarwinCleanup(config.factoryControlDir, id, attempt);
+
+      if (current.identity?.attempt !== attempt || current.orchestrator !== 'dead'
+        || current.runner !== 'dead' || current.finalization !== 'pending' || action?.identity !== expected) {
+        return stale();
+      }
+
+      const args = routeStopCleanupArgs(config, {
+        task: id,
+        profile,
+        attempt,
+      }, true, expected);
+      const result = await runRouteDecision(config, args);
+      const after = await factoryState.inspectTaskRuntime(ownershipPaths, id);
+
+      return result.ok && after.identity?.attempt === attempt && after.orchestrator === 'dead'
+        && after.runner === 'dead' && after.finalization === 'done'
+        ? { ok: true, outcome: 'stopped' } : stale();
+    } catch {
+      return stale();
+    }
+  }
 
   // Полный граф конвейера задачи (для SVG-отрисовки): схема + статусы узлов + возвраты.
   fastify.get<FactoryRoute>('/api/tasks/:id/graph', async (request, reply) => {

@@ -72,7 +72,9 @@ export async function startQwenSandbox(
   const workspaceRoots = [options.cwd, ...options.extraDirs || []];
 
   if (process.platform !== 'linux') {
-    throw new Error('Qwen: требуется Linux и песочница bwrap');
+    throw Object.assign(new Error('Qwen: требуется Linux и песочница bwrap'), {
+      code: 'platform_capability_unsupported',
+    });
   }
 
   try {

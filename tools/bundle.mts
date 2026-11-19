@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -11,8 +11,10 @@ import {
 } from '../shared/chat/deepSeekBinary.ts';
 import { assertDeepSeekGlmApiAdmission } from '../shared/node/glmCompatibility.ts';
 import { writeBuildStepEvent } from '../shared/node/buildStepEvents.ts';
-import { executeInstalledBundle } from './installedBundle.mts';
-import type { BundleBuildInput } from './bundleSteps.mts';
+import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
+import { buildDesktopRelease } from './buildDesktopRelease.mts';
+import { executeInstalledBundle, stageInstalledBundle } from './installedBundle.mts';
+import type { BundleBuildInput, BundleOptions } from './bundleSteps.mts';
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -77,6 +79,8 @@ async function deepSeekInfo(binary: string, env: NodeJS.ProcessEnv) {
  * Подготовка vendor вынесена в дочерний процесс с тем же синтетическим HOME.
  */
 async function main(): Promise<void> {
+  await configureDarwinBuildProcessHelper();
+
   if (process.argv[2] === '--prepare-deepseek' && process.argv.length === 4) {
     await materializeDeepSeekSnapshot(path.join(root, 'deepseek/vendor/deepseek-harness'));
     await prepareRuntimeDependencies(process.argv[3]!);
@@ -84,11 +88,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (process.argv.length !== 2) {
+  const stage = process.argv[2] === '--stage-installed' && process.argv.length === 5;
+
+  if (!stage && process.argv.length !== 2) {
     throw new Error('Использование: grigdesk-ctl bundle');
   }
 
-  await executeInstalledBundle({
+  if (stage && process.env.GRIGDESK_RELEASE_SIGNING_KEY) {
+    throw new Error('release_signing_key_in_build_environment');
+  }
+
+  const options: BundleOptions = {
     root,
     ...(process.env.GRIGDESK_RELEASE_SIGNING_KEY
       ? {
@@ -161,35 +171,8 @@ async function main(): Promise<void> {
 
         return path.join(input.outDir, 'deepseek');
       },
-      /**
-       * AppImage собирается вместе со свежим UI в явный выход, без desktop install.
-       * Лишний второй образ считается неоднозначным результатом и не публикуется.
-       * Локальная упаковка готовит те же закреплённые Electron и AppImage tools, что CI.
-       * Готовый runtime передаётся упаковщику, чтобы он не скачивал его повторно.
-       */
       async window(input) {
-        const preparedTools = process.env.GRIGDESK_APPIMAGE_TOOLS_PATH;
-        const tools = preparedTools ?? path.join(input.cacheDir, 'appimage-tools');
-
-        if (!preparedTools) {
-          await run('bash', ['tools/ci/prepare-release-desktop.sh', tools], input);
-        }
-
-        const env = { ...input.env, APPIMAGE_TOOLS_PATH: tools };
-
-        await run('npm', ['--prefix', path.join(root, 'desktop'), 'run', 'dist', '--',
-          `--config.directories.output=${input.outDir}`,
-          `--config.extraMetadata.version=${input.env.GRIGDESK_RELEASE_VERSION}`,
-          `--config.electronDist=${path.join(root, 'desktop/node_modules/electron/dist')}`,
-        ], { ...input, env });
-
-        const images = (await readdir(input.outDir)).filter((name) => name.endsWith('.AppImage'));
-
-        if (images.length !== 1) {
-          throw new Error('Сборка окна должна вернуть ровно один свежий AppImage');
-        }
-
-        return path.join(input.outDir, images[0]!);
+        return buildDesktopRelease({ ...input, root }, { run });
       },
     },
     /**
@@ -225,7 +208,26 @@ async function main(): Promise<void> {
       assertDeepSeekHostCompatibility(info, host);
       assertDeepSeekGlmApiAdmission(info, host);
     },
-  });
+  };
+
+  if (stage) {
+    const directory = process.argv[3]!;
+    const receipt = process.argv[4]!;
+
+    if (!path.isAbsolute(directory) || !path.isAbsolute(receipt)) {
+      throw new Error('release_staging_path_invalid');
+    }
+
+    await mkdir(directory, { mode: 0o700 });
+
+    const digest = await stageInstalledBundle(options, directory);
+
+    await writeFile(receipt, digest + '\n', { mode: 0o600, flag: 'wx' });
+
+    return;
+  }
+
+  await executeInstalledBundle(options);
 
   process.stdout.write('Готовы установочные артефакты в release-artifacts/.\n');
 }

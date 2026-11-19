@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
-import { ensureNodeArchive, readNodeRuntime } from '../../shared/node/nodeRuntime.ts';
+import {
+  ensureNodeArchive, readTargetNodeRuntime, seaHostTarget, serverNodeRuntimeManifest,
+} from '../../shared/node/nodeRuntime.ts';
 import { downloadFile } from '../../shared/node/seaBuild.ts';
 
 /**
@@ -41,11 +43,10 @@ export async function prepareBuildRuntime(cacheDir: string, options: {
   download?: typeof downloadFile;
   pauseMs?: number;
 } = {}): Promise<string> {
+  const target = seaHostTarget();
   const manifest = options.manifestPath
-    ?? fileURLToPath(new URL('../build/node-runtime.json', import.meta.url));
-  const runtime = readNodeRuntime(
-    JSON.parse(await readFile(manifest, 'utf8')), 'server/build/node-runtime.json',
-  );
+    ?? fileURLToPath(new URL(`../../${serverNodeRuntimeManifest(target)}`, import.meta.url));
+  const runtime = await readTargetNodeRuntime(manifest, target);
 
   return ensureNodeArchive(runtime, cacheDir, {
     download: options.download ?? downloadFile,

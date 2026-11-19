@@ -38,6 +38,9 @@ import { registerWindowKeyLifecycle } from './lib/windowKey.ts';
 import type { WindowAuthState } from './lib/windowKey.ts';
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
+import { readDarwinLaunchRecords } from './lib/factoryDarwinLaunch.ts';
+import { initializeDarwinOwnershipRoots } from './lib/factoryDarwinOwnershipRoots.ts';
+import { FactoryLaunchAdmission } from './lib/factoryLaunchAdmission.ts';
 import { ArbiterCardsStore } from './lib/arbiterCards.ts';
 import { ArbiterConversationStore } from './lib/arbiterConversationStore.ts';
 import { createTrackerRuntime } from './lib/trackers/runtime.ts';
@@ -244,6 +247,18 @@ async function build(desktopParent: DesktopParent | null) {
     // на AVV_ERR_PLUGIN_EXEC_TIMEOUT и уходил в бесконечный цикл перезапусков systemd.
     pluginTimeout: 60_000,
   });
+
+  const factoryAdmission = process.platform === 'darwin' && runtimeKind() === 'packaged'
+    && process.env.GRIGDESK_ENGINE_MODE !== 'external' ? new FactoryLaunchAdmission() : undefined;
+
+  if (factoryAdmission) {
+    try {
+      await initializeDarwinOwnershipRoots(config);
+      await readDarwinLaunchRecords(config.factoryControlDir);
+    } catch (error) {
+      fastify.log.warn({ error }, 'Не удалось подтвердить каталоги владения конвейером macOS');
+    }
+  }
 
   // Встроенные навыки комплекта зеркалируются в ~/.agents/skills при каждом старте: только
   // этот каталог знают меню «/» и файловый provider Harness. Сбой синка не мешает подъёму.
@@ -1141,6 +1156,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(helpModule, { help });
   await fastify.register<FactoryModuleOptions>(factoryModule, {
     factoryState,
+    factoryAdmission,
     config,
     prefs,
     tracker: asPort(tracker),
@@ -1156,6 +1172,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(systemModule, {
     system,
     config,
+    factoryAdmission,
     desktop: desktopParent,
   });
   // Каталог сам выбирает публичный сайт по приоритету и не задерживает boot сетью.

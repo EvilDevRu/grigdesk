@@ -19,13 +19,15 @@ const MARKER = '# GRIGDESK_BOOTSTRAP:';
 
 const PLACEHOLDERS = new Set(['VERSION', 'CHANNEL', 'ORIGIN', 'INDEX_SHA256', 'INDEX_SIZE',
   'HELPER_SHA256', 'HELPER_SIZE', 'COMPRESSED_SHA256', 'COMPRESSED_SIZE', 'LOCAL_BYTES',
-  'REMOTE_BYTES', 'SERVER_BYTES']);
+  'REMOTE_BYTES', 'SERVER_BYTES', 'PLATFORM', 'DELIVERY']);
 
 export interface BootstrapMetadata {
   format: 1;
   version: string;
   channel: 'release' | 'dev';
   origin: string;
+  platform?: 'darwin-arm64';
+  delivery?: 'candidate-file' | 'local-test';
   manifestDigest: string;
   indexSha256: string;
   indexSize: number;
@@ -83,6 +85,8 @@ export function renderBootstrap(metadata: BootstrapMetadata, template: string,
     VERSION: metadata.version,
     CHANNEL: metadata.channel,
     ORIGIN: metadata.origin,
+    PLATFORM: metadata.platform ?? 'linux-x64',
+    DELIVERY: metadata.delivery ?? 'channel',
     INDEX_SHA256: metadata.indexSha256,
     INDEX_SIZE: String(metadata.indexSize),
     HELPER_SHA256: metadata.helperSha256,
@@ -131,10 +135,13 @@ function decodeBootstrapMetadata(value: unknown): BootstrapMetadata {
   const record = value as Record<string, unknown>;
   const expected = ['channel', 'compressedSha256', 'compressedSize', 'downloadBytes', 'format',
     'helperSha256', 'helperSize', 'indexSha256', 'indexSize', 'manifestDigest', 'origin',
-    'version'].sort().join(',');
+    'version', ...['platform', 'delivery'].filter((field) => Object.hasOwn(record, field))].sort().join(',');
 
   if (Object.keys(record).sort().join(',') !== expected || record.format !== 1
-    || !['release', 'dev'].includes(record.channel as string)) {
+    || !['release', 'dev'].includes(record.channel as string)
+    || Object.hasOwn(record, 'platform') && record.platform !== 'darwin-arm64'
+    || Object.hasOwn(record, 'delivery')
+      && !['candidate-file', 'local-test'].includes(String(record.delivery))) {
     throw new Error('bootstrap_metadata_invalid');
   }
 
@@ -312,6 +319,7 @@ export async function verifyBootstrapFiles(directory: string,
   const indexBytes = await fs.readFile(indexFile);
 
   if (metadata.channel !== channel || metadata.version !== trust.envelope.payload.version
+    || metadata.platform !== (trust.envelope.payload.platform.os === 'darwin' ? 'darwin-arm64' : undefined)
     || metadata.manifestDigest !== verifyReleaseEnvelope(trust.envelope, trust.publicKey)) {
     throw new Error('bootstrap_metadata_mismatch');
   }

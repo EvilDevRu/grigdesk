@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { constants } from 'node:fs';
+import { constants, renameSync } from 'node:fs';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
 import { assertInstallationPath } from '../shared/node/installedLayout.ts';
 import { sha256File } from '../shared/node/hash.ts';
+import { syncDirectory } from '../shared/node/files.ts';
 import { canonicalJson } from '../shared/lib/canonicalJson.ts';
 
 export interface DistributionRunArtifact {
@@ -25,6 +26,7 @@ export interface DistributionRunRecord {
   manifestDigest: string;
   stage: 'building' | 'failed' | 'verified';
   artifacts: DistributionRunArtifact[];
+  verificationTools?: { processIdentity: string; setsid: string };
 }
 
 const RECORD_LIMIT = 1024 * 1024;
@@ -87,23 +89,59 @@ Promise<{
 
 /**
  * Итог заменяет собственную запись атомарным rename в приватной папке запуска.
- * Failed не оставляет кандидата verified, а успех закрепляет точную опись файлов.
+ * Один writer переводит building в терминальное состояние после проверки отмены.
  */
 export async function completeRunRecord(runDir: string, runId: string,
   stage: 'failed' | 'verified', artifacts: DistributionRunArtifact[],
-  manifestDigest?: string): Promise<void> {
-  const record = await readRunRecord(runDir, runId);
-  const updated = {
-    ...record,
-    stage,
-    artifacts,
-    ...manifestDigest !== undefined ? { manifestDigest } : {}
-  };
-  const directory = path.join(runDir, runId);
-  const temporary = path.join(directory, 'run.json.next');
+  options: {
+    manifestDigest?: string;
+    verificationTools?: DistributionRunRecord['verificationTools'];
+    signal?: AbortSignal;
+  } = {}): Promise<void> {
+  const { manifestDigest, verificationTools, signal } = options;
 
-  await fs.writeFile(temporary, canonicalJson(updated) + '\n', { mode: 0o600 });
-  await fs.rename(temporary, path.join(directory, 'run.json'));
+  await readRunRecord(runDir, runId);
+
+  const directory = path.join(runDir, runId);
+  const lock = path.join(directory, 'terminal.lock');
+
+  await fs.mkdir(lock, { mode: 0o700 });
+
+  const temporary = path.join(lock, 'run.json');
+
+  try {
+    const record = await readRunRecord(runDir, runId);
+
+    if (record.stage !== 'building') {
+      throw new Error('distribution_run_already_terminal');
+    }
+
+    signal?.throwIfAborted();
+
+    const updated = {
+      ...record,
+      stage,
+      artifacts,
+      ...manifestDigest !== undefined ? { manifestDigest } : {},
+      ...verificationTools !== undefined ? { verificationTools } : {},
+    };
+    const file = await fs.open(temporary, 'wx', 0o600);
+
+    try {
+      await file.writeFile(canonicalJson(updated) + '\n');
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+
+    // Проверка сигнала и начало commit проходят в одном обороте цикла событий.
+    signal?.throwIfAborted();
+    renameSync(temporary, path.join(directory, 'run.json'));
+    await syncDirectory(directory);
+  } finally {
+    await fs.rm(temporary, { force: true });
+    await fs.rmdir(lock);
+  }
 }
 
 /**
@@ -142,11 +180,22 @@ export async function readRunRecord(runDir: string, runId: string): Promise<Dist
     }
 
     const value = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>;
-    const expected = ['artifacts', 'format', 'manifestDigest', 'publicKeyPem', 'recipeDigest',
-      'realArtifactsRoot', 'runId', 'sourceCommit', 'sourceDigest', 'stage', 'uid']
-      .sort().join(',');
+    const fields = ['artifacts', 'format', 'manifestDigest', 'publicKeyPem', 'recipeDigest',
+      'realArtifactsRoot', 'runId', 'sourceCommit', 'sourceDigest', 'stage', 'uid'];
+    const tools = value.verificationTools;
 
-    if (Object.keys(value).sort().join(',') !== expected || value.format !== 1
+    if (tools !== undefined) {
+      fields.push('verificationTools');
+
+      if (value.stage !== 'verified' || !tools || typeof tools !== 'object'
+        || Object.keys(tools).sort().join(',') !== 'processIdentity,setsid'
+        || !Object.values(tools).every((digest) => typeof digest === 'string'
+          && /^[a-f0-9]{64}$/u.test(digest))) {
+        throw new Error('distribution_run_record_invalid');
+      }
+    }
+
+    if (Object.keys(value).sort().join(',') !== fields.sort().join(',') || value.format !== 1
       || value.runId !== runId || value.uid !== process.getuid!()
       || !['building', 'failed', 'verified'].includes(String(value.stage))) {
       throw new Error('distribution_run_record_invalid');
@@ -182,7 +231,7 @@ export async function readRunRecord(runDir: string, runId: string): Promise<Dist
  * Проверка локального доверия закрепляет физический путь и точные байты всей описи.
  * Ни ключ, ни дополнительные файлы из переданного каталога не расширяют доверие run-а.
  */
-export async function verifyRunArtifacts(record: DistributionRunRecord): Promise<void> {
+export async function verifyRunArtifacts(record: DistributionRunRecord, signal?: AbortSignal): Promise<void> {
   const root = record.realArtifactsRoot;
 
   await assertInstallationPath(root);
@@ -199,11 +248,13 @@ export async function verifyRunArtifacts(record: DistributionRunRecord): Promise
   }
 
   for (const artifact of record.artifacts) {
+    signal?.throwIfAborted();
+
     const file = path.join(root, artifact.name);
     const stat = await fs.lstat(file);
 
     if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== record.uid
-      || stat.size !== artifact.size || await sha256File(file) !== artifact.sha256) {
+      || stat.size !== artifact.size || await sha256File(file, signal) !== artifact.sha256) {
       throw new Error('distribution_run_artifacts_invalid');
     }
   }

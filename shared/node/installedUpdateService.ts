@@ -7,13 +7,13 @@ import type { ReleaseEnvelope } from '../runtime/installedUpdateContracts.ts';
 import { compareProductVersions, type ReleaseChannel } from '../runtime/productReleaseVersion.ts';
 import { ReleaseChannelService } from './releaseChannel.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
-import { readInstallation, readInstalledPointer, writeInstallationJson,
+import { acquireInstalledUpdateLock, readInstallation, readInstalledPointer, writeInstallationJson,
   readInstallationJson } from './installedLayout.ts';
 import { readInstalledUpdate, PENDING_UPDATE_STAGES } from './installedUpdateState.ts';
 import type { InstalledUpdateJob } from './installedUpdateState.ts';
 import { InstalledUpdateManager } from './installedUpdate.ts';
-import { acquireInstallLock } from './binaryInstall.ts';
 import { readUpdateProcess } from './updateProcessOwner.ts';
+import { assertInstallationReleaseTrust, installedExecutableSuffix } from './bundleLayout.ts';
 
 const execute = promisify(execFile);
 
@@ -41,7 +41,7 @@ export async function probeInstalledComponent(
 
   await fs.mkdir(work, { recursive: true, mode: 0o700 });
 
-  const binary = path.join(directory, component === 'server' ? 'bin/grigdesk-server' : 'GrigDesk');
+  const binary = path.join(directory, installedExecutableSuffix(component, job.envelope.payload.platform.os));
   const args = component === 'server' ? ['--version', '--json'] : ['--grigdesk-release-probe'];
 
   /**
@@ -136,6 +136,10 @@ export class InstalledUpdateService {
    */
   async status() {
     const receipt = await readInstallation(this.root);
+
+    assertInstallationReleaseTrust(receipt, this.publicKeyPem);
+
+    const source = receipt.format === 2 ? receipt.source : 'channel';
     const pointer = await readInstalledPointer(receipt);
     const job = await readInstalledUpdate(receipt);
     let workerActive = false;
@@ -154,7 +158,7 @@ export class InstalledUpdateService {
             executable: string;
           };
         };
-        const actual = await readUpdateProcess(saved.process.pid);
+        const actual = await readUpdateProcess(saved.process.pid, path.join(this.root, 'update/maintenance'));
 
         workerActive = saved.jobId === job.id && actual.starttime === saved.process.starttime
           && actual.executable === saved.process.executable;
@@ -163,7 +167,7 @@ export class InstalledUpdateService {
       }
     }
 
-    if (this.check.state !== 'checking') {
+    if (source === 'channel' && this.check.state !== 'checking') {
       try {
         const cache = await readInstallationJson(this.root, 'update/check.json') as {
           channel: ReleaseChannel; check: InstalledUpdateCheck;
@@ -216,6 +220,7 @@ export class InstalledUpdateService {
 
     return {
       channel: receipt.channel,
+      source,
       mode: receipt.mode,
       installed: {
         desktop: pointer.desktop?.split('/')[1] ?? null,
@@ -233,6 +238,13 @@ export class InstalledUpdateService {
    */
   async checkUpdates(force = true): Promise<void> {
     const receipt = await readInstallation(this.root);
+
+    assertInstallationReleaseTrust(receipt, this.publicKeyPem);
+
+    if (receipt.format === 2) {
+      return;
+    }
+
     let channel = this.channels.get(receipt.channel);
 
     this.checkedChannel = receipt.channel;
@@ -287,10 +299,17 @@ export class InstalledUpdateService {
    * Проверка и обновление receipt сериализуются тем же installation lock.
    */
   async setChannel(channel: ReleaseChannel): Promise<void> {
-    const receipt = await readInstallation(this.root);
-    const lock = await acquireInstallLock(path.join(this.root, 'update/installation'), { waitMs: 0 });
+    const lock = await acquireInstalledUpdateLock(this.root);
 
     try {
+      const receipt = await readInstallation(this.root);
+
+      assertInstallationReleaseTrust(receipt, this.publicKeyPem);
+
+      if (receipt.format === 2) {
+        throw new Error('candidate_channel_fixed');
+      }
+
       const job = await readInstalledUpdate(receipt);
 
       if (!['release', 'dev'].includes(channel) || job && PENDING_UPDATE_STAGES.includes(job.stage)) {

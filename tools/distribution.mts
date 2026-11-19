@@ -3,11 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
+import type { Stats } from 'node:fs';
 
-import { readRunRecord, verifyRunArtifacts } from './distributionRuns.mts';
+import { readRunRecord, verifyRunArtifacts, type DistributionRunRecord } from './distributionRuns.mts';
 import { verifyDistributionArtifacts, type DistributionTrust }
   from './releaseArtifactVerification.mts';
-import { verifyInstallation } from './verifyInstallation.mts';
+import { verifyInstallation, type VerificationScopeState } from './verifyInstallation.mts';
 import { runDistributionBuild } from './distributionBuild.mts';
 import { artifactsPath } from '../shared/runtime/dataHome.ts';
 import { runEnvironmentReport } from './releaseEnvironment.mts';
@@ -16,6 +17,9 @@ import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 import { verifyReleaseInstaller } from './releaseArtifactVerification.mts';
 import { cliTranslator } from '../cli/i18n.ts';
 import { createDistributionProgress } from '../cli/distributionProgress.ts';
+import { readDarwinBuildSetsid } from './darwinBuildTools.mts';
+import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
+import { removePrivateTree } from '../shared/node/files.ts';
 
 const USAGE = [
   'grigdesk-ctl dist — подготовка и проверка дистрибутива из исходников',
@@ -52,10 +56,13 @@ function defaultRunsRoot(): string {
  * кандидата Actions (явное значение дополнительно сверяется с файлом и конвертом).
  * --local-run читает только собственную запись run-а.
  */
-export async function resolveTrust(argv: string[]): Promise<{
+export async function resolveTrust(argv: string[], signal?: AbortSignal): Promise<{
   directory: string;
   trust: DistributionTrust;
+  nativeTools?: NodeJS.ProcessEnv;
 }> {
+  signal?.throwIfAborted();
+
   const from = valueOf(argv, '--from');
   const localRun = valueOf(argv, '--local-run');
 
@@ -104,14 +111,20 @@ export async function resolveTrust(argv: string[]): Promise<{
     throw new Error('distribution_run_not_verified');
   }
 
-  await verifyRunArtifacts(record);
+  await verifyRunArtifacts(record, signal);
 
-  return { directory: record.realArtifactsRoot, trust: {
-    purpose: 'local',
-    publicKeyPem: record.publicKeyPem,
-    expectedCommit: record.sourceCommit,
-    expectedManifestDigest: record.manifestDigest
-  } };
+  const nativeTools = process.platform === 'darwin' ? await readLocalVerificationTools(record) : undefined;
+
+  return {
+    directory: record.realArtifactsRoot,
+    nativeTools,
+    trust: {
+      purpose: 'local',
+      publicKeyPem: record.publicKeyPem,
+      expectedCommit: record.sourceCommit,
+      expectedManifestDigest: record.manifestDigest,
+    },
+  };
 }
 
 function valueOf(argv: string[], flag: string): string | null {
@@ -204,6 +217,120 @@ async function installationPaths(argv: string[]): Promise<Record<string, string>
 }
 
 /**
+ * Проверяет два фиксированных файла из приватной записи UUID.
+ * Публичная опись артефактов не задаёт путь к исполняемым инструментам.
+ */
+async function readLocalVerificationTools(record: DistributionRunRecord): Promise<NodeJS.ProcessEnv> {
+  const tools = record.verificationTools;
+
+  if (!tools) {
+    throw new Error('dist_verification_native_tools_invalid');
+  }
+
+  const directory = path.join(await fs.realpath(defaultRunsRoot()), record.runId, 'verification-tools');
+  const env = {
+    GRIGDESK_BUILD_PROCESS_HELPER: path.join(directory, 'process-identity'),
+    GRIGDESK_BUILD_PROCESS_HELPER_SHA256: tools.processIdentity,
+    GRIGDESK_TEST_SETSID_BIN: path.join(directory, 'setsid'),
+    GRIGDESK_BUILD_SETSID_SHA256: tools.setsid,
+  };
+
+  await readDarwinBuildSetsid(env);
+  await configureDarwinBuildProcessHelper(env);
+
+  return env;
+}
+
+/** Установка и очистка используют тот же физический приватный inode. */
+async function proveCheckRoot(directory: string, original: Stats): Promise<void> {
+  const current = await fs.lstat(directory);
+
+  if (!original.isDirectory() || !current.isDirectory() || current.uid !== process.getuid!()
+    || original.uid !== current.uid || (original.mode & 0o7777) !== 0o700
+    || (current.mode & 0o7777) !== 0o700 || original.dev !== current.dev || original.ino !== current.ino
+    || await fs.realpath(directory) !== directory) {
+    throw new Error('dist_verification_scope_invalid');
+  }
+}
+
+/**
+ * Local check на Mac сохраняет первую причину отмены до проверки выхода сервиса.
+ * Состояние записи сборки принадлежит build и в check остаётся только для чтения.
+ */
+async function checkDistribution(argv: string[]): Promise<number> {
+  const scoped = process.platform === 'darwin' && argv.includes('--local-run');
+  const cancellation = new AbortController();
+  const signal = scoped ? cancellation.signal : undefined;
+  const interrupt = () => cancellation.abort(130);
+  const terminate = () => cancellation.abort(143);
+
+  if (scoped) {
+    process.on('SIGINT', interrupt);
+    process.on('SIGTERM', terminate);
+  }
+
+  try {
+    const source = await resolveTrust(argv, signal);
+    const verified = await verifyDistributionArtifacts(source.directory, {
+      ...source.trust, requireHostPlatform: true,
+    }, signal);
+
+    signal?.throwIfAborted();
+
+    const temporary = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'dist-check-'));
+    const installRoot = scoped ? await fs.realpath(temporary) : temporary;
+    const original = scoped ? await fs.lstat(temporary) : null;
+    const scope: { state: VerificationScopeState } = { state: 'idle' };
+
+    try {
+      if (original) {
+        await proveCheckRoot(installRoot, original);
+      }
+
+      await verifyInstallation(source.directory, source.trust.expectedCommit, {
+        trust: source.trust,
+        installRoot,
+        modes: ['local', 'remote', 'server'],
+        signal,
+        nativeTools: source.nativeTools,
+        onScopeState: (state) => {
+          scope.state = state;
+        },
+      });
+    } finally {
+      if (scope.state === 'idle' || scope.state === 'clean') {
+        if (original) {
+          await proveCheckRoot(installRoot, original);
+        }
+
+        await removePrivateTree(installRoot);
+      } else {
+        process.stderr.write(`Сохранена временная установка ${installRoot}\n`);
+      }
+    }
+
+    signal?.throwIfAborted();
+
+    process.stdout.write(`${JSON.stringify({
+      verified: true,
+      version: verified.envelope.payload.version,
+      manifestDigest: verified.bootstrap.manifestDigest,
+    })}\n`);
+
+    return 0;
+  } catch (error) {
+    if (signal?.aborted) {
+      return signal.reason as number;
+    }
+
+    throw error;
+  } finally {
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', terminate);
+  }
+}
+
+/**
  * Единственный dist-диспетчер проверяет источник доверия перед установкой или сборкой.
  * Самостоятельная публикация и доступ к релизным SSH-ключам сюда не входят.
  */
@@ -238,27 +365,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === 'check') {
-    const source = await resolveTrust(argv);
-    const verified = await verifyDistributionArtifacts(source.directory, source.trust);
-    const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dist-check-'));
-
-    try {
-      await verifyInstallation(source.directory, source.trust.expectedCommit, {
-        trust: source.trust,
-        installRoot,
-        modes: ['local', 'remote', 'server'],
-      });
-    } finally {
-      await fs.rm(installRoot, { recursive: true, force: true });
-    }
-
-    process.stdout.write(`${JSON.stringify({
-      verified: true,
-      version: verified.envelope.payload.version,
-      manifestDigest: verified.bootstrap.manifestDigest
-    })}\n`);
-
-    return 0;
+    return checkDistribution(argv);
   }
 
   if (command === 'install') {
@@ -269,7 +376,9 @@ async function main(argv: string[]): Promise<number> {
     }
 
     const source = await resolveTrust(argv);
-    const verified = await verifyDistributionArtifacts(source.directory, source.trust);
+    const verified = await verifyDistributionArtifacts(source.directory, {
+      ...source.trust, requireHostPlatform: true,
+    });
     const paths = await installationPaths(argv);
     const { t } = cliTranslator();
 

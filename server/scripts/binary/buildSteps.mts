@@ -3,7 +3,9 @@ import path from 'node:path';
 
 import { withWorkDirectory, syncDirectory } from '../../../shared/node/files.ts';
 import { sha256File } from '../../../shared/node/hash.ts';
-import { assertUntracked, readNodeRuntime, type NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
+import {
+  assertUntracked, readNodeRuntime, seaHostTarget, serverNodeRuntimeManifest, type NodeRuntime,
+} from '../../../shared/node/nodeRuntime.ts';
 import { nodeArchive, seaConfig } from '../../../shared/node/seaBuild.ts';
 import { HELP_LOCALES } from '../../../shared/help/helpContracts.ts';
 import { decodeServerManifest, serverManifestBytes,
@@ -24,11 +26,20 @@ export interface BinarySmokeMetrics {
  * Отпечаток сборочных контрактов снимается до стадий и повторяется перед упаковкой.
  * В manifest входят только относительные имена и SHA, без путей машины и timestamp.
  */
-export async function readBuildInputs(sourceRoot: string): Promise<Record<string, string>> {
+export async function readBuildInputs(
+  sourceRoot: string,
+  target: NodeRuntime['platform'] = 'linux-x64',
+): Promise<Record<string, string>> {
   const files = ['VERSION', 'server/package.json', 'server/package-lock.json',
-    'server/build/node-runtime.json', 'server/build/helpers.json', 'server/build/compatibility.json',
+    serverNodeRuntimeManifest(target), 'server/build/helpers.json', 'server/build/compatibility.json',
     'shared/node/helpSources.ts', 'web/package-lock.json',
     'server/build/binary-resources.json', 'server/build/esmBridge.cjs', 'server/scripts/buildBinary.mts'];
+
+  if (target === 'darwin-arm64') {
+    files.push('cli/darwinBuildProcesses.ts', 'shared/node/processIdentity.ts',
+      'tools/macos/process-identity.c', 'tools/macos/runner-fds.h', 'tools/macos/setsid.c',
+      'tools/darwinBuildTools.mts');
+  }
 
   for (const directory of ['server/scripts/binary', 'server/scripts/sea']) {
     for (const name of (await readdir(path.join(sourceRoot, directory))).sort()) {
@@ -76,8 +87,10 @@ export interface BinaryBuildSteps {
   bundle(work: string): Promise<void>;
   package(work: string, options: BinaryBuildOptions): Promise<ServerPackageManifest>;
   copy?: typeof copyFile;
+  assets?(work: string): Promise<Record<string, string>>;
   postject(work: string): Promise<void>;
   smoke(binary: string, manifest: ServerPackageManifest, work: string): Promise<BinarySmokeMetrics | void>;
+  beforePublish?(): void;
 }
 
 /**
@@ -128,14 +141,11 @@ export async function localRuntimeArchive(cacheDir: string, runtime: NodeRuntime
  * Инъекция портов проверяет каждый отказ без настоящей сборки и без изменения старого ELF.
  */
 export async function executeBinaryBuild(options: BinaryBuildOptions, steps: BinaryBuildSteps) {
-  if (steps.platform !== 'linux' || steps.arch !== 'x64') {
-    throw new Error('Сборка сервера поддерживает только Linux x64');
-  }
+  const hostTarget = seaHostTarget(steps.platform, steps.arch);
+  const runtime = readNodeRuntime(steps.runtime, serverNodeRuntimeManifest(hostTarget));
 
-  const runtime = readNodeRuntime(steps.runtime, 'server/build/node-runtime.json');
-
-  if (runtime.version !== '24.21.0' || runtime.platform !== 'linux-x64') {
-    throw new Error('Неверный pin Node серверного ELF');
+  if (runtime.version !== '24.21.0' || runtime.platform !== hostTarget) {
+    throw new Error('Неверный pin Node серверного пакета');
   }
 
   const target = path.join(options.outDir, 'grigdesk-server');
@@ -163,7 +173,12 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
     const manifest = await steps.package(work, options);
     const bytes = serverManifestBytes(manifest);
 
-    decodeServerManifest(bytes, manifest.packageId);
+    const { runtime: runtimeInfo } = decodeServerManifest(bytes, manifest.packageId);
+
+    if (runtimeInfo.platform !== steps.platform || runtimeInfo.arch !== steps.arch
+      || runtimeInfo.node !== runtime.version) {
+      throw new Error('Runtime серверного manifest не совпадает с закреплённым Node');
+    }
 
     if (manifest.launcher.sha256 !== await sha256File(path.join(work, 'bundle.cjs'))) {
       throw new Error('Launcher изменился после вычисления package identity');
@@ -171,7 +186,11 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
 
     await writeFile(path.join(work, 'manifest.json'), bytes);
     await writeFile(path.join(work, 'package-id'), manifest.packageId);
+
+    const assets = await steps.assets?.(work);
+
     await writeFile(path.join(work, 'sea-config.json'), JSON.stringify(seaConfig({
+      ...assets,
       manifest: 'manifest.json',
       'package-id': 'package-id',
       payload: 'payload.zip',
@@ -200,6 +219,7 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
       size: (await stat(staged)).size,
       packageId: manifest.packageId,
       node: runtime.version,
+      ...hostTarget === 'darwin-arm64' ? { runtime: runtimeInfo } : {},
       ...smoke ? {
         warmRatio: smoke.warmRatio,
         warmP95Ratio: smoke.warmP95Ratio,
@@ -220,10 +240,11 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
       }
     }
 
+    steps.beforePublish?.();
     await rename(staged, target);
     await rename(resultTemporary, resultFile);
     await syncDirectory(options.outDir);
 
     return result;
-  });
+  }, { preserveOnUnconfirmedCleanup: hostTarget === 'darwin-arm64' });
 }
