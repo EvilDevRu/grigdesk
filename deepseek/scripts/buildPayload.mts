@@ -7,6 +7,8 @@ import { decodeDeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
 import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
 import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 import { sha256, sha256File } from '../../shared/node/hash.ts';
+import { configureDarwinBuildProcessHelper } from '../../shared/node/processIdentity.ts';
+import { seaHostTarget, type NodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { readWorkerArtifact } from '../src/runtime/artifact.ts';
 import { GLM_COMPATIBILITY } from '../src/runtime/glmCompatibility.ts';
 import { createDeepSeekMetadata, packageIdFor, type DeepSeekManifest } from '../src/runtime/metadata.ts';
@@ -46,13 +48,17 @@ async function reusePayload(file: string, work: string): Promise<DeepSeekManifes
  * Возвращённый lock удерживается вызывающим до конца упаковки и чтения journal contract.
  * При ошибке подготовки владелец освобождается здесь, готовое дерево не становится production current.
  */
-async function generation(work: string, options: BinaryBuildOptions) {
+async function generation(work: string, options: BinaryBuildOptions, target: NodeRuntime['platform']) {
+  await configureDarwinBuildProcessHelper();
+
   const prepared = await readPreparedRuntimeDependencies(options.nodeCacheDir);
   const node = prepared.node;
-  const identitySource = 'JSON.stringify({ version: process.versions.node, abi: process.versions.modules })';
+  const identitySource = 'JSON.stringify({ version: process.versions.node, abi: process.versions.modules, '
+    + 'platform: process.platform, arch: process.arch })';
   const actual = JSON.parse((await run(node, ['--print', identitySource], { env: {} })).stdout);
 
   if (actual.version !== prepared.version || actual.abi !== prepared.abi
+    || seaHostTarget(actual.platform, actual.arch) !== target
     || await sha256File(path.join(work, 'bin/node')) !== prepared.nodeSha256) {
     throw new Error('Dependencies подготовлены другим worker Node');
   }
@@ -78,8 +84,8 @@ async function generation(work: string, options: BinaryBuildOptions) {
   const worker = {
     nodeVersion: prepared.version,
     nativeAbi: prepared.abi,
-    platform: 'linux',
-    arch: 'x64',
+    platform: String(actual.platform),
+    arch: String(actual.arch),
   };
 
   try {
@@ -148,6 +154,7 @@ console.log(JSON.stringify({ write, read: Array.from({ length: write + 1 }, (_, 
 export async function prepareBinaryPayload(
   work: string,
   options: BinaryBuildOptions,
+  target = seaHostTarget(),
 ): Promise<DeepSeekManifest> {
   const paths = deepSeekPackagePaths();
   const compatibility = GLM_COMPATIBILITY;
@@ -156,8 +163,12 @@ export async function prepareBinaryPayload(
 
   if (options.payload) {
     base = await reusePayload(options.payload, work);
+
+    if (seaHostTarget(String(base.platform), String(base.arch)) !== target) {
+      throw new Error('Готовый payload DeepSeek принадлежит другой платформе');
+    }
   } else {
-    const built = await generation(work, options);
+    const built = await generation(work, options, target);
 
     try {
       const raw = JSON.parse(await readFile(path.join(built.directory, 'runtime.json'), 'utf8'));
@@ -178,8 +189,8 @@ export async function prepareBinaryPayload(
         runtimeVersion: built.artifact.runtimeVersion,
         hostContract: built.artifact.hostContract,
         journal: await journalContract(path.join(work, 'bin/node'), built.directory),
-        platform: 'linux',
-        arch: 'x64',
+        platform: built.worker.platform,
+        arch: built.worker.arch,
         workerNode: {
           version: built.worker.nodeVersion,
           abi: built.worker.nativeAbi,

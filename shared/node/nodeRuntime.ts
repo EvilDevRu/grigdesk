@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -16,8 +16,61 @@ import { nodeArchive } from './seaBuild.ts';
 
 export interface NodeRuntime {
   version: string;
-  platform: 'linux-x64';
+  platform: 'linux-x64' | 'darwin-arm64';
   sha256: string;
+}
+
+/**
+ * Связывает платформу сборки с нативным архивом до запуска инструментов.
+ * Сборка под чужую архитектуру не допускается.
+ */
+export function seaHostTarget(
+  platform: string = process.platform,
+  arch: string = process.arch,
+): NodeRuntime['platform'] {
+  if (platform === 'linux' && arch === 'x64') {
+    return 'linux-x64';
+  }
+
+  if (platform === 'darwin' && arch === 'arm64') {
+    return 'darwin-arm64';
+  }
+
+  throw new Error(`Сборка SEA не поддерживается на ${platform}-${arch}`);
+}
+
+/**
+ * Серверная сборка выбирает опись по уже проверенной нативной цели.
+ * Linux и Apple Silicon имеют отдельные контрольные суммы.
+ */
+export function serverNodeRuntimeManifest(target: NodeRuntime['platform']): string {
+  return target === 'darwin-arm64'
+    ? 'server/build/node-runtime-darwin-arm64.json'
+    : 'server/build/node-runtime.json';
+}
+
+/**
+ * CLI-пакеты сохраняют собственные описи Linux.
+ * На Apple Silicon все CLI используют ту же опись, что серверный SEA.
+ */
+export function componentNodeRuntimeManifest(packageDir: string, target: NodeRuntime['platform']): string {
+  return target === 'darwin-arm64'
+    ? path.resolve(packageDir, '..', serverNodeRuntimeManifest(target))
+    : path.join(packageDir, 'build/node-runtime.json');
+}
+
+/**
+ * Читает закреплённый архив для ожидаемой платформы сборщика.
+ * Даже валидный manifest другой платформы отбрасывается до работы с кэшем.
+ */
+export async function readTargetNodeRuntime(manifest: string, target: NodeRuntime['platform']) {
+  const runtime = readNodeRuntime(JSON.parse(await readFile(manifest, 'utf8')), manifest);
+
+  if (runtime.platform !== target) {
+    throw new Error(`Неверная платформа в ${manifest}`);
+  }
+
+  return runtime;
 }
 
 export interface ArchiveOptions {
@@ -25,12 +78,13 @@ export interface ArchiveOptions {
   attempts?: number;
   pauseMs?: number;
   discardInvalidArchive?: boolean;
+  signal?: AbortSignal;
 }
 
 export const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 
 /**
- * Принимает только закреплённую ветку Node, linux-x64 и полный SHA256 архива.
+ * Принимает только закреплённую ветку Node, поддерживаемую платформу и полный SHA256 архива.
  * Метка manifest попадает в сообщение, чтобы ошибку нельзя было спутать с чужим выпуском.
  */
 export function readNodeRuntime(value: unknown, manifest: string): NodeRuntime {
@@ -38,7 +92,7 @@ export function readNodeRuntime(value: unknown, manifest: string): NodeRuntime {
 
   if (!record || typeof record !== 'object'
     || typeof record.version !== 'string' || !/^24\.[0-9]+\.[0-9]+$/.test(record.version)
-    || record.platform !== 'linux-x64'
+    || (record.platform !== 'linux-x64' && record.platform !== 'darwin-arm64')
     || typeof record.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(record.sha256)) {
     throw new Error(`Некорректный ${manifest}`);
   }
@@ -61,6 +115,7 @@ export async function ensureNodeArchive(
   cacheDir: string,
   options: ArchiveOptions,
 ): Promise<string> {
+  options.signal?.throwIfAborted();
   await mkdir(cacheDir, {
     recursive: true
   });
@@ -71,6 +126,8 @@ export async function ensureNodeArchive(
 
   try {
     if (await sha256File(archive) === runtime.sha256) {
+      options.signal?.throwIfAborted();
+
       return archive;
     }
 
@@ -91,15 +148,19 @@ export async function ensureNodeArchive(
   let failure: unknown;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    options.signal?.throwIfAborted();
+
     const part = `${archive}.part-${randomUUID()}`;
 
     try {
       await options.download(url, part);
+      options.signal?.throwIfAborted();
 
       if (await sha256File(part) !== runtime.sha256) {
         throw new Error('Контрольная сумма архива Node не совпала');
       }
 
+      options.signal?.throwIfAborted();
       await rename(part, archive);
 
       return archive;
@@ -112,7 +173,7 @@ export async function ensureNodeArchive(
     }
 
     if (attempt + 1 < attempts) {
-      await pause(options.pauseMs ?? 10000);
+      await pause(options.pauseMs ?? 10000, undefined, { signal: options.signal });
     }
   }
 

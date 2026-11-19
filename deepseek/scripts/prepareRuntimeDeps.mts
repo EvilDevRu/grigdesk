@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { ensureNodeArchive, readNodeRuntime } from '../../shared/node/nodeRuntime.ts';
+import {
+  componentNodeRuntimeManifest, ensureNodeArchive, readTargetNodeRuntime, seaHostTarget, type NodeRuntime,
+} from '../../shared/node/nodeRuntime.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 import { sha256File } from '../../shared/node/hash.ts';
 import { downloadFile } from '../../shared/node/seaBuild.ts';
@@ -21,6 +23,10 @@ export interface PreparedRuntimeDependencies {
   nodeSha256: string;
 }
 
+function runtimeCache(cacheDir: string, pin: NodeRuntime) {
+  return pin.platform === 'linux-x64' ? cacheDir : path.join(cacheDir, `${pin.platform}-${pin.sha256}`);
+}
+
 /**
  * Готовность dependencies доказывается stamp того же pinned Node и точными package/lock.
  * Отсутствующая подготовка даёт команду, а обычная сборка не запускает npm незаметно.
@@ -28,16 +34,17 @@ export interface PreparedRuntimeDependencies {
 export async function readPreparedRuntimeDependencies(
   cacheDir: string,
 ): Promise<PreparedRuntimeDependencies> {
-  const directory = path.join(cacheDir, 'runtime-deps-node24');
-  const node = path.join(cacheDir, 'node-runtime/bin/node');
+  const target = seaHostTarget();
+  const pin = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, target), target);
+  const root = runtimeCache(cacheDir, pin);
+  const directory = path.join(root, 'runtime-deps-node24');
+  const node = path.join(root, 'node-runtime/bin/node');
 
   try {
-    const pin = readNodeRuntime(JSON.parse(await readFile(
-      path.join(packageDir, 'build/node-runtime.json'), 'utf8',
-    )), 'deepseek/build/node-runtime.json');
     const stamp = JSON.parse(await readFile(path.join(directory, '.prepared.json'), 'utf8'));
 
     if (stamp.version !== pin.version || stamp.archiveSha256 !== pin.sha256
+      || (target === 'darwin-arm64' || stamp.target !== undefined) && stamp.target !== target
       || typeof stamp.abi !== 'string' || stamp.nodeSha256 !== await sha256File(node)) {
       throw new Error('stamp');
     }
@@ -71,12 +78,12 @@ export async function readPreparedRuntimeDependencies(
  * Legacy dependencies не изменяются; HOME, npm cache и временные файлы принадлежат сборке.
  */
 export async function prepareRuntimeDependencies(cacheDir: string): Promise<PreparedRuntimeDependencies> {
-  const pin = readNodeRuntime(JSON.parse(await readFile(
-    path.join(packageDir, 'build/node-runtime.json'), 'utf8',
-  )), 'deepseek/build/node-runtime.json');
+  const target = seaHostTarget();
+  const pin = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, target), target);
   const archive = await ensureNodeArchive(pin, cacheDir, { download: downloadFile });
-  const nodeRoot = path.join(cacheDir, 'node-runtime');
-  const directory = path.join(cacheDir, 'runtime-deps-node24');
+  const root = runtimeCache(cacheDir, pin);
+  const nodeRoot = path.join(root, 'node-runtime');
+  const directory = path.join(root, 'runtime-deps-node24');
 
   try {
     return await readPreparedRuntimeDependencies(cacheDir);
@@ -87,7 +94,7 @@ export async function prepareRuntimeDependencies(cacheDir: string): Promise<Prep
   const nodeExists = await readFile(path.join(nodeRoot, 'bin/node')).then(() => true, () => false);
 
   if (!nodeExists) {
-    await withWorkDirectory(cacheDir, async (work) => {
+    await withWorkDirectory(root, async (work) => {
       await run('tar', ['-xJf', archive, '--strip-components=1'], { cwd: work });
       await rename(work, nodeRoot);
     });
@@ -104,8 +111,8 @@ export async function prepareRuntimeDependencies(cacheDir: string): Promise<Prep
     stamp[name] = await sha256File(source);
   }
 
-  const home = path.join(cacheDir, 'build-home');
-  const temporary = path.join(cacheDir, 'tmp');
+  const home = path.join(root, 'build-home');
+  const temporary = path.join(root, 'tmp');
 
   await mkdir(home, { recursive: true, mode: 0o700 });
   await mkdir(temporary, { recursive: true, mode: 0o700 });
@@ -115,23 +122,25 @@ export async function prepareRuntimeDependencies(cacheDir: string): Promise<Prep
     HOME: home,
     PATH: `${path.join(nodeRoot, 'bin')}:/usr/bin:/bin`,
     TMPDIR: temporary,
-    XDG_CACHE_HOME: path.join(cacheDir, 'build-cache'),
+    XDG_CACHE_HOME: path.join(root, 'build-cache'),
     NPM_CONFIG_USERCONFIG: '/dev/null',
     NODE_ENV: 'production',
     LANG: 'C.UTF-8',
   };
-  const identity = JSON.parse((await run(node, ['--print',
-    'JSON.stringify({ version: process.versions.node, abi: process.versions.modules })'], {
+  const identitySource = 'JSON.stringify({ version: process.versions.node, abi: process.versions.modules, '
+    + 'platform: process.platform, arch: process.arch })';
+  const identity = JSON.parse((await run(node, ['--print', identitySource], {
     env: environment,
   })).stdout);
 
-  if (identity.version !== pin.version || typeof identity.abi !== 'string') {
+  if (identity.version !== pin.version || typeof identity.abi !== 'string'
+    || seaHostTarget(identity.platform, identity.arch) !== target) {
     throw new Error('Версия подготовленного Node не совпадает с pin');
   }
 
   const npm = path.join(nodeRoot, 'lib/node_modules/npm/bin/npm-cli.js');
   const result = await run(node, [npm, 'ci', '--include=dev', '--prefix', directory,
-    '--cache', path.join(cacheDir, 'npm-cache'), '--prefer-offline', '--no-audit', '--no-fund'], {
+    '--cache', path.join(root, 'npm-cache'), '--prefer-offline', '--no-audit', '--no-fund'], {
     env: environment,
     timeout: 300000,
     maxBuffer: 4 * 1024 * 1024,
@@ -146,6 +155,7 @@ export async function prepareRuntimeDependencies(cacheDir: string): Promise<Prep
     abi: identity.abi,
     nodeSha256: await sha256File(node),
     archiveSha256: pin.sha256,
+    target,
   }), { mode: 0o600 });
 
   return readPreparedRuntimeDependencies(cacheDir);

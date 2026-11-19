@@ -2,11 +2,12 @@ import { execFile } from 'node:child_process';
 import { chmod, copyFile, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { downloadFile, nodeArchive, seaConfig } from './seaBuild.ts';
+import { downloadFile, injectSea, nodeArchive, seaConfig } from './seaBuild.ts';
 import { sha256File } from './hash.ts';
 import { withWorkDirectory } from './files.ts';
 import {
-    assertUntracked, ensureNodeArchive, publishFile, readNodeRuntime, SEA_FUSE,
+    assertUntracked, componentNodeRuntimeManifest, ensureNodeArchive, publishFile,
+    readTargetNodeRuntime, seaHostTarget, SEA_FUSE,
 } from './nodeRuntime.ts';
 import type { CliBuildOptions } from './cliBuildArgs.ts';
 
@@ -48,15 +49,9 @@ async function postjectCli(packageDir: string): Promise<string> {
 export async function buildCliBinary(input: CliSeaBuild): Promise<void> {
     const { packageDir, program, entry, options } = input;
 
-    if (process.platform !== 'linux' || process.arch !== 'x64') {
-        throw new Error('сборка поддерживает только Linux x64');
-    }
-
+    const platform = seaHostTarget();
     const manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
-    const runtime = readNodeRuntime(
-        JSON.parse(await readFile(path.join(packageDir, 'build/node-runtime.json'), 'utf8')),
-        path.basename(packageDir) + '/build/node-runtime.json',
-    );
+    const runtime = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, platform), platform);
     const archive = await ensureNodeArchive(runtime, options.cacheDir, {
         download: downloadFile
     });
@@ -89,11 +84,14 @@ export async function buildCliBinary(input: CliSeaBuild): Promise<void> {
             cwd: work
         });
         await copyFile(path.join(work, 'bin/node'), path.join(work, program));
-        await run(process.execPath, [
-            postject, program, 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
-        ], {
-            cwd: work,
-            maxBuffer: 4 * 1024 * 1024,
+        await injectSea({
+            target: platform,
+            work,
+            node: process.execPath,
+            postject,
+            executable: program,
+            fuse: SEA_FUSE,
+            run: (file, args, options) => run(file, args, { ...options, maxBuffer: 4 * 1024 * 1024 }),
         });
         await chmod(path.join(work, program), 0o755);
 
@@ -101,7 +99,8 @@ export async function buildCliBinary(input: CliSeaBuild): Promise<void> {
             env: {},
             timeout: 10000,
         });
-        const expected = `${program} ${manifest.version} (Node v${runtime.version}, linux x64)\n`;
+        const runtimeLabel = platform.replace('-', ' ');
+        const expected = `${program} ${manifest.version} (Node v${runtime.version}, ${runtimeLabel})\n`;
 
         if (version.stdout !== expected || version.stderr !== '') {
             throw new Error('версия готового ' + program + ' не совпадает с manifest');

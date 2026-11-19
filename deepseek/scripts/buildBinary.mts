@@ -7,8 +7,10 @@ import { promisify } from 'node:util';
 import { build } from 'esbuild';
 
 import { decodeDeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
-import { readNodeRuntime, SEA_FUSE } from '../../shared/node/nodeRuntime.ts';
-import { downloadFile } from '../../shared/node/seaBuild.ts';
+import {
+  componentNodeRuntimeManifest, readTargetNodeRuntime, seaHostTarget, SEA_FUSE,
+} from '../../shared/node/nodeRuntime.ts';
+import { downloadFile, injectSea } from '../../shared/node/seaBuild.ts';
 
 import { prepareBinaryPayload } from './buildPayload.mts';
 import { executeBinaryBuild, parseBuildArgs, type BinaryBuildOptions } from './buildSteps.mts';
@@ -48,10 +50,9 @@ async function bundle(work: string): Promise<void> {
  * Публикация разрешена лишь после metadata и полного --verify собственным обычным Node.
  */
 export async function buildDeepSeekBinary(options: BinaryBuildOptions) {
+  const target = seaHostTarget();
   const manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
-  const runtime = readNodeRuntime(JSON.parse(await readFile(
-    path.join(packageDir, 'build/node-runtime.json'), 'utf8',
-  )), 'deepseek/build/node-runtime.json');
+  const runtime = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, target), target);
 
   return executeBinaryBuild(options, {
     platform: process.platform,
@@ -61,20 +62,28 @@ export async function buildDeepSeekBinary(options: BinaryBuildOptions) {
     download: downloadFile,
     run: (command, args, input) => run(command, args, { ...input, maxBuffer: 4 * 1024 * 1024 }),
     bundle,
-    prepare: prepareBinaryPayload,
+    prepare: (work, buildOptions) => prepareBinaryPayload(work, buildOptions, target),
     postject: async (work) => {
       const root = path.join(packageDir, 'node_modules/postject');
       const postject = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
       const cli = path.join(root, typeof postject.bin === 'string' ? postject.bin : postject.bin.postject);
 
-      await run(process.execPath, [cli, 'deepseek', 'NODE_SEA_BLOB', 'sea-prep.blob',
-        '--sentinel-fuse', SEA_FUSE], { cwd: work, maxBuffer: 4 * 1024 * 1024 });
+      await injectSea({
+        target,
+        work,
+        node: process.execPath,
+        postject: cli,
+        executable: 'deepseek',
+        fuse: SEA_FUSE,
+        run: (file, args, options) => run(file, args, { ...options, maxBuffer: 4 * 1024 * 1024 }),
+      });
     },
     smoke: async (binary, expected, work) => {
       const result = await run(binary, ['--runtime-info', '--json'], { env: { PATH: '' }, timeout: 30000 });
       const info = decodeDeepSeekRuntimeInfo(JSON.parse(result.stdout));
 
-      if (info.packageId !== expected.packageId || result.stderr !== '') {
+      if (info.packageId !== expected.packageId || info.platform !== process.platform
+        || info.arch !== process.arch || result.stderr !== '') {
         throw new Error('Metadata smoke DeepSeek не подтвердил candidate');
       }
 

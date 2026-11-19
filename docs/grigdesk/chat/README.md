@@ -75,7 +75,7 @@
 - [Память DeepSeek: стабильный home, обновление/откат и несовместимый журнал](deepseek-binary-memory.md)
 - [Подготовленный runtime: внутренний handle адаптера и native context](prepared-executor-runtime.md)
 - [Управляемая поставка: чистые distribution/bin и запрет обновления через карточку](provider-managed-delivery.md)
-- [Сборка автономного DeepSeek и явная подготовка pinned Node](deepseek-binary-build.md)
+- [Нативная сборка DeepSeek для Linux и Apple Silicon, подготовка pinned Node](deepseek-binary-build.md)
 - [Kernel fingerprints прогретого кэша DeepSeek](deepseek-cache-fingerprints.md)
 - [Физические codec журналов и worker миграции DeepSeek](deepseek-journal-codecs.md)
 - [Целостность generation и проверка ABI выбранного Node](deepseek-runtime-integrity.md)

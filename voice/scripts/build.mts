@@ -5,7 +5,9 @@ import { promisify } from 'node:util';
 
 import { build } from 'esbuild';
 
-import { downloadFile, nodeArchive, seaConfig } from '../../shared/node/seaBuild.ts';
+import { downloadFile, injectSea, nodeArchive, seaConfig } from '../../shared/node/seaBuild.ts';
+import { componentNodeRuntimeManifest, readTargetNodeRuntime, seaHostTarget }
+  from '../../shared/node/nodeRuntime.ts';
 import { sha256File } from '../../shared/node/hash.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 
@@ -14,7 +16,6 @@ import {
   ensureNodeArchive,
   parseBuildArgs,
   publishFile,
-  readNodeRuntime,
   SEA_FUSE,
 } from './buildSteps.mts';
 import type { BuildOptions } from './buildSteps.mts';
@@ -39,14 +40,9 @@ async function postjectCli(): Promise<string> {
  * Публикация в outDir разрешена только после проверки с пустым окружением.
  */
 export async function buildBinary(options: BuildOptions): Promise<void> {
-  if (process.platform !== 'linux' || process.arch !== 'x64') {
-    throw new Error('сборка поддерживает только Linux x64');
-  }
-
+  const platform = seaHostTarget();
   const manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
-  const runtime = readNodeRuntime(
-    JSON.parse(await readFile(path.join(packageDir, 'build/node-runtime.json'), 'utf8')),
-  );
+  const runtime = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, platform), platform);
   const archive = await ensureNodeArchive(runtime, options.cacheDir, { download: downloadFile });
   const { directory } = nodeArchive(runtime);
   const postject = await postjectCli();
@@ -86,11 +82,14 @@ export async function buildBinary(options: BuildOptions): Promise<void> {
     await writeFile(path.join(work, 'sea-config.json'), JSON.stringify(seaConfig(assets)));
     await run(path.join(work, 'bin/node'), ['--experimental-sea-config', 'sea-config.json'], { cwd: work });
     await copyFile(path.join(work, 'bin/node'), path.join(work, 'voice'));
-    await run(process.execPath, [
-      postject, 'voice', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
-    ], {
-      cwd: work,
-      maxBuffer: 4 * 1024 * 1024,
+    await injectSea({
+      target: platform,
+      work,
+      node: process.execPath,
+      postject,
+      executable: 'voice',
+      fuse: SEA_FUSE,
+      run: (file, args, options) => run(file, args, { ...options, maxBuffer: 4 * 1024 * 1024 }),
     });
     await chmod(path.join(work, 'voice'), 0o755);
 
@@ -98,7 +97,7 @@ export async function buildBinary(options: BuildOptions): Promise<void> {
       env: {},
       timeout: 10000,
     });
-    const expected = `voice ${manifest.version} (Node v${runtime.version}, linux x64)\n`;
+    const expected = `voice ${manifest.version} (Node v${runtime.version}, ${platform.replace('-', ' ')})\n`;
 
     if (version.stdout !== expected || version.stderr !== '') {
       throw new Error('версия готового voice не совпадает с manifest');

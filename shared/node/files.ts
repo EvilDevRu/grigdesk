@@ -64,23 +64,29 @@ export async function readTextOrNull(file: string): Promise<string | null> {
 
 /**
  * Выделяет отдельную build-папку в заданном кеше и удаляет её после callback.
- * Результат и ошибка callback сохраняются; ошибка очистки остаётся явной.
+ * По явному запросу caller неподтверждённое завершение сохраняет его staging.
  */
 export async function withWorkDirectory<T>(
   cacheDir: string,
   produce: (work: string) => Promise<T>,
+  options?: { preserveOnUnconfirmedCleanup?: boolean },
 ): Promise<T> {
   await mkdir(cacheDir, { recursive: true });
 
   const work = await mkdtemp(path.join(cacheDir, 'build-'));
+  let preserve = false;
 
   try {
     return await produce(work);
+  } catch (error) {
+    preserve = options?.preserveOnUnconfirmedCleanup === true
+      && (error as { cleanupConfirmed?: boolean } | null)?.cleanupConfirmed === false;
+
+    throw error;
   } finally {
-    await rm(work, {
-      recursive: true,
-      force: true,
-    });
+    if (!preserve) {
+      await rm(work, { recursive: true, force: true });
+    }
   }
 }
 

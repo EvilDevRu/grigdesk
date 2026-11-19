@@ -1,15 +1,18 @@
 # Автономный DeepSeek Harness
 
-Пакет собирает один Linux x64 ELF для glibc: launcher Node SEA, закреплённый worker Node,
+Пакет собирает нативный исполняемый файл для Linux x64 с glibc или macOS 15+
+на Apple Silicon. Внутри launcher Node SEA, закреплённый worker Node,
 Harness, web/ACP-мосты GrigDesk, плагин GLM, native resources и лицензии. При запуске рядом
 не нужны исходники, npm или установленный Node. Shell, bubblewrap и прочие системные средства инструментов остаются требованиями хоста;
 управляемые команды используют доступный backend systemd либо собственную группу процессов.
+Нативный прогон macOS выполняется отдельно. Установка ниже описывает Linux.
 
 ## Сборка из чистого checkout
 
 Из корня репозитория нужны Node `^22.19.0 || >=24.0.0`, npm, git, tar/xz, C compiler и
 системные библиотеки native dependencies. Версия и SHA worker закреплены в
-`build/node-runtime.json`; сборка generation использует именно его ABI.
+`build/node-runtime.json` для Linux и `../server/build/node-runtime-darwin-arm64.json`
+для macOS. Сборка generation использует ABI выбранного runtime.
 
 ```bash
 npm ci --include=dev --prefix deepseek

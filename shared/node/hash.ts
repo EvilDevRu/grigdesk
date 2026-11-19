@@ -13,12 +13,16 @@ export function sha256(value: string | Uint8Array): string {
  * Читает файл потоком, не удерживая большой архив в памяти.
  * Ошибка открытия или чтения передаётся вызывающему коду без подмены.
  */
-export async function sha256File(file: string): Promise<string> {
+export async function sha256File(file: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+
   const hash = createHash('sha256');
 
-  for await (const chunk of createReadStream(file)) {
+  for await (const chunk of createReadStream(file, { signal })) {
     hash.update(chunk);
   }
+
+  signal?.throwIfAborted();
 
   return hash.digest('hex');
 }

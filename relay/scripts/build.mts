@@ -5,12 +5,14 @@ import { promisify } from 'node:util';
 
 import { build } from 'esbuild';
 
-import { downloadFile, nodeArchive, seaConfig } from '../../shared/node/seaBuild.ts';
+import { downloadFile, injectSea, nodeArchive, seaConfig } from '../../shared/node/seaBuild.ts';
+import { componentNodeRuntimeManifest, readTargetNodeRuntime, seaHostTarget }
+  from '../../shared/node/nodeRuntime.ts';
 import { sha256File } from '../../shared/node/hash.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 
 import { versionLine } from '../src/cli.ts';
-import { ensureNodeArchive, parseBuildArgs, publishFile, readNodeRuntime, SEA_FUSE } from './buildSteps.mts';
+import { ensureNodeArchive, parseBuildArgs, publishFile, SEA_FUSE } from './buildSteps.mts';
 
 const run = promisify(execFile);
 const relay = path.resolve(import.meta.dirname, '..');
@@ -20,14 +22,9 @@ const relay = path.resolve(import.meta.dirname, '..');
  * Публикация разрешена только после проверки версии с пустым окружением.
  */
 async function buildRelay(outDir: string): Promise<void> {
-  if (process.platform !== 'linux' || process.arch !== 'x64') {
-    throw new Error('Сборка посредника поддерживает только Linux x64');
-  }
-
+  const platform = seaHostTarget();
   const manifest = JSON.parse(await readFile(path.join(relay, 'package.json'), 'utf8'));
-  const runtime = readNodeRuntime(
-    JSON.parse(await readFile(path.join(relay, 'build/node-runtime.json'), 'utf8')),
-  );
+  const runtime = await readTargetNodeRuntime(componentNodeRuntimeManifest(relay, platform), platform);
   const cache = path.join(relay, '.cache');
   const archive = await ensureNodeArchive(runtime, cache, { download: downloadFile });
   const { directory } = nodeArchive(runtime);
@@ -63,11 +60,14 @@ async function buildRelay(outDir: string): Promise<void> {
       cwd: work,
     });
     await copyFile(path.join(work, 'bin/node'), path.join(work, 'grigdesk-relay'));
-    await run(process.execPath, [
-      postjectCli, 'grigdesk-relay', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
-    ], {
-      cwd: work,
-      maxBuffer: 4 * 1024 * 1024,
+    await injectSea({
+      target: platform,
+      work,
+      node: process.execPath,
+      postject: postjectCli,
+      executable: 'grigdesk-relay',
+      fuse: SEA_FUSE,
+      run: (file, args, options) => run(file, args, { ...options, maxBuffer: 4 * 1024 * 1024 }),
     });
     await chmod(path.join(work, 'grigdesk-relay'), 0o755);
 
@@ -75,7 +75,9 @@ async function buildRelay(outDir: string): Promise<void> {
       env: {},
       timeout: 10000,
     });
-    const expected = `${versionLine(manifest.version, `v${runtime.version}`, 'linux', 'x64')}\n`;
+    const expected = versionLine(
+      manifest.version, `v${runtime.version}`, process.platform, process.arch,
+    ) + '\n';
 
     if (version.stdout !== expected || version.stderr !== '') {
       throw new Error('Версия готового посредника не совпадает с manifest');

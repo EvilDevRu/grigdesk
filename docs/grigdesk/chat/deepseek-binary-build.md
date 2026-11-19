@@ -2,8 +2,9 @@
 
 [README пакета](../../../deepseek/README.md) содержит полный порядок чистого checkout.
 
-Пакет `deepseek/` выпускает Linux x64 ELF с закреплённым Node из
-`deepseek/build/node-runtime.json`. Сборщик не импортирует сервер. Готовый файл включает
+Пакет `deepseek/` собирает Linux x64 ELF или подписанный ad hoc Mach-O ARM64 на macOS.
+Linux использует `deepseek/build/node-runtime.json`, Apple Silicon использует
+общий `server/build/node-runtime-darwin-arm64.json`. Сборщик не импортирует сервер. Готовый файл включает
 launcher, обычный worker Node, generation Harness, bootstrap, verifier и лицензии; при запуске
 ему не нужны исходники, npm, системный Node или соседние файлы.
 
@@ -19,6 +20,8 @@ npm --prefix deepseek run verify -- --binary /absolute/output/deepseek
 `deepseek/.cache/runtime-deps-node24/`. Legacy зависимости в `deepseek/build/runtime-deps/`
 не перезаписываются. Нативная сборка использует полную установку pinned Node с development
 headers; bytes упаковываемого executable сверяются с ней по SHA256.
+Подготовленные зависимости macOS лежат в отдельной папке с SHA архива Node.
+Родной тест проверяет Mach-O, подпись, metadata и автономную загрузку GLM.
 Бинарная generation строится с `--read-only`: modes 0444/0555 входят в её payload hashes
 и buildId. Каталоги принадлежат владельцу и имеют права 0700.
 

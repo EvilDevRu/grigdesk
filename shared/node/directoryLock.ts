@@ -4,6 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 
+import {
+  darwinProcessOwnerState, moveDarwinLockDirectory, readDarwinProcessIdentity, tryDarwinInstallLease,
+} from './processIdentity.ts';
+
 export const DIRECTORY_LOCK_SUFFIXES = ['.lock', '.install-lock', '.select-lock', '.cutover-lock'] as const;
 
 export interface DirectoryLockOwner {
@@ -22,6 +26,9 @@ export interface DirectoryLockOptions {
   pollMs?: number;
   probe?: DirectoryLockProbe;
   cleanupBarrier?: DirectoryLockReference;
+  signal?: AbortSignal;
+  checkpoint?: (phase: 'retire-before-rename' | 'retire-after-rename'
+    | 'publish-before-rename' | 'publish-after-rename') => Promise<void>;
 }
 
 export interface DirectoryLockReference {
@@ -53,6 +60,10 @@ export async function processOwnerState(
   owner: DirectoryLockOwner,
   probe: DirectoryLockProbe = actualProbe,
 ): Promise<'alive' | 'dead' | 'unknown'> {
+  if (process.platform === 'darwin' && probe === actualProbe) {
+    return darwinProcessOwnerState(owner);
+  }
+
   let permitted = true;
 
   try {
@@ -95,7 +106,17 @@ async function readOwner(directory: string): Promise<DirectoryLockOwner | null> 
       return null;
     }
 
-    handle = await fs.open(path.join(directory, 'owner.json'), constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await fs.open(path.join(directory, 'owner.json'),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+
+    if (process.platform === 'darwin') {
+      const stat = await handle.stat();
+
+      if (!stat.isFile() || stat.uid !== process.getuid!() || stat.nlink !== 1
+        || (stat.mode & 0o7777) !== 0o600 || stat.size > 4096) {
+        return null;
+      }
+    }
 
     const value = JSON.parse(await handle.readFile('utf8')) as Partial<DirectoryLockOwner>;
 
@@ -111,6 +132,68 @@ async function readOwner(directory: string): Promise<DirectoryLockOwner | null> 
 
 function sameOwner(left: DirectoryLockOwner | null, right: DirectoryLockOwner): boolean {
   return left?.pid === right.pid && left.starttime === right.starttime && left.token === right.token;
+}
+
+/**
+ * All changes to a canonical Darwin lock use the same persistent kernel guard.
+ * The native helper leaves the flock attached to the descriptor held by this process.
+ */
+async function darwinDirectoryGuard<T>(directory: string, operation: () => Promise<T>): Promise<T | null> {
+  const guardFile = directory + '.guard';
+  const flags = constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  const handle = await fs.open(guardFile, flags, 0o600);
+
+  try {
+    if (!await tryDarwinInstallLease(handle.fd)) {
+      return null;
+    }
+
+    const held = await handle.stat({ bigint: true });
+    const named = await fs.lstat(guardFile, { bigint: true });
+
+    if (!named.isFile() || held.dev !== named.dev || held.ino !== named.ino) {
+      throw new Error('directory_lock_guard_changed');
+    }
+
+    return await operation();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * A dead owner is rechecked under the same guard used for publish and release.
+ * Moving the checked inode makes cleanup independent of the next lock owner.
+ */
+async function retireDarwinDirectory(directory: string, options: DirectoryLockOptions): Promise<boolean> {
+  const retired = await darwinDirectoryGuard(directory, async () => {
+    const owner = await readOwner(directory);
+
+    if (!owner || await processOwnerState(owner, options.probe) !== 'dead') {
+      return null;
+    }
+
+    const inode = await fs.lstat(directory, { bigint: true });
+    const tombstone = `${directory}.stale-${randomBytes(16).toString('hex')}`;
+
+    await options.checkpoint?.('retire-before-rename');
+    options.signal?.throwIfAborted();
+
+    if (!sameOwner(await readOwner(directory), owner)) {
+      throw new Error('directory_lock_owner_changed');
+    }
+
+    await moveDarwinLockDirectory(directory, tombstone, inode);
+    await options.checkpoint?.('retire-after-rename');
+
+    return tombstone;
+  });
+
+  if (retired) {
+    await fs.rm(retired, { recursive: true, force: true });
+  }
+
+  return retired !== null;
 }
 
 /**
@@ -145,6 +228,10 @@ export async function directoryLockOwnedBy(directory: string, owner: DirectoryLo
  * Владелец перечитывается после захвата claim: свежий lock не удаляется по старому снимку.
  */
 async function retireDead(directory: string, options: DirectoryLockOptions): Promise<boolean> {
+  if (process.platform === 'darwin') {
+    return retireDarwinDirectory(directory, options);
+  }
+
   const claim = path.join(directory, '.reclaim');
   let inode: bigint;
 
@@ -190,6 +277,133 @@ async function retireDead(directory: string, options: DirectoryLockOptions): Pro
 }
 
 /**
+ * A Darwin lock is visible only after its owner record is written and synced.
+ * A signal before the rename can leave only a private staging directory.
+ */
+async function acquireDarwinDirectoryLock(
+  directory: string, owner: DirectoryLockOwner, options: DirectoryLockOptions,
+): Promise<DirectoryLock> {
+  const stage = `${directory}.pending-${owner.token}`;
+  const retired = `${directory}.release-${owner.token}`;
+  const deadline = performance.now() + (options.waitMs ?? 15000);
+  let published = false;
+
+  await fs.mkdir(stage, { mode: 0o700 });
+
+  try {
+    const handle = await fs.open(path.join(stage, 'owner.json'), 'wx', 0o600);
+
+    try {
+      await handle.writeFile(JSON.stringify(owner));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    const staged = await fs.open(stage, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    let inode;
+
+    try {
+      await staged.sync();
+      inode = await staged.stat({ bigint: true });
+    } finally {
+      await staged.close();
+    }
+
+    /**
+     * Release proves the token and the inode under the guard before making
+     * the exact directory unavailable to subsequent callers.
+     */
+    const release = async (signal?: AbortSignal): Promise<void> => {
+      const expires = performance.now() + 5000;
+
+      for (;;) {
+        const finished = await darwinDirectoryGuard(directory, async () => {
+          if (sameOwner(await readOwner(directory), owner)) {
+            const current = await fs.lstat(directory, { bigint: true });
+
+            if (current.dev !== inode.dev || current.ino !== inode.ino) {
+              throw new Error('directory_lock_owner_changed');
+            }
+
+            await moveDarwinLockDirectory(directory, retired, inode);
+            await fs.rm(retired, { recursive: true, force: true });
+          }
+
+          return true;
+        });
+
+        if (finished) {
+          return;
+        }
+        if (performance.now() >= expires) {
+          throw directoryBusy();
+        }
+
+        await pause(options.pollMs ?? 50, undefined, { signal });
+      }
+    };
+
+    for (;;) {
+      options.signal?.throwIfAborted();
+
+      const acquired = await darwinDirectoryGuard(directory, async () => {
+        const absent = await fs.lstat(directory).then(() => false, (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') {
+            throw error;
+          }
+
+          return true;
+        });
+
+        if (!absent) {
+          return false;
+        }
+
+        await options.checkpoint?.('publish-before-rename');
+        options.signal?.throwIfAborted();
+        await moveDarwinLockDirectory(stage, directory, inode);
+        published = true;
+
+        return true;
+      });
+
+      if (acquired) {
+        try {
+          await options.checkpoint?.('publish-after-rename');
+          options.signal?.throwIfAborted();
+        } catch (error) {
+          await release();
+
+          throw error;
+        }
+
+        return { owner, release };
+      }
+
+      if (acquired === false && await retireDarwinDirectory(directory, options)) {
+        continue;
+      }
+      if (performance.now() >= deadline) {
+        throw directoryBusy();
+      }
+
+      await pause(options.pollMs ?? 50, undefined, { signal: options.signal });
+    }
+  } finally {
+    if (!published) {
+      await fs.rm(stage, { recursive: true, force: true });
+    }
+  }
+}
+
+function directoryBusy(): Error {
+  return Object.assign(new Error('Каталог занят другим процессом; повторите запуск'), {
+    code: 'directory_lock_busy',
+  });
+}
+
+/**
  * Эксклюзивный mkdir-lock ограничивает ожидание и снимается только своим владельцем.
  * Восстановление после SIGKILL требует PID и времени старта, а не возраста lock.
  * Уборка мёртвого владельца разрешает повторный захват даже без ожидания.
@@ -198,7 +412,7 @@ async function acquireRawDirectoryLock(
   directory: string,
   options: DirectoryLockOptions = {},
 ): Promise<DirectoryLock> {
-  const starttime = procFields(await actualProbe.readStat(process.pid))[19];
+  const starttime = await ownStarttime();
 
   if (!starttime || !/^\d+$/u.test(starttime)) {
     throw new Error('Не удалось установить время старта владельца directory lock');
@@ -209,6 +423,11 @@ async function acquireRawDirectoryLock(
     starttime,
     token: randomBytes(16).toString('hex'),
   };
+
+  if (process.platform === 'darwin') {
+    return acquireDarwinDirectoryLock(directory, owner, options);
+  }
+
   const deadline = performance.now() + (options.waitMs ?? 15000);
 
   for (;;) {
@@ -260,13 +479,25 @@ async function acquireRawDirectoryLock(
     }
 
     if (performance.now() >= deadline) {
-      throw Object.assign(new Error('Каталог занят другим процессом; повторите запуск'), {
-        code: 'directory_lock_busy',
-      });
+      throw directoryBusy();
     }
 
     await pause(options.pollMs ?? 50);
   }
+}
+
+/**
+ * Берёт starttime текущего процесса из того же порта, что проверяет старые записи.
+ * Отсутствие нативного доказательства не позволяет опубликовать lock.
+ */
+async function ownStarttime(): Promise<string | undefined> {
+  if (process.platform === 'darwin') {
+    const owner = await readDarwinProcessIdentity(process.pid);
+
+    return owner.state === 'alive' ? owner.identity.starttime : undefined;
+  }
+
+  return procFields(await actualProbe.readStat(process.pid))[19];
 }
 
 /**
@@ -286,6 +517,8 @@ async function cleanupBarrierBusy(directory: string, options: DirectoryLockOptio
   let ancestor = suffix ? directory.slice(0, -suffix.length) : directory;
 
   for (;;) {
+    options.signal?.throwIfAborted();
+
     const barrier = directoryCleanupLockPath(ancestor);
     const own = options.cleanupBarrier;
 
@@ -328,7 +561,8 @@ export async function acquireDirectoryLock(
       let lock;
 
       try {
-        lock = await acquireRawDirectoryLock(directory, { ...options, waitMs: 0 });
+        lock = await acquireRawDirectoryLock(process.platform === 'darwin' ? physical : directory,
+          { ...options, waitMs: 0 });
 
         if (!await cleanupBarrierBusy(physical, options)) {
           return lock;
@@ -349,11 +583,9 @@ export async function acquireDirectoryLock(
     }
 
     if (performance.now() >= deadline) {
-      throw Object.assign(new Error('Каталог занят другим процессом; повторите запуск'), {
-        code: 'directory_lock_busy',
-      });
+      throw directoryBusy();
     }
 
-    await pause(options.pollMs ?? 50);
+    await pause(options.pollMs ?? 50, undefined, { signal: options.signal });
   }
 }

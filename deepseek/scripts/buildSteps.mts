@@ -1,7 +1,7 @@
 import { chmod, copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { assertUntracked, ensureNodeArchive, publishFile, readNodeRuntime }
+import { assertUntracked, ensureNodeArchive, publishFile, readNodeRuntime, seaHostTarget }
   from '../../shared/node/nodeRuntime.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 import { sha256File } from '../../shared/node/hash.ts';
@@ -80,18 +80,19 @@ export function parseBuildArgs(
 
 /**
  * Шаги сборки внедряются отдельно, чтобы отказ каждого проверялся без настоящего postject.
- * Старый output остаётся целым до успешного smoke нового ELF.
+ * Старый output остаётся целым до успешного smoke нового native executable.
  */
 export async function executeBinaryBuild(
   options: BinaryBuildOptions,
   steps: BinaryBuildSteps,
 ): Promise<DeepSeekRuntimeInfo> {
-  if (steps.platform !== 'linux' || steps.arch !== 'x64') {
-    throw new Error('Сборка DeepSeek поддерживает только Linux x64');
-  }
-
+  const host = seaHostTarget(steps.platform, steps.arch);
   const runtime = readNodeRuntime(steps.runtime, 'deepseek/build/node-runtime.json');
   const target = path.join(options.outDir, 'deepseek');
+
+  if (runtime.platform !== host) {
+    throw new Error('Архив worker Node другой платформы');
+  }
 
   await assertUntracked(target);
 
@@ -112,6 +113,11 @@ export async function executeBinaryBuild(
     await steps.bundle(work);
 
     const prepared = await steps.prepare(work, options);
+
+    if (prepared.platform !== steps.platform || prepared.arch !== steps.arch) {
+      throw new Error('Платформа готового worker отличается от нативной цели');
+    }
+
     const manifest = createDeepSeekMetadata({
       ...prepared,
       binaryVersion: options.binaryVersion ?? steps.defaultBinaryVersion,
