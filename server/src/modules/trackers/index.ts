@@ -5,6 +5,7 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { projectIcon } from '../../../../shared/runtime/projectIcon.ts';
 import type { TrackerDescriptor } from '../../../../shared/trackers/contracts.ts';
 import {
   isTrackerTokenInput, visibleTrackerTokenKeys,
@@ -164,9 +165,10 @@ async function trackersModule(app: FastifyInstance, options: {
 
         if (!isRecord(body)
           || Object.keys(body).some((key) => ![
-            'externalId', 'drivers', 'default', 'settings', 'expectedRevision',
+            'externalId', 'drivers', 'default', 'settings', 'logos', 'expectedRevision',
           ].includes(key))
-          || (body.settings !== undefined && !isRecord(body.settings))) {
+          || (body.settings !== undefined && !isRecord(body.settings))
+          || (body.logos !== undefined && !isRecord(body.logos))) {
           throw new TrackerError('invalid_request', 'Некорректные настройки трекера');
         }
 
@@ -189,6 +191,15 @@ async function trackersModule(app: FastifyInstance, options: {
         }
 
         const selection = { drivers: drivers as string[], default: requested as string | null };
+        const logos = Object.fromEntries(Object.entries(body.logos ?? {}).map(([id, input]) => {
+          const logo = projectIcon(input);
+
+          if (!catalog.some((entry) => entry.id === id && !entry.deleted) || (input !== null && !logo)) {
+            throw new TrackerError('invalid_request', 'Некорректный логотип доски');
+          }
+
+          return [id, logo] as const;
+        }));
 
         const rawChanges = isRecord(body.settings) ? body.settings : {};
         const changes = Object.fromEntries(Object.entries(rawChanges).map(([id, input]) => {
@@ -217,7 +228,7 @@ async function trackersModule(app: FastifyInstance, options: {
         }
 
         runtime.selection.assertRevision(body.expectedRevision);
-        await runtime.writeSettings(selection, changes);
+        await runtime.writeSettings(selection, changes, logos);
         await app.sse?.broadcast?.('trackers-changed', runtime.selection.read());
 
         return publicSettings();

@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { projectIcon } from '../../../../shared/runtime/projectIcon.ts';
 import { TrackerError } from './contract.ts';
 
 export interface TrackerSelection {
@@ -14,6 +16,7 @@ export type TrackerSelectionInput = Pick<TrackerSelection, 'drivers' | 'default'
 
 export class TrackerSettingsStore {
   private value: TrackerSelection;
+  private logos = new Map<string, string>();
   private readonly file: string;
 
   constructor(privateFile: string) {
@@ -47,8 +50,18 @@ export class TrackerSettingsStore {
         revision,
       };
 
+      if (isRecord(parsed.logos)) {
+        for (const [id, value] of Object.entries(parsed.logos)) {
+          const logo = projectIcon(value);
+
+          if (logo) {
+            this.logos.set(id, logo);
+          }
+        }
+      }
+
       if (legacy) {
-        this.persist(this.value);
+        this.persist(this.value, this.logos);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -59,6 +72,10 @@ export class TrackerSettingsStore {
 
   read(): TrackerSelection {
     return { ...this.value, drivers: [...this.value.drivers] };
+  }
+
+  logo(id: string): string | undefined {
+    return this.logos.get(id);
   }
 
   /**
@@ -72,10 +89,10 @@ export class TrackerSettingsStore {
   }
 
   /**
-   * Файл хранит только канонический набор и дефолт, alias вычисляется для старых клиентов.
+   * Выбор и загруженные логотипы записываются вместе, alias вычисляется для старых клиентов.
    * Закрытые права устанавливаются также у уже существовавшего временного файла.
    */
-  private persist(value: TrackerSelection): void {
+  private persist(value: TrackerSelection, logos: ReadonlyMap<string, string>): void {
     const { drivers, default: defaultId, revision } = value;
 
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -83,6 +100,7 @@ export class TrackerSettingsStore {
       drivers,
       default: defaultId,
       revision,
+      ...(logos.size ? { logos: Object.fromEntries(logos) } : {}),
     }), {
       mode: 0o600,
     });
@@ -94,7 +112,10 @@ export class TrackerSettingsStore {
    * Старый caller может по-прежнему передать один id: он становится дефолтом.
    * Явный набор сохраняет порядок, необходимый для автоматического выбора следующего.
    */
-  write(input: TrackerSelectionInput | string | null): TrackerSelection {
+  write(
+    input: TrackerSelectionInput | string | null,
+    logoChanges: Record<string, string | null> = {},
+  ): TrackerSelection {
     const drivers = typeof input === 'object' && input !== null ? [...input.drivers]
       : input ? [...new Set([...this.value.drivers, input])] : this.value.drivers
         .filter((id) => id !== this.value.default);
@@ -106,9 +127,19 @@ export class TrackerSettingsStore {
       externalId: defaultId,
       revision: this.value.revision + 1,
     };
+    const logos = new Map(this.logos);
 
-    this.persist(next);
+    for (const [id, logo] of Object.entries(logoChanges)) {
+      if (logo === null) {
+        logos.delete(id);
+      } else {
+        logos.set(id, logo);
+      }
+    }
+
+    this.persist(next, logos);
     this.value = next;
+    this.logos = logos;
 
     return this.read();
   }

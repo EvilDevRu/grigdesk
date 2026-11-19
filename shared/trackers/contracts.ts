@@ -91,6 +91,7 @@ export interface TrackerDescriptor {
   reason?: string;
   deleted?: boolean;
   logoUrl?: string;
+  packageLogoUrl?: string | null;
   generation?: number;
   dataRevision?: number;
 }

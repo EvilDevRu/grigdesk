@@ -57,6 +57,7 @@ export const useTrackersStore = defineStore('trackers', {
       drivers?: string[];
       default?: string | null;
       settings: Record<string, Record<string, unknown>>;
+      logos?: Record<string, string | null>;
       expectedRevision: number;
     }) {
       const board = useBoardStore();

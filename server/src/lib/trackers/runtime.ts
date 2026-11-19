@@ -214,6 +214,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     writeSettings: async (
       input: import('./settingsStore.ts').TrackerSelectionInput | string | null,
       changes: Record<string, Record<string, unknown>>,
+      logos?: Record<string, string | null>,
     ) => {
       const previous = selection.read();
       const changed = Object.keys(changes).filter((id) => JSON.stringify(credsStore.readFor(id) ?? {})
@@ -234,15 +235,24 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
           registry.bumpContext(id);
         }
 
-        selection.write(input);
+        selection.write(input, logos);
       });
       await activateSelection();
     },
     catalog: () => {
       const selected = selection.read();
+      const drivers = registry.descriptors().map((entry) => {
+        const logo = selection.logo(entry.id);
+
+        return logo ? {
+          ...entry,
+          logoUrl: logo,
+          packageLogoUrl: entry.logoUrl ?? null,
+        } : entry;
+      });
 
       return {
-        drivers: registry.descriptors(),
+        drivers,
         activeIds: registry.activeIds,
         enabledIds: selected.drivers,
         default: selected.default,

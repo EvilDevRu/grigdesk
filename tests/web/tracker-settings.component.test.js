@@ -9,6 +9,79 @@ import {
 
 process.env.NODE_ENV = 'test';
 
+test('Настройки показывают черновик логотипа и отправляют его только после применения', async (t) => {
+  const id = 'grigdesk-b24-discript';
+  const logo = 'data:image/png;base64,TEST';
+  const catalog = trackerCatalog();
+  const driver = catalog.drivers.find((entry) => entry.id === id);
+
+  driver.schema = {
+    accessToken: {
+      type: 'string',
+      label: 'API-токен',
+      secret: true,
+      required: true,
+      format: 'api-token',
+    },
+  };
+
+  const card = await mountTrackerBoard(t, {
+    catalog,
+    compilerStubs: {
+      '../projects/projectIconFile.ts': `
+        export const PROJECT_ICON_FILE_ACCEPT = 'image/png';
+        export const projectIconFile = async () => ${JSON.stringify(logo)};
+      `,
+    },
+    handlers: {
+      get: async (_url, state) => {
+        state.settings.settings['grigdesk-b24'] = { baseUrl: '' };
+      },
+      post: async (url, payload) => {
+        if (url === '/api/trackers/settings') {
+          driver.logoUrl = payload.logos[id] ?? undefined;
+          driver.packageLogoUrl = driver.logoUrl ? null : undefined;
+        }
+      },
+    },
+  });
+
+  await openTrackerSettings(card);
+  await card.wrapper.get(`[data-driver="${id}"]`).trigger('click');
+
+  const picker = card.wrapper.get('[data-role="tracker-logo-picker"] input[type="file"]');
+  const file = new picker.element.ownerDocument.defaultView.File(['png'], 'logo.png', { type: 'image/png' });
+
+  Object.defineProperty(picker.element, 'files', { configurable: true, value: [file] });
+  await picker.trigger('change');
+  await card.flushPromises();
+
+  assert.equal(card.wrapper.get('.tracker-settings__editor .tracker-icon').attributes('src'), logo);
+  assert.equal(card.apiCalls.some((call) => call.method === 'POST'), false);
+
+  const apply = actionButton(card.wrapper, /^Применить$/u);
+
+  await apply.trigger('click');
+  await card.flushPromises();
+
+  const written = card.apiCalls.find((call) =>
+    call.url === '/api/trackers/settings' && call.method === 'POST');
+
+  assert.deepEqual(written.payload.logos, { [id]: logo });
+  assert.deepEqual(written.payload.settings, {});
+
+  await card.wrapper.get('[data-role="tracker-logo-reset"]').trigger('click');
+  assert.equal(card.wrapper.find('.tracker-settings__editor img.tracker-icon').exists(), false);
+  await actionButton(card.wrapper, /^Применить$/u).trigger('click');
+  await card.flushPromises();
+
+  const writes = card.apiCalls.filter((call) =>
+    call.url === '/api/trackers/settings' && call.method === 'POST');
+
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes.at(-1).payload.logos, { [id]: null });
+});
+
 test('TRACKER-SETTINGS-01: настройки без отдельного трекера GrigDesk, выбор и secret через tracker API',
   async (t) => {
     const card = await mountTrackerBoard(t);

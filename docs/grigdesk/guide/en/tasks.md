@@ -21,6 +21,9 @@ Done and Back to settings return from the operation. Loading reserves source-car
 expanded manual version input stays visible.
 Enable adds a driver to the shared task list. Set as default also enables it.
 Apply or Save persists the choice; the current default's button is disabled.
+To add a logo, select a tracker and click Upload logo under Board connection. Choose a PNG,
+JPEG, WebP, or SVG up to 5 MiB and check the preview. Click Apply or Save to show it for the
+board and in the chat task picker. Reset logo restores the board’s default icon.
 Enabled and Default chips show saved settings, not merely the selected catalog row.
 
 Paste the whole API token, including any `=` characters. Remove surrounding whitespace, line breaks,

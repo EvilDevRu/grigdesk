@@ -6,6 +6,7 @@ import test from 'node:test';
 import { deflateSync } from 'node:zlib';
 
 import { validateDriverPackage } from '../../server/src/lib/trackers/driverPackage.ts';
+import { TrackerSettingsStore } from '../../server/src/lib/trackers/settingsStore.ts';
 import { png, expectedPackage } from '../helpers/pluginV1.js';
 import { trackerFixture, writeTracker } from './helpers/trackerFixture.js';
 
@@ -161,4 +162,56 @@ test('MD-LOGO-HTTP: выключенный PNG защищён auth/digest и н�
   await writeFile(path.join(fixture.root, 'outside.png'), png);
   await symlink(path.join(fixture.root, 'outside.png'), file);
   assert.equal((await fixture.request('GET', descriptor.logoUrl)).statusCode, 404);
+});
+
+test('Логотип каждой доски сохраняется и сбрасывается до логотипа пакета', async (t) => {
+  const id = 'fixture-logo';
+  const fixture = await trackerFixture(t, {
+    setup: async (config) => {
+      const directory = await writeTracker(config, id, { manifest: { logo: 'logo.png' } });
+
+      await writeFile(path.join(directory, 'logo.png'), png);
+      await writeTracker(config, 'another-board');
+    },
+  });
+  const catalog = () => fixture.runtime.catalog();
+  const driver = () => catalog().drivers.find((entry) => entry.id === id);
+  const packageLogoUrl = driver().logoUrl;
+  const custom = `data:image/png;base64,${dimensions(32, 32).toString('base64')}`;
+  const save = (logos, expectedRevision = catalog().revision) =>
+    fixture.request('POST', '/api/trackers/settings', {
+      drivers: [],
+      default: null,
+      settings: {},
+      expectedRevision,
+      logos,
+    });
+
+  const revision = catalog().revision;
+  const invalid = await save({ [id]: custom, unknown: custom });
+
+  assert.equal(invalid.statusCode, 400, invalid.body);
+  assert.equal(catalog().revision, revision);
+  assert.equal((await save({ [id]: 'data:image/svg+xml;base64,PHN2Zy8+' })).statusCode, 400);
+  assert.equal(driver().logoUrl, packageLogoUrl);
+
+  const saved = await save({ [id]: custom });
+
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.equal(driver().logoUrl, custom);
+  assert.equal(driver().packageLogoUrl, packageLogoUrl);
+  assert.equal(catalog().drivers.find((entry) => entry.id === 'another-board').logoUrl, undefined);
+  assert.equal(new TrackerSettingsStore(fixture.config.trackerSettingsPath).logo(id), custom);
+  assert.equal(fixture.events.at(-1).payload.logos, undefined);
+  assert.equal((await save(undefined)).statusCode, 200);
+  assert.equal(driver().logoUrl, custom);
+  assert.equal((await save({ [id]: null }, revision)).statusCode, 409);
+  assert.equal(driver().logoUrl, custom);
+
+  const reset = await save({ [id]: null });
+
+  assert.equal(reset.statusCode, 200, reset.body);
+  assert.equal(driver().logoUrl, packageLogoUrl);
+  assert.equal(driver().packageLogoUrl, undefined);
+  assert.equal(new TrackerSettingsStore(fixture.config.trackerSettingsPath).logo(id), undefined);
 });

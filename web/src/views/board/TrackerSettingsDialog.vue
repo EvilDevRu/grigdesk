@@ -76,6 +76,9 @@
             <UiButton v-for="driver in externalDrivers" :key="driver.id" :data-driver="driver.id"
                       :pressed="editorId === driver.id" :disabled="busy" data-ui-settings-catalog
                       data-context="provider-entry" @click="editorId = driver.id">
+              <template #leading>
+                <TrackerIcon :name="driver.name" :logo-url="driver.logoUrl" :size="18" />
+              </template>
               <span class="ui-settings-catalog-copy">
                 <span class="ui-settings-catalog-heading">
                   <span class="ui-settings-catalog-title">{{ driver.name }}</span>
@@ -165,6 +168,19 @@
                 {{ externalId ? t('core.trackerSwitchConnection', { name: activeDriverName })
                   : t('core.trackerDisconnectConnection') }}
               </UiInlineMessage>
+              <UiField :label="t('core.trackerBoardLogo')" :hint="t('core.projectIconRequirements')"
+                       :error="logoFailed ? t('core.projectIconInvalid') : undefined">
+                <UiFormActions align="start">
+                  <TrackerIcon :name="selected.name" :logo-url="previewLogo" :size="32" />
+                  <UiFilePicker :label="t('core.trackerChooseLogo')" :accept="PROJECT_ICON_FILE_ACCEPT"
+                                :busy="loadingLogo" :disabled="busy" :show-summary="false" :show-reset="false"
+                                data-role="tracker-logo-picker" @change="chooseLogo" />
+                  <UiButton v-if="hasCustomLogo" :disabled="busy" data-role="tracker-logo-reset"
+                            @click="setLogo(null)">
+                    {{ t('core.trackerResetLogo') }}
+                  </UiButton>
+                </UiFormActions>
+              </UiField>
               <div class="tracker-settings__fields">
                 <template v-for="(field, key) in selected.schema ?? {}" :key="key">
                   <UiField v-if="fieldVisible(field)" :label="fieldLabel(field.label, key)"
@@ -260,10 +276,12 @@ import { useTrackersStore } from '../../stores/trackers.ts';
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
 import type { DriverInstallRequest } from '../../stores/driverInstall.ts';
 import { api, ApiError, failureText } from '../../shared/apiClient.ts';
+import TrackerIcon from '../../shared/TrackerIcon.vue';
 import {
-  t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
+  t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFilePicker, UiFormActions,
   UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeleton,
 } from '../../ui.ts';
+import { PROJECT_ICON_FILE_ACCEPT, projectIconFile } from '../projects/projectIconFile.ts';
 import TrackerInstallDialog from './TrackerInstallDialog.vue';
 import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
 
@@ -276,6 +294,9 @@ const enabledIds = ref<string[]>([]);
 const externalId = ref('');
 const editorId = ref('');
 const revision = ref(0);
+const logoDrafts = ref(new Map<string, string | null>());
+const loadingLogo = ref(false);
+const logoFailed = ref(false);
 const savedValues = ref<Record<string, Record<string, unknown>>>({});
 const values = ref<Record<string, string | boolean | number>>({});
 const error = ref('');
@@ -306,12 +327,19 @@ const savedDefaultId = computed(() => trackers.catalog?.default ?? trackers.cata
 const savedEnabledIds = computed(() => trackers.catalog?.enabledIds
   ?? (savedDefaultId.value ? [savedDefaultId.value] : []));
 const selected = computed(() => externalDrivers.value.find((driver) => driver.id === editorId.value));
+const logoDraft = computed(() => logoDrafts.value.get(editorId.value));
+const hasSavedLogo = computed(() => selected.value?.packageLogoUrl !== undefined);
+const previewLogo = computed(() => logoDraft.value === null
+  ? (hasSavedLogo.value ? selected.value?.packageLogoUrl ?? undefined : selected.value?.logoUrl)
+  : logoDraft.value ?? selected.value?.logoUrl);
+const hasCustomLogo = computed(() => logoDraft.value === undefined
+  ? hasSavedLogo.value : logoDraft.value !== null);
 const packageInfo = computed(() => installer.installed[editorId.value]);
 const driverAvailable = computed(() => ['active', 'available'].includes(selected.value?.status ?? ''));
 const activeDriverName = computed(() => externalDrivers.value
   .find((driver) => driver.id === externalId.value)?.name ?? externalId.value);
 const busy = computed(() => saving.value !== null || testing.value
-  || installer.removing || recoveringRemoval.value);
+  || installer.removing || recoveringRemoval.value || loadingLogo.value);
 const packageActionsDisabled = computed(() => loading.value || busy.value || updatesLoading.value
   || checking.value || installer.blocked || removalNeedsRefresh.value);
 const operationPending = computed(() => !installer.pendingRemoval && (installer.active
@@ -322,6 +350,39 @@ const tokenInputErrors = computed(() => Object.fromEntries(
     .map((key) => [key, t('core.trackerTokenInvalidFormat')]),
 ));
 const invalidTokenInput = computed(() => Object.keys(tokenInputErrors.value).length > 0);
+
+function setLogo(logo: string | null) {
+  logoDrafts.value.set(editorId.value, logo);
+  logoFailed.value = false;
+  saved.value = false;
+}
+
+/**
+ * Обработка файла сохраняет прежний логотип при ошибке.
+ * Черновик попадает только в редактор, в котором был выбран файл.
+ */
+async function chooseLogo([file]: File[]) {
+  const id = editorId.value;
+
+  if (!file || !id || busy.value) {
+    return;
+  }
+
+  logoFailed.value = false;
+  loadingLogo.value = true;
+
+  try {
+    const logo = await projectIconFile(file);
+
+    if (id === editorId.value) {
+      setLogo(logo);
+    }
+  } catch {
+    logoFailed.value = id === editorId.value;
+  } finally {
+    loadingLogo.value = false;
+  }
+}
 
 /**
  * Настройка использует ту же модальную оболочку вместо диалога поверх установщика.
@@ -607,6 +668,8 @@ function fieldVisible(field: TrackerSettingsField): boolean {
 }
 
 watch(editorId, (id, previous) => {
+  logoFailed.value = false;
+
   if (previous) {
     drafts.set(previous, { ...values.value });
   }
@@ -696,17 +759,22 @@ async function save(closeAfterSave: boolean) {
           return value !== savedValues.value[id]?.[key];
         });
 
-        return [id, Object.fromEntries(changed)];
-      }));
+        return [id, Object.fromEntries(changed)] as const;
+      })
+      .filter(([, changed]) => Object.keys(changed).length));
+    const logos = Object.fromEntries([...logoDrafts.value]
+      .filter(([id]) => externalDrivers.value.some((driver) => driver.id === id)));
     const result = await trackers.saveSettings({
       ...(trackers.catalog?.enabledIds ? {
         drivers: [...enabledIds.value], default: externalId.value || null,
       } : { externalId: externalId.value || null }),
       settings,
+      ...(Object.keys(logos).length ? { logos } : {}),
       expectedRevision: revision.value,
     }) as { revision: number };
 
     revision.value = result.revision;
+    logoDrafts.value.clear();
 
     for (const [id, changed] of Object.entries(settings)) {
       savedValues.value[id] = { ...savedValues.value[id], ...changed };
