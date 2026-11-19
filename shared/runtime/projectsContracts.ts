@@ -235,6 +235,8 @@ function withProjectIcon<T extends object>(parsed: T, value: unknown): T & { ico
   return { ...parsed, icon: source.icon === null ? null : projectIcon(source.icon) };
 }
 
+export type ProjectListScope = 'active' | 'archived' | 'all';
+
 /**
  * Проверяет каталог перед использованием в списках проектов.
  * Путь поля сохраняет индекс записи для диагностики ответа.

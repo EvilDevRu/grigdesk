@@ -343,7 +343,7 @@ async function build(desktopParent: DesktopParent | null) {
     trusted: createFactoryBrowserTrusted({
       state: factoryState,
       routes: new RoutesStore({ baseDir: config.routesDir }),
-      projectExists: async (profile) => (await listProjects(config, prefs)).includes(profile),
+      projectExists: async (profile) => (await listProjects(config, prefs, 'all')).includes(profile),
     }),
   };
   const browser = await createBrowserService({
@@ -380,7 +380,7 @@ async function build(desktopParent: DesktopParent | null) {
     withReferences: projectsService.withReferences,
     isProjectDeleted: isDeletedProject,
     file: config.sshConnectionsPath,
-    projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
+    projects: async () => (await listProjects(config, prefs, 'all')).map((id) => ({ id })),
   });
   const sshHostKeys = await createHostKeyStore({ file: config.sshKnownHostsPath });
   const sshTransport = createSshTransport();
@@ -533,7 +533,7 @@ async function build(desktopParent: DesktopParent | null) {
     withReferences: projectsService.withReferences,
     isProjectDeleted: isDeletedProject,
     path: config.dbProfilesPath,
-    projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
+    projects: async () => (await listProjects(config, prefs, 'all')).map((id) => ({ id })),
   });
   const dbAuditStore = await createDbAudit({ dir: config.dbAuditDir });
   const dbAudit = {
@@ -1182,7 +1182,7 @@ async function build(desktopParent: DesktopParent | null) {
     grigDeskVersion: installOptions.grigDeskVersion,
     runtimeServices: createPluginRuntimeServices({
       config,
-      project: (id) => projectsService.read(id),
+      project: (id) => projectsService.read(id, 'all'),
       listProjects: () => projectsService.list(),
       environment: () => createPluginEnvironment(config),
       sandboxes: () => sandboxService.overview(),
@@ -1231,7 +1231,7 @@ async function build(desktopParent: DesktopParent | null) {
     isProjectDeleted: isDeletedProject,
     withReferences: projectsService.withReferences,
     connection: asPort(githubConnection),
-    listProjects: () => listProjects(config, prefs),
+    listProjects: () => listProjects(config, prefs, 'all'),
   });
   await fastify.register(inboxModule, {
     coordinator: inboxCoordinator,
@@ -1244,9 +1244,9 @@ async function build(desktopParent: DesktopParent | null) {
     connection: asPort(telegramConnection),
     poller: telegramPoller,
     botApi: telegramBotApi,
-    listProjects: () => listProjects(config, prefs),
+    listProjects: () => listProjects(config, prefs, 'all'),
     // Новое правило заводят только на активный проект; уже заведённые архив не трогает.
-    listActiveProjects: () => listProjects(config, prefs, { includeArchived: false }),
+    listActiveProjects: () => listProjects(config, prefs),
   });
   await fastify.register(documentsModule, { reader: documentReader });
   // Сервис проектов создаётся здесь, а не внутри модуля: провайдеры связей знают

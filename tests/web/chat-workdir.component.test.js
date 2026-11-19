@@ -227,11 +227,6 @@ test('каталог объединяет проекты и недавние б�
   globalThis.__workdirProjects = [
     { id: 'demo', title: 'Демо' },
     { id: 'other', title: 'Второй проект' },
-    {
-      id: 'archived',
-      title: 'Архивный',
-      archivedAt: '2026-01-01',
-    },
   ];
 
   const { wrapper, flushPromises } = await mountWorkdir(t, browser, {

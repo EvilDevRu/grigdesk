@@ -6,6 +6,7 @@ Source and comparison viewing are read-only.
 ## Before you begin
 
 Enable the tool and register project paths. Git actions require an available repository on the server.
+The picker shows active projects. A direct link can open a file from an archived project.
 
 ## What to do
 

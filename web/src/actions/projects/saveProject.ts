@@ -1,6 +1,7 @@
 import { runtimeOf } from './projectsRuntime';
 import { projectsApi, projectsErrorData, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
+import type { ProjectCatalogScope } from '../../stores/projects';
 import { changedFields, createDraft, toInput } from '../../views/projects/projectDraft';
 import { loadProjects } from './loadProjects';
 import type { ProjectDraft } from '../../views/projects/projectDraft';
@@ -30,7 +31,10 @@ export interface SaveProjectResult {
 export async function saveProject(
   id: string | null,
   draft: ProjectDraft,
-  { expectedRevision }: { expectedRevision?: number } = {},
+  { expectedRevision, catalogScope = 'all' }: {
+    expectedRevision?: number;
+    catalogScope?: ProjectCatalogScope;
+  } = {},
 ): Promise<SaveProjectResult> {
   const store = useProjectsStore();
   const runtime = runtimeOf(store);
@@ -57,7 +61,7 @@ export async function saveProject(
     store.setDraft(createDraft(detail));
     store.setConflict(null);
     store.setError('');
-    await loadProjects();
+    await loadProjects(catalogScope);
 
     return {
       ok: true,

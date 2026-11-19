@@ -26,6 +26,7 @@ import type { RepositoryCheckResult } from '../../lib/projects/repositoryCheck.t
 import type {
   ProjectDetail,
   ProjectInput,
+  ProjectListScope,
   ProjectSummary,
 } from '../../../../shared/runtime/projectsContracts.ts';
 
@@ -93,8 +94,8 @@ export interface ProjectsService {
   remove: (id: string, expectedRevision: unknown) => Promise<void>;
   withReferences: <T>(op: () => Promise<T>) => Promise<T>;
   registerDeletionCleanup: (hook: DeletionCleanup) => void;
-  list: () => Promise<ProjectSummary[]>;
-  read: (id: string) => Promise<ProjectDetail>;
+  list: (scope?: ProjectListScope) => Promise<ProjectSummary[]>;
+  read: (id: string, scope?: ProjectListScope) => Promise<ProjectDetail>;
   create: (input: unknown) => Promise<ProjectDetail>;
   update: (id: string, input: unknown, expectedRevision: unknown) => Promise<ProjectDetail>;
   archive: (id: string, expectedRevision: unknown) => Promise<ProjectDetail>;
@@ -403,12 +404,15 @@ export function createProjectsService({
     return recordOrEmpty(storedProjectsOf(stored)[id]);
   }
 
-  async function list(): Promise<ProjectSummary[]> {
-    // Список — чтение: нечитаемый файл настроек не должен гасить раздел целиком.
+  /**
+   * Область и паспорта берутся из одного снимка реестра.
+   * Архивация посреди запроса не смешивает старую сводку с новым составом.
+   */
+  async function list(scope?: ProjectListScope): Promise<ProjectSummary[]> {
     const stored = prefs.read();
     const port = storedPort(stored);
     const factorySet = await factoryIds();
-    const ids = await listProjects(config, prefs);
+    const ids = await listProjects(config, port, scope);
     const profiles = await Promise.all(ids.map((id) => profileStateOf(id, factorySet.has(id))));
 
     // Профили читались тем же порядком, что и ids: индекс один и тот же.
@@ -417,7 +421,11 @@ export function createProjectsService({
     )));
   }
 
-  async function read(id: string): Promise<ProjectDetail> {
+  /**
+   * Обычное чтение видит активный паспорт, как и рабочий каталог.
+   * Архивные паспорта доступны в явно выбранной области.
+   */
+  async function read(id: string, scope: ProjectListScope = 'active'): Promise<ProjectDetail> {
     requireId(id);
 
     // Паспорт читается из фактического файла: если файл не читается, показать проект
@@ -428,7 +436,10 @@ export function createProjectsService({
     const record = readProjectRecord(storedPort(stored), id);
     const factorySet = await factoryIds();
 
-    if (record === null && !factorySet.has(id)) {
+    const exists = record !== null || factorySet.has(id);
+    const inScope = scope === 'all' || Boolean(record?.archivedAt) === (scope === 'archived');
+
+    if (!exists || !inScope) {
       throw new ProjectsError(404, 'not_found', `Проект «${id}» не найден.`);
     }
 
@@ -784,7 +795,7 @@ export function createProjectsService({
         throw new ProjectsError(409, 'revision_conflict', 'Паспорт изменился.', { currentRevision });
       }
 
-      const detail = await read(id);
+      const detail = await read(id, 'all');
 
       if (!detail.archivedAt) {
         throw new ProjectsError(409, 'not_archived', 'Сначала отправьте проект в архив.');

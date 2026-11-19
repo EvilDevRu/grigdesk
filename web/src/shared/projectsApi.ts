@@ -18,22 +18,41 @@ import type {
   ProjectDependencies,
   ProjectDetail,
   ProjectInput,
+  ProjectListScope,
   ProjectRepositoryCheck,
   ProjectSummary,
   ProjectsErrorBody,
 } from '../../../shared/runtime/projectsContracts.ts';
 
 export const projectsApi = {
-  async list(): Promise<ProjectSummary[]> {
-    const value: unknown = await api.get('/api/projects');
+  async list(scope: ProjectListScope = 'active'): Promise<ProjectSummary[]> {
+    const path = scope === 'active' ? '/api/projects' : `/api/projects?scope=${scope}`;
+    const value: unknown = await api.get(path);
 
     return parseProjectSummaries(value);
   },
 
-  async detail(id: string): Promise<ProjectDetail> {
-    const value: unknown = await api.get(`/api/projects/${encodeURIComponent(id)}`);
+  async detail(id: string, scope: ProjectListScope = 'active'): Promise<ProjectDetail> {
+    const query = scope === 'active' ? '' : `?scope=${scope}`;
+    const value: unknown = await api.get(`/api/projects/${encodeURIComponent(id)}${query}`);
 
     return parseProjectDetail(value);
+  },
+
+  /**
+   * Точный адрес может открыть архивный проект. Только подтверждённое отсутствие
+   * сбрасывает открытый контекст, сетевой отказ остаётся ошибкой чтения.
+   */
+  async findDetail(id: string): Promise<ProjectDetail | null> {
+    try {
+      return await projectsApi.detail(id, 'all');
+    } catch (error) {
+      if (projectsErrorData(error)?.error === 'not_found') {
+        return null;
+      }
+
+      throw error;
+    }
   },
 
   async create(input: ProjectInput): Promise<ProjectDetail> {

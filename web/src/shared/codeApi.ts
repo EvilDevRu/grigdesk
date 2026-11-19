@@ -133,8 +133,9 @@ export const codeApi = {
     return parseCodeProjects(value).projects;
   },
 
-  async roots() {
-    const value: unknown = await api.get('/api/code/roots');
+  async roots(scope: 'active' | 'all' = 'active') {
+    const path = scope === 'all' ? '/api/code/roots?scope=all' : '/api/code/roots';
+    const value: unknown = await api.get(path);
 
     return parseCodeRoots(value).roots;
   },

@@ -66,6 +66,10 @@ async function reconcileOpenDraft(profile: string): Promise<void> {
 }
 
 async function reconcile(profile: string): Promise<void> {
+  if (!profile) {
+    return;
+  }
+
   await Promise.allSettled([loadEditor(profile), loadDrafts(profile)]);
   await reconcileOpenDraft(profile);
 }

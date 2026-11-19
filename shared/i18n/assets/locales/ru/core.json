@@ -2056,6 +2056,7 @@
   "codeProjectRepolabel": "{project} · {repoLabel}",
   "codeZagruzkaKoda": "Загрузка кода…",
   "codeProektovPokaNetZavedi": "Проектов пока нет — заведи в разделе",
+  "codeNoActiveProjects": "Активных проектов нет. Создайте или восстановите проект в разделе",
   "codeProekty": "«Проекты»",
   "codeRazdelyKoda": "Разделы кода",
   "codeFaylyDerevoIPoisk": "Файлы: дерево и поиск по коду",

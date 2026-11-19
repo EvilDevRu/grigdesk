@@ -445,7 +445,7 @@ async function loadProjects(): Promise<void> {
   try {
     const catalog = await api.get('/api/projects') as { projects?: ProjectOption[]; };
 
-    projects.value = (catalog.projects || []).filter((project) => !project.archivedAt);
+    projects.value = catalog.projects || [];
   } catch (failure) {
     error.value ||= (failure as Error).message;
   } finally {

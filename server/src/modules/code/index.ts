@@ -24,7 +24,7 @@ import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
-import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
+import { PROFILE_RE, listProjects, projectScopeOptions, type ProjectScopeRoute } from '../../lib/profiles.ts';
 import { projectRepos } from '../../lib/projects.ts';
 import { generateChangeSummary, generateCommitTitle } from '../../lib/codeCommitMessage.ts';
 import { CodeBranchRuns } from '../../lib/codeBranchRuns.ts';
@@ -174,26 +174,6 @@ async function readProjectRepos(
       ...(typeof repo.from === 'string' ? { from: repo.from } : {}),
     };
   });
-}
-
-/**
- * JS-каталог объединяет фабричные и пользовательские проекты. Плагин принимает
- * только строковые идентификаторы, сохраняя неизвестный ответ за этой границей.
- */
-async function readProjectIds(config: CodeModuleConfig, prefs: CodePreferences): Promise<string[]> {
-  const reader: unknown = listProjects;
-
-  if (typeof reader !== 'function') {
-    throw new TypeError('Каталог проектов недоступен');
-  }
-
-  const result: unknown = await reader(config, prefs);
-
-  if (!Array.isArray(result) || !result.every((id: unknown) => typeof id === 'string')) {
-    throw new TypeError('Некорректный список проектов');
-  }
-
-  return result;
 }
 
 const exec = promisify(execFile);
@@ -493,16 +473,16 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
   }
 
-  // Карта «абсолютный корень дерева → проект/репозиторий» по всем проектам.
+  // Карта «абсолютный корень дерева → проект/репозиторий» с явной областью каталога.
   // Нужна мосту из чата: клиент по ней превращает файловую ссылку из ответа агента
   // в открытие этого файла панелью «Код». Ссылка — навигация, а не доступ: чтение
   // всё равно идёт обычными ls/file/raw с их проверками.
-  fastify.get('/api/code/roots', async (req, reply) => {
+  fastify.get<ProjectScopeRoute>('/api/code/roots', projectScopeOptions, async (req, reply) => {
     if (gate(reply)) {
       return reply;
     }
 
-    const ids = await readProjectIds(config, prefs);
+    const ids = await listProjects(config, prefs, req.query.scope);
     const roots: CodeRoot[] = [];
 
     await Promise.all(ids.map(async (id) => {

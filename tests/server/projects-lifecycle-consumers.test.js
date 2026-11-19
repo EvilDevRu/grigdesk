@@ -51,19 +51,19 @@ async function profilesFixture(t) {
   return { root, profilesDir };
 }
 
-test('список проектов умеет отдавать только активные, а по умолчанию — все', async (t) => {
+test('каталог по умолчанию активный, архив возвращается по явному запросу', async (t) => {
   const { profilesDir } = await profilesFixture(t);
   const prefs = prefsDouble();
 
   assert.deepEqual(
     await listProjects({ profilesDir }, prefs),
-    ['project-alpha', 'project-beta'],
-    'по умолчанию список полный: архив ничего не рвёт',
-  );
-  assert.deepEqual(
-    await listProjects({ profilesDir }, prefs, { includeArchived: false }),
     ['project-alpha'],
   );
+  assert.deepEqual(
+    await listProjects({ profilesDir }, prefs, 'all'),
+    ['project-alpha', 'project-beta'],
+  );
+  assert.deepEqual(await listProjects({ profilesDir }, prefs, 'archived'), ['project-beta']);
   assert.deepEqual([...archivedProjectIds(prefs)], ['project-beta']);
   assert.equal(isProjectArchived(prefs, 'project-beta'), true);
   assert.equal(isProjectArchived(prefs, 'project-alpha'), false);
@@ -206,15 +206,15 @@ test('песочница архивного проекта не поднимае
 });
 
 for (const source of ['prefs', 'profile', 'both']) {
-  test(`PD-catalog: tombstone скрыт при обоих includeArchived (${source})`, async (t) => {
+  test(`PD-catalog: tombstone скрыт во всех областях чтения (${source})`, async (t) => {
     const { pdFixture } = await import('./helpers/projects-deletion.js');
     const { listFactoryProfiles } = await import('../../server/src/lib/profiles.ts');
     const f = await pdFixture(t, { source });
 
     f.prefs.write({ projectsMeta: { tombstones: { demo: { deletedAt: ARCHIVED_AT, revision: 2 } } } });
 
-    for (const includeArchived of [true, false]) {
-      assert.deepEqual(await listProjects(f.config, f.prefs, { includeArchived }), ['other']);
+    for (const scope of ['active', 'all', 'archived']) {
+      assert.deepEqual(await listProjects(f.config, f.prefs, scope), scope === 'archived' ? [] : ['other']);
     }
 
     if (source !== 'prefs') {

@@ -96,7 +96,7 @@ function deferred() {
 function apiWith({ summaries = [SUMMARY], detail = DETAIL, check = [CHECK], put } = {}) {
   return {
     get: async (path) => {
-      if (path === '/api/projects') return { projects: summaries };
+      if (path === '/api/projects?scope=all') return { projects: summaries };
       if (path.startsWith('/api/projects/')) return detail;
 
       throw new Error(`неожиданный путь ${path}`);
@@ -117,17 +117,36 @@ test('loadProjects складывает проверенные сводки, о�
     get: async () => payload,
   });
 
-  await loadProjects();
+  await loadProjects('all');
 
   assert.equal(store.items.length, 1);
   assert.equal(store.items[0].title, 'Демо-проект');
   assert.equal(store.error, '');
 
   payload = { projects: [{ ...SUMMARY, revision: 1.5 }] };
-  await loadProjects();
+  await loadProjects('all');
 
   assert.match(store.error, /проект/i);
   assert.equal(store.items[0].title, 'Демо-проект', 'прежний список остаётся на месте');
+});
+
+test('рабочий и полный каталоги принимают независимые ответы сервера', async (t) => {
+  const pending = Promise.withResolvers();
+  const archived = { ...SUMMARY, archivedAt: '2026-11-18T00:00:00Z' };
+  const active = { ...SUMMARY, id: 'active' };
+  const { store, loadProjects } = await sectionFixture(t, {
+    ...apiWith(),
+    get: (url) => url === '/api/projects?scope=all' ? pending.promise : { projects: [active] },
+  });
+
+  const fullLoad = loadProjects('all');
+
+  await loadProjects('active');
+  pending.resolve({ projects: [active, archived] });
+  await fullLoad;
+
+  assert.deepEqual(store.activeCatalog.items.map((item) => item.id), ['active']);
+  assert.deepEqual(store.items.map((item) => item.id), ['active', archived.id]);
 });
 
 test('projects-changed перечитывает список, hello — список и открытый паспорт', async (t) => {
@@ -142,8 +161,8 @@ test('projects-changed перечитывает список, hello — спис
     },
   });
 
-  watchProjects();
-  await loadProjects();
+  watchProjects('all');
+  await loadProjects('all');
   await loadProject('demo');
   calls.length = 0;
 
@@ -152,7 +171,7 @@ test('projects-changed перечитывает список, hello — спис
     setTimeout(resolve, 0);
   });
 
-  assert.deepEqual(calls, ['/api/projects']);
+  assert.deepEqual(calls, ['/api/projects?scope=all']);
   assert.equal(store.opened.revision, 3);
 
   emit('hello', null);
@@ -160,7 +179,7 @@ test('projects-changed перечитывает список, hello — спис
     setTimeout(resolve, 0);
   });
 
-  assert.deepEqual(calls, ['/api/projects', '/api/projects', '/api/projects/demo']);
+  assert.deepEqual(calls, ['/api/projects?scope=all', '/api/projects?scope=all', '/api/projects/demo?scope=all']);
 });
 
 test('поздний ответ старого запроса не заменяет свежий', async (t) => {
@@ -182,8 +201,8 @@ test('поздний ответ старого запроса не заменя�
     },
   });
 
-  const first = loadProjects();
-  const second = loadProjects();
+  const first = loadProjects('all');
+  const second = loadProjects('all');
 
   await second;
   slow.resolve();
@@ -195,7 +214,7 @@ test('поздний ответ старого запроса не заменя�
 test('событие и перечитывание не трогают draft', async (t) => {
   const { store, loadProject, watchProjects, emit } = await sectionFixture(t, apiWith());
 
-  watchProjects();
+  watchProjects('all');
   await loadProject('demo');
   store.draft.title = 'Правка человека';
 
@@ -354,7 +373,7 @@ for (const operation of ['list', 'detail', 'dependencies', 'save', 'archive']) {
       ...api,
       get: async (url) => {
         const kind = url.endsWith('/dependencies')
-          ? 'dependencies' : url === '/api/projects' ? 'list' : 'detail';
+          ? 'dependencies' : url === '/api/projects?scope=all' ? 'list' : 'detail';
 
         if (pending && kind === operation) {
           pending = false;
@@ -363,7 +382,7 @@ for (const operation of ['list', 'detail', 'dependencies', 'save', 'archive']) {
 
           return kind === 'list' ? { projects: [SUMMARY] } : kind === 'dependencies' ? dependencies : DETAIL;
         }
-        if (url === '/api/projects') {
+        if (url === '/api/projects?scope=all') {
           return { projects: deleted ? [] : [SUMMARY] };
         }
 
@@ -386,12 +405,12 @@ for (const operation of ['list', 'detail', 'dependencies', 'save', 'archive']) {
       saveProject, archiveProject, watchProjects, emit } =
       fixture;
 
-    await loadProjects();
+    await loadProjects('all');
     await loadProject('demo');
-    watchProjects();
+    watchProjects('all');
     pending = true;
 
-    const request = operation === 'list' ? loadProjects()
+    const request = operation === 'list' ? loadProjects('all')
       : operation === 'detail' ? loadProject('demo')
         : operation === 'dependencies' ? loadDependencies('demo')
           : operation === 'save' ? saveProject('demo', store.draft)
@@ -418,12 +437,12 @@ test('PD-hello: успешный свежий список обнаружива�
   const api = apiWith();
   const { store, loadProjects, loadProject, watchProjects, emit } = await sectionFixture(t, {
     ...api,
-    get: async (url) => url === '/api/projects' ? { projects: removed ? [] : [SUMMARY] } : DETAIL,
+    get: async (url) => url === '/api/projects?scope=all' ? { projects: removed ? [] : [SUMMARY] } : DETAIL,
   });
 
-  await loadProjects();
+  await loadProjects('all');
   await loadProject('demo');
-  watchProjects();
+  watchProjects('all');
   removed = true;
   emit('hello', null);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -436,7 +455,7 @@ test('PD-neighbor: updated и чужой deleted сохраняют dirty', asyn
 
   await loadProject('demo');
   store.draft.title = 'Несохранённый текст';
-  watchProjects();
+  watchProjects('all');
   emit('projects-changed', {
     id: 'demo',
     revision: 4,
@@ -470,7 +489,7 @@ test('PD-failure: ошибка DELETE сохраняет паспорт, пок�
         };
       }
 
-      return url === '/api/projects' ? { projects: [] } : DETAIL;
+      return url === '/api/projects?scope=all' ? { projects: [] } : DETAIL;
     },
     del: async () => {
       if (fail) {

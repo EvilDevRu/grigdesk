@@ -200,7 +200,7 @@ export async function resolveChatWorkdir({
     const retained = retainedProject?.id === projectId ? retainedProject : null;
     const deleted = isProjectDeleted(prefs, projectId);
     const record = retained ?? readProjectRecord(prefs, projectId);
-    const known = record || (await listProjects(config, prefs)).includes(projectId);
+    const known = record || (await listProjects(config, prefs, 'all')).includes(projectId);
 
     if (!known || (deleted && !retained)) {
       throw new ChatWorkdirError('workdir_unknown_project', 'Проект рабочей папки больше не существует.');

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
+import { projectCatalog } from './fixtures/projects/data.mjs';
 import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
@@ -94,6 +95,7 @@ async function fixture(t, {
   editorGate = null, graphGate = null, revisionsGate = null,
   sourceMode = 'editor', documents = [], realCanvas = false,
   profiles = () => ['sample', 'other'],
+  archivedProfiles = () => [],
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -120,8 +122,23 @@ async function fixture(t, {
     get: async (url) => {
       calls.push(['get', url]);
 
-      if (url === '/api/profiles') {
-        return { profiles: await profiles() };
+      if (url === '/api/projects') {
+        const archived = archivedProfiles();
+        const active = (await profiles()).filter((id) => !archived.includes(id));
+
+        return projectCatalog(active);
+      }
+      if (url.startsWith('/api/projects/')) {
+        const id = url.split('?')[0].split('/').at(-1);
+        const archived = archivedProfiles();
+
+        if ((await profiles()).includes(id)) {
+          return projectCatalog([id], archived).projects[0];
+        }
+
+        throw Object.assign(new Error('Проект не найден'), {
+          data: { error: 'not_found', message: 'Проект не найден' },
+        });
       }
       if (url.endsWith('/revisions')) {
         await revisionsGate;
@@ -674,7 +691,7 @@ for (const event of ['projects-changed', 'hello']) {
       kind: 'deleted'
     });
     await flushPromises();
-    assert.equal(calls.filter((call) => call[1] === '/api/profiles').length >= 2, true);
+    assert.equal(calls.filter((call) => call[1] === '/api/projects').length >= 2, true);
     assert.equal(route.query.profile ?? '', '');
     assert.equal(wrapper.get('[data-test="project-switcher"]').element.value, '');
   });
@@ -708,6 +725,28 @@ test('PD-routes: dirty удалённого проекта остаётся дл
   assert.equal(store.opened.readOnly, true);
   assert.match(wrapper.text(), /Регистрация проекта удалена.*Несохранённые изменения сохранить нельзя/su);
   assert.equal(calls.some((call) => call[1]?.includes('/export')), false);
+});
+
+test('PD-routes: архив скрывается из переключателя, открытый по адресу профиль сохраняется', async (t) => {
+  let archived = false;
+  const { wrapper, calls, route, emit, flushPromises } = await fixture(t, {
+    archivedProfiles: () => archived ? ['sample'] : [],
+  });
+
+  archived = true;
+  emit('projects-changed', {
+    id: 'sample',
+    kind: 'archived',
+    revision: 3,
+  });
+  await flushPromises();
+
+  const options = wrapper.findAll('[data-test="project-switcher"] option');
+
+  assert.deepEqual(options.map((item) => item.element.value), ['other']);
+  assert.ok(calls.some(([, url]) => url === '/api/projects/sample?scope=all'));
+  assert.equal(calls.some(([, url]) => url.includes('/routes/other/')), false);
+  assert.equal(route.query.profile, 'sample');
 });
 
 test('PD-routes: поздний draft не возвращает документ удалённого профиля', async (t) => {

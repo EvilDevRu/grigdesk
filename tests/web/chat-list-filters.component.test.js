@@ -283,10 +283,12 @@ async function fixture(t, initial = {}, liveChat = null, storedProject = null, c
   };
 
   globalThis.__filtersProjects = vue.reactive({
-    items: CATALOG_SUMMARIES.map((item) => ({ ...item })),
-    loaded: true,
-    loading: false,
-    error: '',
+    activeCatalog: {
+      items: CATALOG_SUMMARIES.map((item) => ({ ...item })),
+      loaded: true,
+      loading: false,
+      error: '',
+    },
     deletedIds: new Set(),
   });
 
@@ -878,7 +880,7 @@ test('PROJECT-UI-ERROR-DELETE: ошибка сохраняет выбор, tombs
   const { wrapper, calls } = await fixture(t);
 
   await wrapper.find('[data-chat-project="alpha"]').trigger('click');
-  globalThis.__filtersProjects.error = 'Каталог недоступен';
+  globalThis.__filtersProjects.activeCatalog.error = 'Каталог недоступен';
   await drain();
 
   assert.equal(calls.search.at(-1)[2].project, 'alpha');
@@ -886,7 +888,7 @@ test('PROJECT-UI-ERROR-DELETE: ошибка сохраняет выбор, tombs
   assert.equal(wrapper.find('[data-chat-project-retry]').exists(), true);
 
   globalThis.__filtersProjects.deletedIds.add('alpha');
-  globalThis.__filtersProjects.items = globalThis.__filtersProjects.items
+  globalThis.__filtersProjects.activeCatalog.items = globalThis.__filtersProjects.activeCatalog.items
     .filter((item) => item.id !== 'alpha');
   await drain();
 
@@ -997,7 +999,7 @@ test('PROJECT-UI-LATEST-WINS: вытесненный запрос не блок�
   assert.equal(requests.length, 2);
   requests[0]({ projects: [] });
   await drain();
-  assert.equal(globalThis.__filtersRealProjectStore.loaded, false);
+  assert.equal(globalThis.__filtersRealProjectStore.activeCatalog.loaded, false);
   requests[1]({ projects: CATALOG_SUMMARIES });
   await drain();
 
@@ -1005,16 +1007,26 @@ test('PROJECT-UI-LATEST-WINS: вытесненный запрос не блок�
   assert.equal(calls.search.at(-1)[2].project, 'beta');
 });
 
-test('PROJECT-UI-ARCHIVE-LABEL: desktop раскрывает причину недоступного создания', async (t) => {
-  const { wrapper } = await fixture(t);
+test('PROJECT-UI-ARCHIVE-HIDE: архивирование снимает фильтр и скрывает обе кнопки выбора', async (t) => {
+  const { wrapper, state, calls } = await fixture(t, { activeId: 'c-2' }, null, 'alpha');
 
-  globalThis.__filtersProjects.items[0].archivedAt = '2026-11-17T00:00:00Z';
+  assert.equal(calls.search.at(-1)[2].project, 'alpha');
+  const catalog = globalThis.__filtersProjects.activeCatalog;
+
+  catalog.items = CATALOG_SUMMARIES.filter((item) => item.id !== 'alpha');
   await drain();
 
-  assert.equal(wrapper.find('[data-chat-project="alpha"]').attributes('aria-label'), 'Альфа · Архив');
-  await wrapper.find('[data-chat-project="alpha"]').trigger('click');
+  assert.equal(wrapper.find('[data-chat-project="alpha"]').exists(), false);
+  assert.equal(wrapper.find('[data-chat-project-picker="compact"] option[value="alpha"]').exists(), false);
+  assert.equal(wrapper.find('[data-chat-project-current]').exists(), false);
+  assert.equal(calls.search.at(-1)[2].project ?? '', '');
+  assert.equal(state.activeId, 'c-2');
+
+  catalog.items = CATALOG_SUMMARIES;
   await drain();
-  assert.equal(wrapper.find('[data-chat-project-current]').text().includes('Архив'), true);
+
+  assert.equal(wrapper.find('[data-chat-project="alpha"]').exists(), true);
+  assert.equal(calls.search.at(-1)[2].project ?? '', '');
 });
 
 test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty ленты обновляет проект строки', async (t) => {
@@ -1095,15 +1107,11 @@ test('PROJECT-UI-CREATE-NONE: без проекта не наследует пр
   assert.deepEqual(calls.created.at(-1), { workdir: { kind: 'grigdesk' } });
 });
 
-test('PROJECT-UI-CREATE-ARCHIVED: архивный проект читается, но новый чат не создаётся', async (t) => {
-  const { wrapper, calls } = await fixture(t);
+test('PROJECT-UI-RESTORE-ARCHIVED: сохранённый архивный проект не применяется', async (t) => {
+  const catalog = CATALOG_SUMMARIES.filter((item) => item.id !== 'alpha');
+  const { wrapper, calls } = await fixture(t, {}, null, 'alpha', async () => ({ projects: catalog }));
 
-  globalThis.__filtersProjects.items[0].archivedAt = '2026-11-17T00:00:00Z';
-  await wrapper.find('[data-chat-project="alpha"]').trigger('click');
-  await drain();
-
-  assert.equal(wrapper.find('.new').attributes('disabled') !== undefined, true);
-  await wrapper.find('.new').trigger('click');
-
-  assert.equal(calls.created.length, 0);
+  assert.equal(wrapper.find('[data-chat-project="alpha"]').exists(), false);
+  assert.equal(wrapper.get('[data-chat-project=""]').attributes('aria-pressed'), 'true');
+  assert.equal(calls.search.some(([, , filters]) => filters.project === 'alpha'), false);
 });

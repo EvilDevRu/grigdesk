@@ -42,7 +42,6 @@ import type {
 import {
   parseRouteGraph,
   parseRoutePublish,
-  parseRouteProfiles,
   parseRouteRevisions,
 } from '../../../shared/pipeline/routesContracts.ts';
 import type { RoutePublishResponse, RouteRevisionList } from '../../../shared/pipeline/routesContracts.ts';
@@ -328,12 +327,6 @@ export const routesApi = {
       presentation: {},
       provenance: {},
     });
-  },
-
-  async profiles(): Promise<string[]> {
-    const value: unknown = await api.get('/api/profiles');
-
-    return parseRouteProfiles(value);
   },
 
   async revisions(profile: string): Promise<RouteRevisionList> {

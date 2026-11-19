@@ -44,7 +44,7 @@ export async function removeProject(
 
   forgetProject(store, id);
   store.setError('');
-  await loadProjects();
+  await loadProjects('all');
 
   return {
     ok: true,

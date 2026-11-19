@@ -11,8 +11,8 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-import { listProjects } from '../../lib/profiles.ts';
-import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
+import { listProjects, projectScopeOptions } from '../../lib/profiles.ts';
+import type { ProjectsPrefsPort, ProjectScopeRoute } from '../../lib/profiles.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ProjectsError } from '../projects/errors.ts';
 import { registerRoutesApi } from './api.ts';
@@ -63,7 +63,8 @@ async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions)
   });
 
   // ── Проекты ──
-  fastify.get('/api/profiles', async () => ({ profiles: await listProjects(config, prefs) }));
+  fastify.get<ProjectScopeRoute>('/api/profiles', projectScopeOptions,
+    async (request) => ({ profiles: await listProjects(config, prefs, request.query.scope) }));
 
   // Новый проект GrigDesk — запись реестра паспортов; дальше ему задают пути репозиториев
   // («Проекты»), и его видит плагин «Код». Заводит её сервис раздела «Проекты»: у реестра

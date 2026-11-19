@@ -3,6 +3,7 @@ import { after } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 
 import { capabilities, roleCatalog, seedDraft, serverFixture } from '../../fixtures/routes-stage-wizard.mjs';
+import { projectCatalog } from '../fixtures/projects/data.mjs';
 import { compileVue, webFile } from './compile-vue.js';
 import { createUiBrowser } from './ui-components.js';
 
@@ -105,8 +106,8 @@ export async function wizardFixture(t, options = {}) {
       payload: payload === undefined ? undefined : JSON.parse(JSON.stringify(payload)),
     });
 
-    if (url === '/api/profiles') {
-      return { profiles: ['sample', 'other'] };
+    if (url === '/api/projects') {
+      return projectCatalog(['sample', 'other']);
     }
     if (url.endsWith('/editor/stage-roles')) {
       await pending.catalog;

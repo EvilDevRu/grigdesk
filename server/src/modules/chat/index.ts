@@ -689,7 +689,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         return null;
       }
 
-      return isProjectDeleted(prefs, projectId) || (await listProjects(config, prefs)).includes(projectId)
+      return isProjectDeleted(prefs, projectId)
+        || (await listProjects(config, prefs, 'all')).includes(projectId)
         ? projectId : null;
     } catch {
       return null;
@@ -706,7 +707,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       ? await trustedWorkspaceProject(taskId)
       : workdir?.kind === 'project' ? workdir.projectId : null;
 
-    return id && (await listProjects(config, prefs)).includes(id) ? id : null;
+    return id && (await listProjects(config, prefs, 'all')).includes(id) ? id : null;
   }
 
   /** Один UDS живёт вместе с chat scope и переиспользуется живым CLI-процессом. */

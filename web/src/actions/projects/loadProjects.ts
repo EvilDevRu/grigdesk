@@ -1,5 +1,6 @@
 import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
+import type { ProjectCatalogScope } from '../../stores/projects';
 import { forgetProject, runtimeOf } from './projectsRuntime';
 import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../../shared/uiLocalePort.ts';
@@ -8,48 +9,44 @@ const translateUi = localeTranslator(uiLocalePort);
 
 
 /**
- * Список проектов целиком — вместе с архивными: прятать их должен потребитель, а
- * список один на раздел.
- *
- * Каждый вызов получает свой номер: событие сервера и действие человека приходят почти
- * одновременно, и ответ на более старый запрос не должен затирать более свежий.
+ * Рабочий каталог и управление архивом принимают независимые снимки сервера.
+ * Только полный каталог может подтвердить отсутствие открытого паспорта.
  */
-export async function loadProjects(): Promise<void> {
+export async function loadProjects(scope: ProjectCatalogScope): Promise<void> {
   const store = useProjectsStore();
   const runtime = runtimeOf(store);
+  const catalog = scope === 'all' ? store : store.activeCatalog;
+  const request = ++runtime.listRequest[scope];
 
-  runtime.listRequest += 1;
-
-  const request = runtime.listRequest;
-
-  store.setLoading(true);
+  catalog.loading = true;
 
   try {
-    const response = await projectsApi.list();
+    const response = await projectsApi.list(scope);
     const items = response.filter((item) => !store.deletedIds.has(item.id));
 
-    if (request !== runtime.listRequest) {
+    if (request !== runtime.listRequest[scope]) {
       return;
     }
 
     const selected = store.opened?.id || runtime.selectedId;
 
-    if (selected && !items.some((item) => item.id === selected)) {
-      store.setLoading(false);
+    if (scope === 'all' && selected && !items.some((item) => item.id === selected)) {
+      catalog.loading = false;
       forgetProject(store, selected);
     }
 
-    store.setItems(items);
-    store.setError('');
+    catalog.items = items;
+    catalog.loaded = true;
+    catalog.error = '';
   } catch (error) {
-    if (request !== runtime.listRequest) {
+    if (request !== runtime.listRequest[scope]) {
       return;
     }
 
-    store.setError(projectsFailureText(error, translateUi('core.loadProjectsCouldNotReadTheProjectList')));
+    catalog.error = projectsFailureText(error, translateUi('core.loadProjectsCouldNotReadTheProjectList'));
   } finally {
-    if (request === runtime.listRequest) {
-      store.setLoading(false);
+    if (request === runtime.listRequest[scope]) {
+      catalog.loading = false;
     }
   }
 }

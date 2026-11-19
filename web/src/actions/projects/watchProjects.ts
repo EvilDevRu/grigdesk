@@ -1,27 +1,23 @@
 import { sseSubscribe } from '../../composables/useSse';
 import { useProjectsStore } from '../../stores/projects';
+import type { ProjectCatalogScope } from '../../stores/projects';
 import { loadProject } from './loadProject';
 import { loadProjects } from './loadProjects';
 import { parseProjectsChange } from '../../../../shared/runtime/projectsContracts';
 import { forgetProject, runtimeOf } from './projectsRuntime';
 
 /**
- * Подписка раздела на общий поток событий. `projects-changed` приходит после каждой
- * мутации реестра — список перечитывается; `hello` означает переподключение, когда
- * вкладка могла пропустить события, поэтому перечитывается и открытый паспорт.
- *
- * Открытая форма при этом не трогается: черновик человека важнее чужой правки, а
- * расхождение ревизий покажет сохранение.
+ * Общий поток обновляет только каталоги, которые используются открытыми экранами.
+ * Восстановление соединения перечитывает точный паспорт, сохраняя черновик.
  */
-export function watchProjects(): void {
+export function watchProjects(scope: ProjectCatalogScope): () => void {
   const store = useProjectsStore();
   const runtime = runtimeOf(store);
+  const watchers = runtime.catalogWatchers;
 
-  if (runtime.off) {
-    return;
-  }
+  watchers[scope] += 1;
 
-  runtime.off = sseSubscribe((name, data) => {
+  runtime.off ??= sseSubscribe((name, data) => {
     if (name === 'projects-changed') {
       try {
         const change = parseProjectsChange(data);
@@ -32,20 +28,33 @@ export function watchProjects(): void {
       } catch {
         // Незнакомое событие не меняет выбор до успешного чтения каталога.
       }
+    }
 
-      void loadProjects();
-
+    if (name !== 'hello' && name !== 'projects-changed') {
+      return;
+    }
+    if (watchers.active) {
+      void loadProjects('active');
+    }
+    if (!watchers.all) {
       return;
     }
 
-    if (name === 'hello') {
-      void loadProjects().then(() => {
-        const openedId = store.opened?.id;
+    void loadProjects('all').then(() => {
+      const openedId = store.opened?.id;
 
-        if (openedId) {
-          void loadProject(openedId, { keepDraft: true });
-        }
-      });
-    }
+      if (name === 'hello' && watchers.all && openedId) {
+        void loadProject(openedId, { keepDraft: true });
+      }
+    });
   });
+
+  return () => {
+    watchers[scope] -= 1;
+
+    if (!watchers.active && !watchers.all) {
+      runtime.off?.();
+      runtime.off = null;
+    }
+  };
 }

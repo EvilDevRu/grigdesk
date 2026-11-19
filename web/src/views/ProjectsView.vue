@@ -144,6 +144,7 @@ const store = useProjectsStore();
 const chat = useChatStore();
 const { dockCapable } = useDockViewport();
 const projectsContext = useUiContextSource('projects', { layer: 'page', active: false });
+let stopCatalog: (() => void) | undefined;
 
 const fieldErrors = ref<Array<{ path: string; message: string }>>([]);
 // Код отказа сохранения: по нему показывается «проект уже есть» и расхождение ревизий.
@@ -324,6 +325,7 @@ watch(dirty, (value) => {
 });
 
 onBeforeUnmount(() => {
+  stopCatalog?.();
   window.removeEventListener('beforeunload', beforeUnload);
   workspaceObserver?.disconnect();
 });
@@ -353,8 +355,8 @@ onMounted(() => {
     workspaceObserver.observe(workspace.value);
   }
 
-  watchProjects();
-  void loadProjects();
+  stopCatalog = watchProjects('all');
+  void loadProjects('all');
 });
 
 /**
@@ -579,7 +581,7 @@ function cancelChanges(): void {
 }
 
 function retry(): void {
-  void loadProjects();
+  void loadProjects('all');
 }
 
 function retryProject(): void {

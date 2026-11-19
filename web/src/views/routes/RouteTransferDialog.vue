@@ -20,7 +20,9 @@
       <p>{{ t('core.routeIshodnyyProekt') }} <strong>{{ bundle.sourceProfile }}</strong> {{ t('core.routeMarshruty2') }} {{ Object.keys(bundle.content.routes).join(', ') || t('core.routeNet') }}</p>
       <p v-if="bundle.dependencies.length" class="bad" data-test="transfer-dependencies"> {{ t('core.routeVneshnieZavisimosti') }} {{ bundle.dependencies.join(', ') }}{{ t('core.routeIhNuzhnoRazreshitV') }} </p>
       <div class="route-transfer__row">
-        <label>{{ t('core.routeTselevoyProekt') }} <UiSelect v-model="targetProfile" data-test="transfer-target-profile">
+        <label>{{ t('core.routeTselevoyProekt') }}
+          <UiSelect v-model="targetProfile" data-test="transfer-target-profile" :disabled="!profiles.length">
+            <option value="" disabled>{{ t('core.taskFormChooseProject') }}</option>
             <option v-for="profile in profiles" :key="profile" :value="profile">
               {{ profile }}
             </option>
@@ -94,7 +96,10 @@ const error = ref('');
 const exportRouteId = ref('');
 const bundle = ref<RouteTransferBundle | null>(null);
 const result = ref<RouteTransferImportResult | null>(null);
-const targetProfile = ref(props.document.profile);
+const defaultTargetProfile = computed(() => (
+  props.profiles.includes(props.document.profile) ? props.document.profile : ''
+));
+const targetProfile = ref(defaultTargetProfile.value);
 const title = ref(t('core.routeImportirovannyyKomplekt'));
 const importMode = ref<'new' | 'add'>('new');
 const collisionChoice = ref<'cancel' | 'replace' | 'rename'>('cancel');
@@ -105,7 +110,7 @@ const singleRoute = computed(() => Object.keys(bundle.value?.content.routes ?? {
 const collision = computed(() => singleRoute.value
   && Object.hasOwn(props.document.routes, importedRouteId.value));
 const canImport = computed(() => Boolean(bundle.value && !busy.value && !props.dirty
-  && targetProfile.value && title.value.trim()
+  && targetProfile.value && props.profiles.includes(targetProfile.value) && title.value.trim()
   && (importMode.value === 'new' || (singleRoute.value
     && props.document.state === 'editing'
     && targetProfile.value === props.document.profile))
@@ -118,9 +123,15 @@ watch(targetProfile, (profile) => {
   }
 });
 
+watch(() => props.profiles, (profiles) => {
+  if (targetProfile.value && !profiles.includes(targetProfile.value)) {
+    targetProfile.value = '';
+  }
+});
+
 watch(() => props.document.id, () => {
   clearFile();
-  targetProfile.value = props.document.profile;
+  targetProfile.value = defaultTargetProfile.value;
   importMode.value = 'new';
   exportRouteId.value = '';
 });

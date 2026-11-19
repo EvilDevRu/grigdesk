@@ -38,7 +38,7 @@ export async function loadProject(
   const generation = runtime.selectionGeneration;
 
   try {
-    const detail = await projectsApi.detail(id);
+    const detail = await projectsApi.detail(id, 'all');
 
     if (request !== runtime.detailRequest || generation !== runtime.selectionGeneration) {
       return;

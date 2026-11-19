@@ -656,7 +656,6 @@ test('архивный проект не предлагается новой с�
     store: {
       projects: [
         { id: 'grigdesk', factory: false, archivedAt: null },
-        { id: 'kopeika', factory: false, archivedAt: '2026-09-22T10:00:00.000Z' },
       ],
       connections: [
         {

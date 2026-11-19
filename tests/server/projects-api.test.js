@@ -296,6 +296,24 @@ test('POST /archive и /restore: 200 с паспортом, событие и п
   assert.equal(parseProjectDetail(archived.json()).archivedAt !== null, true);
   assert.equal(parseProjectDetail(archived.json()).revision, 2);
 
+  for (const [query, expected] of [['', []], ['?scope=archived', ['demo']], ['?scope=all', ['demo']]]) {
+    const projects = await app.inject(`/api/projects${query}`);
+    const profiles = await app.inject(`/api/profiles${query}`);
+
+    assert.equal(projects.statusCode, 200);
+    assert.equal(profiles.statusCode, 200);
+    assert.deepEqual(parseProjectSummaries(projects.json()).map((item) => item.id), expected);
+    assert.deepEqual(profiles.json().profiles, expected);
+  }
+
+  assert.equal((await app.inject('/api/projects?scope=unknown')).statusCode, 400);
+  assert.equal((await app.inject('/api/profiles?scope=unknown')).statusCode, 400);
+  assert.equal((await app.inject('/api/projects/demo')).statusCode, 404);
+  const detail = await app.inject('/api/projects/demo?scope=archived');
+
+  assert.equal(detail.statusCode, 200);
+  assert.equal(parseProjectDetail(detail.json()).archivedAt !== null, true);
+
   const again = await app.inject({
     method: 'POST',
     url: '/api/projects/demo/archive',
@@ -313,6 +331,8 @@ test('POST /archive и /restore: 200 с паспортом, событие и п
 
   assert.equal(restored.statusCode, 200);
   assert.equal(parseProjectDetail(restored.json()).archivedAt, null);
+  assert.deepEqual((await app.inject('/api/profiles')).json().profiles, ['demo']);
+  assert.deepEqual((await app.inject('/api/projects?scope=archived')).json().projects, []);
   assert.deepEqual(events.map((event) => event.data.kind), ['created', 'archived', 'restored']);
 });
 

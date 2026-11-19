@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeAgentNode, makeDraft } from '../fixtures/routes-editor.mjs';
+import { projectCatalog } from './fixtures/projects/data.mjs';
 import { buildRouteGraph } from '../../shared/pipeline/routeGraphView.ts';
 import { clientBrowser } from './helpers/client-browser.mjs';
 
@@ -25,7 +26,7 @@ async function fixture(t, draft = makeDraft()) {
     nodeIds: true,
   });
   const responses = {
-    '/api/profiles': { profiles: ['sample', 'design-system'] },
+    '/api/projects': projectCatalog(['sample', 'design-system']),
     '/api/routes/sample/revisions': {
       profile: 'sample',
       publishSupported: false,

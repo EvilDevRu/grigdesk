@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { projectCatalog } from './fixtures/projects/data.mjs';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { DEFAULT_CODE_BRANCH_SETTINGS } from '../../shared/plugins/code/codeBranchContracts.ts';
 import {
@@ -5722,6 +5723,35 @@ test('TW-C02: transfer сохраняет staged gitRef; пропавшие tree
   }
 });
 
+test('PD-code-archive: выбор содержит активные проекты, ссылка на архивный открывается', async (t) => {
+  const archived = {
+    ...projectCatalog(['archived'], ['archived']).projects[0],
+    repos: [],
+  };
+  const { api } = makeFilesApi({
+    getHandlers: {
+      projects: ({ url }) => url === '/api/projects/archived?scope=all'
+        ? archived : { projects: [projectFixture('demo', ['/demo'])] },
+    },
+  });
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    storage: { 'grigdesk-project': 'archived' },
+  });
+  const projectOptions = () => wrapper.findAll('#code-project-native option').map((item) => item.text());
+
+  assert.deepEqual(projectOptions(), ['demo']);
+  assert.equal(wrapper.get('#code-project').text(), 'demo');
+
+  await wrapper.setProps({
+    intents: [{ id: 1, type: 'project', project: 'archived' }],
+  });
+  await settle(flushPromises);
+
+  assert.equal(wrapper.get('#code-project').text(), 'archived');
+  assert.deepEqual(projectOptions(), ['demo']);
+});
+
 for (const event of ['projects-changed', 'hello']) {
   test(`PD-code-catalog: ${event} сбрасывает удалённый контекст и отбрасывает поздний GET`, async (t) => {
     let removed = false;
@@ -5735,6 +5765,11 @@ for (const event of ['projects-changed', 'hello']) {
               projects: removed ? [projectFixture('other', ['/other'])]
                 : [projectFixture('demo', ['/demo']), projectFixture('other', ['/other'])]
             };
+          }
+          if (url === '/api/projects/demo?scope=all' && removed) {
+            throw Object.assign(new Error('Проект не найден'), {
+              data: { error: 'not_found', message: 'Проект не найден' },
+            });
           }
           if (url.endsWith('/repos')) {
             repoCalls += 1;

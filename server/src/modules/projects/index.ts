@@ -6,6 +6,7 @@
 // заводя проект через POST /api/profiles.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { projectScopeOptions, type ProjectScopeRoute } from '../../lib/profiles.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { createProjectsService } from './service.ts';
 import { ProjectsError } from './errors.ts';
@@ -55,21 +56,23 @@ async function projectsModule(
 
   fastify.decorate('projects', service);
 
-  fastify.get('/api/projects', async (_request, reply) => {
-    try {
-      return { projects: await service.list() };
-    } catch (err) {
-      return failure(reply, err);
-    }
-  });
+  fastify.get<ProjectScopeRoute>('/api/projects', projectScopeOptions,
+    async (request, reply) => {
+      try {
+        return { projects: await service.list(request.query.scope) };
+      } catch (err) {
+        return failure(reply, err);
+      }
+    });
 
-  fastify.get<ProjectParams>('/api/projects/:id', async (request, reply) => {
-    try {
-      return await service.read(request.params.id);
-    } catch (err) {
-      return failure(reply, err);
-    }
-  });
+  fastify.get<ProjectParams & ProjectScopeRoute>('/api/projects/:id', projectScopeOptions,
+    async (request, reply) => {
+      try {
+        return await service.read(request.params.id, request.query.scope);
+      } catch (err) {
+        return failure(reply, err);
+      }
+    });
 
   fastify.post('/api/projects', async (request: FastifyRequest, reply) => {
     try {

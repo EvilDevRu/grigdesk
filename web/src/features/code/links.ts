@@ -62,7 +62,7 @@ export function loadCodeRoots({ force = false } = {}) {
     return Promise.resolve(codeRoots.value);
   }
 
-  rootsLoading = codeApi.roots()
+  rootsLoading = codeApi.roots('all')
     .then((roots) => {
       codeRoots.value = roots;
     })

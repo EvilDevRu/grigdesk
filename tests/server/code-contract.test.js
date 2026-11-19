@@ -52,6 +52,7 @@ async function fixture(t, resolveCommitTarget = async () => ({ ok: false, error:
   await git(root, ['remote', 'add', 'origin', remote]);
 
   let enabled = true;
+  let archivedAt = null;
   const app = Fastify({ logger: false });
 
   app.decorate('pluginEnabled', () => enabled);
@@ -60,7 +61,7 @@ async function fixture(t, resolveCommitTarget = async () => ({ ok: false, error:
     config: { profilesDir: path.join(temp, 'profiles') },
     prefs: {
       read: () => ({
-        projects: { demo: { repos: [{ key: 'main', dir: root }] } },
+        projects: { demo: { repos: [{ key: 'main', dir: root }], archivedAt } },
         providerSettings: { test: { selected: true } },
       }),
     },
@@ -76,11 +77,28 @@ async function fixture(t, resolveCommitTarget = async () => ({ ok: false, error:
     app,
     root,
     remote,
+    archive: () => {
+      archivedAt = '2026-11-18T00:00:00Z';
+    },
     disable: () => {
       enabled = false;
     },
   };
 }
+
+test('Код добавляет корни архивных проектов только по явному запросу', async (t) => {
+  const { app, root, archive } = await fixture(t);
+
+  archive();
+
+  const ordinary = await app.inject('/api/code/roots');
+  const explicit = await app.inject('/api/code/roots?scope=all');
+
+  assert.equal(ordinary.statusCode, 200);
+  assert.equal(explicit.statusCode, 200);
+  assert.deepEqual(parseCodeRoots(ordinary.json()).roots, []);
+  assert.equal(parseCodeRoots(explicit.json()).roots[0]?.root, root);
+});
 
 /** Проверяет HTTP-статус до декодирования сериализованного ответа маршрута. */
 async function request(app, method, action, parse, payload) {

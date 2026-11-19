@@ -47,7 +47,7 @@ export async function changeLifecycle(
     store.setDraft(createDraft(detail));
     store.setConflict(null);
     store.setError('');
-    await Promise.all([loadProjects(), loadDependencies(id)]);
+    await Promise.all([loadProjects('all'), loadDependencies(id)]);
 
     return {
       ok: true,

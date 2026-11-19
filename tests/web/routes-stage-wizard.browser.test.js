@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   capabilities, loopDraft, roleCatalog, seedDraft, serverFixture,
 } from '../fixtures/routes-stage-wizard.mjs';
+import { projectCatalog } from './fixtures/projects/data.mjs';
 import { clientBrowser } from './helpers/client-browser.mjs';
 
 /**
@@ -51,7 +52,7 @@ async function fixture(t, initial) {
   const client = await clientBrowser(t, {
     shell: null,
     artifacts: path.join(process.env.GRIGDESK_ARTIFACTS_DIR, 'stage-wizard'),
-    responses: { '/api/profiles': { profiles: ['sample'] } },
+    responses: { '/api/projects': projectCatalog(['sample']) },
   });
   const calls = [];
 

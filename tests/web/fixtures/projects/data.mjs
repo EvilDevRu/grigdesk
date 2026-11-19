@@ -58,10 +58,28 @@ export const projects = [project, ...[
   archivedAt: archived ? '2026-10-01T10:00:00Z' : null,
 }))];
 
-export const responses = { '/api/projects': { projects } };
+export const responses = {
+  '/api/projects': { projects: projects.filter((item) => !item.archivedAt) },
+  '/api/projects?scope=all': { projects },
+};
+
+/**
+ * Каталог маршрутов использует ту же сетевую форму, включая состояние архива.
+ * Сохраняем порядок имён и общий паспорт для каждого проекта фикстуры.
+ */
+export function projectCatalog(ids, archived = []) {
+  return {
+    projects: ids.map((id) => ({
+      ...project,
+      id,
+      title: id,
+      archivedAt: archived.includes(id) ? '2026-11-17T00:00:00Z' : null,
+    })),
+  };
+}
 
 for (const item of projects) {
-  responses[`/api/projects/${item.id}`] = item;
+  responses[`/api/projects/${item.id}?scope=all`] = item;
   responses[`/api/projects/${item.id}/dependencies`] = {
     items: [],
     archivable: true,

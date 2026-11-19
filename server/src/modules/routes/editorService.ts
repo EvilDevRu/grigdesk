@@ -50,7 +50,9 @@ export class RoutesEditorService {
     } catch {
       throw new RoutesEditorStoreError('routes_bad_request', 'Недопустимый профиль');
     }
-    const projects = await listProjects({ profilesDir: this.profilesDir }, this.prefs);
+
+    const projects = await listProjects({ profilesDir: this.profilesDir }, this.prefs, 'all');
+
     if (!projects.includes(profile)) {
       throw new RoutesEditorStoreError('routes_project_not_found', 'Проект не найден');
     }

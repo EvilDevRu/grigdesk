@@ -98,7 +98,9 @@ export function publicPrefsView(prefs: GrigDeskPrefs): GrigDeskPrefs {
     return [id, local];
   }));
 
-  return { ...prefs, providerSettings };
+  const { projects: _projects, projectsMeta: _projectsMeta, ...publicPrefs } = prefs;
+
+  return { ...publicPrefs, providerSettings };
 }
 
 /** Запись настроек из недоверенного файла: не объект читается как пустая. */

@@ -23,15 +23,21 @@ export interface ProjectCheckState {
   message: string;
 }
 
-interface ProjectsState {
+type ProjectCatalog = {
   items: ProjectSummary[];
+  loaded: boolean;
+  loading: boolean;
+  error: string;
+};
+
+export type ProjectCatalogScope = 'active' | 'all';
+
+interface ProjectsState extends ProjectCatalog {
+  activeCatalog: ProjectCatalog;
   deletedIds: Set<string>;
   opened: ProjectDetail | null;
   draft: ProjectDraft | null;
   conflict: ProjectConflict | null;
-  loaded: boolean;
-  loading: boolean;
-  error: string;
   checks: Record<string, ProjectCheckState>;
   // Связи открытого проекта: форма показывает их перед архивом.
   dependencies: ProjectDependencies | null;
@@ -40,6 +46,12 @@ interface ProjectsState {
 export const useProjectsStore = defineStore('projects', {
   state: (): ProjectsState => ({
     items: [],
+    activeCatalog: {
+      items: [],
+      loaded: false,
+      loading: false,
+      error: '',
+    },
     deletedIds: new Set(),
     opened: null,
     draft: null,
@@ -54,11 +66,6 @@ export const useProjectsStore = defineStore('projects', {
   getters: {},
 
   actions: {
-    setItems(items: ProjectSummary[]) {
-      this.items = items;
-      this.loaded = true;
-    },
-
     /**
      * Удалённый паспорт больше не служит выбором; локальные правки остаются для чтения.
      * Каталог и связанные проверки очищаются вместе, без обращения к сети.
@@ -66,6 +73,7 @@ export const useProjectsStore = defineStore('projects', {
     removeRegistration(id: string) {
       this.deletedIds.add(id);
       this.items = this.items.filter((item) => item.id !== id);
+      this.activeCatalog.items = this.activeCatalog.items.filter((item) => item.id !== id);
 
       if (this.opened?.id !== id) {
         return;
@@ -90,10 +98,6 @@ export const useProjectsStore = defineStore('projects', {
 
     setConflict(conflict: ProjectConflict | null) {
       this.conflict = conflict;
-    },
-
-    setLoading(loading: boolean) {
-      this.loading = loading;
     },
 
     setError(message: string) {

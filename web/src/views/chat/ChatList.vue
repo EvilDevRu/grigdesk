@@ -552,12 +552,10 @@ const projectById = computed(() => new Map(projectItems.value.map((item) => [ite
 const selectedProjectRecord = computed(() => projectById.value.get(selectedProject.value));
 const canCreateChat = computed(() => chat.loaded && (
   !selectedProject.value || selectedProject.value === '@none'
-  || Boolean(selectedProjectRecord.value && !selectedProjectRecord.value.archivedAt)
+  || Boolean(selectedProjectRecord.value)
 ));
 const selectedProjectTitle = computed(() => selectedProject.value === '@none'
-  ? t('core.chatProjectNone') : selectedProjectRecord.value
-    ? selectedProjectRecord.value.title + (selectedProjectRecord.value.archivedAt
-      ? ` · ${t('core.chatFilterArchived')}` : '') : selectedProject.value);
+  ? t('core.chatProjectNone') : selectedProjectRecord.value?.title ?? selectedProject.value);
 const listFilters = computed<ChatListFilters>(() => {
   const ordinary = { ...filters.value };
 

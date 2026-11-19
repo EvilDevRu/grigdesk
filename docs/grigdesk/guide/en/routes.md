@@ -19,6 +19,8 @@ Route scripts remain in the selected profile; explicitly configured external pat
 4. Validate and resolve connectivity, input and executor-availability errors.
 5. Publish the verified revision and check the new-run form proposes it.
 
+The project picker and the import target selector show active projects.
+
 Narrow panels switch between Catalog / Route / Properties using compact tabs, preserving selection and input.
 Wide panels keep the graph beside stage properties even when toolbar actions wrap;
 the stage list remains accessible below the graph.

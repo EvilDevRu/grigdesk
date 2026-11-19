@@ -19,14 +19,14 @@ the dialog fills the screen. "Cancel" and "Create project" are in the footer.
 Cancel and Close ask for confirmation if you have edited the draft. Once created,
 the project appears in the project picker.
 
-Search, archive, and the other filters apply within the selected project.
-Archived projects are available for reading previous conversations. Deleting a
-project registration returns to the full list. If the catalog fails to load,
-the selection is kept and you can retry. The choice is remembered for this connection.
+The rail and the "Chat project" selector show active projects. Search, the chat
+archive, and other filters apply within the selected project. Archiving or deleting
+the selected project returns the list to "All chats" and keeps the current conversation
+open. If the catalog fails to load, the selection is kept and you can retry.
+The choice is remembered for this connection.
 
 Creating a chat in an active project selects its working folder. "No project"
 uses the built-in GrigDesk folder. "All chats" uses your usual new-chat settings.
-Creating chats is disabled for archived projects.
 
 ## Filters
 

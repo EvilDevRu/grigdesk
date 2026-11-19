@@ -117,7 +117,9 @@
         <div class="ebody"><span class="loading-status">{{ t('core.codeZagruzkaKoda') }}</span></div>
       </section>
     </div>
-    <div v-else-if="!projects.length" class="empty"> {{ t('core.codeProektovPokaNetZavedi') }} <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
+    <div v-else-if="!project && !projects.length" class="empty">
+      {{ t('core.codeNoActiveProjects') }}
+      <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
     </div>
 
     <div v-else ref="layHost" class="lay" :class="layoutClasses"
@@ -1515,6 +1517,7 @@ import type { ToolWindowState } from '../../shared/tools/toolWindowState.ts';
 import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { codeApi, codeErrorMessage } from '../../shared/codeApi';
 import { parseCodeCommitSelectionHistory } from '../../../../shared/plugins/code/codeContracts';
+import { projectsApi } from '../../shared/projectsApi.ts';
 import { useSse } from '../../composables/useSse';
 import { useChatStore } from '../../stores/chat.ts';
 import { router } from '../../router.ts';
@@ -1668,6 +1671,7 @@ const contextLoading = ref(false);
 const error = ref('');
 const projects = ref<CodeProject[]>([]);   // сводка /api/projects: [{id, repos, …}]
 const project = ref('');
+const openedProject = ref<CodeProject | null>(null);
 const repos = ref<CodeRepo[]>([]);      // /api/code/:project/repos: [{key, dir, trees}]
 const repoKey = ref('');
 const treePath = ref('');
@@ -1700,7 +1704,7 @@ const contextGroups = computed(() => {
   return groups;
 });
 const projectHasRepos = computed(() => (
-  (projects.value.find((item) => item.id === project.value)?.repos || []).length > 0
+  Boolean(openedProject.value?.repos.length)
 ));
 // Оба переключателя видны всегда, как только есть что показать: даже единственный
 // вариант обязан выглядеть переключателем — иначе непонятно, где вообще менять проект
@@ -4307,7 +4311,7 @@ async function importState(value: ToolWindowState): Promise<void> {
   }
 
   if (typeof state.project === 'string' && project.value !== state.project) {
-    await setProject(state.project);
+    await openNamedProject(state.project);
   }
 
   const target = contexts.value.find((item) => item.repoKey === state.repo && item.treePath === state.root);
@@ -4359,9 +4363,20 @@ async function importState(value: ToolWindowState): Promise<void> {
   commitComposerTouched.value = state.commitComposerTouched === true;
 }
 
+/**
+ * Переключатель принимает только пункт рабочего каталога.
+ * Точные ссылки открывают паспорт вне списка отдельным действием.
+ */
 function selectProject(event: Event) {
-  if (event.target instanceof HTMLSelectElement) {
-    return setProject(event.target.value);
+  if (!(event.target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const id = event.target.value;
+  const target = projects.value.find((item) => item.id === id);
+
+  if (target) {
+    return setProject(target);
   }
 }
 
@@ -4376,14 +4391,16 @@ function selectContext(event: Event) {
  * Смена проекта начинает новое поколение запросов и сохраняет выбор человека.
  * Ответы предыдущего проекта не могут вернуть его рабочую копию или состояние.
  */
-async function setProject(id: string, { activation = null }: ActivationOptions = {}) {
+async function setProject(target: CodeProject, { activation = null }: ActivationOptions = {}) {
   if (!activationIsCurrent(activation)) {
     return;
   }
 
   const generation = ++contextGeneration;
   const requestId = ++reposRequestId;
+  const id = target.id;
 
+  openedProject.value = target;
   project.value = id;
   localStorage.setItem('grigdesk-project', id); // общий выбор проекта с «Маршрутами» и «Проектами»
   repos.value = [];
@@ -7250,6 +7267,17 @@ async function activate({ preserve = false } = {}) {
     if (own !== activationId) {
       return;
     }
+
+    projects.value = loaded;
+
+    const wanted = localStorage.getItem('grigdesk-project') || '';
+    const pick = previous?.project
+      ? loaded.find((item) => item.id === previous.project) ?? await projectsApi.findDetail(previous.project)
+      : pickCodeProject(loaded, wanted);
+
+    if (own !== activationId) {
+      return;
+    }
     // Пока фоновый запрос летел, человек мог выбрать другой проект/worktree.
     // Такой ответ больше не имеет права возвращать интерфейс к старому снимку.
     if (previous && (previous.generation !== contextGeneration
@@ -7257,20 +7285,17 @@ async function activate({ preserve = false } = {}) {
       return;
     }
 
-    projects.value = loaded;
-
-    const wanted = previous?.project || localStorage.getItem('grigdesk-project') || '';
-    const pick = preserve && previous?.project && !loaded.some((item) => item.id === previous.project)
-      ? null : pickCodeProject(projects.value, wanted);
     let revalidatedInPlace = false;
 
     if (pick && preserve && previous?.project === pick.id && project.value === pick.id) {
+      openedProject.value = pick;
       revalidatedInPlace = true;
       await revalidateProject(previous, own);
     } else if (pick) {
-      await setProject(pick.id, { activation: own });
+      await setProject(pick, { activation: own });
     } else {
       contextGeneration += 1;
+      openedProject.value = null;
       project.value = '';
       repos.value = [];
       repoKey.value = '';
@@ -7305,7 +7330,7 @@ async function activate({ preserve = false } = {}) {
 
     initialized = true;
   } catch (e) {
-    if (own === activationId) {
+    if (own === activationId && (!previous || previous.generation === contextGeneration)) {
       error.value = codeErrorMessage(e);
     }
   } finally {
@@ -7317,6 +7342,33 @@ async function activate({ preserve = false } = {}) {
   await processIntents();
   await nextTick();
   layoutEditors();
+}
+
+/**
+ * Явное открытие может прочитать архивный паспорт по ID.
+ * Смена рабочего контекста отменяет применение запоздалого ответа.
+ */
+async function openNamedProject(id: string): Promise<void> {
+  const generation = contextGeneration;
+
+  try {
+    const target = projects.value.find((item) => item.id === id) ?? await projectsApi.findDetail(id);
+
+    if (generation !== contextGeneration) {
+      return;
+    }
+    if (!target) {
+      error.value = t('core.codeProektProjectNedostupenV', { project: id });
+
+      return;
+    }
+
+    await setProject(target);
+  } catch (failure) {
+    if (generation === contextGeneration) {
+      error.value = codeErrorMessage(failure);
+    }
+  }
 }
 
 /**
@@ -7335,13 +7387,7 @@ async function openIntentFile(intent: OpenFileIntent) {
   }
 
   if (intent.project && project.value !== intent.project) {
-    if (!projects.value.some((item) => item.id === intent.project)) {
-      error.value = t('core.codeProektProjectNedostupenV', { project: intent.project });
-
-      return;
-    }
-
-    await setProject(intent.project);
+    await openNamedProject(intent.project);
 
     if (project.value !== intent.project) {
       return;
@@ -7393,11 +7439,7 @@ async function processIntents() {
   try {
     for (const { id, payload: intent } of pending) {
       if (intent?.type === 'project' && intent.project && project.value !== intent.project) {
-        const target = projects.value.find((item) => item.id === intent.project);
-
-        if (target) {
-          await setProject(target.id);
-        }
+        await openNamedProject(intent.project);
       } else if (intent?.type === 'open-file') {
         await openIntentFile(intent);
       }

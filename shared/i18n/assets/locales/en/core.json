@@ -2036,6 +2036,7 @@
   "codeProjectRepolabel": "{project} · {repoLabel}",
   "codeZagruzkaKoda": "Loading code…",
   "codeProektovPokaNetZavedi": "No projects yet — create one in",
+  "codeNoActiveProjects": "No active projects. Create or restore a project in",
   "codeProekty": "Projects",
   "codeRazdelyKoda": "Code sections",
   "codeFaylyDerevoIPoisk": "Files: tree and code search",

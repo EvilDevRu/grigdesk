@@ -50,6 +50,11 @@ test('RE-G4-03/05: файл показывает источник, зависи�
       true);
     await wrapper.find('[data-test="transfer-new-id"]').setValue('imported');
     assert.equal(wrapper.find('[data-test="transfer-import"]').attributes('disabled'), undefined);
+
+    await wrapper.setProps({ profiles: ['target'] });
+
+    assert.equal(wrapper.get('[data-test="transfer-target-profile"]').element.value, '');
+    assert.equal(wrapper.get('[data-test="transfer-import"]').attributes('disabled') !== undefined, true);
   });
 
 test('RE-G4-02: смена целевого проекта оставляет только создание нового черновика',

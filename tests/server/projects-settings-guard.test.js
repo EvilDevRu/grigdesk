@@ -63,6 +63,8 @@ test('POST /api/settings/prefs не трогает реестры проекто
   });
 
   assert.equal(ok.statusCode, 200);
+  assert.equal(Object.hasOwn(ok.json(), 'projects'), false);
+  assert.equal(Object.hasOwn(ok.json(), 'projectsMeta'), false);
   assert.equal(prefs.readStored().showAllModels, true);
 });
 

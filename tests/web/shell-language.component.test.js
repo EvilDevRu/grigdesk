@@ -496,7 +496,7 @@ test('RET-NAV: старая ссылка открывает маршруты б�
   timeout: 120000,
 }, async (t) => {
   const { browser, origin } = await i18nBrowser(t, {
-    responses: { '/api/profiles': { profiles: [] } },
+    responses: { '/api/projects': { projects: [] } },
   });
 
   for (const locale of ['ru-RU', 'en-US']) {

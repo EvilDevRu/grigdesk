@@ -462,7 +462,7 @@ test('валидация путей: bad_dir, dup_key, bad_key и path.normalize
   assert.equal(env.prefs.readStored().projects.norm.repos[0].dir, '/srv/b');
 });
 
-test('list отдаёт сводки: exists, pathsSource, пустые routes без бандла, архив включён', async (t) => {
+test('полный каталог включает архив и сводки с exists, pathsSource и routes', async (t) => {
   const env = await withPrefs(t);
   const here = await makeRepoDir(env, 'here');
   const gone = path.join(env.dir, 'repos', 'gone');
@@ -482,7 +482,7 @@ test('list отдаёт сводки: exists, pathsSource, пустые routes �
     },
   });
 
-  const summaries = await service.list();
+  const summaries = await service.list('all');
   const byId = new Map(summaries.map((summary) => [summary.id, summary]));
 
   assert.deepEqual([...byId.keys()].sort(), ['factory', 'grigdesk', 'old']);

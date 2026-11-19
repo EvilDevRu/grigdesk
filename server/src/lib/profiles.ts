@@ -7,11 +7,25 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { recordOrEmpty } from '../../../shared/lib/objects.ts';
+import type { ProjectListScope } from '../../../shared/runtime/projectsContracts.ts';
 import { deletedProjectIds } from './projects/deletion.ts';
-
 import { archivedProjectIds } from './projects/archive.ts';
 
 export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+
+export const projectScopeOptions = {
+  schema: {
+    querystring: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['active', 'archived', 'all'] satisfies ProjectListScope[] },
+      },
+    },
+  },
+};
+
+export type ProjectScopeRoute = { Querystring: { scope?: ProjectListScope } };
 
 /**
  * Готовность профиля к чему-либо он заявляет САМ — списком `capabilities` в graph.json
@@ -70,43 +84,41 @@ export async function listFactoryProfiles(
 
 // Ровно то, что нужно от ещё нетипизированного стора настроек: реестр проектов.
 export interface ProjectsPrefsPort {
-  read?: () => { projects?: Record<string, unknown> } | null | undefined;
-}
-
-/** Проекты, заведённые в GrigDesk: ключи реестра prefs.projects. */
-function listGrigDeskProjects(prefs: ProjectsPrefsPort | null): string[] {
-  try {
-    return Object.keys(prefs?.read?.()?.projects || {}).filter((name) => PROFILE_RE.test(name));
-  } catch { return []; }
+  read?: () => unknown;
 }
 
 /**
- * Все проекты: фабрика + заведённые в GrigDesk (объединение, отсортировано).
- * По умолчанию список полный — архив ничего не рвёт, и уже созданное продолжает
- * открываться. `includeArchived: false` просят там, где начинают НОВОЕ: форма
- * запуска, подъём песочницы, выбор проекта в новом правиле.
+ * Каталог объединяет проекты фабрики и GrigDesk, удалённые регистрации исключаются.
+ * Обычные списки активны, архив подключается явной областью запроса.
  */
 export async function listProjects(
   { profilesDir }: { profilesDir: string },
   prefs: ProjectsPrefsPort | null = null,
-  { includeArchived = true }: { includeArchived?: boolean } = {},
+  scope: ProjectListScope = 'active',
 ): Promise<string[]> {
-  const all = new Set([
-    ...(await listFactoryProfiles(profilesDir)),
-    ...listGrigDeskProjects(prefs),
-  ]);
+  const factory = await listFactoryProfiles(profilesDir);
+  let stored: unknown;
 
-  const deleted = deletedProjectIds(prefs);
+  try {
+    stored = prefs?.read?.();
+  } catch {
+    stored = null;
+  }
+
+  const registered = Object.keys(recordOrEmpty(recordOrEmpty(stored).projects));
+  const all = new Set([...factory, ...registered.filter((id) => PROFILE_RE.test(id))]);
+  const snapshot = { read: () => stored };
+  const deleted = deletedProjectIds(snapshot);
 
   for (const id of deleted) {
     all.delete(id);
   }
 
-  if (includeArchived) {
+  if (scope === 'all') {
     return [...all].sort();
   }
 
-  const archived = archivedProjectIds(prefs);
+  const archived = archivedProjectIds(snapshot);
 
-  return [...all].filter((id) => !archived.has(id)).sort();
+  return [...all].filter((id) => archived.has(id) === (scope === 'archived')).sort();
 }

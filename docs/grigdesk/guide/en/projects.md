@@ -23,6 +23,10 @@ Prepare existing directories on the server. Human-supplied paths determine which
 5. Archive the project to prevent new work. Inspect blocking references and disable them in their owning sections.
 6. Restore it from the archive when needed. Delete registration is available in the archive after checks and confirmation.
 
+The project pickers in Chats, Code, and Routes show only active projects.
+Archived projects are available on the Archive tab. Restoring a project makes it
+available in the pickers again.
+
 Rows from a factory profile are read-only. Use the same Add button to include your own working
 folders. After saving, they appear in Code and can be used in project chats. The factory profile
 sets the repositories for triage and pipelines.

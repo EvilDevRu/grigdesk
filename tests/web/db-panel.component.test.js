@@ -353,7 +353,6 @@ test('архивный проект не предлагается новому �
     schemas: {},
     projects: [
       { id: 'grigdesk', archivedAt: null },
-      { id: 'kopeika', archivedAt: '2026-09-22T10:00:00.000Z' },
     ],
     load: async () => {},
   });

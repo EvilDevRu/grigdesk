@@ -18,7 +18,7 @@
         </template>
       </UiPaneHeader>
       <div class="catalog-content">
-        <ProjectSwitcher compact :profiles="profiles" :model-value="profile"
+        <ProjectSwitcher compact :profiles="activeProfiles" :model-value="profile"
                          @update:model-value="switchProfile" @create="openProjectCreate" @manage="manageProject" />
         <div class="catalog-heading">
           <h2>{{ editingDraft ? t('core.routeVChernovike') : t('core.routeOpublikovannye') }}</h2>
@@ -244,7 +244,7 @@
           <div class="ui-workspace-section__body">
             <RouteTransferDialog
                                :document="routesStore.serverSnapshot"
-                               :profiles="profiles" :dirty="routesStore.dirty || routesStore.saving
+                               :profiles="activeProfiles" :dirty="routesStore.dirty || routesStore.saving
                                  || routesStore.conflict || Boolean(routesStore.jsonBuffer?.dirty)"
                                @open="openTransferredDraft" />
           </div>
@@ -342,7 +342,9 @@ import type { RouteDraft, RouteRebaseResolution,
   RouteRevisionCompareReport } from '../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteEditorIssue } from '../../../shared/pipeline/routesEditorContracts.ts';
 import { publishSummary } from '../../../shared/pipeline/routesContracts.ts';
+import type { ProjectSummary } from '../../../shared/runtime/projectsContracts.ts';
 import { failureText } from '../shared/apiClient.ts';
+import { projectsApi } from '../shared/projectsApi.ts';
 import { routesApi } from '../shared/routesApi.ts';
 import type { DraftCreateRequest } from '../shared/routesApi.ts';
 import {
@@ -435,7 +437,8 @@ const PROJECT_KEY = 'grigdesk-project';
 const DRAFT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CATALOG_HASH_RE = /^[a-f0-9]{64}$/;
 
-const profiles = ref<string[]>([]);
+const profiles = ref<ProjectSummary[]>([]);
+const activeProfiles = computed(() => profiles.value.map((item) => item.id));
 const registrationDeleted = ref(false);
 let projectsRequest = 0;
 let pageGeneration = 0;
@@ -650,17 +653,20 @@ async function load(): Promise<void> {
 
   try {
     if (!profiles.value.length) {
-      profiles.value = await routesApi.profiles();
+      profiles.value = await projectsApi.list();
 
-      const first = profiles.value[0];
+      const named = route.query.profile;
 
-      if (typeof route.query.profile === 'string'
-        && !profiles.value.includes(route.query.profile)) {
-        throw new Error(t('core.routeProektProfileNeNayden', { profile: route.query.profile }));
-      }
-      if (first && !profiles.value.includes(profile.value)) {
-        profile.value = first;
-        localStorage.setItem(PROJECT_KEY, first);
+      if (typeof named === 'string') {
+        if (!activeProfiles.value.includes(named) && !await projectsApi.findDetail(named)) {
+          throw new Error(t('core.routeProektProfileNeNayden', { profile: named }));
+        }
+      } else if (!activeProfiles.value.includes(profile.value)) {
+        profile.value = activeProfiles.value[0] ?? '';
+
+        if (profile.value) {
+          localStorage.setItem(PROJECT_KEY, profile.value);
+        }
       }
     }
     if (!profile.value) {
@@ -1362,21 +1368,35 @@ function manageProject(id: string): void {
  */
 async function refreshProjects(): Promise<void> {
   const request = ++projectsRequest;
-  let available: string[];
+  const selected = profile.value;
+  let available: ProjectSummary[];
 
   try {
-    available = await routesApi.profiles();
+    available = await projectsApi.list();
   } catch {
     return;
   }
 
-  if (request !== projectsRequest) {
+  if (request !== projectsRequest || disposed) {
     return;
   }
 
   profiles.value = available;
 
-  if (!profile.value || available.includes(profile.value)) {
+  if (!selected || selected !== profile.value || activeProfiles.value.includes(selected)) {
+    return;
+  }
+
+  try {
+    if (await projectsApi.findDetail(selected)) {
+      return;
+    }
+  } catch {
+    // Отказ точного чтения не означает удаления открытого документа.
+    return;
+  }
+
+  if (request !== projectsRequest || selected !== profile.value || disposed) {
     return;
   }
 
@@ -1398,6 +1418,10 @@ async function refreshProjects(): Promise<void> {
     await router.replace({ path: '/routes', query: {} });
   } finally {
     resettingCatalog = false;
+
+    if (!disposed && !profile.value) {
+      watchRoutes('', catalogChanged);
+    }
   }
 }
 
@@ -1602,6 +1626,8 @@ onMounted(async () => {
     await load();
 
     if (!profile.value || error.value) {
+      watchRoutes('', catalogChanged);
+
       return;
     }
 

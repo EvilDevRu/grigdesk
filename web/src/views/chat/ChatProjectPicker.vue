@@ -7,7 +7,7 @@
         <option value="">{{ t('core.chatProjectAll') }}</option>
         <option value="@none">{{ t('core.chatProjectNone') }}</option>
         <option v-for="item in items" :key="item.id" :value="item.id">
-          {{ item.title }}{{ item.archivedAt ? ` · ${t('core.chatFilterArchived')}` : '' }}
+          {{ item.title }}
         </option>
       </UiSelect>
       <UiIconButton data-chat-project-create :label="t('core.projectNovyyProekt')"
@@ -28,8 +28,8 @@
       </UiIconButton>
       <div class="project-rail-scroll">
         <UiIconButton v-for="item in items" :key="item.id" data-context="chat-project-rail-item"
-          :data-chat-project="item.id" :label="labelOf(item)" :pressed="modelValue === item.id"
-          :disabled="disabled" v-tooltip="labelOf(item)" @click="emit('select', item.id)">
+          :data-chat-project="item.id" :label="item.title" :pressed="modelValue === item.id"
+          :disabled="disabled" v-tooltip="item.title" @click="emit('select', item.id)">
           <ProjectAvatar :id="item.id" :title="item.title" :icon="item.icon" />
         </UiIconButton>
       </div>
@@ -55,10 +55,6 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{ select: [value: string]; create: [] }>();
-
-function labelOf(item: ProjectSummary): string {
-  return item.archivedAt ? `${item.title} · ${t('core.chatFilterArchived')}` : item.title;
-}
 </script>
 
 <style scoped>

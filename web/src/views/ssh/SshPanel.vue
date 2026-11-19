@@ -707,7 +707,7 @@ const selectedSessionId = computed({
 });
 // Новый сервер заводят только на активный проект: архивным уже не работают, а
 // связи, заведённые до архива, остаются в списке со своим проектом.
-const projectOptions = computed(() => (store.projects || []).filter((project) => !project.archivedAt));
+const projectOptions = computed(() => store.projects || []);
 const projectPlaceholder = computed(() => {
   if (store.projectsLoading && !projectOptions.value.length) {
     return t('core.dbZagruzkaProektov');

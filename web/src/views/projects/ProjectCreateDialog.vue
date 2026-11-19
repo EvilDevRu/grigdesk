@@ -147,7 +147,7 @@ async function submit(): Promise<void> {
   saveFailure.value = '';
 
   try {
-    const result = await saveProject(null, draft);
+    const result = await saveProject(null, draft, { catalogScope: 'active' });
 
     fieldErrors.value = result.fieldErrors;
     saveFailure.value = result.ok ? '' : result.error;
@@ -177,6 +177,7 @@ async function overwrite(): Promise<void> {
   try {
     const result = await saveProject(null, draft, {
       expectedRevision: store.conflict?.currentRevision ?? 0,
+      catalogScope: 'active',
     });
 
     fieldErrors.value = result.fieldErrors;
