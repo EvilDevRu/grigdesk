@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
-import { resolveLegacyModel } from '../../server/src/lib/chat/modelRef.ts';
+import { resolveLegacyModel, resolveModelRef } from '../../server/src/lib/chat/modelRef.ts';
 import { getExecutors } from '../../server/src/lib/executors/index.ts';
 import claude from '../../server/src/lib/executors/claude.ts';
 import {
@@ -68,6 +68,79 @@ test('первый scope доступа сохраняет алиасы акту
   }]);
   assert.equal(JSON.stringify(file).includes('account-a-only-model'), false);
   assert.equal(JSON.stringify(file).includes('private-old-model'), false);
+});
+
+test('неполный живой снимок временно сохраняет выбранную модель и время её первого появления', async (t) => {
+  const now = Date.parse('2026-11-19T07:44:00Z');
+  const graceMs = 5 * 60_000;
+  const ref = { provider: 'test-live', model: 'selected-model' };
+  let ids = [ref.model, 'other-model'];
+
+  t.mock.timers.enable({ apis: ['Date'], now });
+
+  await unavailableExecutorFixture(t, {
+    catalogLive: true,
+    catalogOmissionGraceMs: graceMs,
+    catalog: async () => ids.map((id) => ({ id })),
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-catalog-omission-'));
+  const modelsPath = path.join(root, 'models.json');
+  const refresh = () => getModelsRegistry({ modelsPath }, { refresh: true });
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(modelsPath, JSON.stringify({ 'test-live': [] }));
+
+  const initial = resolveModelRef(ref, await refresh());
+
+  assert.equal(initial.ok, true);
+
+  t.mock.timers.tick(60_000);
+  ids = ['other-model', 'new-model'];
+
+  const shortened = await refresh();
+
+  assert.equal(resolveModelRef(ref, shortened).ok, true);
+  assert.equal(resolveModelRef({ ...ref, model: 'new-model' }, shortened).ok, true);
+
+  t.mock.timers.tick(60_000);
+  ids = [ref.model, 'other-model', 'new-model'];
+
+  const recovered = resolveModelRef(ref, await refresh());
+
+  assert.equal(recovered.model.firstSeen, initial.model.firstSeen);
+
+  t.mock.timers.tick(graceMs);
+  ids = ['other-model', 'new-model'];
+
+  assert.equal(resolveModelRef(ref, await refresh()).ok, true);
+
+  t.mock.timers.tick(graceMs);
+
+  assert.equal(resolveModelRef(ref, await refresh()).error, 'unknown_model');
+});
+
+test('смена профиля снимает временно сохранённую модель прежнего каталога сразу', async () => {
+  const file = {};
+  let scope = 'first-account';
+  let ids = ['first-account-model', 'shared-model'];
+  const adapter = {
+    catalogLive: true,
+    catalogOmissionGraceMs: 5 * 60_000,
+    catalogAccessScope: () => scope,
+    catalog: async () => ids.map((id) => ({ id })),
+  };
+
+  await mergeCatalog(file, 'fixture', adapter, {});
+  ids = ['shared-model'];
+  await mergeCatalog(file, 'fixture', adapter, {});
+
+  assert.ok(file.fixture.some((model) => model.id === 'first-account-model'));
+
+  scope = 'second-account';
+  await mergeCatalog(file, 'fixture', adapter, {});
+
+  assert.deepEqual(file.fixture.map((model) => model.id), ['shared-model']);
 });
 
 test('справка усилия следует доступным ступеням и не придумывает смысл новой', () => {

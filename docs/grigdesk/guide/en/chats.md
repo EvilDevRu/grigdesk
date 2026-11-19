@@ -47,6 +47,10 @@ Normal disables acceleration and is first in the list. Older chats without an ex
 “Use executor settings” while closed, inheriting settings; that item is absent from the open list.
 Use Recheck in executor settings if capability data is stale.
 
+If a model temporarily disappears from the Codex catalog, GrigDesk keeps it for the
+current profile for five minutes. If it is still missing at the next successful check
+after that period, select an available model in the conversation header.
+
 Chat cards load in batches of 40 while scrolling. Show more fetches the next batch even when the list fits.
 Archive and search load separately; counts cover all server conversations.
 New conversations from other windows or devices appear after a server notification without reloading or losing

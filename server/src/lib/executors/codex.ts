@@ -3459,6 +3459,8 @@ export default {
     return readCodexModelCatalog(config.codexBin);
   },
   catalogLive: true,
+  // Один неполный model/list не доказывает снятие модели с аккаунта.
+  catalogOmissionGraceMs: 5 * 60_000,
 
   /** Стабильное семейство для policy агентов и движка. */
   modelFamily(model: { family?: unknown; id?: unknown } | null | undefined) {

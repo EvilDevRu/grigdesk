@@ -31,7 +31,8 @@ import type { ExecutorAdapter } from './executors/index.ts';
 // 12: скорости модели приходят из native metadata, старый допуск не переносится.
 // 13: нечат-модели каталога получают extra и причину; порядок списка —
 //     tier → свежесть (createdAt сервиса / firstSeen реестра) → id.
-const CATALOG_SCHEMA = 13;
+// 14: адаптер может отложить удаление моделей после неполного снимка каталога.
+const CATALOG_SCHEMA = 14;
 
 // Запись каталога моделей. Форма открытая: файл редактируется руками, и поля,
 // которых ядро не знает, обязаны переживать мёрж.
@@ -174,9 +175,8 @@ async function mergeDiscovered(
  *
  * Мёрж, а не перезапись: новые модели добавляются, у известных освежаются name/context/tier
  * (кроме записей с `custom: true` — они правлены руками). Пропавшая из каталога модель
- * уходит из списка: состав задаёт каталог, иначе он копит всё, что когда-либо видел любой
- * CLI. Пропажу переживает только ручная запись `custom: true` — она остаётся с пометкой
- * `unknown: true` (полный id CLI обычно принимает и без записи о нём в каталоге).
+ * уходит из списка сразу либо после срока, объявленного адаптером. Смена доступа
+ * очищает прежний каталог сразу. Ручная запись `custom: true` остаётся с `unknown: true`.
  */
 export async function mergeCatalog(
   file: ModelsFile,
@@ -212,6 +212,7 @@ export async function mergeCatalog(
     list = list.filter((model) => model.custom);
     file[prov] = list;
     delete pm.watermark;
+    delete pm.catalogMissingSince;
     pm.catalogAccessScope = accessScope;
   }
   // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
@@ -257,28 +258,61 @@ export async function mergeCatalog(
     }
   }
   catalog = catalogCopy;
-  // Каталог задаёт СОСТАВ списка: что CLI забыл (или мы решили не показывать — старые версии),
-  // из выбора уходит. Иначе список копит всё, что когда-либо видел любой CLI, и превращается
-  // в свалку. Исключение — записи с `custom: true`: их добавил человек, их не трогаем.
+
   const prevById = new Map(list.map((m) => [m.id, m]));
   const next = catalog.map((m) => mergeCatalogModel(m, prevById.get(m.id)));
   const inCatalog = new Set(catalog.map((m) => m.id));
+  const exactAliases = new Set(catalog.flatMap((model) => model.modelRefAliases ?? []));
+  const graceMs = ex.catalogOmissionGraceMs ?? 0;
+  const now = Date.now();
+  const previousMissing = (pm.catalogMissingSince ?? {}) as Record<string, unknown>;
+  const missingSince = new Map<string, number>();
 
-  for (const m of list) {
-    if (!inCatalog.has(m.id) && m.custom) {
+  for (const model of list) {
+    if (inCatalog.has(model.id)) {
+      continue;
+    }
+
+    if (model.custom) {
       next.push({
-        ...m,
+        ...model,
         unknown: true,
         ...(ex.chatSpeed ? { chatSpeedModes: ['standard'] } : {}),
       });
+      continue;
+    }
+
+    if (graceMs <= 0 || exactAliases.has(model.id)) {
+      continue;
+    }
+
+    const previous = Object.hasOwn(previousMissing, model.id) ? previousMissing[model.id] : undefined;
+    const since = typeof previous === 'number' && previous <= now ? previous : now;
+
+    if (now - since < graceMs) {
+      missingSince.set(model.id, since);
+      next.push(model);
     }
   }
+
+  // Храним первый пропуск между опросами и перезапуском. Возврат модели сбрасывает срок.
+  const pending = Object.fromEntries(missingSince);
+  const pendingChanged = JSON.stringify(previousMissing) !== JSON.stringify(pending);
+
+  if (missingSince.size) {
+    pm.catalogMissingSince = pending;
+  } else {
+    delete pm.catalogMissingSince;
+  }
+
   const listChanged = JSON.stringify(list) !== JSON.stringify(next);
+
   file[prov] = next;
   pm.catalogVersion = version;
   pm.catalogSchema = CATALOG_SCHEMA;
   if (hasCacheKey && cacheKeyVerified) pm.catalogCacheKey = catalogCacheKey;
-  return metadataChanged || listChanged;
+
+  return accessChanged || metadataChanged || listChanged || pendingChanged;
 }
 
 /**

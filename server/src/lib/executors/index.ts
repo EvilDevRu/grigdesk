@@ -391,6 +391,7 @@ export interface ExecutorAdapter {
   statusPage?: string;
   updateCmd?: readonly string[];
   catalogLive?: boolean;
+  catalogOmissionGraceMs?: number;
   autoCompactEnv?: string;
   chatAutoCompact?: boolean;
   // Вендорные коды и статусы сбоя хода объявляет сам адаптер; ядро читает таблицу

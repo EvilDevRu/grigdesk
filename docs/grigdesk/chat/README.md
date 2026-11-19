@@ -281,7 +281,7 @@
 - [Смена ИИ внутри чата](executor-switching.md)
 - [Смена рабочей папки посреди разговора: Claude и Codex помнят разговор, DeepSeek начинает заново](workdir-switch.md)
 - [Список моделей Claude — ИЗ БИНАРЯ УСТАНОВЛЕННОГО CLI](claude-model-catalog.md)
-- [Список моделей Codex — ИЗ ОФИЦИАЛЬНОГО APP-SERVER](codex-model-catalog.md)
+- [Каталог Codex из App Server и защита от кратковременного исчезновения моделей](codex-model-catalog.md)
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
 - [Codex: глубина xhigh и max, автоматическое делегирование ultra](codex-effort-modes.md)
 - [Краткие подсказки усилия каждого исполнителя в чате и настройках](effort-hints.md)
