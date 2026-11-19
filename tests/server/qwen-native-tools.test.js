@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { createServer as createHttpsServer } from 'node:https';
 import { execFile as execFileCallback, spawn as spawnSentinel } from 'node:child_process';
@@ -14,6 +14,7 @@ import { withExternalCliProcess } from '../../server/src/lib/providerInstall/ext
 import { inspectCliLeases } from '../../server/src/lib/providerInstall/leases.ts';
 import { createWorkTools } from '../../server/src/lib/executors/index.ts';
 import { createWorkIpc } from '../../server/src/lib/executors/workIpc.ts';
+import { createSshBroker } from '../../server/src/lib/ssh/broker.ts';
 import { ChatLiveSessions } from '../../server/src/lib/chat/liveSessions.ts';
 import rawQwen from '../../server/src/lib/executors/qwen.ts';
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
@@ -420,37 +421,237 @@ test('Qwen native: вход в план закрывает запись до у�
   assert.equal(await readFile(allowed, 'utf8'), 'mode-transition-sentinel');
 });
 
-test('Qwen native: guard закрывает субагента без контекста', { timeout: 90000 }, async (t) => {
+test('Qwen native: foreground-субагент исполняет разрешённые инструменты через guard', {
+  timeout: 90000,
+}, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const model = await selectedModel(adapter, fixture);
+  const source = path.join(fixture.workspace, 'source.txt');
   const target = path.join(fixture.workspace, 'subagent.txt');
+  const shellTarget = path.join(fixture.workspace, 'subagent-shell.txt');
+  const sshCanary = path.join(fixture.workspace, 'ssh-executed');
+  const outside = path.join(fixture.root, 'outside.txt');
+  const escape = path.join(fixture.workspace, 'escape');
   const agent = { name: 'agent', args: {
     description: 'Проверить права дочернего агента',
     prompt: 'Выполни проверочные инструменты и заверши работу.',
     subagent_type: 'general-purpose',
+    run_in_background: false,
   } };
-  const ssh = { name: 'run_shell_command', args: { command: 'ssh example.invalid true' } };
-  const write = { name: 'write_file', args: { file_path: target, content: 'subagent-sentinel' } };
 
-  fixture.actions.push(agent, ssh, write);
+  await writeFile(source, 'subagent-read-sentinel');
+  await symlink(fixture.root, escape);
+  fixture.actions.push(agent,
+    { name: 'read_file', args: { file_path: source } },
+    { name: 'write_file', args: { file_path: target, content: 'subagent-sentinel' } },
+    { name: 'run_shell_command', args: { command: `printf subagent-shell > '${shellTarget}'` } },
+    { name: 'run_shell_command', args: {
+      command: `ssh example.invalid true; printf BAD > '${sshCanary}'`,
+    } },
+    { name: 'write_file', args: { file_path: outside, content: 'BAD' } },
+    { name: 'write_file', args: { file_path: path.join(escape, 'escaped.txt'), content: 'BAD' } },
+  );
 
   const result = await adapter.run(runInput(fixture, model, {
     permissionMode: 'yolo',
+    providerSettings: { blockDirectSsh: true },
     signal: AbortSignal.timeout(75000),
     onPermission: async () => assert.fail('Yolo не требует обычных разрешений'),
   }));
 
   assert.equal(agent.missing, undefined);
-  assert.equal(ssh.missing, undefined);
-  assert.equal(write.missing, undefined);
-
-  const content = await readFile(target, 'utf8').catch((error) => error.code);
-
-  assert.equal(content, 'ENOENT', 'Отсутствующий guard context не разрешает даже обычную запись');
-  assert.ok(JSON.stringify(fixture.requests).includes('Tool invocation guard failed'),
-    'CLI 0.27.2 очищает invocation context ребёнка до вызова обязательного guard');
+  assert.equal(fixture.actions.length, 0, 'Все действия субагента потребованы');
+  assert.equal(await readFile(target, 'utf8'), 'subagent-sentinel');
+  assert.equal(await readFile(shellTarget, 'utf8'), 'subagent-shell');
+  assert.ok(JSON.stringify(fixture.requests).includes('subagent-read-sentinel'));
+  assert.equal(JSON.stringify(fixture.requests).includes('Tool invocation guard failed'), false);
+  assert.match(JSON.stringify(fixture.requests), /denied by host policy/i);
+  await assert.rejects(access(sshCanary), { code: 'ENOENT' });
+  await assert.rejects(access(outside), { code: 'ENOENT' });
+  await assert.rejects(access(path.join(fixture.root, 'escaped.txt')), { code: 'ENOENT' });
   assert.ok(result.steps.some((step) => step.k === 'tool' && /agent/i.test(step.name)));
+});
+
+/**
+ * Тестовый SSH-брокер с настоящей очередью подтверждений и локальным транспортом.
+ * Эффект команды наблюдается только после решения человека и ровно один раз.
+ */
+function sshBrokerFixture(fixture, canary) {
+  const confirmations = [];
+  const decisions = [];
+  const execCalls = [];
+  const session = {
+    id: 'synthetic-ssh',
+    projectId: 'bound-project',
+    connectionId: 'synthetic-connection',
+    label: 'SSH_SENTINEL_LABEL',
+    role: 'reader',
+    host: '127.0.0.1',
+    port: 22,
+    user: 'tester',
+    agentAllowed: true,
+    generation: 1,
+  };
+  const broker = createSshBroker({
+    pluginEnabled: () => true,
+    sessions: {
+      list: () => [session],
+      listForAgent: () => [session],
+      exec: async (id, command) => {
+        execCalls.push({ id, command });
+        await writeFile(canary, command);
+
+        return {
+          ok: true,
+          output: 'SSH_EXEC_SENTINEL',
+          exitCode: 0,
+        };
+      },
+    },
+    permissionQueue: {
+      enqueue: (request) => {
+        confirmations.push(request);
+
+        return { result: new Promise((resolve) => decisions.push(resolve)) };
+      },
+    },
+  });
+  const workTools = createWorkTools({ chatKey: 'qwen-test-chat', invoke: broker.invoke });
+
+  return {
+    confirmations,
+    decisions,
+    execCalls,
+    workTools,
+  };
+}
+
+test('Qwen native: субагент вызывает supervised_ssh list через брокер', { timeout: 90000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const canary = path.join(fixture.workspace, 'ssh-list-effect');
+  const { confirmations, execCalls, workTools } = sshBrokerFixture(fixture, canary);
+  const work = await createWorkIpc({ root: fixture.workspace, workTools });
+
+  fixture.onCleanup(() => work.close());
+
+  const list = { match: 'supervised_ssh', args: { action: 'list' } };
+
+  fixture.actions.push({ name: 'agent', args: {
+    description: 'Получить список SSH-сессий',
+    prompt: 'Вызови список разрешённых SSH-сессий и верни метки.',
+    subagent_type: 'general-purpose',
+    run_in_background: false,
+  } }, list);
+
+  const result = await adapter.run(runInput(fixture, model, {
+    permissionMode: 'yolo',
+    signal: AbortSignal.timeout(75000),
+    mcpServers: [{ name: 'grigdesk-work', ...work.mcpServer }],
+    workTools,
+  }));
+
+  assert.equal(list.missing, undefined);
+  assert.equal(confirmations.length, 0, 'list не требует подтверждения');
+  assert.equal(execCalls.length, 0);
+  assert.ok(JSON.stringify(fixture.requests).includes('SSH_SENTINEL_LABEL'),
+    'Результат брокера вернулся в ход через субагента');
+  assert.equal(JSON.stringify(fixture.requests).includes('Tool invocation guard failed'), false);
+  assert.ok(result.steps.some((step) => step.k === 'tool' && /agent/i.test(step.name)));
+  await assert.rejects(access(canary), { code: 'ENOENT' });
+});
+
+test('Qwen native: exec субагента подтверждается в родительском чате', { timeout: 120000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const canary = path.join(fixture.workspace, 'ssh-exec-effect');
+  const { confirmations, decisions, execCalls, workTools } = sshBrokerFixture(fixture, canary);
+  const work = await createWorkIpc({ root: fixture.workspace, workTools });
+
+  fixture.onCleanup(() => work.close());
+
+  const deniedCommand = 'printf denied > /dev/null';
+  const approvedCommand = 'printf approved';
+
+  fixture.actions.push({ name: 'agent', args: {
+    description: 'Исполнить SSH-команды под надзором',
+    prompt: 'Вызови обе команды по очереди и верни результаты.',
+    subagent_type: 'general-purpose',
+    run_in_background: false,
+  } }, { match: 'supervised_ssh', args: {
+    action: 'exec',
+    sessionId: 'synthetic-ssh',
+    command: deniedCommand,
+  } }, { match: 'supervised_ssh', args: {
+    action: 'exec',
+    sessionId: 'synthetic-ssh',
+    command: approvedCommand,
+  } });
+
+  const running = adapter.run(runInput(fixture, model, {
+    permissionMode: 'yolo',
+    signal: AbortSignal.timeout(100000),
+    mcpServers: [{ name: 'grigdesk-work', ...work.mcpServer }],
+    workTools,
+  }));
+
+  running.catch(() => {});
+
+  await until(() => confirmations.length === 1, 'первое подтверждение SSH');
+  assert.equal(confirmations[0].origin, 'ssh');
+  assert.equal(confirmations[0].chatKey, 'qwen-test-chat', 'Подтверждение адресовано родительскому чату');
+  assert.equal(confirmations[0].presentation.command, deniedCommand);
+  await assert.rejects(access(canary), { code: 'ENOENT' }, 'До решения эффекта нет');
+  decisions[0]({ allow: false });
+
+  await until(() => confirmations.length === 2, 'второе подтверждение SSH');
+  assert.equal(execCalls.length, 0, 'Отказ не исполняет команду');
+  await assert.rejects(access(canary), { code: 'ENOENT' });
+  decisions[1]({ allow: true });
+
+  const result = await running;
+
+  assert.equal(execCalls.length, 1, 'Одобренная команда исполнена ровно один раз');
+  assert.equal(execCalls[0].command, approvedCommand);
+  assert.equal(await readFile(canary, 'utf8'), approvedCommand);
+  assert.ok(JSON.stringify(fixture.requests).includes('SSH_EXEC_SENTINEL'));
+  assert.ok(JSON.stringify(fixture.requests).includes('denied'));
+  assert.equal(JSON.stringify(fixture.requests).includes('Tool invocation guard failed'), false);
+  assert.equal(result.deliveryFailure, undefined);
+});
+
+test('Qwen native: отмена хода закрывает инструменты субагента до эффекта', {
+  timeout: 90000,
+}, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const target = path.join(fixture.workspace, 'after-cancel.txt');
+  const controller = new AbortController();
+
+  fixture.actions.push({ name: 'agent', args: {
+    description: 'Проверить отмену дочернего агента',
+    prompt: 'Выполни проверочные инструменты.',
+    subagent_type: 'general-purpose',
+    run_in_background: false,
+  } }, { hold: true }, { name: 'write_file', args: { file_path: target, content: 'BAD' } });
+
+  const running = adapter.run(runInput(fixture, model, {
+    permissionMode: 'yolo',
+    signal: controller.signal,
+  }));
+
+  running.catch(() => {});
+  await fixture.held;
+  await assert.rejects(access(target), { code: 'ENOENT' });
+  controller.abort();
+  await running.catch(() => {});
+
+  assert.equal(fixture.actions.length, 1, 'Запись после отмены не вызывается');
+  await assert.rejects(access(target), { code: 'ENOENT' });
 });
 
 test('Qwen native: web_fetch читает страницу через штатный инструмент', { timeout: 60000 }, async (t) => {

@@ -146,9 +146,12 @@ When a sandboxed turn starts, Qwen waits for GrigDesk work tools, including supe
 If Qwen reports a connection failure for these tools, GrigDesk shows it before sending the request to the model.
 Retry the message once the connection is restored.
 
-In CLI 0.27.2 and 0.27.3, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
+In stock CLI 0.27.2–0.28.0, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
 Allowing subagents does not fix it; a compatible external CLI fix is needed. GrigDesk does not disable protection.
-Updating from 0.27.2 to 0.27.3 alone does not resolve this issue.
+Updating from 0.27.x to 0.28.0 alone does not resolve this issue.
+A compatible patch is verified on a separate test build of v0.28.0: the subagent receives only the parent turn's
+identity for the guard, and all other checks stay in place. Installing and releasing the fixed CLI into the working
+GrigDesk is agreed separately.
 
 Media tools require executable `ffmpeg` and `ffprobe`; otherwise chat and other tools remain available.
 LSP needs a configured language server and external processing services need their own access.
