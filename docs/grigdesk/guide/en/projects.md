@@ -46,7 +46,8 @@ You do not need to send tokens; registering a project alone does not install the
 
 In the project's basic details, choose "Upload icon" next to the preview. Choose
 "Replace icon" if an image is already set. Select a PNG, JPEG, WebP, or SVG up to 5 MiB
-and 4096×4096 pixels. The preview keeps the image's proportions. SVG is converted to PNG. Choose Save to
+and 4096×4096 pixels. GrigDesk preserves proportions, centers transparent artwork with padding,
+and converts the file to PNG. The colored tile is used for letter avatars. Choose Save to
 display the icon in the project catalog and the chat rail.
 
 To use the letter avatar again, choose "Remove icon" and save the project.

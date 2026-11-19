@@ -1,5 +1,5 @@
 <template>
-  <span class="project-avatar" :class="{ large, 'is-placeholder': !imageSrc && !initial }"
+  <span class="project-avatar" :class="{ large, 'has-image': imageSrc, 'is-placeholder': !imageSrc && !initial }"
     :style="{ '--project-hue': hue }" aria-hidden="true">
     <img v-if="imageSrc" :src="imageSrc" alt="" data-project-icon-image @error="failed = true" />
     <span v-else-if="initial" data-project-initial>{{ initial }}</span>
@@ -45,6 +45,10 @@ watch(source, () => {
   font-weight: 600;
 }
 .project-avatar img { width: 100%; height: 100%; object-fit: contain; }
+
+.project-avatar.has-image {
+  background: transparent;
+}
 
 .project-avatar.is-placeholder {
   color: var(--ink-mid);
