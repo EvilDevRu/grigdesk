@@ -6,6 +6,8 @@ import {
 } from '../../../shared/plugins/pluginCatalogContracts.ts';
 import { detailMatchesIndex } from '../../../shared/plugins/pluginCatalogPolicy.ts';
 
+import { isolatedFetchWithLimits } from './isolatedFetch.ts';
+
 interface CatalogOptions {
   urls?: readonly string[];
   applicationVersion: string;
@@ -174,8 +176,8 @@ export class PluginCatalogService {
   }
 
   /**
-   * Публичный JSON ограничен во время чтения stream, включая ответ без Content-Length.
-   * Deadline охватывает fetch и тело; никакие cookies и credentials сайта не передаются.
+   * Deadline охватывает запрос и тело, в том числе чтение в отдельном процессе.
+   * Проверки размера и формата действуют и для переданного транспорта.
    */
   private async read(
     url: URL,
@@ -198,12 +200,15 @@ export class PluginCatalogService {
     this.controllers.add(controller);
 
     try {
-      const response = await (this.options.fetch ?? globalThis.fetch)(url, {
+      const init: RequestInit = {
         signal: controller.signal,
         redirect: 'error',
         credentials: 'omit',
         headers: { accept: 'application/json' },
-      });
+      };
+      const response = this.options.fetch
+        ? await this.options.fetch(url, init)
+        : await isolatedFetchWithLimits(url, init, { timeoutMs: remaining, maxBytes: limit, successJsonOnly: true });
 
       const type = response.headers.get('content-type')?.toLowerCase() ?? '';
 

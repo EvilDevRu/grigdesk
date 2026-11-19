@@ -20,6 +20,7 @@ import { npmLatest } from './_npmLatest.ts';
 import type { ProviderInstallationContext } from './index.ts';
 import { npmInstallCommand } from '../providerInstall/commands.ts';
 import { withRetry } from '../retry.ts';
+import { isolatedFetch, isolatedFetchWithLimits } from '../isolatedFetch.ts';
 import { usagePercentOrNull } from '../providerUsage.ts';
 import type { ProviderUsagePatch } from '../providerUsage.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
@@ -417,7 +418,7 @@ async function oauthRefreshConfig(oauth: ClaudeOauth | null | undefined, {
  */
 export async function resolveClaudeCliToken({
   credentialsPath = defaultCredentialsPath(),
-  fetchImpl = globalThis.fetch,
+  fetchImpl = isolatedFetch,
   now = Date.now,
   sleep = wait,
   forceRefresh = false,
@@ -680,7 +681,7 @@ async function usageResponse(result: {
 
 export async function fetchClaudeUsage({
   credentialsPath = defaultCredentialsPath(),
-  fetchImpl = globalThis.fetch,
+  fetchImpl = isolatedFetch,
   now = Date.now,
   sleep = wait,
   claudeBin = 'claude',
@@ -1016,7 +1017,7 @@ async function orgUuid(tok: string): Promise<string | null> {
     ) as { oauthAccount?: { organizationUuid?: string } } | null;
     if (j?.oauthAccount?.organizationUuid) return j.oauthAccount.organizationUuid;
   } catch { /* файла нет или он битый — спросим у API */ }
-  const r = await fetch(`${API}/api/oauth/profile`, {
+  const r = await isolatedFetch(`${API}/api/oauth/profile`, {
     headers: authHeaders(tok),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => null);
@@ -1034,12 +1035,11 @@ async function orgUuid(tok: string): Promise<string | null> {
  * («no payment method on file» и т.п.).
  */
 async function orgCall(tok: string, org: string, method: string, sub: string, body: unknown) {
-  const r = await fetch(`${API}/api/oauth/organizations/${org}${sub}`, {
+  const r = await isolatedFetchWithLimits(`${API}/api/oauth/organizations/${org}${sub}`, {
     method,
     headers: { ...authHeaders(tok), 'x-organization-uuid': org, 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
-  }).catch((e: Error) => { throw new Error(`сеть недоступна: ${e.message}`); });
+  }, { timeoutMs: 30_000 }).catch((e: Error) => { throw new Error(`сеть недоступна: ${e.message}`); });
   if (r.ok) return r.json().catch(() => ({}));
   const text = await r.text().catch(() => '');
   let msg = '';
@@ -2019,7 +2019,7 @@ export default {
       } catch { /* кредов нет — обнаружение недоступно */ }
     }
     if (!headers) return null;
-    const r = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+    const r = await isolatedFetch('https://api.anthropic.com/v1/models?limit=100', {
       headers: { 'anthropic-version': '2023-06-01', ...headers },
       signal: AbortSignal.timeout(10_000),
     });

@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const fixture = fileURLToPath(new URL('./helpers/shutdownDnsFixture.mjs', import.meta.url));
 
-for (const mode of ['cancel', 'native', 'restart', 'launcher', 'network-orphan']) {
+for (const mode of ['cancel', 'native', 'restart', 'launcher', 'network-orphan', 'recover']) {
   test(`TCP DNS: ${mode}, только собственные процессы и повторный запуск`, {
     timeout: 65_000,
   }, async (t) => {

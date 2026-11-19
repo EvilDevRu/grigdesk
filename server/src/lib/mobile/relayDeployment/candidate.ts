@@ -1,8 +1,8 @@
-import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import tls from 'node:tls';
 import https from 'node:https';
 
+import { isolatedLookup } from '../../isolatedDns.ts';
 import { RelayLink, normalizeRelayIp } from '../relayLink.ts';
 import type { Relay } from '../store.ts';
 import { dialRelay, relayHello } from '../transport.ts';
@@ -20,7 +20,7 @@ export interface CandidateOptions {
  * Возвращённый числовой адрес закрепляется на всё доказательство кандидата.
  */
 export async function candidateAddress(host: string, gate: CandidateOptions['vpnGate']): Promise<string> {
-  const address = normalizeRelayIp(net.isIP(host) ? host : (await lookup(host)).address);
+  const address = normalizeRelayIp(net.isIP(host) ? host : (await isolatedLookup(host)).address);
 
   if (!address.private && !await gate(address.ip)) {
     throw new Error('waiting_vpn');

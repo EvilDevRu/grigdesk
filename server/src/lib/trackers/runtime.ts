@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 
 import type { TrackerCredentialsStore } from './credentialsStore.ts';
 import { createDriverInstallService } from '../driverInstall/service.ts';
+import { fetchWithIsolatedDns } from '../fetchWithIsolatedDns.ts';
 import { TrackerFacade } from './facade.ts';
 import { TrackerRegistry } from './registry.ts';
 import { createSerialQueue } from './serialQueue.ts';
@@ -50,7 +51,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
     if (!value) {
       value = {
-        fetch: options.fetch,
+        fetch: options.fetch ?? fetchWithIsolatedDns,
         traceRead: options.traceRead,
         credentials: { read: () => credsStore.readFor(id) },
         dataDir: path.join(path.dirname(config.trackerSettingsPath), 'tracker-data', id),

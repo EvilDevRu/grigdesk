@@ -7,6 +7,8 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
+import { fetchWithIsolatedDns } from '../fetchWithIsolatedDns.ts';
+
 // Ссылка из описания задачи и что с ней можно сделать. `fetchable` отделяет то,
 // что скачивается без авторизации, от ссылок на закрытые площадки: у последних
 // путь к содержимому лежит через человека, а не через сеть.
@@ -46,7 +48,7 @@ async function fetchRetry(url: string, opts?: RequestInit, tries = 2): Promise<R
 
     for (let i = 0; i < tries; i += 1) {
         try {
-            return await fetch(url, opts);
+            return await fetchWithIsolatedDns(url, opts);
         } catch (e) {
             lastErr = e;
         }

@@ -1,8 +1,8 @@
-import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import type { Socket } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 
+import { isolatedLookup } from '../isolatedDns.ts';
 import type { Relay } from './store.ts';
 import { dialRelay, relayHello, relayLine } from './transport.ts';
 
@@ -150,7 +150,7 @@ export class RelayLink {
   private async address() {
     const resolved = net.isIP(this.relay.host)
       ? this.relay.host
-      : (await lookup(this.relay.host)).address;
+      : (await isolatedLookup(this.relay.host)).address;
     const address = normalizeRelayIp(resolved);
 
     if (!address.private && !(await this.vpnGate(address.ip))) {

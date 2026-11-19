@@ -8,6 +8,8 @@
 
 ## Устройство
 
+- [Скачивание медиа по HTTP с изолированным DNS](../server/isolated-statistics-fetch.md#нативные-ответы-и-потоки)
+
 - [Ядро voice: Model Studio, Token Plan, локальные движки и CLI-потребитель «Презентации»](voice-core.md)
 - [Qwen Token Plan в voice: инструкция, экспериментальные ударения и потоковый WAV](voice-qwen-token-plan.md)
 

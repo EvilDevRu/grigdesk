@@ -1,4 +1,3 @@
-import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 
 import type { PhoneAddress } from '../../../../shared/client/phonePairing.ts';
 import { validPhoneHost } from '../../../../shared/client/phonePairing.ts';
+import { isolatedLookup } from '../isolatedDns.ts';
 import { MobileInputError } from '../mobile/errors.ts';
 import { privateRead, privateWrite, serialized } from '../mobile/files.ts';
 import type { MobileService } from '../mobile/service.ts';
@@ -277,8 +277,9 @@ export function createPhoneAccess(options: PhoneAccessOptions,
       }
 
       if (!isIP(address.host)) {
-        const resolve = options.dependencies?.lookup ?? ((host: string) => lookup(host, { all: true }));
-        const values = await resolve(address.host);
+        const values = options.dependencies?.lookup
+          ? await options.dependencies.lookup(address.host)
+          : await isolatedLookup(address.host, { all: true });
 
         if (!values.some((item) => item.family === 4 && validPhoneHost(item.address))) {
           throw new MobileInputError('bad_client_address', 'Имя сервера не имеет подходящего сетевого IPv4.');

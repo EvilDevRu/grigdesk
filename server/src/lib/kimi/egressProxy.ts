@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
-import dns from 'node:dns/promises';
+import type { LookupAddress, LookupAllOptions } from 'node:dns';
 import net from 'node:net';
 import path from 'node:path';
+
+import { isolatedLookup } from '../isolatedDns.ts';
 
 import {
   assertResolvedEgressAddresses,
@@ -23,6 +25,8 @@ interface EgressRecord {
   address: string;
   family: number;
 }
+
+type ResolveEgressHost = (host: string, options: LookupAllOptions) => Promise<LookupAddress[]>;
 
 export function assertUnixSocketPath(socketPath: string, label = 'unix_socket'): string {
   if (!path.isAbsolute(socketPath || '')) throw new TypeError(`${label} path должен быть абсолютным`);
@@ -55,7 +59,7 @@ export function parseConnectTarget(header: unknown, {
   return { host, port };
 }
 
-async function resolvePublic(host: string, lookup = dns.lookup): Promise<EgressRecord[]> {
+async function resolvePublic(host: string, lookup: ResolveEgressHost): Promise<EgressRecord[]> {
   const records = await lookup(host, { all: true, verbatim: true });
   const addresses = records.map((entry) => (typeof entry === 'string' ? entry : entry.address));
   assertResolvedEgressAddresses(addresses);
@@ -106,13 +110,13 @@ export function createKimiEgressProxy({
   socketPath,
   allowedHosts = KIMI_EGRESS_ALLOWED_HOSTS,
   allowedPorts = [443],
-  lookup = dns.lookup,
+  lookup = isolatedLookup,
   connector = net.createConnection,
 }: {
   socketPath: string;
   allowedHosts?: readonly string[];
   allowedPorts?: readonly number[];
-  lookup?: typeof dns.lookup;
+  lookup?: ResolveEgressHost;
   connector?: typeof net.createConnection;
 }) {
   assertUnixSocketPath(socketPath, 'egress_socket');

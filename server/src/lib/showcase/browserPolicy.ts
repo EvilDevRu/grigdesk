@@ -10,9 +10,10 @@
 // Ключ `--proxy-bypass-list=<-loopback>` обязателен. Без него Chromium ходит на
 // 127.0.0.1 напрямую, и вся проверка границы становится фикцией — а стенды показа
 // как раз и живут на loopback.
-import dns from 'node:dns/promises';
 import http from 'node:http';
 import net from 'node:net';
+
+import { isolatedLookup } from '../isolatedDns.ts';
 
 export interface BrowserPolicy {
   allowedOrigins: string[];
@@ -76,7 +77,7 @@ export async function startEgressGuard(policy: BrowserPolicy) {
       return known;
     }
 
-    const { address } = await dns.lookup(host);
+    const { address } = await isolatedLookup(host);
 
     pinned.set(host, address);
 
@@ -114,7 +115,19 @@ export async function startEgressGuard(policy: BrowserPolicy) {
 
     passed.push({ kind: 'request', target: String(request.url), at: new Date().toISOString() });
 
-    const address = await addressOf(host).catch(() => host);
+    const address = await addressOf(host).catch(() => null);
+
+    if (response.destroyed) {
+      return;
+    }
+
+    if (!address) {
+      response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('адрес показа недоступен');
+
+      return;
+    }
+
     const upstream = http.request({
       host: address,
       port,
@@ -166,9 +179,15 @@ export async function startEgressGuard(policy: BrowserPolicy) {
 
     passed.push({ kind: 'connect', target: String(request.url), at: new Date().toISOString() });
 
-    const address = await addressOf(host).catch(() => host);
+    const address = await addressOf(host).catch(() => null);
 
     if (socket.destroyed) {
+      return;
+    }
+
+    if (!address) {
+      socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+
       return;
     }
 

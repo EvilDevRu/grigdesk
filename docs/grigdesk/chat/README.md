@@ -20,7 +20,7 @@
 
 ## Устройство
 
-- [Сеть лимитов GLM, DeepSeek и Tripo: изоляция DNS и завершение зависшего запроса](../server/isolated-statistics-fetch.md)
+- [Сеть лимитов Claude, GLM, DeepSeek и Tripo: изоляция DNS и завершение зависшего запроса](../server/isolated-statistics-fetch.md)
 - [Профили доступа: имя и ключ в одном окне, переименование без проб и сброса сессий, допуск, login и память](access-profiles.md)
 
 - [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)

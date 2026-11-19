@@ -59,6 +59,11 @@ with saved messages and completed effects considered before retrying.
 
 ## Limits and recovery
 
+If DNS stops responding, individual network requests may time out.
+Task loading, the plugin catalog, and Claude usage checks can resume in the
+current session as soon as connectivity returns. Use the retry control in
+the affected section to retry a read manually.
+
 Normal shutdown cancels Kimi quota checks and waits for their processes.
 Investigate remaining processes by ownership: another working copy or standalone executor can still run.
 Do not kill all executor processes by name.

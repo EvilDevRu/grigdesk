@@ -12,6 +12,7 @@ import { tripoAccess } from './account.ts';
 import { parseTripoTask, parseUsage, tripoRequestError } from './catalog.ts';
 import { ProviderFailure } from '../studio3d/provider.ts';
 import { openVerified } from '../studio3d/safePath.ts';
+import { fetchWithIsolatedDns } from '../fetchWithIsolatedDns.ts';
 import type {
   AccountSnapshot,
   Balance,
@@ -99,7 +100,7 @@ function retryAfter(headers: Headers): number | null {
  */
 export function createTripoClient(deps: TripoClientDeps = {}): TripoClient {
   const env = deps.env ?? process.env;
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = deps.fetchImpl ?? fetchWithIsolatedDns;
   const sleep = deps.sleep ?? pause;
   const timeoutMs = deps.timeoutMs ?? 30_000;
   const reads = new Set<AbortController>();

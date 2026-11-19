@@ -12,6 +12,7 @@ import type { ReleaseManifest } from './releaseManifest.ts';
 import type { RuntimeBuildContext } from './runtimeBuildContext.ts';
 import { runtimeBuildContext } from './runtimeBuildContext.ts';
 import { runtimeInstallationRoot } from './runtimePaths.ts';
+import { fetchWithIsolatedDns } from './fetchWithIsolatedDns.ts';
 
 import { sha256File } from '../../../shared/node/hash.ts';
 import {
@@ -782,7 +783,7 @@ export class PackagedUpdateManager {
 
       await this.#setStage(job, 'downloading');
 
-      const fetcher = this.options.fetcher ?? globalThis.fetch.bind(globalThis);
+      const fetcher = this.options.fetcher ?? fetchWithIsolatedDns;
       const response = await fetcher(entry.archiveUrl!, {
         redirect: 'error',
         signal: AbortSignal.timeout(30 * 60_000),

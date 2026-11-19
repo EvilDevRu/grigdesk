@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 
-import { isolatedFetch } from '../../server/src/lib/isolatedFetch.ts';
+import { isolatedFetch, isolatedFetchWithLimits } from '../../server/src/lib/isolatedFetch.ts';
 import { createPluginCore } from '../../server/src/modules/plugins/core.ts';
 
 /**
@@ -118,4 +118,22 @@ test('заранее отменённый запрос и потоковый в�
     name: 'AbortError',
   });
   await assert.rejects(isolatedFetch('http://127.0.0.1:1', { body: new Uint8Array(1) }), TypeError);
+});
+
+test('отказ зеркала закрывает зависшее тело по заголовкам', async (t) => {
+  let closed;
+  const disconnected = new Promise((resolve) => {
+    closed = resolve;
+  });
+  const url = await fixture(t, (request, response) => {
+    request.socket.once('close', closed);
+    response.writeHead(503, { 'content-type': 'application/json' });
+    response.write('{"error":');
+  });
+
+  const reply = await isolatedFetchWithLimits(url, {}, { successJsonOnly: true, timeoutMs: 3000 });
+
+  assert.equal(reply.status, 503);
+  assert.equal(reply.body, null);
+  await disconnected;
 });

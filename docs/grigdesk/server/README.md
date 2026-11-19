@@ -16,7 +16,7 @@
 - [Серверное задание relay: общий API, выбор и отмена ожидания, SSH, порт и откат VPS](relay-setup.md)
 
 - [Остановка до выхода ОС: независимые сторожа worker, потеря launcher, код 75 и поэтапный журнал](shutdown-watchdogs.md)
-- [Изоляция статистики и Telegram: отдельный Node, сроки, лимиты и освобождение DNS](isolated-statistics-fetch.md)
+- [Изоляция исходящих интеграций: буферизованный HTTP, DNS для потоков и восстановление](isolated-statistics-fetch.md)
 - [Ротация stdout/stderr, gzip-архивы и чтение всех частей журнала окна](log-rotation.md)
 - [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)

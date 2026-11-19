@@ -8,6 +8,8 @@ import {
 } from '../../../../../shared/node/releaseArchive.ts';
 import { sha256File } from '../../../../../shared/node/hash.ts';
 
+import { fetchWithIsolatedDns } from '../../fetchWithIsolatedDns.ts';
+
 export interface RelayArtifact {
   file: string;
   digest: string;
@@ -33,9 +35,11 @@ export async function resolveRelayArtifact(
     return options.resolveArtifact();
   }
 
+  const fetcher = options.release?.fetch ?? fetchWithIsolatedDns;
   const source = new ReleaseChannelService({
     channel: options.receipt?.channel ?? 'release',
     ...options.release,
+    fetch: fetcher,
   });
   const envelope = await source.latest();
 
@@ -64,7 +68,7 @@ export async function resolveRelayArtifact(
     await downloadReleaseArtifact({
       artifact,
       destination: archive,
-      fetcher: options.release?.fetch,
+      fetcher,
       progress: async () => {},
     });
     await extractReleaseArtifact(archive, unpacked, artifact);

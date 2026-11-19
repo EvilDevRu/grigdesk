@@ -39,7 +39,7 @@
 - [Каталог внешних драйверов: умолчание и GRIGDESK_DRIVERS_DIR](driver-directory.md)
 - [Нейтральный API трекера и обновление клиентов](neutral-tracker-api.md)
 - [Нейтральная идентичность и прежние хеши личных данных](tracker-account-scope.md)
-- [Граница внешних драйверов и статусная семантика](external-driver-boundary.md)
+- [Граница внешних драйверов, статусная семантика и host.fetch с изолированным DNS](external-driver-boundary.md)
 - [Границы драйверов, возможности Б24/Jira и правила поставки](tracker-drivers.md)
 - [Обновление карточки, колонка времени и ряды виджетов трекера](tracker-ui-refresh.md)
 - [Общий срок чтения, подписчики, HTTP-отмена, cookie и диагностика](read-operation-lifecycle.md)
