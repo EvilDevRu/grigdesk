@@ -47,7 +47,8 @@ const ALLOWED_ASSET_EXTENSIONS = new Map([
 // Область — `вид:id`, источник её корня — `вид:id:номер`. Номер — позиция в ответе
 // поставщика, поэтому исчезнувшая папка не сдвигает ссылки на соседние.
 const SCOPE_RE = /^([a-z][a-z0-9-]{0,31}):([A-Za-z0-9_-]{1,128})$/;
-const SCOPED_SOURCE_RE = /^([a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,128}):\d{1,4}$/;
+const SCOPED_SOURCE_RE = /^([a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,128}):(?:\d{1,4}|run-[a-f0-9-]{36})$/;
+const RUN_SOURCE_KEY = /^run-[a-f0-9-]{36}$/u;
 
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_ASSET_BYTES = 5_000_000;
@@ -154,14 +155,39 @@ function assertStableSnapshot(
   }
 }
 
+interface ScopeDirectoryEntry {
+  id?: unknown;
+  label?: unknown;
+  path?: unknown;
+  key?: string;
+  fixed?: boolean;
+}
+
+/**
+ * Исторический каталог запуска должен остаться по своему физическому пути.
+ * Обычные рабочие корни по-прежнему могут быть зарегистрированы через ссылку.
+ */
 async function canonicalDirectory(value: unknown): Promise<DocumentRoot | null> {
-  const entry = value as { id?: unknown; label?: unknown; path?: unknown } | null;
+  const entry = value as ScopeDirectoryEntry | null;
   const raw = String(entry?.path || '');
-  if (!raw || !path.isAbsolute(raw)) return null;
+
+  if (!raw || !path.isAbsolute(raw)) {
+    return null;
+  }
+
   try {
     const canonical = await fs.realpath(raw);
+
+    if (entry?.fixed && canonical !== raw) {
+      return null;
+    }
+
     const stat = await fs.stat(canonical);
-    if (!stat.isDirectory()) return null;
+
+    if (!stat.isDirectory()) {
+      return null;
+    }
+
     return {
       id: String(entry?.id || path.basename(canonical) || 'root'),
       label: String(entry?.label || entry?.id || path.basename(canonical) || 'Документы'),
@@ -359,12 +385,14 @@ export class DocumentReader {
     }
 
     const roots = await Promise.all(entries.map((entry, index) => {
-      const declared = entry as { label?: unknown; path?: unknown } | null;
+      const declared = entry as ScopeDirectoryEntry | null;
+      const key = declared?.key && RUN_SOURCE_KEY.test(declared.key) ? declared.key : index;
 
       return canonicalDirectory({
-        id: `${name}:${index}`,
+        id: `${name}:${key}`,
         label: String(declared?.label || ''),
         path: declared?.path,
+        fixed: declared?.fixed,
       });
     }));
     const seen = new Set<string>();

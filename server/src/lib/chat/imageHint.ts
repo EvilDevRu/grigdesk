@@ -4,8 +4,10 @@
  * Собирает подсказку с папкой артефактов: новые картинки и временные файлы агент кладёт туда,
  * а не в `.state/` дерева кода. Сервер открывает эту папку ходу на запись и для показа.
  */
-export function chatImageHint(artifactsDir: string): string {
-  const target = artifactsDir ? `${artifactsDir}/<тема>/` : 'папку артефактов GrigDesk';
+export function chatImageHint(artifactsDir: string, managedRun = false): string {
+  const target = artifactsDir
+    ? `${artifactsDir}/${managedRun ? '' : '<тема>/'}`
+    : 'папку артефактов GrigDesk';
 
   return [
     '[Подсказка GrigDesk: картинки в ответе]',
@@ -13,6 +15,10 @@ export function chatImageHint(artifactsDir: string): string {
     'Поддержаны PNG, JPEG, GIF и WebP до 10 МБ из рабочей папки разговора и папки артефактов.',
     'Относительный путь считается от основной папки; абсолютный — также из дополнительных папок.',
     `Новые картинки, снимки и временные файлы сохраняй в ${target}.`,
+    ...managedRun ? [
+      'В ответе используй абсолютные пути к файлам этой папки.',
+      'Чтобы закрепить запуск по просьбе пользователя, создай в его папке пустой файл .keep.',
+    ] : [],
     'В .state/ папки кода не пиши. Нет доступа к папке артефактов — скажи об этом человеку.',
     'Файл вне этих папок сначала скопируй в папку артефактов. SVG не поддержан.',
     'Для пути с пробелами используй ![подпись](<путь с пробелами.png>).',
@@ -24,6 +30,6 @@ export function chatImageHint(artifactsDir: string): string {
  * Дополняет исходную просьбу фиксированным описанием изображений в ответе.
  * Exactly-once задаётся точкой вызова, а не поиском маркера в недоверенном тексте.
  */
-export function withChatImageHint(message: string, artifactsDir: string): string {
-  return `${message}\n\n${chatImageHint(artifactsDir)}`;
+export function withChatImageHint(message: string, artifactsDir: string, managedRun = false): string {
+  return `${message}\n\n${chatImageHint(artifactsDir, managedRun)}`;
 }

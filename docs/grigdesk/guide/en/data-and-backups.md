@@ -52,6 +52,17 @@ Reading conversations is only allowed with explicit human permission.
 
 You have a consistent copy of working data, rather than program binaries alone.
 
+## Artifacts from new turns
+
+On Linux, GrigDesk creates `artifacts/chat-runs/projects/<project>/<run>/` in the shared
+data folder outside Git. Runs without a project go directly into `artifacts/chat-runs/`.
+Links in the conversation keep working after the temporary checkout is removed while the file still exists.
+
+GrigDesk removes run directories in a daily pass once 14 days have elapsed since the turn ended.
+To keep a run, create an empty `.keep` file in its directory or ask the agent to pin the run.
+Placement follows the executor's write permissions. Turns that cannot use a run directory
+continue to use the previous layout.
+
 ## Cleaning old artifacts
 
 1. Back up artifacts you need. Cleanup is irreversible and does not check conversation links;
@@ -72,7 +83,7 @@ You have a consistent copy of working data, rather than program binaries alone.
    Ctrl+C exits with 130 and SIGTERM with 143. Removing the current directory may finish, but later ones are kept.
    The partial report remains; JSON records cancellation as `interrupted: true`.
 
-The server does not automatically clean other topics. DeepSeek tests remove only their known old outputs.
+Old topics are cleaned manually. DeepSeek tests remove only their known old outputs.
 Restore lost user files from backups; regenerate test builds through normal preparation.
 
 ## Limits and recovery

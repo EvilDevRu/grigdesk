@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Stats } from 'node:fs';
 
 import { openArtifactDirectory } from './artifactRemoval.ts';
+import { CHAT_ARTIFACT_RUNS } from './chatArtifactLayout.ts';
 import {
   acquireDirectoryLock, DIRECTORY_LOCK_SUFFIXES, directoryCleanupLockPath,
   directoryLockOwnedBy, directoryLockState,
@@ -447,6 +448,8 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
           append(child, null, 'locked');
         } else if (!childStat.isDirectory()) {
           append(child, null, childStat.isSymbolicLink() ? 'symlink' : 'not-directory');
+        } else if (directory === root && name === CHAT_ARTIFACT_RUNS) {
+          append(child, null, 'current');
         } else if (mode === 'root' && name === 'deepseek-binary') {
           await collect(child, 'theme');
         } else if (mode === 'theme' && name === 'node-cache') {

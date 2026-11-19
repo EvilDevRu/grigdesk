@@ -11,6 +11,7 @@ import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.t
 import type { WebChatHead } from '../../../../shared/chat/chatListProjection.ts';
 import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
+import { ChatArtifactRuns } from '../../lib/chat/artifactRuns.ts';
 import { isProjectDeleted, readProjectsMeta, readProjectRecord, projectRepos } from '../../lib/projects.ts';
 import type { ProjectsService } from '../projects/service.ts';
 import { projectDeletionError } from '../projects/errors.ts';
@@ -86,7 +87,7 @@ import {
   resolveChatAttachment,
   resolveInTurnAttachments,
 } from '../../lib/chat/attachments.ts';
-import { readChatImage } from '../../lib/chat/chatImages.ts';
+import { isWithinChatImageRoot, readChatImage } from '../../lib/chat/chatImages.ts';
 import { withChatImageHint } from '../../lib/chat/imageHint.ts';
 import { withPluginDocsHint } from '../../lib/chat/pluginDocsHint.ts';
 import type { PluginDocsEntry } from '../../lib/pluginDocs.ts';
@@ -648,6 +649,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // сборки модуля) её не задаёт — тогда ход идёт без неё, как до появления папки.
   const artifactsDir = config.artifactsDir ? path.resolve(config.artifactsDir) : '';
   const artifactsDirs = artifactsDir ? [artifactsDir] : [];
+  const artifactRuns = artifactsDir && config.dataStateDir && process.platform === 'linux'
+    ? new ChatArtifactRuns(path.join(config.dataStateDir, 'chat-artifact-runs'), artifactsDir)
+    : null;
   const sshBroker = opts.sshBroker || fastify.sshBroker as SshBroker | null || null;
   const dbBroker = opts.dbBroker || fastify.dbBroker as DbBroker | null || null;
   const permissionQueue = (opts.permissionQueue || createPermissionQueue()) as InteractionQueue;
@@ -708,6 +712,36 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       : workdir?.kind === 'project' ? workdir.projectId : null;
 
     return id && (await listProjects(config, prefs, 'all')).includes(id) ? id : null;
+  }
+
+  if (artifactRuns) {
+    const stopRotation = new AbortController();
+    let rotation: Promise<void> | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const rotate = () => {
+      rotation ??= artifactRuns.sweep(Date.now(), stopRotation.signal).then((errors) => {
+        if (errors) {
+          fastify.log.warn({ errors }, 'чат: часть просроченных артефактов осталась до следующей ротации');
+        }
+      }).catch(() => {
+        if (!stopRotation.signal.aborted) {
+          fastify.log.warn('чат: не удалось проверить срок хранения артефактов');
+        }
+      }).finally(() => {
+        rotation = undefined;
+      });
+    };
+
+    fastify.addHook('onReady', async () => {
+      rotate();
+      timer = setInterval(rotate, 24 * 60 * 60 * 1000);
+      timer.unref();
+    });
+    fastify.addHook('onClose', async () => {
+      clearInterval(timer);
+      stopRotation.abort();
+      await rotation;
+    });
   }
 
   /** Один UDS живёт вместе с chat scope и переиспользуется живым CLI-процессом. */
@@ -3388,6 +3422,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const info = { provider: target.provider, model: target.modelInfo };
     let executor = await executorResolver(target.provider);
     let accessReservation;
+    let artifactRun: Awaited<ReturnType<ChatArtifactRuns['begin']>> | null = null;
 
     try {
       accessReservation = await reserveExecutorAccess(executor, config);
@@ -3407,19 +3442,16 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // если адаптер объявил несколько корней. Однокорневые (их граница записи — рабочая папка)
     // её не получают; Kimi держит свою изоляцию без папки данных — как с вложениями.
     const multiRoot = (await resolveWorkdirCapability(executor, config))?.roots === 'multi';
+    let artifactsReady = false;
 
     if (artifactsDir && multiRoot && target.provider !== 'kimi') {
-      const artifactsReady = await fs.mkdir(artifactsDir, { recursive: true, mode: 0o700 })
+      artifactsReady = await fs.mkdir(artifactsDir, { recursive: true, mode: 0o700 })
         .then(() => true, () => false);
 
       if (artifactsReady) {
         extraDirs.push(artifactsDir);
       }
     }
-    // Один и тот же каталог может прийти из репозиториев проекта, worktree и вложений.
-    // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
-    const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
-
     // Служебный слэш-ход провайдерской команды (меню «/» в чате). Признак принимаем
     // строго: команда обязана быть в списке commands() исполнителя с run:'prompt', а
     // текст хода — ей самой (с необязательными аргументами через пробел). Иначе полем
@@ -3464,6 +3496,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // если слэш-команд в неинтерактивном режиме он не понимает (lib/executors/index.js).
     const plan = compact ? (summaryWorkspace ? { kind: 'summary' }
       : executor?.compaction || { kind: 'summary' }) : null;
+    const runId = `run-${randomUUID()}`;
+    const workProjectId = await trustedWorkProject(id, target.record?.workdir);
+
+    if (!plan && !slash && artifactsReady) {
+      artifactRun = await artifactRuns?.begin(chatKey || '', runId, workProjectId).catch(() => {
+        fastify.log.warn('чат: не удалось подготовить папку артефактов запуска');
+
+        return null;
+      }) ?? null;
+    }
+
+    const outputDir = artifactRun?.directory ?? artifactsDir;
+    const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
     // Тикет выбранной задачи — только обычному ходу: служебному сжатию он не нужен.
     const ticket = plan ? '' : await taskTicketBlock(id);
     // Досье прерванного хода — запасная память, когда resume невозможен: binding
@@ -3495,7 +3540,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             promptMessage,
             pluginDocs,
           ),
-          artifactsDir,
+          outputDir,
+          !!artifactRun,
         ),
         wantsTitle,
       );
@@ -3531,7 +3577,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
 
-    const workProjectId = await trustedWorkProject(id, target.record?.workdir);
     const browserOwner = chatKey && target.record ? await chatBrowserOwners.owner(chatKey) : null;
     const browserIntent = Boolean(browserOwner && opts.browser?.routing.mode() === 'grigdesk');
     const previousWorkPolicy = opts.help
@@ -3805,7 +3850,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Конец хода как обещание: слив остановки ждёт его, а не опрашивает activeRuns.
     let finishRun!: () => void;
     const finished = new Promise<void>((resolve) => { finishRun = () => resolve(); });
-    const runId = `run-${randomUUID()}`;
     const runRec: RunningTurn = {
       runId,
       snapshot: {
@@ -4141,7 +4185,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
               return port.deliver({
                 ...input,
-                text: withChatImageHint(text, artifactsDir),
+                text: withChatImageHint(text, outputDir, !!artifactRun),
                 ...(images.length ? { images } : {}),
               });
             },
@@ -4685,6 +4729,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // До finish(): слив остановки сразу после него сверяет activeRuns, лишнее ожидание
       // между ними выдало бы законченный ход за зависший.
       await assistantPublisher.settleRun(runId).catch(() => {});
+      await artifactRun?.finish().catch(() => {
+        fastify.log.warn('чат: срок хранения артефактов запуска не начался после ошибки записи');
+      });
+      artifactRun = null;
       runRec.finish();
 
       if (chatKey) {
@@ -4713,6 +4761,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
     }
     } finally {
+      await artifactRun?.finish().catch(() => {
+        fastify.log.warn('чат: срок хранения артефактов запуска не начался после ошибки записи');
+      });
       await accessReservation.release();
     }
   }
@@ -4812,22 +4863,38 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(404).send({ error: 'no_chat' });
     }
 
-    let workspace: ResolvedWorkdir;
+    const requested = request.query.path;
+    const managedRoot = requested && path.isAbsolute(requested) && artifactRuns
+      ? (await artifactRuns.roots(String(request.params.id))).find((root) =>
+        isWithinChatImageRoot(requested, root.path))
+      : null;
+    let result;
 
-    try {
-      workspace = await workspaceOf(record);
-    } catch {
-      return reply.code(404).send({ error: 'no_workdir' });
+    if (managedRoot) {
+      result = await readChatImage({
+        cwd: null,
+        fixedImageRoots: [managedRoot.path],
+        requested,
+      });
+    } else {
+      let workspace: ResolvedWorkdir;
+
+      try {
+        workspace = await workspaceOf(record);
+      } catch {
+        return reply.code(404).send({ error: 'no_workdir' });
+      }
+
+      const ref = normalizeModelRef(record.modelRef);
+      const executor = ref ? await executorResolver(ref.provider) : null;
+
+      result = await readChatImage({
+        cwd: workspace.cwd,
+        extraDirs: workspace.extraDirs,
+        imageRoots: [attachDir, ...artifactsDirs, ...(executor?.imageRoots?.(config) || [])],
+        requested,
+      });
     }
-
-    const ref = normalizeModelRef(record.modelRef);
-    const executor = ref ? await executorResolver(ref.provider) : null;
-    const result = await readChatImage({
-      cwd: workspace.cwd,
-      extraDirs: workspace.extraDirs,
-      imageRoots: [attachDir, ...artifactsDirs, ...(executor?.imageRoots?.(config) || [])],
-      requested: request.query.path,
-    });
 
     if ('status' in result) {
       return reply.code(result.status).send({ error: result.error });
@@ -4851,12 +4918,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return [];
     }
 
-    const workspace = await workspaceOf(record);
+    const managed = await artifactRuns?.roots(chatId) ?? [];
+    const workspace = await workspaceOf(record).catch(() => null);
+    const dirs = workspace ? [workspace.cwd, ...workspace.extraDirs, ...artifactsDirs] : [];
 
-    return [workspace.cwd, ...workspace.extraDirs, ...artifactsDirs].map((dir) => ({
-      label: path.basename(dir) || dir,
-      path: dir,
-    }));
+    return [
+      ...dirs.map((dir) => ({ label: path.basename(dir) || dir, path: dir })),
+      ...managed,
+    ];
   });
 
   // Диктовка с микрофона: multipart-аудио (webm/ogg) → whisper → { text }.

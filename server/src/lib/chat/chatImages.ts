@@ -7,10 +7,11 @@ import { config } from '../../config.ts';
 export const CHAT_IMAGE_MAX_BYTES = 10_000_000;
 
 export interface ChatImageRequest {
-  cwd: string;
+  cwd: string | null;
   extraDirs?: string[];
   // Каталоги исполнителя вне рабочей папки; несуществующий каталог просто не участвует.
   imageRoots?: string[];
+  fixedImageRoots?: string[];
   requested: unknown;
 }
 
@@ -23,21 +24,25 @@ export type ChatImageFileSystem = Pick<typeof fs, 'realpath' | 'open'>;
  * Возвращает только байты или контролируемую ошибку, без путей и сырых fs сообщений.
  */
 export async function readChatImage(
-  { cwd, extraDirs = [], imageRoots = [], requested }: ChatImageRequest,
+  { cwd, extraDirs = [], imageRoots = [], fixedImageRoots = [], requested }: ChatImageRequest,
   fileSystem: ChatImageFileSystem = fs,
 ): Promise<ChatImageResult> {
   if (typeof requested !== 'string' || !requested.trim() || requested.length > 4096 ||
-      /[\u0000-\u001f\u007f]/.test(requested)) {
+      /[\u0000-\u001f\u007f]/.test(requested) || cwd === null && !path.isAbsolute(requested)) {
     return { status: 400, error: 'bad_path' };
   }
 
   try {
-    const workRoots = [cwd, ...extraDirs].map((root) => path.resolve(root));
+    const workRoots = [...cwd === null ? [] : [cwd], ...extraDirs].map((root) => path.resolve(root));
     const workCanonical = await Promise.all(workRoots.map((root) => fileSystem.realpath(root)));
-    const executorRoots = await existingRoots(imageRoots, fileSystem);
-    const requestedRoots = [...workRoots, ...executorRoots.map(([root]) => root)];
-    const canonicalRoots = [...workCanonical, ...executorRoots.map(([, canonical]) => canonical)];
-    const file = path.resolve(cwd, requested);
+    const [executorRoots, fixedRoots] = await Promise.all([
+      existingRoots(imageRoots, fileSystem),
+      existingRoots(fixedImageRoots, fileSystem, true),
+    ]);
+    const added = [...executorRoots, ...fixedRoots];
+    const requestedRoots = [...workRoots, ...added.map(([root]) => root)];
+    const canonicalRoots = [...workCanonical, ...added.map(([, root]) => root)];
+    const file = cwd === null ? path.resolve(requested) : path.resolve(cwd, requested);
 
     if (!requestedRoots.some((root) => isWithinChatImageRoot(file, root))) {
       return { status: 403, error: 'outside_workdir' };
@@ -116,12 +121,15 @@ export async function readChatImage(
 async function existingRoots(
   roots: string[],
   fileSystem: ChatImageFileSystem,
+  fixed = false,
 ): Promise<Array<[string, string]>> {
   const found = await Promise.all(roots.map(async (root): Promise<[string, string] | null> => {
     const resolved = path.resolve(root);
 
     try {
-      return [resolved, await fileSystem.realpath(resolved)];
+      const canonical = await fileSystem.realpath(resolved);
+
+      return fixed && resolved !== canonical ? null : [resolved, canonical];
     } catch {
       return null;
     }
