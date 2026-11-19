@@ -143,13 +143,18 @@
   --workspace-actions-column: calc(3 * var(--toolbar-control-h));
   --workspace-column-gap: 12px;
   --workspace-label-color: color-mix(in srgb, var(--ink-mid) 72%, var(--ink));
+  --radius: var(--radius-md);
+}
+
+/* Подвал любого UiDialog использует те же действия, что и рабочая форма. */
+[data-ui-workspace],
+.ui-dialog-form-footer {
   --control-height: var(--workspace-control-h);
   --control-radius: var(--radius-sm);
-  --radius: var(--radius-md);
 
   /* Ввод и обычные действия светлее панели, чтобы не выглядеть провалами в фон.
      Hover сохраняет эту поверхность; readonly остаётся отдельным спокойным слоем. */
-  --control-background: var(--workspace-field-background);
+  --control-background: var(--workspace-field-background, var(--field-background));
   --control-background-hover: var(--surface-2);
   --control-outline-background-hover: var(--control-background-hover);
   --control-outline-border: var(--control-border);
@@ -205,16 +210,6 @@ html:root[data-ui-touch] {
     --toolbar-control-h: 44px;
     --pane-header-action-h: 32px;
   }
-}
-
-/* Кнопки общих подтверждений берут высоту рабочих форм, палитра и скругление остаются обычными.
-   Сенсорный атрибут на окне поднимает --workspace-control-h, и площадки снова 44 px. */
-.ui-dialog-host__actions {
-  --control-height: var(--workspace-control-h);
-}
-
-.ui-dialog-form-footer {
-  --control-height: var(--workspace-control-h);
 }
 
 /* Узкое окно настроек использует те же площадки, что и сенсорный интерфейс. */

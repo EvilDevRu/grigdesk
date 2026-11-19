@@ -189,8 +189,14 @@ async function checkPromptFields(browser, t) {
     });
     await flushPromises();
 
+    const [cancelAction, mainAction] = browser.document.querySelectorAll(
+      '.ui-dialog-host .ui-dialog-form-footer__actions > button',
+    );
     const disclosure = browser.document.querySelector('button[aria-expanded]');
 
+    assert.equal(cancelAction.dataset.variant, 'outline');
+    assert.equal(mainAction.dataset.variant, 'solid');
+    assert.equal(mainAction.dataset.tone, 'accent');
     assert.ok(disclosure);
     assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
     assert.equal(browser.document.querySelector('.ui-dialog-host__code') === null, true);

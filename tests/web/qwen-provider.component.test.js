@@ -217,7 +217,7 @@ test('Qwen Host: ручное подтверждение, Apply, отказ и �
   await h.flushPromises();
   assert.match(h.win.document.body.textContent, /Docker/);
 
-  const cancel = [...h.win.document.querySelectorAll('.ui-dialog-host__actions button')][0];
+  const cancel = [...h.win.document.querySelectorAll('.ui-dialog-host .ui-dialog__footer button')][0];
 
   cancel.click();
   await h.flushPromises();
@@ -230,7 +230,7 @@ test('Qwen Host: ручное подтверждение, Apply, отказ и �
   await h.flushPromises();
   assert.match(h.win.document.body.textContent, /Enable Host mode/);
 
-  const accept = [...h.win.document.querySelectorAll('.ui-dialog-host__actions button')].at(-1);
+  const accept = [...h.win.document.querySelectorAll('.ui-dialog-host .ui-dialog__footer button')].at(-1);
 
   accept.click();
   await h.flushPromises();

@@ -314,7 +314,10 @@ async function fixture(t, {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
+  const wrapper = mount(component, {
+    attachTo: browser.document.querySelector('#mount'),
+    global: { stubs: { teleport: true } },
+  });
 
   t.after(() => {
     wrapper.vm.closeDraft();
@@ -609,7 +612,7 @@ test('RE-G2-01: устаревшее основание открывает previ
     await flushPromises();
     assert.equal(calls.some((call) => call[0] === 'get'
       && call[1] === `/api/routes/sample/drafts/${draft.id}/rebase/preview`), true);
-    assert.match(wrapper.text(), /Независимые правки объединятся/);
+    assert.match(wrapper.get('.route-rebase-dialog').text(), /Независимые правки объединятся/);
   });
 
 test('RET-LOAD: инструкции обоих scope не загружают библиотеку', async (t) => {

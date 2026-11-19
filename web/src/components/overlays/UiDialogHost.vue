@@ -78,26 +78,24 @@
     </UiInlineMessage>
 
     <template #footer>
-      <div class="ui-dialog-host__actions">
-        <UiButton
-          v-if="request?.kind !== 'alert'"
-          ref="cancelButton"
-          :disabled="busy"
-          @click="cancel"
-        >
-          {{ cancelText }}
-        </UiButton>
-        <UiButton
-          ref="submitButton"
-          variant="solid"
-          :tone="danger ? 'danger' : 'accent'"
-          :loading="busy"
-          :loading-label="okText"
-          @click="submit"
-        >
-          {{ okText }}
-        </UiButton>
-      </div>
+      <UiButton
+        v-if="request?.kind !== 'alert'"
+        ref="cancelButton"
+        :disabled="busy"
+        @click="cancel"
+      >
+        {{ cancelText }}
+      </UiButton>
+      <UiButton
+        ref="submitButton"
+        variant="solid"
+        :tone="danger ? 'danger' : 'accent'"
+        :loading="busy"
+        :loading-label="okText"
+        @click="submit"
+      >
+        {{ okText }}
+      </UiButton>
     </template>
   </UiDialog>
 </template>

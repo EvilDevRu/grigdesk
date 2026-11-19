@@ -182,7 +182,7 @@ test('DWIZ-02: отмена confirm не откатывает, согласие 
 
   await flushPromises();
 
-  await wrapper.get('.ui-dialog-host__actions button').trigger('click');
+  await wrapper.get('.ui-dialog-host .ui-dialog__footer button').trigger('click');
 
   await flushPromises();
 
@@ -194,7 +194,7 @@ test('DWIZ-02: отмена confirm не откатывает, согласие 
 
   await flushPromises();
 
-  await wrapper.findAll('.ui-dialog-host__actions button')[1].trigger('click');
+  await wrapper.findAll('.ui-dialog-host .ui-dialog__footer button')[1].trigger('click');
 
   await flushPromises();
 
@@ -222,7 +222,7 @@ test('DWIZ-02: double click и recovery во время confirm запрещаю
 
   await nextTick();
 
-  await wrapper.findAll('.ui-dialog-host__actions button')[1].trigger('click');
+  await wrapper.findAll('.ui-dialog-host .ui-dialog__footer button')[1].trigger('click');
 
   await flushPromises();
 

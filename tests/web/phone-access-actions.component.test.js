@@ -176,7 +176,7 @@ test('PHONE-A7: выключение спрашивает общий диало�
   await h.dialogClick(/^\s*Выключить прямой доступ\s*$/);
   assert.equal(requestsOf(h, 'PUT').length, 0);
 
-  const cancel = [...document.querySelectorAll('.ui-dialog-host__actions button')]
+  const cancel = [...document.querySelectorAll('.ui-dialog-host .ui-dialog__footer button')]
     .find((button) => /Отмена/.test(button.textContent));
 
   assert.ok(cancel, 'подтверждение показано общим диалогом');
@@ -185,7 +185,7 @@ test('PHONE-A7: выключение спрашивает общий диало�
   assert.equal(requestsOf(h, 'PUT').length, 0);
   await h.dialogClick(/^\s*Выключить прямой доступ\s*$/);
 
-  const approve = [...document.querySelectorAll('.ui-dialog-host__actions button')]
+  const approve = [...document.querySelectorAll('.ui-dialog-host .ui-dialog__footer button')]
     .find((button) => !/Отмена|Закрыть|×/.test(button.textContent));
 
   approve.click();
@@ -211,7 +211,7 @@ test('PHONE-A7: сломанный сохранённый вход можно в
   };
   await h.click(/Подключить телефон/);
   await h.dialogClick(/^\s*Выключить прямой доступ\s*$/);
-  [...document.querySelectorAll('.ui-dialog-host__actions button')]
+  [...document.querySelectorAll('.ui-dialog-host .ui-dialog__footer button')]
     .find((button) => !/Отмена|Закрыть|×/.test(button.textContent)).click();
   await h.flushPromises();
   assert.match(dialogText(), /Не удалось выключить прямой доступ/);

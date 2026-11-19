@@ -522,7 +522,7 @@
 }
 
 /* Общие подтверждения короткие: значок без подложки, заголовок и строка пояснения как у окна
-   установки исполнителя; высота кнопок — в tokens.css. На телефоне окно остаётся карточкой. */
+   установки исполнителя. На телефоне окно остаётся карточкой. */
 .ui-dialog-host__head {
   display: flex;
   align-items: center;
@@ -584,14 +584,6 @@
 .ui-dialog-host__error {
   color: var(--bad);
   font-size: 12px;
-}
-
-.ui-dialog-host__actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .ui-dialog__heading {

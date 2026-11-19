@@ -119,12 +119,12 @@ test('P5: настоящий confirm отменяется без rollback; со�
   await wrapper.get('[data-role="plugin-source-rollback"]').trigger('click');
   await flushPromises();
   assert.match(wrapper.get('.ui-dialog-host__message').text(), /Вернуть v1.0.0/u);
-  await wrapper.get('.ui-dialog-host__actions button').trigger('click');
+  await wrapper.get('.ui-dialog-host .ui-dialog__footer button').trigger('click');
   await flushPromises();
   assert.equal(calls.filter(([method]) => method === 'rollback').length, 0);
   await wrapper.get('[data-role="plugin-source-rollback"]').trigger('click');
   await flushPromises();
-  await wrapper.findAll('.ui-dialog-host__actions button')[1].trigger('click');
+  await wrapper.findAll('.ui-dialog-host .ui-dialog__footer button')[1].trigger('click');
   await flushPromises();
 
   const rollback = calls.filter(([method]) => method === 'rollback');
@@ -177,7 +177,7 @@ test('P8: неизвестный исход блокирует действия,
   wrapper.get('[data-role="plugin-source-rollback"]').element.click();
   wrapper.get('[data-role="plugin-source-rollback"]').element.click();
   await flushPromises();
-  await wrapper.findAll('.ui-dialog-host__actions button')[1].trigger('click');
+  await wrapper.findAll('.ui-dialog-host .ui-dialog__footer button')[1].trigger('click');
   await flushPromises();
   assert.equal(calls.filter(([method]) => method === 'rollback').length, 1);
   assert.equal(wrapper.find('.ui-dialog-host__message').exists(), false);
@@ -190,7 +190,7 @@ test('P8: health появившийся во время confirm запрещае
   await flushPromises();
   state.recoveryError = { code: 'recovery_required', message: 'Изменилась целостность состояния.' };
   await nextTick();
-  await wrapper.findAll('.ui-dialog-host__actions button')[1].trigger('click');
+  await wrapper.findAll('.ui-dialog-host .ui-dialog__footer button')[1].trigger('click');
   await flushPromises();
   assert.equal(calls.filter(([method]) => method === 'rollback').length, 0);
 });
