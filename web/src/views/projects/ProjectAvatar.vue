@@ -1,5 +1,6 @@
 <template>
-  <span class="project-avatar" :class="{ large, 'has-image': imageSrc, 'is-placeholder': !imageSrc && !initial }"
+  <span class="project-avatar"
+    :class="{ large, compact, 'has-image': imageSrc, 'is-placeholder': !imageSrc && !initial }"
     :style="{ '--project-hue': hue }" aria-hidden="true">
     <img v-if="imageSrc" :src="imageSrc" alt="" data-project-icon-image @error="failed = true" />
     <span v-else-if="initial" data-project-initial>{{ initial }}</span>
@@ -17,6 +18,7 @@ const props = defineProps<{
   title: string;
   icon?: string | null;
   large?: boolean;
+  compact?: boolean;
 }>();
 const failed = ref(false);
 const source = computed(() => projectIcon(props.icon));
@@ -64,5 +66,22 @@ watch(source, () => {
   width: 44px;
   height: 44px;
   font-size: 20px;
+}
+
+.compact {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.compact.has-image {
+  background: var(--surface-2);
+}
+
+.compact.is-placeholder svg {
+  width: 14px;
+  height: 14px;
 }
 </style>

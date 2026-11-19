@@ -270,7 +270,20 @@ test('проект из шапки ограничивает список пап�
     projectId: 'demo',
     repoKey: null,
   };
-  const session = await workdirSession({ workdir: project });
+  const session = await workdirSession({
+    workdir: project,
+    workdirPreview: {
+      target: {
+        cwd: '/workspace/demo-web',
+        source: 'project',
+        copies: [
+          { key: 'web', path: '/workspace/demo-web' },
+          { key: 'api', path: '/workspace/demo-api' },
+          { key: 'legacy', path: '/workspace/retained-root' },
+        ],
+      },
+    },
+  });
   const calls = [];
 
   globalThis.__workdirProjects = [
@@ -310,10 +323,17 @@ test('проект из шапки ограничивает список пап�
   const dialog = browser.document.querySelector('[data-role="workdir-picker"]');
 
   assert.equal(Boolean(dialog.closest('[data-mobile-sheet]')), true);
-  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 2);
+  assert.equal(dialog.querySelectorAll('.workdir-choices .workdir-choice').length, 2);
   assert.equal(dialog.querySelectorAll('.is-selected').length, 1);
   assert.match(dialog.textContent, /Папки на подключённом компьютере/u);
   assert.match(dialog.querySelector('.is-selected').textContent, /demo-web/u);
+  assert.doesNotMatch(dialog.querySelector('.is-selected').textContent, /Дополнительный репозиторий/u);
+  const api = [...dialog.querySelectorAll('.workdir-choices .workdir-choice')]
+    .find((row) => row.querySelector('.workdir-choice-title')?.textContent === 'api');
+
+  assert.equal(api.querySelector('.workdir-caption').textContent.trim(), 'Дополнительный репозиторий');
+  assert.equal(dialog.querySelector('.workdir-copies code').textContent, '/workspace/retained-root');
+  assert.doesNotMatch(dialog.querySelector('.workdir-copies').textContent, /demo-api|demo-web/u);
   assert.doesNotMatch(dialog.querySelector('.workdir-catalog').textContent, /По пути|GrigDesk|other/u);
 
   const search = dialog.querySelector('input[type="search"]');
@@ -321,7 +341,8 @@ test('проект из шапки ограничивает список пап�
   search.value = 'DEMO-API';
   search.dispatchEvent(new browser.Event('input', { bubbles: true }));
   await nextTick();
-  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 1);
+  assert.equal(dialog.querySelectorAll('.workdir-choices .workdir-choice').length, 1);
+  assert.doesNotMatch(dialog.querySelector('.workdir-copies').textContent, /demo-api/u);
   dialog.querySelector('.ui-selectable-row__primary').click();
   await flushPromises();
   assert.deepEqual(calls, [['chat', {
@@ -362,13 +383,18 @@ test('селект рисует аватары, ждёт перехода и с�
   });
   const select = wrapper.get('button[data-role="chat-project"]');
 
+  assert.equal(select.find('.project-avatar.compact.is-placeholder svg').exists(), true);
   await select.trigger('click');
   await flushPromises();
 
-  const demo = [...browser.document.querySelectorAll('[role="option"]')]
+  const options = [...browser.document.querySelectorAll('[role="option"]')];
+  const demo = options
     .find((option) => option.querySelector('.ui-select-option__label')?.textContent === 'Демо');
+  const noProject = options
+    .find((option) => option.querySelector('.ui-select-option__label')?.textContent === 'Без проекта');
 
-  assert.equal(demo.querySelector('[data-project-initial]').textContent, 'Д');
+  assert.equal(demo.querySelector('.project-avatar.compact [data-project-initial]').textContent, 'Д');
+  assert.equal(Boolean(noProject.querySelector('.project-avatar.compact.is-placeholder svg')), true);
   demo.click();
   await flushPromises();
   assert.equal(select.get('.ui-select__label').text(), 'Без проекта');
@@ -474,7 +500,19 @@ test('возврат из ручного ввода сохраняет филь�
 
 test('папка задачи доступна для просмотра без каталога и ручного ввода', async (t) => {
   const browser = await browserHarness();
-  const session = await workdirSession({ taskId: 'task' });
+  const session = await workdirSession({
+    taskId: 'task',
+    workdirPreview: {
+      target: {
+        cwd: '/workspace/current',
+        source: 'task-copies',
+        copies: [
+          { key: 'web', path: '/workspace/current' },
+          { key: 'api', path: '/workspace/task-api' },
+        ],
+      },
+    },
+  });
   const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
     workdirProtocol: 1,
     sessions: [session],
@@ -484,7 +522,9 @@ test('папка задачи доступна для просмотра без 
 
   await wrapper.get('[data-context="chat-workdir"]').trigger('click');
   await flushPromises();
-  assert.match(browser.document.querySelector('[data-role="workdir-picker"]').textContent,
-    /Папка определяется задачей/u);
+  const dialog = browser.document.querySelector('[data-role="workdir-picker"]');
+
+  assert.match(dialog.textContent, /Папка определяется задачей/u);
+  assert.equal(dialog.querySelector('.workdir-copies code').textContent, '/workspace/task-api');
   assert.equal(Boolean(browser.document.querySelector('input')), false);
 });

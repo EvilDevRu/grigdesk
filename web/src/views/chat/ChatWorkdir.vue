@@ -15,14 +15,11 @@
       <option v-if="projectId && !project" :value="projectId" hidden disabled>{{ projectId }}</option>
       <option v-for="item in projects.items" :key="item.id" :value="item.id">{{ item.title }}</option>
       <template #value-leading>
-        <ProjectAvatar v-if="projectId" class="project-select-icon"
-                       :id="projectId" :title="projectTitle" :icon="project?.icon" />
-        <ProjectIcon v-else class="project-select-icon" name="folder" />
+        <ProjectAvatar compact :id="projectId" :title="projectId ? projectTitle : ''" :icon="project?.icon" />
       </template>
       <template #option-leading="{ option }">
-        <ProjectAvatar v-if="option.value" class="project-select-icon"
-                       :id="option.value" :title="option.label" :icon="projectById.get(option.value)?.icon" />
-        <ProjectIcon v-else class="project-select-icon" name="folder" />
+        <ProjectAvatar compact :id="option.value" :title="option.value ? option.label : ''"
+                       :icon="projectById.get(option.value)?.icon" />
       </template>
     </UiSelect>
   </div>
@@ -101,7 +98,12 @@
                     <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
                   </svg>
                   <span class="workdir-choice-copy">
-                    <span class="workdir-choice-title">{{ option.title }}</span>
+                    <span class="workdir-choice-heading">
+                      <span class="workdir-choice-title">{{ option.title }}</span>
+                      <span v-if="option.additional" class="workdir-caption">
+                        {{ t('core.workdirExtraRepo') }}
+                      </span>
+                    </span>
                     <span v-if="option.detail" class="workdir-choice-detail">{{ option.detail }}</span>
                   </span>
                   <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
@@ -150,13 +152,18 @@
             <code class="workdir-path">{{ directory }}</code>
           </div>
         </div>
-        <div v-if="additionalCopies.length" class="workdir-copies">
-          <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
-          <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
-            <span>{{ copy.key }}</span>
-            <code class="workdir-path">{{ copy.path }}</code>
-          </div>
-        </div>
+        <section v-if="unlistedCopies.length" class="workdir-copies" :aria-labelledby="`${pickerId}-copies`">
+          <h3 :id="`${pickerId}-copies`" class="workdir-caption">{{ t('core.workdirExtraRepos') }}</h3>
+          <ul class="workdir-copy-list">
+            <li v-for="copy in unlistedCopies" :key="copy.key" class="workdir-choice">
+              <ProjectIcon class="workdir-icon" name="folder" />
+              <span class="workdir-choice-copy">
+                <span class="workdir-choice-title">{{ copy.key }}</span>
+                <code class="workdir-path">{{ copy.path }}</code>
+              </span>
+            </li>
+          </ul>
+        </section>
         <span v-if="!editable" class="workdir-caption">{{ t('core.workdirManaged') }}</span>
         <UiButton v-if="needsTransfer" :disabled="busy" @click="confirmCurrent">
           {{ t('core.workdirTransfer') }}
@@ -338,11 +345,14 @@ const sourceLabel = computed(() => ({
   grigdesk: t('core.workdirAppRepo'),
 } as Record<string, string>)[preview.value?.target?.source || ''] || '');
 const additionalCopies = computed(() => (
-  (preview.value?.target?.copies || []).filter((copy) => copy.path !== directory.value)
+  (preview.value?.target?.copies || []).filter((copy) => (
+    copy.path !== directory.value && copy.path !== preview.value?.target?.cwd
+  ))
 ));
+const additionalPaths = computed(() => new Set(additionalCopies.value.map((copy) => copy.path)));
 // Текущий выбор остаётся видимым, даже когда паспорт проекта уже недоступен.
 // Остальные варианты относятся к проекту из шапки или к свободным папкам.
-const choices = computed(() => {
+const catalogChoices = computed(() => {
   const current = currentWorkdir.value;
   const candidates: WorkdirChoice[] = [
     ...(current ? [current] : []),
@@ -354,15 +364,40 @@ const choices = computed(() => {
   const unique = candidates.filter((workdir, index) => (
     !candidates.slice(0, index).some((previous) => sameChatWorkdir(previous, workdir))
   ));
+
+  return unique.map((workdir) => {
+    const detail = choiceDetail(workdir);
+    const selected = sameChatWorkdir(workdir, current);
+
+    return {
+      key: JSON.stringify(workdir),
+      workdir,
+      title: choiceTitle(workdir),
+      detail,
+      selected,
+      additional: !selected && workdir.kind === 'project' && additionalPaths.value.has(detail),
+    };
+  });
+});
+const choices = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
 
-  return unique.map((workdir) => ({
-    key: JSON.stringify(workdir),
-    workdir,
-    title: choiceTitle(workdir),
-    detail: choiceDetail(workdir),
-    selected: sameChatWorkdir(workdir, current),
-  })).filter((option) => `${option.title} ${option.detail}`.toLocaleLowerCase().includes(query));
+  return catalogChoices.value.filter((option) => (
+    `${option.title} ${option.detail}`.toLocaleLowerCase().includes(query)
+  ));
+});
+// Поиск скрывает строки каталога, поэтому совпадающие пути не возвращаются под ним при фильтрации.
+// В чате с каталогом только для чтения все дополнительные копии показаны отдельными строками.
+const unlistedCopies = computed(() => {
+  if (!editable.value || mode.value !== 'catalog') {
+    return additionalCopies.value;
+  }
+
+  const listedPaths = new Set(catalogChoices.value
+    .filter((option) => option.additional)
+    .map((option) => option.detail));
+
+  return additionalCopies.value.filter((copy) => !listedPaths.has(copy.path));
 });
 
 /**
@@ -643,12 +678,6 @@ watch(() => JSON.stringify([
   max-width: 100%;
 }
 
-.project-select-icon.project-avatar,
-.project-select-icon {
-  width: 18px;
-  height: 18px;
-}
-
 .workdir-content {
   display: flex;
   flex: 1 0 auto;
@@ -738,10 +767,17 @@ watch(() => JSON.stringify([
   overflow-wrap: anywhere;
 }
 
-.workdir-copy {
+.workdir-copies > h3 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.workdir-copy-list {
   display: grid;
-  gap: 2px;
-  font-size: 12px;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .workdir-list-heading {
@@ -775,6 +811,13 @@ watch(() => JSON.stringify([
   flex: 1;
   gap: 3px;
   min-width: 0;
+}
+
+.workdir-choice-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
 }
 
 .workdir-choice-title {

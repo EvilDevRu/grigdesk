@@ -222,6 +222,7 @@
   "workdirFolder": "Папка",
   "workdirOnComputer": "Папки на подключённом компьютере",
   "workdirCurrent": "Текущая папка",
+  "workdirExtraRepo": "Дополнительный репозиторий",
   "workdirExtraRepos": "Дополнительные репозитории",
   "workdirMethod": "Способ выбора папки",
   "workdirByPath": "По пути",

@@ -222,6 +222,7 @@
   "workdirFolder": "Folder",
   "workdirOnComputer": "Folders on the connected computer",
   "workdirCurrent": "Current folder",
+  "workdirExtraRepo": "Additional repository",
   "workdirExtraRepos": "Additional repositories",
   "workdirMethod": "Folder selection method",
   "workdirByPath": "By path",
