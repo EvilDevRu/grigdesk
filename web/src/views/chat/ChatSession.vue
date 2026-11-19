@@ -112,10 +112,8 @@
                 </span>
               </template>
             </UiTooltip>
-            <div class="session-option workdir-option">
-              <span class="option-label">{{ t('core.chatOptionWorkdir') }}</span>
-              <ChatWorkdir :sid="sid" :embedded="phoneLayout" :active="!phoneLayout || optionsOpen" />
-            </div>
+            <ChatWorkdir :sid="sid" :embedded="phoneLayout"
+                         :active="!phoneLayout || optionsOpen" :frozen="frozen" />
           </div>
         </Teleport>
       </div>

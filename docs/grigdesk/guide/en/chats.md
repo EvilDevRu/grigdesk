@@ -25,6 +25,11 @@ an unknown size does not mean access was denied.
 5. Stop interrupts work and shows “⏹ Turn stopped.” alongside completed actions.
    After a network interruption, inspect what already happened and the reason before resuming.
 
+In a conversation without a task, use the Project picker in the header. It shows project icons.
+The working folder menu beside it lists the selected project’s repositories. When a project
+filter is active on the left, a new chat starts with that project selected.
+On phones, both fields are in the Workspace section of the conversation options.
+
 The Task picker in the header shows each task’s number, title, and board logo. When multiple
 boards are enabled, the All and board buttons appear below the search field, just like in the
 model picker. Search covers all boards. A single board uses a flat list. Choosing a task changes

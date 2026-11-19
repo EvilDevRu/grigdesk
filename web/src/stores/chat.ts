@@ -7308,16 +7308,17 @@ export const useChatStore = defineStore('chat', {
       }
     },
     /**
-     * Что остаётся после сбоя commit. Определённый отказ сервера закрывает переход.
-     * Потерянный ответ сохраняет прежний operationId: повтор идемпотентен. Если сервер
-     * записал failed, reseed получает новый выбор стратегии, а прямой переход закрывается.
+     * Потерянный ответ сохраняет прежний operationId для идемпотентного повтора.
+     * После несовместимости прежней сессии оставляем причину и явный выход без выжимки.
+     * Для нового решения нужен свежий предпросмотр: сервер уже записал исход операции.
      */
     async _workdirRetry(
       id: string, proposal: WorkdirProposal, caught: unknown,
     ): Promise<WorkdirProposal | null> {
       const error = chatFailure(caught);
+      const originChanged = error.data.error === 'workdir_origin_changed';
 
-      if (error.status === 409 || error.data?.error === 'stale_chat_workdir') {
+      if (!originChanged && (error.status === 409 || error.data.error === 'stale_chat_workdir')) {
         return null;
       }
       if (!error.status) {
@@ -7325,23 +7326,31 @@ export const useChatStore = defineStore('chat', {
       }
 
       try {
-        const remote = decodeChatEnvelope(await api.get(
-          `/api/chat/store/chat/${id}${this.pagingEnabled ? '?window=1' : ''}`,
-        ));
-        const transition = remote.chat?.workdirState?.transition;
+        if (!originChanged) {
+          const remote = decodeChatEnvelope(await api.get(
+            `/api/chat/store/chat/${id}${this.pagingEnabled ? '?window=1' : ''}`,
+          ));
+          const transition = remote.chat?.workdirState?.transition;
 
-        if (transition?.id !== proposal.operationId || transition.phase !== 'failed') {
-          return proposal;
+          if (transition?.id !== proposal.operationId || transition.phase !== 'failed') {
+            return proposal;
+          }
         }
         if (!['reseed', 'unavailable'].includes(proposal.preview.transfer)) {
           return null;
+        }
+
+        const preview = await this.previewWorkdir(id, proposal.candidate);
+
+        if (!preview) {
+          return proposal;
         }
 
         return {
           ...proposal,
           operationId: newTurnId(),
           transfer: null,
-          preview: (await this.previewWorkdir(id, proposal.candidate))!,
+          preview: originChanged ? { ...preview, summaryAvailable: false } : preview,
         };
       } catch {
         // Исход пока неизвестен: повтор тем же operationId остаётся идемпотентным.

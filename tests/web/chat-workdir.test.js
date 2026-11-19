@@ -202,6 +202,57 @@ test('кандидат reseed живёт в диалоге, фактическа
   assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
 });
 
+test('отказ прежней сессии оставляет причину и явный сброс с новой ревизией', async () => {
+  const { chat, session } = await fixture();
+  const requests = [];
+  const candidate = { taskId: null, workdir: SECOND };
+  const reason = 'Профиль или сессия исполнителя изменились.';
+
+  session.sessionId = 'old-session';
+  chat.previewWorkdir = async () => ({
+    transfer: 'reseed',
+    workspaceKey: 'next',
+    revision: requests.length + 1,
+    summaryAvailable: true,
+  });
+  apiHarness.post = async (_url, body) => {
+    requests.push(body);
+
+    if (body.transfer === 'summary') {
+      throw Object.assign(new Error(reason), {
+        status: 409,
+        data: { error: 'workdir_origin_changed' },
+      });
+    }
+
+    return {
+      chat: {
+        id: 'chat',
+        revision: 3,
+        workdir: SECOND,
+        sessionId: null,
+        messages: [],
+        workdirState: { transition: { id: body.operationId, phase: 'done' } },
+      },
+    };
+  };
+
+  await chat.proposeWorkdir('chat', candidate);
+  assert.equal(await chat.commitWorkdir('chat', 'summary'), false);
+  assert.deepEqual(session.workdir, FIRST);
+  assert.equal(session.sessionId, 'old-session');
+  assert.equal(session.error, reason);
+  assert.equal(session.workdirProposal?.preview.summaryAvailable, false);
+  assert.equal(session.workdirProposal?.transfer, null);
+  assert.equal(requests.length, 1);
+
+  assert.equal(await chat.commitWorkdir('chat', 'reset'), true);
+  assert.equal(requests[1].transfer, 'reset');
+  assert.equal(requests[1].expectedRevision, 2);
+  assert.notEqual(requests[1].operationId, requests[0].operationId);
+  assert.deepEqual(session.workdir, SECOND);
+});
+
 test('повтор после потери ACK использует то же тело; draft и defaults переживают commit', async () => {
   const { chat, session } = await fixture();
 

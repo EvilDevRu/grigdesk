@@ -36,6 +36,7 @@ function uiFacadeStub(prefix) {
     ...imports,
     'export { t, messageRef, resolveUiText } from "./src/services/locale.ts";',
     'export { vTooltip } from "./src/services/tooltipDirective.ts";',
+    'export { showToast } from "./src/services/toasts.ts";',
     `export { ${names} };`,
     'export const confirmDialog = (...args) => {',
     `  const handler = globalThis.${prefix}ConfirmDialog;`,

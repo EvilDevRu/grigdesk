@@ -25,6 +25,17 @@ test.before(async () => {
 test.after(() => sharedBrowser?.close());
 
 /**
+ * Диалог снимает закрывающийся слой после кадра анимации.
+ * Дожидаемся удаления слоя перед повторным открытием или проверкой фокуса.
+ */
+async function finishDialogTransition(browser, flushPromises) {
+  await new Promise((resolve) => browser.requestAnimationFrame(() => (
+    browser.requestAnimationFrame(resolve)
+  )));
+  await flushPromises();
+}
+
+/**
  * Настоящий композер получает управляемые стор и канал активного хода.
  * Счётчики различают немедленный ввод, очередь и остановку без вызова исполнителя.
  */
@@ -134,6 +145,11 @@ async function mountChat(t, {
       realSteps: true,
       realWorkdir,
       stubs: {
+        '../../actions/projects/index.ts': `
+          export const useProjectsStore = () => ({ activeCatalog: { items: [], loaded: true } });
+          export const watchProjects = () => () => {};
+          export const loadProjects = async () => {};
+        `,
         '../../shared/desktopSettings.ts': (
           `export const currentDesktopMode = () => '${desktop ? 'main' : 'page'}';`
         ),
@@ -358,6 +374,7 @@ test('сенсорный Enter в меню команд не выбирает к
 test('телефон: переименование доступно при закрытых настройках, строки ленты компактны', async (t) => {
   const { wrapper, browser, session, flushPromises } = await mountChat(t, {
     touch: true, width: 390,
+    realWorkdir: true,
   });
   const styles = await Promise.all(['tokens', 'base', 'components/foundation',
     'components/actions', 'components/fields', 'components/patterns', 'components/overlays']
@@ -457,6 +474,7 @@ test('настройки телефона: полный набор полей, �
   const { wrapper, browser, flushPromises } = await mountChat(t, {
     touch: true,
     width: 390,
+    realWorkdir: true,
     modes: [{ id: 'auto', label: 'Авто' }],
     provider: { ...PROVIDER, models: [{ ...PROVIDER.models[0], efforts: ['low', 'high'] }] },
   });
@@ -474,13 +492,13 @@ test('настройки телефона: полный набор полей, �
     assert.equal(dialog.closest('[data-mobile-fullscreen]') !== null, true);
     assert.equal(dialog.contains(model) && dialog.contains(effort) && dialog.contains(task), true);
     assert.match(dialog.textContent,
-      /Агент.*Модель.*Режим доступа.*Усилие.*Рабочая область.*Задача.*Рабочая папка.*Контекст/su);
+      /Агент.*Модель.*Режим доступа.*Усилие.*Рабочая область.*Задача.*Проект.*Рабочая папка.*Контекст/su);
     assert.equal(dialog.querySelectorAll('.options-section').length, 3);
     assert.equal([...dialog.querySelectorAll('.context-actions button')]
       .every((button) => button.disabled), true);
     assert.equal(browser.document.querySelectorAll('.sel.model').length, 1);
-    dialog.querySelector('.options-heading button').click();
-    await flushPromises();
+    dialog.querySelector('button[aria-label="Закрыть"]').click();
+    await finishDialogTransition(browser, flushPromises);
     assert.equal(browser.document.querySelector('[data-role="chat-options"]') === null, true);
     assert.equal(wrapper.get('.sel.model').element === model, true);
   }
@@ -490,7 +508,7 @@ test('настройки телефона: полный набор полей, �
   // Начальное resize заполняет кеш MediaQueryList Happy DOM перед настоящим переходом.
   browser.dispatchEvent(new browser.Event('resize'));
   browser.happyDOM.setWindowSize({ width: 1280, height: 844 });
-  await flushPromises();
+  await finishDialogTransition(browser, flushPromises);
   assert.equal(browser.document.querySelector('[data-role="chat-options"]') === null, true);
   assert.equal(wrapper.get('.sel.model').element === model, true);
   assert.equal(wrapper.get('.eff').element === effort, true);
@@ -549,12 +567,7 @@ test('телефон: выбор папки встроен в настройки
     width: 390,
     realWorkdir: true,
   });
-  const finishTransition = async () => {
-    await new Promise((resolve) => browser.requestAnimationFrame(() => (
-      browser.requestAnimationFrame(resolve)
-    )));
-    await flushPromises();
-  };
+  const finishTransition = () => finishDialogTransition(browser, flushPromises);
 
   await wrapper.get('.phone-options').trigger('click');
   await flushPromises();
@@ -634,7 +647,7 @@ test('телефон: выбор папки встроен в настройки
 
   trigger.click();
   await flushPromises();
-  options.querySelector('.options-heading button').click();
+  options.querySelector('button[aria-label="Закрыть"]').click();
   await flushPromises();
   await finishTransition();
   assert.equal(browser.document.querySelector('[data-role="workdir-picker"]') === null, true);

@@ -1,157 +1,207 @@
 <template>
-  <UiButton
-    v-if="chat.workdirProtocol"
-    variant="ghost"
-    :aria-label="t('core.workdirTrigger', { name: directoryName })"
-    v-tooltip="t('core.workdirWorkingIn', { path: currentDirectory || directory })"
-    :aria-haspopup="embedded ? undefined : 'dialog'"
-    :aria-controls="pickerOpen ? pickerId : undefined"
-    :aria-expanded="pickerOpen"
-    :pressed="pickerOpen"
-    :disabled="busy"
-    data-context="chat-workdir"
-    @click="openPicker"
-  >
-    <template #leading>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path :d="NAV_ICONS.projects" />
-      </svg>
-    </template>
-    {{ directoryName }}
-    <template #trailing>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path :d="pickerOpen ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'" />
-      </svg>
-    </template>
-  </UiButton>
-  <ChatWorkdirPicker v-model:open="pickerOpen" :id="pickerId" :embedded="embedded" :busy="busy">
-    <div class="workdir-content" :class="{ 'workdir-content--embedded': embedded }">
-      <UiInlineMessage v-for="warning in preview?.target?.warnings || []" :key="warning" tone="warning">
-        {{ warning }}
-      </UiInlineMessage>
-      <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-      <template v-if="editable">
-        <div v-if="mode === 'catalog'" class="workdir-catalog">
-          <div class="workdir-toolbar">
-            <UiSearchInput v-model="search" :aria-label="t('core.workdirSearch')" :disabled="busy"
-                           :placeholder="t('core.search')" autocomplete="off" :spellcheck="false" />
-            <UiButton ref="pathModeButton" :disabled="busy" @click="showPathInput">
+  <div v-if="chat.workdirProtocol && editable" class="session-option project-option">
+    <span class="option-label">{{ t('core.chatOptionProject') }}</span>
+    <UiSelect
+      :model-value="projectId"
+      :aria-label="t('core.chatOptionProject')"
+      :disabled="busy || frozen"
+      compact searchable
+      data-context="chat-session-toolbar"
+      data-role="chat-project"
+      v-tooltip="projects.error || projectTitle"
+      @update:model-value="chooseProject"
+    >
+      <option value="">{{ t('core.chatProjectNone') }}</option>
+      <option v-if="projectId && !project" :value="projectId" hidden disabled>{{ projectId }}</option>
+      <option v-for="item in projects.items" :key="item.id" :value="item.id">{{ item.title }}</option>
+      <template #value-leading>
+        <ProjectAvatar v-if="projectId" class="project-select-icon"
+                       :id="projectId" :title="projectTitle" :icon="project?.icon" />
+        <ProjectIcon v-else class="project-select-icon" name="folder" />
+      </template>
+      <template #option-leading="{ option }">
+        <ProjectAvatar v-if="option.value" class="project-select-icon"
+                       :id="option.value" :title="option.label" :icon="projectById.get(option.value)?.icon" />
+        <ProjectIcon v-else class="project-select-icon" name="folder" />
+      </template>
+    </UiSelect>
+  </div>
+  <div v-if="chat.workdirProtocol" class="session-option workdir-option">
+    <span class="option-label">{{ t('core.chatOptionWorkdir') }}</span>
+    <UiButton
+      variant="ghost"
+      :aria-label="t('core.workdirTrigger', { name: directoryName })"
+      v-tooltip="t('core.workdirWorkingIn', { path: currentDirectory || directory })"
+      :aria-haspopup="embedded ? undefined : 'dialog'"
+      :aria-controls="pickerOpen ? pickerId : undefined"
+      :aria-expanded="pickerOpen"
+      :pressed="pickerOpen"
+      :disabled="busy || frozen"
+      data-context="chat-workdir"
+      @click="openPicker"
+    >
+      <template #leading>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="NAV_ICONS.projects" />
+        </svg>
+      </template>
+      {{ directoryName }}
+      <template #trailing>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="pickerOpen ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'" />
+        </svg>
+      </template>
+    </UiButton>
+    <ChatWorkdirPicker v-model:open="pickerOpen" :id="pickerId" :embedded="embedded" :busy="busy">
+      <div class="workdir-content" :class="{ 'workdir-content--embedded': embedded }">
+        <UiInlineMessage v-for="warning in preview?.target?.warnings || []" :key="warning" tone="warning">
+          {{ warning }}
+        </UiInlineMessage>
+        <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
+        <UiInlineMessage v-if="editable && projectId && projects.error" tone="danger">
+          {{ projects.error }}
+        </UiInlineMessage>
+        <template v-if="editable">
+          <div v-if="mode === 'catalog'" class="workdir-catalog">
+            <div class="workdir-toolbar">
+              <UiSearchInput v-model="search" :aria-label="t('core.workdirSearch')" :disabled="busy"
+                             :placeholder="t('core.search')" autocomplete="off" :spellcheck="false" />
+              <UiButton v-if="!projectId" ref="pathModeButton" :disabled="busy" @click="showPathInput">
+                <template #leading>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" />
+                  </svg>
+                </template>
+                {{ t('core.workdirByPath') }}
+              </UiButton>
+            </div>
+            <div class="workdir-list-heading">
+              <span class="workdir-caption">
+                {{ projectId ? t('core.workdirProjectRepos') : t('core.workdirAvailable') }}
+              </span>
+              <UiSpinner v-if="projectId && projects.loading" :label="t('core.loading')" />
+            </div>
+            <div class="workdir-choices" role="group" :aria-label="t('core.workdirAvailable')"
+                 :aria-busy="Boolean(projectId && projects.loading)">
+              <UiSelectableRow
+                v-for="option in choices"
+                :key="option.key"
+                :selected="option.selected"
+                :pressed="option.selected"
+                :disabled="busy"
+                data-context="workspace-catalog"
+                @select="choose(option.workdir)"
+              >
+                <span class="workdir-choice">
+                  <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
+                  </svg>
+                  <span class="workdir-choice-copy">
+                    <span class="workdir-choice-title">{{ option.title }}</span>
+                    <span v-if="option.detail" class="workdir-choice-detail">{{ option.detail }}</span>
+                  </span>
+                  <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                       :aria-label="t('core.workdirCurrent')" role="img">
+                    <path d="m5 13 4 4L19 7" />
+                  </svg>
+                </span>
+              </UiSelectableRow>
+              <p v-if="!choices.length && !(projectId && projects.loading)" class="workdir-empty"
+                 role="status">
+                {{ t('core.workdirNoResults') }}
+              </p>
+            </div>
+          </div>
+          <div v-else class="workdir-path-editor">
+            <UiButton variant="ghost" size="compact" :disabled="busy" @click="showCatalog">
               <template #leading>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" />
+                  <path d="m10 6-6 6 6 6M4 12h16" />
                 </svg>
               </template>
-              {{ t('core.workdirByPath') }}
+              {{ t('core.workdirBackToCatalog') }}
             </UiButton>
+            <form class="workdir-form" @submit.prevent="choosePath">
+              <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
+                <UiInput ref="pathField" v-model="pathInput" placeholder="/home/user/project" :disabled="busy"
+                         autocomplete="off" autocapitalize="off" :spellcheck="false" />
+              </UiField>
+              <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()">
+                {{ t('core.workdirChoose') }}
+              </UiButton>
+            </form>
           </div>
-          <div class="workdir-list-heading">
-            <span class="workdir-caption">{{ t('core.workdirCatalog') }}</span>
-            <UiSpinner v-if="loadingProjects" :label="t('core.loading')" />
-          </div>
-          <div class="workdir-choices" role="group" :aria-label="t('core.workdirAvailable')"
-               :aria-busy="loadingProjects">
-            <UiSelectableRow
-              v-for="option in choices"
-              :key="option.key"
-              :selected="option.selected"
-              :pressed="option.selected"
-              :disabled="busy"
-              data-context="workspace-catalog"
-              @select="choose(option.workdir)"
-            >
-              <span class="workdir-choice">
-                <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
-                </svg>
-                <span class="workdir-choice-copy">
-                  <span class="workdir-choice-title">{{ option.title }}</span>
-                  <span v-if="option.workdir.kind !== 'project' || option.workdir.repoKey"
-                        class="workdir-choice-detail">{{ option.detail }}</span>
-                </span>
-                <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                     :aria-label="t('core.workdirCurrent')" role="img">
-                  <path d="m5 13 4 4L19 7" />
-                </svg>
-              </span>
-            </UiSelectableRow>
-            <p v-if="!choices.length && !loadingProjects" class="workdir-empty" role="status">
-              {{ t('core.workdirNoResults') }}
-            </p>
+        </template>
+        <div class="workdir-current">
+          <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path :d="NAV_ICONS.projects" />
+          </svg>
+          <div class="workdir-current-copy">
+            <span class="workdir-caption">
+              {{ t('core.workdirCurrent') }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
+            </span>
+            <code class="workdir-path">{{ directory }}</code>
           </div>
         </div>
-        <div v-else class="workdir-path-editor">
-          <UiButton variant="ghost" size="compact" :disabled="busy" @click="showCatalog">
-            <template #leading>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m10 6-6 6 6 6M4 12h16" />
-              </svg>
-            </template>
-            {{ t('core.workdirBackToCatalog') }}
-          </UiButton>
-          <form class="workdir-form" @submit.prevent="choosePath">
-            <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
-              <UiInput ref="pathField" v-model="pathInput" :placeholder="'/home/user/project'" :disabled="busy"
-                       autocomplete="off" autocapitalize="off" :spellcheck="false" />
-            </UiField>
-            <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()">
-              {{ t('core.workdirChoose') }}
-            </UiButton>
-          </form>
+        <div v-if="additionalCopies.length" class="workdir-copies">
+          <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
+          <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
+            <span>{{ copy.key }}</span>
+            <code class="workdir-path">{{ copy.path }}</code>
+          </div>
         </div>
-      </template>
-      <div class="workdir-current">
-        <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="NAV_ICONS.projects" />
-        </svg>
-        <div class="workdir-current-copy">
-          <span class="workdir-caption">
-            {{ t('core.workdirCurrent') }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
-          </span>
-          <code class="workdir-path">{{ directory }}</code>
-        </div>
+        <span v-if="!editable" class="workdir-caption">{{ t('core.workdirManaged') }}</span>
+        <UiButton v-if="needsTransfer" :disabled="busy" @click="confirmCurrent">
+          {{ t('core.workdirTransfer') }}
+        </UiButton>
       </div>
-      <div v-if="additionalCopies.length" class="workdir-copies">
-        <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
-        <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
-          <span>{{ copy.key }}</span>
-          <code class="workdir-path">{{ copy.path }}</code>
-        </div>
-      </div>
-      <span v-if="!editable" class="workdir-caption">{{ t('core.workdirManaged') }}</span>
-      <UiButton v-if="needsTransfer" :disabled="busy" @click="confirmCurrent">
-        {{ t('core.workdirTransfer') }}
-      </UiButton>
-    </div>
-  </ChatWorkdirPicker>
+    </ChatWorkdirPicker>
+  </div>
   <UiDialog
     :open="Boolean(proposal)"
     layer="confirm"
+    size="compact"
+    mobile-sheet
     :title="t('core.chatSmenaRabocheyPapki')"
     :busy="Boolean(session?.workdirChanging)"
     @close="cancel"
   >
-    <p>{{ t('core.chatRabotaemV') }} {{ proposal?.preview.target?.cwd }}</p>
-    <p v-if="retrying"> {{ t('core.chatServerNePodtverdilPerehod') }} </p>
-    <p v-else>{{ t('core.chatIspolnitelNachnetNovuyuSessiyu') }}</p>
+    <p>{{ t('core.workdirTransferTarget', { path: proposal?.preview.target?.cwd || '' }) }}</p>
+    <p v-if="transferStatus" class="workdir-transfer-status" role="status">
+      <UiSpinner decorative />
+      {{ transferStatus }}
+    </p>
+    <p v-else-if="retrying">{{ t('core.chatServerNePodtverdilPerehod') }}</p>
+    <p v-else-if="!session?.error">
+      {{ summaryAvailable ? t('core.chatIspolnitelNachnetNovuyuSessiyu') : t('core.workdirSummaryUnavailable') }}
+    </p>
     <UiInlineMessage v-if="session?.error" tone="danger">{{ session.error }}</UiInlineMessage>
     <template #footer>
-      <UiButton v-if="retrying" :disabled="session?.workdirChanging" @click="retry">{{ t('core.pluginNotificationsRetry') }}</UiButton>
-      <template v-else>
-        <UiButton
-          :disabled="session?.workdirChanging || !proposal?.preview.summaryAvailable
-            || proposal?.preview.transfer === 'unavailable'"
-          @click="chat.commitWorkdir(sid, 'summary')"
-        > {{ t('core.chatSzhatRazgovorIPereyti') }} </UiButton>
-        <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')"> {{ t('core.chatPereytiBezVyzhimki') }} </UiButton>
-      </template>
       <UiButton :disabled="session?.workdirChanging" @click="cancel">{{ t('core.cancel') }}</UiButton>
+      <UiButton v-if="retrying" variant="solid" tone="accent" @click="retry">
+        {{ t('core.pluginNotificationsRetry') }}
+      </UiButton>
+      <template v-else>
+        <UiButton :disabled="session?.workdirChanging" @click="chat.commitWorkdir(sid, 'reset')">
+          {{ t('core.chatPereytiBezVyzhimki') }}
+        </UiButton>
+        <UiButton
+          v-if="summaryAvailable"
+          variant="solid"
+          tone="accent"
+          :disabled="session?.workdirChanging"
+          @click="chat.commitWorkdir(sid, 'summary')"
+        >
+          {{ t('core.chatSzhatRazgovorIPereyti') }}
+        </UiButton>
+      </template>
     </template>
   </UiDialog>
 </template>
@@ -166,18 +216,21 @@ import {
   UiInlineMessage,
   UiInput,
   UiSearchInput,
+  UiSelect,
   UiSpinner,
   UiSelectableRow,
+  showToast,
   t,
   vTooltip,
 } from '../../ui.ts';
 import ChatWorkdirPicker from './ChatWorkdirPicker.vue';
-import { api } from '../../shared/apiClient.ts';
+import ProjectAvatar from '../projects/ProjectAvatar.vue';
+import ProjectIcon from '../projects/ProjectIcon.vue';
+import { loadProjects, useProjectsStore, watchProjects } from '../../actions/projects/index.ts';
 import { NAV_ICONS } from '../../shared/navIcons.ts';
-import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
 import { useChatStore } from '../../stores/chat.ts';
 import {
-  chatWorkdirLabel, normalizeRecentWorkdirs, sameChatWorkdir,
+  chatWorkdirLabel, normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir,
 } from '../../../../shared/chat/chatWorkdir.ts';
 import type { ChatWorkdir as WorkdirChoice } from '../../../../shared/chat/chatWorkdir.ts';
 
@@ -211,22 +264,18 @@ interface WorkdirSession {
   } | null;
 }
 
-interface ProjectOption {
-  id: string;
-  title?: string;
-  archivedAt?: string | null;
-}
-
 const props = withDefaults(defineProps<{
   sid: string;
   embedded?: boolean;
   active?: boolean;
+  frozen?: boolean;
 }>(), {
   embedded: false,
   active: true,
 });
 
 const chat = useChatStore();
+const projects = useProjectsStore().activeCatalog;
 const pickerId = `chat-workdir-picker-${useId()}`;
 const pickerOpen = ref(false);
 const mode = ref<'catalog' | 'path'>('catalog');
@@ -234,8 +283,6 @@ const search = ref('');
 const pathInput = ref('');
 const pathField = ref<InstanceType<typeof UiInput> | null>(null);
 const pathModeButton = ref<InstanceType<typeof UiButton> | null>(null);
-const loadingProjects = ref(false);
-const projects = ref<ProjectOption[]>([]);
 const error = ref('');
 
 const session = computed<WorkdirSession | undefined>(() => (
@@ -246,6 +293,17 @@ const preview = computed(() => session.value?.workdirPreview);
 const proposal = computed(() => session.value?.workdirProposal || null);
 // Стратегия уже отправлена, а ответа нет: окно предлагает повтор того же запроса.
 const retrying = computed(() => Boolean(proposal.value?.transfer) && !session.value?.workdirChanging);
+const summaryAvailable = computed(() => Boolean(proposal.value?.preview.summaryAvailable)
+  && proposal.value?.preview.transfer !== 'unavailable');
+const transferStatus = computed(() => {
+  if (!session.value?.workdirChanging || !proposal.value?.transfer) {
+    return '';
+  }
+
+  return proposal.value.transfer === 'summary'
+    ? t('core.chatSzhimayuKontekst')
+    : t('core.workdirTransferPending');
+});
 const directory = computed(() => session.value?.workdirState?.committed?.cwd
   || preview.value?.target?.cwd || chatWorkdirLabel(session.value?.workdir));
 // Подпись шапки показывает подтверждённую папку, даже если предпросмотр предлагает другую.
@@ -260,6 +318,17 @@ const directoryName = computed(() => (
 const busy = computed(() => Boolean(session.value?.sending || session.value?.compacting
   || session.value?.sessionResetting || session.value?.workdirChanging));
 const editable = computed(() => !session.value?.taskId && session.value?.purpose !== 'companion');
+const currentWorkdir = computed(() => normalizeChatWorkdir(session.value?.workdir));
+const projectId = computed(() => currentWorkdir.value?.kind === 'project'
+  ? currentWorkdir.value.projectId : '');
+const projectById = computed(() => new Map(projects.items.map((item) => [item.id, item])));
+const project = computed(() => projectById.value.get(projectId.value));
+const projectTitle = computed(() => project.value?.title || projectId.value || t('core.chatProjectNone'));
+const defaultRepo = computed(() => {
+  const items = project.value?.repos ?? [];
+
+  return items.find((repo) => repo.key === project.value?.defaultRepoKey) ?? items[0];
+});
 const needsTransfer = computed(() => ['reseed', 'unavailable'].includes(preview.value?.transfer || ''));
 const sourceLabel = computed(() => ({
   'task-copies': t('core.workdirTaskCopies'),
@@ -271,19 +340,16 @@ const sourceLabel = computed(() => ({
 const additionalCopies = computed(() => (
   (preview.value?.target?.copies || []).filter((copy) => copy.path !== directory.value)
 ));
-// Текущий выбор и недавние идут первыми, остальные проекты дополняют каталог.
-// Сравнение по контракту папки исключает повтор проекта из недавних в том же списке.
+// Текущий выбор остаётся видимым, даже когда паспорт проекта уже недоступен.
+// Остальные варианты относятся к проекту из шапки или к свободным папкам.
 const choices = computed(() => {
-  const current = normalizeChatWorkdir(session.value?.workdir);
+  const current = currentWorkdir.value;
   const candidates: WorkdirChoice[] = [
     ...(current ? [current] : []),
-    ...normalizeRecentWorkdirs(chat.recentWorkdirs),
-    ...projects.value.map((project): WorkdirChoice => ({
-      kind: 'project',
-      projectId: project.id,
-      repoKey: null,
-    })),
-    { kind: 'grigdesk' },
+    ...(projectId.value ? projectFolders() : [
+      ...normalizeRecentWorkdirs(chat.recentWorkdirs).filter((item) => item.kind === 'path'),
+      { kind: 'grigdesk' } as const,
+    ]),
   ];
   const unique = candidates.filter((workdir, index) => (
     !candidates.slice(0, index).some((previous) => sameChatWorkdir(previous, workdir))
@@ -295,17 +361,50 @@ const choices = computed(() => {
     workdir,
     title: choiceTitle(workdir),
     detail: choiceDetail(workdir),
-    selected: sameChatWorkdir(workdir, session.value?.workdir),
+    selected: sameChatWorkdir(workdir, current),
   })).filter((option) => `${option.title} ${option.detail}`.toLocaleLowerCase().includes(query));
 });
 
 /**
- * Название каталога остаётся коротким, а полный путь виден второй строкой.
- * У проекта показываем заголовок паспорта; пока каталог грузится, доступен его id.
+ * Ключ null следует за основным репозиторием паспорта, явный ключ закрепляет папку.
+ * Основной репозиторий показываем одним вариантом, сохраняя текущий явный выбор в списке.
+ */
+function projectFolders(): WorkdirChoice[] {
+  const id = projectId.value;
+  const main = defaultRepo.value;
+  const current = currentWorkdir.value;
+
+  if (!main || !project.value) {
+    return [];
+  }
+
+  const automatic: WorkdirChoice[] = current?.kind === 'project' && current.repoKey === main.key
+    ? []
+    : [{
+      kind: 'project',
+      projectId: id,
+      repoKey: null,
+    }];
+
+  return [
+    ...automatic,
+    ...project.value.repos
+      .filter((repo) => repo.key !== main.key)
+      .map((repo): WorkdirChoice => ({
+        kind: 'project',
+        projectId: id,
+        repoKey: repo.key,
+      })),
+  ];
+}
+
+/**
+ * В проекте различаем папки по ключам репозиториев из паспорта.
+ * Для произвольной папки достаточно последнего сегмента пути.
  */
 function choiceTitle(workdir: WorkdirChoice): string {
   if (workdir.kind === 'project') {
-    return projects.value.find((project) => project.id === workdir.projectId)?.title || workdir.projectId;
+    return workdir.repoKey || t('core.workdirProjectMain');
   }
   if (workdir.kind === 'path') {
     return workdir.path.split('/').filter(Boolean).at(-1) || workdir.path;
@@ -315,8 +414,8 @@ function choiceTitle(workdir: WorkdirChoice): string {
 }
 
 /**
- * Подпись различает проекты и одноимённые каталоги в недавних выборах.
- * Фактические пути проектов не угадываются по их названиям.
+ * Поиск видит пути из паспорта; подтверждённый путь запуска приходит от сервера.
+ * У сохранённого выбора без доступного паспорта остаётся только его название.
  */
 function choiceDetail(workdir: WorkdirChoice): string {
   if (workdir.kind === 'path') {
@@ -324,11 +423,42 @@ function choiceDetail(workdir: WorkdirChoice): string {
   }
   if (workdir.kind === 'project') {
     return workdir.repoKey
-      ? t('core.workdirProjectRepo', { name: workdir.repoKey })
-      : t('core.workdirProjectMain');
+      ? project.value?.repos.find((repo) => repo.key === workdir.repoKey)?.dir || ''
+      : defaultRepo.value?.dir || '';
   }
 
   return t('core.workdirAppFolder');
+}
+
+/**
+ * Смена проекта использует тот же переход, что выбор папки.
+ * Селект читает подтверждённый выбор, пока сервер проверяет новую папку и память.
+ */
+async function chooseProject(value: string | number | null): Promise<void> {
+  const id = String(value ?? '');
+
+  if (!editable.value || busy.value || props.frozen || id === projectId.value
+    || (id && !projectById.value.has(id))) {
+    return;
+  }
+
+  const workdir: WorkdirChoice = id ? {
+    kind: 'project',
+    projectId: id,
+    repoKey: null,
+  } : { kind: 'grigdesk' };
+
+  closePicker();
+  await choose(workdir);
+
+  if (error.value && !proposal.value) {
+    showToast({
+      id: `chat-project-change:${props.sid}`,
+      title: t('core.chatSmenaRabocheyPapki'),
+      body: error.value,
+      tone: 'danger',
+    });
+  }
 }
 
 /**
@@ -436,25 +566,7 @@ async function refresh(): Promise<void> {
 }
 
 /**
- * Каталог проектов нужен только открытому окошку выбора,
- * поэтому грузится при открытии, а не после каждого хода.
- */
-async function loadProjects(): Promise<void> {
-  loadingProjects.value = true;
-
-  try {
-    const catalog = await api.get('/api/projects') as { projects?: ProjectOption[]; };
-
-    projects.value = catalog.projects || [];
-  } catch (failure) {
-    error.value ||= (failure as Error).message;
-  } finally {
-    loadingProjects.value = false;
-  }
-}
-
-/**
- * Каждый вход начинает выбор с общего каталога без прежнего поискового фильтра.
+ * Каждый вход начинает поиск заново в пределах текущего проекта.
  * Встроенный выбор сворачивается повторным нажатием; открытие не вызывает клавиатуру.
  */
 async function openPicker(): Promise<void> {
@@ -470,10 +582,27 @@ async function openPicker(): Promise<void> {
   error.value = '';
   pickerOpen.value = true;
 
-  await Promise.all([refresh(), loadProjects()]);
+  if (editable.value && !projects.loading && (!projects.loaded || projects.error)) {
+    void loadProjects('active');
+  }
+
+  await refresh();
 }
 
+watch(() => Boolean(chat.workdirProtocol && editable.value && session.value), (enabled, _, onCleanup) => {
+  if (!enabled) {
+    return;
+  }
+
+  onCleanup(watchProjects('active'));
+
+  if (!projects.loaded && !projects.loading) {
+    void loadProjects('active');
+  }
+}, { immediate: true });
+
 watch(() => props.sid, closePicker);
+watch(projectId, closePicker);
 watch(() => props.embedded, closePicker);
 watch(() => props.active, (active) => {
   if (!active) {
@@ -490,6 +619,36 @@ watch(() => JSON.stringify([
 </script>
 
 <style scoped>
+.workdir-transfer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-option {
+  display: contents;
+}
+
+.option-label {
+  display: none;
+}
+
+.project-option > .ui-select-wrap {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(200px, 33%);
+}
+
+.project-option :deep(.ui-select) {
+  max-width: 100%;
+}
+
+.project-select-icon.project-avatar,
+.project-select-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .workdir-content {
   display: flex;
   flex: 1 0 auto;
@@ -654,6 +813,10 @@ watch(() => JSON.stringify([
 }
 
 @media (max-width: 600px) {
+  .project-option > .ui-select-wrap {
+    max-width: 100%;
+  }
+
   .workdir-content:not(.workdir-content--embedded) {
     padding-right: max(16px, env(safe-area-inset-right));
     padding-bottom: max(20px, env(safe-area-inset-bottom));

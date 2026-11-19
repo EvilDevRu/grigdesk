@@ -29,9 +29,13 @@ async function mountWorkdir(t, browser, store) {
   const Component = await compileVue(webFile('src/views/chat/ChatWorkdir.vue'), {
     stubs: {
       '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__workdirChat;',
-      '../../shared/apiClient.ts': `export const api = { get: async () => ({
-        projects: globalThis.__workdirProjects || [],
-      }) };`,
+      '../../actions/projects/index.ts': `
+        export const useProjectsStore = () => ({
+          activeCatalog: { items: globalThis.__workdirProjects || [], loaded: true },
+        });
+        export const watchProjects = () => () => {};
+        export const loadProjects = async () => {};
+      `,
     }
   });
   const wrapper = mount(Component, {
@@ -180,6 +184,51 @@ test('относительный путь объясняется на месте
   assert.match(browser.document.body.textContent, /Нужен абсолютный путь/u);
 });
 
+test('сжатие показывает ход переноса и оставляет причину отказа рядом с доступными действиями', async (t) => {
+  const browser = await browserHarness();
+  const session = await workdirSession({
+    workdirProposal: {
+      preview: { target: { cwd: '/workspace/next' }, summaryAvailable: true, transfer: 'reseed' },
+    },
+  });
+  const calls = [];
+  let refuse;
+  const { flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [],
+    previewWorkdir: async () => session.workdirPreview,
+    async commitWorkdir(id, transfer) {
+      calls.push({ id, transfer });
+      session.workdirChanging = true;
+      session.workdirProposal.transfer = transfer;
+      await new Promise((resolve) => {
+        refuse = resolve;
+      });
+      session.workdirProposal.transfer = null;
+      session.workdirProposal.preview.summaryAvailable = false;
+      session.error = 'Профиль или сессия исполнителя изменились.';
+      session.workdirChanging = false;
+    },
+  });
+
+  buttonByText(browser, 'Сжать разговор и перейти').click();
+  await flushPromises();
+  assert.deepEqual(calls, [{ id: 'chat', transfer: 'summary' }]);
+  assert.match(browser.document.querySelector('[role="status"]').textContent, /Сжимаю контекст/u);
+  assert.equal(buttonByText(browser, 'Перейти без выжимки').disabled, true);
+
+  refuse();
+  await flushPromises();
+  assert.match(browser.document.body.textContent, /Профиль или сессия исполнителя изменились/u);
+  assert.equal(Boolean(buttonByText(browser, 'Сжать разговор и перейти')), false);
+  assert.equal(buttonByText(browser, 'Перейти без выжимки').disabled, false);
+  buttonByText(browser, 'Отмена').click();
+  await flushPromises();
+  assert.equal(session.workdirProposal, null);
+});
+
 test('после обрыва связи окно предлагает повторить тот же переход, а не выбрать заново', async (t) => {
   const browser = await browserHarness();
   const session = await workdirSession({
@@ -213,7 +262,7 @@ test('после обрыва связи окно предлагает повт�
   assert.deepEqual(calls, [{ id: 'chat', transfer: 'resume' }]);
 });
 
-test('каталог объединяет проекты и недавние без повторов, поиск сохраняет реальный выбор', async (t) => {
+test('проект из шапки ограничивает список папок репозиториями своего паспорта', async (t) => {
   const browser = await browserHarness();
   const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
   const project = {
@@ -225,15 +274,27 @@ test('каталог объединяет проекты и недавние б�
   const calls = [];
 
   globalThis.__workdirProjects = [
-    { id: 'demo', title: 'Демо' },
-    { id: 'other', title: 'Второй проект' },
+    {
+      id: 'demo',
+      title: 'Демо',
+      defaultRepoKey: 'web',
+      repos: [{ key: 'api', dir: '/workspace/demo-api' }, { key: 'web', dir: '/workspace/demo-web' }],
+    },
+    {
+      id: 'other',
+      title: 'Второй проект',
+      repos: [{ key: 'other', dir: '/workspace/other-project' }],
+    },
   ];
 
   const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
     workdirProtocol: 1,
     sessions: [session],
     archived: [],
-    recentWorkdirs: [project, { kind: 'path', path: '/workspace/other' }, { kind: 'grigdesk' }],
+    recentWorkdirs: [
+      project, { kind: 'path', path: '/workspace/other' },
+      { kind: 'project', projectId: 'other', repoKey: null },
+    ],
     previewWorkdir: async () => session.workdirPreview,
     proposeWorkdir: async (...args) => {
       calls.push(args);
@@ -242,21 +303,22 @@ test('каталог объединяет проекты и недавние б�
     },
   });
 
+  assert.equal(wrapper.get('button[data-role="chat-project"] .ui-select__label').text(), 'Демо');
   await wrapper.get('[data-context="chat-workdir"]').trigger('click');
   await flushPromises();
 
   const dialog = browser.document.querySelector('[data-role="workdir-picker"]');
 
   assert.equal(Boolean(dialog.closest('[data-mobile-sheet]')), true);
-  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 4);
+  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 2);
   assert.equal(dialog.querySelectorAll('.is-selected').length, 1);
   assert.match(dialog.textContent, /Папки на подключённом компьютере/u);
-  assert.match(dialog.textContent, /Папка приложения GrigDesk/u);
-  assert.doesNotMatch(dialog.textContent, /Архивный/u);
+  assert.match(dialog.querySelector('.is-selected').textContent, /demo-web/u);
+  assert.doesNotMatch(dialog.querySelector('.workdir-catalog').textContent, /По пути|GrigDesk|other/u);
 
   const search = dialog.querySelector('input[type="search"]');
 
-  search.value = 'ВТОРОЙ';
+  search.value = 'DEMO-API';
   search.dispatchEvent(new browser.Event('input', { bubbles: true }));
   await nextTick();
   assert.equal(dialog.querySelectorAll('.workdir-choice').length, 1);
@@ -266,11 +328,62 @@ test('каталог объединяет проекты и недавние б�
     taskId: null,
     workdir: {
       kind: 'project',
-      projectId: 'other',
-      repoKey: null,
+      projectId: 'demo',
+      repoKey: 'api',
     },
   }, true]]);
   assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('aria-expanded'), 'false');
+});
+
+test('селект рисует аватары, ждёт перехода и сбрасывает область при выборе «Без проекта»', async (t) => {
+  const browser = await browserHarness();
+  const session = await workdirSession();
+  const calls = [];
+
+  globalThis.__workdirProjects = [{ id: 'demo', title: 'Демо', repos: [] }];
+
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [],
+    previewWorkdir: async () => session.workdirPreview,
+    async proposeWorkdir(_id, { workdir }) {
+      calls.push(workdir);
+
+      if (calls.length === 1) {
+        return false;
+      }
+
+      session.workdir = workdir;
+
+      return true;
+    },
+  });
+  const select = wrapper.get('button[data-role="chat-project"]');
+
+  await select.trigger('click');
+  await flushPromises();
+
+  const demo = [...browser.document.querySelectorAll('[role="option"]')]
+    .find((option) => option.querySelector('.ui-select-option__label')?.textContent === 'Демо');
+
+  assert.equal(demo.querySelector('[data-project-initial]').textContent, 'Д');
+  demo.click();
+  await flushPromises();
+  assert.equal(select.get('.ui-select__label').text(), 'Без проекта');
+  await wrapper.get('select').setValue('demo');
+  await flushPromises();
+  assert.equal(select.get('.ui-select__label').text(), 'Демо');
+  assert.equal(select.get('[data-project-initial]').text(), 'Д');
+  await wrapper.get('select').setValue('');
+  await flushPromises();
+  assert.equal(select.get('.ui-select__label').text(), 'Без проекта');
+  assert.deepEqual(calls, [
+    { kind: 'project', projectId: 'demo', repoKey: null },
+    { kind: 'project', projectId: 'demo', repoKey: null },
+    { kind: 'grigdesk' },
+  ]);
 });
 
 test('пустой поиск и отказ сервера остаются в диалоге, новый вход очищает поиск', async (t) => {
@@ -348,7 +461,7 @@ test('возврат из ручного ввода сохраняет филь�
   field.value = '/workspace/draft';
   field.dispatchEvent(new browser.Event('input', { bubbles: true }));
   await nextTick();
-  buttonByText(browser, 'К проектам и папкам').click();
+  buttonByText(browser, 'К списку папок').click();
   await flushPromises();
   assert.equal(browser.document.querySelector('input[type="search"]').value, 'example');
   assert.equal(browser.document.querySelectorAll('.workdir-choice').length, 1);

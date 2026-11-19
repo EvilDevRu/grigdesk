@@ -10,12 +10,15 @@ Projects and task working copies can supply their own roots.
 
 ## What to do
 
-1. In a free conversation, open the folder menu and choose GrigDesk, a project, a recent directory or “Other folder…”.
-2. Enter an absolute path for another folder. Filesystem root, the entire home directory,
-   relative paths and `~/` notation are not accepted.
+1. In a conversation without a task, choose a project in the header. Its main repository
+   is selected by default. To choose another repository in that project, open the working folder menu.
+2. For a standalone folder, choose “No project”. The working folder menu offers GrigDesk,
+   recent folders, and “By path” for entering an absolute path.
+   Filesystem root, the entire home directory, relative paths and `~/` notation are not accepted.
 3. Check the primary repository and additional roots. Screen context alone does not change the folder.
-4. If memory migration is required, choose compact and move, move without a summary, or cancel.
-   You can draft text during migration; a new turn waits for completion.
+4. If memory migration is required, choose “Compress the conversation and switch”, switch without a summary, or cancel.
+   The dialog shows “Compressing context…” while it prepares the summary. You can draft in another window
+   during the move. A new turn waits for completion.
 5. Check the header and migration notice afterwards. If the response was lost, use the offered retry of that operation.
 
 ## Result
@@ -31,6 +34,8 @@ the agent sees all open sessions with Agent commands enabled. Every command need
 Claude and Codex can continue after a folder change; DeepSeek/GLM, Kimi and Qwen may need new memory.
 Qwen supports writable additional project repositories and task working copies;
 changing that set requires memory migration. Additional roots and write access depend on isolation and executor.
+If the original session no longer matches the executor settings, the dialog explains the refusal.
+The current folder and memory are preserved. You can cancel or explicitly choose “Switch without a summary”.
 An invalid explicit path does not silently switch the conversation.
 Old chats for a deleted project registration keep their roots, but that registration cannot be selected again.
 

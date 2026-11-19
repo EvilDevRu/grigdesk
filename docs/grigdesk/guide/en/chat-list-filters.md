@@ -25,8 +25,9 @@ the selected project returns the list to "All chats" and keeps the current conve
 open. If the catalog fails to load, the selection is kept and you can retry.
 The choice is remembered for this connection.
 
-Creating a chat in an active project selects its working folder. "No project"
-uses the built-in GrigDesk folder. "All chats" uses your usual new-chat settings.
+Creating a chat with a project filter selects that project in the header and uses
+its main repository. “No project” uses the built-in GrigDesk folder.
+“All chats” uses your usual new-chat settings.
 
 ## Filters
 
