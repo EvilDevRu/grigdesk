@@ -25,7 +25,7 @@
       <span>{{ t('core.projectMetka') }}</span>
     </div>
     <div
-      v-for="(repo, index) in draft.repos"
+      v-for="({ repo, git, problem }, index) in rows"
       :key="index"
       class="row"
       data-role="project-repo-row"
@@ -43,12 +43,25 @@
           :model-value="repo.dir"
           data-role="project-repo-dir"
           data-context="workspace-path"
+          :aria-describedby="git ? `${gitStatusId}-${index}` : undefined"
           :disabled="rowLocked(index)"
           v-tooltip="repo.dir"
-          :placeholder="'/srv/project/service'"
+          placeholder="/srv/project/service"
           @update:model-value="draft = setRepoDir(draft, index, String($event ?? ''))"
-          @blur="emit('check', [repo.dir])"
-        />
+        >
+          <template #trailing>
+            <span
+              v-if="git"
+              :id="`${gitStatusId}-${index}`"
+              v-tooltip="git"
+              class="git-status"
+              data-role="project-repo-git"
+            >
+              <ProjectIcon name="git" />
+              <span class="ui-visually-hidden">{{ git }}</span>
+            </span>
+          </template>
+        </UiInput>
       </UiField>
 
       <UiField
@@ -80,8 +93,8 @@
           @update:model-value="setDefault(index)"
         > {{ t('core.projectOsnovnoy') }} </UiRadio>
       </div>
-      <span v-if="stateText(repo.dir)" class="state" :data-state="stateOf(repo.dir)" role="status">
-        {{ stateText(repo.dir) }}
+      <span v-if="problem" class="path-problem" role="status">
+        {{ problem }}
       </span>
 
       <span class="acts">
@@ -139,9 +152,10 @@
 // Правки идут через чистые функции черновика, а не через мутацию строк: так выбор
 // по умолчанию едет вместе с переименованной строкой, а форма не держит вторую
 // копию этих правил. Состояние пути приходит снаружи: проверяет его сервер.
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, useId, watch } from 'vue';
 
 import { UiButton, UiField, UiInput, UiRadio, vTooltip, t } from '../../ui';
+import ProjectIcon from './ProjectIcon.vue';
 import { moveRepo, removeRepo, renameRepoKey, setRepoDir } from './projectDraft';
 import type { ProjectDraft } from './projectDraft';
 
@@ -163,6 +177,31 @@ const emit = defineEmits<{
 const keyInputs = ref<Array<InstanceType<typeof UiInput> | null>>([]);
 const dirInputs = ref<Array<InstanceType<typeof UiInput> | null>>([]);
 const defaultGroup = computed(() => `project-default-${draft.value.id || 'new'}`);
+const gitStatusId = useId();
+const rows = computed(() => draft.value.repos.map((repo) => {
+  const check = props.checks[repo.dir.trim()];
+  const git = gitLabel(check?.state);
+
+  return {
+    repo,
+    git,
+    problem: check && !git && check.state !== 'dir' ? check.message : '',
+  };
+}));
+const checkPaths = computed(() => [...new Set(draft.value.repos
+  .map(({ dir }) => dir.trim())
+  .filter((dir) => dir.startsWith('/') && !dir.includes('\u0000')))]);
+
+// Проверяем и заблокированные строки при открытии. Передаём все подходящие пути
+// одним списком, чтобы правка поля не вытеснила проверку остальных строк.
+watch([() => draft.value.id, checkPaths], ([id, dirs], [previousId, previousDirs]) => {
+  const pathsChanged = dirs.length !== previousDirs?.length
+    || dirs.some((dir, index) => dir !== previousDirs?.[index]);
+
+  if (dirs.length && (id !== previousId || pathsChanged)) {
+    emit('check', dirs);
+  }
+}, { immediate: true });
 
 function rowLocked(index: number): boolean {
   return Boolean(props.readonly || index < (props.lockedPrefix ?? 0));
@@ -172,12 +211,16 @@ function errorOf(path: string): string {
   return props.errors.find((error) => error.path === path)?.message ?? '';
 }
 
-function stateOf(dir: string): string {
-  return props.checks[dir]?.state ?? '';
-}
+/**
+ * Оба вида рабочей копии используют значок Git, но получают разные подписи.
+ * Каталог без Git и ошибки проверки значка не получают.
+ */
+function gitLabel(state: string | undefined): string {
+  if (state === 'git') {
+    return t('core.projectRepositoryGit');
+  }
 
-function stateText(dir: string): string {
-  return props.checks[dir]?.message ?? '';
+  return state === 'worktree' ? t('core.projectRepositoryWorktree') : '';
 }
 
 function setKeyRef(index: number, element: unknown): void {
@@ -323,21 +366,23 @@ defineExpose({ focus });
   min-height: var(--control-height);
 }
 
-.state {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  min-width: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.state[data-state='git'], .state[data-state='worktree'] {
+.git-status {
+  display: flex;
   color: var(--good);
 }
 
-.state[data-state='missing'], .state[data-state='denied'], .state[data-state='file'], .state[data-state='timeout'] {
+.git-status svg {
+  width: 16px;
+  height: 16px;
+}
+
+.path-problem {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
   color: var(--warn);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .empty {
@@ -378,7 +423,7 @@ defineExpose({ focus });
     grid-row: 3;
   }
 
-  .state {
+  .path-problem {
     grid-column: 1 / -1;
     grid-row: 4;
   }

@@ -3445,6 +3445,8 @@
   "projectMetka": "Метка",
   "projectRepoKeyAutomatic": "Автоматически",
   "projectPutKRabocheyKopii": "Путь к рабочей копии",
+  "projectRepositoryGit": "Рабочая копия Git",
+  "projectRepositoryWorktree": "Связанная рабочая копия Git",
   "projectOsnovnoy": "Основной",
   "projectPeremestitKeyVyshe": "Переместить {key} выше",
   "projectPeremestitVyshe": "Переместить выше",

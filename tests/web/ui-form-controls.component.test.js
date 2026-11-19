@@ -37,6 +37,7 @@ test('UiInput сохраняет modifiers и composition semantics', async (t) 
     },
   });
   const input = wrapper.element;
+  assert.equal(input.tagName, 'INPUT');
   input.dispatchEvent(new browser.CompositionEvent('compositionstart', { bubbles: true }));
   input.value = ' текст ';
   input.dispatchEvent(new browser.InputEvent('input', { bubbles: true }));
@@ -49,6 +50,41 @@ test('UiInput сохраняет modifiers и composition semantics', async (t) 
   input.dispatchEvent(new browser.InputEvent('input', { bubbles: true }));
   assert.equal(values.at(-1), 12.5);
   wrapper.unmount();
+});
+
+test('UiInput принимает свой элемент справа и сохраняет атрибуты, фокус и события поля', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, { h }, UiInput] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
+    compileVue(webFile('src/components/primitives/UiInput.vue')),
+  ]);
+  let clicks = 0;
+
+  const wrapper = mount(UiInput, {
+    attachTo: browser.document.querySelector('#mount'),
+    attrs: { name: 'folder', 'aria-describedby': 'path-description' },
+    props: { id: 'folder', modelValue: '/srv/demo' },
+    slots: {
+      trailing: () => h('button', { type: 'button', onClick: () => { clicks += 1; } }, 'Проверить'),
+    },
+  });
+  t.after(() => wrapper.unmount());
+
+  const input = wrapper.get('input');
+  assert.equal(input.attributes('name'), 'folder');
+  assert.equal(input.attributes('id'), 'folder');
+  assert.equal(input.attributes('aria-describedby'), 'path-description');
+  assert.equal(wrapper.vm.el === input.element, true);
+  wrapper.vm.focus();
+  assert.equal(browser.document.activeElement === input.element, true);
+
+  await input.setValue('/srv/next');
+  assert.deepEqual(wrapper.emitted('update:modelValue'), [['/srv/next']]);
+  await wrapper.get('.ui-input-frame__trailing button').trigger('click');
+  assert.equal(clicks, 1);
+  await wrapper.setProps({ disabled: true });
+  assert.equal(input.element.disabled, true);
 });
 
 test('UiField связывает label, hint/error и invalid с control', async (t) => {

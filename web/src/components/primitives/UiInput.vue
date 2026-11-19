@@ -1,27 +1,14 @@
 <template>
-  <input
-    ref="element"
-    v-bind="forwardedAttrs"
-    class="ui-input"
-    :type="normalizedType"
-    :value="model ?? ''"
-    :id="fieldState.id.value"
-    :disabled="disabled"
-    :readonly="readonly"
-    :required="fieldState.required.value"
-    :aria-invalid="fieldState.invalid.value ? 'true' : undefined"
-    :aria-describedby="fieldState.describedBy.value"
-    @compositionstart="composing = true"
-    @compositionend="onCompositionEnd"
-    @input="onInput"
-    @change="onChange"
-    @focus="$emit('focus', $event)"
-    @blur="$emit('blur', $event)"
-  />
+  <div v-if="$slots.trailing" class="ui-input-frame">
+    <input ref="element" v-bind="controlAttrs()" v-on="controlEvents" />
+    <div class="ui-input-frame__trailing"><slot name="trailing" /></div>
+  </div>
+  <input v-else ref="element" v-bind="controlAttrs()" v-on="controlEvents" />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, useAttrs } from 'vue';
+import type { InputHTMLAttributes } from 'vue';
 import { useResolvedFieldState } from '../../composables/useUiFieldContext';
 import type { UiTextInputType, UiTextValue } from '../../types/uiFields';
 
@@ -51,6 +38,9 @@ const emit = defineEmits<{
   focus: [event: FocusEvent];
   blur: [event: FocusEvent];
 }>();
+
+defineSlots<{ trailing?(): unknown }>();
+
 const [model, modelModifiers] = defineModel<
   UiTextValue,
   'trim' | 'number' | 'lazy'
@@ -80,11 +70,35 @@ const fieldState = useResolvedFieldState({
   invalid: () => props.invalid,
   required: () => props.required,
 });
-const forwardedAttrs = computed(() => {
-  const { id: _id, 'aria-describedby': _describedBy, ...rest } = attrs;
+const controlEvents = {
+  compositionstart: () => {
+    composing.value = true;
+  },
+  compositionend: onCompositionEnd,
+  input: onInput,
+  change: onChange,
+  focus: (event: FocusEvent) => emit('focus', event),
+  blur: (event: FocusEvent) => emit('blur', event),
+};
 
-  return rest;
-});
+/**
+ * Атрибуты в обоих вариантах получает нативное поле, включая связь с UiField.
+ * Считываем актуальные атрибуты при отрисовке, чтобы они обновлялись и со слотом.
+ */
+function controlAttrs(): InputHTMLAttributes {
+  return {
+    ...attrs,
+    class: ['ui-input', attrs.class],
+    type: normalizedType.value,
+    value: model.value ?? '',
+    id: fieldState.id.value,
+    disabled: props.disabled,
+    readonly: props.readonly,
+    required: fieldState.required.value,
+    'aria-invalid': fieldState.invalid.value ? 'true' : undefined,
+    'aria-describedby': fieldState.describedBy.value,
+  };
+}
 
 /**
  * Модификаторы применяются внутри primitive одинаково для input и IME.

@@ -358,6 +358,49 @@ test('в проекте фабрики можно добавить рабочу�
   assert.deepEqual(draft.repos.at(-1), { key: 'notes', dir: '/srv/рабочие заметки' });
 });
 
+test('Git виден внутри поля пути и у основной строки профиля, и у дополнительной папки', async (t) => {
+  const detail = profileDetail();
+  detail.profile.repos = detail.profile.repos.slice(0, 1);
+  const { wrapper, harness, flushPromises } = await mountForm(t, { detail });
+  const [primary, extra] = wrapper.findAll('[data-role="project-repo-row"]');
+  const primaryPath = primary.get('[data-role="project-repo-dir"]');
+  const extraPath = extra.get('[data-role="project-repo-dir"]');
+  const icon = '[data-role="project-repo-git"]';
+
+  assert.deepEqual(harness.calls.filter(([name]) => name === 'check').map(([, dirs]) => dirs), [
+    ['/srv/demo/be', '/srv/demo/fe'],
+  ]);
+  assert.notEqual(primaryPath.attributes('disabled'), undefined);
+
+  harness.store.checks = {
+    '/srv/demo/be': { state: 'git', message: 'Рабочая копия git' },
+    '/srv/demo/fe': { state: 'worktree', message: 'Связанная рабочая копия' },
+  };
+  await flushPromises();
+
+  const primaryIcon = primary.get(icon);
+  assert.equal(primaryIcon.element.closest('.ui-input-frame') === primaryPath.element.parentElement, true);
+  assert.equal(primaryPath.attributes('aria-describedby'), primaryIcon.attributes('id'));
+  assert.equal(primaryIcon.attributes('data-ui-tooltip'), 'Рабочая копия Git');
+  assert.equal(extra.get(icon).attributes('data-ui-tooltip'), 'Связанная рабочая копия Git');
+  assert.equal(wrapper.find('.path-problem').exists(), false);
+
+  await extraPath.setValue('/srv/demo/notes');
+  assert.equal(extra.find(icon).exists(), false);
+  assert.deepEqual(harness.calls.filter(([name]) => name === 'check').at(-1)[1], [
+    '/srv/demo/be', '/srv/demo/notes',
+  ]);
+
+  harness.store.checks['/srv/demo/notes'] = { state: 'dir', message: 'Каталог без .git' };
+  await flushPromises();
+  assert.equal(extra.find(icon).exists(), false);
+  assert.equal(extra.find('.path-problem').exists(), false);
+
+  harness.store.checks['/srv/demo/notes'] = { state: 'missing', message: 'Каталога нет' };
+  await flushPromises();
+  assert.equal(extra.get('.path-problem').text(), 'Каталога нет');
+});
+
 test('контурная кнопка раскрывает доступ к папкам, удаления в «Управлении» пока нет', async (t) => {
   const { wrapper } = await mountForm(t);
   const access = wrapper.get('.source-row button');

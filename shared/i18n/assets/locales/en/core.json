@@ -3425,6 +3425,8 @@
   "projectMetka": "Label",
   "projectRepoKeyAutomatic": "Automatic",
   "projectPutKRabocheyKopii": "Working copy path",
+  "projectRepositoryGit": "Git working copy",
+  "projectRepositoryWorktree": "Linked Git working copy",
   "projectOsnovnoy": "Primary",
   "projectPeremestitKeyVyshe": "Move {key} up",
   "projectPeremestitVyshe": "Move up",

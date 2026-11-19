@@ -33,6 +33,11 @@ Rows from a factory profile are read-only. Use the same Add button to include yo
 folders. After saving, they appear in Code and can be used in project chats. The factory profile
 sets the repositories for triage and pipelines.
 
+GrigDesk checks paths when you open the project details and when you change a path, including
+the primary folder and rows from the factory profile. A green Git icon at the right of the path
+field marks a Git working copy. Ordinary folders have no icon. If a path is unavailable, the
+reason appears below its row.
+
 The compact catalog search matches names, IDs, labels and paths; the adjacent button changes sorting.
 The factory configuration heading wraps on narrow screens, keeping its disclosure accessible
 with larger text.
