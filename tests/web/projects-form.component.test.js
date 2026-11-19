@@ -269,6 +269,30 @@ test('добавление, удаление, Выше/Ниже и переим�
   assert.equal(harness.store.draft.defaultRepoKey, 'backend');
 });
 
+test('новой рабочей папке достаточно пути, а введённая метка сохраняется при смене папки', async (t) => {
+  const { wrapper, harness } = await mountForm(t);
+
+  await wrapper.find('[data-role="project-repo-add"]').trigger('click');
+  const added = wrapper.findAll('[data-role="project-repo-row"]').at(-1);
+  const path = added.get('[data-role="project-repo-dir"]');
+  const key = added.get('[data-role="project-repo-key"]');
+
+  assert.equal(document.activeElement?.getAttribute('data-role'), 'project-repo-dir');
+  await path.setValue('/srv/other/be/');
+  assert.equal(key.element.value, 'be-2');
+  await added.get('[data-role="project-repo-default"]').setValue(true);
+  await path.setValue('/srv/Готовые заметки');
+  assert.equal(key.element.value, 'gotovye-zametki');
+  assert.equal(harness.store.draft.defaultRepoKey, 'gotovye-zametki');
+  await key.setValue('notes');
+  await path.setValue('/srv/docs');
+  assert.equal(key.element.value, 'notes');
+  await key.setValue('');
+  assert.equal(key.element.value, 'docs');
+  await saveButton(wrapper).trigger('click');
+  assert.ok(harness.calls.some(([name]) => name === 'save'));
+});
+
 test('удаление выбранного репозитория при оставшихся строках блокирует отправку до выбора', async (t) => {
   const { wrapper, harness } = await mountForm(t);
 
@@ -334,13 +358,24 @@ test('в проекте фабрики можно добавить рабочу�
   assert.deepEqual(draft.repos.at(-1), { key: 'notes', dir: '/srv/рабочие заметки' });
 });
 
-test('текст о границе доверия на месте, удаления в «Управлении» пока нет', async (t) => {
+test('контурная кнопка раскрывает доступ к папкам, удаления в «Управлении» пока нет', async (t) => {
   const { wrapper } = await mountForm(t);
+  const access = wrapper.get('.source-row button');
+  const note = wrapper.get('[data-role="project-trust"]');
 
-  assert.match(
-    wrapper.find('[data-role="project-trust"]').text(),
-    /доступны в чатах проекта с учётом разрешений исполнителя/,
-  );
+  assert.equal(access.attributes('data-variant'), 'outline');
+  assert.equal(access.attributes('aria-controls'), note.attributes('id'));
+  assert.equal(access.attributes('aria-expanded'), 'false');
+  assert.equal(note.isVisible(), false);
+
+  await access.trigger('click');
+  assert.equal(access.attributes('aria-expanded'), 'true');
+  assert.equal(note.isVisible(), true);
+  assert.match(note.text(), /доступны в чатах проекта с учётом разрешений исполнителя/);
+
+  await access.trigger('click');
+  assert.equal(access.attributes('aria-expanded'), 'false');
+  assert.equal(note.isVisible(), false);
 
   const manage = wrapper.find('[data-role="project-manage"]');
 

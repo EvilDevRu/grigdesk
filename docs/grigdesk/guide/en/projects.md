@@ -15,8 +15,10 @@ Prepare existing directories on the server. Human-supplied paths determine which
 1. Open Projects, select New, and enter a name. GrigDesk generates the ID from
    the name. If the ID is taken, enter another one or open the existing project.
    The ID is visible in the project details after creation.
-2. In Repositories, select Add and enter a short label and absolute path. Choose the primary
-   folder and check that the paths are available.
+2. In Repositories, select Add and enter the absolute path. The label on the right is filled
+   from the folder name. You can edit it or clear it to return to the generated label. Choose the primary
+   folder and check that the paths are available. Select Folder access to see which
+   folders are available in project chats.
 3. Save the project details.
 4. Chat with project creates a draft with its working folder selected. Configure the profile and routes separately
    for tasks and pipelines.

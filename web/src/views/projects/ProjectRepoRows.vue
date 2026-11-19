@@ -21,8 +21,8 @@
         </template> {{ t('core.add') }} </UiButton>
     </header>
     <div v-if="draft.repos.length" class="repo-columns" aria-hidden="true">
-      <span>{{ t('core.projectMetka') }}</span>
       <span>{{ t('core.projectPutKRabocheyKopii') }}</span>
+      <span>{{ t('core.projectMetka') }}</span>
     </div>
     <div
       v-for="(repo, index) in draft.repos"
@@ -31,23 +31,6 @@
       data-role="project-repo-row"
       :data-repo-key="repo.key"
     >
-      <UiField
-        class="key"
-        :label="t('core.projectMetka')"
-        data-context="workspace-repo"
-        :data-label-repeat="index > 0"
-        :error="errorOf(`repos.${index}.key`)"
-      >
-        <UiInput
-          :ref="(element) => setKeyRef(index, element)"
-          :model-value="repo.key"
-          data-role="project-repo-key"
-          :disabled="rowLocked(index)"
-          :placeholder="'service'"
-          @update:model-value="rename(index, $event)"
-        />
-      </UiField>
-
       <UiField
         class="dir"
         :label="t('core.projectPutKRabocheyKopii')"
@@ -63,8 +46,26 @@
           :disabled="rowLocked(index)"
           v-tooltip="repo.dir"
           :placeholder="'/srv/project/service'"
-          @update:model-value="setDir(index, $event)"
+          @update:model-value="draft = setRepoDir(draft, index, String($event ?? ''))"
           @blur="emit('check', [repo.dir])"
+        />
+      </UiField>
+
+      <UiField
+        class="key"
+        :label="t('core.projectMetka')"
+        data-context="workspace-repo"
+        :data-label-repeat="index > 0"
+        :error="errorOf(`repos.${index}.key`)"
+      >
+        <UiInput
+          :ref="(element) => setKeyRef(index, element)"
+          :model-value="repo.key"
+          data-role="project-repo-key"
+          :disabled="rowLocked(index)"
+          :placeholder="t('core.projectRepoKeyAutomatic')"
+          v-tooltip="repo.key"
+          @update:model-value="draft = renameRepoKey(draft, index, String($event ?? ''))"
         />
       </UiField>
 
@@ -141,9 +142,8 @@
 import { computed, nextTick, ref } from 'vue';
 
 import { UiButton, UiField, UiInput, UiRadio, vTooltip, t } from '../../ui';
-import { moveRepo, removeRepo, renameRepoKey } from './projectDraft';
+import { moveRepo, removeRepo, renameRepoKey, setRepoDir } from './projectDraft';
 import type { ProjectDraft } from './projectDraft';
-import type { UiTextValue } from '../../ui';
 
 const draft = defineModel<ProjectDraft>({ required: true });
 
@@ -188,18 +188,6 @@ function setDirRef(index: number, element: unknown): void {
   dirInputs.value[index] = element as InstanceType<typeof UiInput> | null;
 }
 
-function rename(index: number, key: UiTextValue): void {
-  draft.value = renameRepoKey(draft.value, index, String(key ?? ''));
-}
-
-function setDir(index: number, dir: UiTextValue): void {
-  const repos = draft.value.repos.map((repo, position) => (
-    position === index ? { ...repo, dir: String(dir ?? '') } : repo
-  ));
-
-  draft.value = { ...draft.value, repos };
-}
-
 /**
  * Выбор репозитория по умолчанию: он же снимает требование выбора, поставленное
  * удалением прежнего. О выборе сообщаем наружу — он уходит в UI-контекст.
@@ -228,15 +216,15 @@ function remove(index: number): void {
 }
 
 /**
- * Добавляет пустую строку и переводит фокус на метку после отрисовки.
- * На длинном списке поле сразу попадает в видимую область.
+ * Добавляет строку с автоматической меткой. Фокус сразу на пути,
+ * по которому заполнится метка, если человек не задал её сам.
  */
 async function add(): Promise<void> {
   const index = draft.value.repos.length;
 
-  draft.value = { ...draft.value, repos: [...draft.value.repos, { key: '', dir: '' }] };
+  draft.value = { ...draft.value, repos: [...draft.value.repos, { key: '', dir: '', automaticKey: true }] };
   await nextTick();
-  keyInputs.value[index]?.focus();
+  dirInputs.value[index]?.focus();
 }
 
 /**
@@ -293,7 +281,8 @@ defineExpose({ focus });
 
 .row, .repo-columns {
   display: grid;
-  grid-template-columns: var(--workspace-label-column) minmax(0, 1fr) var(--workspace-selection-column) var(--workspace-actions-column);
+  grid-template-columns: minmax(0, 1fr) var(--workspace-label-column)
+    var(--workspace-selection-column) var(--workspace-actions-column);
   gap: var(--workspace-column-gap);
   align-items: start;
 }
@@ -335,7 +324,7 @@ defineExpose({ focus });
 }
 
 .state {
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
   grid-row: 2;
   min-width: 0;
   color: var(--ink-mid);
@@ -369,12 +358,12 @@ defineExpose({ focus });
     padding-block: 10px;
   }
 
-  .key {
+  .dir {
     grid-column: 1 / -1;
     grid-row: 1;
   }
 
-  .dir {
+  .key {
     grid-column: 1 / -1;
     grid-row: 2;
   }

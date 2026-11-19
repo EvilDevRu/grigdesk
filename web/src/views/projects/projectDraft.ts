@@ -10,6 +10,7 @@ import type { ProjectDetail, ProjectInput } from '../../../../shared/runtime/pro
 export interface ProjectRepoDraft {
   key: string;
   dir: string;
+  automaticKey?: boolean;
 }
 
 export interface ProjectDraft {
@@ -72,6 +73,15 @@ const CYRILLIC_TO_LATIN: Record<string, string> = {
   ў: 'u',
 };
 
+function slugFromTitle(title: string): string {
+  return title.normalize('NFC').toLowerCase()
+    .replace(/[а-яёєіїґў]/gu, (letter) => CYRILLIC_TO_LATIN[letter] ?? letter)
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+}
+
 /**
  * Превращает заголовок в ключ, совместимый с фабрикой и паспортом.
  * Числовые названия получают префикс, а для названий без латинского представления есть запасной ключ.
@@ -81,16 +91,36 @@ export function projectIdFromTitle(title: string): string {
     return '';
   }
 
-  const slug = title.normalize('NFC').toLowerCase()
-    .replace(/[а-яёєіїґў]/gu, (letter) => CYRILLIC_TO_LATIN[letter] ?? letter)
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '');
-
+  const slug = slugFromTitle(title);
   const id = /^[a-z]/u.test(slug) ? slug : ['project', slug].filter(Boolean).join('-');
 
   return id.slice(0, PROJECT_LIMITS.id).replace(/-+$/u, '');
+}
+
+/**
+ * Предлагает свободную метку по имени папки. У длинных имён сначала сохраняет
+ * целые слова с конца, где обычно находится отличие от соседней рабочей копии.
+ */
+function suggestedRepoKey(repos: ProjectRepoDraft[], index: number, dir: string): string {
+  if (!dir.trim()) {
+    return '';
+  }
+
+  const name = dir.trim().replace(/\/+$/u, '').split('/').at(-1) ?? '';
+  const slug = slugFromTitle(name) || 'repo';
+  const limit = PROJECT_LIMITS.repoKey;
+  const tail = slug.slice(-(limit + 1)).match(/-(.+)$/u)?.[1];
+  const base = slug.length <= limit ? slug : tail || slug.slice(0, limit).replace(/-+$/u, '');
+  const occupied = new Set(repos.filter((_, position) => position !== index).map(({ key }) => key.trim()));
+  let key = base;
+
+  for (let number = 2; occupied.has(key); number += 1) {
+    const suffix = `-${number}`;
+
+    key = base.slice(0, limit - suffix.length).replace(/-+$/u, '') + suffix;
+  }
+
+  return key;
 }
 
 /**
@@ -180,14 +210,50 @@ export function renameRepoKey(draft: ProjectDraft, index: number, key: string): 
     return draft;
   }
 
-  const repos = draft.repos.map((repo, position) => (
-    position === index ? { ...repo, key } : repo
-  ));
+  const automaticKey = !key.trim();
+  const nextKey = automaticKey ? suggestedRepoKey(draft.repos, index, row.dir) || row.key : key;
+  const next: ProjectRepoDraft = {
+    key: nextKey,
+    dir: row.dir,
+    ...(automaticKey ? { automaticKey } : {}),
+  };
+
+  return replaceRepo(draft, index, next);
+}
+
+/**
+ * Новый путь обновляет метку только в автоматическом режиме.
+ * У сохранённых и вручную изменённых строк метка остаётся стабильной.
+ */
+export function setRepoDir(draft: ProjectDraft, index: number, dir: string): ProjectDraft {
+  const row = draft.repos[index];
+
+  if (!row) {
+    return draft;
+  }
+
+  const key = row.automaticKey ? suggestedRepoKey(draft.repos, index, dir) || row.key : row.key;
+
+  return replaceRepo(draft, index, {
+    ...row,
+    dir,
+    key,
+  });
+}
+
+/**
+ * Меняет одну строку и переносит выбор по умолчанию на её новый ключ.
+ * Автоподстановка и ручное переименование меняют ссылку по одному правилу.
+ */
+function replaceRepo(draft: ProjectDraft, index: number, next: ProjectRepoDraft): ProjectDraft {
+  const repos = [...draft.repos];
+
+  repos[index] = next;
 
   return {
     ...draft,
     repos,
-    defaultRepoKey: row.key === draft.defaultRepoKey ? key : draft.defaultRepoKey,
+    defaultRepoKey: draft.repos[index]?.key === draft.defaultRepoKey ? next.key : draft.defaultRepoKey,
   };
 }
 

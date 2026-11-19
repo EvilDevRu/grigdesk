@@ -3420,6 +3420,7 @@
   "projectObyavlenyVPasporteNo": "declared in the passport, but the profile does not name them.",
   "projectDobavitRepozitoriy": "Add repository",
   "projectMetka": "Label",
+  "projectRepoKeyAutomatic": "Automatic",
   "projectPutKRabocheyKopii": "Working copy path",
   "projectOsnovnoy": "Primary",
   "projectPeremestitKeyVyshe": "Move {key} up",

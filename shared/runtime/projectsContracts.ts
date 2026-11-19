@@ -20,6 +20,7 @@ export const PROJECT_LIMITS = {
   tags: 20,
   tag: 32,
   repos: 32,
+  repoKey: 16,
   dir: 1024,
 };
 
@@ -28,7 +29,7 @@ export const PROJECT_LIMITS = {
 // отдельной (PROFILE_RE на сервере).
 export const PROJECT_ID_RE = new RegExp(`^[a-z][a-z0-9_-]{0,${PROJECT_LIMITS.id - 1}}$`);
 // Ключ репозитория — метка внутри проекта: короткая, строчная, без пробелов.
-export const REPO_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,15}$/;
+export const REPO_KEY_RE = new RegExp(`^[a-z0-9][a-z0-9_-]{0,${PROJECT_LIMITS.repoKey - 1}}$`);
 
 export class ProjectsContractError extends Error {
   constructor(path: string) {

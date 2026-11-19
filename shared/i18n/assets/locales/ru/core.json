@@ -3440,6 +3440,7 @@
   "projectObyavlenyVPasporteNo": "объявлены в паспорте, но профиль их не называет.",
   "projectDobavitRepozitoriy": "Добавить репозиторий",
   "projectMetka": "Метка",
+  "projectRepoKeyAutomatic": "Автоматически",
   "projectPutKRabocheyKopii": "Путь к рабочей копии",
   "projectOsnovnoy": "Основной",
   "projectPeremestitKeyVyshe": "Переместить {key} выше",

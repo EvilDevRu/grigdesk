@@ -52,9 +52,10 @@
             @select-repo="emit('selectRepo', $event)" />
           <div class="source-row">
             <span v-if="!dialog" class="hint">{{ repoSourceText }}</span>
-            <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
-              :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen"> {{ t('core.projectDostupKPapkam') }} {{ accessNoteOpen ? '↑' : '↓' }}
-            </UiButton>
+            <UiDisclosureButton v-model:open="accessNoteOpen" :controls="accessNoteId"
+              variant="outline" size="compact">
+              {{ t('core.projectDostupKPapkam') }}
+            </UiDisclosureButton>
           </div>
           <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust"> {{ t('core.projectPutiIzPasportaRasshiryayut') }} </p>
         </section>
@@ -171,7 +172,7 @@
 // в «Маршруты» делает страница.
 import { computed, nextTick, ref, useId } from 'vue';
 
-import { UiButton, UiField, UiFormActions, UiInput, UiTextarea, t } from '../../ui';
+import { UiButton, UiDisclosureButton, UiField, UiFormActions, UiInput, UiTextarea, t } from '../../ui';
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
 import { projectIdFromTitle, toInput } from './projectDraft';
 import ProjectIcon from './ProjectIcon.vue';
@@ -257,7 +258,7 @@ const canSave = computed(() => (
   && !iconBusy.value && (!props.creating || Boolean(draft.value.title.trim()))
 ));
 
-const saveLabel = computed(() => t(props.creating ? 'core.projectSozdatProekt' : 'core.save'));
+const saveLabel = computed(() => props.creating ? t('core.projectSozdatProekt') : t('core.save'));
 const saveStatus = computed(() => {
   if (draft.value.defaultRepoRequired) {
     return t('core.projectVyberiteRepozitoriyPoUmolchaniyu');
