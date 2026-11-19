@@ -98,6 +98,10 @@ a long conversation's history to process new replies.
 
 ## Limits and recovery
 
+If an executor disconnects during a work tool call, the server keeps serving other
+conversations. An action already in progress may complete even if its response is
+lost: check the result before repeating it.
+
 Chats use the executor's active [access profile](access-profiles.md). Switching keeps messages;
 a note explains when a new native session is needed. If sign-in is required, restore that profile.
 Another account is not selected automatically, and a turn with an unknown outcome is not replayed.
