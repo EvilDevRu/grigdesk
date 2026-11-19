@@ -24,7 +24,7 @@
       </slot>
     </template>
     <template #group-leading="{ option }">
-      <ProviderIcon v-if="entries.get(option.value)" :provider="entries.get(option.value)!.provider"
+      <ProviderIcon v-if="option && entries.get(option.value)" :provider="entries.get(option.value)!.provider"
                     :size="16" :style="{ color: entries.get(option.value)!.provider.color }" />
     </template>
     <template #option-leading="{ option }">

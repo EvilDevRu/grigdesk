@@ -11,6 +11,25 @@ export interface UiSelectOptionSnapshot {
   disabled: boolean;
 }
 
+export interface UiSelectGroupSnapshot {
+  key: string;
+  label: string;
+}
+
+function groupKey(group: HTMLOptGroupElement, index: number): string {
+  return group.dataset.groupKey || String(index);
+}
+
+/**
+ * Явный ключ оставляет группу доступной для навигации до загрузки её вариантов.
+ * Обычные группы по-прежнему появляются по видимым вариантам.
+ */
+export function readUiSelectKeyedGroups(select: HTMLSelectElement): UiSelectGroupSnapshot[] {
+  return [...select.querySelectorAll('optgroup')]
+    .filter((group) => !group.hidden && group.dataset.groupKey && group.label)
+    .map((group) => ({ key: group.dataset.groupKey!, label: group.label }));
+}
+
 /**
  * Читаем уже отрендеренные options, поэтому Fragment, v-for и вложенный текст
  * остаются ответственностью Vue. Индекс относится к native options, а не к фильтру.
@@ -30,7 +49,7 @@ export function readUiSelectOptions(select: HTMLSelectElement): UiSelectOptionSn
       index,
       value: option.value,
       label: option.label || option.text,
-      groupKey: group ? String(groups.indexOf(group)) : '',
+      groupKey: group ? groupKey(group, groups.indexOf(group)) : '',
       groupLabel: group?.label ?? '',
       description: option.getAttribute('data-description') ?? option.title,
       title: option.title,

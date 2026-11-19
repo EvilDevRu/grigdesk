@@ -85,7 +85,7 @@
                   >
                     <option value="">{{ t('core.chatBezZadachi') }}</option>
                     <template v-if="multiBoard">
-                      <optgroup v-for="b in groupedTaskBoards" :key="b.id" :label="b.name">
+                      <optgroup v-for="b in taskBoards" :key="b.id" :label="b.name" :data-group-key="b.id">
                         <option v-for="o in b.options" :key="o.task" :value="o.task">
                           {{ optLabel(o) }}
                         </option>
@@ -100,14 +100,13 @@
                       <TrackerIcon v-if="boardOfValue(value)" :name="boardOfValue(value)!.name"
                                    :logo-url="boardOfValue(value)!.logoUrl" :size="14" />
                     </template>
-                    <template #group-leading="{ option }">
-                      <TrackerIcon v-if="boardOfGroupKey(option.groupKey)"
-                                   :name="boardOfGroupKey(option.groupKey)!.name"
-                                   :logo-url="boardOfGroupKey(option.groupKey)!.logoUrl" :size="16" />
+                    <template #group-leading="{ groupKey }">
+                      <TrackerIcon v-if="taskBoardById.get(groupKey)" :name="taskBoardById.get(groupKey)!.name"
+                                   :logo-url="taskBoardById.get(groupKey)!.logoUrl" :size="16" />
                     </template>
                     <template #option-leading="{ option }">
-                      <TrackerIcon v-if="boardOfValue(option.value)" :name="boardOfValue(option.value)!.name"
-                                   :logo-url="boardOfValue(option.value)!.logoUrl" :size="14" />
+                      <TrackerIcon v-if="boardOfOption(option)" :name="boardOfOption(option)!.name"
+                                   :logo-url="boardOfOption(option)!.logoUrl" :size="14" />
                     </template>
                   </UiSelect>
                 </span>
@@ -1468,17 +1467,16 @@ const taskBoards = computed<TaskSelectBoard[]>(() => {
   }];
 });
 
-// Вкладки досок и optgroup появляются только при нескольких досках с задачами;
-// одна доска даёт плоский список, но иконки доски сохраняются.
-const groupedTaskBoards = computed(() => taskBoards.value.filter((b) => b.options.length));
-const multiBoard = computed(() => groupedTaskBoards.value.length > 1);
+// Вкладки зависят от включённых досок, в том числе пока их задачи загружаются.
+const multiBoard = computed(() => taskBoards.value.length > 1);
 const taskOpts = computed(() => taskBoards.value.flatMap((b) => b.options));
+const taskBoardById = computed(() => new Map(taskBoards.value.map((board) => [board.id, board])));
 
 // Значение варианта — номер задачи; иконку ведёт первая доска с этим номером.
 const taskBoardByValue = computed(() => {
   const map = new Map<string, TaskSelectBoard>();
 
-  for (const b of groupedTaskBoards.value) {
+  for (const b of taskBoards.value) {
     for (const o of b.options) {
       if (!map.has(o.task)) {
         map.set(o.task, b);
@@ -1488,16 +1486,13 @@ const taskBoardByValue = computed(() => {
 
   return map;
 });
-const taskBoardByGroupKey = computed(() => new Map(
-  groupedTaskBoards.value.map((b, index): [string, TaskSelectBoard] => [String(index), b]),
-));
 
 function boardOfValue(value: unknown): TaskSelectBoard | undefined {
   return taskBoardByValue.value.get(String(value ?? ''));
 }
 
-function boardOfGroupKey(groupKey: string): TaskSelectBoard | undefined {
-  return taskBoardByGroupKey.value.get(groupKey);
+function boardOfOption(option: { groupKey: string; value: string }): TaskSelectBoard | undefined {
+  return taskBoardById.value.get(option.groupKey) ?? boardOfValue(option.value);
 }
 
 onMounted(async () => {

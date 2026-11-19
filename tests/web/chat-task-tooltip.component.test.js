@@ -793,16 +793,38 @@ test('селект задачи показывает доски с иконка�
   await wrapper.get('.sel.task button.ui-select').trigger('click');
   await flushPromises();
   let popup = document.querySelector('.ui-select-popup');
+
   assert.deepEqual(
     [...popup.querySelectorAll('.ui-select-group-nav button')]
       .map((button) => button.getAttribute('data-select-group')),
-    ['all', '0', '1'],
+    ['all', 'b24', 'github'],
   );
   assert.ok(popup.querySelector('.ui-select-group-nav img[src="/logo-b24.svg"]'));
   assert.ok(popup.querySelector('.ui-select-group-nav img[src="/logo-github.svg"]'));
   const optionIcons = [...popup.querySelectorAll('.ui-select-option')]
     .map((option) => option.querySelector('img')?.getAttribute('src') ?? null);
   assert.deepEqual(optionIcons, [null, '/logo-b24.svg', '/logo-github.svg']);
+
+  popup.querySelector('[data-select-group="github"]').click();
+  await flushPromises();
+  assert.deepEqual(
+    [...popup.querySelectorAll('.ui-select-option')].map((option) => option.textContent.trim()),
+    ['#7 · Issue GitHub'],
+  );
+
+  boardState.data.tasks.pop();
+  await flushPromises();
+  assert.ok(popup.querySelector('[data-select-group="github"] img[src="/logo-github.svg"]'));
+  assert.equal(popup.querySelectorAll('.ui-select-option').length, 0);
+  assert.ok(popup.querySelector('.ui-select-empty'));
+
+  const search = popup.querySelector('.ui-input');
+
+  search.value = 'Задача Б24';
+  search.dispatchEvent(new browser.window.Event('input', { bubbles: true }));
+  await flushPromises();
+  assert.equal(popup.querySelector('[data-select-group="all"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(popup.querySelectorAll('.ui-select-option').length, 1);
 
   popup.querySelector('[data-option-index="1"]').click();
   await flushPromises();

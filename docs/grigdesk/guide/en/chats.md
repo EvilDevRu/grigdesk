@@ -25,11 +25,10 @@ an unknown size does not mean access was denied.
 5. Stop interrupts work and shows “⏹ Turn stopped.” alongside completed actions.
    After a network interruption, inspect what already happened and the reason before resuming.
 
-The Task select in the header offers tasks from your boards, not only from the pipeline:
-each task shows its number and title, and each board shows its icon. With a single board the
-list is flat; with several boards, board tabs appear at the top like the model picker, plus a
-shared search. Choosing a task changes the conversation's working folder after confirmation;
-“no task” removes the binding.
+The Task picker in the header shows each task’s number, title, and board logo. When multiple
+boards are enabled, the All and board buttons appear below the search field, just like in the
+model picker. Search covers all boards. A single board uses a flat list. Choosing a task changes
+the conversation’s working folder after confirmation. Choose “no task” to unlink it.
 
 For GrigDesk work, agents are instructed to read help and use available built-in tools and commands.
 External tasks use `tracker`. Viewing pipelines and changing settings do not require Vite or an application build.

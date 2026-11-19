@@ -124,7 +124,9 @@
             @click="selectGroup(group.key)"
           >
             <template v-if="$slots['group-leading']" #leading>
-              <span aria-hidden="true"><slot name="group-leading" :option="group.option" /></span>
+              <span aria-hidden="true">
+                <slot name="group-leading" :option="group.option" :group-key="group.key" />
+              </span>
             </template>
             {{ group.label }}
             <span class="ui-select-group-nav__count">{{ group.count }}</span>
@@ -223,7 +225,9 @@ import { provideUiFieldContext, useResolvedFieldState } from '../../composables/
 import {
   filterUiSelectOptions,
   normalizeUiSelectValue,
+  readUiSelectKeyedGroups,
   readUiSelectOptions,
+  type UiSelectGroupSnapshot,
   type UiSelectOptionSnapshot,
 } from '../../composables/useUiFieldSelect';
 import { t } from '../../services/locale.ts';
@@ -266,7 +270,7 @@ defineSlots<{
   default(): unknown;
   value?(props: { option: UiSelectOptionSnapshot | undefined; value: UiSelectValue }): unknown;
   'value-leading'?(props: { option: UiSelectOptionSnapshot | undefined; value: UiSelectValue }): unknown;
-  'group-leading'?(props: { option: UiSelectOptionSnapshot }): unknown;
+  'group-leading'?(props: { option?: UiSelectOptionSnapshot; groupKey: string }): unknown;
   'option-leading'?(props: { option: UiSelectOptionSnapshot }): unknown;
   option?(props: { option: UiSelectOptionSnapshot; selected: boolean }): unknown;
   actions?(props: { value: UiSelectValue; disabled: boolean }): unknown;
@@ -312,6 +316,7 @@ let triggerObserver: ResizeObserver | null = null;
 const nativeInvalid = ref(false);
 let boundForm: HTMLFormElement | null = null;
 const options = shallowRef<UiSelectOptionSnapshot[]>([]);
+const keyedGroups = shallowRef<UiSelectGroupSnapshot[]>([]);
 const fallbackId = 'ui-select-' + useId().replaceAll(':', '');
 let optionsStamp = '';
 
@@ -324,8 +329,12 @@ const navigationGroups = computed(() => {
     key: string;
     label: string;
     count: number;
-    option: UiSelectOptionSnapshot;
+    option?: UiSelectOptionSnapshot;
   }>();
+
+  for (const group of keyedGroups.value) {
+    groups.set(group.key, { ...group, count: 0 });
+  }
 
   for (const option of options.value) {
     if (!option.groupLabel) {
@@ -336,6 +345,7 @@ const navigationGroups = computed(() => {
 
     if (group) {
       group.count += 1;
+      group.option ??= option;
     } else {
       groups.set(option.groupKey, {
         key: option.groupKey,
@@ -466,11 +476,13 @@ function syncOptions(): void {
   select.value = String(model.value ?? '');
 
   const next = readUiSelectOptions(select);
-  const stamp = JSON.stringify(next);
+  const groups = props.groupNavigation ? readUiSelectKeyedGroups(select) : [];
+  const stamp = JSON.stringify([next, groups]);
 
   if (stamp !== optionsStamp) {
     optionsStamp = stamp;
     options.value = next;
+    keyedGroups.value = groups;
   }
 
   if (nativeInvalid.value && select.validity.valid) {
