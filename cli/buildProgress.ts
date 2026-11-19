@@ -15,7 +15,7 @@ import { buildProgressBar, buildStepIds, estimateBuildProgress } from './buildSt
 import type { BuildStep } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
 import { runPresentedCommand } from './presentation.ts';
-import { showScreen } from './screen.ts';
+import { chooseScreenAction, showScreen } from './screen.ts';
 import type { ScreenLine, ScreenOptions } from './screen.ts';
 import { TerminalSession } from './terminal.ts';
 
@@ -40,43 +40,28 @@ async function offerOpenWindow(
   root: string, session: TerminalSession, summary: ScreenOptions,
 ): Promise<number> {
   const { t } = cliTranslator();
-  let open = false;
-  const render = () => showScreen(session, {
+
+  session.resume();
+
+  const choice = await chooseScreenAction(session, {
     ...summary,
     lines: (width) => [
       ...typeof summary.lines === 'function' ? summary.lines(width) : summary.lines,
       '',
       { text: t('openWindowQuestion'), tone: 'accent' },
-      { text: `${open ? '›' : ' '} ${t('open')}`, selected: open },
-      { text: `${open ? ' ' : '›'} ${t('skipOpen')}`, selected: !open },
     ],
     footer: t('openWindowNavigation'),
+  }, {
+    accept: t('open'),
+    cancel: t('skipOpen'),
+    letterKeys: true,
   });
 
-  session.resume();
-  render();
-
-  while (true) {
-    const key = await session.nextKey();
-    const letter = key.text?.toLowerCase() ?? '';
-
-    if (['interrupt', 'terminate'].includes(key.name)) {
-      return key.name === 'interrupt' ? 130 : 143;
-    }
-
-    if (['escape', 'eof'].includes(key.name) || ['n', 'н'].includes(letter)) {
-      return 0;
-    }
-
-    if (['y', 'д'].includes(letter) || key.name === 'return') {
-      return open || ['y', 'д'].includes(letter) ? runPresentedCommand(root, ['open'], session) : 0;
-    }
-
-    if (['up', 'down', 'left', 'right'].includes(key.name)) {
-      open = !open;
-      render();
-    }
+  if (choice === 'accept') {
+    return runPresentedCommand(root, ['open'], session);
   }
+
+  return choice === 'cancel' ? 0 : choice;
 }
 
 interface GlmAdmissionState {

@@ -46,6 +46,10 @@ export async function runEntry(argv: readonly string[]): Promise<number> {
     return runMenu(root);
   }
 
+  if (argv[0] === 'artifacts-cleanup') {
+    return runCli(argv);
+  }
+
   if (argv[0] === 'build' && argv.length <= 2
     && ['all', 'server', 'web', 'window', 'deepseek', 'apk'].includes(argv[1] ?? 'all')
     && sourceInstallation(root)) {

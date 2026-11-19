@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Stats } from 'node:fs';
+import { constants, lstatSync, type Stats } from 'node:fs';
+import { setImmediate } from 'node:timers/promises';
 
 import { openArtifactDirectory } from './artifactRemoval.ts';
 import { CHAT_ARTIFACT_RUNS } from './chatArtifactLayout.ts';
@@ -38,6 +39,20 @@ export interface CleanupReport {
 
 type HeldLock = DirectoryLockReference;
 
+export interface CleanupApproval {
+  root: string;
+  paths: ReadonlySet<string>;
+}
+
+export interface CleanupProgress {
+  phase: 'scan' | 'check' | 'delete';
+  path: string;
+  completed: number;
+  total: number;
+  visited: number;
+  freedBytes: number;
+}
+
 export interface CleanupOptions {
   root: string;
   scope: 'artifacts' | 'deepseek-tests';
@@ -51,6 +66,14 @@ export interface CleanupOptions {
   protectedPaths?: readonly string[];
   heldLock?: HeldLock;
   signal?: AbortSignal;
+  onProgress?: (progress: CleanupProgress) => void;
+  approval?: CleanupApproval;
+}
+
+interface TreeSnapshot {
+  bytes: number;
+  newest: number;
+  nestedLock: LockReason;
 }
 
 interface Candidate {
@@ -58,6 +81,7 @@ interface Candidate {
   stat: Stats;
   bytes: number;
   newest: number;
+  nestedLock?: LockReason;
   generation?: string;
   theme?: string;
 }
@@ -147,7 +171,7 @@ async function containedStat(root: string, directory: string): Promise<Stats> {
  * Содержимое файлов не читается; последовательный обход ограничивает память большого кэша.
  */
 async function measure(
-  root: string, directory: string, signal?: AbortSignal,
+  root: string, directory: string, signal?: AbortSignal, visit?: () => void,
 ): Promise<{ bytes: number; newest: number }> {
   signal?.throwIfAborted();
 
@@ -155,9 +179,11 @@ async function measure(
   let bytes = stat.isFile() ? stat.size : 0;
   let newest = stat.mtimeMs;
 
+  visit?.();
+
   if (stat.isDirectory()) {
     for (const name of await fs.readdir(directory)) {
-      const child = await measure(root, path.join(directory, name), signal);
+      const child = await measure(root, path.join(directory, name), signal, visit);
 
       bytes += child.bytes;
       newest = Math.max(newest, child.newest);
@@ -184,11 +210,92 @@ async function lockReason(directory: string, held: readonly HeldLock[]): Promise
 }
 
 /**
+ * Предварительный Linux-обход считает размер, mtime и вложенные lock-и вместе.
+ * Открытые fd удерживают физические каталоги; lstat записей не следует по ссылкам.
+ */
+async function snapshotTree(
+  directory: string, stat: Stats, checkLocks: boolean, signal?: AbortSignal, visit?: () => void,
+): Promise<TreeSnapshot> {
+  const snapshot: TreeSnapshot = {
+    bytes: 0,
+    newest: stat.mtimeMs,
+    nestedLock: null,
+  };
+  let batchSize = 0;
+
+  /**
+   * Порция метаданных выполняется синхронно без очереди fs на каждый файл.
+   * Между порциями цикл событий принимает отмену и перерисовывает прогресс.
+   */
+  async function scan(source: string, expected: Stats, checkLocks: boolean): Promise<void> {
+    signal?.throwIfAborted();
+
+    const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+    const handle = await fs.open(source, flags);
+
+    try {
+      const actual = await handle.stat();
+
+      if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
+        throw Object.assign(new Error('Каталог уборки заменён'), { code: 'ENOENT' });
+      }
+
+      const base = `/proc/self/fd/${handle.fd}`;
+      const names = await fs.readdir(base);
+      const packageLocks = path.basename(source) === '.locks';
+
+      snapshot.newest = Math.max(snapshot.newest, actual.mtimeMs);
+
+      if (checkLocks && !snapshot.nestedLock && names.includes('owner.json')) {
+        snapshot.nestedLock = await lockReason(`${base}/.`, []);
+      }
+
+      for (const name of names) {
+        const child = `${base}/${name}`;
+        const info = lstatSync(child);
+
+        visit?.();
+        snapshot.newest = Math.max(snapshot.newest, info.mtimeMs);
+
+        if (info.isFile()) {
+          snapshot.bytes += info.size;
+        }
+
+        const inspect = checkLocks && !snapshot.nestedLock && !lockSidecar(name);
+        const lock = inspect && (packageLocks || lockName(name));
+
+        if (lock) {
+          snapshot.nestedLock = await lockReason(child, []);
+        } else if (inspect && name === '.locks' && !info.isDirectory()) {
+          snapshot.nestedLock = 'lock-unknown';
+        }
+
+        if (info.isDirectory()) {
+          await scan(child, info, inspect && !lock);
+        }
+
+        if (++batchSize === 512) {
+          batchSize = 0;
+          await setImmediate();
+          signal?.throwIfAborted();
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
+  await scan(directory, stat, checkLocks);
+
+  return snapshot;
+}
+
+/**
  * Упаковка payload использует как sibling lock, так и записи внутри .locks.
  * Проверка вложенного дерева не следует по ссылкам и консервативно сохраняет неизвестный lock.
  */
 async function nestedLocks(
-  root: string, directory: string, held: readonly HeldLock[], signal?: AbortSignal,
+  root: string, directory: string, held: readonly HeldLock[], signal?: AbortSignal, visit?: () => void,
 ): Promise<LockReason> {
   signal?.throwIfAborted();
 
@@ -198,13 +305,15 @@ async function nestedLocks(
 
   const stat = await containedStat(root, directory);
 
+  visit?.();
+
   if (!stat.isDirectory()) {
     return path.basename(directory) === '.locks' ? 'lock-unknown' : null;
   }
 
-  const names = await fs.readdir(directory);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
 
-  if (names.includes('owner.json')) {
+  if (entries.some((entry) => entry.name === 'owner.json')) {
     const reason = await lockReason(directory, held);
 
     if (reason) {
@@ -212,9 +321,10 @@ async function nestedLocks(
     }
   }
 
-  for (const name of names) {
+  for (const entry of entries) {
     signal?.throwIfAborted();
 
+    const name = entry.name;
     const child = path.join(directory, name);
 
     if (lockSidecar(name)) {
@@ -227,8 +337,8 @@ async function nestedLocks(
       if (reason) {
         return reason;
       }
-    } else {
-      const reason = await nestedLocks(root, child, held, signal);
+    } else if (entry.isDirectory() || name === '.locks') {
+      const reason = await nestedLocks(root, child, held, signal, visit);
 
       if (reason) {
         return reason;
@@ -247,6 +357,8 @@ async function candidateLocks(
   root: string, candidate: Candidate, held: readonly HeldLock[],
   themes: Map<string, LockReason>,
   signal?: AbortSignal,
+  visit?: () => void,
+  useSnapshot = false,
 ): Promise<LockReason> {
   let directory = candidate.directory;
 
@@ -268,7 +380,8 @@ async function candidateLocks(
     directory = path.dirname(directory);
   }
 
-  const nested = await nestedLocks(root, candidate.directory, held, signal);
+  const nested = useSnapshot && candidate.nestedLock !== undefined ? candidate.nestedLock
+    : await nestedLocks(root, candidate.directory, held, signal, visit);
 
   if (nested || !candidate.theme) {
     return nested;
@@ -285,7 +398,7 @@ async function candidateLocks(
 
     const child = path.join(candidate.theme, name);
     const reason = lockName(name) ? await lockReason(child, held)
-      : await nestedLocks(root, child, held, signal);
+      : await nestedLocks(root, child, held, signal, visit);
 
     if (reason) {
       themes.set(candidate.theme, reason);
@@ -373,12 +486,12 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
     return null;
   });
 
-  if (rootError) {
+  if (rootError || options.approval && root !== options.approval.root) {
     report.entries.push({
       path: '',
       bytes: null,
       status: 'error',
-      reason: 'io-error',
+      reason: rootError ? 'io-error' : 'disappeared',
     });
     report.errorCount = 1;
 
@@ -399,6 +512,65 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
   const held = options.heldLock ? [options.heldLock] : [];
   const cutoff = (options.now ?? Date.now()) - olderThanMs;
   const protectedPaths = options.protectedPaths ?? [];
+  const fastScan = process.platform === 'linux' && options.scope === 'artifacts' && !held.length;
+  const progress: CleanupProgress = {
+    phase: 'scan',
+    path: '',
+    completed: 0,
+    total: 0,
+    visited: 0,
+    freedBytes: 0,
+  };
+  let lastProgress = -Infinity;
+
+  /**
+   * Частота обратной связи не зависит от числа записей в одном каталоге.
+   * Начало этапа и границы обхода отправляются сразу, счётчики — порциями.
+   */
+  function publish(force = false): void {
+    if (!options.onProgress) {
+      return;
+    }
+
+    const now = performance.now();
+
+    if (force || now - lastProgress >= 200) {
+      lastProgress = now;
+      options.onProgress({ ...progress, freedBytes: report.freedBytes });
+    }
+  }
+
+  const visit = options.onProgress ? () => {
+    progress.visited++;
+
+    if (progress.visited % 128 === 0) {
+      publish();
+    }
+  } : undefined;
+
+  /**
+   * Кандидат крепится к физическому родителю на весь предварительный обход.
+   * Отдельный медленный путь сохраняет совместимость test helper и других платформ.
+   */
+  async function inventory(directory: string, stat: Stats, checkLocks = true) {
+    if (!fastScan) {
+      return measure(root, directory, options.signal, visit);
+    }
+
+    const anchor = await openArtifactDirectory({
+      root,
+      directory,
+      rootStat: rootStat!,
+      stat,
+      signal: options.signal,
+    });
+
+    try {
+      return await snapshotTree(anchor.path, stat, checkLocks, options.signal, visit);
+    } finally {
+      await anchor.close();
+    }
+  }
 
   function current(directory: string): boolean {
     return protectedPaths.some((protectedPath) => contains(directory, path.resolve(protectedPath)))
@@ -436,8 +608,17 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
       return;
     }
 
-    for (const name of (await fs.readdir(directory)).sort()) {
+    const names = (await fs.readdir(directory)).sort();
+
+    if (directory === root) {
+      progress.total = names.length;
+      publish(true);
+    }
+
+    for (const name of names) {
       const child = path.join(directory, name);
+
+      progress.path = path.relative(root, child);
 
       try {
         options.signal?.throwIfAborted();
@@ -476,6 +657,11 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
 
           const generation = mode === 'generations' && !lockSidecar(name) && !cleanupStaging(name)
             ? directory : undefined;
+          const approved = options.approval?.paths.has(progress.path) ?? true;
+
+          if (!approved && !generation) {
+            continue;
+          }
 
           // Свежий корень уже доказывает молодость всего дерева: удалять его нельзя.
           // Helper может не считать размер сохранённых данных; CLI по умолчанию читает полную опись.
@@ -492,7 +678,7 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
           const candidate: Candidate = {
             directory: child,
             stat: childStat,
-            ...await measure(root, child, options.signal),
+            ...await inventory(child, childStat),
             generation,
             theme: generation ? path.dirname(path.dirname(directory)) : undefined,
           };
@@ -501,10 +687,16 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
             knownGenerations.set(child, candidate);
           }
 
+          if (!approved) {
+            continue;
+          }
+
           // Свежий снимок можно только сохранить. Его повторный обход под общим
           // барьером блокировал запуск соседних ELF, хотя удаление не допускалось.
           if (candidate.newest >= cutoff) {
-            const busy = await candidateLocks(root, candidate, held, themeLocks, options.signal);
+            const busy = await candidateLocks(
+              root, candidate, held, themeLocks, options.signal, visit, fastScan,
+            );
 
             append(child, candidate.bytes, busy ?? 'young');
 
@@ -516,6 +708,12 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
       } catch (error) {
         options.signal?.throwIfAborted();
         append(child, null, errorReason(error));
+      } finally {
+        if (directory === root) {
+          progress.completed++;
+        }
+
+        publish();
       }
     }
   }
@@ -524,7 +722,9 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
    * Повторная проверка сохраняет свежие данные и current независимо от старого preview.
    * Исходный inode и цепочка предков защищают от замены пути между выбором и эффектом.
    */
-  async function eligible(candidate: Candidate, locks: readonly HeldLock[]): Promise<CleanupReason | null> {
+  async function eligible(
+    candidate: Candidate, locks: readonly HeldLock[], remeasure = true,
+  ): Promise<CleanupReason | null> {
     const stat = await containedStat(root, candidate.directory);
     const currentRoot = await fs.lstat(root);
 
@@ -537,18 +737,21 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
       return 'current';
     }
 
-    const busy = await candidateLocks(root, candidate, locks, themeLocks, options.signal);
+    const useSnapshot = report.dryRun && fastScan;
+    const busy = await candidateLocks(root, candidate, locks, themeLocks, options.signal, visit, useSnapshot);
 
     if (busy) {
       return busy;
     }
 
-    const measured = await measure(root, candidate.directory, options.signal);
+    if (!useSnapshot && remeasure) {
+      const measured = await inventory(candidate.directory, stat, false);
 
-    candidate.bytes = measured.bytes;
-    candidate.newest = measured.newest;
+      candidate.bytes = measured.bytes;
+      candidate.newest = measured.newest;
+    }
 
-    if (measured.newest >= cutoff) {
+    if (Math.max(candidate.newest, stat.mtimeMs) >= cutoff) {
       return 'young';
     }
 
@@ -572,6 +775,7 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
   }
 
   try {
+    publish(true);
     await collect(root, options.scope === 'artifacts' ? 'root' : 'theme');
   } catch (error) {
     if (options.signal?.aborted) {
@@ -589,6 +793,12 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
 
   let barrier;
   const barrierPath = directoryCleanupLockPath(root);
+
+  progress.phase = 'check';
+  progress.path = '';
+  progress.completed = 0;
+  progress.total = candidates.length;
+  publish(true);
 
   if (!report.dryRun && candidates.length) {
     try {
@@ -623,8 +833,12 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
       let lock;
       let anchored;
 
+      progress.phase = 'check';
+      progress.path = path.relative(root, candidate.directory);
+      publish();
+
       try {
-        let reason = await eligible(candidate, held);
+        let reason = await eligible(candidate, held, !fastScan);
 
         if (!reason && !report.dryRun) {
           anchored = await openArtifactDirectory({
@@ -651,6 +865,8 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
         }
 
         if (!report.dryRun) {
+          progress.phase = 'delete';
+          publish(true);
           await anchored!.remove();
           report.freedBytes += candidate.bytes;
         } else {
@@ -686,6 +902,9 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
             append(candidate.directory, null, 'io-error');
           }
         }
+
+        progress.completed++;
+        publish();
       }
     }
   } finally {
@@ -697,6 +916,7 @@ export async function cleanupArtifacts(options: CleanupOptions): Promise<Cleanup
   }
 
   report.interrupted ||= options.signal?.aborted ?? false;
+  publish(true);
 
   return report;
 }

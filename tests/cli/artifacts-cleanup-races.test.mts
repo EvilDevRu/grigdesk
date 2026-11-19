@@ -170,7 +170,10 @@ for (const target of ['ancestor', 'ancestor-install', 'nested', 'payload'] as co
     let visitsUnderLock = 0;
     let blocked = false;
     const intercept = t.mock.method(fs, 'readdir', async (...args: Parameters<typeof fs.readdir>) => {
-      if (String(args[0]) === old && await present(`${old}.lock`)) {
+      const directory = String(args[0]);
+      const physical = directory.startsWith('/proc/self/fd/') ? await fs.realpath(directory) : directory;
+
+      if (physical === old && await present(`${old}.lock`)) {
         visitsUnderLock++;
 
         if (visitsUnderLock === 2) {
@@ -321,7 +324,10 @@ for (const dryRun of [true, false]) {
     const readdir = fs.readdir.bind(fs);
     let scans = 0;
     const intercept = t.mock.method(fs, 'readdir', async (...args: Parameters<typeof fs.readdir>) => {
-      if (String(args[0]).startsWith(`${generations}/g`)) {
+      const directory = String(args[0]);
+      const physical = directory.startsWith('/proc/self/fd/') ? await fs.realpath(directory) : directory;
+
+      if (physical.startsWith(`${generations}/g`)) {
         scans++;
       }
 
@@ -339,6 +345,11 @@ for (const dryRun of [true, false]) {
 
     assert.equal(report.errorCount, 0);
     assert.equal(report.entries.filter((entry) => entry.status === status).length, 17);
+
+    if (dryRun && process.platform === 'linux') {
+      assert.equal(scans, 20, 'Предпросмотр читает дерево каждого поколения ровно один раз');
+    }
+
     assert.ok(scans <= 6 * 20, `Обходов ${scans}; нельзя перечитывать все деревья для каждого поколения`);
   });
 }

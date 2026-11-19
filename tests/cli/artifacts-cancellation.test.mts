@@ -128,6 +128,7 @@ for (const cancellation of ['SIGINT', 'SIGTERM', 'raw-interrupt', 'eof'] as cons
 
     await box.session.wait(menuTitle);
     box.session.write(down.repeat(7) + '\r');
+    await box.session.wait(/Сканирование/u);
     await cancelAtBarrier(box, cancellation);
 
     const result = await box.session.done;
@@ -150,6 +151,8 @@ for (const variant of ['command', 'menu', 'json'] as const) {
         box.session.write(down.repeat(7) + '\r');
         await box.session.wait(/Отмена|Cancel/u);
         box.session.write(down + '\r');
+      } else if (variant === 'command') {
+        await box.session.wait(/Сканирование/u);
       }
 
       await cancelAtBarrier(box, cancellation);

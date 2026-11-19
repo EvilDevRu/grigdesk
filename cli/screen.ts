@@ -13,11 +13,18 @@ export interface ScreenOptions {
   title: string;
   state?: ScreenLine;
   lines: readonly (ScreenLine | string)[] | ((width: number) => readonly (ScreenLine | string)[]);
+  actions?: () => readonly ScreenLine[];
   footer?: string;
   full?: boolean;
   follow?: boolean;
   minimumWidth?: number;
   incremental?: boolean;
+}
+
+interface ScreenChoice {
+  accept: string;
+  cancel: string;
+  letterKeys?: boolean;
 }
 
 interface ScreenState {
@@ -28,6 +35,37 @@ interface ScreenState {
 }
 
 const screens = new WeakMap<TerminalSession, ScreenState>();
+
+/**
+ * Строки отчёта и действий переносятся по одним правилам.
+ * Выделение и цвет сохраняются у всех частей перенесённой строки.
+ */
+function contentRows(
+  entries: readonly (ScreenLine | string)[], width: number, inset: string,
+): TerminalLine[] {
+  const rows: TerminalLine[] = [];
+
+  for (const entry of entries) {
+    const line = typeof entry === 'string' ? { text: entry } : entry;
+    const wrapped = terminalLines(line.text.replaceAll('\t', '    '), width, { words: !line.paper });
+
+    for (const text of wrapped.length ? wrapped : ['']) {
+      rows.push({
+        spans: [
+          { text: inset },
+          {
+            text,
+            tone: line.tone,
+            paper: line.paper,
+          },
+        ],
+        selected: line.selected,
+      });
+    }
+  }
+
+  return rows;
+}
 
 /**
  * Общая рамка удерживает заголовок и управление при прокрутке длинных результатов.
@@ -50,7 +88,7 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
   }
 
   if (options.state) {
-      for (const text of terminalLines(options.state.text, contentWidth, { words: true })) {
+    for (const text of terminalLines(options.state.text, contentWidth, { words: true })) {
       header.push(row(text, options.state.tone));
     }
   }
@@ -58,27 +96,8 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
   header.push(rule, '');
 
   const source = typeof options.lines === 'function' ? options.lines(contentWidth) : options.lines;
-  const body: TerminalLine[] = [];
-
-  for (const entry of source) {
-    const line = typeof entry === 'string' ? { text: entry } : entry;
-    const wrapped = terminalLines(line.text.replaceAll('\t', '    '), contentWidth, { words: !line.paper });
-
-    for (const text of wrapped.length ? wrapped : ['']) {
-      body.push({
-        spans: [
-          { text: inset },
-          {
-            text,
-            tone: line.tone,
-            paper: line.paper,
-          },
-        ],
-        selected: line.selected,
-      });
-    }
-  }
-
+  const body = contentRows(source, contentWidth, inset);
+  const actions = contentRows(options.actions?.() ?? [], contentWidth, inset);
   const footer: TerminalLine[] = ['', rule];
 
   if (options.footer) {
@@ -88,7 +107,7 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
   }
 
   const full = options.full || process.env.TERM === 'dumb';
-  const pageSize = Math.max(1, session.rows - header.length - footer.length - 2);
+  const pageSize = Math.max(1, session.rows - header.length - actions.length - footer.length - 2);
   const atEnd = state.total > 0 && state.offset >= state.total - state.pageSize;
 
   state.pageSize = pageSize;
@@ -97,7 +116,7 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
     : Math.min(state.offset, Math.max(0, body.length - pageSize));
 
   if (!full && body.length > pageSize) {
-    const position = t('screens.page', {
+    const position = t(actions.length ? 'screens.pagePosition' : 'screens.page', {
       first: state.offset + 1,
       last: Math.min(body.length, state.offset + pageSize),
       total: body.length,
@@ -109,6 +128,7 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
   session.draw([
     ...header,
     ...full ? body : body.slice(state.offset, state.offset + pageSize),
+    ...actions,
     ...footer,
   ], () => renderScreen(session, state), {
     theme: 'dark',
@@ -118,19 +138,72 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
 }
 
 /**
- * Новый результат сбрасывает позицию просмотра, потоковый вывод следует за хвостом.
- * Resize повторно рассчитывает строки по исходным данным, не теряя скрытую часть.
+ * Новый результат сбрасывает позицию просмотра, обновление выбора сохраняет её.
+ * Resize заново рассчитывает доступную область из тех же данных.
  */
-export function showScreen(session: TerminalSession, options: ScreenOptions): void {
+export function showScreen(session: TerminalSession, options: ScreenOptions): () => void {
   const state: ScreenState = {
     options,
     offset: 0,
     pageSize: 1,
     total: 0,
   };
+  const redraw = () => renderScreen(session, state);
 
   screens.set(session, state);
-  renderScreen(session, state);
+  redraw();
+
+  return redraw;
+}
+
+/**
+ * Подтверждение показывает действия под отчётом и начинает с выделенного отказа.
+ * Стрелки переключают выбор, клавиши страниц прокручивают только отчёт.
+ * Буквенные сокращения подключаются для действий, которым достаточно одного нажатия.
+ */
+export async function chooseScreenAction(
+  session: TerminalSession, options: ScreenOptions, choice: ScreenChoice,
+): Promise<'accept' | 'cancel' | 0 | 130 | 143> {
+  let accept = false;
+  const redraw = showScreen(session, {
+    ...options,
+    actions: () => [
+      { text: `${accept ? '›' : ' '} ${choice.accept}`, selected: accept },
+      { text: `${accept ? ' ' : '›'} ${choice.cancel}`, selected: !accept },
+    ],
+  });
+
+  for (;;) {
+    const key = await session.nextKey();
+    const letter = choice.letterKeys ? key.text?.toLowerCase() ?? '' : '';
+
+    if (key.name === 'interrupt' || key.name === 'terminate') {
+      return key.name === 'interrupt' ? 130 : 143;
+    }
+
+    if (key.name === 'eof') {
+      return 0;
+    }
+
+    if (key.name === 'escape' || ['n', 'н'].includes(letter)) {
+      return 'cancel';
+    }
+
+    if (['y', 'д'].includes(letter)) {
+      return 'accept';
+    }
+
+    if (key.name === 'return') {
+      return accept ? 'accept' : 'cancel';
+    }
+
+    if (['up', 'down', 'left', 'right'].includes(key.name)) {
+      accept = !accept;
+      redraw();
+    } else {
+      scrollScreen(session, key);
+    }
+  }
 }
 
 /**

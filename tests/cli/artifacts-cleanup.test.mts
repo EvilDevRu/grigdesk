@@ -429,6 +429,26 @@ test('AC-JSON/AC-NO-AUTO: shell pipe и TTY с --json, help/status не удал
   }
 });
 
+test('AC-LOCAL: source dry-run работает без запуска установленного серверного ELF', async (t) => {
+  const box = await sourceMenu(t);
+  const old = await oldTree(path.join(box.home, 'artifacts'), 'old', 4096);
+  const binary = path.join(box.root, 'bin/grigdesk-server');
+  const called = path.join(box.home, 'server-elf-called');
+
+  await fs.writeFile(binary, '#!/bin/sh\n: > "$GRIGDESK_TEST_ELF_CALLED"\nexit 99\n', { mode: 0o755 });
+
+  const result = await box.run(['artifacts-cleanup', '--dry-run', '--json'], {
+    ...box.environment,
+    GRIGDESK_ARTIFACTS_DIR: path.dirname(old),
+    GRIGDESK_TEST_ELF_CALLED: called,
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).wouldDeleteBytes, 4096);
+  assert.equal(await present(called), false);
+  assert.equal(await present(old), true);
+});
+
 test('AC-RACE: второй процесс держит настоящий sibling lock до файлового release', async (t) => {
   const box = await fixture(t);
   const old = await oldTree(box.artifacts, 'old');

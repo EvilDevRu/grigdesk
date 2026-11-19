@@ -71,7 +71,7 @@ for (const language of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
       session.write(remove ? down + '\r' : '\r');
 
       if (remove) {
-        await session.wait(/4096/u, 4000, before);
+        await session.wait(/✓ (?:Готово|Done)/u, 4000, before);
         assert.ok(session.output().slice(before).includes(translate('screens.running')),
           'После подтверждения показано выполнение, а не прежний вопрос об удалении');
         assert.equal(await present(old), false);

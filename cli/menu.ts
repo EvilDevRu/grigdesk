@@ -5,7 +5,7 @@ import path from 'node:path';
 import { runtimeRoot } from '../server/src/lib/runtimePaths.ts';
 import { isPortableBundle } from '../shared/node/bundleLayout.ts';
 import { readCliContext } from './commands.ts';
-import { confirmArtifactsCleanup } from './artifactsCleanupMenu.ts';
+import { runArtifactsCleanupMenu } from './artifactsCleanupMenu.ts';
 import { runBuildProgress } from './buildProgress.ts';
 import { cliTranslator } from './i18n.ts';
 import { sourceInstallation } from './interactive.ts';
@@ -109,7 +109,6 @@ function menuItems(source: boolean): MenuItem[] {
     {
       label: 'artifactsCleanup',
       description: 'artifactsCleanupDescription',
-      argv: ['artifacts-cleanup'],
     },
     ...source ? [distributionMenuItem()] : [],
     { label: 'exit', description: 'exitDescription' },
@@ -244,20 +243,18 @@ export async function runMenu(root: string): Promise<number> {
           });
         } else if (item.label === 'exit') {
           return cleanupFailure;
+        } else if (item.label === 'artifactsCleanup') {
+          const outcome = await runArtifactsCleanupMenu(session);
+
+          if (outcome?.exit) {
+            return outcome.code;
+          }
+
+          if (outcome?.code) {
+            cleanupFailure = outcome.code;
+          }
         } else {
           const argv = [...item.argv ?? []];
-          const confirmation = item.label === 'artifactsCleanup'
-            ? await confirmArtifactsCleanup(session) : 'confirm';
-
-          if (typeof confirmation === 'number') {
-            return confirmation;
-          }
-
-          if (confirmation === 'cancel') {
-            render();
-
-            continue;
-          }
 
           if (item.prompt) {
             const value = await promptText(session, t(item.prompt));
@@ -275,13 +272,8 @@ export async function runMenu(root: string): Promise<number> {
             argv.push(value);
           }
 
-          const code = confirmation === 'error' ? 1
-            : item.variant ? await runBuildProgress(root, item.variant, session)
+          const code = item.variant ? await runBuildProgress(root, item.variant, session)
             : await runMenuAction(root, argv, session);
-
-          if (item.label === 'artifactsCleanup' && code !== 0) {
-            cleanupFailure = code;
-          }
 
           if (item.label === 'open' || ['dev', 'run'].includes(item.label) || item.variant && code !== 0) {
             return code;

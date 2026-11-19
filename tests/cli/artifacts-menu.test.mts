@@ -16,8 +16,9 @@ import { completed } from './helpers/sandbox.mts';
 import { DAY, oldTree, present, treeSnapshot } from '../helpers/deepseekRetentionFixture.mts';
 
 const cleanupTitle = /Уборка артефактов|Artifacts? cleanup|Clean(?:up)? artifacts/iu;
-const choice = /Отмена|Отменить|Cancel/iu;
-const deletion = /Удалить|Delete/iu;
+const choice = /› (?:Отмена|Cancel) *\r?\n/u;
+const deletion = /^ *(?:Удалить|Delete) *\r?$/mu;
+const done = /✓ (?:Готово|Done)/u;
 
 /**
  * Меню запускается в настоящем PTY только с приватной папкой артефактов.
@@ -116,7 +117,7 @@ for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
     const confirmed = session.output().length;
 
     session.write(down + '\r');
-    await session.wait(/удалено|deleted|freed|освобождено/iu, 4000, confirmed);
+    await session.wait(done, 4000, confirmed);
     assert.equal(await present(old), false);
     assert.equal(await present(young), true);
     assert.equal(session.finished(), false, 'Результат остаётся до Enter/Esc');
@@ -148,6 +149,116 @@ test('AM-RECHECK: настоящий lock после preview сохраняет 
   assertRestored(result, session.output());
 });
 
+test('AM-SCROLL: действия выделяются отдельными строками и остаются на последней странице', async (t) => {
+  const box = await sourceMenu(t);
+  const artifacts = path.join(box.home, 'artifacts');
+  const old = await oldTree(artifacts, 'old', 4096);
+
+  for (let index = 0; index < 24; index++) {
+    await mkdir(path.join(artifacts, `young-${index.toString().padStart(2, '0')}`));
+  }
+
+  const session = startPty(t, {
+    argv: ['bash', path.join(box.root, 'bin/grigdesk-ctl')],
+    env: {
+      ...box.environment,
+      GRIGDESK_ARTIFACTS_DIR: artifacts,
+      LC_ALL: '',
+      LC_MESSAGES: '',
+      LANG: 'ru_RU.UTF-8',
+      TERM: 'xterm-256color',
+    },
+    rows: 18,
+  });
+  const highlighted = /\x1b\[48;2;41;59;67m[^\r\n]*› Отмена/u;
+  const accept = /\x1b\[48;2;41;59;67m[^\r\n]*› Удалить/u;
+
+  await session.wait(menuTitle);
+  session.write(down.repeat(7) + '\r');
+  await session.wait(highlighted);
+  assert.doesNotMatch(session.output(), /young-23/u);
+
+  const scrolled = session.output().length;
+
+  session.write('\x1b[6~');
+  await session.wait(highlighted, 4000, scrolled);
+  assert.doesNotMatch(visibleLines(session.output().slice(scrolled)).join('\n'), /^ *1–\d+ из/mu);
+
+  const end = session.output().length;
+
+  session.write('\x1b[F');
+  await session.wait(highlighted, 4000, end);
+  assert.match(session.output().slice(end), /young-23/u);
+  assert.match(session.output().slice(end), /К удалению: 4\s?096 байт/u);
+
+  const selected = session.output().length;
+
+  session.write(down + 'Д');
+  await session.wait(accept, 4000, selected);
+  assert.match(session.output().slice(selected), /young-23/u);
+  assert.doesNotMatch(session.output().slice(selected), /› Отмена/u);
+
+  const result = await exitMenus(session);
+
+  assert.equal(await present(old), true);
+  assert.equal(result.code, 0);
+  assertRestored(result, session.output());
+});
+
+test('AM-PARTIAL: недоступная папка остаётся, убираются только показанные кандидаты', async (t) => {
+  const box = await sourceMenu(t);
+  const artifacts = path.join(box.home, 'artifacts');
+  const denied = await oldTree(artifacts, 'denied');
+  const allowed = await oldTree(artifacts, 'allowed');
+  const hook = path.join(box.home, 'deny-artifact.mjs');
+
+  await writeFile(hook, `
+import fs from 'node:fs/promises';
+const readdir = fs.readdir.bind(fs);
+fs.readdir = async (directory, ...args) => {
+  const name = String(directory);
+  const physical = name.startsWith('/proc/self/fd/') ? await fs.realpath(name) : name;
+
+  if (physical === ${JSON.stringify(denied)}) {
+    throw Object.assign(new Error('Тестовый EACCES'), { code: 'EACCES' });
+  }
+
+  return readdir(directory, ...args);
+};
+`);
+
+  const session = startPty(t, {
+    argv: [process.execPath, '--import', hook, path.join(box.root, 'cli/main.ts')],
+    env: {
+      ...box.environment,
+      GRIGDESK_ARTIFACTS_DIR: artifacts,
+      LC_ALL: '',
+      LC_MESSAGES: '',
+      LANG: 'ru_RU.UTF-8',
+      TERM: 'dumb',
+    },
+  });
+
+  await session.wait(menuTitle);
+  session.write(down.repeat(7) + '\r');
+  await session.wait(choice);
+  assert.match(session.output(), /denied.*ошибка/iu);
+
+  const unseen = await oldTree(artifacts, 'unseen');
+
+  session.write(down + '\r');
+  await session.wait(done);
+
+  assert.equal(await present(allowed), false);
+  assert.equal(await present(denied), true);
+  assert.equal(await present(unseen), true);
+
+  const result = await exitMenus(session);
+
+  assert.equal(result.code, 0);
+  assertRestored(result, session.output());
+});
+
 for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
   for (const columns of [40, 80]) {
     for (const term of ['dumb', 'xterm-256color']) {
@@ -167,7 +278,7 @@ for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
         const confirmed = session.output().length;
 
         session.write(down + '\r');
-        await session.wait(/удалено|deleted|freed|освобождено/iu, 4000, confirmed);
+        await session.wait(done, 4000, confirmed);
 
         const resultOutput = session.output().slice(confirmed);
 

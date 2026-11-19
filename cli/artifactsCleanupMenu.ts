@@ -1,10 +1,27 @@
+import type { CleanupApproval } from '../shared/node/artifactsCleanup.ts';
 import { parseArgs } from './args.ts';
 import {
   artifactsCleanupCommand, artifactsCleanupLines, artifactsCleanupPreview,
 } from './artifactsCleanup.ts';
 import { cliTranslator } from './i18n.ts';
-import { scrollScreen, showScreen } from './screen.ts';
+import { chooseScreenAction, scrollScreen, showScreen } from './screen.ts';
 import type { TerminalKey, TerminalSession } from './terminal.ts';
+
+/**
+ * Просмотр и удаление используют один экран, включая живую перерисовку в узком терминале.
+ * Во время операции футер напоминает о поддерживаемой отмене.
+ */
+function showCleanupProgress(session: TerminalSession, lines: readonly string[]): void {
+  const { t } = cliTranslator();
+
+  showScreen(session, {
+    title: t('artifactsCleanup'),
+    state: { text: t('screens.running'), tone: 'accent' },
+    lines,
+    footer: t('screens.cancel'),
+    incremental: true,
+  });
+}
 
 /**
  * Сигналы завершают меню тем же кодом, что обычный процесс CLI.
@@ -19,22 +36,32 @@ function exitKey(key: TerminalKey): number | undefined {
  * Предварительный просмотр ничего не меняет, отказ выбран до первого нажатия клавиши.
  * Согласие запускает обычную команду заново; сохранённый список не разрешает обход защит.
  */
-export async function confirmArtifactsCleanup(
+async function confirmArtifactsCleanup(
   session: TerminalSession,
-): Promise<'confirm' | 'cancel' | 'error' | number> {
+): Promise<CleanupApproval | 'cancel' | 'error' | number> {
   const { t } = cliTranslator();
   let lines: string[];
+  let approval: CleanupApproval;
 
   try {
-    const { report, interruptedCode } = await artifactsCleanupPreview(session.input);
+    const result = await artifactsCleanupPreview(session.input,
+      (progress) => showCleanupProgress(session, progress));
+    const { report, interruptedCode } = result;
 
     if (interruptedCode !== undefined) {
       return interruptedCode;
     }
 
-    lines = artifactsCleanupLines(report);
+    const rootError = report.entries.some((entry) => entry.path === '' && entry.status === 'error');
+    const candidates = report.entries.filter((entry) => entry.status === 'would-delete');
 
-    if (report.errorCount) {
+    lines = artifactsCleanupLines(report);
+    approval = {
+      root: report.root,
+      paths: new Set(candidates.map((entry) => entry.path)),
+    };
+
+    if (rootError || report.errorCount && !approval.paths.size) {
       showScreen(session, {
         title: t('artifactsCleanup'),
         state: { text: t('screens.failed', { code: 1 }), tone: 'error' },
@@ -55,43 +82,17 @@ export async function confirmArtifactsCleanup(
     return 'error';
   }
 
-  let remove = false;
-  const render = () => showScreen(session, {
+  const choice = await chooseScreenAction(session, {
     title: t('artifactsCleanup'),
     state: { text: t('cleanup.question'), tone: 'warning' },
     lines,
-    footer: [
-      `${remove ? ' ' : '›'} ${t('cleanup.cancel')}`,
-      `${remove ? '›' : ' '} ${t('cleanup.delete')}`,
-      t('cleanup.navigation'),
-    ].join(' · '),
+    footer: t('cleanup.navigation'),
+  }, {
+    accept: t('cleanup.delete'),
+    cancel: t('cleanup.cancel'),
   });
 
-  render();
-
-  for (;;) {
-    const key = await session.nextKey();
-    const exit = exitKey(key);
-
-    if (exit !== undefined) {
-      return exit;
-    }
-
-    if (key.name === 'escape') {
-      return 'cancel';
-    }
-
-    if (key.name === 'return') {
-      return remove ? 'confirm' : 'cancel';
-    }
-
-    if (['up', 'down', 'left', 'right'].includes(key.name)) {
-      remove = !remove;
-      render();
-    } else {
-      scrollScreen(session, key);
-    }
-  }
+  return choice === 'accept' ? approval : choice;
 }
 
 /**
@@ -115,18 +116,15 @@ export async function runArtifactsCleanupMenu(
   const lines: string[] = [];
   let code = 1;
 
-  if (confirmation === 'confirm') {
+  if (confirmation !== 'error') {
     session.suspend();
-    showScreen(session, {
-      title: t('artifactsCleanup'),
-      state: { text: t('screens.running'), tone: 'accent' },
-      lines: [],
-      footer: t('screens.cancel'),
-    });
 
     try {
       code = await artifactsCleanupCommand(parseArgs(['artifacts-cleanup']), {
         write: (text) => lines.push(...text.trimEnd().split('\n')),
+      }, {
+        approval: confirmation,
+        renderProgress: (progress) => showCleanupProgress(session, progress),
       });
     } catch (error) {
       lines.push(String(error));
@@ -143,6 +141,10 @@ export async function runArtifactsCleanupMenu(
       lines,
       footer: t('screens.resultNavigation'),
     });
+
+    if (code === 130 || code === 143) {
+      return { code, exit: true };
+    }
   }
 
   for (;;) {

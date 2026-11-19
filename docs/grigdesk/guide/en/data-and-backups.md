@@ -68,13 +68,15 @@ continue to use the previous layout.
 1. Back up artifacts you need. Cleanup is irreversible and does not check conversation links;
    images in old replies may disappear when their files are removed.
 2. Run `grigdesk-ctl artifacts-cleanup --dry-run`. Check the root, each directory, sizes and total.
-   `GRIGDESK_ARTIFACTS_DIR` selects another root. A large scan may take minutes; Ctrl+C safely stops dry-run
-   and also cancels an ongoing preview in the terminal menu.
+   `GRIGDESK_ARTIFACTS_DIR` selects another root. A large scan may take minutes. The terminal shows
+   the phase, current directory, counts and elapsed time. Ctrl+C safely cancels a preview
+   in both the command and the menu.
 3. Run `grigdesk-ctl artifacts-cleanup` when the list is correct. Set age with `--older-than 12h`
    or `--older-than 14d`; whole minutes `m`, hours `h` and days `d` are supported, with a default of 7 days.
    `--keep-generations 3` sets how many recent test-cache generations to keep; `--json` outputs a script report.
-4. Alternatively, choose Developer → Artifact cleanup in the terminal menu. It previews candidates and
-   defaults to Cancel. Only an explicit Delete starts removal after rechecking.
+4. Alternatively, choose Developer → Artifacts cleanup in the terminal menu. Cancel is highlighted below
+   the report. Scroll with PgUp/PgDn or Home/End. Use the arrow keys to select Delete and press Enter.
+   The menu rechecks the listed candidates and skips directories with errors. Esc cancels cleanup.
 5. Check the report. Young or busy directories and core Node cache content are preserved.
    Cleanup does not block executor startup when it finds only young data.
    New directory-lock operations wait while removal runs; another cleanup skips directories if its barrier is busy.

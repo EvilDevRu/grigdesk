@@ -29,6 +29,15 @@ if [[ "$CMD" == dist && ( "$SOURCE_COMMAND" == 0 || -f "$DIR/bin/bundle.json" ) 
   exit 2
 fi
 
+# Локальная уборка из исходников не готовит серверный runtime и его блокировки.
+if [[ "$CMD" == artifacts-cleanup && ! -f "$DIR/release.json" \
+  && ! -f "$DIR/bin/bundle.json" && -f "$DIR/cli/main.ts" ]]; then
+  source "$DIR/deploy/lib/runtime-env.sh"
+  grigdesk_add_cli_paths
+  grigdesk_require_node source
+  exec node "$DIR/cli/main.ts" "$@"
+fi
+
 # Пустой человеческий TTY использует source CLI лишь при пригодном Node.
 # Без него установленный ELF показывает справку своим автономным Node.
 if (( $# == 0 )) && [[ -t 0 && -t 1 && ! -f "$DIR/release.json" \
