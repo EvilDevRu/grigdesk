@@ -3,6 +3,7 @@ import { access, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'n
 import path from 'node:path';
 import test from 'node:test';
 
+import { createWorkTools } from '../../server/src/lib/executors/index.ts';
 import { createWorkIpc } from '../../server/src/lib/executors/workIpc.ts';
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import {
@@ -373,6 +374,91 @@ test('qwen-native-never-and-filesystem', { timeout: 60000 }, async (t) => {
   assert.equal(await readFile(shellFile, 'utf8'), 'native-shell');
   assert.equal(await readFile(canary, 'utf8'), 'original');
   assert.equal(questions, 0, 'Режим never не должен задавать человеку вопросы');
+});
+
+test('Qwen ждёт рабочий MCP перед новым и восстановленным ходом', { timeout: 90000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const delayed = path.join(fixture.root, 'delayed-work-mcp.mjs');
+  const calls = [];
+  const workTools = createWorkTools({
+    invoke: async (_scope, input) => {
+      calls.push(input.action);
+
+      return [{
+        sessionId: 'synthetic',
+        projectId: 'demo',
+        label: 'local',
+        role: 'reader',
+      }];
+    },
+  });
+  const ipc = await createWorkIpc({ root: fixture.workspace, workTools });
+
+  fixture.onCleanup(() => ipc.close());
+  await writeFile(delayed, [
+    "import { setTimeout } from 'node:timers/promises';",
+    "import { pathToFileURL } from 'node:url';",
+    'await setTimeout(5500);',
+    'process.argv.splice(1, 1);',
+    'await import(pathToFileURL(process.argv[1]));',
+  ].join('\n'));
+
+  const mcpServers = [{
+    ...ipc.mcpServer,
+    name: 'grigdesk-work',
+    args: [delayed, ...ipc.mcpServer.args],
+  }];
+  let sessionId;
+
+  for (const expectedCalls of [1, 2]) {
+    const list = { match: 'supervised_ssh', args: { action: 'list' } };
+
+    fixture.actions.push(list);
+
+    const result = await adapter.run(runInput(fixture, model, {
+      permissionMode: 'auto',
+      sessionId,
+      signal: AbortSignal.timeout(22000),
+      mcpServers,
+      workTools,
+    }));
+
+    assert.equal(list.missing, undefined, 'SSH объявлен уже в первом запросе к модели');
+    assert.deepEqual(calls, Array(expectedCalls).fill('list'));
+    assert.ok(result.sessionId);
+
+    if (sessionId) {
+      assert.equal(result.sessionId, sessionId);
+    }
+
+    sessionId = result.sessionId;
+  }
+});
+
+test('Qwen показывает отказ рабочего MCP до обращения к модели', { timeout: 60000 }, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const model = await selectedModel(adapter, fixture);
+  const broken = path.join(fixture.root, 'broken-work-mcp.mjs');
+
+  await writeFile(broken, 'process.exitCode = 17;\n');
+
+  const working = await adapter.run(runInput(fixture, model));
+  const before = fixture.requests.length;
+  const mcpServers = [{
+    name: 'grigdesk-work',
+    command: process.execPath,
+    args: [broken],
+    env: [],
+  }];
+
+  for (const sessionId of [undefined, working.sessionId]) {
+    await assert.rejects(adapter.run(runInput(fixture, model, { sessionId, mcpServers })),
+      /Qwen не смог подключить рабочие инструменты GrigDesk/);
+    assert.equal(fixture.requests.length, before, 'Пользовательский запрос ещё не отправлен');
+  }
 });
 
 test('qwen-native-final-guard-fails-closed', { timeout: 60000 }, async (t) => {

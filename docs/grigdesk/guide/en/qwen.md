@@ -142,6 +142,10 @@ There is no need to reset memory or create a new chat: saved sessions with the p
 
 Sandbox and direct-SSH restrictions also apply to subagents and these tools.
 Plan mode blocks shell, edits, media processing and workflow. Native page reading permits localhost and private addresses.
+When a sandboxed turn starts, Qwen waits for GrigDesk work tools, including supervised SSH.
+If Qwen reports a connection failure for these tools, GrigDesk shows it before sending the request to the model.
+Retry the message once the connection is restored.
+
 In CLI 0.27.2 and 0.27.3, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
 Allowing subagents does not fix it; a compatible external CLI fix is needed. GrigDesk does not disable protection.
 Updating from 0.27.2 to 0.27.3 alone does not resolve this issue.

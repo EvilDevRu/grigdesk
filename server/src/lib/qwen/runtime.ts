@@ -429,6 +429,18 @@ async function runQwenSession(
     }
 
     await request('session/set_mode', { sessionId, modeId: mode });
+
+    if (!hostAccess && mcpServers.some((server) => server.name === 'grigdesk-work')) {
+      // После синхронного обнаружения Qwen сообщает отказ MCP в stderr и продолжает без него.
+      // В чат передаём только заранее заданную причину, без необработанного вывода CLI.
+      const warning = /^Warning: MCP server\(s\) failed to start: (.+?)\. Continuing with built-in tools/mu;
+      const unavailable = warning.exec(transport.stderr())?.[1]?.split(', ');
+
+      if (unavailable?.includes('grigdesk-work')) {
+        throw new Error('Qwen не смог подключить рабочие инструменты GrigDesk.');
+      }
+    }
+
     await fs.writeFile(saved, sessionId, { mode: 0o600 });
     await input.onSessionCreated?.(sessionId);
     input.signal?.throwIfAborted();

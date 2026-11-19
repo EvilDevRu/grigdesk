@@ -289,6 +289,11 @@ export async function startQwenSandbox(
       }
     }
 
+    // Qwen должен передать модели полный набор рабочих инструментов уже в первом запросе.
+    if (options.mcpServers?.some((server) => server.name === 'grigdesk-work')) {
+      env.QWEN_CODE_LEGACY_MCP_BLOCKING = '1';
+    }
+
     const nonce = randomUUID();
 
     env.QWEN_CODE_PRIVATE_ACP_CAPABILITY = nonce;
