@@ -11,7 +11,7 @@
 - [Скачивание медиа по HTTP с изолированным DNS](../server/isolated-statistics-fetch.md#нативные-ответы-и-потоки)
 
 - [Ядро voice: Model Studio, Token Plan, локальные движки и CLI-потребитель «Презентации»](voice-core.md)
-- [Qwen Token Plan в voice: инструкция, экспериментальные ударения и потоковый WAV](voice-qwen-token-plan.md)
+- [Qwen Token Plan в voice: каталог голосов и языков, инструкции, ударения и потоковый WAV](voice-qwen-token-plan.md)
 
 - [Ссылки установки системных зависимостей речи](speech-dependency-links.md)
 - [Установка, обновление и удаление окружения Whisper через настройки](speech-installation.md)

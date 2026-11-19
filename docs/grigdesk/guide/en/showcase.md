@@ -17,7 +17,9 @@ text to providers and incur charges.
    Use Open sandboxes to raise an environment in its own section.
 3. Choose a voice and supported pace before analysis. Install Piper or Silero in
    voice settings; Qwen cloud requires a server environment key. Size and license
-   are shown before installation. Listen to a sample.
+   are shown before installation. In the Qwen Token Plan catalog, search by name,
+   ID, or language. Listen to a sample in the voice's primary language. Write
+   narration in one of the languages supported by the selected voice.
 4. Enter an optional B24 task number and a note describing what to show.
    Apply selection saves the source and starts a full run for an empty video.
    Analyze again can prepare the script separately. The model proposes a brief

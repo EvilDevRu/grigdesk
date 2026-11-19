@@ -1730,6 +1730,7 @@ test('темп речи — ползунок из пяти ступеней, а 
           id: 'vivian',
           name: 'Вивиан',
           language: 'ru',
+          languages: ['ru', 'en', 'zh'],
           available: true,
           reason: '',
           capabilities: {
@@ -1754,6 +1755,14 @@ test('темп речи — ползунок из пяти ступеней, а 
   assert.match(
     qwen.wrapper.find('[data-testid="showcase-voice-capabilities"]').text(),
     /Ударения: нет/,
+  );
+  assert.match(
+    qwen.wrapper.find('[data-testid="showcase-voice-capabilities"]').text(),
+    /Языки: русский, английский, китайский/,
+  );
+  assert.equal(
+    qwen.wrapper.find('option[value="qwen:vivian"]').attributes('data-description'),
+    'русский, английский, китайский',
   );
 
   const unknown = await mountView(t, {

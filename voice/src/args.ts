@@ -89,7 +89,7 @@ export const HELP_TEXT = `voice — синтез речи в WAV
 Опции генерации:
   --engine qwen|piper|silero
   --voice ИМЯ       По умолчанию: Cherry / longanhuan_v3.6 / irina / xenia
-  --language КОД   Язык; у Token Plan по умолчанию ru, у Model Studio — Auto
+  --language КОД   Язык; Token Plan учитывает текст и выбранный голос, Model Studio — Auto
   --out ФАЙЛ        По умолчанию: ./voice-<UTC-метка>-<UUID>.wav
   --format wav      Единственный формат v1; MP3 и перекодирования нет
   --pace slowest|slow|normal|fast|fastest

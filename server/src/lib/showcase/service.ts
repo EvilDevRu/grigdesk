@@ -45,6 +45,7 @@ import { createVoiceRegistry } from './voice/registry.ts';
 import { createStressDictionaryStore } from './voice/dictionary.ts';
 import { createPackageEngines } from './voice/packageEngine.ts';
 import { createPackageInstaller } from './voice/packageInstall.ts';
+import type { SpeechCheckInput } from './voice/speechCheck.ts';
 import { runtimeInstallationBin } from '../runtimePaths.ts';
 import os from 'node:os';
 import { createBrowserInstaller } from './browserInstall.ts';
@@ -73,7 +74,6 @@ import type {
   SandboxActivityGuard,
   SandboxActivityLease,
 } from '../sandboxes/activityGuard.ts';
-import type { SpeechTranscript } from '../speech/transport.ts';
 import { readFinalManifest } from './syncStore.ts';
 import type { ShowcaseFinalManifest } from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 
@@ -107,7 +107,7 @@ export interface ShowcaseServiceOptions {
   // Расшифровка приходит функцией: раздел пользуется общим речевым runtime GrigDesk,
   // но не знает, как тот устроен, и без него обязан работать — с пометкой, что
   // проверка речи пропущена.
-  transcribe?: ((file: string) => Promise<string | SpeechTranscript>) | null;
+  transcribe?: SpeechCheckInput['transcribe'];
   // Модель для брифа и сценария приходит резолвером: раздел не знает, как устроен
   // выбор исполнителя, но обязан получить именно безопасный model-only режим.
   resolveScriptModel?: ((options: {

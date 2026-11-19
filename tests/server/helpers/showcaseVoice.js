@@ -69,8 +69,10 @@ if (args[0] === 'engines') {
   } }))));
 } else if (args[0] === 'voices') {
   const row = rows.find(row => row.id === engine);
-  const id = engine === 'qwen' ? 'Cherry' : engine === 'piper' ? 'irina' : 'xenia';
-  console.log(JSON.stringify([{ id, name: id, languages: ['ru'], engine,
+  const token = engine === 'qwen' && service === 'qwencloud-token';
+  const id = token ? 'longanlufeng' : engine === 'qwen' ? 'Cherry' : engine === 'piper' ? 'irina' : 'xenia';
+  const languages = token ? ['zh', 'en'] : ['ru'];
+  console.log(JSON.stringify([{ id, name: id, languages, engine,
     available: ready.has(key(row)), reason: ready.has(key(row)) ? '' : 'Не установлен.',
   }]));
 } else if (args[0] === 'generate') {

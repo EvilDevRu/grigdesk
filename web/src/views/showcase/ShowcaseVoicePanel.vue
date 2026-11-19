@@ -27,6 +27,7 @@
                 v-for="voice in group.voices"
                 :key="voice.ref"
                 :value="voice.ref"
+                :data-description="voice.languageLabel"
                 :disabled="!voice.available"
               >
                 {{ voice.name }}{{ voice.available ? '' : t('core.showcaseNedostupen') }}
@@ -70,6 +71,9 @@
         data-testid="showcase-voice-capabilities"
         :aria-label="t('core.showcaseVozmozhnostiVybrannogoGolosa')"
       >
+        <span v-if="currentVoiceInfo?.languageLabel">
+          {{ t('core.showcaseVoiceLanguages', { languages: currentVoiceInfo.languageLabel }) }}
+        </span>
         <span :data-state="capabilityState(currentCapabilities?.pace)"> {{ t('core.showcaseTemp') }} {{ capabilityLabel(currentCapabilities?.pace) }}
         </span>
         <span :data-state="capabilityState(currentCapabilities?.pause)"> {{ t('core.showcasePauzy') }} {{ capabilityLabel(currentCapabilities?.pause) }}
@@ -197,7 +201,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { UiButton, UiDisclosureButton, UiDiscreteSlider, UiField, UiSelect, UiTextarea, t } from '../../ui';
+import {
+  UiButton, UiDisclosureButton, UiDiscreteSlider, UiField, UiSelect, UiTextarea, t, uiLocale,
+} from '../../ui';
 import type {
   ShowcasePace,
   ShowcaseVoiceCatalog,
@@ -306,20 +312,25 @@ const pendingEngines = computed(() => (
 
 // Голоса, которыми можно говорить прямо сейчас, сгруппированные по движку.
 // Недоступные в список выбора не попадают: выбрать голос, который молчит, нельзя.
-const groups = computed(() => (props.catalog?.engines ?? [])
-  .map((engine) => ({
-    engineId: engine.id,
-    name: engine.name,
-    voices: engine.voices
-      .filter((voice) => voice.available || `${engine.id}:${voice.id}` === props.voiceRef)
-      .map((voice) => ({
-        ref: `${engine.id}:${voice.id}`,
-        name: voice.name,
-        available: voice.available,
-        capabilities: voice.capabilities,
-      })),
-  }))
-  .filter((group) => group.voices.length > 0));
+const groups = computed(() => {
+  const names = new Intl.DisplayNames(uiLocale.value, { type: 'language' });
+
+  return (props.catalog?.engines ?? [])
+    .map((engine) => ({
+      engineId: engine.id,
+      name: engine.name,
+      voices: engine.voices
+        .filter((voice) => voice.available || `${engine.id}:${voice.id}` === props.voiceRef)
+        .map((voice) => ({
+          ref: `${engine.id}:${voice.id}`,
+          name: voice.name,
+          languageLabel: (voice.languages ?? []).map((code) => names.of(code) ?? code).join(', '),
+          available: voice.available,
+          capabilities: voice.capabilities,
+        })),
+    }))
+    .filter((group) => group.voices.length > 0);
+});
 
 // Пока человек ничего не выбирал, звучит первый доступный голос первого готового
 // движка — ровно тот, который возьмёт сервер. Показывать пустой выбор нельзя:

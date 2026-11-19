@@ -35,6 +35,7 @@ export interface VoiceInfo {
   id: string;
   name: string;
   language: string;
+  languages?: string[];
   // Недоступный ранее выбранный голос остаётся видимым с причиной: тихая подмена
   // другим голосом посреди ролика хуже честного отказа.
   available: boolean;
@@ -64,7 +65,7 @@ export interface SynthesisInput {
   canonicalText: string;
   direction: VoiceDirection;
   voiceRef: string | null;
-  language: string;
+  language: string | null;
 }
 
 // Нативная временная метка уже приведена адаптером к общей шкале WAV. Здесь нет

@@ -235,6 +235,7 @@ test('каталог голосов приносит и состояние ус�
           id: 'irina',
           name: 'Ирина',
           language: 'ru',
+          languages: ['ru'],
           available: true,
           reason: '',
           capabilities: { pace: true, pause: true, stress: false },
@@ -275,11 +276,16 @@ test('каталог голосов приносит и состояние ус�
   const legacyCatalog = structuredClone(catalog);
 
   delete legacyCatalog.engines[0].voices[0].capabilities;
+  delete legacyCatalog.engines[0].voices[0].languages;
+
+  const [legacyVoice] = contract.parseShowcaseVoiceCatalog(legacyCatalog).engines[0].voices;
+
   assert.equal(
-    contract.parseShowcaseVoiceCatalog(legacyCatalog).engines[0].voices[0].capabilities,
+    legacyVoice.capabilities,
     null,
     'старый ответ остаётся unknown',
   );
+  assert.equal(legacyVoice.languages, null);
 
   for (const invalid of [
     { ...catalog, install: undefined },

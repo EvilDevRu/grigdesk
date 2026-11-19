@@ -150,7 +150,7 @@ test('voice-token-config-флаг-выше-env-и-подписочный-адр�
   }, '/unused').qwenService, 'qwencloud-token');
 });
 
-test('voice-token-каталог-описывает-экспериментальный-режим-и-свой-голос-без-сети', async (t) => {
+test('voice-token-каталог-отдаёт-все-голоса-модели-с-их-языками-без-сети', async (t) => {
   const f = await fixture(t);
 
   assert.equal(await runVoice(['models', '--service', 'qwencloud-token', '--json'],
@@ -163,8 +163,50 @@ test('voice-token-каталог-описывает-эксперименталь
   assert.equal(models[0].capabilities.instruction, true);
   assert.equal(await runVoice(['voices', '--service', 'qwencloud-token', '--engine', 'qwen', '--json'],
     { version: 'test' }, f.io), 0);
-  assert.deepEqual(JSON.parse(f.stdout.pop()!).map((voice: { id: string }) => voice.id), ['longanhuan_v3.6']);
+
+  const voices: { id: string; languages: string[] }[] = JSON.parse(f.stdout.pop()!);
+  const languages = new Map(voices.map((voice) => [voice.id, voice.languages]));
+
+  assert.equal(voices.length, 600);
+  assert.equal(languages.size, voices.length);
+  assert.equal(voices[0]!.id, 'longanhuan_v3.6');
+  assert.deepEqual(languages.get('longanhuan_v3.6'), ['ru', 'en', 'zh']);
+  assert.deepEqual(languages.get('longanlingxin'), ['zh', 'en']);
+  assert.deepEqual(languages.get('qwen-audio-3.0-tts-plus-loongolivialin'), ['en']);
+  assert.deepEqual(languages.get('qwen-audio-3.0-tts-plus-longcanzhuyue'), ['zh']);
   assert.equal(f.calls.length, 0);
+});
+
+test('voice-token-отправляет-ID-диктора-и-язык-реплики', async (t) => {
+  const f = await fixture(t);
+
+  for (const [voice, text, language] of [
+    ['longanlingxin', 'Turn on the filter.', 'en'],
+    ['longanhuan_v3.6', 'Откройте API.', 'ru'],
+    ['qwen-audio-3.0-tts-plus-longcanzhuyue', '点击 API 按钮。', 'zh'],
+    ['qwen-audio-3.0-tts-plus-loongolivialin', '2026', 'en'],
+  ] as const) {
+    const code = await runVoice([
+      'generate', '--service', 'qwencloud-token', '--voice', voice, '--text', text, '--out', f.output,
+    ], { version: 'test' }, f.io);
+
+    assert.equal(code, 0, f.stderr.join(''));
+
+    const body = f.calls.at(-2)?.body;
+
+    assert.equal(body?.input.voice, voice);
+    assert.deepEqual(body?.input.language_hints, [language]);
+  }
+
+  const before = f.calls.length;
+  const code = await runVoice([
+    'generate', '--service', 'qwencloud-token', '--voice', 'longanlingxin',
+    '--text', 'Откройте фильтр.', '--language', 'ru', '--out', f.output,
+  ], { version: 'test' }, f.io);
+
+  assert.equal(code, 2);
+  assert.equal(f.calls.length, before);
+  assert.match(f.stderr.at(-1) ?? '', /Long An Ling Xin.*zh, en/u);
 });
 
 test('voice-token-потоковый-WAV-нормализуется-без-перекодирования-PCM', async (t) => {

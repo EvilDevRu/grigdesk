@@ -903,12 +903,16 @@ async function build(desktopParent: DesktopParent | null) {
     // Расшифровка для самопроверки речи идёт через общий речевой runtime GrigDesk —
     // тот же, что у диктовки и «Видео». Своей копии распознавания у раздела нет,
     // а его недоступность делает проверку пропущенной, а не проваленной.
-    transcribe: async (file: string) => {
+    transcribe: async (file, language) => {
       // Showcase просит структуру один раз: тот же результат проверяет слова и
       // даёт границы для синхронизации. Обычная диктовка не включает эту опцию.
       const result = await speechRuntime.transcribe({
         filePath: file,
-        settings: { ...speechRuntime.settings, wordTimestamps: true },
+        settings: {
+          ...speechRuntime.settings,
+          ...(language ? { language } : {}),
+          wordTimestamps: true,
+        },
       }) as { transcript?: unknown };
 
       if (!result.transcript || typeof result.transcript !== 'object') {

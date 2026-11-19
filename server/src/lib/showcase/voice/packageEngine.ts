@@ -467,6 +467,7 @@ export function createPackageEngines(options: PackageEngineOptions): VoiceEngine
           id: voice.id,
           name: voice.name,
           language: voice.languages.includes('ru') ? 'ru' : voice.languages[0] ?? 'ru',
+          languages: voice.languages,
           available: voice.available,
           reason: voice.reason,
         }));
@@ -491,6 +492,10 @@ export function createPackageEngines(options: PackageEngineOptions): VoiceEngine
 
         if (input.voiceRef) {
           args.push('--voice', input.voiceRef);
+        }
+
+        if (spec.service === 'qwencloud-token' && input.language) {
+          args.push('--language', input.language);
         }
 
         args.push('--text', text, '--out', outFile);

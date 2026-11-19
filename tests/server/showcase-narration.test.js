@@ -1108,6 +1108,28 @@ test('заблокированный doctor останавливает preview �
   assert.equal(calls.some((args) => args[0] === 'generate'), false);
 });
 
+test('образец Token Plan использует язык голоса, а каталог сохраняет все его языки', async (t) => {
+  const { service, marker } = await fixture(t, { ready: ['qwen-token'] });
+  const catalog = await service.voiceCatalog();
+  const token = catalog.engines.find((engine) => engine.id === 'qwen-token');
+
+  assert.deepEqual(token.voices[0].languages, ['zh', 'en']);
+
+  const file = await service.previewVoice('qwen-token:longanlufeng');
+
+  assert.equal(await service.previewVoice('qwen-token:longanlufeng'), file);
+
+  const calls = (await readFile(marker + '.argv', 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  const generates = calls.filter((args) => args[0] === 'generate');
+
+  assert.equal(generates.length, 1);
+
+  const [args] = generates;
+
+  assert.equal(args[args.indexOf('--language') + 1], 'zh');
+  assert.match(args[args.indexOf('--text') + 1], /^这/u);
+});
+
 test('удалённый голос не подменяется другим движком при синтезе', async (t) => {
   const { service, project } = await fixture(t);
   const current = await addScene(service, project, 'Прежняя сцена', 'Показываем обзор.');

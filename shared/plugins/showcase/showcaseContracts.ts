@@ -580,6 +580,7 @@ const voiceInfo = objectOf({
   id: text,
   name: text,
   language: text,
+  languages: optional(listOf(text)),
   available: boolean,
   reason: text,
   // Возможности относятся к выбранному диктору, а не ко всему движку. Старый

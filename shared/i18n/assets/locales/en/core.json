@@ -3741,6 +3741,7 @@
   "showcaseGolosEscheNeUstanovlen": "voice not installed yet",
   "showcaseSohranennyyGolosNedostupen": "— the saved voice is unavailable",
   "showcaseNedostupen": "— unavailable",
+  "showcaseVoiceLanguages": "Languages: {languages}",
   "showcaseProslushat": "Preview",
   "showcaseTempRechiPacelabel": "Speech pace — {paceLabel}",
   "showcaseTempRechi": "Speech pace",

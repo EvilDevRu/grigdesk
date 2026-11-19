@@ -1,3 +1,5 @@
+import { narrationLanguage } from '../../../shared/plugins/showcase/showcaseNarration.ts';
+
 import { combineSignals } from '../audioFile.ts';
 import { validateSynthesis, VoiceError } from '../contract.ts';
 import type { VoiceCapabilities, VoiceEngine, VoicePace } from '../contract.ts';
@@ -5,8 +7,10 @@ import { qwenTokenInstruction, qwenTokenText } from './qwenTokenText.ts';
 import { normalizeQwenTokenWav } from './qwenTokenWav.ts';
 import { requestQwenAudio } from './qwenTransport.ts';
 import type { QwenConnection } from './qwenTransport.ts';
+import {
+  TOKEN_DEFAULT_VOICE, TOKEN_TTS_MODEL, TOKEN_VOICES, TOKEN_VOICES_BY_ID,
+} from './qwenTokenVoices.ts';
 
-const DEFAULT_VOICE = 'longanhuan_v3.6';
 const RATE: Record<VoicePace, number> = {
   slowest: 0.7,
   slow: 0.85,
@@ -16,7 +20,7 @@ const RATE: Record<VoicePace, number> = {
 };
 
 /**
- * Token Plan выбирается явно и использует свой API, модель и проверенный голос.
+ * Token Plan выбирается явно и использует свой API, модель и каталог голосов.
  * Ударения передаются как экспериментальные указания, без обещания точного произношения.
  */
 export function createQwenTokenEngine(options: QwenConnection): VoiceEngine {
@@ -39,8 +43,8 @@ export function createQwenTokenEngine(options: QwenConnection): VoiceEngine {
     name: 'QwenCloud Token Plan (облако)',
     service: 'qwencloud-token',
     kind: 'cloud',
-    model: 'qwen-audio-3.0-tts-plus',
-    defaultVoice: DEFAULT_VOICE,
+    model: TOKEN_TTS_MODEL,
+    defaultVoice: TOKEN_DEFAULT_VOICE,
     capabilities: () => own,
     doctor: async () => ({
       status: ready ? 'ready' : 'blocked',
@@ -48,13 +52,11 @@ export function createQwenTokenEngine(options: QwenConnection): VoiceEngine {
         : 'нет ключа QwenCloud Token Plan формата sk-sp-…',
       install: ready ? '' : 'задайте TOKEN_PLAN_API_KEY или GRIGDESK_VOICE_QWEN_API_KEY',
     }),
-    voices: async () => [{
-      id: DEFAULT_VOICE,
-      name: 'Long An Huan — проверен в эксперименте с русским текстом',
-      languages: [...own.languages],
+    voices: async () => TOKEN_VOICES.map((voice) => ({
+      ...voice,
       available: ready,
       reason: ready ? '' : 'нет подписочного ключа',
-    }],
+    })),
     /**
      * Валидация голоса, языка и инструкции завершается до HTTP и создания выходных файлов.
      * Выбранный сервис не заменяется другим после отказа, а PCM публикуется только после проверки WAV.
@@ -62,13 +64,23 @@ export function createQwenTokenEngine(options: QwenConnection): VoiceEngine {
     async synthesize(input, synthesisOptions) {
       const signal = combineSignals(options.signal, synthesisOptions.signal);
       const prepared = validateSynthesis(input, { ...synthesisOptions, signal }, own);
-      const voice = input.voiceRef ?? DEFAULT_VOICE;
+      const voice = TOKEN_VOICES_BY_ID.get(input.voiceRef ?? TOKEN_DEFAULT_VOICE);
 
-      if (voice !== DEFAULT_VOICE) {
-        throw new VoiceError('Неизвестный голос Qwen Token Plan: используйте longanhuan_v3.6.', 2);
+      if (!voice) {
+        throw new VoiceError(
+          'Неизвестный голос Qwen Token Plan. Посмотрите список командой voice voices.',
+          2,
+        );
       }
 
-      const language = input.language ?? 'ru';
+      const suggested = narrationLanguage(prepared.canonicalText);
+      const language = input.language
+        ?? (suggested && voice.languages.includes(suggested) ? suggested : voice.languages[0]);
+
+      if (!voice.languages.includes(language)) {
+        throw new VoiceError(`Голос «${voice.name}» поддерживает языки: ${voice.languages.join(', ')}.`, 2);
+      }
+
       const text = qwenTokenText(prepared);
       const instruction = qwenTokenInstruction(text, language, synthesisOptions.instruction);
 
@@ -81,10 +93,10 @@ export function createQwenTokenEngine(options: QwenConnection): VoiceEngine {
         signal,
         endpoint: '/api/v1/services/audio/tts/SpeechSynthesizer',
         body: {
-          model: 'qwen-audio-3.0-tts-plus',
+          model: TOKEN_TTS_MODEL,
           input: {
             text,
-            voice,
+            voice: voice.id,
             format: 'wav',
             sample_rate: 24000,
             language_hints: [language],

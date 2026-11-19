@@ -52,8 +52,10 @@ voice generate --service qwencloud-token --engine qwen --language ru \
 `--file` takes UTF-8; use either it or `--text`. Place `+` before a vowel to mark stress.
 Pace values are `slowest`, `slow`, `normal`, `fast`, `fastest`. Default voices are
 Cherry for Model Studio, `longanhuan_v3.6` for Token Plan, irina for Piper and xenia for Silero.
-Token Plan currently offers one tested voice, separate from the Model Studio catalog.
-`--language` selects the language: Token Plan defaults to `ru` and also supports `en` and `zh`;
+Run `voice voices --engine qwen --service qwencloud-token` for Token Plan system and base voices
+and their languages. Pass a voice ID from the list with `--voice`. Token Plan uses the text
+and the voice's supported languages (`ru`, `en`, `zh`). Use `--language` to pick one explicitly.
+Russian synthesis with Long An Huan was tested experimentally.
 Model Studio defaults to Auto. An unknown voice is an error.
 
 ## Result
@@ -90,7 +92,7 @@ venv requires manual investigation and is not deleted by the command.
 Data directory priority is `--dir` → `GRIGDESK_VOICE_DIR` → `~/.grigdesk/voice`.
 Automated tests use fake services and Python executables. Live synthesis does not replace
 listening checks; real local model installations require separate verification.
-Presentation narration remains separate. Local Qwen, Edge, Yandex, RHVoice, speech recognition
+Choose the voice for a presentation in the video editor. Local Qwen, Edge, Yandex, RHVoice, speech recognition
 and a persistent `voice serve` session are outside this version.
 
 ## Related articles

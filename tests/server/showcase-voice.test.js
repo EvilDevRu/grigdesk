@@ -410,6 +410,7 @@ test('несколько движков живут рядом и не смеши
 
 test('слова сравниваются по мультимножеству: повтор не покрывает пропуск', () => {
   assert.deepEqual(normalizeWords('Ёлка, ёлка — и ещё раз ёлка!'), ['елка', 'елка', 'и', 'еще', 'раз', 'елка']);
+  assert.deepEqual(normalizeWords('今天，好！'), ['今', '天', '好']);
   assert.deepEqual(missingFrom(['не', 'работает'], ['работает']), ['не']);
   assert.deepEqual(missingFrom(['раз', 'раз'], ['раз']), ['раз']);
   assert.deepEqual(missingFrom(['раз', 'два'], ['два', 'раз']), []);

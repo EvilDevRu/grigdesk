@@ -56,10 +56,10 @@ import type {
 } from './voice/preparation.ts';
 import type { VoiceRegistry } from './voice/registry.ts';
 import { checkSpeech } from './voice/speechCheck.ts';
+import type { SpeechCheckInput } from './voice/speechCheck.ts';
 import type { ShowcaseJob, ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { SHOWCASE_NARRATION_MAX_CHARS } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
 import type { ShowcaseStore } from './store.ts';
-import type { SpeechTranscript } from '../speech/transport.ts';
 
 export interface NarrationOpsDeps {
   assertEnabled: () => void;
@@ -71,7 +71,7 @@ export interface NarrationOpsDeps {
   // Расшифровка приходит функцией: раздел пользуется общим речевым runtime
   // GrigDesk, но не знает, как тот устроен, и без него обязан работать — с
   // пометкой, что проверка речи пропущена.
-  transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
+  transcribe: SpeechCheckInput['transcribe'];
   voiceInstaller: PackageInstaller;
   voices: VoiceRegistry;
   // Образцы голосов лежат отдельно от роликов: они общие для всех и не стареют
@@ -87,8 +87,12 @@ export interface NarrationOpsDeps {
 
 // Фраза образца. Она про сам раздел, а не про рабочую задачу: рабочий текст в
 // общий кэш образцов попадать не должен.
-const PREVIEW_PHRASE = 'Так будет звучать голос ролика: фильтр включается одним нажатием, '
-  + 'а результат виден сразу на экране.';
+const PREVIEW_PHRASES = {
+  ru: 'Так будет звучать голос ролика: фильтр включается одним нажатием, '
+    + 'а результат виден сразу на экране.',
+  en: 'This is how the narration sounds. Click once to turn on the filter and see the result.',
+  zh: '这就是视频的配音效果。点击一下即可启用筛选，并立即看到结果。',
+};
 
 const EMPTY_DIRECTION: ShowcaseProject['scenes'][number]['direction'] = {
   tone: null,
@@ -403,7 +407,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
           canonicalText: prepared.spokenText,
           direction: prepared.direction,
           voiceRef: voiceId,
-          language: 'ru',
+          language: null,
         },
       });
     }
@@ -665,6 +669,13 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
 
     const { engineId, voiceId } = voices.parseVoiceRef(voiceRef);
     const engine = await readyVoiceEngine(engineId);
+    const voice = (await engine.voices()).find((entry) => entry.id === voiceId);
+
+    if (!voice?.available) {
+      throw new ShowcaseError('voice_unavailable', voice?.reason || 'Выбранный голос недоступен.', 409);
+    }
+
+    const language = voice.language === 'en' || voice.language === 'zh' ? voice.language : 'ru';
     const version = engine.capabilities(voiceId).engineVersion;
     const name = `${engineId}-${voiceId}-${version}.wav`.replace(/[^\w.-]/g, '_');
     const file = path.join(deps.previewDir, name);
@@ -677,10 +688,10 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
 
     const candidate = await engine.synthesize(
       {
-        canonicalText: PREVIEW_PHRASE,
+        canonicalText: PREVIEW_PHRASES[language],
         direction: EMPTY_DIRECTION,
         voiceRef: voiceId,
-        language: 'ru',
+        language,
       },
       {
         deadlineMs: 180_000,
@@ -768,7 +779,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
           canonicalText: prepared.spokenText,
           direction: prepared.direction,
           voiceRef: voiceId,
-          language: 'ru',
+          language: null,
         },
         {
           signal: input.signal,

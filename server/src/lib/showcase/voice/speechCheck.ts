@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { SpeechTranscript } from '../../speech/transport.ts';
+import { narrationLanguage } from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
 
 const run = promisify(execFile);
 
@@ -20,7 +21,7 @@ export interface SpeechCheckInput {
   // Расшифровку делает общий речевой runtime GrigDesk. Она внедряется функцией:
   // раздел не должен знать, как именно устроен запуск распознавания, а тесты —
   // поднимать его целиком ради сверки токенов.
-  transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
+  transcribe: ((file: string, language?: 'en' | 'auto') => Promise<string | SpeechTranscript>) | null;
 }
 
 export interface SpeechCheckResult {
@@ -45,13 +46,15 @@ const MISMATCH_LIMIT = 0.15;
 /**
  * Нормализация для сравнения: убираются знаки, регистр и «ё», потому что ни один
  * из них не влияет на то, ЧТО прозвучало. Всё остальное сохраняется — сравнивать
- * приблизительно значило бы пропускать настоящие пропуски.
+ * приблизительно значило бы пропускать настоящие пропуски. Иероглифы сверяются
+ * по одному, чтобы результат не зависел от пробелов, добавленных распознаванием.
  */
 export function normalizeWords(text: string): string[] {
   return text
     .toLowerCase()
     .replaceAll('ё', 'е')
-    .replace(/[^a-zа-я0-9\s-]/gi, ' ')
+    .replace(/(\p{Script=Han})/gu, ' $1 ')
+    .replace(/[^a-zа-я0-9\s\p{Script=Han}-]/giu, ' ')
     .split(/\s+/)
     .filter(Boolean);
 }
@@ -157,7 +160,11 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
   let transcript: SpeechTranscript | null = null;
 
   try {
-    const recognized = await input.transcribe(input.audioFile);
+    const language = narrationLanguage(input.expectedText);
+    const recognized = await input.transcribe(
+      input.audioFile,
+      language === 'zh' ? 'auto' : language === 'en' ? 'en' : undefined,
+    );
 
     if (typeof recognized === 'string') {
       heardText = recognized;
