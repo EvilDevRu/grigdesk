@@ -28,6 +28,7 @@ export const EXTERNAL_BASELINE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:
 export interface ExternalInstallRuntime {
   npm: string;
   node: string;
+  npmNodeOptions?: string[];
   env: Record<string, string>;
   home: string;
 }
@@ -185,6 +186,35 @@ export async function resolveExternalRuntime(input: {
 }
 
 const execute = promisify(execFile);
+const NETWORK_ATTEMPT_TIMEOUT_FLAG = '--network-family-autoselection-attempt-timeout';
+
+/**
+ * При медленном маршруте попытка TCP может занять больше стандартных 250 мс.
+ * Фиксированный флаг передаётся только npm и только с поддерживающим его Node.
+ */
+export async function resolveNpmNodeOptions(runtime: ExternalInstallRuntime,
+  signal?: AbortSignal): Promise<string[]> {
+  const probe = `process.allowedNodeEnvironmentFlags?.has('${NETWORK_ATTEMPT_TIMEOUT_FLAG}')`;
+  const { stdout } = await execute(runtime.node, ['-p', probe], {
+    cwd: runtime.home,
+    env: runtime.env,
+    timeout: 5_000,
+    maxBuffer: 64 * 1024,
+    signal,
+  }).catch(() => ({ stdout: '' }));
+
+  signal?.throwIfAborted();
+
+  return stdout.trim() === 'true' ? [`${NETWORK_ATTEMPT_TIMEOUT_FLAG}=2000`] : [];
+}
+
+/**
+ * Флаги относятся к выбранному Node, поэтому располагаются перед путём к npm.
+ * Аргументы команды npm остаются после скрипта и не разбираются как флаги Node.
+ */
+export function npmNodeArguments(runtime: ExternalInstallRuntime, args: string[]): string[] {
+  return [...(runtime.npmNodeOptions ?? []), runtime.npm, ...args];
+}
 
 /**
  * Effective global prefix узнаётся тем же внешним npm из безопасного cwd вне проекта.

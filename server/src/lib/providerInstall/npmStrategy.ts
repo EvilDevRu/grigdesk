@@ -6,7 +6,7 @@ import type { ProviderLifecycleOperation } from '../../../../shared/chat/provide
 import type { ExternalCliInstallation } from './inventoryTypes.ts';
 import type { ExternalCliDefinition } from './inventoryTypes.ts';
 import { runCommand, type PluginCommandRunner, type CommandOwnership } from '../packageInstall/runCommand.ts';
-import { InstallEnvironmentError, type ExternalInstallRuntime } from './npmEnvironment.ts';
+import { InstallEnvironmentError, npmNodeArguments, type ExternalInstallRuntime } from './npmEnvironment.ts';
 import { inspectNpmGraph, assertReviewedNpmHooks, type NpmGraphPackage } from './npmGraph.ts';
 import reviewed from './npmReviewedHooks.json' with { type: 'json' };
 import { treeSnapshot } from './treeSnapshot.ts';
@@ -57,7 +57,7 @@ export interface PreparedNpmStrategy {
  */
 async function npm(input: NpmStrategyInput, args: string[], env = input.runtime.env,
   ownership?: CommandOwnership): Promise<string> {
-  const result = await (input.run ?? runCommand)(input.runtime.node, [input.runtime.npm, ...args], {
+  const result = await (input.run ?? runCommand)(input.runtime.node, npmNodeArguments(input.runtime, args), {
     cwd: input.runtime.home,
     env,
     timeoutMs: 10 * 60 * 1000,

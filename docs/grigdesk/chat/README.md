@@ -55,7 +55,7 @@
 - [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
 - [Установка Qwen: профили audio-capture 0.27.2/0.27.3, offline start и аудит метаданных prebuild](qwen-install-hooks.md)
 - [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
-- [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
+- [Внешний Node/npm, таймаут TCP и пользовательский prefix](provider-install-npm.md)
 - [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
 - [Проверка нативного Linux ELF и JavaScript в npm-пакетах исполнителей](provider-install-native-bin.md)
 - [Настройка Bash PATH: независимый probe, управляемый блок и честный terminal](provider-install-shell-path.md)

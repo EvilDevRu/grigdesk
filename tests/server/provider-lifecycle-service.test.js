@@ -236,6 +236,7 @@ async function fixture(t, options = {}) {
      * Integrity/probe отвечают fixture-значениями без registry.
      */
     async runCommand(file, args, runOptions) {
+      const npmCommand = args[args.indexOf(path.join(bin, 'npm')) + 1];
       let stdout = '';
 
       if (file === alias) {
@@ -246,7 +247,7 @@ async function fixture(t, options = {}) {
         nativeVersion = options.stale ? '1.0.0' : '2.0.0';
         await fs.writeFile(alias, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2]), { mode: 0o755 });
         runOptions.onStdout?.('fixture installer progress\n');
-      } else if (args[1] === 'view') {
+      } else if (npmCommand === 'view') {
         stdout = JSON.stringify('sha512-Zml4dHVyZQ==');
       } else {
         const target = args[args.indexOf('--prefix') + 1];
@@ -255,7 +256,7 @@ async function fixture(t, options = {}) {
           mutations.push(args);
           await gate;
         }
-        if (args[1] === 'uninstall') {
+        if (npmCommand === 'uninstall') {
           await fs.rm(root, { recursive: true });
           await fs.unlink(alias);
         } else {

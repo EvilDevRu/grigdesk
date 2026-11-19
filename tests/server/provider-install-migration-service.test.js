@@ -143,7 +143,7 @@ async function fixture(t) {
       if (file === path.join(prefix, 'bin/fixture-cli')) {
         return success('fixture 1.0.0');
       }
-      if (args[1] === 'view') {
+      if (args[args.indexOf(path.join(runtimeBin, 'npm')) + 1] === 'view') {
         return success(JSON.stringify('sha512-Zml4dHVyZQ=='));
       }
 

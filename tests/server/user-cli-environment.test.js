@@ -7,6 +7,7 @@ import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import test from 'node:test';
 
 import { captureUserCliParent } from '../../shared/node/userCliParentEnvironment.ts';
+import { npmNodeArguments } from '../../server/src/lib/providerInstall/npmEnvironment.ts';
 import {
   resolveUserCliEnvironment, resolveUserCliNpm,
 } from '../../server/src/lib/providerInstall/userCliEnvironment.ts';
@@ -161,4 +162,35 @@ test('npm prefix сверяется у обеих форм shell до допус
     packageId: '@fixture/cli',
   }),
     { code: 'shell_conflict' });
+});
+
+test('внешний Node получает фиксированный таймаут npm только при поддержке флага', async (t) => {
+  const stand = await fixture(t);
+  const node = path.join(stand.bin, 'node');
+  const npm = path.join(stand.bin, 'npm');
+  const flag = '--network-family-autoselection-attempt-timeout';
+  const options = {
+    ...stand.input,
+    packageId: '@fixture/cli',
+    roots: {
+      dataHome: path.join(stand.home, 'data'),
+      installationRoot: path.join(stand.home, 'installation'),
+      runtimeRoot: path.join(stand.home, 'runtime'),
+    },
+  };
+
+  await fs.writeFile(npm, '#!/bin/sh\nprintf "%s\\n" "$npm_config_prefix"\n', { mode: 0o755 });
+  await fs.symlink(process.execPath, node);
+
+  const { runtime } = await resolveUserCliNpm(options);
+
+  assert.deepEqual(npmNodeArguments(runtime, ['view']), [`${flag}=2000`, npm, 'view']);
+  assert.equal(runtime.env.NODE_OPTIONS, undefined);
+
+  await fs.unlink(node);
+  await fs.writeFile(node, '#!/bin/sh\nprintf "false\\n"\n', { mode: 0o755 });
+
+  const legacy = await resolveUserCliNpm(options);
+
+  assert.deepEqual(npmNodeArguments(legacy.runtime, ['view']), [npm, 'view']);
 });

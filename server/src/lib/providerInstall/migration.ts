@@ -19,7 +19,7 @@ import { runCommand, type PluginCommandRunner } from '../packageInstall/runComma
 import { discoverExternalCli } from './inventory.ts';
 import type { ExternalCliDefinition, ExternalCliInventoryInput } from './inventoryTypes.ts';
 import {
-  InstallEnvironmentError, type InstallRoots,
+  InstallEnvironmentError, npmNodeArguments, type ExternalInstallRuntime, type InstallRoots,
 } from './npmEnvironment.ts';
 import {
   assertNoLegacyKimiShim, executeNpmStrategy, prepareNpmStrategy, revalidateNpmStrategy,
@@ -371,17 +371,12 @@ async function restoreShell(change: MigrationShellChange): Promise<boolean> {
  * Сеть здесь не подменяет точную версию, полученную из inventory.
  */
 async function latestVersion(input: {
-  runtime: {
-    node: string;
-    npm: string;
-    env: NodeJS.ProcessEnv;
-    home: string;
-  };
+  runtime: ExternalInstallRuntime;
   definition: ExternalCliDefinition;
   run?: PluginCommandRunner;
 }): Promise<string | null> {
   const result = await (input.run ?? runCommand)(input.runtime.node,
-    [input.runtime.npm, 'view', input.definition.packageId, 'version', '--json'], {
+    npmNodeArguments(input.runtime, ['view', input.definition.packageId, 'version', '--json']), {
       cwd: input.runtime.home,
       env: input.runtime.env,
       timeoutMs: 30_000,

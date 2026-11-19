@@ -7,7 +7,7 @@ import type { ProviderLifecycleOperation, ProviderLifecyclePreparation }
   from '../../../../shared/chat/providerLifecycleContracts.ts';
 import type { ExecutorAdapter } from '../executors/index.ts';
 import { runCommand, type PluginCommandRunner } from '../packageInstall/runCommand.ts';
-import { InstallEnvironmentError, type InstallRoots } from './npmEnvironment.ts';
+import { InstallEnvironmentError, npmNodeArguments, type InstallRoots } from './npmEnvironment.ts';
 import {
   resolveUserCliNpm, resolveUserCliEnvironment, type UserCliEnvironment,
 } from './userCliEnvironment.ts';
@@ -151,7 +151,7 @@ export async function prepareLifecycleContext(input: {
   }
   if (!version && resolved && (operation === 'install' || operation === 'update')) {
     const result = await (input.run ?? runCommand)(resolved.runtime.node,
-      [resolved.runtime.npm, 'view', definition.packageId, 'version', '--json'], {
+      npmNodeArguments(resolved.runtime, ['view', definition.packageId, 'version', '--json']), {
         cwd: input.home,
         env: resolved.runtime.env,
         timeoutMs: 30_000,

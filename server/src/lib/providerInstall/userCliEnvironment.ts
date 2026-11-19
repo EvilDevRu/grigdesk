@@ -7,8 +7,8 @@ import {
 } from '../../../../shared/node/userCliParentEnvironment.ts';
 import { resolveBashShell, runBashCommand, type BashCommandState } from './bashEnvironment.ts';
 import {
-  InstallEnvironmentError, readGlobalPrefix, resolveExternalRuntime, selectInstallPrefix,
-  type InstallRoots,
+  InstallEnvironmentError, readGlobalPrefix, resolveExternalRuntime, resolveNpmNodeOptions,
+  selectInstallPrefix, type InstallRoots,
 } from './npmEnvironment.ts';
 
 export interface UserCliEnvironmentInput {
@@ -335,8 +335,10 @@ export async function resolveUserCliNpm(input: UserCliEnvironmentInput & {
       'Пользовательский prefix npm недоступен для записи');
   }
 
+  const npmNodeOptions = await resolveNpmNodeOptions(runtime, input.signal);
+
   return {
-    runtime,
+    runtime: { ...runtime, npmNodeOptions },
     prefix,
     shell,
   };
