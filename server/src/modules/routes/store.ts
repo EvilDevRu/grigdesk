@@ -15,6 +15,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
 import { acquireWindowsCatalogLock } from './windowsLock.ts';
+import { syncRoutesDirectory } from './routeDurability.ts';
 import {
   assertProfileId,
   assertRevisionHash,
@@ -205,15 +206,11 @@ async function writeDurable(file: string, bytes: Buffer): Promise<void> {
 }
 
 async function syncDirectory(directory: string): Promise<void> {
-  let handle: FileHandle | undefined;
   try {
-    handle = await fs.open(directory, 'r');
-    await handle.sync();
+    await syncRoutesDirectory(directory);
   } catch {
     // На некоторых FS fsync каталога недоступен. Atomic rename от этого не перестаёт
     // быть атомарным; теряется лишь дополнительная гарантия пережить power loss.
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -935,14 +932,14 @@ export class RoutesStore {
     const held = process.platform === 'win32'
       ? await acquireWindowsCatalogLock(catalogDir, this.lockTimeoutMs)
       : await acquireKernelFileLock({
-      lockPath,
-      timeoutMs: this.lockTimeoutMs,
-      timeoutCode: 'ROUTES_V2_LOCKED',
-      unavailableCode: 'ROUTES_V2_LOCK_UNAVAILABLE',
-      lostCode: 'ROUTES_V2_LOCK_LOST',
-      label: 'routes current',
-      errorFactory: (code, message) => storeError(code, message),
-    });
+        lockPath,
+        timeoutMs: this.lockTimeoutMs,
+        timeoutCode: 'ROUTES_V2_LOCKED',
+        unavailableCode: 'ROUTES_V2_LOCK_UNAVAILABLE',
+        lostCode: 'ROUTES_V2_LOCK_LOST',
+        label: 'routes current',
+        errorFactory: (code, message) => storeError(code, message),
+      });
     try {
       held.assertHeld();
       const keys = new Set(active ?? []);

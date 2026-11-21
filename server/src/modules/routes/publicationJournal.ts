@@ -6,6 +6,7 @@ import { parseRoutePublication } from '../../../../shared/pipeline/routesEditorC
 import type { RoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
+import { syncRoutesDirectory } from './routeDurability.ts';
 import { assertProfileId } from './schema.ts';
 import type { RouteProfileMutation } from './store.ts';
 import { RoutesStore, serializeRoutesJson } from './store.ts';
@@ -30,20 +31,6 @@ export interface PublicationIntent {
 function corrupt(): RoutesEditorStoreError {
   return new RoutesEditorStoreError('routes_authoring_corrupted',
     'Журнал публикации повреждён');
-}
-
-async function syncDirectory(directory: string): Promise<void> {
-  // Windows синхронизирует файл до rename; Node не открывает каталог для FlushFileBuffers.
-  if (process.platform === 'win32') {
-    return;
-  }
-
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 }
 
 async function readSmallJson(file: string): Promise<unknown | null> {
@@ -73,7 +60,7 @@ async function atomicJson(directory: string, file: string, value: unknown): Prom
     await handle.sync();
     await handle.close();
     await fs.rename(temporary, file);
-    await syncDirectory(directory);
+    await syncRoutesDirectory(directory);
   } finally {
     await handle.close().catch(() => {});
     await fs.rm(temporary, { force: true });

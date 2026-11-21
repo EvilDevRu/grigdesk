@@ -12,6 +12,7 @@ import type {
 
 import type { RouteProfileMutation, RoutesStore } from './store.ts';
 import { applyDraftOperations, validateDraftShape } from './draftModel.ts';
+import { syncRoutesDirectory } from './routeDurability.ts';
 import { assertProfileId } from './schema.ts';
 
 const DRAFT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -155,12 +156,7 @@ export class DraftStore {
 
       await this.fsPort.rename(temporary, destination);
       renamed = true;
-      const directoryHandle = await this.fsPort.open(directory, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await syncRoutesDirectory(directory, (...args) => this.fsPort.open(...args));
     } catch {
       if (renamed) {
         let currentRevision: number | null = null;
