@@ -1,0 +1,10 @@
+{
+  "bootstrap": {
+    "file": "bootstrap/scout.json"
+  },
+  "profile": "demo-profile",
+  "routes": {
+    "command": "89fd94451052458e106a1a59f1b0cc70332b1d2d9024276b970e4250d2fddac4"
+  },
+  "schema": 2
+}

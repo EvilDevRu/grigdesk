@@ -1,0 +1,78 @@
+{
+  "entry": "scout",
+  "escalation": [
+    {
+      "allowedRoutes": [
+        "command"
+      ],
+      "from": "scout",
+      "requiresHumanWhenPinned": true
+    }
+  ],
+  "id": "scout",
+  "kind": "bootstrap",
+  "nodes": [
+    {
+      "emits": [],
+      "executor": "agent",
+      "fanout": {
+        "degrade": "forbid",
+        "maxExecutors": 1,
+        "mode": "single"
+      },
+      "id": "scout",
+      "on": {
+        "done": {
+          "escalate": {
+            "routes": [
+              "command"
+            ]
+          }
+        },
+        "exhausted": {
+          "stop": "human"
+        },
+        "failed": {
+          "stop": "human"
+        },
+        "skipped": {
+          "stop": "human"
+        }
+      },
+      "phase": "bootstrap",
+      "policy": {
+        "budgetClass": "standard",
+        "filesystem": "state-only",
+        "timeoutClass": "planning"
+      },
+      "prompt": {
+        "blocks": [
+          {
+            "file": "bootstrap/prompts/scout.base.md"
+          }
+        ],
+        "requiredContext": [
+          "task",
+          "routeCatalog"
+        ]
+      },
+      "retry": {
+        "noResult": 1,
+        "productFailure": 0,
+        "providerFailure": {
+          "attempts": 1,
+          "strategy": "runner-failover"
+        }
+      },
+      "runKey": "SCOUT"
+    }
+  ],
+  "profile": "demo-profile",
+  "schema": 2,
+  "sequence": {
+    "bootstrap": [
+      "scout"
+    ]
+  },
+  "title": "Fixture route selection"
+}

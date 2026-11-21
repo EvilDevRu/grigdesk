@@ -1,0 +1,74 @@
+{
+  "bootstrap": "skip",
+  "entry": "verify",
+  "escalation": [],
+  "id": "command",
+  "kind": "route",
+  "nodes": [
+    {
+      "commandId": "fixture-verify",
+      "emits": [],
+      "executor": "command",
+      "fanout": {
+        "degrade": "forbid",
+        "maxExecutors": 1,
+        "mode": "single"
+      },
+      "id": "verify",
+      "on": {
+        "done": {
+          "next": "gate_accept"
+        },
+        "exhausted": {
+          "stop": "human"
+        },
+        "failed": {
+          "stop": "human"
+        },
+        "skipped": {
+          "stop": "human"
+        }
+      },
+      "phase": "main",
+      "policy": {
+        "budgetClass": "small",
+        "filesystem": "state-only",
+        "timeoutClass": "check"
+      },
+      "retry": {
+        "noResult": 0,
+        "productFailure": 0,
+        "providerFailure": {
+          "attempts": 0,
+          "strategy": "none"
+        }
+      },
+      "runKey": "VERIFY"
+    },
+    {
+      "emits": [],
+      "executor": "gate",
+      "id": "gate_accept",
+      "on": {
+        "approved": {
+          "stop": "done"
+        },
+        "rejected": {
+          "stop": "human"
+        }
+      },
+      "phase": "main",
+      "runKey": "GATE_ACCEPT"
+    }
+  ],
+  "profile": "demo-profile",
+  "schema": 2,
+  "sequence": {
+    "main": [
+      "verify",
+      "gate_accept"
+    ],
+    "tail": []
+  },
+  "title": "Native Windows CI fixture"
+}

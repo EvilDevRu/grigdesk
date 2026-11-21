@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,25 @@ func TestRunCommandToGate(t *testing.T) {
 	f := newRouteFixture(t, false)
 	f.expectStart(t, false)
 	f.assertGate(t)
+}
+
+// TestWindowsResumeAtGate продолжает ту же попытку отдельным процессом фабрики.
+// Доверенное состояние ворот и результат сверяются после повторного открытия.
+func TestWindowsResumeAtGate(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("проверка относится к нативной Windows")
+	}
+	f := newRouteFixture(t, false)
+	f.expectStart(t, false)
+	f.assertGate(t)
+	id := f.attempt(t)
+	if rc, out := f.run(t, "resume", "--attempt", id); rc != 0 {
+		t.Fatalf("resume rc=%d: %s", rc, out)
+	}
+	f.assertGate(t)
+	if f.attempt(t) != id {
+		t.Fatal("resume заменил ID попытки")
+	}
 }
 
 func TestHoldStart(t *testing.T) {
@@ -91,6 +111,10 @@ func newRouteFixture(t *testing.T, damage bool) routeFixture {
 		profile: filepath.Join(dir, "profiles", "demo-profile"), binary: filepath.Join(dir, "factory"),
 		store: state.Store{StateDir: filepath.Join(dir, "state"), ControlDir: filepath.Join(dir, "control")},
 	}
+	if runtime.GOOS == "windows" {
+		f.binary += ".exe"
+		f.extraEnv = []string{"FACTORY_WINDOWS_BASH=" + os.Getenv("FACTORY_WINDOWS_BASH")}
+	}
 	for _, directory := range []string{f.profile, f.checkout, f.store.StateDir} {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)
@@ -147,6 +171,19 @@ profile_route_command() {
 // У маршрута два узла, поэтому он доходит до ворот без тестового провайдера.
 func (f routeFixture) publish(t *testing.T, expected, title string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" && expected == "" {
+		t.Setenv("GRIGDESK_FACTORY_BIN", f.binary)
+		fixture := os.DirFS(filepath.Join(f.repo, ".github", "fixtures", "windows-native-routes"))
+		if err := os.CopyFS(f.routes, fixture); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(f.routes, "demo-profile", "catalog", "current.json"))
+		var pointer struct{ CatalogHash string }
+		if err != nil || json.Unmarshal(data, &pointer) != nil || pointer.CatalogHash == "" {
+			t.Fatalf("повреждён каталог тестовой фикстуры: %s, %v", data, err)
+		}
+		return pointer.CatalogHash
+	}
 	return f.publishBootstrap(t, expected, title, "skip")
 }
 
@@ -225,6 +262,9 @@ func (f routeFixture) runFixture(t *testing.T, path string, args ...string) stri
 		"PATH=" + os.Getenv("PATH"), "LC_ALL=C", "HOME=" + f.dir, "GOTOOLCHAIN=local", "GOWORK=off",
 		"GOCACHE=" + filepath.Join(f.dir, "tool-cache"),
 	}
+	if runtime.GOOS == "windows" {
+		cmd.Env = append(os.Environ(), cmd.Env...)
+	}
 	if cache := os.Getenv("GOCACHE"); cache != "" && path == "go" {
 		cmd.Env = append(cmd.Env, "GOCACHE="+cache)
 	}
@@ -273,6 +313,9 @@ func (f routeFixture) factoryCommand(ctx context.Context, mode string, options .
 		"--routes-dir", f.routes, "--state-dir", f.store.StateDir, "--control-dir", f.store.ControlDir}
 	cmd := exec.CommandContext(ctx, f.binary, append(argv, options...)...)
 	cmd.Env = append(f.launchEnvironment(), f.extraEnv...)
+	if runtime.GOOS == "windows" {
+		cmd.Env = append(os.Environ(), cmd.Env...)
+	}
 	if mode == "start" {
 		cmd.Env = append(cmd.Env, f.runtimeEnv...)
 	}

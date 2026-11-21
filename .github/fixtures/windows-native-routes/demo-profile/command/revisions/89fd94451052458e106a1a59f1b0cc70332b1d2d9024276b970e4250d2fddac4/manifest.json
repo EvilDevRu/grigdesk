@@ -1,0 +1,14 @@
+{
+  "algorithm": "sha256",
+  "files": [
+    {
+      "path": "route.json",
+      "sha256": "e5aecddd2e2bc1d129f65f0ea90ca535d6ca97fca88f98395584b177a9e4a3c4",
+      "size": 1408
+    }
+  ],
+  "id": "command",
+  "kind": "route",
+  "profile": "demo-profile",
+  "schema": 2
+}

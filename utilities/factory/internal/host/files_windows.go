@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,11 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var reopenFile = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
-
 // OpenAt открывает файл относительно handle корня и запрещает reparse points.
 // Для нового приватного файла DACL передаётся ядру при создании.
 func OpenAt(root *os.Root, name string, flags int, mode os.FileMode, options FileOptions) (*os.File, error) {
+	name = filepath.FromSlash(name)
 	if !filepath.IsLocal(name) || filepath.Clean(name) != name || strings.Contains(name, ":") {
 		return nil, os.ErrInvalid
 	}
@@ -39,12 +39,8 @@ func OpenAt(root *os.Root, name string, flags int, mode os.FileMode, options Fil
 		if options&Directory == 0 {
 			return nil, os.ErrInvalid
 		}
-		raw, _, err := reopenFile.Call(directory.Fd(), uintptr(access), share,
-			windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
-		if windows.Handle(raw) == windows.InvalidHandle {
-			return nil, err
-		}
-		return os.NewFile(raw, root.Name()), nil
+
+		return openDirectoryHandle(directory, access, share)
 	}
 	relative, err := windows.NewNTUnicodeString(name)
 	if err != nil {
@@ -89,6 +85,33 @@ func OpenAt(root *os.Root, name string, flags int, mode os.FileMode, options Fil
 	return os.NewFile(uintptr(file), filepath.Join(root.Name(), name)), nil
 }
 
+// openDirectoryHandle открывает сам корень с нужными правами на DACL.
+// Исходный handle удерживается до проверки identity и признака reparse.
+func openDirectoryHandle(directory *os.File, access, share uint32) (*os.File, error) {
+	name := make([]uint16, 32768)
+	length, err := windows.GetFinalPathNameByHandle(windows.Handle(directory.Fd()), &name[0], uint32(len(name)), 0)
+	if err != nil || length == 0 || length >= uint32(len(name)) {
+		return nil, fmt.Errorf("путь открытого каталога: %w", errors.Join(os.ErrInvalid, err))
+	}
+	handle, err := windows.CreateFile(&name[0], access, share, nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, fmt.Errorf("повторное открытие каталога: %w", err)
+	}
+	current := os.NewFile(uintptr(handle), directory.Name())
+	expectedInfo, originalErr := directory.Stat()
+	actualInfo, currentErr := current.Stat()
+	var attributes windows.ByHandleFileInformation
+	attrErr := windows.GetFileInformationByHandle(handle, &attributes)
+	if errors.Join(originalErr, currentErr, attrErr) != nil || !os.SameFile(expectedInfo, actualInfo) ||
+		attributes.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		current.Close()
+		return nil, errors.New("при открытии изменился физический каталог")
+	}
+
+	return current, nil
+}
+
 // OpenPath сохраняет семантику открытия через родителя.
 // Сам файл открывается относительно дескриптора физического каталога.
 func OpenPath(name string, flags int, mode os.FileMode, options FileOptions) (*os.File, error) {
@@ -101,15 +124,31 @@ func OpenPath(name string, flags int, mode os.FileMode, options FileOptions) (*o
 	return OpenAt(root, filepath.Base(name), flags, mode, options)
 }
 
+// FileOwner принимает SID пользователя и назначенного ядром владельца его токена.
+// На повышенном токене каталоги могут создаваться от имени Administrators.
 func FileOwner(file *os.File, _ os.FileInfo) bool {
 	sd, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
 		return false
 	}
 	owner, _, err := sd.Owner()
-	self, tokenErr := windows.GetCurrentProcessToken().GetTokenUser()
+	token := windows.GetCurrentProcessToken()
+	self, tokenErr := token.GetTokenUser()
+	if err != nil || tokenErr != nil || owner == nil {
+		return false
+	}
+	if owner.Equals(self.User.Sid) {
+		return true
+	}
+	if !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+		return false
+	}
 
-	return err == nil && tokenErr == nil && owner != nil && owner.Equals(self.User.Sid)
+	buffer := make([]byte, 256)
+	var used uint32
+	tokenErr = windows.GetTokenInformation(token, windows.TokenOwner, &buffer[0], uint32(len(buffer)), &used)
+	primary := *(**windows.SID)(unsafe.Pointer(&buffer[0]))
+	return tokenErr == nil && primary != nil && owner.Equals(primary)
 }
 
 func SingleLink(file *os.File, _ os.FileInfo) bool {

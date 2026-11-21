@@ -1,0 +1,23 @@
+{
+  "algorithm": "sha256",
+  "files": [
+    {
+      "path": "bootstrap/prompts/scout.base.md",
+      "sha256": "74ab5c923d4fc0d0c4477301f43c203b0e0c1904e7c4e2629ed315ec40589fe9",
+      "size": 89
+    },
+    {
+      "path": "bootstrap/scout.json",
+      "sha256": "9b22863ec559c964ee821d86d144f24e732e2f0237457a6f12012776b41be1c0",
+      "size": 1467
+    },
+    {
+      "path": "catalog.json",
+      "sha256": "7f4ee4248bba745cf8929b34826a4a93369a3e786af4f42b4ab56961ca023e34",
+      "size": 205
+    }
+  ],
+  "kind": "catalog",
+  "profile": "demo-profile",
+  "schema": 2
+}

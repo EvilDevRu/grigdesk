@@ -88,8 +88,13 @@ func TestWindowsProtectedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := f.Stat()
-	if err != nil || !SingleLink(f, info) || !PrivateMode(f, info, 0400) || PrivateMode(f, info, 0600) {
-		t.Fatalf("не применён DACL immutable файла: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, links := FileOwner(f, info), SingleLink(f, info)
+	readonly, writable := PrivateMode(f, info, 0400), PrivateMode(f, info, 0600)
+	if !owner || !links || !readonly || writable {
+		t.Fatalf("ACL immutable: owner=%v links=%v read-only=%v writable=%v", owner, links, readonly, writable)
 	}
 	if escaped, err := OpenAt(root, "..\\value", os.O_RDONLY, 0, 0); err == nil {
 		escaped.Close()
