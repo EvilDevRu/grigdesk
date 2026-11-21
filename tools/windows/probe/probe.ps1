@@ -29,6 +29,7 @@ $seaOutput | Set-Content -Encoding utf8 (Join-Path $OutputDirectory 'sea.json')
 $conPty = Start-Process -FilePath $ConPtyExe -PassThru -NoNewWindow
 $conPtyExited = $conPty.WaitForExit(25000)
 $conPtyOk = $conPtyExited -and $conPty.ExitCode -eq 0
+Write-Host "ConPTY exited: $conPtyExited, code: $($conPty.ExitCode)"
 if (!$conPtyExited) {
   Stop-Process -Id $conPty.Id -Force
 }
@@ -45,6 +46,10 @@ $imported = $false
 try {
   # Импорт и первый запуск различаются. Импорт сам по себе не подтверждает доступный WSL2.
   wsl.exe --status
+  if ($LASTEXITCODE -ne 0) {
+    wsl.exe --install --no-distribution --web-download
+    Write-Host "WSL installation exit: $LASTEXITCODE"
+  }
   wsl.exe --version
   wsl.exe --import $distro (Join-Path $probeDirectory 'rootfs') $RootfsTar --version 2
   if ($LASTEXITCODE -ne 0) {
@@ -52,7 +57,8 @@ try {
   }
   $imported = $true
   $summary.stage = 'boot'
-  $arch = (wsl.exe -d $distro --exec uname -m).Trim()
+  $arch = [string](wsl.exe -d $distro --exec uname -m)
+  $arch = $arch.Trim()
   if ($LASTEXITCODE -ne 0 -or $arch -notin @('x86_64', 'aarch64')) {
     return
   }
@@ -62,11 +68,11 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw 'apt-get update failed in the probe distribution'
   }
-  wsl.exe -d $distro --exec env DEBIAN_FRONTEND=noninteractive apt-get -qq install -y util-linux bubblewrap
+  wsl.exe -d $distro --exec env DEBIAN_FRONTEND=noninteractive apt-get -qq install -y util-linux bubblewrap passwd
   if ($LASTEXITCODE -ne 0) {
     throw 'Failed to install probe packages'
   }
-  wsl.exe -d $distro --exec useradd -m probe
+  wsl.exe -d $distro --exec /usr/sbin/useradd -m probe
   if ($LASTEXITCODE -ne 0) {
     throw 'Failed to create the probe user'
   }

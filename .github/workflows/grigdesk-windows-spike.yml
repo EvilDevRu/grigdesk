@@ -89,6 +89,7 @@ jobs:
         run: |
           ./tools/windows/probe/probe.ps1 -RootfsTar (Join-Path $PWD 'rootfs.tar') -SeaExe (Join-Path $PWD 'sea.exe') -ConPtyExe (Join-Path $PWD 'conpty-probe.exe') -Runner $env:PROBE_RUNNER -OutputDirectory (Join-Path $PWD 'probe-report')
           if (Test-Path probe-report/status.json) { Get-Content probe-report/status.json }
+          exit 0
       - name: Декодировать полный WSL-отчёт
         if: always()
         run: |

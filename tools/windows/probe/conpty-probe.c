@@ -20,7 +20,7 @@ int main(void) {
     SIZE_T attrSize = 0;
     char buffer[4096];
     DWORD readBytes = 0;
-    const char *command = "set left=conpty-\r\necho %left%probe-ok\r\nexit\r\n";
+    const char *command = "conpty-probe\r\n";
     int ok = 0;
 
     sa.nLength = sizeof(sa);
@@ -44,7 +44,9 @@ int main(void) {
         return 6;
     }
 
-    WCHAR commandLine[] = L"cmd.exe /Q /D";
+    CloseHandle(inPipeRead);
+    CloseHandle(outPipeWrite);
+    WCHAR commandLine[] = L"cmd.exe /D /Q /V:ON /C \"set /P input= & echo !input!-ok\"";
     ZeroMemory(&pi, sizeof(pi));
     if (!CreateProcessW(NULL, commandLine, NULL, NULL, FALSE,
             EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
@@ -77,9 +79,7 @@ int main(void) {
     ClosePseudoConsole(pseudo);
     DeleteProcThreadAttributeList(si.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
-    CloseHandle(inPipeRead);
     CloseHandle(outPipeRead);
-    CloseHandle(outPipeWrite);
 
     return ok ? 0 : 10;
 }
