@@ -301,11 +301,10 @@ export async function buildWindowsNative(
       .replace('@@ARCH@@', target === 'windows-x64' ? 'AMD64' : 'ARM64')
       .replace('@@HELPER_SHA@@', files[0]!.sha256));
     const checksum = `${sha256(bootstrap)}  ${script}\n`;
+    const signature = sign(null, bootstrap, key).toString('base64') + '\n';
 
     await fs.writeFile(path.join(output, script), bootstrap, { flag: 'wx' });
     await fs.writeFile(path.join(output, `${script}.sha256`), checksum, { flag: 'wx' });
-    const signature = sign(null, bootstrap, key).toString('base64') + '\n';
-
     await fs.writeFile(path.join(output, `${script}.sig`), signature, { flag: 'wx' });
   } finally {
     await fs.rm(work, { recursive: true, force: true });
@@ -395,7 +394,7 @@ async function privatePort(): Promise<number> {
  * Закрытие считается завершённым после выхода приложения и остановки API.
  */
 async function closeWindow(pid: number): Promise<void> {
-  const command = `$p=Get-Process -Id ${pid} -ErrorAction Stop; if (-not $p.CloseMainWindow()) {exit 1}`;
+  const command = `if (-not [Diagnostics.Process]::GetProcessById(${pid}).CloseMainWindow()) {exit 1}`;
 
   await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
     timeout: 15000, windowsHide: true,

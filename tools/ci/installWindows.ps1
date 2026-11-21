@@ -23,7 +23,18 @@ $null = New-Item -ItemType Directory -Path $temporary
 try {
     $helper = Join-Path $temporary 'grigdesk-maintenance.exe'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'grigdesk-maintenance.exe') -Destination $helper
-    if ((Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash -ne '@@HELPER_SHA@@') {
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($helper)
+        try {
+            $hash = [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '')
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $algorithm.Dispose()
+    }
+    if ($hash -ne '@@HELPER_SHA@@') {
         throw 'Контрольная сумма установщика GrigDesk не совпала.'
     }
     & $helper install $PSScriptRoot $InstallDir

@@ -33,9 +33,9 @@ jobs:
       - name: Dependencies
         shell: bash
         run: |
-          npm --prefix server ci --include=dev --no-audit --no-fund
-          npm --prefix web ci --include=dev --no-audit --no-fund
-          npm --prefix desktop ci --include=dev --no-audit --no-fund
+          npm --prefix server ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix web ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix desktop ci --include=dev --ignore-scripts --no-audit --no-fund
       - name: Build and install signed test package
         run: node tools/ci/windowsInstallerSmoke.mts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
