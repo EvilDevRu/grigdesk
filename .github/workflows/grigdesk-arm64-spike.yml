@@ -1,0 +1,176 @@
+# ВРЕМЕННЫЙ пробный workflow пробы 5 плана grigdesk-additional-platforms-tdd.md (ред. 9).
+# Не входит в продуктовый код выпуска; удаляется после вердикта пробы.
+# Запуск: только ручной dispatch владельцем (Actions -> GrigDesk ARM64 spike -> Run workflow).
+# Раннер ubuntu-24.04-arm — VM (проверка ловушки dlopen SEA, собранного в контейнере).
+name: GrigDesk ARM64 spike (probe 5, temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arm64-spike:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Архитектура раннера
+        run: |
+          uname -m
+          test "$(uname -m)" = aarch64
+
+      - name: Системные инструменты
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libfuse2t64 bubblewrap python3 p7zip-full build-essential
+
+      - name: Pinned Node 24.21.0 linux-arm64
+        run: |
+          curl -fsSL --retry 3 -o node.tar.xz \
+            https://nodejs.org/download/release/v24.21.0/node-v24.21.0-linux-arm64.tar.xz
+          echo "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2  node.tar.xz" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/node-pin"
+          tar -xJf node.tar.xz -C "$RUNNER_TEMP/node-pin" --strip-components=1
+          echo "$RUNNER_TEMP/node-pin/bin" >> "$GITHUB_PATH"
+
+      - name: Зависимости server и desktop
+        run: |
+          npm --prefix server ci
+          npm --prefix desktop ci
+
+      - name: Пробный SEA и dlopen на VM-раннере
+        run: |
+          mkdir -p spike
+          cd spike
+          cat > addon.c <<'EOF'
+          #include <node_api.h>
+          static napi_value Hello(napi_env env, napi_callback_info info) {
+            napi_value result;
+            napi_create_string_utf8(env, "napi-ok", NAPI_AUTO_LENGTH, &result);
+            return result;
+          }
+          static napi_value Init(napi_env env, napi_value exports) {
+            napi_value fn;
+            napi_create_function(env, "hello", NAPI_AUTO_LENGTH, Hello, NULL, &fn);
+            napi_set_named_property(env, exports, "hello", fn);
+            return exports;
+          }
+          NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)
+          EOF
+          cat > binding.gyp <<'EOF'
+          {"targets":[{"target_name":"spike_addon","sources":["addon.c"]}]}
+          EOF
+          npx --yes node-gyp rebuild --nodedir="$RUNNER_TEMP/node-pin"
+          cat > sea-probe.js <<'EOF'
+          const path = require('node:path');
+          const sea = require('node:sea');
+          const info = {
+            node: process.version,
+            platform: process.platform,
+            arch: process.arch,
+            sea: sea.isSea(),
+          };
+          if (process.argv.includes('--runtime-info')) {
+            console.log(JSON.stringify(info));
+            process.exit(0);
+          }
+          const mod = { exports: {} };
+          process.dlopen(mod, path.join(__dirname, 'build/Release/spike_addon.node'));
+          console.log(JSON.stringify({ ...info, dlopen: mod.exports.hello() }));
+          EOF
+          cat > sea-config.json <<'EOF'
+          {
+            "main": "sea-probe.js",
+            "output": "sea-prep.blob",
+            "disableExperimentalSEAWarning": true,
+            "useSnapshot": false,
+            "useCodeCache": false
+          }
+          EOF
+          node --experimental-sea-config sea-config.json
+          cp "$RUNNER_TEMP/node-pin/bin/node" sea-probe
+          ../server/node_modules/.bin/postject sea-probe NODE_SEA_BLOB sea-prep.blob \
+            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          ./sea-probe --runtime-info
+          ./sea-probe
+
+      - name: glibc floor фактических ELF
+        run: |
+          node tools/arm64Spike.mts \
+            "$RUNNER_TEMP/node-pin/bin/node" \
+            spike/sea-probe \
+            spike/build/Release/spike_addon.node | tee spike/glibc-floor.json
+
+      - name: AppImage arm64 и запуск под xvfb
+        continue-on-error: true
+        run: |
+          version=$(node -p 'require("./desktop/node_modules/electron/package.json").version')
+          archive="electron-v$version-linux-arm64.zip"
+          checksum=$(node -p 'require("./desktop/node_modules/electron/checksums.json")[process.argv[1]]' "$archive")
+          curl -fsSL --retry 3 -o "$archive" \
+            "https://github.com/electron/electron/releases/download/v$version/$archive"
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
+          unzip -q "$archive" -d desktop/node_modules/electron/dist
+          printf 'electron' > desktop/node_modules/electron/path.txt
+          npm --prefix desktop run build
+          (cd desktop && npx electron-builder --linux AppImage --arm64 --publish never)
+          image=$(find desktop/dist -name '*.AppImage' | head -1)
+          test -n "$image"
+          echo "AppImage: $image"
+          xvfb-run -a "$image" --appimage-extract-and-run --no-sandbox &
+          pid=$!
+          sleep 20
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "appimage-alive-ok"
+            kill "$pid"
+          else
+            echo "appimage-exited-early"
+            exit 1
+          fi
+
+      - name: Engine smoke и несущие утилиты
+        run: |
+          flock -n /tmp/spike.lock -c true && echo flock-ok
+          timeout 1 sleep 2
+          test $? -eq 124 && echo timeout-124-ok
+          nohup true && echo nohup-ok
+          bash tests/engine/run-offline.sh
+
+      - name: bwrap и python3 pty
+        run: |
+          bwrap --ro-bind / / true && echo bwrap-ok
+          python3 -m py_compile server/src/modules/terminal/pty-helper.py
+          python3 - <<'EOF'
+          import os
+          import pty
+          pid, fd = pty.fork()
+          if pid == 0:
+              os.execvp("bash", ["bash", "-c", "echo pty-ok"])
+          out = os.read(fd, 100)
+          os.waitpid(pid, 0)
+          assert b"pty-ok" in out
+          print("forkpty-ok")
+          EOF
+
+      - name: Отчёт пробы
+        if: always()
+        run: |
+          {
+            echo "## ARM64 spike (проба 5)"
+            uname -m
+            cat /etc/os-release | head -2
+            echo "### glibc floor"
+            cat spike/glibc-floor.json 2>/dev/null || echo "не измерен"
+          } > spike-report.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-spike-report
+          path: |
+            spike-report.md
+            spike/glibc-floor.json
