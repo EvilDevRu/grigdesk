@@ -1,10 +1,40 @@
 package host
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"grigdesk.local/tools/utilities/internal/processidentity"
 )
+
+// ProcessStartCommand возвращает время создания Win32 процесса из открытого handle.
+// Недоступный процесс отличается от доказанно завершённого.
+func ProcessStartCommand(args []string, out io.Writer) (bool, int) {
+	if len(args) == 0 || args[0] != "_windows-starttime" {
+		return false, 0
+	}
+	if len(args) != 2 {
+		return true, 2
+	}
+	pid, err := strconv.Atoi(args[1])
+	if err != nil || pid <= 0 || uint64(pid) > 1<<32-1 {
+		return true, 2
+	}
+	start, dead := processidentity.Start(pid)
+	if dead {
+		return true, 3
+	}
+	if start == "" {
+		return true, 4
+	}
+	if _, err := fmt.Fprintln(out, start); err != nil {
+		return true, 4
+	}
+	return true, 0
+}
 
 // TrustedReadCommand читает control с проверкой того же DACL, что у движка.
 // Node получает проверенные байты, а режим Unix не используется как подмена ACL.

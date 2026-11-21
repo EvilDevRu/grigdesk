@@ -19,6 +19,10 @@ func TrustedReadCommand(_ []string, _ io.Writer) (bool, int) {
 	return false, 0
 }
 
+func ProcessStartCommand(_ []string, _ io.Writer) (bool, int) {
+	return false, 0
+}
+
 func TrustedWriteCommand(_ []string, _ io.Reader) (bool, int) {
 	return false, 0
 }
