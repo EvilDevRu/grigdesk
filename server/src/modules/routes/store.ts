@@ -14,6 +14,7 @@ import { sha256 } from '../../../../shared/node/hash.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
+import { acquireWindowsCatalogLock } from './windowsLock.ts';
 import {
   assertProfileId,
   assertRevisionHash,
@@ -931,7 +932,9 @@ export class RoutesStore {
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') throw error;
     }
-    const held = await acquireKernelFileLock({
+    const held = process.platform === 'win32'
+      ? await acquireWindowsCatalogLock(catalogDir, this.lockTimeoutMs)
+      : await acquireKernelFileLock({
       lockPath,
       timeoutMs: this.lockTimeoutMs,
       timeoutCode: 'ROUTES_V2_LOCKED',

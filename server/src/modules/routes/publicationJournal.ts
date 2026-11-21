@@ -33,6 +33,11 @@ function corrupt(): RoutesEditorStoreError {
 }
 
 async function syncDirectory(directory: string): Promise<void> {
+  // Windows синхронизирует файл до rename; Node не открывает каталог для FlushFileBuffers.
+  if (process.platform === 'win32') {
+    return;
+  }
+
   const handle = await fs.open(directory, 'r');
   try {
     await handle.sync();
