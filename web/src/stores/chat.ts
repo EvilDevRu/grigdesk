@@ -1650,7 +1650,7 @@ export const useChatStore = defineStore('chat', {
           archived,
           draft: !t && (!chatLoadRuntimeFor(this).headOnly.has(sess.id)
             ? !!(sess.draft || '').trim() || !!sess.draftAttachments?.length : !!sess.hasDraft),
-          // Модель чата — для иконки исполнителя и подписи в строке списка.
+          // Модель чата — для текста и цвета чипа в строке списка.
           model: sess.model || sess.modelRef?.model || '',
           modelRef: sess.modelRef || null,
           // Сжатие для списка — такая же занятость чата, как обычный ход: строке нужен

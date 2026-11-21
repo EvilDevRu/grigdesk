@@ -848,7 +848,7 @@ test('PROJECT-UI-CREATE-PLUS: плюс полосы и компактной ша
   assert.equal(wrapper.find('[data-chat-project-create-dialog]').exists(), true);
 });
 
-test('PROJECT-UI-ROW: строка без плашки проекта, клик выбирает чат', async (t) => {
+test('PROJECT-UI-ROW: строка показывает проект из каталога, клик выбирает чат', async (t) => {
   const { wrapper, state, calls } = await fixture(t, { activeId: 'c-2' });
 
   // Общая фикстура глушит selectChat: здесь проверяем именно выбор строки.
@@ -856,8 +856,17 @@ test('PROJECT-UI-ROW: строка без плашки проекта, клик 
     state.activeId = id;
   };
 
-  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
-  await wrapper.find('[data-chat-id="c-1"] .row-hit').trigger('click');
+  const row = wrapper.get('[data-chat-id="c-1"]');
+  const catalog = globalThis.__filtersProjects.activeCatalog;
+  const icon = 'data:image/png;base64,'
+    + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
+
+  assert.equal(row.get('.ava [data-project-initial]').text(), 'А');
+  assert.equal(row.get('.row-hit').attributes('aria-description'), 'Альфа');
+  catalog.items = catalog.items.map((item) => item.id === 'alpha' ? { ...item, icon } : item);
+  await drain();
+  assert.equal(row.get('.ava [data-project-icon-image]').attributes('src'), icon);
+  await row.get('.row-hit').trigger('click');
   await drain();
 
   assert.equal(state.activeId, 'c-1');
@@ -1053,7 +1062,7 @@ test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty �
 
   const { wrapper } = await fixture(t, {}, chat);
 
-  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
+  assert.equal(wrapper.get('[data-chat-id="dirty-project"] .ava [data-project-initial]').text(), 'А');
 
   const response = await world.app.inject('/api/chat/store/head/dirty-project');
 
@@ -1070,7 +1079,7 @@ test('PROJECT-UI-FULL-DIRTY-HEAD: метка скрытой полной dirty �
   const row = chat.list('', false).find((entry) => entry.id === 'dirty-project');
 
   assert.equal(row?.catalogProjectId, 'beta');
-  assert.equal(wrapper.find('[data-chat-project-chip]').exists(), false);
+  assert.equal(wrapper.get('[data-chat-id="dirty-project"] .ava [data-project-initial]').text(), 'Б');
   assert.equal(session.draft, 'Локальный черновик');
   assert.equal(JSON.stringify(session.workdir), folder);
   assert.equal(session.messages === messages, true);

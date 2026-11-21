@@ -13,7 +13,7 @@ process.env.NODE_ENV = 'test';
 
 // Раскладка страницы «Чаты»: ширина списка и высота поля ввода — настройки устройства.
 // Здесь стережём три вещи: разделитель реально меняет размер, выбор переживает
-// перезагрузку (localStorage), а знак исполнителя в списке красится ЕГО цветом.
+// перезагрузку (localStorage), а чип модели в списке красится цветом исполнителя.
 const CHATS_VIEW_PATH = fileURLToPath(new URL('../../web/src/views/ChatsView.vue', import.meta.url));
 const CHAT_LIST_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatList.vue', import.meta.url));
 const CHAT_SESSION_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url));
@@ -248,7 +248,7 @@ test('список чатов: разделитель управляется и 
   assert.equal(sp.attributes('aria-valuenow'), '220');
 });
 
-test('строка чата: знак исполнителя красится цветом исполнителя, безымянный остаётся нейтральным', async (t) => {
+test('строка чата: чип модели красится цветом исполнителя', async (t) => {
   const browser = await browserHarness();
   const [{ mount }, { createPinia, defineStore }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -258,6 +258,13 @@ test('строка чата: знак исполнителя красится ц
     { id: 'a', title: 'Про GrigDesk', snippet: '', ts: Date.now(), model: 'claude-opus-5' },
     { id: 'b', title: 'Про парсер', snippet: '', ts: Date.now(), model: 'gpt-5.6', sending: true },
     { id: 'c', title: 'Без модели', snippet: '', ts: Date.now(), model: 'ктотоещё' },
+    {
+      id: 'd',
+      title: 'Сохранённая модель',
+      snippet: '',
+      ts: Date.now(),
+      model: 'gpt-old',
+    },
   ];
 
   globalThis.__chatListStore = defineStore(`chat-list-brand-${nonce}`, {
@@ -284,6 +291,18 @@ test('строка чата: знак исполнителя красится ц
       modelOf(ref) {
         if (ref === 'claude-opus-5') return { model: { name: 'Opus 5' }, provider: { id: 'claude', name: 'Claude', color: '#d97757' } };
         if (ref === 'gpt-5.6') return { model: { name: 'GPT-5.6' }, provider: { id: 'codex', name: 'Codex', color: '#10a37f' } };
+        if (ref === 'gpt-old') {
+          return {
+            id: ref,
+            model: null,
+            provider: {
+              id: 'codex',
+              name: 'Codex',
+              color: '#10a37f',
+            },
+          };
+        }
+
         return { model: null, provider: null };
       },
     },
@@ -321,22 +340,22 @@ test('строка чата: знак исполнителя красится ц
   t.after(() => wrapper.unmount());
 
   const avas = wrapper.findAll('.ava');
-  assert.equal(avas.length, 3);
   const primaryRows = wrapper.findAll('.row-hit');
-  assert.equal(primaryRows.length, 3);
+
+  assert.equal(avas.length, 4);
+  assert.equal(primaryRows.length, 4);
   assert.equal(primaryRows.every((entry) => entry.element.tagName === 'BUTTON'), true);
   assert.equal(primaryRows[0].attributes('aria-pressed'), 'true');
   assert.equal(wrapper.find('.row-hit button').exists(), false, 'action-кнопки не вложены в primary');
-  assert.equal(avas[0].element.style.getPropertyValue('--prov').trim(), '#d97757');
-  assert.equal(avas[0].classes().includes('brand'), true);
-  assert.equal(avas[1].element.style.getPropertyValue('--prov').trim(), '#10a37f');
-  // Работающий чат остаётся в цвете своего исполнителя: иначе все занятые чаты
-  // сливаются между собой ровно тогда, когда их и различают.
+  assert.equal(avas.every((avatar) => avatar.get('.project-avatar').classes('is-placeholder')), true);
   assert.equal(avas[1].classes().includes('live'), true);
-  assert.equal(avas[1].classes().includes('brand'), true);
-  // Исполнитель неизвестен (реестр не приехал) — красить нечем, знака тоже нет.
-  assert.equal(avas[2].element.style.getPropertyValue('--prov').trim(), '');
-  assert.equal(avas[2].classes().includes('brand'), false);
+
+  const chips = wrapper.findAll('.mdl.brand');
+  const colors = chips.map((chip) => chip.element.closest('.row').style.getPropertyValue('--prov').trim());
+
+  assert.deepEqual(chips.map((chip) => chip.text()), ['Opus 5', 'GPT-5.6', 'gpt-old']);
+  assert.deepEqual(colors, ['#d97757', '#10a37f', '#10a37f']);
+  assert.equal(primaryRows[2].find('.mdl').exists(), false);
 });
 
 test('раскладка чата: JS и CSS считают одни и те же границы', async (t) => {
@@ -355,18 +374,15 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   // Ширину списка задаёт страница, но применяет её ChatList — через ту же переменную.
   assert.match(list, /\.cl \{ width: var\(--chat-list-w, 300px\)/);
   assert.match(list, /@media \(min-width: 900px\) and \(max-width: 1099px\) \{ \.cl \{ width: var\(--chat-list-w, 232px\); \} \}/);
-  // Знак исполнителя красится и в покое, и во время работы.
-  assert.match(list, /\.ava\.brand \{ color: color-mix\(in srgb, var\(--prov\)/);
-  assert.match(list, /\.ava\.live \{ color: color-mix\(in srgb, var\(--prov, var\(--accent\)\)/);
-  // Полную силу цвета держат ровно три состояния: открытый чат, вставший на вопросе и
-  // работающий. Остальные приглушены ОБЕСЦВЕЧИВАНИЕМ (подмешан нейтральный `--ink-mid`),
-  // а не прозрачностью и не затемнением: обе роняют контраст знака к своей заливке ниже
-  // порога графики 3:1 — первым всегда тёмный фиолетовый Kimi.
+  assert.match(list, /\.mdl\.brand \{\s*color: color-mix\(in srgb, var\(--prov\)/);
+  assert.match(list, /\.ava > \.project-avatar \{[^}]*border-radius: 50%;/);
+  assert.match(list, /\.ava\.live::before \{[^}]*--live-ring-color: var\(--prov, var\(--accent\)\)/);
+  assert.match(list, /\.ava\.live::before \{[^}]*border-radius: 50%;[^}]*animation: chat-live-spin/);
+  assert.match(list, /@keyframes chat-live-spin \{ to \{ transform: rotate\(360deg\); \} \}/);
   assert.match(
     list,
-    /\.row:not\(\.cur\):not\(\.wait\) \.ava\.brand:not\(\.live\) \{\s*color: color-mix\(in srgb, var\(--prov\) 50%, var\(--ink-mid\)\);/,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.ava\.live::before \{\s*animation: none;/,
   );
-  assert.equal(/\.ava[^{]*\{[^}]*opacity:/.test(list), false);
 
   // Высота поля ввода: разделитель, переменная и ПОТОЛОК. Потолок дублируется в CSS
   // (поворот планшета скрипт не ловит), поэтому обе цифры обязаны совпадать — иначе

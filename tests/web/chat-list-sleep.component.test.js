@@ -334,9 +334,11 @@ test('LIST-MEMO-01: копия строк сохраняет DOM, видимые
   assert.equal(wrapper.find('.dr').exists(), true);
   assert.equal(wrapper.find('.ago').text(), '2м');
   assert.equal(wrapper.find('.mdl').text(), 'codex');
+  assert.equal(wrapper.find('.row').element.style.getPropertyValue('--prov').trim(), '#d97757');
   catalog.codex.provider.color = '';
   await settle();
-  assert.equal(wrapper.find('.ava').classes().includes('brand'), false);
+  assert.equal(wrapper.find('.mdl').classes('brand'), false);
+  assert.equal(wrapper.find('.row').element.style.getPropertyValue('--prov').trim(), '');
   await wrapper.find('.row-hit').trigger('click');
   await settle();
   assert.equal(wrapper.find('.row').classes().includes('cur'), true);

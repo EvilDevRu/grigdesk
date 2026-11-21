@@ -269,7 +269,7 @@
         :key="r.id"
         :data-chat-id="r.id"
         v-memo="[
-          r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
+          r.title, r.snippet, r.modelName, r.providerColor, r.catalogProjectId, r.projectTitle, r.projectIcon,
           r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
           r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
         ]"
@@ -279,23 +279,19 @@
           cur: r.id === chat.activeId,
           wait: r.waiting,
         }"
+        :style="r.providerColor ? { '--prov': r.providerColor } : null"
       >
         <template v-if="editId === r.id">
           <span
             class="ava"
-            :class="{
-              live: r.sending,
-              brand: Boolean(r.provider?.color),
-            }"
-            :style="r.provider?.color ? { '--prov': r.provider.color } : null"
+            :class="{ live: r.sending }"
             v-tooltip="avatarTitle(r)"
           >
-            <ProviderIcon
-              v-if="r.provider"
-              :provider="r.provider"
-              :size="19"
+            <ProjectAvatar
+              :id="r.catalogProjectId ?? undefined"
+              :title="r.projectTitle"
+              :icon="r.projectIcon"
             />
-            <template v-else>{{ letter(r) }}</template>
             <ChatSleepBadge
               v-if="r.sleep && !r.sending && !r.compacting"
               :tasks="r.sleep.backgroundTasks"
@@ -323,25 +319,20 @@
           v-else
           class="row-hit"
           :pressed="r.id === chat.activeId"
+          :aria-description="r.projectTitle || t('core.chatProjectNone')"
           @click="select(r)"
           @dblclick="startEdit(r)"
         >
-          <!-- Аватар показывает исполнителя; кольцо работы вращается отдельно от знака. -->
           <span
             class="ava"
-            :class="{
-              live: r.sending,
-              brand: Boolean(r.provider?.color),
-            }"
-            :style="r.provider?.color ? { '--prov': r.provider.color } : null"
+            :class="{ live: r.sending }"
             v-tooltip="avatarTitle(r)"
           >
-            <ProviderIcon
-              v-if="r.provider"
-              :provider="r.provider"
-              :size="19"
+            <ProjectAvatar
+              :id="r.catalogProjectId ?? undefined"
+              :title="r.projectTitle"
+              :icon="r.projectIcon"
             />
-            <template v-else>{{ letter(r) }}</template>
             <ChatSleepBadge
               v-if="r.sleep && !r.sending && !r.compacting"
               :tasks="r.sleep.backgroundTasks"
@@ -361,7 +352,11 @@
                 class="wchip"
                 v-tooltip="t('core.chatAgentZhdetTvoegoOtveta')"
               > {{ t('core.chatZhdetOtveta') }} </span>
-              <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
+              <span
+                v-else-if="r.modelName"
+                class="mdl"
+                :class="{ brand: Boolean(r.providerColor) }"
+              >{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </span>
             <span class="t2 muted">
@@ -465,8 +460,8 @@ import { onUnmounted, computed, nextTick, ref, watch } from 'vue';
 import { captureChatScrollAnchor } from '../../shared/chatScrollAnchor.ts';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
-import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ChatProjectPicker from './ChatProjectPicker.vue';
+import ProjectAvatar from '../projects/ProjectAvatar.vue';
 import ProjectCreateDialog from '../projects/ProjectCreateDialog.vue';
 import { useChatProjectFilter } from './useChatProjectFilter.ts';
 import ChatSleepBadge from './ChatSleepBadge.vue';
@@ -487,6 +482,7 @@ import type { ChatListFilters } from '../../../../shared/chat/chatPaging.ts';
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
 type ListRow = ChatListRow & {
   modelName: string;
+  projectTitle: string;
   sleep?: ChatSleepingSession;
 };
 
@@ -899,20 +895,22 @@ const emptyLabel = computed(() => {
   return showArchived.value ? t('core.chatArhivPust') : t('core.chatNetAktivnyhChatov');
 });
 
-// Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
-// Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
+// Строки берут знак из каталога проектов, а подпись и оттенок модели — из реестра исполнителей.
 const rows = computed(() => {
   if (!chat.loaded) {
     return [];
   }
 
   return chat.list(q.value, showArchived.value, listFilters.value).map((r: ChatListRow) => {
-    const { model, provider } = prov.modelOf(r.modelRef || r.model);
+    const { id: modelId, model, provider } = prov.modelOf(r.modelRef || r.model);
+    const project = projectById.value.get(r.catalogProjectId ?? '');
 
     return {
       ...r,
-      provider,
-      modelName: model?.name || '',
+      projectTitle: project?.title ?? r.catalogProjectId ?? '',
+      projectIcon: project?.icon,
+      providerColor: provider?.color,
+      modelName: model?.name || (provider ? modelId || provider.name : ''),
       sleep: sleepingSessions.value[r.id],
     };
   });
@@ -954,26 +952,17 @@ watch(
   },
 );
 
-// Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
-function letter(row: ListRow) {
-  return row.taskId ? '#' : (row.title[0] || '?').toUpperCase();
-}
-
 /**
- * Заголовок аватара называет модель и текущее состояние чата.
- * Сжатие имеет отдельную подпись при том же индикаторе занятости.
+ * Подсказка к знаку раскрывает имя проекта и модель чата.
+ * Для работающего чата подпись модели также сообщает о ходе или сжатии.
  */
 function avatarTitle(row: ListRow) {
+  const project = row.projectTitle || t('core.chatProjectNone');
   const modelName = row.modelName || t('core.chatModelPoUmolchaniyu');
+  const statusKey = row.compacting ? 'core.chatModelnameSzhimayuKontekst' : 'core.chatModelnameAgentRabotaet';
+  const status = row.compacting || row.sending ? t(statusKey, { modelName }) : modelName;
 
-  if (row.compacting) {
-    return t('core.chatModelnameSzhimayuKontekst', { modelName: modelName });
-  }
-  if (row.sending) {
-    return t('core.chatModelnameAgentRabotaet', { modelName: modelName });
-  }
-
-  return modelName;
+  return `${project} · ${status}`;
 }
 
 /**
@@ -1332,47 +1321,41 @@ async function del(r: ListRow) {
   border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
 .row.wait.cur { --row-bg: color-mix(in srgb, var(--warn, #e0a33a) 18%, var(--surface)); }
 
-.ava { flex: none; width: var(--chat-avatar-size); height: var(--chat-avatar-size); border-radius: 50%; display: grid; place-items: center;
-  background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  font-size: 15px; font-weight: 600; position: relative; }
-/* Знак исполнителя — в цвете исполнителя. Одинаково-серые аватары в списке из двадцати
-   строк не различаются вовсе: чат приходилось искать по подписи модели, а сам знак
-   работал украшением. Фирменные цвета рассчитаны на светлый фон, поэтому на тёмном
-   подмешиваем белый (знак) и фон карточки (заливка с рамкой) — иначе тёмно-фиолетовый
-   Kimi на #1c222c читается пятном. Чат без знака (реестр ещё не приехал, буква-фоллбэк)
-   остаётся нейтральным: `--prov` там не задан. */
-.ava.brand { color: color-mix(in srgb, var(--prov) 72%, #fff);
-  background: color-mix(in srgb, var(--prov) 17%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--prov) 45%, var(--line)); }
-/* Полную силу цвета получают только чаты, которые сейчас чего-то стоят: открытый,
-   работающий и вставший на вопросе. Остальные приглушены — иначе список из двадцати
-   строк горит ровным ковром и выделять в нём нечего.
-   Приглушаем ОБЕСЦВЕЧИВАНИЕМ (подмешиваем нейтральный `--ink-mid`), а не затемнением
-   и не прозрачностью. Обе «очевидные» альтернативы роняют знак ниже порога графики
-   3:1 к своей заливке, причём первым всегда Kimi — его фиолетовый и так самый тёмный
-   (замер: `opacity: .72` → 2.98, подмешивание тёмной нейтрали → 2.87). Обесцвечивание,
-   наоборот, контраст даже поднимает: нейтраль светлее тёмных фирменных цветов.
-   Текущие числа — знак 3.6–5.6:1 к заливке, отличие от полной силы ΔE 13.5–18.1
-   (рядом видно), различимость исполнителей между собой ΔE ≥ 26.8. */
-.row:not(.cur):not(.wait) .ava.brand:not(.live) {
-  color: color-mix(in srgb, var(--prov) 50%, var(--ink-mid));
-  background: color-mix(in srgb, var(--prov) 9%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--prov) 26%, var(--line)); }
-/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса.
-   Цвет тут исполнительский (`--prov`), а не общий акцент: иначе работающие чаты снова
-   сливались бы между собой — ровно в тот момент, когда их и различают. */
-.ava.live { color: color-mix(in srgb, var(--prov, var(--accent)) 82%, #fff);
-  background: color-mix(in srgb, var(--prov, var(--accent)) 16%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--prov, var(--accent)) 62%, var(--line));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--prov, var(--accent)) 24%, transparent); }
-.ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--prov, var(--accent)) 22%, transparent);
-  border-top-color: var(--prov, var(--accent));
-  border-right-color: color-mix(in srgb, var(--prov, var(--accent)) 68%, transparent);
-  animation: chat-live-spin .85s linear infinite; }
+.ava {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--chat-avatar-size);
+  height: var(--chat-avatar-size);
+}
+.ava > .project-avatar {
+  width: calc(100% - 4px);
+  height: calc(100% - 4px);
+  border-radius: 50%;
+}
+.ava > .project-avatar.has-image {
+  background: var(--surface-2);
+}
+/* Кольцо вращается вокруг неподвижного аватара проекта. */
+.ava.live::before {
+  --live-ring-color: var(--prov, var(--accent));
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 2px solid color-mix(in srgb, var(--live-ring-color) 24%, transparent);
+  border-top-color: var(--live-ring-color);
+  border-right-color: color-mix(in srgb, var(--live-ring-color) 68%, transparent);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: chat-live-spin .85s linear infinite;
+}
 @keyframes chat-live-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--prov, var(--accent)) 72%, transparent); }
+  .ava.live::before {
+    animation: none;
+    border-color: var(--live-ring-color);
+  }
 }
 /* «Непрочитано» — точка на аватаре: не двигает разметку строки и не спорит с кольцом работы */
 .udot { position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
@@ -1385,6 +1368,11 @@ async function del(r: ListRow) {
 /* Модель чата — мелкой подписью рядом с названием; при нехватке места жертвуем ею, а не названием */
 .mdl { flex: none; font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px;
   padding: 0 5px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdl.brand {
+  color: color-mix(in srgb, var(--prov) 48%, var(--ink));
+  background: color-mix(in srgb, var(--prov) 14%, var(--row-bg));
+  border-color: color-mix(in srgb, var(--prov) 45%, var(--line));
+}
 /* «Ждёт ответа» — чип на месте подписи модели: тёплый, заметный, но не кричащий */
 .wchip { flex: none; font-size: 10.5px; font-weight: 600; color: var(--warn, #e0a33a); line-height: 1.6;
   border: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 55%, transparent); border-radius: 5px; padding: 0 5px;
