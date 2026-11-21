@@ -5,7 +5,8 @@
 allprojects {
     afterEvaluate { project ->
         if (project.name == 'client' && project.extensions.findByName('android') != null) {
-            def probeRoot = new File(settingsDir, '../../tools/android/probe-apk').canonicalFile
+            def probeRoot = new File(project.rootProject.projectDir,
+                    '../../tools/android/probe-apk').canonicalFile
 
             project.android {
                 buildTypes {
