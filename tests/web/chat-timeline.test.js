@@ -105,6 +105,28 @@ test('старт, действия и реплики образуют одну �
   }), snapshot);
 });
 
+test('обновление счётчика вытесненных шагов не переносит уточнение выше старых действий', () => {
+  const cutoff = 400;
+  const hidden = { k: 'note', truncated: true, at: cutoff, text: 'Ранние шаги скрыты' };
+  const retained = Array.from({ length: cutoff - 1 }, (_, index) => ({
+    k: 'tool', id: `old-${index}`, at: index + 1, title: `Старое действие ${index + 1}`,
+  }));
+  const chatMessage = { ...clarification, receipt: { acceptedAt: cutoff + 1 } };
+  const messages = [parent, chatMessage];
+  const latest = { k: 'tool', id: 'new', at: cutoff + 2, title: 'Новое действие' };
+  const before = chatTimeline(messages, [hidden, ...retained], true, run);
+  const buffered = [{ ...hidden, at: latest.at }, ...retained.slice(1), latest];
+  const after = chatTimeline(messages, buffered, true, run);
+  const saved = chatTimeline([...messages, {
+    role: 'assistant', runId: RUN, text: 'Итог', steps: buffered,
+  }], [], false, null);
+
+  assert.deepEqual(labels(before).slice(-3), [retained.at(-1).title, chatMessage.text, 'Работает']);
+  assert.equal(labels(after)[1], hidden.text);
+  assert.deepEqual(labels(after).slice(-4), [retained.at(-1).title, chatMessage.text, latest.title, 'Работает']);
+  assert.deepEqual(labels(saved).slice(-4), [retained.at(-1).title, chatMessage.text, latest.title, 'Итог']);
+});
+
 test('сохранённый ход сохраняет порядок и полный итог вне компактных реплик', () => {
   const final = {
     ...answer,

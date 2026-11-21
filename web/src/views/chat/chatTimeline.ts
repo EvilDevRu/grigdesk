@@ -8,6 +8,7 @@ interface TimelineStep {
   k: string;
   id?: string;
   at?: number;
+  truncated?: boolean;
   [field: string]: unknown;
 }
 
@@ -97,7 +98,7 @@ function messageRow(message: TimelineMessage, index: number, offset = 0): ChatTi
 
 /**
  * Текстовый шаг с общим id задаёт точное место реплики, даже в старой истории без времени.
- * Для уточнения берём серверное время приёма; неизвестное место ограничиваем соседями.
+ * Серверное время приёма сравниваем с действиями. Счётчик в начале обновляется при вытеснении.
  */
 function messageBoundary(message: TimelineMessage, steps: TimelineStep[]): number | null {
   if (Array.isArray(message.steps) || message.finalAssistantMessageId) {
@@ -117,7 +118,7 @@ function messageBoundary(message: TimelineMessage, steps: TimelineStep[]): numbe
     return null;
   }
 
-  const later = steps.findIndex((step) => step.at && step.at > at);
+  const later = steps.findIndex((step) => !step.truncated && step.at && step.at > at);
 
   return later < 0 ? steps.length : later;
 }

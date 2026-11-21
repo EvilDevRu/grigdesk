@@ -291,7 +291,7 @@ function historyMessage(
 
 /**
  * Группа уточнений и завершённых блоков занимает место перед финалом своего запуска.
- * Локальный индекс сохраняет прежние сообщения без повторных обходов всей истории.
+ * Записи в страницах дополняют историю. Отсутствующая на странице реплика остаётся в группе.
  */
 export function materializeInTurnMessages(
   messages: HistoryMessage[],
@@ -306,13 +306,41 @@ export function materializeInTurnMessages(
 
   const previous = indexHistoryMessages(messages, run.runId);
   const group = entries.map((entry) => historyMessage(entry, run, previous));
-  const kept = messages.filter((message) => message.runId !== run.runId
-    || (message.kind !== 'in-turn' && message.kind !== 'assistant-block'));
-  const parent = kept.findIndex((message) => message.role === 'user'
-    && message.turnId === run.parentTurnId);
+  const seen = new Set(entries.map(inTurnEntryKey));
+  const kept: HistoryMessage[] = [];
+  let previousAnchor = -1;
+
+  for (const message of messages) {
+    if (message.runId !== run.runId || (message.kind !== 'in-turn' && message.kind !== 'assistant-block')) {
+      kept.push(message);
+
+      continue;
+    }
+    if (previousAnchor < 0) {
+      previousAnchor = kept.length;
+    }
+
+    const receipt = message.kind === 'in-turn';
+    const id = receipt ? message.messageId : message.assistantMessageId;
+    const key = `${receipt ? 'user' : 'assistant'}:${id}`;
+
+    if (typeof id === 'string' && id && !seen.has(key)) {
+      group.push(message);
+      seen.add(key);
+    }
+  }
+
+  if (group.length > entries.length) {
+    group.sort((left, right) => Number(left.sequence ?? Infinity) - Number(right.sequence ?? Infinity));
+  }
+
+  const parent = run.parentTurnId
+    ? kept.findIndex((message) => message.role === 'user' && message.turnId === run.parentTurnId)
+    : -1;
   const final = kept.findIndex((message) => message.runId === run.runId
     && message.role === 'assistant');
-  const at = final >= 0 ? final : (parent >= 0 ? parent + 1 : kept.length);
+  const fallback = previousAnchor >= 0 ? previousAnchor : kept.length;
+  const at = final >= 0 ? final : (parent >= 0 ? parent + 1 : fallback);
 
   kept.splice(at, 0, ...group);
 

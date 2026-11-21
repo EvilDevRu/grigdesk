@@ -96,6 +96,9 @@ Answers and actions remain in the transcript. Unsent text is saved as a draft.
 Questions prepared from help open a separate conversation and wait for you to send them.
 
 New answer blocks preserve earlier replies and steering messages in their order.
+In a long turn, the hidden-step count stays at the start of the feed. Steering
+messages keep their place among visible actions. While the turn history syncs,
+messages already shown stay visible even if a later page fails to load.
 Receiving the same block again does not add a copy. You do not need to clear
 a long conversation's history to process new replies.
 

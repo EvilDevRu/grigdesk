@@ -99,6 +99,61 @@ test('FLOW-11/16: active snapshot and paged GET restore ordered messages once', 
   assert.equal(messages.filter((m) => m.assistantMessageId === 'answer-12345678').length, 1);
 });
 
+test('неполная сверка сохраняет уточнение из загруженной истории при отказе второй страницы', async (t) => {
+  const initial = base();
+  const saved = receipt(3, 'msg-later-page');
+  const first = [block(1, 'answer-first'), block(2, 'answer-second')];
+
+  initial.messages = materializeInTurnMessages(initial.messages, {
+    runId: RUN, parentTurnId: TURN, entries: [saved],
+  });
+
+  const chat = await chatStoreFixture({ sessions: [initial] });
+
+  t.after(() => chat.$dispose());
+  chat._persist = () => {};
+
+  const session = chat.sessions[0];
+  const savedMessage = session.messages.at(-1);
+  const pageOne = page(first, 2, 3);
+  const observedDuringRead = [];
+  let failSecondPage = true;
+
+  apiHarness.get = async (url) => {
+    if (url === '/api/chat/active') {
+      return {
+        protocol: 1,
+        active: [{ chatKey: CHAT, runId: RUN, turnId: TURN, inTurn: { ...availability, ...pageOne } }],
+      };
+    }
+    if (url.includes('afterSequence=0')) {
+      return pageOne;
+    }
+
+    assert.ok(url.includes('afterSequence=2'));
+    observedDuringRead.push(session.messages.find((message) => message.messageId === saved.messageId));
+
+    if (failSecondPage) {
+      throw Object.assign(new Error('Отказ второй страницы'), { status: 503 });
+    }
+
+    return page([saved], null, 3);
+  };
+
+  await chat._loadActive();
+  assert.equal(observedDuringRead[0] === savedMessage, true);
+  assert.equal(session.messages.at(-1) === savedMessage, true);
+  assert.equal(chat.inTurnFor(CHAT).completeThrough, 0);
+
+  failSecondPage = false;
+  assert.equal(await chat._reconcileInTurn(CHAT, RUN), true);
+  assert.equal(observedDuringRead[1] === savedMessage, true);
+  assert.equal(chat.inTurnFor(CHAT).completeThrough, 3);
+  assert.deepEqual(session.messages.map((message) => message.text), [
+    'Сделай два шага', ...first.map((entry) => entry.text), saved.text,
+  ]);
+});
+
 test('FLOW-11: late draft/receipt revisions do not roll back completed answer', async () => {
   const chat = await chatStoreFixture({ sessions: [base()] });
 

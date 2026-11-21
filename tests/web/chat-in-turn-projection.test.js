@@ -195,6 +195,25 @@ test('PROJECT-METADATA: новая ревизия сохраняет финал�
   assert.equal(result[2].steps === steps, true);
 });
 
+test('PROJECT-PARTIAL: сохраняет место и порядок группы без исходного вопроса в окне', () => {
+  const { state } = projectionFixture(3);
+  const before = { role: 'user', text: 'Прежний вопрос без id' };
+  const note = { role: 'note', text: 'Соседняя запись выше' };
+  const after = { role: 'user', text: 'Следующий вопрос' };
+  const first = state.messages[0];
+  const last = state.messages[2];
+  const middle = state.run.entries[1];
+  const result = materializeInTurnMessages([before, note, first, last, after], {
+    ...state.run, parentTurnId: undefined, entries: [middle],
+  });
+
+  assert.deepEqual(result.map((message) => message.text), [
+    before.text, note.text, first.text, middle.text, last.text, after.text,
+  ]);
+  assert.equal(result[2] === first, true);
+  assert.equal(result[4] === last, true);
+});
+
 test('PROJECT-EMPTY: пустая видимая группа не обходит прежнюю историю', () => {
   const history = [{
     get runId() {
