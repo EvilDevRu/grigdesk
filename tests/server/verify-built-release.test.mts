@@ -24,16 +24,22 @@ const root = path.resolve(import.meta.dirname, '../..');
  */
 test('VERIFY-BUILT-INSTALLATION: официальный verifier доказывает три завершённые установки', async (t) => {
   const built = await installedBuild(t, 'release', {
-    maintenanceSource: async (signer: { publicKeyPem: string }) => {
-      const module = await loadInstalledModule(t, 'tests/fixtures/release-v2/maintenance.mts', signer.publicKeyPem);
-      const entry = `import { runMaintenance } from ${JSON.stringify(module.fixtureModuleUrl)};
-        process.execPath = process.argv[1];
-        process.exitCode = await runMaintenance(process.argv.slice(2));`;
-
-      return `#!/bin/sh\nexec ${shellQuote(process.execPath)} --input-type=module -e `
-        + `${shellQuote(entry)} "$0" "$@"\n`;
-    },
+    realGoUtilities: true,
     builderSource: async (name: string, _input: unknown, metadata: FixtureBinaryMetadata) => {
+      if (['tracker', 'pipeline', 'routes', 'voice', 'relay'].includes(name)) {
+        const info = {
+          schema: 1,
+          kind: name === 'relay' ? 'grigdesk-relay' : name,
+          version: metadata.version,
+          runtime: 'go',
+          go: 'go1.27.4',
+          os: 'linux',
+          arch: 'amd64',
+        };
+
+        return `#!/bin/sh\nprintf '%s\\n' ${shellQuote(JSON.stringify(info))}\n`;
+      }
+
       const server = {
         format: 1,
         hostContract: 1,

@@ -303,7 +303,7 @@ export async function inspectAndroidElf(
     env: { ...process.env, LC_ALL: 'C' },
   });
   const expectedMachine = abi === 'arm64-v8a' ? 'AArch64' : 'X86-64';
-  const machine = /Machine:\s+(.+)/u.exec(stdout)?.[1].trim() ?? '';
+  const machine = /Machine:\s+(.+)/u.exec(stdout)?.[1]?.trim() ?? '';
   const type = /Type:\s+(\S+)/u.exec(stdout)?.[1] ?? '';
   const entry = /Entry point address:\s+(0x[0-9a-f]+)/u.exec(stdout)?.[1] ?? '';
   const interpreter = /\[Requesting program interpreter: ([^\]]+)\]/u.exec(stdout)?.[1] ?? '';
@@ -320,12 +320,12 @@ export async function inspectAndroidElf(
   }
 
   const aligns = [...stdout.matchAll(/^\s+LOAD\s+.*\s(0x[0-9a-f]+)\s*$/gmu)]
-    .map((match) => Number.parseInt(match[1], 16));
+    .map((match) => Number.parseInt(match[1] ?? '', 16));
   // 16 КиБ требуется только arm64 (устройства с 16K-страницами);
   // Android x86_64 использует 4K-страницы — там достаточно 0x1000.
   const minAlign = abi === 'arm64-v8a' ? maxPageSize : 4096;
 
-  if (aligns.length === 0 || aligns.some((align) => align < minAlign)) {
+  if (aligns.length === 0 || aligns.some((align) => !Number.isFinite(align) || align < minAlign)) {
     throw new Error('bionic_node_elf_alignment_invalid');
   }
 

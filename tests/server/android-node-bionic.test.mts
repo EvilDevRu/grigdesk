@@ -29,7 +29,7 @@ test('ANDROID-NODE-PATCH: патч execinfo закреплён и идемпот
   const patches = readBionicPatches();
   const patch = patches[0];
 
-  assert.ok(patches.length >= 1);
+  assert.ok(patch, 'обязателен патч execinfo');
   assert.equal(patch.file, 'deps/v8/src/base/debug/stack_trace_posix.cc');
   assert.ok(patch.from.includes('V8_LIBC_BSD'));
   assert.ok(patch.to.includes('!V8_LIBC_BIONIC'));
@@ -66,6 +66,9 @@ test('ANDROID-NODE-PATCH: патч execinfo закреплён и идемпот
 test('ANDROID-NODE-PATCH: отсутствующий контекст останавливает сборку', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bionic-patch-'));
   const patch = readBionicPatches()[0];
+
+  assert.ok(patch, 'обязателен патч execinfo');
+
   const file = path.join(dir, patch.file);
 
   await fs.mkdir(path.dirname(file), { recursive: true });

@@ -205,6 +205,7 @@ const POS = { build: [0, 0], lint: [1, 0], gate_accept: [2, 0], ship: [3, 0] };
 
 // HTTP resume проходит настоящий resolver и unpin. Подменяется только процесс
 // движка: юнит публикует причину в stages.log, а «живость» задаёт ответ адаптера.
+// Повтор остаётся на текущем Go-движке. Устаревший путь проверяется отдельно.
 for (const scenario of [
   {
     first: 'incompatible',
@@ -257,12 +258,6 @@ for (const scenario of [
       immutableFiles.map((file) => readFile(path.join(attemptDir, file), 'utf8')),
     );
 
-    const nextBin = path.join(fx.root, 'bin/factory-current');
-
-    await writeFile(nextBin, '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-
-    fx.config.factoryBin = nextBin;
-
     await writeFile(path.join(fx.root, 'bin/systemd-run'), `#!/usr/bin/env bash
 if [[ "$1" == --version ]]; then echo 'systemd 252 (fixture)'; exit 0; fi
 printf '%s\\n' "$*" >> '${fx.callsLog}'
@@ -301,13 +296,13 @@ exit 3
 
     assert.equal(calls.length, scenario.launches, 'перепривязка ограничена одним повтором');
     assert.ok(calls[0].includes(beforePin.engineBin), 'первый запуск использует прежний pin');
-    assert.equal(afterPin.engineBin, scenario.launches === 2 ? nextBin : beforePin.engineBin);
+    assert.equal(afterPin.engineBin, fx.config.factoryBin);
     assert.deepEqual(await Promise.all(
       immutableFiles.map((file) => readFile(path.join(attemptDir, file), 'utf8')),
     ), before, 'попытка, каталог, маршрут, курсор и active pointer сохраняют исходные bytes');
 
     if (scenario.launches === 2) {
-      assert.ok(calls[1].includes(nextBin), 'повтор использует текущую поставку');
+      assert.ok(calls[1].includes(fx.config.factoryBin), 'повтор использует текущую поставку');
     }
 
     if (scenario.status === 500) {
@@ -317,6 +312,23 @@ exit 3
     }
   });
 }
+
+test('/resume отказывает до запуска, если попытка закреплена за прежним движком', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'ship', state: 'ready' } });
+  await prepareFactoryRouteLaunch(fx.config, ['7', 'resume', '--profile', 'demo', '--attempt', ATTEMPT]);
+
+  const installedBin = path.join(fx.root, 'bin/factory-current');
+
+  await writeFile(installedBin, '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  fx.config.factoryBin = installedBin;
+
+  const app = await server(t, fx);
+  const response = await app.inject({ method: 'POST', url: '/api/tasks/7/resume', payload: {} });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.json().error, 'factory_runtime_engine_retired');
+  await assert.rejects(access(fx.callsLog), { code: 'ENOENT' });
+});
 
 test('v2-реестр не дорисовывает ворота без явной записи waiting', () => {
   // LINT=done записан узлом, коммит в журнал не лёг — ворота не достигнуты.
