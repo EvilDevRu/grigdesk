@@ -6,7 +6,7 @@ import { nodeExecutable, runtimeKind } from './lib/runtimePaths.ts';
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type { InjectOptions } from 'light-my-request';
@@ -17,7 +17,7 @@ import websocket from '@fastify/websocket';
 import { isProjectDeleted, deletedProjectIds } from './lib/projects/deletion.ts';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
-import { attachDesktopParent } from './lib/desktopParent.ts';
+import { attachDesktopParent, DESKTOP_WINDOW_KEY_MESSAGE } from './lib/desktopParent.ts';
 import { startProcessWatchdog } from './lib/processWatchdog.ts';
 import type { DesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
@@ -34,7 +34,7 @@ import { relayVpnGate } from './lib/mobile/vpn.ts';
 import mobileModule from './modules/mobile/index.ts';
 import { grigDeskCliPath } from './lib/cliPath.ts';
 import { AuthStore } from './lib/authStore.ts';
-import { registerWindowKeyLifecycle } from './lib/windowKey.ts';
+import { registerWindowKeyLifecycle, windowKeyOwnerUid } from './lib/windowKey.ts';
 import type { WindowAuthState } from './lib/windowKey.ts';
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { configureWindowsProcessIdentity } from '../../shared/node/windowsProcessIdentity.ts';
@@ -1130,11 +1130,22 @@ async function build(desktopParent: DesktopParent | null) {
     key: null,
   };
 
-  registerWindowKeyLifecycle(fastify, windowAuth, windowKeyPath({
-    env: process.env,
-    uid: process.getuid?.(),
-    port: config.port,
-  }));
+  if (process.platform === 'win32' && desktopParent) {
+    fastify.addHook('onListen', async () => {
+      windowAuth.key = randomBytes(32).toString('base64url');
+      process.send?.({ type: DESKTOP_WINDOW_KEY_MESSAGE, key: windowAuth.key }, (error) => {
+        if (error) {
+          windowAuth.key = null;
+        }
+      });
+    });
+  } else {
+    registerWindowKeyLifecycle(fastify, windowAuth, windowKeyPath({
+      env: process.env,
+      uid: windowKeyOwnerUid(),
+      port: config.port,
+    }));
+  }
 
   // Плагины платформы.
   // Гард закрывает весь /api, включая upgrade вебсокета.

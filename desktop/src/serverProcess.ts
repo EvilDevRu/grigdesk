@@ -31,6 +31,7 @@ export function spawnServer(runtime: ServerRuntime, logFd: number | 'pipe', spaw
     serialization: 'json',
     detached: false,
     shell: false,
+    ...(runtime.windowsInstalled ? { windowsHide: true } : {}),
   });
 }
 
@@ -48,6 +49,14 @@ export function runVpnGate(
       code: 1,
       lastLine: '',
     });
+  }
+
+  if (runtime.windowsInstalled) {
+    const required = runtime.env.GRIGDESK_REQUIRE_VPN;
+
+    return !required || required === '0'
+      ? { code: 0, lastLine: '' }
+      : { code: 1, lastLine: 'VPN-ворота: проверка интерфейса недоступна в установке Windows' };
   }
 
   return new Promise((resolve) => {
@@ -114,7 +123,7 @@ export function runVpnGate(
  * Недоступный менеджер пользователя считается отсутствием сведений о службе.
  */
 export async function readUnitState(signal: AbortSignal, execFileImpl = execFile): Promise<string> {
-  if (signal.aborted) {
+  if (signal.aborted || process.platform === 'win32') {
     return 'unavailable';
   }
 

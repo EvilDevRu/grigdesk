@@ -12,6 +12,8 @@ export interface ChildHandle {
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
   kill(signal: 'SIGTERM' | 'SIGKILL'): boolean;
+  readonly connected?: boolean;
+  disconnect?(): void;
   once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   once(event: 'error', listener: (error: Error) => void): unknown;
   on?(event: 'message', listener: (message: unknown) => void): unknown;
@@ -581,7 +583,11 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     const startedAt = adapters.now();
 
     adapters.log(JSON.stringify({ event: 'server.stop.start', budgetMs: child.runtime.graceMs }));
-    child.handle.kill('SIGTERM');
+    if (child.runtime.windowsInstalled && child.handle.connected && child.handle.disconnect) {
+      child.handle.disconnect();
+    } else {
+      child.handle.kill('SIGTERM');
+    }
 
     if (await exitedWithin(child, child.runtime.graceMs)) {
       adapters.log(JSON.stringify({

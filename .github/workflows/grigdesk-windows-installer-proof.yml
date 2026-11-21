@@ -1,0 +1,48 @@
+name: GrigDesk Windows installer proof
+on:
+  push:
+    branches: [ci/native-windows-installer-20261122]
+permissions:
+  contents: read
+jobs:
+  install:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    env:
+      WINDOWS_SMOKE_TARGET: windows-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.21.0'
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+      - name: Dependencies
+        shell: bash
+        run: |
+          npm --prefix server ci --include=dev
+          npm --prefix web ci --include=dev
+          npm --prefix desktop ci --include=dev
+      - name: Build and install signed test package
+        run: node tools/ci/windowsInstallerSmoke.mts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: windows-install-${{ matrix.arch }}
+          path: |
+            windows-build/
+            windows-proof/
+          if-no-files-found: warn

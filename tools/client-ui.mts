@@ -33,7 +33,10 @@ export async function prepareClientUi(options: {
   let preserve = false;
 
   try {
-    const result = await (options.run || execute)('npm', [
+    const npm = process.platform === 'win32' && !options.run
+      ? [process.execPath, path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js')]
+      : ['npm'];
+    const result = await (options.run || execute)(npm[0]!, [...npm.slice(1),
       '--prefix', path.join(root, 'web'), 'run', 'build', '--',
       '--outDir', output, '--emptyOutDir',
     ], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
