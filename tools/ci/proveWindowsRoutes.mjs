@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -64,7 +64,18 @@ if (process.argv[2]) {
       expectedSourceRevision: 1, operationId: '44444444-4444-4444-8444-444444444444',
     };
     const editor = new RoutesPublicationCoordinator(store, drafts, profilesDir);
-    const receipt = await editor.publish(profile, input);
+    let receipt;
+    try {
+      receipt = await editor.publish(profile, input);
+    } catch (error) {
+      const revisions = await fs.readdir(path.join(routesDir, profile, 'catalog', 'revisions'));
+      for (const hash of revisions) {
+        const cli = spawnSync(path.resolve('bin/factory.exe'), ['route', '--routes-dir', routesDir,
+          '--profile', profile, 'catalog', '--catalog-hash', hash], { encoding: 'utf8' });
+        console.error('Prepared catalog reader:', cli.status, cli.stderr || cli.error || cli.stdout);
+      }
+      throw error;
+    }
 
     assert.deepEqual(await editor.publish(profile, input), receipt);
     assert.equal((await store.readCurrent(profile)).catalogHash, receipt.toCatalogHash);
