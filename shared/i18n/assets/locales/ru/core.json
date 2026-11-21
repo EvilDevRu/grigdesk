@@ -3764,6 +3764,7 @@
   "showcaseSohranennyyGolosNedostupen": "— сохранённый голос недоступен",
   "showcaseNedostupen": "— недоступен",
   "showcaseVoiceLanguages": "Языки: {languages}",
+  "showcaseVoiceLanguageFilter": "Язык озвучки",
   "showcaseProslushat": "Прослушать",
   "showcaseTempRechiPacelabel": "Темп речи — {paceLabel}",
   "showcaseTempRechi": "Темп речи",

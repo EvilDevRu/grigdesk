@@ -15,6 +15,9 @@
         <UiField :label="t('core.showcaseGolosRolika')" class="voice__field">
           <UiSelect
             data-testid="showcase-voice-select"
+            searchable
+            :option-filters="languageFilters"
+            :filters-label="t('core.showcaseVoiceLanguageFilter')"
             :model-value="currentVoice"
             :disabled="busy || !availableVoiceRefs.length"
             @update:model-value="onVoice"
@@ -28,11 +31,16 @@
                 :key="voice.ref"
                 :value="voice.ref"
                 :data-description="voice.languageLabel"
+                :data-search-keywords="voice.languageKeywords"
+                :data-filter-keys="voice.languageKeys.join(' ')"
                 :disabled="!voice.available"
               >
                 {{ voice.name }}{{ voice.available ? '' : t('core.showcaseNedostupen') }}
               </option>
             </optgroup>
+            <template #group-leading="{ groupKey }">
+              {{ languageFlags.get(groupKey) }}
+            </template>
           </UiSelect>
         </UiField>
         <UiButton
@@ -204,6 +212,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   UiButton, UiDisclosureButton, UiDiscreteSlider, UiField, UiSelect, UiTextarea, t, uiLocale,
 } from '../../ui';
+import { countryFlag } from '../../shared/countryFlag.ts';
 import type {
   ShowcasePace,
   ShowcaseVoiceCatalog,
@@ -212,6 +221,7 @@ import type {
 } from '../../../../shared/plugins/showcase/showcaseContracts';
 
 type Pace = ShowcasePace;
+type Voice = ShowcaseVoiceCatalog['engines'][number]['voices'][number];
 
 const props = withDefaults(defineProps<{
   catalog: ShowcaseVoiceCatalog | null;
@@ -310,27 +320,78 @@ const pendingEngines = computed(() => (
   (props.catalog?.engines ?? []).filter((engine) => engine.doctor.status !== 'ready')
 ));
 
-// Голоса, которыми можно говорить прямо сейчас, сгруппированные по движку.
-// Недоступные в список выбора не попадают: выбрать голос, который молчит, нельзя.
-const groups = computed(() => {
-  const names = new Intl.DisplayNames(uiLocale.value, { type: 'language' });
+const russianLanguageNames = new Intl.DisplayNames('ru', { type: 'language' });
+const englishLanguageNames = new Intl.DisplayNames('en', { type: 'language' });
+const localizedLanguageNames = computed(() => new Intl.DisplayNames(uiLocale.value, { type: 'language' }));
 
-  return (props.catalog?.engines ?? [])
-    .map((engine) => ({
-      engineId: engine.id,
-      name: engine.name,
-      voices: engine.voices
-        .filter((voice) => voice.available || `${engine.id}:${voice.id}` === props.voiceRef)
-        .map((voice) => ({
-          ref: `${engine.id}:${voice.id}`,
-          name: voice.name,
-          languageLabel: (voice.languages ?? []).map((code) => names.of(code) ?? code).join(', '),
-          available: voice.available,
-          capabilities: voice.capabilities,
-        })),
-    }))
-    .filter((group) => group.voices.length > 0);
+/**
+ * Каталог может содержать собственные коды диалектов движка.
+ * Если Intl не разбирает код, его текст всё равно присутствует в подписи и поиске.
+ */
+function languageName(names: Intl.DisplayNames, code: string): string {
+  try {
+    return names.of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+/**
+ * Фильтр объединяет варианты языка по основному коду, сохраняя подписи диалектов.
+ * Поиск знает оба языка интерфейса. В старых каталогах доступно только поле language.
+ */
+function voiceLanguages(voice: Voice) {
+  const codes = [...new Set((voice.languages?.length ? voice.languages : [voice.language])
+    .map((code) => code.trim().toLowerCase())
+    .filter(Boolean))];
+  const languageKeys = [...new Set(codes.map((code) => code.split('-', 1)[0]!))]
+    .filter((code) => /^(?:[a-z]{2,3}|[a-z]{5,8})$/.test(code));
+  const keywords = [...new Set([...codes, ...languageKeys])]
+    .flatMap((code) => [
+      code,
+      languageName(russianLanguageNames, code),
+      languageName(englishLanguageNames, code),
+    ]);
+
+  return {
+    languageKeys,
+    languageLabel: codes.map((code) => languageName(localizedLanguageNames.value, code)).join(', '),
+    languageKeywords: [...new Set(keywords)].join(' '),
+  };
+}
+
+// Каталог сгруппирован по движку. Из недоступных вариантов остаётся сохранённый
+// голос, чтобы при обновлении каталога поле могло показать его подпись.
+const groups = computed(() => (props.catalog?.engines ?? [])
+  .map((engine) => ({
+    engineId: engine.id,
+    name: engine.name,
+    voices: engine.voices
+      .filter((voice) => voice.available || `${engine.id}:${voice.id}` === props.voiceRef)
+      .map((voice) => ({
+        ref: `${engine.id}:${voice.id}`,
+        name: voice.name,
+        ...voiceLanguages(voice),
+        available: voice.available,
+        capabilities: voice.capabilities,
+      })),
+  }))
+  .filter((group) => group.voices.length > 0));
+
+const languageFilters = computed(() => {
+  const keys = new Set(groups.value.flatMap((group) => group.voices
+    .filter((voice) => voice.available)
+    .flatMap((voice) => voice.languageKeys)));
+  const locale = uiLocale.value;
+
+  return [...keys]
+    .map((key) => ({ key, label: languageName(localizedLanguageNames.value, key) }))
+    .sort((left, right) => left.label.localeCompare(right.label, locale));
 });
+
+const languageFlags = computed(() => new Map(languageFilters.value.map(({ key }) => [
+  key, countryFlag(new Intl.Locale(key).maximize().region),
+])));
 
 // Пока человек ничего не выбирал, звучит первый доступный голос первого готового
 // движка — ровно тот, который возьмёт сервер. Показывать пустой выбор нельзя:

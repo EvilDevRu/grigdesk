@@ -484,6 +484,7 @@ async function mountView(t, {
   reactiveStore = false,
   applyResponses = false,
   adaptResult = true,
+  stubTeleport = false,
 } = {}) {
   const browser = await createUiBrowser(url);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -589,7 +590,10 @@ async function mountView(t, {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
+  const wrapper = mount(component, {
+    attachTo: browser.document.querySelector('#mount'),
+    global: { stubs: { teleport: stubTeleport } },
+  });
 
   // Сначала снимаем Vue-наблюдатели и только потом закрываем DOM. Обратный порядок
   // оставлял runtime-dom с узлами уже закрытого Window и постепенно раздувал suite.
@@ -1687,6 +1691,66 @@ test('сцены старше карты экранов получают пре�
 
 // Темп — пять ступеней на ползунке, и переводит их выбранный диктор; у голоса без
 // темпа и у старого ответа без capabilities ползунка нет вовсе.
+test('каталог голосов совмещает флаг и поиск по языку, сохраняя выбор ролика', async (t) => {
+  const [piper] = readyVoiceCatalog().engines;
+  const [localVoice] = piper.voices;
+  const voices = voiceCatalog({
+    engines: [piper, {
+      ...piper,
+      id: 'qwen-token',
+      name: 'Qwen Token Plan',
+      voices: [
+        {
+          ...localVoice,
+          id: 'long',
+          name: 'Long An Huan',
+          languages: ['ru', 'en', 'zh-cantonese'],
+        },
+        {
+          ...localVoice,
+          id: 'olivia',
+          name: 'Olivia Lin',
+          language: 'en',
+        },
+      ],
+    }],
+  });
+  const { wrapper, flushPromises, calls } = await mountView(t, { voices, stubTeleport: true });
+  const trigger = wrapper.get('button[data-testid="showcase-voice-select"]');
+
+  await trigger.trigger('click');
+  await flushPromises();
+
+  const popup = wrapper.get('.ui-select-popup');
+  const search = popup.get('input[type="search"]');
+  const english = popup.get('[data-select-group="en"]');
+
+  assert.match(popup.get('[data-select-group="ru"]').text(), /🇷🇺/);
+  assert.equal(popup.get('[data-select-group="ru"]').attributes('aria-label'), 'русский');
+
+  await popup.get('[data-select-group="zh"]').trigger('click');
+  assert.match(popup.get('[role="option"]').text(), /Long An Huan/);
+
+  await english.trigger('click');
+  assert.deepEqual(
+    popup.findAll('[role="option"]').map((row) => row.attributes('data-option-index')),
+    ['1', '2'],
+  );
+  assert.match(trigger.text(), /Ирина/);
+
+  await search.setValue('Русский');
+  assert.equal(english.attributes('aria-pressed'), 'true');
+  assert.match(popup.get('[role="option"]').text(), /Long An Huan/);
+
+  await popup.get('[data-select-group="all"]').trigger('click');
+  await search.setValue('Russian');
+  assert.deepEqual(
+    popup.findAll('[role="option"]').map((row) => row.attributes('data-option-index')),
+    ['0', '1'],
+  );
+  assert.equal(calls.some(([name]) => name === 'set-voice'), false);
+});
+
 test('темп речи — ползунок из пяти ступеней, а голос без темпа его не показывает', async (t) => {
   const { wrapper, flushPromises, calls } = await mountView(t, { voices: readyVoiceCatalog() });
   const slider = wrapper.find('[data-testid="showcase-voice-pace"] input[type="range"]');

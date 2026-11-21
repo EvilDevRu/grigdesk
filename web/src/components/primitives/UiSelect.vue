@@ -19,9 +19,9 @@
     <UiPopover
       :open="open"
       :style="popupStyle"
-      :data-ui-workspace="workspaceMode || groupNavigation || undefined"
+      :data-ui-workspace="workspaceMode || showNavigation || undefined"
       :data-ui-touch="touchMode || undefined"
-      :data-group-navigation="groupNavigation || undefined"
+      :data-group-navigation="showNavigation || undefined"
       :data-density="compact ? 'compact' : undefined"
       :data-option-layout="optionLayout === 'inline' ? 'inline' : undefined"
       class="ui-select-popup"
@@ -84,20 +84,20 @@
           />
         </div>
         <div
-          v-if="groupNavigation && navigationGroups.length"
+          v-if="showNavigation && navigationGroups.length"
           class="ui-select-group-nav"
           role="group"
-          :aria-label="t('core.selectGroups')"
+          :aria-label="(useOptionFilters && filtersLabel) || t('core.selectGroups')"
         >
           <UiButton
             variant="ghost"
             size="compact"
-            :pressed="effectiveGroupKey === null"
+            :pressed="effectiveNavigationKey === null"
             :aria-label="t('core.selectAllGroups')"
             v-tooltip="t('core.selectAllGroups')"
             data-group-icon
             data-select-group="all"
-            @click="selectGroup(null)"
+            @click="selectNavigation(null)"
           >
             <template #leading>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -116,12 +116,12 @@
             :key="group.key"
             variant="ghost"
             size="compact"
-            :pressed="effectiveGroupKey === group.key"
+            :pressed="effectiveNavigationKey === group.key"
             :aria-label="group.label"
             v-tooltip="group.label"
             :data-group-icon="$slots['group-leading'] ? '' : undefined"
             :data-select-group="group.key"
-            @click="selectGroup(group.key)"
+            @click="selectNavigation(group.key)"
           >
             <template v-if="$slots['group-leading']" #leading>
               <span aria-hidden="true">
@@ -148,7 +148,7 @@
             :role="group.label ? 'group' : undefined"
             :aria-label="group.label || undefined"
           >
-            <div v-if="group.label && (!groupNavigation || effectiveGroupKey === null)"
+            <div v-if="group.label && (!useGroupNavigation || effectiveNavigationKey === null)"
                  class="ui-select-group" aria-hidden="true">{{ group.label }}</div>
             <button
               v-for="option in group.options"
@@ -249,6 +249,8 @@ const props = withDefaults(defineProps<{
   compact?: boolean;
   searchable?: boolean | 'auto';
   groupNavigation?: boolean;
+  optionFilters?: readonly UiSelectGroupSnapshot[];
+  filtersLabel?: string;
   optionLayout?: 'stacked' | 'inline';
   modelValue?: UiSelectValue;
   modelModifiers?: UiModelModifiers;
@@ -261,6 +263,8 @@ const props = withDefaults(defineProps<{
   compact: false,
   searchable: 'auto',
   groupNavigation: false,
+  optionFilters: () => [],
+  filtersLabel: '',
   optionLayout: 'stacked',
   modelValue: undefined,
   modelModifiers: () => ({}),
@@ -321,10 +325,26 @@ const fallbackId = 'ui-select-' + useId().replaceAll(':', '');
 let optionsStamp = '';
 
 const query = ref('');
-const activeGroupKey = ref<string | null>(null);
+const activeNavigationKey = ref<string | null>(null);
 const searchInput = ref<InstanceType<typeof UiSearchInput> | null>(null);
 
+const useOptionFilters = computed(() => props.optionFilters.length > 0);
+const useGroupNavigation = computed(() => props.groupNavigation && !useOptionFilters.value);
+const showNavigation = computed(() => useGroupNavigation.value || useOptionFilters.value);
+
 const navigationGroups = computed(() => {
+  if (useOptionFilters.value) {
+    return props.optionFilters.map((filter) => {
+      const matches = options.value.filter((option) => option.filterKeys?.includes(filter.key));
+
+      return {
+        ...filter,
+        count: matches.length,
+        option: matches[0],
+      };
+    });
+  }
+
   const groups = new Map<string, {
     key: string;
     label: string;
@@ -358,14 +378,20 @@ const navigationGroups = computed(() => {
 
   return [...groups.values()];
 });
-const effectiveGroupKey = computed(() => props.groupNavigation
-  && navigationGroups.value.some((group) => group.key === activeGroupKey.value)
-  ? activeGroupKey.value
+const effectiveNavigationKey = computed(() => showNavigation.value
+  && navigationGroups.value.some((group) => group.key === activeNavigationKey.value)
+  ? activeNavigationKey.value
   : null);
 const showSearch = computed(() => props.searchable === true
   || (props.searchable === 'auto' && options.value.length >= 10));
 const visibleOptions = computed(() => filterUiSelectOptions(options.value, query.value).filter((option) => {
-  return effectiveGroupKey.value === null || option.groupKey === effectiveGroupKey.value;
+  const key = effectiveNavigationKey.value;
+
+  if (key === null) {
+    return true;
+  }
+
+  return useOptionFilters.value ? option.filterKeys?.includes(key) : option.groupKey === key;
 }));
 const optionGroups = computed(() => {
   const groups: Array<{
@@ -476,7 +502,7 @@ function syncOptions(): void {
   select.value = String(model.value ?? '');
 
   const next = readUiSelectOptions(select);
-  const groups = props.groupNavigation ? readUiSelectKeyedGroups(select) : [];
+  const groups = useGroupNavigation.value ? readUiSelectKeyedGroups(select) : [];
   const stamp = JSON.stringify([next, groups]);
 
   if (stamp !== optionsStamp) {
@@ -510,7 +536,7 @@ async function setOpen(value: boolean): Promise<void> {
   if (value) {
     query.value = '';
     syncOptions();
-    activeGroupKey.value = props.groupNavigation ? selectedOption.value?.groupKey ?? null : null;
+    activeNavigationKey.value = useGroupNavigation.value ? selectedOption.value?.groupKey ?? null : null;
     resetActive();
     await nextTick();
     await Promise.resolve();
@@ -533,12 +559,15 @@ async function setOpen(value: boolean): Promise<void> {
 }
 
 /**
- * Смена группы фильтрует только каталог и никогда не выбирает модель за человека.
- * Поиск сбрасывается, чтобы выбранная группа показывала все свои варианты.
+ * Навигация ограничивает видимый каталог, сохраняя исходное значение формы.
+ * Переход к optgroup очищает поиск, а предметный фильтр работает вместе с запросом.
  */
-function selectGroup(key: string | null): void {
-  query.value = '';
-  activeGroupKey.value = key;
+function selectNavigation(key: string | null): void {
+  if (!useOptionFilters.value) {
+    query.value = '';
+  }
+
+  activeNavigationKey.value = key;
 }
 
 function scrollToActive(): void {
@@ -777,8 +806,8 @@ function onSearchKeydown(event: KeyboardEvent): void {
 }
 
 watch(query, (value) => {
-  if (value.trim()) {
-    activeGroupKey.value = null;
+  if (value.trim() && !useOptionFilters.value) {
+    activeNavigationKey.value = null;
   }
 }, { flush: 'sync' });
 
@@ -841,7 +870,7 @@ function updatePopupMetrics(): void {
   const below = top + height - rect.bottom - 12;
   const groupedHeight = props.compact ? 420 : 520;
   const preferredWidth = 360;
-  const preferredHeight = props.groupNavigation ? groupedHeight : 360;
+  const preferredHeight = showNavigation.value ? groupedHeight : 360;
 
   workspaceMode.value = Boolean(button.closest('[data-ui-workspace]'));
   touchMode.value = Boolean(button.closest('[data-ui-touch]'));

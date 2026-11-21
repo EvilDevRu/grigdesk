@@ -3744,6 +3744,7 @@
   "showcaseSohranennyyGolosNedostupen": "— the saved voice is unavailable",
   "showcaseNedostupen": "— unavailable",
   "showcaseVoiceLanguages": "Languages: {languages}",
+  "showcaseVoiceLanguageFilter": "Voice language",
   "showcaseProslushat": "Preview",
   "showcaseTempRechiPacelabel": "Speech pace — {paceLabel}",
   "showcaseTempRechi": "Speech pace",

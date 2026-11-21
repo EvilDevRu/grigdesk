@@ -399,7 +399,7 @@
         <UiTopbarPanel v-if="sys?.net" :title="t('core.network')">
           <template #trigger>
             <UiPressable class="netbox mono" data-context="topbar-network" :aria-label="t('core.networkInformation')">
-              <span class="flag">{{ flagOf(sys.net!.countryCode) }}</span>
+              <span class="flag">{{ countryFlag(sys.net!.countryCode) }}</span>
               <span :class="{ 'status-label': !phoneLayout }">{{ t('core.network') }}</span>
             </UiPressable>
           </template>
@@ -469,6 +469,7 @@ import PluginIcon from '../PluginIcon.vue';
 import { selectTopbarTimerTasks } from '../boardTimerTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
+import { countryFlag } from '../countryFlag.ts';
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
@@ -771,15 +772,6 @@ const sysResourcesAlarm = computed(() => resourcesAlarm(sys.value));
 const sysResourcesLabel = computed(() => sysResourcesAlarm.value
   ? `${t('core.computerResources')} · ${t('core.resourcesAlarm')}`
   : t('core.computerResources'));
-
-// Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
-function flagOf(cc: string | null | undefined) {
-  if (!cc || cc.length !== 2) {
-    return '🏳';
-  }
-
-  return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
-}
 
 // ── Бейджи в навигации ──
 // Правило одно на все разделы: жёлтый пульсирующий — работа СТОИТ, пока не подойду;
