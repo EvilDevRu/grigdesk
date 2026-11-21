@@ -1,11 +1,7 @@
-import { execFile, spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { promisify } from 'node:util';
+import { readWindowsProtectedFile, writeWindowsProtectedFile } from '../../../shared/node/windowsProtectedFiles.ts';
 
 import { factoryRuntimePaths } from './factoryRuntime.ts';
 import { runtimeKind, runtimeRoot } from './runtimePaths.ts';
-
-const exec = promisify(execFile);
 
 function factoryBin(): string {
   return factoryRuntimePaths({
@@ -16,47 +12,19 @@ function factoryBin(): string {
 }
 
 /**
- * Делегирует чтение защищённого файла штатной фабрике Win32.
- * Проверка DACL и чтение используют один handle, результат ограничён по размеру.
+ * Читает ограниченный файл через штатную Go-фабрику установленного сервера.
+ * Разрешённые формы определяет проверка прав Win32.
  */
-export async function readFactoryWindowsFile(
+export function readFactoryWindowsFile(
   file: string, kind: 'directory' | 'file' | 'immutable' | 'owner', limit = 16 * 1024 * 1024,
 ): Promise<Buffer> {
-  const result = await exec(factoryBin(), ['_windows-read-protected', kind, file], {
-    encoding: 'buffer',
-    timeout: 10000,
-    windowsHide: true,
-    maxBuffer: limit,
-  });
-
-  return result.stdout;
+  return readWindowsProtectedFile(factoryBin(), file, kind, limit);
 }
 
-/** Содержимое передаётся только через stdin.
- * Фабрика закрепляет права Win32 до публикации имени.
+/**
+ * Передаёт содержимое Go-фабрике для атомарной записи.
+ * Путь к фабрике берётся из того же описания runtime, что при работе с маршрутами.
  */
-export async function writeFactoryWindowsFile(file: string, text: string | Buffer): Promise<void> {
-  const child = spawn(factoryBin(), ['_windows-write-protected', file], {
-    stdio: ['pipe', 'ignore', 'ignore'],
-    timeout: 15000,
-    windowsHide: true,
-  });
-
-  try {
-    const [[code]] = await Promise.all([
-      once(child, 'close'),
-      new Promise<void>((resolve, reject) => {
-        child.stdin.once('error', reject);
-        child.stdin.end(text, resolve);
-      }),
-    ]);
-
-    if (code === 0) {
-      return;
-    }
-  } catch {
-    child.kill();
-  }
-
-  throw new Error('windows_private_write_failed');
+export function writeFactoryWindowsFile(file: string, text: string | Buffer): Promise<void> {
+  return writeWindowsProtectedFile(factoryBin(), file, text);
 }

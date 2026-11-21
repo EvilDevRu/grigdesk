@@ -64,7 +64,7 @@ import { RotatingLog } from '../../shared/node/rotatingLog.ts';
 import { finished } from 'node:stream/promises';
 import { createServerSupervisor } from './serverSupervisor.ts';
 import type { ServerStartupStage } from './serverSupervisor.ts';
-import { readSettings, writeSettings, updateSettings } from './settings.ts';
+import { prepareWindowsSettings, readSettings, writeSettings, updateSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
 import { createKeyboardLayoutReader } from './keyboardLayout.ts';
@@ -1800,7 +1800,11 @@ async function boot(): Promise<void> {
     return;
   }
 
-  settingsFile = path.join(app.getPath('userData'), 'settings.json');
+  const userData = app.getPath('userData');
+
+  settingsFile = process.platform === 'win32' && packageDir
+    ? await prepareWindowsSettings(userData, path.join(packageDir, 'server', 'bin', 'factory.exe'))
+    : path.join(userData, 'settings.json');
   settings = await readSettings(settingsFile);
   setDesktopLocale(settings.uiLanguage ?? 'system', app.getPreferredSystemLanguages()[0] ?? '');
 

@@ -12,6 +12,12 @@ import (
 // TrustedWriteCommand публикует ограниченный stdin под приватным DACL.
 // Переименование внутри физического каталога не открывает существующий target для записи.
 func TrustedWriteCommand(args []string, in io.Reader) (bool, int) {
+	if len(args) > 0 && args[0] == "_windows-mkdir-protected" {
+		if len(args) != 2 || ensureProtectedDirectory(args[1]) != nil {
+			return true, 78
+		}
+		return true, 0
+	}
 	if len(args) == 0 || args[0] != "_windows-write-protected" {
 		return false, 0
 	}
@@ -36,6 +42,31 @@ func TrustedWriteCommand(args []string, in io.Reader) (bool, int) {
 		return true, 74
 	}
 	return true, 0
+}
+
+// ensureProtectedDirectory создаёт каталог сразу с закрытым DACL.
+// Уже существующий каталог допускается только с теми же правами.
+func ensureProtectedDirectory(name string) error {
+	parent := filepath.Dir(name)
+	physical, err := filepath.EvalSymlinks(parent)
+	if err != nil || physical != parent || !filepath.IsAbs(name) || filepath.Clean(name) != name {
+		return os.ErrInvalid
+	}
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	directory, err := OpenAt(root, filepath.Base(name), os.O_RDONLY|os.O_CREATE, 0700, Directory)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil || !PrivateMode(directory, info, 0700) {
+		return os.ErrPermission
+	}
+	return nil
 }
 
 // publishProtectedFile закрывает содержимое до атомарной смены имени.
