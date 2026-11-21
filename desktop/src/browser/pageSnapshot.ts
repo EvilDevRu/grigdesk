@@ -84,6 +84,12 @@ export const DOM_ACT_SOURCE = String.raw`function(payload) {
     return { ok: true };
   }
 
-  node.click();
+  if (typeof node.click === 'function') {
+    node.click();
+  } else {
+    // SVG-узлы графа принимают DOM-событие, но не имеют метода HTMLElement.click.
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+  }
+
   return { ok: true };
 }`;

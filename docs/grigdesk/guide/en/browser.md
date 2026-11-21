@@ -25,6 +25,8 @@ page clicks, typing, scrolling, address/zoom changes, refresh and close.
 Control returns after the command. You can select another tab or create one.
 Pause and Revoke access interrupt access; the current effect must finish before manual input returns.
 
+In a hidden tab, an agent can click graph controls, such as a pipeline stage.
+
 ## Limits and recovery
 
 There is no fixed tab-count limit. Agent-created tabs close after five minutes without page interaction.

@@ -154,7 +154,7 @@ export function createBrowserProtocol(port: {
       check();
 
       if (result.exceptionDetails || snapshotEpoch !== port.epoch()) {
-        return { ok: false, code: 'stale_page' };
+        throw new Error('stale_page');
       }
 
       const value = result.result?.value as { ok?: boolean; code?: string } | null;
