@@ -264,6 +264,13 @@ export class RoutesStore {
     this.lockTimeoutMs = lockTimeoutMs;
   }
 
+  /** Проверяет весь путь до передачи движку, затем разворачивает имя тома и алиасы 8.3 на Windows. */
+  async engineDirectory(): Promise<string> {
+    const directory = await this._baseDirectory({ create: false });
+
+    return process.platform === 'win32' ? fs.realpath(directory) : directory;
+  }
+
   async _baseDirectory({ create }: { create: boolean }): Promise<string> {
     const parsed = path.parse(this.baseDir);
     let current = parsed.root;

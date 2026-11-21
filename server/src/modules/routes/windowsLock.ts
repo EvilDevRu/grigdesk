@@ -59,21 +59,27 @@ export async function acquireWindowsCatalogLock(catalogDir: string, timeoutMs: n
   let released = false;
   let lost = false;
 
-  server.on('error', () => { lost = true; });
+  server.on('error', () => {
+    lost = true;
+  });
   server.unref();
 
-  return {
-    assertHeld() {
-      try {
-        if (!released && !lost && server.listening && isCurrentDirectory()) {
-          return;
-        }
-      } catch {
-        // Замена либо исчезновение каталога отзывают допуск.
+  // Перед записью сверяет замок и физический ID каталога.
+  // Канал может оставаться открытым после замены каталога другим процессом.
+  function assertHeld() {
+    try {
+      if (!released && !lost && server.listening && isCurrentDirectory()) {
+        return;
       }
+    } catch {
+      // Замена либо исчезновение каталога отзывают допуск.
+    }
 
-      throw new RoutesError('ROUTES_V2_LOCK_LOST', 'Каталог маршрутов изменился под замком');
-    },
+    throw new RoutesError('ROUTES_V2_LOCK_LOST', 'Каталог маршрутов изменился под замком');
+  }
+
+  return {
+    assertHeld,
     async release() {
       if (released) {
         return;
