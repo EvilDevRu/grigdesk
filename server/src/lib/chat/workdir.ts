@@ -50,8 +50,13 @@ export class ChatWorkdirError extends Error {
 /**
  * Каталог проверяется после realpath: симлинк не скрывает корень или весь home.
  * Проверка доступности не требует записи, поскольку чат может работать в режиме чтения.
+ * Весь home запрещён ручному выбору пути и дополнительным корням; allowHome снимает
+ * запрет только для доверенного встроенного выбора «Без проекта» и главного cwd.
  */
-export async function validateWorkdirPath(input: string): Promise<string> {
+export async function validateWorkdirPath(
+  input: string,
+  { allowHome = false }: { allowHome?: boolean; } = {},
+): Promise<string> {
   if (!path.isAbsolute(input) || /[\x00-\x1f]/u.test(input)) {
     throw new ChatWorkdirError('bad_workdir', 'Нужен абсолютный путь каталога.', 400);
   }
@@ -60,7 +65,7 @@ export async function validateWorkdirPath(input: string): Promise<string> {
     const real = await fs.realpath(input);
     const home = await fs.realpath(os.homedir());
 
-    if (real === path.parse(real).root || real === home) {
+    if (real === path.parse(real).root || (!allowHome && real === home)) {
       throw new ChatWorkdirError('bad_workdir', 'Нельзя выбрать весь корень или домашний каталог.', 400);
     }
     if (!(await fs.stat(real)).isDirectory()) {
@@ -229,13 +234,20 @@ export async function resolveChatWorkdir({
     copies = [main, ...repos.filter((repo) => repo !== main)]
       .map((repo) => ({ key: repo.key, path: repo.dir }));
   }
+  // Встроенный выбор «Без проекта» работает в домашней папке пользователя.
+  // Ручной выбор пути и корни проектов/задач сохраняют запрет всего home.
   if (!copies.length) {
-    copies = [{ key: workdir.kind, path: workdir.kind === 'path' ? workdir.path : config.rootDir }];
+    copies = [{
+      key: workdir.kind,
+      path: workdir.kind === 'path' ? workdir.path : os.homedir(),
+    }];
   }
 
-  copies = await Promise.all(copies.map(async (copy) => ({
+  copies = await Promise.all(copies.map(async (copy, index) => ({
     ...copy,
-    path: await validateWorkdirPath(copy.path),
+    path: await validateWorkdirPath(copy.path, {
+      allowHome: workdir.kind === 'grigdesk' && index === 0,
+    }),
   })));
 
   const cwd = copies[0]!.path;

@@ -26,7 +26,7 @@ open. If the catalog fails to load, the selection is kept and you can retry.
 The choice is remembered for this connection.
 
 Creating a chat with a project filter selects that project in the header and uses
-its main repository. “No project” uses the built-in GrigDesk folder.
+its main repository. “No project” uses the user's home folder.
 “All chats” uses your usual new-chat settings.
 
 ## Filters

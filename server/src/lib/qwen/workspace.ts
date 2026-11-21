@@ -5,9 +5,11 @@ import { validateWorkdirPath } from '../chat/workdir.ts';
 /**
  * Адаптер и прямой запуск проверяют одинаковые физические корни до создания песочницы.
  * Ссылки и повторы не меняют набор доступа и identity памяти; главный cwd остаётся первым.
+ * Главный cwd может быть домашней папкой встроенного выбора «Без проекта»;
+ * дополнительные корни сохраняют запрет всего home.
  */
 export async function resolveQwenWorkspace(cwd: string, extraDirs: readonly string[] = []) {
-  const main = await validateWorkdirPath(cwd);
+  const main = await validateWorkdirPath(cwd, { allowHome: true });
   const resolved = await Promise.all(extraDirs.map((directory) => validateWorkdirPath(directory)));
   const additional = [...new Set(resolved)].filter((directory) => directory !== main).sort();
   const roots = [main, ...additional];

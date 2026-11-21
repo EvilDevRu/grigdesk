@@ -60,7 +60,7 @@ function buttonByText(browser, text) {
 }
 
 /**
- * Чат без задачи в GrigDesk с уже известным предпросмотром сервера.
+ * Чат без задачи с домашней папкой и уже известным предпросмотром сервера.
  * Состояние реактивное: компонент видит изменения стора так же, как в окне.
  */
 async function workdirSession(extra = {}) {
@@ -410,6 +410,38 @@ test('селект рисует аватары, ждёт перехода и с�
     { kind: 'project', projectId: 'demo', repoKey: null },
     { kind: 'grigdesk' },
   ]);
+});
+
+test('свободный чат предлагает домашнюю папку и выбирает её встроенным выбором', async (t) => {
+  const browser = await browserHarness();
+  const session = await workdirSession();
+  const calls = [];
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [],
+    previewWorkdir: async () => session.workdirPreview,
+    proposeWorkdir: async (_id, { workdir }) => {
+      calls.push(workdir);
+
+      return true;
+    },
+  });
+
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+
+  const dialog = browser.document.querySelector('[data-role="workdir-picker"]');
+  const home = [...dialog.querySelectorAll('.workdir-choices .workdir-choice')]
+    .find((row) => row.querySelector('.workdir-choice-title')?.textContent === 'Домашняя папка');
+
+  assert.ok(home, 'каталог свободного чата содержит домашнюю папку');
+  assert.match(home.textContent, /Домашняя папка пользователя на этом компьютере/u);
+  assert.match(dialog.querySelector('.workdir-current').textContent, /Домашняя папка/u);
+  home.closest('.ui-selectable-row').querySelector('.ui-selectable-row__primary').click();
+  await flushPromises();
+  assert.deepEqual(calls, [{ kind: 'grigdesk' }]);
 });
 
 test('пустой поиск и отказ сервера остаются в диалоге, новый вход очищает поиск', async (t) => {

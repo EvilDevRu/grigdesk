@@ -66,8 +66,10 @@ export function sameChatWorkdir(left: unknown, right: unknown): boolean {
 /**
  * Короткая подпись выбора пригодна окну и истории.
  * Фактический путь проекта показывает только ответ серверного предпросмотра.
+ * Встроенный выбор без проекта — домашняя папка: web передаёт локализованную
+ * подпись, серверные плашки и мобильный фасад используют русское умолчание.
  */
-export function chatWorkdirLabel(value: unknown): string {
+export function chatWorkdirLabel(value: unknown, homeLabel = 'Домашняя папка'): string {
   const workdir = normalizeChatWorkdir(value);
 
   if (workdir?.kind === 'path') {
@@ -77,7 +79,7 @@ export function chatWorkdirLabel(value: unknown): string {
     return workdir.repoKey ? `${workdir.projectId} · ${workdir.repoKey}` : workdir.projectId;
   }
 
-  return workdir ? 'GrigDesk' : 'Папка не определена';
+  return workdir ? homeLabel : 'Папка не определена';
 }
 
 /**

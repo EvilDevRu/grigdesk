@@ -12,9 +12,9 @@ Projects and task working copies can supply their own roots.
 
 1. In a conversation without a task, choose a project in the header. Its main repository
    is selected by default. To choose another repository in that project, open the working folder menu.
-2. For a standalone folder, choose “No project”. The working folder menu offers GrigDesk,
-   recent folders, and “By path” for entering an absolute path.
-   Filesystem root, the entire home directory, relative paths and `~/` notation are not accepted.
+2. “No project” switches the conversation to the user's home folder. For another directory,
+   pick a recent folder in the working folder menu or press “By path” and enter an absolute path.
+   Filesystem root, the entire home directory entered manually, relative paths and `~/` notation are not accepted.
 3. Check the current folder below the list. Additional repositories are marked in the project list.
    Additional paths outside the list appear below the current folder. Screen context alone does not change the folder.
 4. If memory migration is required, choose “Compress the conversation and switch”, switch without a summary, or cancel.

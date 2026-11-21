@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { access, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -150,6 +151,26 @@ test('Qwen: второй корень скрывает свои .env и .qwen, �
   assert.match(await readFile(settings, 'utf8'), /PRIVATE_SECOND_SETTINGS/);
   assert.equal((await lstat(env)).isSymbolicLink(), true);
   await assert.rejects(access(forbidden), { code: 'ENOENT' });
+});
+
+test('Qwen: домашняя папка допустима главным cwd, дополнительным корнем остаётся запрещённой', async (t) => {
+  const fixture = await qwenFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const home = await realpath(os.homedir());
+
+  const validation = await adapter.validateWorkdir({
+    config: fixture.config,
+    cwd: os.homedir(),
+    extraDirs: [],
+  });
+
+  assert.equal(validation.error, undefined);
+  assert.deepEqual(validation.extraDirs, []);
+  await assert.rejects(adapter.validateWorkdir({
+    config: fixture.config,
+    cwd: fixture.workspace,
+    extraDirs: [home],
+  }));
 });
 
 test('Qwen: недопустимый дополнительный путь не запускает CLI', async (t) => {

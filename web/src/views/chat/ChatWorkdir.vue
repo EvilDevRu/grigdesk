@@ -95,7 +95,7 @@
                 <span class="workdir-choice">
                   <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
+                    <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.home : NAV_ICONS.projects" />
                   </svg>
                   <span class="workdir-choice-copy">
                     <span class="workdir-choice-heading">
@@ -312,7 +312,7 @@ const transferStatus = computed(() => {
     : t('core.workdirTransferPending');
 });
 const directory = computed(() => session.value?.workdirState?.committed?.cwd
-  || preview.value?.target?.cwd || chatWorkdirLabel(session.value?.workdir));
+  || preview.value?.target?.cwd || chatWorkdirLabel(session.value?.workdir, t('core.workdirHomeFolder')));
 // Подпись шапки показывает подтверждённую папку, даже если предпросмотр предлагает другую.
 // До первого подтверждения серверный preview разрешает фактический путь сохранённого выбора.
 const currentDirectory = computed(() => session.value?.workdirState?.committed?.cwd
@@ -342,7 +342,7 @@ const sourceLabel = computed(() => ({
   'task-project': t('core.workdirTaskProject'),
   project: t('core.workdirProjectRepos'),
   path: t('core.workdirChosenDirectory'),
-  grigdesk: t('core.workdirAppRepo'),
+  grigdesk: t('core.workdirHomeFolder'),
 } as Record<string, string>)[preview.value?.target?.source || ''] || '');
 const additionalCopies = computed(() => (
   (preview.value?.target?.copies || []).filter((copy) => (
@@ -445,7 +445,7 @@ function choiceTitle(workdir: WorkdirChoice): string {
     return workdir.path.split('/').filter(Boolean).at(-1) || workdir.path;
   }
 
-  return 'GrigDesk';
+  return t('core.workdirHomeFolder');
 }
 
 /**
@@ -462,7 +462,7 @@ function choiceDetail(workdir: WorkdirChoice): string {
       : defaultRepo.value?.dir || '';
   }
 
-  return t('core.workdirAppFolder');
+  return t('core.workdirHomeFolderDetail');
 }
 
 /**

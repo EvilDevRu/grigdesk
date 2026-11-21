@@ -417,7 +417,8 @@
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : t('core.chatSprosiAgenta') }}</div>
           <div class="e-sub muted">
             <p class="e-workdir"> {{ t('core.chatRabotaemV') }} {{ sess.workdirPreview?.target?.cwd
-                || sess.workdirState?.committed?.cwd || chatWorkdirLabel(sess.workdir) }}
+                || sess.workdirState?.committed?.cwd
+                || chatWorkdirLabel(sess.workdir, t('core.workdirHomeFolder')) }}
             </p>
             <p>
               <span class="keyboard-hint">{{ t('core.chatModelIUsilieSverhu') }}</span>

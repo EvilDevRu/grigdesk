@@ -89,6 +89,23 @@ test('realpath блокирует корень/home и сохраняет оди
   await assert.rejects(validateWorkdirPath('/'), { code: 'bad_workdir' });
   await assert.rejects(validateWorkdirPath(os.homedir()), { code: 'bad_workdir' });
   await assert.rejects(validateWorkdirPath(path.join(f.root, 'gone')), { code: 'workdir_missing' });
+  assert.equal(await validateWorkdirPath(os.homedir(), { allowHome: true }), await fs.realpath(os.homedir()));
+  await assert.rejects(validateWorkdirPath('/', { allowHome: true }), { code: 'bad_workdir' });
+});
+
+test('«Без проекта» разрешает домашнюю папку, ручной путь к home по-прежнему запрещён', async (t) => {
+  const f = await fixture(t);
+  const home = await fs.realpath(os.homedir());
+  const builtIn = await resolveChatWorkdir({ ...f.input, workdir: { kind: 'grigdesk' } });
+
+  assert.equal(builtIn.cwd, home);
+  assert.equal(builtIn.source, 'grigdesk');
+  assert.deepEqual(builtIn.copies, [{ key: 'grigdesk', path: home }]);
+  assert.equal((await resolveChatWorkdir({ ...f.input })).cwd, home, 'старый чат без поля тоже home');
+  await assert.rejects(resolveChatWorkdir({
+    ...f.input,
+    workdir: { kind: 'path', path: os.homedir() },
+  }), { code: 'bad_workdir' });
 });
 
 test('задача без доверенного проекта возвращает выбранную папку; битый env не маскируется', async (t) => {
