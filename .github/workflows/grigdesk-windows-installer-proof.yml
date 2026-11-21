@@ -2,6 +2,7 @@ name: GrigDesk Windows installer proof
 on:
   push:
     branches: [ci/native-windows-installer-20261122]
+    paths-ignore: [".github/workflows/grigdesk-arm64-nsis-diag.yml"]
 permissions:
   contents: read
 jobs:

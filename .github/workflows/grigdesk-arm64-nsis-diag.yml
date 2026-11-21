@@ -1,0 +1,51 @@
+name: GrigDesk ARM64 NSIS diagnostic
+on:
+  push:
+    branches: [ci/native-windows-installer-20261122]
+    paths: [.github/workflows/grigdesk-arm64-nsis-diag.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  reproduce:
+    runs-on: windows-11-arm
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 44959436117
+          artifact-ids: 14728349727
+          path: arm64-package
+      - name: Observe the NSIS output and registration
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem arm64-package -Recurse -Filter desktop.exe | Select-Object -First 1).FullName
+          if (-not $installer) { throw 'desktop.exe missing from artifact' }
+          "Installer: $installer, size $((Get-Item $installer).Length) bytes"
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z l -ba $installer | Select-String 'app-arm64|arm64.7z|Uninstall'
+          }
+          [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+          $destination = Join-Path $env:LOCALAPPDATA 'GrigDesk ARM diagnostic\App With Spaces'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new($installer, "/S /D=$destination")
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          if (-not $process.WaitForExit(180000)) { throw 'NSIS timed out' }
+          "NSIS exit code: $($process.ExitCode)"
+          "Requested destination: $destination"
+          Get-ChildItem -LiteralPath $destination -Force | Select-Object Name,Length | Format-Table
+          $path = 'Software\73fd52cc-055b-5e49-89e0-9706aab795e4'
+          foreach ($hive in 'CurrentUser', 'LocalMachine') {
+            foreach ($view in 'Registry32', 'Registry64') {
+              $key = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view).OpenSubKey($path)
+              if ($key) {
+                $registered = $key.GetValue('InstallLocation')
+                "${hive}/${view}: $registered"
+                if ($registered -and (Test-Path $registered)) {
+                  Get-ChildItem -LiteralPath $registered -Force | Select-Object Name,Length | Format-Table
+                }
+              }
+            }
+          }
+          Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter '*GrigDesk*' -ErrorAction SilentlyContinue
