@@ -138,7 +138,8 @@ export async function assertWindowsMachine(file: string, target: WindowsTarget):
 async function stageServer(root: string, target: WindowsTarget, env: NodeJS.ProcessEnv): Promise<void> {
   const files = ['server/src', 'server/seed', 'server/build',
     'server/deepseek-runtime-contract.json', 'server/deepseek-host-contract.json',
-    'server/package.json', 'server/package-lock.json', 'shared', 'deploy', 'docs/grigdesk/guide',
+    'server/package.json', 'server/package-lock.json', 'shared', 'cli/darwinBuildProcesses.ts',
+    'deploy', 'docs/grigdesk/guide',
     'docs/engine', 'docs/README.md', 'server/requirements-media.txt', 'VERSION'];
   const runtime = path.join(root, 'runtime');
 
@@ -228,7 +229,7 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     `--config.directories.output=${output}`, '--config.artifactName=desktop.exe',
     `--config.extraMetadata.version=${plan.current.version}`, '--config.nsis.runAfterFinish=false',
     '--config.nsis.guid=73fd52cc-055b-5e49-89e0-9706aab795e4',
-    // Прямая распаковка ZIP обходит CopyFiles, который пропускал EXE и DLL на ARM64.
+    // 7z-ветка NSIS оставляла поставку ARM64 без EXE и DLL. ZIP распаковывается сразу в каталог программы.
     ...(target === 'windows-arm64' ? ['--config.nsis.useZip=true', '--config.nsis.differentialPackage=false'] : []),
   ], {
     cwd: desktop,

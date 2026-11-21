@@ -188,12 +188,19 @@ func install(ctx context.Context, source, destination, local, platform string, k
 	if err := os.Mkdir(destination, 0700); err != nil {
 		return fmt.Errorf("windows_install_destination_exists_or_unavailable: %w", err)
 	}
+	desktopStarted := false
 	defer func() {
 		if result != nil {
+			if desktopStarted {
+				if err := undoDesktopInstall(destination); err != nil {
+					result = errors.Join(result, fmt.Errorf("windows_install_cleanup_incomplete: %w", err))
+					return
+				}
+			}
 			result = errors.Join(result, os.RemoveAll(destination))
 		}
 	}()
-	stagePath, err := os.MkdirTemp(parent, ".grigdesk-install-")
+	stagePath, err := os.MkdirTemp(local, ".grigdesk-install-")
 	if err != nil {
 		return err
 	}
@@ -212,6 +219,7 @@ func install(ctx context.Context, source, destination, local, platform string, k
 	if err := unpackServer(filepath.Join(stagePath, "server.zip"), filepath.Join(stagePath, "server")); err != nil {
 		return err
 	}
+	desktopStarted = true
 	if err := run(ctx, filepath.Join(stagePath, "desktop.exe"), destination); err != nil {
 		return fmt.Errorf("windows_desktop_install_failed: %w", err)
 	}
