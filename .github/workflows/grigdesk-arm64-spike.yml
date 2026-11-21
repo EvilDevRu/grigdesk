@@ -1,10 +1,12 @@
 # ВРЕМЕННЫЙ пробный workflow пробы 5 плана grigdesk-additional-platforms-tdd.md (ред. 9).
 # Не входит в продуктовый код выпуска; удаляется после вердикта пробы.
-# Запуск: только ручной dispatch владельцем (Actions -> GrigDesk ARM64 spike -> Run workflow).
+# Запуск: временная ветка пробы или ручной dispatch после регистрации workflow.
 # Раннер ubuntu-24.04-arm — VM (проверка ловушки dlopen SEA, собранного в контейнере).
 name: GrigDesk ARM64 spike (probe 5, temporary)
 
 on:
+  push:
+    branches: [ci/arm64-runtime-probe]
   workflow_dispatch:
 
 permissions:
@@ -38,11 +40,16 @@ jobs:
           echo "$RUNNER_TEMP/node-pin/bin" >> "$GITHUB_PATH"
 
       - name: Зависимости server и desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: |
           npm --prefix server ci
+          npm --prefix web ci
           npm --prefix desktop ci
 
       - name: Пробный SEA и dlopen на VM-раннере
+        id: sea
+        continue-on-error: true
         run: |
           mkdir -p spike
           cd spike
@@ -95,10 +102,13 @@ jobs:
           cp "$RUNNER_TEMP/node-pin/bin/node" sea-probe
           ../server/node_modules/.bin/postject sea-probe NODE_SEA_BLOB sea-prep.blob \
             --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-          ./sea-probe --runtime-info
-          ./sea-probe
+          ./sea-probe --runtime-info | tee runtime.json
+          ./sea-probe | tee dlopen.json
+          jq -e '.platform == "linux" and .arch == "arm64" and .sea and .dlopen == "napi-ok"' dlopen.json
 
       - name: glibc floor фактических ELF
+        id: glibc
+        continue-on-error: true
         run: |
           node tools/arm64Spike.mts \
             "$RUNNER_TEMP/node-pin/bin/node" \
@@ -106,6 +116,7 @@ jobs:
             spike/build/Release/spike_addon.node | tee spike/glibc-floor.json
 
       - name: AppImage arm64 и запуск под xvfb
+        id: appimage
         continue-on-error: true
         run: |
           version=$(node -p 'require("./desktop/node_modules/electron/package.json").version')
@@ -114,35 +125,44 @@ jobs:
           curl -fsSL --retry 3 -o "$archive" \
             "https://github.com/electron/electron/releases/download/v$version/$archive"
           printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
-          unzip -q "$archive" -d desktop/node_modules/electron/dist
+          unzip -oq "$archive" -d desktop/node_modules/electron/dist
           printf 'electron' > desktop/node_modules/electron/path.txt
           npm --prefix desktop run build
           (cd desktop && npx electron-builder --linux AppImage --arm64 --publish never)
-          image=$(find desktop/dist -name '*.AppImage' | head -1)
+          image=$(find desktop/release -maxdepth 1 -type f -name '*.AppImage' -print -quit)
           test -n "$image"
           echo "AppImage: $image"
-          xvfb-run -a "$image" --appimage-extract-and-run --no-sandbox &
-          pid=$!
-          sleep 20
-          if kill -0 "$pid" 2>/dev/null; then
-            echo "appimage-alive-ok"
-            kill "$pid"
-          else
-            echo "appimage-exited-early"
-            exit 1
-          fi
+          status=0
+          timeout 20s xvfb-run -a "$image" --appimage-extract-and-run --no-sandbox \
+            > spike/appimage.log 2>&1 || status=$?
+          cat spike/appimage.log
+          test "$status" -eq 124
+          echo appimage-alive-ok
+
+      - name: Go для движка
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache: false
 
       - name: Engine smoke и несущие утилиты
+        id: engine
+        continue-on-error: true
         run: |
           flock -n /tmp/spike.lock -c true && echo flock-ok
-          timeout 1 sleep 2
-          test $? -eq 124 && echo timeout-124-ok
-          nohup true && echo nohup-ok
-          bash tests/engine/run-offline.sh
+          status=0
+          timeout 1 sleep 2 || status=$?
+          test "$status" -eq 124
+          echo timeout-124-ok
+          nohup true
+          bash tests/engine/run-offline.sh 2>&1 | tee spike/engine.log
 
       - name: bwrap и python3 pty
+        id: helpers
+        continue-on-error: true
         run: |
-          bwrap --ro-bind / / true && echo bwrap-ok
+          status=0
+          bwrap --ro-bind / / true && echo bwrap-ok || status=$?
           python3 -m py_compile server/src/modules/terminal/pty-helper.py
           python3 - <<'EOF'
           import os
@@ -155,14 +175,24 @@ jobs:
           assert b"pty-ok" in out
           print("forkpty-ok")
           EOF
+          exit "$status"
 
       - name: Отчёт пробы
         if: always()
+        env:
+          SEA: ${{ steps.sea.outcome }}
+          GLIBC: ${{ steps.glibc.outcome }}
+          APPIMAGE: ${{ steps.appimage.outcome }}
+          ENGINE: ${{ steps.engine.outcome }}
+          HELPERS: ${{ steps.helpers.outcome }}
         run: |
           {
             echo "## ARM64 spike (проба 5)"
             uname -m
             cat /etc/os-release | head -2
+            printf '\nCommit: %s\n' "$GITHUB_SHA"
+            printf '\nSEA+dlopen: %s\nglibc floor: %s\nAppImage: %s\nEngine: %s\nbwrap и PTY: %s\n' \
+              "$SEA" "$GLIBC" "$APPIMAGE" "$ENGINE" "$HELPERS"
             echo "### glibc floor"
             cat spike/glibc-floor.json 2>/dev/null || echo "не измерен"
           } > spike-report.md
@@ -173,4 +203,5 @@ jobs:
           name: arm64-spike-report
           path: |
             spike-report.md
-            spike/glibc-floor.json
+            spike/*.json
+            spike/*.log
