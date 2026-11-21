@@ -38,7 +38,9 @@ export async function ensureWindowsProtectedDirectory(factory: string, directory
  * Фабрика закрепляет права Win32 до атомарной смены файла.
  * Содержимое передаётся только через stdin.
  */
-export async function writeWindowsProtectedFile(factory: string, file: string, text: string | Buffer): Promise<void> {
+export async function writeWindowsProtectedFile(
+  factory: string, file: string, text: string | Buffer,
+): Promise<void> {
   const child = spawn(factory, ['_windows-write-protected', file], {
     stdio: ['pipe', 'ignore', 'ignore'],
     timeout: 15000,

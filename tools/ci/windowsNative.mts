@@ -228,6 +228,8 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     `--config.directories.output=${output}`, '--config.artifactName=desktop.exe',
     `--config.extraMetadata.version=${plan.current.version}`, '--config.nsis.runAfterFinish=false',
     '--config.nsis.guid=73fd52cc-055b-5e49-89e0-9706aab795e4',
+    // Прямая распаковка ZIP обходит CopyFiles, который пропускал EXE и DLL на ARM64.
+    ...(target === 'windows-arm64' ? ['--config.nsis.useZip=true', '--config.nsis.differentialPackage=false'] : []),
   ], {
     cwd: desktop,
     env: desktopEnv,
