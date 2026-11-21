@@ -13,8 +13,8 @@
         </UiButton>
       </div>
       <p v-if="usesChannel">{{ t(`settings.appUpdateCheck_${snapshot.checkState}`) }}</p>
-      <p v-else>{{ t(snapshot.source === 'local-test'
-        ? 'settings.appUpdateLocalTestSource' : 'settings.appUpdateCandidateSource') }}</p>
+      <p v-else-if="snapshot.source === 'local-test'">{{ t('settings.appUpdateLocalTestSource') }}</p>
+      <p v-else>{{ t('settings.appUpdateCandidateSource') }}</p>
       <p v-if="snapshot.checkedAt">{{ t('settings.appUpdateCheckedAt', { time: snapshot.checkedAt }) }}</p>
       <p class="application-update-notes">{{ notes || t('settings.appUpdateNoNotes') }}</p>
       <template v-if="snapshot.job">

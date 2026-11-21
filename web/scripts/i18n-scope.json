@@ -18,6 +18,26 @@
       "reason": "Код отказа native browser IPC при отсутствии окна; часть протокола"
     },
     {
+      "text": "release_activity_unknown",
+      "file": "desktop/src/main.ts",
+      "reason": "Код отказа допуска к выходу. Нативное предупреждение использует desktop.exitStrictBlocked."
+    },
+    {
+      "text": "release_activity_unknown",
+      "file": "desktop/src/desktopExitController.ts",
+      "reason": "Код протокола подтверждения выхода. Контроллер передаёт отказ нативному предупреждению."
+    },
+    {
+      "text": "candidate_source_required",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Код источника для IPC обновлений. Диалог передаёт код в локализованное appUpdateFailure."
+    },
+    {
+      "text": "release_update_in_progress",
+      "file": "desktop/src/applicationUpdates.ts",
+      "reason": "Код занятого обновления для IPC. Диалог передаёт код в локализованное appUpdateFailure."
+    },
+    {
       "text": "help_unavailable",
       "file": "web/src/shared/helpLoader.ts",
       "reason": "Внутренний код отказа загрузки справки; окно показывает локализованное сообщение"
