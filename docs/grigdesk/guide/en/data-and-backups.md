@@ -79,8 +79,8 @@ size so far and the read errors. A large scan can take a few minutes. Press Ctrl
    images in old replies may disappear when their files are removed.
 2. Run `grigdesk-ctl artifacts-cleanup --dry-run`. Check the root, each directory, sizes and total.
    `GRIGDESK_ARTIFACTS_DIR` selects another root. A large scan may take minutes. The terminal shows
-   the phase, current directory, counts and elapsed time. Ctrl+C safely cancels a preview
-   in both the command and the menu.
+   the phase and elapsed time. During verification, the bar shows progress through the entries
+   and the current directory. Ctrl+C cancels the preview in both the command and the menu.
 3. Run `grigdesk-ctl artifacts-cleanup` when the list is correct. Set age with `--older-than 12h`
    or `--older-than 14d`; whole minutes `m`, hours `h` and days `d` are supported, with a default of 7 days.
    `--keep-generations 3` sets how many recent test-cache generations to keep; `--json` outputs a script report.

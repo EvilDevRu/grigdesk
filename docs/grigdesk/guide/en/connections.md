@@ -29,7 +29,9 @@ For manual installation, download `relay.env` and follow the relay card instruct
 to run the `grigdesk-relay` executable on the relay host.
 After channel verification, obtain QR and wait separately for the phone to connect.
 You may close and later reopen the same job; do not delete configuration for a temporary connection failure.
-Select a particular job to continue, or 0 in the console for a new VPS.
+In the console, use the arrow keys to select a job or “Use a new VPS”, then press Enter.
+Typing the job number or 0 for a new VPS also works. SSH method, key trust and installation
+use the same controls.
 If an old job awaits fingerprint, access or installation confirmation, end that wait with its separate confirmation
 before entering a new server. This does not cancel an already accepted installation.
 Escape closes only the wizard and returns focus to settings.

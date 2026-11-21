@@ -13,12 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	"grigdesk.local/tools/shared/i18n"
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 )
 
 type relaySetupArgs struct {
@@ -75,17 +74,13 @@ type relayAdminStatus struct {
 }
 
 type wizard struct {
-	ctx  context.Context
-	fd   int
-	out  io.Writer
-	lang i18n.CLI
-	api  Session
-}
-
-type inputExit int
-
-func (exit inputExit) Error() string {
-	return "Ввод закрыт."
+	ctx    context.Context
+	input  ctlterm.Input
+	screen *ctlterm.Screen
+	out    io.Writer
+	env    map[string]string
+	lang   i18n.CLI
+	api    Session
 }
 
 func parseRelaySetup(argv []string) (relaySetupArgs, error) {
@@ -131,8 +126,7 @@ func SetupRelay(ctx context.Context, settings Settings, mode string, argv []stri
 	}
 	lang := i18n.CLIForEnvironment(settings.Env)
 	input, hasInput := terminal.Stdin.(*os.File)
-	output, hasOutput := terminal.Stdout.(*os.File)
-	if !hasInput || !hasOutput || !term.IsTerminal(int(input.Fd())) || !term.IsTerminal(int(output.Fd())) {
+	if !hasInput || !ctlterm.IsTTY(input) || !ctlterm.IsTTY(terminal.Stdout) {
 		return terminal.Fail(lang.Text("remote.tty"), 2)
 	}
 	api, err := SignIn(ctx, settings)
@@ -145,16 +139,28 @@ func SetupRelay(ctx context.Context, settings Settings, mode string, argv []stri
 		return terminal.Fail(lang.Text("remote.tty"), 2)
 	}
 	defer term.Restore(fd, restore)
-	ui := wizard{ctx: ctx, fd: fd, out: terminal.Stdout, api: api, lang: lang}
+	screen := terminal.Screen
+	if screen == nil {
+		standalone := ctlterm.NewScreen(terminal.Stdout, settings.Env)
+		screen = &standalone
+	}
+	ui := wizard{
+		ctx: ctx, input: ctlterm.Input{Ctx: ctx, FD: fd, Out: terminal.Stdout},
+		screen: screen, out: terminal.Stdout,
+		env: settings.Env, api: api, lang: lang,
+	}
 	err = ui.run(mode, options)
 	if err == nil {
 		return 0
 	}
-	var closed inputExit
+	var closed ctlterm.Exit
 	if errors.As(err, &closed) {
+		if closed == ctlterm.EndOfInput {
+			return 2
+		}
 		return int(closed)
 	}
-	ui.line(ui.label("requestFailed"))
+	ui.line(ui.screen.Label(ui.label("requestFailed"), ctlterm.Error))
 	return 1
 }
 
@@ -166,74 +172,34 @@ func (ui wizard) line(text string) {
 	_, _ = fmt.Fprint(ui.out, text, "\r\n")
 }
 
-func (ui wizard) next(milliseconds int) (byte, bool, error) {
-	for ui.ctx.Err() == nil {
-		poll := []unix.PollFd{{Fd: int32(ui.fd), Events: unix.POLLIN}}
-		ready, err := unix.Poll(poll, milliseconds)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if err != nil {
-			return 0, false, inputExit(2)
-		}
-		if ready == 0 {
-			return 0, false, nil
-		}
-		var buffer [1]byte
-		n, err := unix.Read(ui.fd, buffer[:])
-		if err != nil || n == 0 || buffer[0] == 4 {
-			return 0, false, inputExit(2)
-		}
-		if buffer[0] == 3 {
-			return 0, false, inputExit(130)
-		}
-		return buffer[0], true, nil
-	}
-	return 0, false, inputExit(130)
-}
-
-func (ui wizard) waitByte() (byte, error) {
-	for {
-		value, ok, err := ui.next(150)
-		if err != nil || ok {
-			return value, err
-		}
-	}
-}
-
 func (ui wizard) prompt(label string, secret bool, first []byte) (string, error) {
-	_, _ = fmt.Fprint(ui.out, ui.label(label), ": ")
-	value := append([]byte{}, first...)
-	defer func() { clear(value) }()
-	for len(value) < 60_000 {
-		key, err := ui.waitByte()
-		if err != nil {
-			return "", err
-		}
-		switch key {
-		case '\r', '\n':
-			ui.line("")
-			return string(value), nil
-		case 27:
-			return "", inputExit(2)
-		case 8, 127:
-			if len(value) != 0 {
-				_, size := utf8.DecodeLastRune(value)
-				value = value[:len(value)-size]
-				if !secret {
-					_, _ = io.WriteString(ui.out, "\b \b")
-				}
+	title := ui.screen.Label(ui.label(label)+":", ctlterm.Accent)
+	return ui.input.Text(title+" ", secret, first, 60_000)
+}
+
+// pick даёт мастеру те же строки и управление, что у основного меню.
+// Текстовые сокращения остаются доступны для привычных сценариев.
+func (ui wizard) pick(choice ctlterm.Choice) (int, error) {
+	choice.Navigation = ui.lang.Text("navigation")
+	choice.Paging = ui.lang.Text("choice.paging")
+	return ui.screen.Choose(ui.input, choice)
+}
+
+// decision начинает с отказа и сохраняет прежний ответ «да» с клавиатуры.
+// Подробности операции видны рядом с вариантами выбора.
+func (ui wizard) decision(label, action string, details []string) (bool, error) {
+	chosen, err := ui.pick(ctlterm.Choice{
+		Title: ui.label(label), Details: details,
+		Options: []string{ui.lang.Text("choice.decline"), ui.lang.Text(action)},
+		Shortcut: func(first byte) (int, error) {
+			answer, err := ui.input.Text("", true, []byte{first}, 128)
+			if confirmed(answer) {
+				return 1, err
 			}
-		default:
-			if key >= 32 {
-				value = append(value, key)
-				if !secret {
-					_, _ = ui.out.Write([]byte{key})
-				}
-			}
-		}
-	}
-	return "", inputExit(2)
+			return 0, err
+		},
+	})
+	return chosen == 1, err
 }
 
 const deployments = "/api/mobile/deployments"
@@ -245,7 +211,7 @@ func (ui wizard) run(mode string, options relaySetupArgs) error {
 	}
 	if status.Server.FP == "" {
 		ui.line(ui.label("homeUnavailable"))
-		return inputExit(1)
+		return ctlterm.Exit(1)
 	}
 	var listed struct {
 		Jobs []relayJob `json:"jobs"`
@@ -256,7 +222,7 @@ func (ui wizard) run(mode string, options relaySetupArgs) error {
 	if status.Server.Name == "" {
 		status.Server.Name = ui.api.Origin
 	}
-	ui.line(ui.label("home") + ": " + Printable(status.Server.Name))
+	ui.line(ui.screen.Label(ui.label("home")+": "+Printable(status.Server.Name), ctlterm.Accent))
 	job, err := ui.choose(mode, listed.Jobs)
 	if err != nil {
 		return err
@@ -280,16 +246,16 @@ func (ui wizard) choose(mode string, jobs []relayJob) (relayJob, error) {
 	if len(matching) == 0 {
 		return relayJob{}, nil
 	}
-	ui.line(ui.label("jobs"))
-	for index, job := range matching {
-		ui.line(fmt.Sprintf("%d. %s", index+1, jobTitle(job)))
+	options := make([]string, 0, len(matching)+1)
+	for _, job := range matching {
+		options = append(options, jobTitle(job))
 	}
-	ui.line("0. " + ui.label("newJob"))
-	index, err := ui.readIndex("chooseJob", len(matching), true)
-	if err != nil || index == 0 {
+	options = append(options, ui.label("newJob"))
+	index, err := ui.readIndex("chooseJob", options, true)
+	if err != nil || index == len(matching) {
 		return relayJob{}, err
 	}
-	return matching[index-1], nil
+	return matching[index], nil
 }
 
 func jobTitle(job relayJob) string {
@@ -303,19 +269,29 @@ func jobTitle(job relayJob) string {
 	return Printable(name) + " · " + Printable(job.SSH.Host)
 }
 
-func (ui wizard) readIndex(label string, count int, zero bool) (int, error) {
-	value, err := ui.prompt(label, false, nil)
-	if err != nil {
-		return 0, err
-	}
-	if value == "" {
-		value = "1"
-	}
-	index, err := strconv.Atoi(value)
-	if err != nil || index > count || index < 0 || !zero && index == 0 {
-		return 0, inputExit(2)
-	}
-	return index, nil
+// readIndex сохраняет ввод номера рядом с навигацией стрелками.
+// В списке заданий номер 0 ведёт на создание нового задания в конце списка.
+func (ui wizard) readIndex(label string, options []string, allowNew bool) (int, error) {
+	return ui.pick(ctlterm.Choice{
+		Title: ui.label(label), Options: options,
+		Shortcut: func(first byte) (int, error) {
+			value, err := ui.input.Text("", true, []byte{first}, 12)
+			if err != nil {
+				return -1, err
+			}
+			index, err := strconv.Atoi(value)
+			switch {
+			case err != nil || index < 0 || index > len(options):
+				return -1, ctlterm.Exit(2)
+			case index == 0 && allowNew:
+				return len(options) - 1, nil
+			case index > 0 && (!allowNew || index < len(options)):
+				return index - 1, nil
+			default:
+				return -1, ctlterm.Exit(2)
+			}
+		},
+	})
 }
 
 func (ui wizard) create(mode string, options relaySetupArgs, status relayAdminStatus, previous []relayJob) (relayJob, error) {
@@ -332,16 +308,17 @@ func (ui wizard) create(mode string, options relaySetupArgs, status relayAdminSt
 	if mode == "restore" {
 		if len(status.Relays) == 0 {
 			ui.line(ui.label("noRelay"))
-			return relayJob{}, inputExit(1)
+			return relayJob{}, ctlterm.Exit(1)
 		}
-		for index, relay := range status.Relays {
-			ui.line(fmt.Sprintf("%d. %s", index+1, Printable(relay.Name)))
+		names := make([]string, 0, len(status.Relays))
+		for _, relay := range status.Relays {
+			names = append(names, Printable(relay.Name))
 		}
-		index, err := ui.readIndex("choose", len(status.Relays), false)
+		index, err := ui.readIndex("choose", names, false)
 		if err != nil {
 			return relayJob{}, err
 		}
-		selected := status.Relays[index-1]
+		selected := status.Relays[index]
 		body.RelayID, body.Public = selected.ID, selected.remoteEndpoint
 	} else {
 		name, err := ui.prompt("name", false, nil)
@@ -360,7 +337,7 @@ func (ui wizard) create(mode string, options relaySetupArgs, status relayAdminSt
 	body.SSH.Port = options.SSHPort
 	if options.PublicHost == "" && strings.Contains(body.SSH.Host, ":") {
 		ui.line(ui.label("publicRequired"))
-		return relayJob{}, inputExit(1)
+		return relayJob{}, ctlterm.Exit(1)
 	}
 	if body.Public.Host == "" {
 		body.Public = remoteEndpoint{Host: body.SSH.Host, Port: 443}
@@ -380,13 +357,12 @@ func (ui wizard) create(mode string, options relaySetupArgs, status relayAdminSt
 			body.Public != old.Public {
 			continue
 		}
-		ui.line(jobTitle(old))
-		accept, err := ui.prompt("cancelWaiting", false, nil)
+		accept, err := ui.decision("cancelWaiting", "remote.cancelWaitingAction", []string{jobTitle(old)})
 		if err != nil {
 			return relayJob{}, err
 		}
-		if !confirmed(accept) {
-			return relayJob{}, inputExit(2)
+		if !accept {
+			return relayJob{}, ctlterm.Exit(2)
 		}
 		if _, err := ui.action(old, "cancel", map[string]any{"requestId": requestID()}); err != nil {
 			return relayJob{}, err
@@ -472,7 +448,7 @@ func (ui wizard) drive(job relayJob) error {
 			job, err = ui.action(job, "probe", nil)
 		case "failed", "interrupted", "recovery_required":
 			ui.reportFailure(job)
-			if _, err = ui.prompt("retry", false, nil); err == nil {
+			if err = ui.acknowledge("retry", "choice.retry"); err == nil {
 				job, err = ui.action(job, "retry", map[string]any{"requestId": requestID()})
 			}
 		case "awaiting_host_key":
@@ -484,24 +460,46 @@ func (ui wizard) drive(job relayJob) error {
 		case "ready":
 			return ui.finish(job)
 		case "awaiting_dns", "waiting_vpn":
-			if _, err = ui.prompt(job.State, false, nil); err == nil {
+			if err = ui.acknowledge(job.State, "choice.check"); err == nil {
 				job, err = ui.action(job, "check", map[string]any{"requestId": requestID()})
 			}
 		default:
-			ui.line(ui.label("working"))
-			key, available, readError := ui.next(250)
-			if readError != nil {
-				return readError
-			}
-			if available && key == 27 {
-				return inputExit(2)
-			}
-			job, err = ui.request(deployments+"/"+url.PathEscape(job.ID), nil, false)
+			job, err = ui.waitForJob(job)
 		}
+
 		if err != nil {
 			return err
 		}
 	}
+}
+
+func (ui wizard) acknowledge(label, action string) error {
+	_, err := ui.pick(ctlterm.Choice{Title: ui.label(label), Options: []string{ui.lang.Text(action)}})
+	return err
+}
+
+// waitForJob обновляет строку ожидания до изменения статуса серверного задания.
+// Esc закрывает наблюдение, а само задание продолжает выполняться на сервере.
+func (ui wizard) waitForJob(job relayJob) (relayJob, error) {
+	progress := ctlterm.NewProgress(ui.out, ui.env, true)
+	defer progress.Close()
+	progress.Update(ui.label("working"), "", 0, 0)
+
+	state := job.State
+	for job.State == state {
+		key, available, err := ui.input.Read(250)
+		if err != nil {
+			return job, err
+		}
+		if available && key == 27 {
+			return job, ctlterm.Exit(2)
+		}
+		job, err = ui.request(deployments+"/"+url.PathEscape(job.ID), nil, false)
+		if err != nil {
+			return job, err
+		}
+	}
+	return job, nil
 }
 
 func (ui wizard) reportFailure(job relayJob) {
@@ -513,21 +511,21 @@ func (ui wizard) reportFailure(job relayJob) {
 	if code == "" {
 		code = "failedGeneric"
 	}
-	ui.line(ui.label(code))
+	ui.line(ui.screen.Label(ui.label(code), ctlterm.Error))
 }
 
 func (ui wizard) trust(job relayJob) (relayJob, error) {
-	ui.line(Printable(job.HostKey.Fingerprint))
+	details := []string{Printable(job.HostKey.Fingerprint)}
 	replace := job.HostKey.Decision == "replace_required"
 	if replace {
-		ui.line(ui.label("changedKey"))
+		details = append(details, ui.label("changedKey"))
 	}
-	answer, err := ui.prompt("trust", false, nil)
+	answer, err := ui.decision("trust", "remote.trustAction", details)
 	if err != nil {
 		return job, err
 	}
 	decision := "reject"
-	if confirmed(answer) {
+	if answer {
 		decision = "trust"
 		if replace {
 			decision = "replace"
@@ -537,45 +535,28 @@ func (ui wizard) trust(job relayJob) (relayJob, error) {
 		"challengeId": job.HostKey.ChallengeID, "decision": decision,
 	})
 	if err == nil && decision == "reject" {
-		err = inputExit(1)
+		err = ctlterm.Exit(1)
 	}
 	return result, err
 }
 
 func (ui wizard) credentials(job relayJob) (relayJob, error) {
-	ui.line(ui.label("method"))
-	useKey := false
 	var first []byte
-	for {
-		key, err := ui.waitByte()
-		if err != nil {
-			return job, err
-		}
-		if key == '\r' || key == '\n' {
-			break
-		}
-		if key == 27 {
-			prefix, present, err := ui.next(35)
-			if err != nil || !present || prefix != '[' {
-				return job, inputExit(2)
-			}
-			arrow, present, err := ui.next(35)
-			if err != nil || !present {
-				return job, inputExit(2)
-			}
-			if arrow == 'A' || arrow == 'B' {
-				useKey = !useKey
-			}
-			continue
-		}
-		if key >= 32 {
+	method, err := ui.pick(ctlterm.Choice{
+		Title:   ui.label("method"),
+		Options: []string{ui.label("password"), ui.label("keyMethod")},
+		Shortcut: func(key byte) (int, error) {
 			first = []byte{key}
-			useKey = false
-			break
-		}
+			return 0, nil
+		},
+	})
+	defer clear(first)
+	if err != nil {
+		return job, err
 	}
+
 	data := map[string]any{"attemptId": requestID()}
-	if useKey {
+	if method == 1 {
 		file, err := ui.prompt("keyFile", false, nil)
 		if err != nil {
 			return job, err
@@ -597,7 +578,6 @@ func (ui wizard) credentials(job relayJob) (relayJob, error) {
 		data["privateKey"], data["passphrase"] = string(bytes), passphrase
 	} else {
 		password, err := ui.prompt("password", true, first)
-		clear(first)
 		if err != nil {
 			return job, err
 		}
@@ -609,19 +589,20 @@ func (ui wizard) credentials(job relayJob) (relayJob, error) {
 func (ui wizard) confirm(job relayJob) (relayJob, error) {
 	changes := map[string]string{"install_relay_binary": "changeBinary", "create_service_user": "changeUser",
 		"write_private_config": "changeConfig", "enable_systemd": "changeService"}
+	details := make([]string, 0, len(job.Preview.Changes))
 	for _, change := range job.Preview.Changes {
 		if label := changes[change]; label != "" {
-			ui.line(ui.label(label))
+			details = append(details, ui.label(label))
 		} else {
-			ui.line(Printable(change))
+			details = append(details, Printable(change))
 		}
 	}
-	answer, err := ui.prompt("start", false, nil)
+	answer, err := ui.decision("start", "choice.accept", details)
 	if err != nil {
 		return job, err
 	}
-	if !confirmed(answer) {
-		return job, inputExit(2)
+	if !answer {
+		return job, ctlterm.Exit(2)
 	}
 	return ui.action(job, "start", map[string]any{"requestId": requestID(), "previewDigest": job.Preview.Digest})
 }
@@ -632,7 +613,7 @@ func (ui wizard) finish(job relayJob) error {
 		map[string]string{"relayId": job.RelayID}, &pairing); err != nil {
 		return err
 	}
-	ui.line(ui.label("ready"))
+	ui.line(ui.screen.Label(ui.label("ready"), ctlterm.Success))
 	if err := WritePairing(ui.out, pairing, false); err != nil {
 		return err
 	}
@@ -641,6 +622,6 @@ func (ui wizard) finish(job relayJob) error {
 		label = "routeUpdate"
 	}
 	ui.line(ui.label(label))
-	_, _ = ui.waitByte()
+	_, _ = ui.input.Byte()
 	return nil
 }

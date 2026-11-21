@@ -11,12 +11,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 )
 
 type Terminal struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	Screen *ctlterm.Screen
 }
 
 type Result struct {

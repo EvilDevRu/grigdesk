@@ -11,6 +11,13 @@
     "developer": "DEVELOPER TOOLS"
   },
   "continue": "Enter or Esc — back",
+  "choice": {
+    "accept": "Confirm",
+    "decline": "Cancel",
+    "retry": "Retry",
+    "check": "Check again",
+    "paging": "↑↓ select · Enter · Esc · PgUp/PgDn view"
+  },
   "open": "Open window",
   "openDescription": "start GrigDesk",
   "openWindowQuestion": "Open the GrigDesk window?",
@@ -87,6 +94,8 @@
   "log": "Log: {path}",
   "logError": "Cannot open build log: {reason}",
   "failed": "Failed: {step}, code {code}",
+  "buildDone": "Build completed",
+  "buildFailed": "Build failed (code {code}). {log}",
   "interrupted": "interrupted",
   "total": "Total time: {time}",
   "summaryAll": "Installed server, web, window, tasks and voice.",
@@ -168,6 +177,8 @@
     "help": "Help",
     "version": "Version",
     "running": "◐ Running…",
+    "stopping": "◐ Cancelling…",
+    "cancelled": "○ Action cancelled",
     "done": "✓ Done",
     "failed": "✗ Command exited with code {code}",
     "cancel": "Ctrl+C cancel",
@@ -256,6 +267,8 @@
     "menu_relay-restore": "Restore remote access"
   },
   "remote": {
+    "cancelWaitingAction": "End the pending job",
+    "trustAction": "Trust the fingerprint",
     "tty": "The wizard requires an interactive terminal.",
     "requestFailed": "Action failed. Check the connection, permissions and job status.",
     "home": "Home server",
@@ -274,6 +287,7 @@
     "trust": "Verify the fingerprint. Trust (yes/no)",
     "method": "Authentication: password (Enter) / key (↓ Enter). Password is hidden",
     "password": "SSH password",
+    "keyMethod": "SSH private key",
     "keyFile": "Private key file path",
     "passphrase": "Key passphrase (may be empty)",
     "start": "Confirm changes and service installation (yes/no)",

@@ -60,9 +60,9 @@ func runInventoryFixture(t *testing.T, ctx context.Context, root string,
 	var stdout, stderr bytes.Buffer
 	terminal := service.Terminal{Stdin: bytes.NewReader(nil), Stdout: &stdout, Stderr: &stderr}
 	env := map[string]string{"GRIGDESK_ARTIFACTS_DIR": root, "LANG": "en"}
-	code := Run(ctx, env, args, terminal, func(Report) bool {
+	code := Run(ctx, env, args, terminal, func(Report) (bool, error) {
 		t.Fatal("инвентаризация предложила удаление")
-		return false
+		return false, nil
 	})
 	return code, stdout.String(), stderr.String()
 }

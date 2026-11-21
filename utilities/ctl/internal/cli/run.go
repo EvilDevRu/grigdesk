@@ -7,12 +7,11 @@ import (
 	"os"
 	"slices"
 
-	"golang.org/x/term"
-
 	"grigdesk.local/tools/utilities/ctl/internal/cleanup"
 	"grigdesk.local/tools/utilities/ctl/internal/menu"
 	"grigdesk.local/tools/utilities/ctl/internal/service"
 	"grigdesk.local/tools/utilities/ctl/internal/source"
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 	"grigdesk.local/tools/utilities/internal/buildinfo"
 	"grigdesk.local/tools/utilities/internal/grigdeskapi/localapi"
 	"grigdesk.local/tools/utilities/internal/installation"
@@ -37,7 +36,7 @@ func (command Command) Run(ctx context.Context, argv []string, stdin io.Reader, 
 	}
 
 	args, invalid := parse(argv)
-	tty := isTTY(stdin) && isTTY(stdout)
+	tty := ctlterm.IsTTY(stdin) && ctlterm.IsTTY(stdout)
 	if args.kind == "help" || args.kind == "menu" && (!tty || service.InAgentScope(env)) {
 		_, _ = io.WriteString(stdout, help)
 		return 0
@@ -110,7 +109,7 @@ func packaged(ctx context.Context, root, version string, argv []string, args arg
 
 func dispatch(ctx context.Context, args arguments, settings service.Settings, tty bool, terminal service.Terminal) int {
 	if args.kind == "status" || args.action.Name == "status" {
-		color := isTTY(terminal.Stdout) && settings.Env["NO_COLOR"] == "" && settings.Env["TERM"] != "dumb"
+		color := ctlterm.IsTTY(terminal.Stdout) && settings.Env["NO_COLOR"] == "" && settings.Env["TERM"] != "dumb"
 		return service.Status(ctx, settings, args.kind, args.json, color, terminal)
 	}
 	switch args.kind {
@@ -136,7 +135,8 @@ func dispatch(ctx context.Context, args arguments, settings service.Settings, tt
 		if err != nil {
 			return terminal.Fail(err.Error(), 2)
 		}
-		return service.Device(ctx, settings, device, isTTY(terminal.Stdout) && settings.Env["NO_COLOR"] == "", terminal)
+		color := ctlterm.IsTTY(terminal.Stdout) && settings.Env["NO_COLOR"] == "" && settings.Env["TERM"] != "dumb"
+		return service.Device(ctx, settings, device, color, terminal)
 	case "build":
 		target := ""
 		if len(args.tail) != 0 {
@@ -147,7 +147,7 @@ func dispatch(ctx context.Context, args arguments, settings service.Settings, tt
 	case "run", "dev", "deps":
 		return source.Development(ctx, settings, args.kind, terminal)
 	case "menu":
-		return menu.Run(ctx, settings, terminal, func(argv []string) int {
+		return menu.Run(ctx, settings, terminal, func(ctx context.Context, argv []string, terminal service.Terminal) int {
 			selected, err := parse(argv)
 			if err != nil {
 				return terminal.Fail(err.Error(), 2)
@@ -156,10 +156,10 @@ func dispatch(ctx context.Context, args arguments, settings service.Settings, tt
 				return terminal.Fail("Команда прервёт ход агента или откроет окно из него. Используйте --force.", 1)
 			}
 			if selected.kind == "artifacts-cleanup" {
-				return cleanup.Run(ctx, settings.Env, selected.tail, terminal, func(report cleanup.Report) bool {
-					cleanup.ShowReport(report, terminal)
-					return menu.ConfirmCleanup(ctx, settings, terminal)
-				})
+				return cleanupMenu(ctx, settings, selected.tail, terminal)
+			}
+			if selected.kind == "dist" {
+				return source.Distribution(ctx, settings, selected.tail, terminal)
 			}
 			if slices.Contains(delegated, selected.kind) {
 				return terminal.Fail(source.Delegate(settings.Root, selected.kind, selected.tail).Error(), 1)
@@ -170,7 +170,22 @@ func dispatch(ctx context.Context, args arguments, settings service.Settings, tt
 	return terminal.Fail("Команда grigdesk-ctl ещё не перенесена на Go.", 78)
 }
 
-func isTTY(stream any) bool {
-	file, ok := stream.(*os.File)
-	return ok && term.IsTerminal(int(file.Fd()))
+// cleanupMenu возвращает в меню после отказа и показывает итог после удаления.
+// Закрытый ввод завершает сеанс без новой отрисовки.
+func cleanupMenu(ctx context.Context, settings service.Settings, argv []string, terminal service.Terminal) int {
+	next := 0
+	code := cleanup.Run(ctx, settings.Env, argv, terminal, func(report cleanup.Report) (bool, error) {
+		approved, err := menu.ConfirmCleanup(ctx, settings, terminal, cleanup.ReportLines(report, true))
+		switch {
+		case err == ctlterm.EndOfInput:
+			next = menu.End
+		case !approved:
+			next = menu.Back
+		}
+		return approved, err
+	})
+	if code == 0 {
+		return next
+	}
+	return code
 }

@@ -17,6 +17,8 @@ import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 import { verifyReleaseInstaller } from './releaseArtifactVerification.mts';
 import { cliTranslator } from '../cli/i18n.ts';
 import { createDistributionProgress } from '../cli/distributionProgress.ts';
+import { TerminalSession, terminalLines } from '../cli/terminal.ts';
+import type { TerminalLine } from '../cli/terminal.ts';
 import { readDarwinBuildSetsid } from './darwinBuildTools.mts';
 import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
 import { removePrivateTree } from '../shared/node/files.ts';
@@ -137,9 +139,13 @@ function valueOf(argv: string[], flag: string): string | null {
  * Подтверждение читает человеческий терминал до любых записей тестовой установки.
  * EOF и запуск без TTY не считаются согласием.
  */
-async function confirm(question: string): Promise<boolean> {
+async function confirm(question: string, details: string[]): Promise<boolean | 130 | 143> {
   if (!process.stdin.isTTY) {
     throw new Error('dist_install_confirmation_requires_tty');
+  }
+
+  if (process.stdout.isTTY) {
+    return chooseConfirmation(question, details);
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -150,6 +156,94 @@ async function confirm(question: string): Promise<boolean> {
     return /^(y|yes|д|да)$/iu.test(answer.trim());
   } finally {
     rl.close();
+  }
+}
+
+/**
+ * Терминал показывает пути рядом с подтверждением и начинает со строки отмены.
+ * Буквенный ответ по-прежнему можно ввести целиком и подтвердить Enter.
+ */
+async function chooseConfirmation(question: string, details: string[]): Promise<boolean | 130 | 143> {
+  const session = new TerminalSession();
+  const { t } = cliTranslator();
+  const positioned = process.env.TERM !== 'dumb';
+  let selected = 0;
+  let typed = '';
+  let page = 0;
+
+  /**
+   * Перенос строк заново учитывает размер терминала при смене геометрии.
+   * Строка выбора сохраняется при просмотре другой страницы подробностей.
+   */
+  const draw = () => {
+    const columns = Math.max(1, Math.min(80, session.columns - 1));
+    const inset = columns >= 34 ? '  ' : '';
+    const content = columns - inset.length * 2;
+    const title = terminalLines(question, content, { words: true });
+    const available = Math.max(1, session.rows - title.length - 4);
+    const wrapped = details.flatMap((line) => terminalLines(line, content, { words: true }));
+
+    page = Math.min(page, Math.max(0, Math.ceil(wrapped.length / available) - 1));
+
+    const rows: TerminalLine[] = [
+      ...title.map((text) => ({ spans: [{ text: inset + text, tone: 'accent' as const }] })),
+      ...wrapped.slice(page * available, (page + 1) * available).map((text) => ({
+        spans: [{ text: inset + text, tone: 'muted' as const }],
+      })),
+      ...[t('choice.decline'), t('choice.accept')].map((label, index) => ({
+        selected: index === selected,
+        spans: [{ text: inset + (index === selected ? '› ' : '  ') + label }],
+      })),
+      { spans: [{
+        text: inset + t(wrapped.length > available ? 'choice.paging' : 'navigation'),
+        tone: 'muted',
+      }] },
+    ];
+
+    session.draw(rows, draw, { theme: 'dark', width: columns });
+  };
+
+  if (positioned) {
+    session.output.write('\x1b[?1049h');
+  }
+
+  try {
+    return await session.run(async () => {
+      draw();
+
+      for (;;) {
+        const key = await session.nextKey();
+
+        if (key.name === 'enter' || key.name === 'return') {
+          return typed ? /^(y|yes|д|да)$/iu.test(typed.trim()) : selected === 1;
+        }
+        if (key.name === 'escape' || key.name === 'eof') {
+          return false;
+        }
+        if (key.name === 'interrupt' || key.name === 'terminate') {
+          return key.name === 'interrupt' ? 130 : 143;
+        }
+        if (key.name === 'up' || key.name === 'down' || key.name === 'tab') {
+          selected = 1 - selected;
+          typed = '';
+          draw();
+        } else if (key.name === 'pageup' || key.name === 'pagedown') {
+          page = Math.max(0, page + (key.name === 'pageup' ? -1 : 1));
+          draw();
+        } else if (key.name === 'home' || key.name === 'end') {
+          page = key.name === 'home' ? 0 : Number.MAX_SAFE_INTEGER;
+          draw();
+        } else if (key.name === 'backspace') {
+          typed = typed.slice(0, -1);
+        } else if (key.text && typed.length < 128) {
+          typed += key.text;
+        }
+      }
+    });
+  } finally {
+    if (positioned) {
+      session.output.write('\x1b[?1049l');
+    }
   }
 }
 
@@ -384,8 +478,13 @@ async function main(argv: string[]): Promise<number> {
 
     process.stdout.write(JSON.stringify({ mode, ...paths }, null, 2) + '\n');
 
-    if (!argv.includes('--yes') && !await confirm(t('distribution.confirmInstall'))) {
-      return 0;
+    if (!argv.includes('--yes')) {
+      const decision = await confirm(t('distribution.confirmInstall'),
+        [mode, ...Object.entries(paths).map(([flag, value]) => `${flag} ${value}`)]);
+
+      if (decision !== true) {
+        return decision || 0;
+      }
     }
 
     const profile = paths['--root'] + '-profile';

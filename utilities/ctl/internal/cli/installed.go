@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"slices"
 
 	"grigdesk.local/tools/utilities/ctl/internal/menu"
@@ -106,10 +107,13 @@ func registeredAction(ctx context.Context, layout *installation.Layout, argv []s
 		settings.ServerWork = receipt.Root
 		settings.Registered = receipt.Mode
 		settings.Version = pointer.Version()
-		return menu.Run(ctx, settings, terminal, func(next []string) int {
+		return menu.Run(ctx, settings, terminal, func(ctx context.Context, next []string, terminal service.Terminal) int {
 			parsed, invalid := parse(next)
 			if invalid != nil {
 				return terminal.Fail(invalid.Error(), 2)
+			}
+			if parsed.kind == "artifacts-cleanup" {
+				return cleanupMenu(ctx, settings, parsed.tail, terminal)
 			}
 			return registered(ctx, receipt.Root, next, parsed, clean, true, terminal)
 		})
@@ -124,6 +128,13 @@ func registeredAction(ctx context.Context, layout *installation.Layout, argv []s
 	if slices.Contains([]string{"server", "status", "open", "recover-update"}, args.kind) {
 		if pointer.Format != 2 {
 			return terminal.Fail("Для управления этой установкой завершите переход на Go.", 1)
+		}
+		if terminal.Screen != nil {
+			executable, err := os.Executable()
+			if err != nil {
+				return terminal.Fail(err.Error(), 1)
+			}
+			return terminal.Attached(ctx, executable, argv...)
 		}
 		binary, err := layout.Maintenance()
 		if err != nil {

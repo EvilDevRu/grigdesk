@@ -124,6 +124,20 @@ function darkLine(line: TerminalLine, columns: number): string {
 }
 
 /**
+ * Подпись для потокового экрана имеет ту же подложку, что и меню.
+ * Встраиваемые наблюдатели передают исходный текст вызывающему экрану.
+ */
+export function terminalLabel(text: string, columns: number, tone: TerminalTone): string {
+  if (process.env.NO_COLOR || process.env.TERM === 'dumb' || columns <= 4) {
+    return terminalText(text, columns);
+  }
+
+  const clipped = terminalText(text, columns - 4);
+
+  return darkLine({ spans: [{ text: `  ${clipped}  `, tone }] }, [...clipped].length + 4);
+}
+
+/**
  * Сигнальные ключи приходят от сигналов процесса и конца stdin, а не от клавиш
  * вложенного мастера. Их доставка после suspend/resume и есть отмена, поэтому
  * при очистке очереди они сохраняются, а реплей настоящих нажатий отбрасывается.
@@ -181,7 +195,9 @@ export class TerminalSession {
       return;
     }
 
-    this.receive({ name: key.ctrl && key.name === 'c' ? 'interrupt' : key.name ?? '', text });
+    const control = key.ctrl && key.name === 'c' ? 'interrupt' : key.ctrl && key.name === 'd' ? 'eof' : '';
+
+    this.receive({ name: control || key.name || '', text });
   };
 
   private end = (): void => this.receive({ name: 'eof', text: '' });

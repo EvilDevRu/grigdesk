@@ -1,6 +1,6 @@
 import { buildProgressBar } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
-import { terminalText } from './terminal.ts';
+import { terminalLabel, terminalText } from './terminal.ts';
 import type { PipelineObserver } from '../tools/releasePipeline.mts';
 
 type Phase = 'snapshot' | 'setup' | 'acceptance' | 'record';
@@ -19,6 +19,7 @@ export function createDistributionProgress() {
 
   const live = process.env.TERM !== 'dumb';
   const { t } = cliTranslator();
+  const started = Date.now();
   const pending = { stdout: '', stderr: '' };
   let finished = 0;
   let total = 0;
@@ -37,9 +38,13 @@ export function createDistributionProgress() {
 
     const percent = success ? 100 : total ? Math.min(99, finished * 100 / total) : 0;
     const width = terminal ? Math.max(1, (process.stderr.columns || 80) - 1) : 79;
-    const bar = buildProgressBar(percent, Math.max(4, Math.min(16, width - 14)));
-    const headline = `${bar}  ${label}`;
-    const line = terminalText(last ? `${headline}  › ${last}` : headline, width);
+    const bar = buildProgressBar(percent, Math.min(12, Math.max(3, Math.floor(width / 6))));
+    const elapsed = Math.floor((Date.now() - started) / 1000);
+    const headline = screen ? `${bar}  ${label}` : `${bar}  ${label} · ${elapsed}s`;
+    const content = last ? `${headline}  › ${last}` : headline;
+    const line = terminal && !screen
+      ? terminalLabel(content, width, success ? 'success' : 'accent')
+      : terminalText(content, width);
     const prefix = live ? (screen ? '\r' : '\r\x1b[K') : '';
 
     open = live && !end;

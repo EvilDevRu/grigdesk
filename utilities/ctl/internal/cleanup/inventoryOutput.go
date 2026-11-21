@@ -4,27 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"golang.org/x/term"
-
 	"grigdesk.local/tools/shared/i18n"
 	"grigdesk.local/tools/utilities/ctl/internal/service"
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 )
 
 const textInventoryLimit = 20
 
 // runInventory сохраняет отдельный контракт отчёта и коды завершения уборки.
 // Сообщение о начале идёт только в терминал, поэтому JSON остаётся одним документом.
-func runInventory(ctx context.Context, root string, rules options, lang i18n.CLI,
+func runInventory(ctx context.Context, root string, rules options, env map[string]string, lang i18n.CLI,
 	terminal service.Terminal) int {
-	if stream, ok := terminal.Stderr.(*os.File); ok && term.IsTerminal(int(stream.Fd())) {
-		_, _ = fmt.Fprintln(stream, lang.Text("inventory.scanning"))
-	}
+	progress := ctlterm.NewProgress(terminal.Stderr, env, !rules.json)
+	defer progress.Close()
+	progress.Update(lang.Text("inventory.scanning"), rules.topic, 0, 0)
 	report, err := scanInventory(ctx, root, rules.topic)
+	progress.Close()
 	if err != nil {
 		message := strings.ReplaceAll(lang.Text("inventory.openError"), "{error}", err.Error())
 		return terminal.Fail(message, 1)

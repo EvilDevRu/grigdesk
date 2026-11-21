@@ -76,6 +76,15 @@ The application has private registration and verified component generations with
 Remote mode does not download a server or create a local server descriptor.
 The program, data and window profile remain separate.
 
+## Command menu
+
+Run `grigdesk-ctl` without arguments in a terminal. The header shows the version, server
+and window status. Use the arrow keys to highlight an item, Enter to select it, and Esc
+to go back. Builds started from the menu display progress and their results on the same screen.
+Press Ctrl+C to cancel the build, then Enter or Esc at the result to return to the selected target.
+Confirmation screens start on Cancel. Set `NO_COLOR=1` for text without color.
+With `TERM=dumb`, progress stages appear on separate lines.
+
 ## Checking a candidate from source
 
 Open “Distribution” in the `grigdesk-ctl` menu. Choose an Actions artifact directory for official files,

@@ -50,7 +50,8 @@ voice описаны в обеих редакциях: [RU](ru/voice.md), [EN](e
 агентов описаны в «Профилях доступа»: [RU](ru/access-profiles.md), [EN](en/access-profiles.md).
 
 Терминальная установка, офлайн-вход кандидата Apple Silicon, диагностика среды по запросу,
-сетевой deb и доверие dist описаны в [RU](ru/installation.md) и [EN](en/installation.md).
+консольное меню со сборкой на одном экране, сетевой deb и доверие dist описаны в
+[RU](ru/installation.md) и [EN](en/installation.md).
 Повтор кандидата, переход на Go и подтверждение AppImage описаны в [RU](ru/updates.md) и [EN](en/updates.md).
 Подтверждение короткого маршрута при запуске описано в [RU](ru/pipelines.md) и [EN](en/pipelines.md).
 

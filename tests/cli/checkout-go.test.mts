@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, stat, symlink } from 'node:fs/promises';
+import { mkdir, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
 import { createSandbox } from './helpers/sandbox.mts';
 import { buildLog, chooseBuild, launchBuild, terminalBuildFixture } from './helpers/buildFixture.mts';
+import { down, menuTitle, up, visibleLines } from './helpers/menuFixture.mts';
+import { assertRestored, startPty } from './helpers/pty.mts';
 import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 import { DAY, oldTree, retentionFixture } from '../helpers/deepseekRetentionFixture.mts';
 
@@ -68,12 +70,214 @@ test('CTL-GO-02: меню запускает web-сборку, сохраняе�
   const session = launchBuild(t, fixture, 'web', true);
 
   await chooseBuild(session, 'web');
+  await session.wait(/50%.*Веб: сборка/u);
   await session.wait(/Сборка завершена|Сборка выполнена/iu);
 
   const log = await buildLog(fixture);
 
+  assert.match(session.output(), /Веб: зависимости/u);
+  assert.match(session.output(), /50%.*Веб: сборка/u);
   assert.match(log.text, /fixture-out.*build/u);
   assert.match(log.text, /fixture-err/u);
+  await returnFromBuild(session);
+});
+
+for (const outcome of ['failed', 'cancelled'] as const) {
+  test(`CTL-GO-07: исход сборки ${outcome} остаётся внутри меню`, async (t) => {
+    const fixture = await terminalBuildFixture(t, true);
+
+    if (outcome === 'failed') {
+      await fixture.fail('npm', 'build', 17);
+    }
+
+    const session = launchBuild(t, fixture, 'web', true);
+
+    await chooseBuild(session, 'web');
+
+    if (outcome === 'cancelled') {
+      await session.wait(/Веб: зависимости/u);
+      session.write('\x03');
+      await session.wait(/Действие прервано/u);
+    } else {
+      await session.wait(/Команда завершилась с кодом 17/u);
+      await session.wait(/tail-25/u);
+    }
+
+    await returnFromBuild(session);
+  });
+}
+
+/**
+ * У карточки результата и двух уровней меню общий альтернативный экран.
+ * Проверка закрывает весь сеанс только после подтверждения возврата к той же цели.
+ */
+async function returnFromBuild(session: ReturnType<typeof startPty>) {
+  await session.wait(/Enter \/ Esc — назад/u);
+
+  const beforeResult = session.output().length;
+
+  assert.doesNotMatch(session.output(), /\x1b\[\?1049l/u);
+  session.write('\r');
+  await session.wait(/› Только веб/u, 4000, beforeResult);
+
+  const beforeParent = session.output().length;
+
+  session.write('\x1b');
+  await session.wait(menuTitle, 4000, beforeParent);
+  assert.doesNotMatch(session.output(), /\x1b\[\?1049l/u);
+  session.write('\x1b');
+
+  const result = await session.done;
+  const output = session.output();
+
+  assert.equal(result.code, 0);
+  assert.equal(output.match(/\x1b\[\?1049h/gu)?.length, 1);
+  assert.equal(output.match(/\x1b\[\?1049l/gu)?.length, 1);
+  assertRestored(result, output);
+}
+
+test('CTL-GO-08: сборка дистрибутива возвращается на тот же экран после результата', async (t) => {
+  const fixture = await terminalBuildFixture(t, true);
+  const script = path.join(fixture.root, 'tools/distribution.mts');
+
+  await writeFile(script, [
+    'if (process.env.GRIGDESK_CTL_DIST_PROGRESS !== "1") process.exit(2);',
+    'process.stderr.write("\\r25% Подготовка дистрибутива");',
+    'await new Promise((resolve) => setTimeout(resolve, 300));',
+    'process.stderr.write("\\r100% Готово\\n");',
+    'process.stdout.write("Кандидат собран\\n");',
+  ].join('\n'));
+
+  const session = launchBuild(t, fixture, 'web', true);
+
+  await session.wait(menuTitle);
+
+  const root = session.output().length;
+
+  session.write(down.repeat(8) + '\r');
+  await session.wait(/› Собрать дистрибутив/u, 4000, root);
+  session.write('\r');
+  await session.wait(/25% Подготовка дистрибутива/u);
+  await session.wait(/Кандидат собран/u);
+  await session.wait(/Enter \/ Esc — назад/u);
+
+  const beforeResult = session.output().length;
+
+  session.write('\x1b');
+  await session.wait(/› Собрать дистрибутив/u, 4000, beforeResult);
+  assert.doesNotMatch(session.output(), /\x1b\[\?1049l/u);
+  session.write('\x03');
+
+  const result = await session.done;
+
+  assert.equal(result.code, 130);
+  assertRestored(result, session.output());
+});
+
+for (const mode of ['color', 'no-color', 'dumb'] as const) {
+  test(`CTL-GO-05: меню сохраняет выбор и терминал в режиме ${mode}`, async (t) => {
+    const box = await createSandbox(t, { go: true });
+    const session = startPty(t, {
+      argv: box.argv(),
+      env: {
+        ...box.environment,
+        TERM: mode === 'dumb' ? 'dumb' : 'xterm-256color',
+        NO_COLOR: mode === 'no-color' ? '1' : '',
+        LC_ALL: 'ru_RU.UTF-8',
+      },
+      columns: 82,
+    });
+
+    await session.wait(menuTitle);
+
+    const root = session.output();
+
+    assert.match(root, /› Открыть окно/u);
+    assert.match(root, /Сервер [○●✗]/u);
+    assert.match(root, /ПРИЛОЖЕНИЕ/u);
+    assert.match(root, /РАЗРАБОТЧИКУ/u);
+
+    if (mode === 'color') {
+      assert.match(root, /\x1b\[48;2;27;31;38m/u);
+      assert.match(root, /\x1b\[48;2;41;59;67m/u);
+    } else {
+      assert.doesNotMatch(root, /\x1b\[[\d;]*m/u);
+    }
+    if (mode === 'dumb') {
+      assert.doesNotMatch(root, /\x1b/u);
+    }
+
+    const before = session.output().length;
+
+    session.write(down.repeat(2) + '\r');
+    await session.wait(/› Запустить/u, 4000, before);
+
+    const resizedAt = session.output().length;
+
+    session.resize(32);
+    await session.wait(/Esc назад/u, 4000, resizedAt);
+    assert.ok(visibleLines(session.output().slice(resizedAt)).every((line) => [...line].length < 32));
+
+    const backAt = session.output().length;
+
+    session.write('\x1b');
+    await session.wait(/› Сервер/u, 4000, backAt);
+    session.write(up + '\x03');
+
+    const result = await session.done;
+    const output = session.output();
+
+    assert.equal(result.code, 130);
+    assertRestored(result, output);
+
+    if (mode !== 'dumb') {
+      assert.equal(output.match(/\x1b\[\?1049h/gu)?.length, 1);
+      assert.equal(output.match(/\x1b\[\?1049l/gu)?.length, 1);
+    }
+  });
+}
+
+test('CTL-GO-06: подтверждение уборки листает отчёт и возвращает в меню после отмены', async (t) => {
+  const box = await createSandbox(t, { go: true });
+  const retention = await retentionFixture(t);
+  const earlier = Date.now() - 14 * DAY;
+  const names = Array.from({ length: 20 }, (_, index) => 'archive-' + String(index).padStart(2, '0'));
+
+  await Promise.all(names.map((name) => oldTree(retention.artifacts, name, 64, earlier)));
+
+  const session = startPty(t, {
+    argv: box.argv(),
+    env: {
+      ...box.environment,
+      GRIGDESK_ARTIFACTS_DIR: retention.artifacts,
+      TERM: 'xterm-256color',
+      LC_ALL: 'ru_RU.UTF-8',
+    },
+    columns: 82,
+    rows: 17,
+  });
+
+  await session.wait(menuTitle);
+  session.write(down.repeat(7) + '\r');
+  await session.wait(/PgUp\/PgDn/u);
+
+  const preview = session.output().length;
+
+  session.write('\x1b[F');
+  await session.wait(/archive-19/u, 4000, preview);
+  await session.wait(/› Отмена/u, 4000, preview);
+
+  const back = session.output().length;
+
+  session.write('\r');
+  await session.wait(menuTitle, 4000, back);
+  session.write('\x1b');
+
+  const result = await session.done;
+
+  await stat(path.join(retention.artifacts, 'archive-19'));
+  assert.equal(result.code, 0);
+  assertRestored(result, session.output());
 });
 
 test('CTL-GO-03: события сборки идут по fd 3 и не загрязняют stdout', async (t) => {

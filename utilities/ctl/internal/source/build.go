@@ -9,22 +9,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"grigdesk.local/tools/shared/i18n"
 	"grigdesk.local/tools/utilities/ctl/internal/service"
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 )
 
 type builder struct {
-	settings service.Settings
-	term     service.Terminal
-	events   *os.File
-	log      *buildLog
-	screen   bool
-	target   string
+	settings      service.Settings
+	term          service.Terminal
+	events        *os.File
+	log           *buildLog
+	progress      *ctlterm.Progress
+	lang          i18n.CLI
+	progressMu    sync.Mutex
+	activeSteps   []string
+	finishedSteps int
+	totalSteps    int
+	screen        bool
+	target        string
 }
 
 type stageTiming struct {
@@ -37,7 +46,8 @@ type buildHistory struct {
 	Variants map[string][]stageTiming `json:"variants"`
 }
 
-// Build запускает существующие сборщики с явными argv, сохраняя их первый отказ.
+// Build оставляет полный поток команд в журнале и показывает стадию в терминале.
+// В потоковом режиме сохраняются исходные команды и события fd 3.
 func Build(ctx context.Context, settings service.Settings, target string, screen bool, term service.Terminal) int {
 	if target == "" {
 		target = "all"
@@ -56,22 +66,41 @@ func Build(ctx context.Context, settings service.Settings, target string, screen
 		}
 		defer log.Close()
 		runner.log = log
-		terminalWrite(term.Stdout, "Сборка GrigDesk: "+target+"\n")
+		runner.lang = i18n.CLIForEnvironment(settings.Env)
+		runner.progress = ctlterm.NewProgress(term.Stderr, settings.Env, true)
+		runner.totalSteps = buildStageCount(target)
+		defer runner.progress.Close()
+		if term.Screen == nil || !term.Screen.Positioned() {
+			console := ctlterm.NewScreen(term.Stdout, settings.Env)
+			title := runner.lang.Text("build") + " GrigDesk · " + target
+			terminalWrite(term.Stdout, console.Label(title, ctlterm.Accent)+"\n")
+		}
+		terminalWrite(term.Stdout, logLabel(runner.lang, log.Name)+"\n")
+		runner.progress.Update(runner.lang.Text("preparing"), "", 0, runner.totalSteps)
 	}
 	rc := runner.run(ctx)
 	if ctx.Err() != nil {
 		rc = 130
 	}
+	runner.progress.Close()
 	if runner.log != nil {
 		runner.log.Finish(target, rc)
 		if rc == 0 {
-			terminalWrite(term.Stdout, "Сборка завершена\n")
+			console := ctlterm.NewScreen(term.Stdout, settings.Env)
+			terminalWrite(term.Stdout, console.Label(runner.lang.Text("buildDone"), ctlterm.Success)+"\n")
 		} else {
-			terminalWrite(term.Stderr, fmt.Sprintf("Сборка не выполнена (код %d). Журнал: %s\n", rc, runner.log.Name))
+			console := ctlterm.NewScreen(term.Stderr, settings.Env)
+			failure := strings.NewReplacer("{code}", strconv.Itoa(rc), "{log}", logLabel(runner.lang, runner.log.Name)).
+				Replace(runner.lang.Text("buildFailed"))
+			terminalWrite(term.Stderr, console.Label(failure, ctlterm.Error)+"\n")
 			terminalWrite(term.Stderr, runner.log.Tail())
 		}
 	}
 	return rc
+}
+
+func logLabel(lang i18n.CLI, path string) string {
+	return strings.ReplaceAll(lang.Text("log"), "{path}", service.Printable(path))
 }
 
 func terminalWrite(output io.Writer, value string) {
@@ -79,6 +108,9 @@ func terminalWrite(output io.Writer, value string) {
 }
 
 func (runner *builder) event(kind, id string, status ...int) {
+	if runner.progress != nil && (kind == "start" || kind == "end") {
+		runner.showStage(kind, id, status)
+	}
 	if runner.events == nil {
 		return
 	}
@@ -87,6 +119,46 @@ func (runner *builder) event(kind, id string, status ...int) {
 		line += "\t" + strconv.Itoa(status[0])
 	}
 	terminalWrite(runner.events, line+"\n")
+}
+
+// buildStageCount учитывает только стадии, известные до запуска выбранной цели.
+// Сценарий DeepSeek зависит от допуска и может добавлять повторные сборки.
+func buildStageCount(target string) int {
+	if runtime.GOOS == "darwin" && target == "all" {
+		return 2
+	}
+	return map[string]int{"apk": 1, "factory": 1, "web": 2, "window": 4, "server": 4, "all": 9}[target]
+}
+
+// showStage удерживает на экране активные параллельные стадии до их завершения.
+// Ошибка не прибавляет выполненную работу, а 100% относится к общему итогу команды.
+func (runner *builder) showStage(kind, id string, status []int) {
+	runner.progressMu.Lock()
+	defer runner.progressMu.Unlock()
+	if kind == "start" {
+		runner.activeSteps = append(runner.activeSteps, id)
+	} else {
+		if index := slices.Index(runner.activeSteps, id); index >= 0 {
+			runner.activeSteps = slices.Delete(runner.activeSteps, index, index+1)
+		}
+		if len(status) != 0 && status[0] == 0 {
+			runner.finishedSteps++
+		}
+	}
+	if len(runner.activeSteps) == 0 {
+		runner.progress.Line()
+		return
+	}
+	names := make([]string, 0, len(runner.activeSteps))
+	for _, active := range runner.activeSteps {
+		key := "steps." + active
+		label := runner.lang.Text(key)
+		if label == key {
+			label = active
+		}
+		names = append(names, label)
+	}
+	runner.progress.Update(strings.Join(names, " · "), "", runner.finishedSteps, runner.totalSteps)
 }
 
 func (runner *builder) execute(ctx context.Context, cwd, command string, argv ...string) *exec.Cmd {
@@ -105,6 +177,8 @@ func (runner *builder) execute(ctx context.Context, cwd, command string, argv ..
 	return child
 }
 
+// step пишет весь вывод в журнал, а пользователю сообщает текущую стадию.
+// События fd 3 и коды дочерней команды сохраняются.
 func (runner *builder) step(ctx context.Context, id, cwd, command string, argv ...string) int {
 	if id != "" {
 		runner.event("start", id)
@@ -130,6 +204,7 @@ func (runner *builder) step(ctx context.Context, id, cwd, command string, argv .
 	if runner.log != nil && id != "" {
 		runner.log.Record(id, time.Since(start))
 		if rc != 0 {
+			runner.progress.Line()
 			terminalWrite(runner.term.Stderr, fmt.Sprintf("Сбой стадии %s (код %d)\n", id, rc))
 		}
 	}
@@ -205,6 +280,7 @@ func (runner *builder) dependencies(ctx context.Context, forceWeb, withWeb bool)
 	if withWeb {
 		server := filepath.Join(root, "server")
 		if runner.step(ctx, "", server, "npm", "run", "--silent", "deepseek:prepare") != 0 {
+			runner.progress.Line()
 			terminalWrite(runner.term.Stderr,
 				"DeepSeek недоступен; GrigDesk работает без него. Установите совместимый ELF через install:binary\n")
 		}
@@ -477,7 +553,11 @@ func Development(ctx context.Context, settings service.Settings, name string, te
 			return code
 		}
 		terminal.Say("→ Сервер поднят: http://localhost:" + settings.Port + " (только с этой машины)")
-		return terminal.Fail(Exec(server, "node", append(nodeArgs, "src/app.ts")).Error(), 1)
+		args := append(nodeArgs, "src/app.ts")
+		if terminal.Screen != nil {
+			return runner.step(ctx, "", server, "node", args...)
+		}
+		return terminal.Fail(Exec(server, "node", args).Error(), 1)
 	default:
 		return 2
 	}

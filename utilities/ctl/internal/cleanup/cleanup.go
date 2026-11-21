@@ -16,6 +16,7 @@ import (
 
 	"grigdesk.local/tools/shared/i18n"
 	"grigdesk.local/tools/utilities/ctl/internal/service"
+	ctlterm "grigdesk.local/tools/utilities/ctl/internal/terminal"
 )
 
 type options struct {
@@ -133,11 +134,12 @@ func artifactRoot(env map[string]string) (string, error) {
 // Run запускает инвентаризацию без изменений либо существующую локальную уборку.
 // При подтверждении в меню удаление ограничено путями из показанного отчёта.
 func Run(ctx context.Context, env map[string]string, argv []string, terminal service.Terminal,
-	confirm func(Report) bool) int {
+	confirm func(Report) (bool, error)) int {
+	lang := i18n.CLIForEnvironment(env)
 	rules, invalid := parse(argv)
 	if invalid != nil {
 		if invalid == errInventoryTopic || invalid == errInventoryFilters {
-			return terminal.Fail(i18n.CLIForEnvironment(env).Text(invalid.Error()), 2)
+			return terminal.Fail(lang.Text(invalid.Error()), 2)
 		}
 		return terminal.Fail(invalid.Error(), 2)
 	}
@@ -146,13 +148,28 @@ func Run(ctx context.Context, env map[string]string, argv []string, terminal ser
 		return terminal.Fail(err.Error(), 1)
 	}
 	if rules.inventory {
-		return runInventory(ctx, root, rules, i18n.CLIForEnvironment(env), terminal)
+		return runInventory(ctx, root, rules, env, lang, terminal)
 	}
+
+	progress := ctlterm.NewProgress(terminal.Stderr, env, !rules.json)
+	defer progress.Close()
 	if confirm != nil && !rules.dry {
 		preview := rules
 		preview.dry = true
-		found := scan(ctx, root, preview)
-		if found.WouldDeleteBytes == 0 || found.Interrupted || !confirm(found) {
+		found := scan(ctx, root, preview, progress, lang)
+		progress.Line()
+		if found.Interrupted {
+			return 130
+		}
+		if found.WouldDeleteBytes == 0 {
+			ShowReport(found, terminal)
+			return 0
+		}
+		approved, err := confirm(found)
+		if err == ctlterm.Exit(130) {
+			return 130
+		}
+		if !approved || err != nil {
 			return 0
 		}
 		// Источник списка путей после подтверждения остаётся той же физической папкой.
@@ -167,7 +184,8 @@ func Run(ctx context.Context, env map[string]string, argv []string, terminal ser
 			}
 		}
 	}
-	report := scan(ctx, root, rules)
+	report := scan(ctx, root, rules, progress, lang)
+	progress.Close()
 	if rules.json {
 		encoder := json.NewEncoder(terminal.Stdout)
 		encoder.SetEscapeHTML(false)
@@ -186,11 +204,29 @@ func Run(ctx context.Context, env map[string]string, argv []string, terminal ser
 	return 0
 }
 
-// ShowReport показывает причины пропуска и байты без вывода данных файлов.
+// ShowReport печатает причины пропуска и байты без вывода данных файлов.
+// Список строк общий с предварительным просмотром перед подтверждением.
 func ShowReport(report Report, terminal service.Terminal) {
-	terminal.Say("Папка: " + service.Printable(report.Root))
-	terminal.Say(fmt.Sprintf("Порог: %g сут.; хранить поколений: %d", float64(report.OlderThanMS)/86_400_000,
-		report.KeepGenerations))
+	for _, line := range ReportLines(report, false) {
+		terminal.Say(line)
+	}
+}
+
+// ReportLines собирает плоский отчёт для потока и интерактивного просмотра.
+// Корень, итог и порог расположены перед списком для первого экрана просмотра.
+func ReportLines(report Report, preview bool) []string {
+	lines := []string{
+		"Папка: " + service.Printable(report.Root),
+		fmt.Sprintf("Порог: %g сут.; хранить поколений: %d", float64(report.OlderThanMS)/86_400_000,
+			report.KeepGenerations),
+	}
+	total := fmt.Sprintf("Удалено, освобождено: %d байт", report.FreedBytes)
+	if report.DryRun {
+		total = fmt.Sprintf("К удалению: %d байт", report.WouldDeleteBytes)
+	}
+	if preview {
+		lines = append(lines, total)
+	}
 	labels := map[string]string{
 		"would-delete": "будет удалено", "deleted": "удалено", "skipped": "пропущено", "error": "ошибка",
 	}
@@ -209,19 +245,18 @@ func ShowReport(report Report, terminal service.Terminal) {
 		if item.Reason != nil {
 			text += " (" + reasons[*item.Reason] + ")"
 		}
-		terminal.Say(fmt.Sprintf("%s: %s байт — %s", service.Printable(item.Path), count, text))
+		lines = append(lines, fmt.Sprintf("%s: %s байт — %s", service.Printable(item.Path), count, text))
 	}
-	if report.DryRun {
-		terminal.Say(fmt.Sprintf("К удалению: %d байт", report.WouldDeleteBytes))
-	} else {
-		terminal.Say(fmt.Sprintf("Удалено, освобождено: %d байт", report.FreedBytes))
+	if !preview {
+		lines = append(lines, total)
 	}
 	if report.ErrorCount > 0 {
-		terminal.Say(fmt.Sprintf("Ошибок: %d", report.ErrorCount))
+		lines = append(lines, fmt.Sprintf("Ошибок: %d", report.ErrorCount))
 	}
 	if report.Interrupted {
-		terminal.Say("Уборка прервана; оставшиеся каталоги не удалены.")
+		lines = append(lines, "Уборка прервана; оставшиеся каталоги не удалены.")
 	}
+	return lines
 }
 
 func reasonText(reason string) *string {
@@ -257,10 +292,16 @@ func (report *Report) add(value entry) {
 	}
 }
 
-func scan(ctx context.Context, path string, options options) Report {
+// scan собирает снимок, затем проверяет каждый путь перед отчётом или удалением.
+// Процент появляется после подсчёта кандидатов и измеряет обработанные позиции.
+func scan(ctx context.Context, path string, options options, progress *ctlterm.Progress, lang i18n.CLI) Report {
 	report := Report{Format: 1, Root: path, DryRun: options.dry, OlderThanMS: options.age,
 		KeepGenerations: options.keep, Entries: []entry{}}
 
+	if ctx.Err() != nil {
+		report.Interrupted = true
+		return report
+	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return report
@@ -282,6 +323,7 @@ func scan(ctx context.Context, path string, options options) Report {
 		return report
 	}
 	defer root.Close()
+	progress.Update(lang.Text("cleanup.progress.scan"), path, 0, 0)
 	candidates, err := collect(ctx, root, "", "root")
 	if err != nil && ctx.Err() == nil {
 		report.add(skipped("", nil, "io-error"))
@@ -296,11 +338,16 @@ func scan(ctx context.Context, path string, options options) Report {
 			barrier.release()
 		}
 	}()
-	for _, candidate := range candidates {
+	stage := lang.Text("cleanup.progress.check")
+	if !options.dry {
+		stage = lang.Text("cleanup.progress.delete")
+	}
+	for index, candidate := range candidates {
 		if ctx.Err() != nil {
 			break
 		}
 		item := candidate.entry
+		progress.Update(stage, item.Path, index, len(candidates))
 		if item.Status != "" {
 			report.add(item)
 			continue

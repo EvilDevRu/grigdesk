@@ -1,12 +1,16 @@
 package source
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
+
+	"grigdesk.local/tools/utilities/ctl/internal/service"
 )
 
 // Exec передаёт исходные argv и потоки одной заранее выбранной команде.
@@ -42,4 +46,32 @@ func Delegate(root, name string, args []string) error {
 	default:
 		return errors.New("Неизвестная команда")
 	}
+}
+
+// Distribution запускает инструмент дистрибутива внутри сеанса меню.
+// Строки прогресса и итог читаются родительским процессом на том же экране.
+func Distribution(ctx context.Context, settings service.Settings, args []string, terminal service.Terminal) int {
+	runner := &builder{settings: settings, term: terminal}
+	argv := append([]string{filepath.Join(settings.Root, "tools", "distribution.mts")}, args...)
+	child := runner.execute(ctx, settings.Root, "node", argv...)
+	child.Stdout, child.Stderr = terminal.Stdout, terminal.Stderr
+	child.Stdin = terminal.Stdin
+	if len(args) > 0 && args[0] == "build" {
+		child.Env = append(child.Env, "GRIGDESK_CTL_DIST_PROGRESS=1")
+		if runtime.GOOS == "darwin" {
+			// Инструмент дожидается уборки собственной установки по этому сигналу.
+			child.Cancel = func() error { return child.Process.Signal(syscall.SIGTERM) }
+			child.WaitDelay = 0
+		}
+	}
+
+	err := child.Run()
+	if ctx.Err() != nil {
+		return 130
+	}
+	var status *exec.ExitError
+	if err != nil && !errors.As(err, &status) {
+		return terminal.Fail(err.Error(), 1)
+	}
+	return service.ExitCode(err)
 }
