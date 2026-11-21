@@ -10,6 +10,10 @@ import { helperCommandFor, readHelperCatalog } from '../runtimePaths.ts';
  * Длинный data home получает короткий UID-private hashed путь без смены identity.
  */
 export function browserRelaySocket(dataHome: string): string {
+  if (process.platform === 'win32') {
+    return '';
+  }
+
   const file = path.join(dataHome, 'browser', 'relay.sock');
 
   if (!path.isAbsolute(dataHome) || /[\r\n\0]/u.test(file)) {
@@ -36,6 +40,11 @@ export function factoryBrowserRuntimeEnv(runtime: FactoryRuntimeSelection, socke
     GRIGDESK_BROWSER_HELPER: '',
     GRIGDESK_BROWSER_RELAY_SOCKET: '',
   };
+
+  if (!socket) {
+    return empty;
+  }
+
   const packaged = runtime.packageId !== null;
   const helperDirectory = path.join(runtime.runtimeRoot, 'server/runtime/helpers');
   const manifest = packaged ? path.join(helperDirectory, 'helpers.json')
