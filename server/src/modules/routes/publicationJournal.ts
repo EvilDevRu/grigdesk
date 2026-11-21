@@ -189,7 +189,7 @@ export class PublicationJournal {
 
   async clearIntent(mutation: RouteProfileMutation): Promise<void> {
     await fs.rm(path.join(mutation.catalogDir, PENDING_FILE), { force: true });
-    await syncDirectory(mutation.catalogDir);
+    await syncRoutesDirectory(mutation.catalogDir);
   }
 
   /** Восстанавливает единственный intent до действия следующего писателя под общим lock. */
