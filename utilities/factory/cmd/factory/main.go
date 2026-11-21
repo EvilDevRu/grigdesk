@@ -20,6 +20,9 @@ func main() {
 	if handled, rc := host.TrustedReadCommand(os.Args[1:], os.Stdout); handled {
 		os.Exit(rc)
 	}
+	if handled, rc := host.TrustedWriteCommand(os.Args[1:], os.Stdin); handled {
+		os.Exit(rc)
+	}
 	if handled, rc := host.OrchestratorCommand(os.Args[1:]); handled {
 		os.Exit(rc)
 	}

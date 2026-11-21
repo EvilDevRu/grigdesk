@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { dataHome } from '../../../../shared/runtime/dataHome.ts';
 import { acquireDirectoryLock } from '../../../../shared/node/directoryLock.ts';
 import { writeDurableFile } from '../durableFile.ts';
+import { readFactoryWindowsFile } from '../factoryWindowsFiles.ts';
 import type { AccessConfig, AccessManifest, AccessOptions } from './types.ts';
 
 /**
@@ -27,6 +28,13 @@ export async function readPrivate<T>(file: string): Promise<T | null> {
   let handle;
 
   try {
+    if (process.platform === 'win32') {
+      await fs.lstat(file);
+      const bytes = await readFactoryWindowsFile(file, 'owner', 4 * 1024 * 1024);
+
+      return JSON.parse(bytes.toString('utf8')) as T;
+    }
+
     handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
 
     const stat = await handle.stat();
