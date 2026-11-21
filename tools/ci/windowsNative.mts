@@ -135,7 +135,7 @@ export async function assertWindowsMachine(file: string, target: WindowsTarget):
  * Сервер получает ровно ресурсы исходного Node-входа и production-зависимости.
  * Runtime распространяется внутри ZIP, системный Node при установке не нужен.
  */
-async function stageServer(root: string, target: WindowsTarget, env: NodeJS.ProcessEnv): Promise<void> {
+async function stageServer(root: string, target: WindowsTarget, plan: Plan, env: NodeJS.ProcessEnv): Promise<void> {
   const files = ['server/src', 'server/seed', 'server/build',
     'server/deepseek-runtime-contract.json', 'server/deepseek-host-contract.json',
     'server/package.json', 'server/package-lock.json', 'shared', 'cli/darwinBuildProcesses.ts',
@@ -177,6 +177,12 @@ async function stageServer(root: string, target: WindowsTarget, env: NodeJS.Proc
   });
   await assertWindowsMachine(factory, target);
   await fs.writeFile(path.join(root, 'grigdesk-windows.json'), '{"format":1}\n');
+  await fs.writeFile(path.join(root, release), JSON.stringify({
+    schema: 1,
+    packagingVersion: 1,
+    version: plan.current.version,
+    contentId: sha256(Buffer.from(`${plan.current.releaseId}/${target}`)),
+  }) + '\n');
 }
 
 /**
@@ -271,7 +277,7 @@ export async function buildWindowsNative(
     const helper = path.join(output, archiveNames[0]);
     const trust = publicDer(createPublicKey(key)).toString('base64');
 
-    await stageServer(server, target, env);
+    await stageServer(server, target, plan, env);
     await archiveServer(server, path.join(output, 'server.zip'));
     await buildWindow(window, target, plan, env);
     await fs.copyFile(path.join(window, 'desktop.exe'), path.join(output, 'desktop.exe'));
