@@ -1,0 +1,70 @@
+name: GrigDesk native Windows factory
+on:
+  push:
+    branches: [ci/native-windows-factory-20261122]
+permissions:
+  contents: read
+jobs:
+  native-factory:
+    name: Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: amd64
+            node-arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+            node-arch: arm64
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.21.0'
+          architecture: ${{ matrix.node-arch }}
+      - name: Build and launch the native source factory
+        shell: pwsh
+        env:
+          EXPECTED_GO_ARCH: ${{ matrix.arch }}
+          EXPECTED_NODE_ARCH: ${{ matrix.node-arch }}
+        run: |
+          if ((go env GOHOSTARCH).Trim() -ne $env:EXPECTED_GO_ARCH) { throw 'Incorrect Go host arch' }
+          if ((node -p process.arch).Trim() -ne $env:EXPECTED_NODE_ARCH) { throw 'Incorrect Node arch' }
+          npm --prefix server run build:factory
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = & .\bin\factory.exe capabilities --format json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ('native-subcommands' -notin ($report | ConvertFrom-Json).features) {
+            throw 'Missing native-subcommands'
+          }
+          New-Item -ItemType Directory -Path windows-evidence | Out-Null
+          $report | Set-Content windows-evidence/capabilities.json
+          Get-FileHash .\bin\factory.exe -Algorithm SHA256 | Select-Object -ExpandProperty Hash |
+            Set-Content windows-evidence/factory.sha256
+      - name: Verify Windows process ownership, stop, locks and trusted state
+        shell: pwsh
+        run: |
+          go test -count=1 -json -timeout 4m -run '^TestWindows|^TestProcessLockWindows' ./utilities/factory/internal/host ./utilities/factory/internal/state ./utilities/internal/processidentity |
+            Tee-Object -FilePath windows-evidence/go-tests.jsonl
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-windows-factory-${{ matrix.arch }}
+          path: |
+            bin/factory.exe
+            windows-evidence/
+          if-no-files-found: warn

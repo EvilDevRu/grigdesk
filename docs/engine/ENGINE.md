@@ -29,7 +29,7 @@
    `stage-progress`.
 4. Любой повтор/switch получает новый `run_id`, больший `epoch` и новую capability.
 5. Автоматический failover выполняется только для классифицированных provider failures.
-6. Config/state writers используют `flock`, CAS/revision и atomic rename.
+6. Config/state writers используют платформенную блокировку, CAS/revision и atomic rename.
 7. Offline tests не запускают GrigDesk и не выполняют model call.
 8. Опубликованный route v2 bundle проверяется engine независимо от server-а; изменение
    `current` не меняет уже закреплённую ревизию.

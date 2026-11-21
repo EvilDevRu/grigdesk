@@ -3,6 +3,7 @@ export type DataHomeEnv = Readonly<Record<string, string | undefined>>;
 export interface DataHomeInput {
   env: DataHomeEnv;
   home: string;
+  platform?: string;
 }
 
 export const DATA_LAYOUT = {
@@ -47,11 +48,44 @@ function validPath(value: string): boolean {
 }
 
 /**
+ * Принимает локальный том Windows и приводит разделители к Win32-виду.
+ * Обход через device paths, потоки NTFS и имена DOS устройств запрещён.
+ */
+function windowsDataPath(value: string): string | null {
+  const normalized = value.replaceAll('/', '\\').replace(/\\+$/, '');
+
+  if (!/^[a-z]:\\/iu.test(normalized)) {
+    return null;
+  }
+
+  const parts = normalized.slice(3).split('\\');
+  const invalid = parts.some((part) => !part || /[<>:"|?*\u0000-\u001f]/u.test(part) || /[ .]$/u.test(part)
+    || /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu.test(part));
+
+  return invalid ? null : normalized;
+}
+
+function isWindows(platform?: string): boolean {
+  return (platform ?? (typeof process === 'undefined' ? undefined : process.platform)) === 'win32';
+}
+
+/**
  * Вычисляет папку без чтения окружения или файловой системы.
  * Умолчание проходит ту же проверку, что явный путь, и даёт подсказку при отказе.
  */
-export function dataHome({ env, home }: DataHomeInput): string {
+export function dataHome({ env, home, platform }: DataHomeInput): string {
   const override = env.GRIGDESK_HOME;
+
+  if (isWindows(platform)) {
+    const result = windowsDataPath(override || (home ? home.replace(/[\\/]+$/, '') + '\\.grigdesk' : ''));
+
+    if (!result) {
+      throw new Error('GRIGDESK_HOME должен быть абсолютным локальным путём Windows: ' + (override || home));
+    }
+
+    return result;
+  }
+
   const source = override || `${home.replace(/\/+$/, '')}/.grigdesk`;
   const result = source.replace(/\/+$/, '');
 
@@ -69,6 +103,12 @@ export function dataHome({ env, home }: DataHomeInput): string {
 export function dataHomeExplicit(input: DataHomeInput): boolean {
   const resolved = dataHome(input);
 
+  if (isWindows(input.platform)) {
+    const fallback = windowsDataPath(input.home.replace(/[\\/]+$/, '') + '\\.grigdesk');
+
+    return Boolean(input.env.GRIGDESK_HOME) && resolved !== fallback;
+  }
+
   return Boolean(input.env.GRIGDESK_HOME) && resolved !== `${input.home.replace(/\/+$/, '')}/.grigdesk`;
 }
 
@@ -77,6 +117,10 @@ export function dataHomeExplicit(input: DataHomeInput): boolean {
  * Вызывающий передаёт уже проверенный или канонический путь папки данных.
  */
 export function dataPath(homeDir: string, key: DataLayoutKey): string {
+  if (/^[a-z]:\\/iu.test(homeDir)) {
+    return homeDir.replace(/\\+$/, '') + '\\' + DATA_LAYOUT[key].replaceAll('/', '\\');
+  }
+
   return `${homeDir.replace(/\/+$/, '')}/${DATA_LAYOUT[key]}`;
 }
 

@@ -29,8 +29,7 @@ func sharedCodexArgs(run Run, policy routePolicy, cwd string) ([]string, error) 
 	if runtime.GOOS != "linux" || access == nil {
 		return nil, fmt.Errorf("Codex shared требует проверенный профиль доступа")
 	}
-	broker, err := os.Lstat(access.BrokerDir)
-	if err != nil || !broker.IsDir() || !privateOwned(broker, 0700, false) ||
+	if !privateDirectory(access.BrokerDir) ||
 		!physicalRunnerPath(access.BrokerDir) {
 		return nil, fmt.Errorf("Codex shared требует приватный каталог профильного канала")
 	}

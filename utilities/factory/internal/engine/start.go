@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/hooks"
+	"grigdesk.local/tools/utilities/factory/internal/host"
 	"grigdesk.local/tools/utilities/factory/internal/route"
 	"grigdesk.local/tools/utilities/factory/internal/state"
 )
@@ -51,6 +52,11 @@ func Launch(ctx context.Context, request LaunchRequest) (code int, failure error
 		return rc, err
 	}
 	defer lock.Close()
+	ctx, closeOrchestrator, err := host.OrchestratorContext(ctx, request.Store.ControlDir, request.Task)
+	if err != nil {
+		return 78, err
+	}
+	defer closeOrchestrator()
 	e := execution{request: request}
 	if err := e.initializeInvocation(); err != nil {
 		return 78, err

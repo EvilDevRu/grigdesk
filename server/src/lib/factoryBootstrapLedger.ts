@@ -1,3 +1,4 @@
+import { readFactoryWindowsFile } from './factoryWindowsFiles.ts';
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -103,6 +104,10 @@ function canonical(value: unknown): string {
  * Ограничение размера применяется до выделения буфера и разбора недоверенного текста.
  */
 async function immutableBytes(filename: string): Promise<Buffer> {
+  if (process.platform === 'win32') {
+    return readFactoryWindowsFile(filename, 'immutable', 1024 * 1024);
+  }
+
   const file = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW);
 
   try {
@@ -254,7 +259,9 @@ export async function readBootstrapStop(
   if (!info) {
     return null;
   }
-  if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o022) !== 0
+  if (process.platform === 'win32') {
+    await readFactoryWindowsFile(directory, 'directory');
+  } else if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o022) !== 0
       || info.uid !== process.geteuid?.()) {
     invalid('небезопасный каталог');
   }

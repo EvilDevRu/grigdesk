@@ -26,8 +26,7 @@ func (run Run) writeClaudeSettings(document *claudeSettings) (string, error) {
 	if !physicalRunnerDirectory(run.Store.ControlDir) {
 		return "", fmt.Errorf("нет физического служебного каталога Claude")
 	}
-	root, err := os.Lstat(run.Store.ControlDir)
-	if err != nil || !privateOwned(root, 0700, false) {
+	if !privateDirectory(run.Store.ControlDir) {
 		return "", fmt.Errorf("нет приватного служебного каталога Claude")
 	}
 	file, err := os.CreateTemp(run.Store.ControlDir, ".claude-settings-")

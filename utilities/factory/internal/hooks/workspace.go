@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"grigdesk.local/tools/utilities/factory/internal/host"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -102,7 +103,7 @@ func (w *Workspace) applyField(key string, value []string) error {
 	case "loop-rounds":
 		w.LoopRounds = &first
 	case "repo":
-		w.Repositories = append(w.Repositories, Repository{first, value[1], value[2], value[3]})
+		w.Repositories = append(w.Repositories, Repository{first, filepath.FromSlash(value[1]), filepath.FromSlash(value[2]), value[3]})
 	case "resource":
 		w.Resources = append(w.Resources, first)
 	default:
@@ -159,8 +160,7 @@ func (r Repository) valid() bool {
 		return false
 	}
 	for _, item := range []string{r.Source, r.Worktree} {
-		if !filepath.IsAbs(item) || filepath.Clean(item) != item || item == "/" ||
-			strings.ContainsAny(item, " :\t\r\n\"\\") {
+		if !validCheckoutPath(item) {
 			return false
 		}
 	}
@@ -173,7 +173,7 @@ func validPort(value string) bool {
 }
 
 func checkoutOverlap(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+	return host.PathsOverlap(a, b)
 }
 
 // workspaceProject выдаёт compact JSON с прежними именами и границами списков.

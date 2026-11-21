@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 // PublishRunnerProcess связывает удержанный launcher с точной активной эпохой.
@@ -71,5 +73,5 @@ func (s Store) clearRunnerProcess(task, file string, expected []byte) error {
 	if err := root.Remove(file); err != nil {
 		return err
 	}
-	return syncDirectory(root, filepath.Dir(file))
+	return host.SyncDirectory(root, filepath.Dir(file))
 }

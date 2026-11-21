@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 const lifecycleDefaultTarget = 16 * 1024 * 1024
@@ -174,7 +175,7 @@ func (l lifecycleState) appendActive(root *os.Root, line []byte) error {
 	if err := l.verifyUnchanged(root); err != nil {
 		return err
 	}
-	file, err := root.OpenFile(name, os.O_WRONLY|syscall.O_APPEND|syscall.O_NOFOLLOW, 0)
+	file, err := host.OpenAt(root, name, os.O_WRONLY|os.O_APPEND, 0, 0)
 	if err != nil {
 		return err
 	}
@@ -183,9 +184,8 @@ func (l lifecycleState) appendActive(root *os.Root, line []byte) error {
 	if err != nil {
 		return err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.Mode().IsRegular() || !ownedByInvoker(info) || stat.Nlink != 1 ||
-		!ownerMode.accepts(info.Mode()) || !os.SameFile(before, info) ||
+	if !info.Mode().IsRegular() || !host.FileOwner(file, info) || !host.SingleLink(file, info) ||
+		!ownerMode.accepts(file, info) || !os.SameFile(before, info) ||
 		before.ModTime() != info.ModTime() || info.Size() != int64(len(l.activeRaw)) {
 		return fmt.Errorf("lifecycle: изменился физический active segment")
 	}

@@ -10,7 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type externalCLI struct {
@@ -32,15 +33,14 @@ func readExternalCLI(file, provider string) (*externalCLI, error) {
 	if err != nil || !filepath.IsAbs(file) || physical != file {
 		return nil, fmt.Errorf("descriptor внешнего CLI должен быть физическим файлом")
 	}
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := host.OpenPath(file, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось открыть descriptor внешнего CLI")
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	stat, ok := fileOwner(info)
-	if err != nil || !ok || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 ||
-		stat != uint32(os.Getuid()) {
+	if err != nil || !info.Mode().IsRegular() || !host.RealFileOwner(f, info) ||
+		!host.SingleLink(f, info) || !host.PrivateMode(f, info, 0600) {
 		return nil, fmt.Errorf("нужен частный descriptor внешнего CLI")
 	}
 	const limit = 1024 * 1024
@@ -58,17 +58,6 @@ func readExternalCLI(file, provider string) (*externalCLI, error) {
 		return nil, fmt.Errorf("неверная identity выбранного CLI %s", provider)
 	}
 	return entry, nil
-}
-
-func fileOwner(info os.FileInfo) (uint32, bool) {
-	if info == nil {
-		return 0, false
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Nlink != 1 {
-		return 0, false
-	}
-	return stat.Uid, true
 }
 
 func (entry *externalCLI) valid(provider string) bool {

@@ -7,9 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
@@ -87,7 +87,7 @@ func (run Run) invoke(provider string, call invocation) (host.ProcessResult, *Ad
 		return host.ProcessResult{}, adapterError(78, err.Error())
 	}
 	defer logs.close()
-	env, token, err := run.statusEnvironment(provider, call.deferred)
+	env, token, err := run.statusEnvironment(provider, call.deferred || runtime.GOOS == "windows")
 	if err != nil {
 		return host.ProcessResult{}, adapterError(78, err.Error())
 	}
@@ -250,7 +250,7 @@ func (run Run) openLogs(provider string) (*runtimeLogs, error) {
 	logs := &runtimeLogs{root: root, debug: run.debugResolution()}
 	durable := fmt.Appendf(nil, "SOURCE=runtime\nRUNNER=%s\nRUN_ID=%s\nEPOCH=%d\nDEBUG_LEVEL=%s\nDEBUG_SOURCE=%s\n",
 		provider, run.Identity.ID, run.Identity.Epoch, logs.debug.Level, logs.debug.Source)
-	file, err := root.OpenFile("meta.env", os.O_WRONLY|os.O_EXCL|os.O_CREATE|syscall.O_NOFOLLOW, 0600)
+	file, err := host.OpenAt(root, "meta.env", os.O_WRONLY|os.O_EXCL|os.O_CREATE, 0600, 0)
 	if err != nil {
 		logs.close()
 		return nil, err
@@ -260,10 +260,10 @@ func (run Run) openLogs(provider string) (*runtimeLogs, error) {
 		logs.close()
 		return nil, err
 	}
-	flags := os.O_WRONLY | os.O_APPEND | os.O_EXCL | os.O_CREATE | syscall.O_NOFOLLOW
-	logs.events, err = root.OpenFile("events.jsonl", flags, 0600)
+	flags := os.O_WRONLY | os.O_APPEND | os.O_EXCL | os.O_CREATE
+	logs.events, err = host.OpenAt(root, "events.jsonl", flags, 0600, 0)
 	if err == nil {
-		logs.stderr, err = root.OpenFile("stderr.log", flags, 0600)
+		logs.stderr, err = host.OpenAt(root, "stderr.log", flags, 0600, 0)
 	}
 	if err != nil {
 		logs.close()
@@ -360,6 +360,13 @@ func providerEnvironment(provider string, env []string) []string {
 }
 
 func systemRunnerEnv(key string) bool {
+	if runtime.GOOS == "windows" {
+		key = strings.ToUpper(key)
+		switch key {
+		case "SYSTEMROOT", "WINDIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP", "PATHEXT", "COMSPEC":
+			return true
+		}
+	}
 	switch key {
 	case "PATH", "HOME", "SHELL", "LANG", "LC_ALL", "TZ", "TMPDIR", "FACTORY_HOME", "FACTORY_FORBID_LIVE",
 		"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "GRIGDESK_RUNTIME_ROOT",

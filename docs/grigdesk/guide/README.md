@@ -63,3 +63,5 @@ voice описаны в обеих редакциях: [RU](ru/voice.md), [EN](e
 Восстановление временных файлов в тестовой установке Go на Linux описано там же. [RU](ru/pipelines.md), [EN](en/pipelines.md)
 Ошибка закрытия канала управления стендом на Linux описана в «Конвейерах».
 [RU](ru/pipelines.md), [EN](en/pipelines.md)
+
+Нативная проба фабрики Windows из исходников описана в [RU](ru/installation.md) и [EN](en/installation.md).

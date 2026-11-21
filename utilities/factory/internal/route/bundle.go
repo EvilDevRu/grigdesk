@@ -14,8 +14,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"syscall"
 	"unicode/utf8"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type object = map[string]any
@@ -471,7 +472,7 @@ func readRegular(root *os.Root, name string) ([]byte, error) {
 // readRegularLimit держит ограничение размера на открытом файле.
 // Лимит учитывает изменение длины между stat и фактическим чтением.
 func readRegularLimit(root *os.Root, name string, limit int64) ([]byte, error) {
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenAt(root, name, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return nil, fmt.Errorf("%s: файл недоступен: %w", name, err)
 	}

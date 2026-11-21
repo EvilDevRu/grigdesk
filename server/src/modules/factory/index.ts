@@ -3511,11 +3511,18 @@ async function factoryModule(
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { registry } = managed;
+    const windows = process.platform === 'win32';
+
     const stop = await stopRouteOrchestrator({
       task: id,
       orchPid: Number(registry.ORCH_PID),
       isAlive: () => factoryState.isDaemonAlive(registry.ORCH_PID, id),
-      exactPid: request.body?.expectedMobile !== undefined || request.body?.expectedPrelude !== undefined,
+      exactPid: windows || request.body?.expectedMobile !== undefined || request.body?.expectedPrelude !== undefined,
+      kill: windows ? (pid) => {
+        if (!factoryState.windowsOrchestrator('stop', pid, id)) {
+          throw new Error('Событие остановки Windows недоступно.');
+        }
+      } : undefined,
     });
     if (!stop.ok) return reply.code(500).send({ error: 'stop_failed', message: stop.message });
     return stop;

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { sha256 } from '../../../shared/node/hash.ts';
 import {
-  FACTORY_GO_BINARY, FACTORY_GO_DESCRIPTOR, FACTORY_PROFILE_ABI, factoryBinaryKind,
+  FACTORY_GO_DESCRIPTOR, FACTORY_PROFILE_ABI, factoryBinaryKind, factoryGoBinaryPath,
 } from '../../src/lib/factoryGoDescriptor.ts';
 import type { FactoryGoDescriptor } from '../../src/lib/factoryGoDescriptor.ts';
 
@@ -52,14 +52,14 @@ export async function stageFactoryCandidate(input: FactoryCandidateInput): Promi
     kind: factoryBinaryKind(bytes, input.os, input.arch),
     os: input.os,
     arch: input.arch,
-    path: FACTORY_GO_BINARY,
+    path: factoryGoBinaryPath(input.os),
     mode: 0o555,
     sha256: sha256(bytes),
     profileAbiSha256: sha256(profile),
   };
 
   await mkdir(path.join(input.root, 'engine'), { recursive: false });
-  await addFile(input.root, FACTORY_GO_BINARY, bytes, descriptor.mode);
+  await addFile(input.root, descriptor.path, bytes, descriptor.mode);
   await addFile(input.root, FACTORY_PROFILE_ABI, profile, 0o444);
   await addFile(input.root, FACTORY_GO_DESCRIPTOR, JSON.stringify(descriptor) + '\n', 0o444);
 

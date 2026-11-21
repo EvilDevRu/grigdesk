@@ -1,3 +1,5 @@
+import { readFactoryWindowsFile } from '../lib/factoryWindowsFiles.ts';
+import { spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import { factoryTicketHash } from '../lib/factoryTaskSources.ts';
 import { readContainedText } from '../../../shared/node/readContainedText.ts';
@@ -117,6 +119,7 @@ export interface FactoryStateAdapterOptions {
   profilesDir: string;
   routesDir?: string | null;
   controlDir?: string | null;
+  factoryBin?: string | null;
   workTimeReader?: WorkTimeReader | null;
   arbiterCards?: ArbiterCardsStore | null;
   arbiterConversations?: ArbiterConversationStore | null;
@@ -130,6 +133,8 @@ export class FactoryStateAdapter {
   readonly routesDir: string | null;
 
   readonly controlDir: string | null;
+
+  private readonly factoryBin: string | null;
 
   // Разбор арбитра последней остановки. Только чтение: пишет его модуль factory после
   // хода, а карточка задачи и модалка узла обязаны его видеть, а не терять.
@@ -155,12 +160,13 @@ export class FactoryStateAdapter {
 
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
-    arbiterCards = null, arbiterConversations = null,
+    arbiterCards = null, arbiterConversations = null, factoryBin = null,
   }: FactoryStateAdapterOptions) {
     this.stateDir = stateDir;
     this.profilesDir = profilesDir;
     this.routesDir = routesDir;
     this.controlDir = controlDir;
+    this.factoryBin = factoryBin;
     this.arbiterCards = arbiterCards;
     this.arbiterConversations = arbiterConversations;
     this.workTimeReader = workTimeReader;
@@ -200,6 +206,13 @@ export class FactoryStateAdapter {
 
     if (!this.controlDir) {
       throw new Error('Не задан control root');
+    }
+
+    if (process.platform === 'win32') {
+      const file = path.join(this.controlDir, relative);
+      const content = await readFactoryWindowsFile(file, 'immutable', 1048576);
+
+      return { ...trusted, ticketHash: factoryTicketHash(JSON.parse(content.toString('utf8'))) };
     }
 
     const content = await readContainedText(this.controlDir, relative, 1048576);
@@ -334,6 +347,10 @@ export class FactoryStateAdapter {
     const pid = Number(orchPid);
     if (!pid || Number.isNaN(pid)) return false;
 
+    if (process.platform === 'win32') {
+      return this.windowsOrchestrator('status', pid, task);
+    }
+
     if (process.platform === 'darwin') {
       return readDarwinFactoryOwnerState(pid, String(task)) === 'alive';
     }
@@ -347,6 +364,27 @@ export class FactoryStateAdapter {
     } catch {
       return false; // нет /proc/<pid> → мёртв
     }
+  }
+
+  /**
+   * Проверяет закрытое событие конкретного запуска через тот же бинарник фабрики.
+   * Команда stop адресует событие Windows по PID, задаче и времени рождения.
+   */
+  windowsOrchestrator(action: 'status' | 'stop', pid: number, task: string | number): boolean {
+    if (!this.factoryBin || !this.controlDir || !path.isAbsolute(this.factoryBin)
+      || !Number.isInteger(pid) || pid <= 0 || !/^[1-9][0-9]{0,18}$/u.test(String(task))) {
+      return false;
+    }
+
+    const result = spawnSync(this.factoryBin, [
+      '_windows-orchestrator', action, this.controlDir, String(task), String(pid),
+    ], {
+      windowsHide: true,
+      timeout: 1500,
+      stdio: 'ignore',
+    });
+
+    return result.status === 0;
   }
 
   /**

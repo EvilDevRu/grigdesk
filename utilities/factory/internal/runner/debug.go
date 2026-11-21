@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/state"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 // debugResolution перечитывает только уровни диагностики точной попытки.
@@ -22,8 +23,8 @@ func (run Run) debugResolution() state.DebugResolution {
 }
 
 func (logs *runtimeLogs) openTrace() {
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL | syscall.O_NOFOLLOW
-	logs.trace, _ = logs.root.OpenFile("debug.trace.jsonl", flags, 0600)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	logs.trace, _ = host.OpenAt(logs.root, "debug.trace.jsonl", flags, 0600, 0)
 }
 
 // finishDebug фиксирует уровень на границе возвращения хоста и код процесса.

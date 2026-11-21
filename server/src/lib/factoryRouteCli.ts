@@ -102,6 +102,7 @@ const ROUTE_HOST_NAMES = [
   'FACTORY_DARWIN_TIMEOUT',
   'FACTORY_DARWIN_LAUNCH_ID',
   'FACTORY_DARWIN_LAUNCH_BOOT_ID',
+  'FACTORY_WINDOWS_BASH',
   'PYTHONDONTWRITEBYTECODE',
   'NODE_BIN',
   'GRIGDESK_SERVER_RUNTIME_RESERVATION',
@@ -492,8 +493,13 @@ export function routeLaunchEnv(
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
   const prefsPath = config.prefsPath;
   const blocked = new Set<string>([...ROUTE_HOST_NAMES, ...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]);
+  const windows = process.platform === 'win32';
   const safeExtra = Object.fromEntries(Object.entries(extra)
-    .filter(([name]) => !blocked.has(name) && !ROUTE_PRIVATE_ENV_NAME.test(name)));
+    .filter(([name]) => {
+      const hostName = windows ? name.toUpperCase() : name;
+
+      return !blocked.has(hostName) && !ROUTE_PRIVATE_ENV_NAME.test(hostName);
+    }));
 
   return {
     ...safeExtra,
@@ -518,8 +524,10 @@ export function routeLaunchEnv(
     GRIGDESK_QWEN_SERVICE: process.env.GRIGDESK_QWEN_SERVICE || '',
     QWEN_CODE_SYSTEM_SETTINGS_PATH: process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH || '',
     QWEN_CODE_SYSTEM_DEFAULTS_PATH: process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || '',
-    HOME: process.env.HOME || '',
+    HOME: process.env.HOME || (windows ? os.homedir() : ''),
     SHELL: config.runtimeHostEnv?.FACTORY_DARWIN_BASH || process.env.SHELL || '/bin/bash',
+    ...(windows && process.env.FACTORY_WINDOWS_BASH
+      ? { FACTORY_WINDOWS_BASH: process.env.FACTORY_WINDOWS_BASH } : {}),
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
@@ -1412,23 +1420,30 @@ export async function spawnRouteEngine(config: RouteConfig, {
     };
   }
 
-  const haveSystemd = await new Promise<boolean>((res) => {
+  const haveSystemd = process.platform !== 'win32' && await new Promise<boolean>((res) => {
     execFile('systemd-run', ['--version'], (err) => res(!err));
   });
 
   if (!haveSystemd) {
-    // Без systemd — полная отвязка: код возврата виден сразу, вывод в тот же журнал.
     const out = await fs.open(logFile, 'a');
     const child = spawn(prepared.command, args, {
       detached: true,
+      windowsHide: true,
       stdio: ['ignore', out.fd, out.fd],
       env: detachedRouteEnv(env, secrets, accessKeys),
     });
     child.unref();
     const exited = await new Promise<number | null>((res) => {
-      let done = false;
-      child.on('exit', (code) => { done = true; res(code ?? 1); });
-      setTimeout(() => { if (!done) res(null); }, 3000);
+      const timer = setTimeout(() => res(null), 3000);
+
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        res(code ?? 1);
+      });
+      child.once('error', () => {
+        clearTimeout(timer);
+        res(126);
+      });
     });
     await out.close();
     if (exited) {

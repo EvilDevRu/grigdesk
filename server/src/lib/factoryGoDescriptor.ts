@@ -7,15 +7,25 @@ import { sha256 } from '../../../shared/node/hash.ts';
 
 export const FACTORY_GO_DESCRIPTOR = 'server/factory-engine.json';
 export const FACTORY_GO_BINARY = 'engine/bin/factory';
+export const FACTORY_GO_WINDOWS_BINARY = 'engine/bin/factory.exe';
+
+/**
+ * Выбирает имя из фиксированного набора пакета.
+ * На Windows сервер запускает файл PE с явным расширением.
+ */
+export function factoryGoBinaryPath(platform: string = process.platform) {
+  return platform === 'win32' ? FACTORY_GO_WINDOWS_BINARY : FACTORY_GO_BINARY;
+}
+
 export const FACTORY_PROFILE_ABI = 'engine/lib/delivery_contract.py';
 
 export interface FactoryGoDescriptor {
   schema: 1;
   protocol: 'go-v1';
-  kind: 'elf' | 'macho';
+  kind: 'elf' | 'macho' | 'pe';
   os: string;
   arch: string;
-  path: typeof FACTORY_GO_BINARY;
+  path: ReturnType<typeof factoryGoBinaryPath>;
   mode: number;
   sha256: string;
   profileAbiSha256: string;
@@ -28,7 +38,7 @@ function invalidFactory(): Error {
 
 /**
  * Заголовок проверяется по фактическим байтам, без запуска кандидата.
- * Режим desktop допускает ELF Linux и Mach-O Apple Silicon.
+ * Архитектура должна совпадать с ELF, Mach-O или заголовком PE32+.
  */
 export function factoryBinaryKind(bytes: Buffer, os: string, arch: string): FactoryGoDescriptor['kind'] {
   if (bytes.length >= 64 && os === 'linux' && ['x64', 'arm64'].includes(arch)
@@ -41,6 +51,22 @@ export function factoryBinaryKind(bytes: Buffer, os: string, arch: string): Fact
     && bytes.readUInt32LE(0) === 0xfeedfacf && bytes.readUInt32LE(4) === 0x0100000c
     && bytes.readUInt32LE(12) === 2) {
     return 'macho';
+  }
+
+  if (os === 'win32' && ['x64', 'arm64'].includes(arch)
+    && bytes.length >= 64 && bytes.readUInt16LE(0) === 0x5a4d) {
+    const pe = bytes.readUInt32LE(60);
+    const machine = arch === 'x64' ? 0x8664 : 0xaa64;
+
+    if (pe >= 64 && pe + 26 <= bytes.length
+      && bytes.readUInt32LE(pe) === 0x4550
+      && bytes.readUInt16LE(pe + 4) === machine
+      && bytes.readUInt16LE(pe + 20) >= 112
+      && pe + 24 + bytes.readUInt16LE(pe + 20) <= bytes.length
+      && (bytes.readUInt16LE(pe + 22) & 0x2002) === 0x2
+      && bytes.readUInt16LE(pe + 24) === 0x20b) {
+      return 'pe';
+    }
   }
 
   throw invalidFactory();
@@ -57,8 +83,11 @@ function verifiedBytes(file: string, mode: number, limit: number): Buffer {
   try {
     const info = fstatSync(fd);
 
+    const correctMode = process.platform === 'win32'
+      ? (info.mode & 0o222) === 0 : (info.mode & 0o7777) === mode;
+
     if (!info.isFile() || info.nlink !== 1 || realpathSync(file) !== file
-      || (info.mode & 0o7777) !== mode || info.size > limit
+      || !correctMode || info.size > limit
       || (uid !== undefined && info.uid !== uid && info.uid !== 0)) {
       throw invalidFactory();
     }
@@ -66,7 +95,8 @@ function verifiedBytes(file: string, mode: number, limit: number): Buffer {
     const bytes = readFileSync(fd);
     const current = lstatSync(file);
 
-    if (bytes.length !== info.size || current.ino !== info.ino || current.dev !== info.dev
+    if (!current.isFile() || current.nlink !== 1 || bytes.length !== info.size
+      || current.ino !== info.ino || current.dev !== info.dev
       || current.ctimeMs !== info.ctimeMs) {
       throw invalidFactory();
     }
@@ -85,6 +115,7 @@ export function readFactoryGoDescriptor(
   root: string, os: string = process.platform, arch: string = process.arch,
 ): FactoryGoDescriptor | null {
   const file = path.join(root, FACTORY_GO_DESCRIPTOR);
+  const binaryPath = factoryGoBinaryPath(os);
 
   try {
     lstatSync(file);
@@ -102,11 +133,11 @@ export function readFactoryGoDescriptor(
 
     if (Object.keys(meta).sort().join() !== keys.join()
       || meta.schema !== 1 || meta.protocol !== 'go-v1' || meta.os !== os || meta.arch !== arch
-      || meta.path !== FACTORY_GO_BINARY || meta.mode !== 0o555) {
+      || meta.path !== binaryPath || meta.mode !== 0o555) {
       throw invalidFactory();
     }
 
-    const bytes = verifiedBytes(path.join(root, FACTORY_GO_BINARY), meta.mode, 64 * 1024 * 1024);
+    const bytes = verifiedBytes(path.join(root, binaryPath), meta.mode, 64 * 1024 * 1024);
     const profile = verifiedBytes(path.join(root, FACTORY_PROFILE_ABI), 0o444, 1024 * 1024);
 
     if (meta.kind !== factoryBinaryKind(bytes, os, arch)

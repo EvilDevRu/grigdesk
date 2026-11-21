@@ -63,6 +63,18 @@ For server modes, run `grigdesk-ctl server start --wait` to start the service,
 For window modes, run `grigdesk-ctl open` to open the application.
 Native acceptance for the macOS candidate runs separately.
 
+## Windows factory preview
+
+To test the factory from source on Windows x64 or ARM64, install Go 1.27.4
+and run `npm --prefix server run build:factory` at the repository root.
+The command builds `bin/factory.exe`. Starting the source server with
+`npm start` also builds the factory.
+Profile hooks use Bash from Git for Windows. For a custom installation,
+set `FACTORY_WINDOWS_BASH` to the absolute path to `bash.exe`.
+
+The preview targets native operation without WSL2. A Windows installer
+and end-to-end pipeline acceptance are pending.
+
 ## Alternative: deb package
 
 Install `grigdesk_<version>_amd64.deb` with `sudo apt install ./grigdesk_<version>_amd64.deb`.

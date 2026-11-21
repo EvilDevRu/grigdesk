@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"grigdesk.local/tools/utilities/factory/internal/hooks"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type transactionBackup struct {
@@ -457,7 +458,7 @@ func restoreTransactionObject(baseline, expected transactionBackup) error {
 // Перед сменой имени ещё раз сверяется исходный inode или его отсутствие.
 func replaceTransactionObject(root *os.Root, name string, backup transactionBackup, prior os.FileInfo) error {
 	tmp := ".instrumentation-restore-" + rand.Text()
-	file, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	file, err := host.OpenAt(root, tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600, 0)
 	if err != nil {
 		return err
 	}

@@ -1,3 +1,4 @@
+import { readFactoryWindowsFile } from './factoryWindowsFiles.ts';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -35,15 +36,22 @@ export async function readStageRunnerProjection(
       'runner-settings', `${identity.node}.json`,
     ].join('/');
     const file = path.join(controlDir, relative);
-    const [parent, stat] = await Promise.all([fs.lstat(path.dirname(file)), fs.lstat(file)]);
+    let text: string | null;
 
-    if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o777) !== 0o700
-      || parent.uid !== process.getuid?.() || !stat.isFile() || stat.nlink !== 1
-      || (stat.mode & 0o777) !== 0o600 || stat.uid !== parent.uid || stat.size > 65536) {
-      return null;
+    if (process.platform === 'win32') {
+      await readFactoryWindowsFile(path.dirname(file), 'directory');
+      text = (await readFactoryWindowsFile(file, 'owner', 65536)).toString('utf8');
+    } else {
+      const [parent, stat] = await Promise.all([fs.lstat(path.dirname(file)), fs.lstat(file)]);
+
+      if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o777) !== 0o700
+        || parent.uid !== process.getuid?.() || !stat.isFile() || stat.nlink !== 1
+        || (stat.mode & 0o777) !== 0o600 || stat.uid !== parent.uid || stat.size > 65536) {
+        return null;
+      }
+
+      text = await readContainedText(controlDir, relative, 65536);
     }
-
-    const text = await readContainedText(controlDir, relative, 65536);
 
     if (!text || text.length > 65536) {
       return null;

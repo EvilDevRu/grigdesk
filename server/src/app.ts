@@ -341,6 +341,7 @@ async function build(desktopParent: DesktopParent | null) {
     routesDir: config.routesDir,
     profilesDir: config.profilesDir,
     controlDir: config.factoryControlDir,
+    factoryBin: config.factoryBin,
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
     arbiterCards,
     arbiterConversations,

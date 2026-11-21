@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
@@ -185,8 +184,12 @@ func runStandScript(ctx context.Context, req StandRequest, name string) host.Pro
 	if name == "up.sh" {
 		env = append(env, "FACTORY_REQUIRE_NEW_SANDBOX=1", "FACTORY_BOOTSTRAP_WORKSPACE_ENV="+req.EarlyFile)
 	}
+	shell, err := profileShell()
+	if err != nil {
+		return host.ProcessResult{RC: 78, Err: err}
+	}
 	return host.RunProcess(ctx, host.Process{
-		Path: "bash", Args: []string{"--noprofile", "--norc", script, req.Task},
+		Path: shell, Args: []string{"--noprofile", "--norc", script, req.Task},
 		Dir: invocation.Directory, Env: env, Files: invocation.Files,
 		Timeout: invocation.Timeout, Limit: hookOutputLimit, Owned: invocation.Owned,
 	})
@@ -195,7 +198,7 @@ func runStandScript(ctx context.Context, req StandRequest, name string) host.Pro
 // readStandDescriptor проверяет жизненный цикл именно этой задачи.
 // Дескриптор не исполняется как shell и не открывается через ссылку.
 func readStandDescriptor(path, task string) ([]byte, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenPath(path, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return nil, err
 	}

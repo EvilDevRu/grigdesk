@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 var registryFieldPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
@@ -74,19 +75,19 @@ func (s Store) lockProjection(task string) (*projectionWriter, error) {
 		return nil, err
 	}
 	name := "t" + task + ".pipeline"
-	flags := os.O_RDWR | os.O_CREATE | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
-	lock, err := root.OpenFile(name+".lock", flags, 0600)
+	flags := os.O_RDWR | os.O_CREATE
+	lock, err := host.OpenAt(root, name+".lock", flags, 0600, host.Nonblocking)
 	if err != nil {
 		root.Close()
 		return nil, err
 	}
 	writer := &projectionWriter{root: root, lock: lock, name: name}
 	info, err := lock.Stat()
-	if err != nil || !info.Mode().IsRegular() || !ownedByInvoker(info) {
+	if err != nil || !info.Mode().IsRegular() || !host.FileOwner(lock, info) {
 		writer.close()
 		return nil, fmt.Errorf("projection: недопустимая блокировка")
 	}
-	if err := flock(lock, syscall.LOCK_EX); err != nil {
+	if err := flock(lock, lockExclusive); err != nil {
 		writer.close()
 		return nil, err
 	}
