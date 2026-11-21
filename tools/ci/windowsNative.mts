@@ -24,6 +24,12 @@ const windowsFiles = [script, `${script}.sha256`, `${script}.sig`, archiveNames[
 export type WindowsTarget = 'windows-x64' | 'windows-arm64';
 type Plan = Awaited<ReturnType<typeof readStableReleasePlan>>;
 
+interface WindowsInputs {
+  target: WindowsTarget;
+  plan: Plan;
+  planDigest: string;
+}
+
 /**
  * Опись Windows считает файлы потоком и согласует предел с распаковщиком.
  * Ссылки и пустые файлы не входят в подписанный пакет.
@@ -36,14 +42,19 @@ async function publicReleaseFile(directory: string, name: string) {
     throw new Error(`windows_release_file_invalid: ${name}`);
   }
 
-  return { name, size: stat.size, sha256: await sha256File(file) };
+  return {
+    name,
+    size: stat.size,
+    sha256: await sha256File(file),
+  };
 }
 
 /**
  * Стабильные команды используют один план и запускаются на архитектуре пакета.
  * Неподключённые платформы сохраняют отдельный диагноз.
  */
-export async function windowsStableInputs(target: string | undefined, file: string | undefined) {
+export async function windowsStableInputs(target: string | undefined, file: string | undefined):
+Promise<WindowsInputs> {
   if (target !== 'windows-x64' && target !== 'windows-arm64') {
     throw new Error(`stable_native_adapter_missing (${target})`);
   }
@@ -58,7 +69,11 @@ export async function windowsStableInputs(target: string | undefined, file: stri
     digest: planDigest,
   });
 
-  return { target, plan, planDigest };
+  return {
+    target,
+    plan,
+    planDigest,
+  };
 }
 
 /**
@@ -152,7 +167,9 @@ async function stageServer(root: string, target: WindowsTarget, env: NodeJS.Proc
     env,
     timeout: 300_000,
   });
-  await execute('go', ['build', '-trimpath', '-buildvcs=false', '-o', factory, './utilities/factory/cmd/factory'], {
+  await execute('go', [
+    'build', '-trimpath', '-buildvcs=false', '-o', factory, './utilities/factory/cmd/factory',
+  ], {
     cwd: repository,
     env,
     timeout: 300_000,
@@ -211,7 +228,12 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     `--config.directories.output=${output}`, '--config.artifactName=desktop.exe',
     `--config.extraMetadata.version=${plan.current.version}`, '--config.nsis.runAfterFinish=false',
     '--config.nsis.guid=73fd52cc-055b-5e49-89e0-9706aab795e4',
-  ], { cwd: desktop, env: desktopEnv, timeout: 600_000, maxBuffer: 16 * 1024 * 1024 });
+  ], {
+    cwd: desktop,
+    env: desktopEnv,
+    timeout: 600_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
 }
 
 /**
@@ -237,6 +259,7 @@ export async function buildWindowsNative(
   }
 
   await fs.mkdir(output);
+
   const work = await fs.mkdtemp(path.join(path.dirname(output), '.windows-build-'));
 
   try {
@@ -252,13 +275,19 @@ export async function buildWindowsNative(
     await execute('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags',
       `-s -w -X main.version=${plan.current.version} -X main.windowsReleaseKey=${trust}`,
       '-o', helper, './utilities/maintenance/cmd/maintenance'], {
-      cwd: repository, env, timeout: 300_000,
+      cwd: repository,
+      env,
+      timeout: 300_000,
     });
     await assertWindowsMachine(helper, target);
 
     const files = await Promise.all(archiveNames.map((name) => publicReleaseFile(output, name)));
     const payload = Buffer.from(JSON.stringify({
-      format: 1, platform: target, ...plan.current, runId: plan.runId, files,
+      format: 1,
+      platform: target,
+      ...plan.current,
+      runId: plan.runId,
+      files,
     }));
     const manifest = JSON.stringify({
       payload: payload.toString('base64'),
@@ -275,8 +304,9 @@ export async function buildWindowsNative(
 
     await fs.writeFile(path.join(output, script), bootstrap, { flag: 'wx' });
     await fs.writeFile(path.join(output, `${script}.sha256`), checksum, { flag: 'wx' });
-    await fs.writeFile(path.join(output, `${script}.sig`), sign(null, bootstrap, key).toString('base64') + '\n',
-      { flag: 'wx' });
+    const signature = sign(null, bootstrap, key).toString('base64') + '\n';
+
+    await fs.writeFile(path.join(output, `${script}.sig`), signature, { flag: 'wx' });
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }
@@ -296,17 +326,28 @@ export async function verifyWindowsPackage(
   }
 
   const files = await Promise.all(windowsFiles.map((name) => publicReleaseFile(directory, name)));
+
+  if (files.some((file) => !archiveNames.some((name) => name === file.name) && file.size > 64 * 1024)) {
+    throw new Error('windows_release_metadata_too_large');
+  }
+
   const raw = await fs.readFile(path.join(directory, release));
   const envelope = JSON.parse(raw.toString('utf8'));
   const payload = Buffer.from(envelope.payload, 'base64');
   const signature = Buffer.from(envelope.signature, 'base64');
 
-  if (raw.length > 64 * 1024 || !verify(null, payload, key, signature)) {
+  if (!verify(null, payload, key, signature)) {
     throw new Error('windows_release_signature_invalid');
   }
 
   const archive = archiveNames.map((name) => files.find((item) => item.name === name));
-  const expected = { format: 1, platform: target, ...plan.current, runId: plan.runId, files: archive };
+  const expected = {
+    format: 1,
+    platform: target,
+    ...plan.current,
+    runId: plan.runId,
+    files: archive,
+  };
   const checksum = await fs.readFile(path.join(directory, `${script}.sha256`), 'utf8');
   const scriptProof = await fs.readFile(path.join(directory, `${script}.sig`), 'utf8');
   const bootstrap = await fs.readFile(path.join(directory, script));
@@ -319,7 +360,11 @@ export async function verifyWindowsPackage(
 
   await assertWindowsMachine(path.join(directory, archiveNames[0]), target);
 
-  return { files, manifestDigest: sha256(raw), signerFingerprint: sha256(publicDer(key)) };
+  return {
+    files,
+    manifestDigest: sha256(raw),
+    signerFingerprint: sha256(publicDer(key)),
+  };
 }
 
 /**
@@ -332,6 +377,7 @@ async function privatePort(): Promise<number> {
   listener.listen(0, '127.0.0.1');
 
   await once(listener, 'listening');
+
   const address = listener.address();
 
   listener.close();
@@ -396,6 +442,7 @@ async function verifyFirstLaunch(
   child.on('error', (error) => {
     launchError = error;
   });
+
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', (chunk) => {
       log = (log + String(chunk)).slice(-64 * 1024);
@@ -435,8 +482,8 @@ async function verifyFirstLaunch(
       throw new Error('windows_verify_owned_server_still_running');
     }
   } catch (error) {
-    const serverLog = await fs.readFile(path.join(work, 'Server Data', 'state', 'grigdesk-server.log'), 'utf8')
-      .catch(() => '');
+    const logPath = path.join(work, 'Server Data', 'state', 'grigdesk-server.log');
+    const serverLog = await fs.readFile(logPath, 'utf8').catch(() => '');
 
     console.error(log.slice(-8000));
     console.error(serverLog.slice(-8000));
@@ -512,9 +559,20 @@ export async function verifyWindowsNative(
 
     await fs.writeFile(path.join(output, 'stable-native-proof.json'), JSON.stringify({
       format: 1,
-      parts: [{ ...plan.current, runId: plan.runId, platform: target, planDigest, ...evidence }],
+      parts: [{
+        ...plan.current,
+        runId: plan.runId,
+        platform: target,
+        planDigest,
+        ...evidence,
+      }],
     }) + '\n', { flag: 'wx' });
   } finally {
-    await fs.rm(work, { force: true, recursive: true, maxRetries: 3, retryDelay: 500 });
+    await fs.rm(work, {
+      force: true,
+      recursive: true,
+      maxRetries: 3,
+      retryDelay: 500,
+    });
   }
 }

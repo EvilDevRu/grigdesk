@@ -54,9 +54,9 @@ export function runVpnGate(
   if (runtime.windowsInstalled) {
     const required = runtime.env.GRIGDESK_REQUIRE_VPN;
 
-    return !required || required === '0'
+    return Promise.resolve(!required || required === '0'
       ? { code: 0, lastLine: '' }
-      : { code: 1, lastLine: 'VPN-ворота: проверка интерфейса недоступна в установке Windows' };
+      : { code: 1, lastLine: 'VPN-ворота: проверка интерфейса недоступна в установке Windows' });
   }
 
   return new Promise((resolve) => {

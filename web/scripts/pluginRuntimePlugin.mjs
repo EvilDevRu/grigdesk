@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 const runtimeDir = fileURLToPath(new URL('../src/pluginRuntime/', import.meta.url));
 const facades = {
-  vue: path.join(runtimeDir, 'vue.ts'),
-  '@grigdesk/ui': path.join(runtimeDir, 'ui.ts'),
+  vue: path.join(runtimeDir, 'vue.ts').replaceAll('\\', '/'),
+  '@grigdesk/ui': path.join(runtimeDir, 'ui.ts').replaceAll('\\', '/'),
 };
 
 /**
@@ -45,8 +45,9 @@ export default function pluginRuntimePlugin() {
             return [name, `/src/pluginRuntime/${path.basename(id)}`];
           }
 
+          // Vite выдаёт ID модуля с прямыми слэшами и на Windows.
           const entry = Object.values(context.bundle ?? {}).find((item) =>
-            item.type === 'chunk' && item.facadeModuleId === id);
+            item.type === 'chunk' && item.facadeModuleId?.replaceAll('\\', '/') === id);
 
           if (!entry) {
             throw new Error(`Не выпущен фасад плагина: ${name}`);

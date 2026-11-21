@@ -10,4 +10,6 @@ if (!source || !output || extra.length) {
 
 const input = await windowsStableInputs(target, planFile);
 
-await verifyWindowsNative(input.target, input.plan, input.planDigest, path.resolve(source), path.resolve(output));
+await verifyWindowsNative(
+  input.target, input.plan, input.planDigest, path.resolve(source), path.resolve(output),
+);
