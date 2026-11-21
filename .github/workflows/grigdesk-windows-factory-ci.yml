@@ -77,6 +77,35 @@ jobs:
           node --max-old-space-size=512 tools/ci/proveWindowsRoutes.mjs |
             Tee-Object -FilePath windows-evidence/windows-editor.txt
           exit $LASTEXITCODE
+      - name: Start native server from source and verify the local API
+        shell: pwsh
+        run: |
+          $env:GRIGDESK_HOME = Join-Path (Get-Item -LiteralPath $env:RUNNER_TEMP).FullName "grigdesk-source-smoke"
+          $env:GRIGDESK_PORT = '48193'
+          $out = Join-Path $PWD 'windows-evidence/server-stdout.txt'
+          $err = Join-Path $PWD 'windows-evidence/server-stderr.txt'
+          $server = Start-Process -FilePath (Get-Command node).Source -ArgumentList 'server/src/app.ts' `
+            -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            for ($i = 0; $i -lt 30; $i++) {
+              if ($server.HasExited) { throw "GrigDesk exited with code $($server.ExitCode)" }
+              try {
+                $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://127.0.0.1:48193/api/auth/state'
+              } catch {
+                Start-Sleep -Seconds 1
+                continue
+              }
+              if ($response.StatusCode -eq 200) {
+                'Native server /api/auth/state returned HTTP 200' |
+                  Tee-Object -FilePath windows-evidence/server-health.txt
+                exit 0
+              }
+            }
+            throw 'Native GrigDesk server did not become ready'
+          } finally {
+            if (-not $server.HasExited) { Stop-Process -Id $server.Id }
+            if (Test-Path $err) { Get-Content $err -Tail 25 }
+          }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
