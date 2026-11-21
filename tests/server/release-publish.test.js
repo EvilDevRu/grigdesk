@@ -304,7 +304,9 @@ test('PUB-BOOTSTRAP-TAMPER: порча helper отвергается до SSH', 
   const bytes = await fs.readFile(file);
 
   bytes[bytes.length - 1] ^= 0xff;
+  await fs.chmod(file, 0o644);
   await fs.writeFile(file, bytes);
+  await fs.chmod(file, 0o444);
 
   await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets, true),
     /installer_helper_integrity_invalid/u);

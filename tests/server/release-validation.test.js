@@ -302,21 +302,13 @@ test('reuse: текущий workflow допускает пропуск толь�
   const f = fixture();
 
   f.source().tree.at(-1).sha = 'c'.repeat(40);
-  f.jobs().jobs[0].steps.push({
-    name: 'Проверка готовых пакетов',
-    status: 'completed',
-    conclusion: 'success',
-  });
-  f.jobs().jobs.push({
-    name: 'Публикация на сайт',
-    status: 'completed',
-    conclusion: 'skipped',
-    steps: [],
-  });
-  f.jobs().total_count++;
+  f.attemptJobs(classicJobs());
   assert.equal((await f.verify()).runId, 42);
-  f.jobs().jobs[1].name = 'Произвольный пропущенный job';
-  await assert.rejects(f.verify(), /release_validation_job_not_successful/);
+
+  const withoutChecks = classicJobs().filter((job) => job.name !== 'Проверка готовых пакетов');
+
+  f.attemptJobs(withoutChecks);
+  await assert.rejects(f.verify(), /release_validation_jobs_incomplete/u);
 });
 
 import {

@@ -279,6 +279,7 @@ test('INSTALL-OFFLINE-RETRY: тот же B повторяет задачу и о
   const source = path.join(path.dirname(root), 'candidate-desktop.tar.gz');
 
   await fs.writeFile(ownedArchive, 'частичный архив', { mode: 0o600 });
+  await fs.chmod(ownedArchive, 0o600);
   await fs.writeFile(source, candidate.archives.get(candidate.envelope.payload.artifacts.desktop.url)!,
     { mode: 0o600 });
   await box.installRelease({ ...input, archive: async () => source });
