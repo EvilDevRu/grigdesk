@@ -16,7 +16,8 @@ $lockScript = "$linuxDirectory/flock-probe.sh"
 $reportedArch = if ($Runner -eq 'windows-11-arm') { 'arm64' } else { 'x64' }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $probeDirectory | Out-Null
-Copy-Item (Join-Path $PSScriptRoot 'flock-probe.sh') $probeDirectory
+$lockSource = Get-Content -Raw (Join-Path $PSScriptRoot 'flock-probe.sh')
+[IO.File]::WriteAllText((Join-Path $probeDirectory 'flock-probe.sh'), $lockSource.Replace([string][char]13, ''))
 
 $seaOk = $false
 $seaOutput = & $SeaExe --runtime-info
@@ -87,7 +88,13 @@ try {
   wsl.exe -d $distro -u probe --exec bwrap --ro-bind / / true
   $bwrapOk = $LASTEXITCODE -eq 0
   $drvfs = wsl.exe -d $distro -u probe --exec bash $lockScript "$linuxDirectory/drvfs.lock"
+  if ($LASTEXITCODE -ne 0) {
+    throw 'DrvFS measurement did not complete'
+  }
   $ext4 = wsl.exe -d $distro -u probe --exec bash $lockScript /home/probe/ext4.lock
+  if ($LASTEXITCODE -ne 0) {
+    throw 'ext4 measurement did not complete'
+  }
 
   $report = [ordered]@{
     format = 1

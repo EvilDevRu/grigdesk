@@ -1,5 +1,5 @@
 /* Проба 4 плана grigdesk-additional-platforms-tdd.md: ConPTY-helper.
- * Создаёт псевдоконсоль, запускает cmd.exe, делает resize, пишет команду и
+ * Создаёт псевдоконсоль, запускает дочернюю копию, делает resize, посылает символ и
  * читает вывод. Код 0 — ConPTY работает; любой отказ — ненулевой код.
  * Сборка на runner/машине владельца: cl /W4 conpty-probe.c /link kernel32.lib
  * (MSVC) либо clang-cl conpty-probe.c -o conpty-probe.exe.
@@ -7,8 +7,38 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 
-int main(void) {
+/*
+ * Дочерний процесс подтверждает канал ввода и фактический размер окна.
+ * Метка выводится после чтения символа и проверки размеров консоли.
+ */
+static int verifyConsole(void) {
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO screen;
+    DWORD mode = 0, count = 0;
+    WCHAR token;
+    const WCHAR marker[] = L"conpty-probe-ok";
+
+    if (!GetConsoleMode(input, &mode)
+        || !SetConsoleMode(input, mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT))
+        || !ReadConsoleW(input, &token, 1, &count, NULL) || count != 1 || token != L'q') {
+        return 21;
+    }
+    if (!GetConsoleScreenBufferInfo(output, &screen)
+        || screen.srWindow.Right - screen.srWindow.Left + 1 != 120
+        || screen.srWindow.Bottom - screen.srWindow.Top + 1 != 40) {
+        return 22;
+    }
+
+    return WriteConsoleW(output, marker, 15, &count, NULL) && count == 15 ? 0 : 23;
+}
+
+int wmain(int argc, WCHAR **argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--child") == 0) {
+        return verifyConsole();
+    }
     HRESULT hr;
     HPCON pseudo = NULL;
     COORD size = {80, 25};
@@ -20,7 +50,7 @@ int main(void) {
     SIZE_T attrSize = 0;
     char buffer[4096];
     DWORD readBytes = 0;
-    const char *command = "conpty-probe\r\n";
+    const char token = 'q';
     int ok = 0;
 
     sa.nLength = sizeof(sa);
@@ -46,9 +76,13 @@ int main(void) {
 
     CloseHandle(inPipeRead);
     CloseHandle(outPipeWrite);
-    WCHAR commandLine[] = L"cmd.exe /D /Q /V:ON /C \"set /P input= & echo !input!-ok\"";
+    WCHAR exe[MAX_PATH];
+    WCHAR commandLine[MAX_PATH + 16];
+    DWORD length = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) { return 11; }
+    if (swprintf_s(commandLine, MAX_PATH + 16, L"\"%ls\" --child", exe) < 0) { return 12; }
     ZeroMemory(&pi, sizeof(pi));
-    if (!CreateProcessW(NULL, commandLine, NULL, NULL, FALSE,
+    if (!CreateProcessW(exe, commandLine, NULL, NULL, FALSE,
             EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
             &si.StartupInfo, &pi)) {
         return 7;
@@ -59,7 +93,7 @@ int main(void) {
     if (FAILED(ResizePseudoConsole(pseudo, resized))) { return 8; }
 
     DWORD written = 0;
-    if (!WriteFile(inPipeWrite, command, (DWORD)strlen(command), &written, NULL)) { return 9; }
+    if (!WriteFile(inPipeWrite, &token, 1, &written, NULL) || written != 1) { return 9; }
 
     /* Читаем вывод до появления метки; цикл ограничен, чтобы не зависнуть. */
     for (int i = 0; i < 200; i++) {
@@ -72,8 +106,14 @@ int main(void) {
     }
 
     CloseHandle(inPipeWrite);
-    WaitForSingleObject(pi.hProcess, 5000);
-    TerminateProcess(pi.hProcess, 0);
+    if (WaitForSingleObject(pi.hProcess, 5000) == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+    }
+    DWORD childCode = 0;
+    if (!GetExitCodeProcess(pi.hProcess, &childCode) || childCode != 0) {
+        fprintf(stderr, "ConPTY child exit code: %lu\n", childCode);
+        ok = 0;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     ClosePseudoConsole(pseudo);

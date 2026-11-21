@@ -15,8 +15,8 @@ trap 'if [[ -n $holder ]]; then kill "$holder" 2>/dev/null || true; wait "$holde
 holder=$!
 
 ready=false
-contender=-1
-reacquired=-1
+contender=125
+reacquired=125
 
 for ((attempt=0; attempt<100; attempt++)); do
   if grep -qx READY "$out"; then
