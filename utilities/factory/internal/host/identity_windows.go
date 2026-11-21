@@ -2,11 +2,36 @@ package host
 
 import (
 	"os"
+	"strings"
+	"sync"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
 	"grigdesk.local/tools/utilities/internal/processidentity"
 )
+
+type windowsBootEnvironment struct {
+	identifier windows.GUID
+	firmware   uint32
+	flags      uint64
+}
+
+// windowsBootID читает идентификатор текущей загрузки из ядра.
+// Один GUID используется во всех событиях lifecycle и процессах одной загрузки.
+var windowsBootID = sync.OnceValues(func() (string, error) {
+	var info windowsBootEnvironment
+	err := windows.NtQuerySystemInformation(windows.SystemBootEnvironmentInformation,
+		unsafe.Pointer(&info), uint32(unsafe.Sizeof(info)), nil)
+	if err != nil {
+		return "", err
+	}
+	if info.identifier == (windows.GUID{}) {
+		return "", ErrUnconfirmedTree
+	}
+
+	return strings.ToLower(strings.Trim(info.identifier.String(), "{}")), nil
+})
 
 // windowsIdentity связывает PID и время создания с владельцем токена процесса.
 // Чужой или неподтверждённый процесс не считается активным исполнителем.
@@ -39,9 +64,13 @@ func windowsIdentity(pid int) (ProcessIdentity, error) {
 	if dead || confirmed != birth {
 		return ProcessIdentity{}, ErrUnconfirmedTree
 	}
+	boot, err := windowsBootID()
+	if err != nil {
+		return ProcessIdentity{}, err
+	}
 
 	return ProcessIdentity{
-		PID: pid, Group: pid, Session: pid, Start: birth, Boot: "windows:" + owner.User.Sid.String(),
+		PID: pid, Group: pid, Session: pid, Start: birth, Boot: boot,
 	}, nil
 }
 
