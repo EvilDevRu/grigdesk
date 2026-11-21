@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { processOwnerState } from '../../../../shared/node/directoryLock.ts';
 import { readDarwinProcessIdentity } from '../../../../shared/node/processIdentity.ts';
+import { readWindowsProcessStart } from '../../../../shared/node/windowsProcessIdentity.ts';
 import type { DirectoryLockOwner } from '../../../../shared/node/directoryLock.ts';
 import type {
   AccessAttempt, AccessProfileList, AccessSnapshot,
@@ -53,6 +54,16 @@ const services = new Map<string, AccessProfileService>();
  * Это позволяет отличить аварийный рестарт от работы второго процесса с общим store.
  */
 async function processIdentity(token: string, pid = process.pid): Promise<DirectoryLockOwner> {
+  if (process.platform === 'win32') {
+    const { starttime } = await readWindowsProcessStart(pid);
+
+    if (!starttime) {
+      throw new Error('Не удалось определить владельца попытки входа');
+    }
+
+    return { pid, starttime, token };
+  }
+
   if (process.platform === 'darwin') {
     const owner = await readDarwinProcessIdentity(pid);
 
@@ -578,17 +589,12 @@ export class AccessProfileService {
 
       if (work) {
         const directory = path.join(this.store.directory(provider), 'reservations');
-        const stat = await fs.readFile(`/proc/${process.pid}/stat`, 'utf8');
-        const starttime = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/u)[19];
+        const owner = await processIdentity(this.owner);
 
         await fs.mkdir(directory, { recursive: true, mode: 0o700 });
         reservation = path.join(directory, `${randomUUID()}.json`);
         await writeDurableFile(reservation, JSON.stringify({
-          owner: {
-            pid: process.pid,
-            starttime,
-            token: this.owner,
-          },
+          owner,
           profileId: profile.id,
         }));
         this.activityChanged(provider);

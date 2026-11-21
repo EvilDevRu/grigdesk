@@ -37,6 +37,7 @@ import { AuthStore } from './lib/authStore.ts';
 import { registerWindowKeyLifecycle } from './lib/windowKey.ts';
 import type { WindowAuthState } from './lib/windowKey.ts';
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
+import { configureWindowsProcessIdentity } from '../../shared/node/windowsProcessIdentity.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
 import { readDarwinLaunchRecords } from './lib/factoryDarwinLaunch.ts';
 import { initializeDarwinOwnershipRoots } from './lib/factoryDarwinOwnershipRoots.ts';
@@ -215,6 +216,10 @@ function readPluginSettings(
  * Закрытие Fastify ждёт installer lifetime прежде завершения процесса.
  */
 async function build(desktopParent: DesktopParent | null) {
+  if (process.platform === 'win32') {
+    configureWindowsProcessIdentity(config.factoryBin);
+  }
+
   const installOptions = await readPluginInstallConfiguration(config);
   const dbInstallOptions = await readDbEngineInstallConfiguration(config);
   const factoryDebug = new FactoryDebugSettings({
