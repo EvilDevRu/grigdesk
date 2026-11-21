@@ -86,6 +86,7 @@ export interface BionicBuildOptions {
   hostOptimization?: string;
   hostCc?: string;
   hostCxx?: string;
+  hostAtomicLib?: string;
 }
 
 export interface BionicBuildResult {
@@ -294,8 +295,12 @@ export async function inspectAndroidElf(
   abi: string,
   maxPageSize: number,
 ): Promise<AndroidElfInfo> {
+  // readelf локализует заголовки под LANG хоста («Машина», «Тип», «Адрес точки
+  // входа») — регулярки ниже парсят только канонический английский вывод,
+  // поэтому вызов принудительно идёт в локали C.
   const { stdout } = await execute('readelf', ['-h', '-l', '-W', binary], {
     maxBuffer: buildLogLimit,
+    env: { ...process.env, LC_ALL: 'C' },
   });
   const expectedMachine = abi === 'arm64-v8a' ? 'AArch64' : 'X86-64';
   const machine = /Machine:\s+(.+)/u.exec(stdout)?.[1].trim() ?? '';
@@ -304,11 +309,14 @@ export async function inspectAndroidElf(
   const interpreter = /\[Requesting program interpreter: ([^\]]+)\]/u.exec(stdout)?.[1] ?? '';
 
   if (!machine.includes(expectedMachine) || type !== 'DYN' || entry === '' || entry === '0x0') {
-    throw new Error('bionic_node_elf_machine_invalid');
+    // Фактические значения в сообщении: бинарь живёт в приватном скретче
+    // фоновой сборки и после падения недоступен для ручного readelf.
+    throw new Error(`bionic_node_elf_machine_invalid (machine=${machine || '?'},`
+      + ` type=${type || '?'}, entry=${entry || '?'}, expected=${expectedMachine})`);
   }
 
   if (interpreter !== '/system/bin/linker64') {
-    throw new Error('bionic_node_elf_linker_invalid');
+    throw new Error(`bionic_node_elf_linker_invalid (interpreter=${interpreter || '?'})`);
   }
 
   const aligns = [...stdout.matchAll(/^\s+LOAD\s+.*\s(0x[0-9a-f]+)\s*$/gmu)]
@@ -486,16 +494,29 @@ export function bionicMakeArgs(
   hostOptimization = '-O2',
   hostCc = 'gcc',
   hostCxx = 'g++',
+  hostAtomicLib?: string,
 ): string[] {
-  return [
+  const args = [
     `-j${jobs}`, 'all', `CC.host=${hostCc}`, `CXX.host=${hostCxx}`,
     `CFLAGS.host=${hostOptimization}`, `CXXFLAGS.host=${hostOptimization} -std=gnu++20`,
-    // NDK clang не подключает libatomic автоматически; v8 wasm требует
-    // 16-байтные атомики (__atomic_compare_exchange) при host-линковке.
-    // LIBS в cmd_link стоит после объектов — символы разрешаются;
-    // LDFLAGS.host стоял бы до группы и lld отбрасывал бы библиотеку.
-    'LIBS=-latomic',
   ];
+
+  // Библиотеки target-линковки задаёт только gyp: mk несёт свой per-target
+  // LIBS (-lm -ldl -llog для android). Командная строка LIBS=-latomic из
+  // прежнего фикса перетирала этот список — node/embedtest теряли liblog и
+  // падали на undefined __android_log_print, а проблему атомиков host-линковок
+  // всё равно не решала (см. hostAtomicLib ниже).
+
+  // NDK clang в host-режиме (без --target) резолвит -latomic в пустой архив
+  // compiler-rt lib/clang/19/lib/linux/x86_64/libatomic.a — mksnapshot падает
+  // на undefined __atomic_compare_exchange. Настоящая host-библиотека
+  // подключается явным путём с --no-as-needed: без флага lld отбрасывает её
+  // как невостребованную в позиции до группы объектов.
+  if (hostAtomicLib) {
+    args.push(`LDFLAGS.host=-Wl,--no-as-needed ${hostAtomicLib}`);
+  }
+
+  return args;
 }
 
 /**
@@ -584,6 +605,7 @@ export async function buildBionicNode(options: BionicBuildOptions): Promise<Bion
     hostOptimization,
     options.hostCc ?? 'gcc',
     options.hostCxx ?? 'g++',
+    options.hostAtomicLib,
   ), {
     cwd: options.sourceDir,
     maxBuffer: buildLogLimit,
@@ -650,6 +672,7 @@ async function main() {
     hostOptimization: option('--host-opt', false),
     hostCc: option('--host-cc', false),
     hostCxx: option('--host-cxx', false),
+    hostAtomicLib: option('--host-atomic-lib', false),
   });
 
   console.log(JSON.stringify(result, null, 2));

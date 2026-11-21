@@ -119,17 +119,35 @@ test('ANDROID-NODE-ENV: окружение make указывает на NDK clan
   assert.equal(arm.CC, '/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang');
   assert.equal(x86.CXX, '/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang++');
   assert.ok(arm.PATH.startsWith('/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:'));
+  // Командная строка LIBS=-latomic перетирала gyp-список библиотек цели
+  // (-lm -ldl -llog) — target-линковка теряла liblog и падала на
+  // __android_log_print. Библиотеки задаёт только gyp; атомики host-линковок
+  // закрывает отдельный hostAtomicLib.
   assert.deepEqual(bionicMakeArgs(2), [
     '-j2', 'all', 'CC.host=gcc', 'CXX.host=g++', 'CFLAGS.host=-O2', 'CXXFLAGS.host=-O2 -std=gnu++20',
-    'LIBS=-latomic',
   ]);
   assert.deepEqual(bionicMakeArgs(8, '-O0'), [
     '-j8', 'all', 'CC.host=gcc', 'CXX.host=g++', 'CFLAGS.host=-O0', 'CXXFLAGS.host=-O0 -std=gnu++20',
-    'LIBS=-latomic',
   ]);
   assert.deepEqual(bionicMakeArgs(8, '-O1', '/ndk/bin/clang', '/ndk/bin/clang++'), [
     '-j8', 'all', 'CC.host=/ndk/bin/clang', 'CXX.host=/ndk/bin/clang++',
-    'CFLAGS.host=-O1', 'CXXFLAGS.host=-O1 -std=gnu++20', 'LIBS=-latomic',
+    'CFLAGS.host=-O1', 'CXXFLAGS.host=-O1 -std=gnu++20',
+  ]);
+  assert.ok(bionicMakeArgs(2).every((arg) => !arg.startsWith('LIBS=')));
+
+  // NDK clang в host-режиме резолвит -latomic в пустой архив compiler-rt
+  // (lib/clang/19/lib/linux/x86_64/libatomic.a, 150 байт) — mksnapshot падает
+  // на __atomic_compare_exchange. Настоящая host-библиотека подключается
+  // отдельным путём с --no-as-needed: LDFLAGS.host стоит до группы объектов,
+  // без флага lld отбрасывает библиотеку как невостребованную.
+  const withAtomic = bionicMakeArgs(
+    8, '-O1', '/ndk/bin/clang', '/ndk/bin/clang++', '/usr/lib/libatomic.so.1',
+  );
+
+  assert.deepEqual(withAtomic, [
+    '-j8', 'all', 'CC.host=/ndk/bin/clang', 'CXX.host=/ndk/bin/clang++',
+    'CFLAGS.host=-O1', 'CXXFLAGS.host=-O1 -std=gnu++20',
+    'LDFLAGS.host=-Wl,--no-as-needed /usr/lib/libatomic.so.1',
   ]);
 });
 
