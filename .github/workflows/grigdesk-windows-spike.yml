@@ -1,0 +1,104 @@
+name: GrigDesk Windows spike (probe 4, temporary)
+
+on:
+  push:
+    branches: [ci/windows-runtime-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            nodeArch: x64
+            ubuntuArch: amd64
+            msvcArch: x64
+            rootfsHash: c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58
+          - runner: windows-11-arm
+            nodeArch: arm64
+            ubuntuArch: arm64
+            msvcArch: arm64
+            rootfsHash: 04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          architecture: ${{ matrix.nodeArch }}
+      - name: Собрать SEA
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item (Get-Command node.exe).Source sea.exe
+          'console.log(JSON.stringify({ sea: require("node:sea").isSea(), platform: process.platform, arch: process.arch }))' |
+            Set-Content -Encoding utf8 sea.cjs
+          '{"main":"sea.cjs","output":"sea.blob","disableExperimentalSEAWarning":true}' |
+            Set-Content -Encoding utf8 sea-config.json
+          node --experimental-sea-config sea-config.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx --yes postject@1.0.0-alpha.6 sea.exe NODE_SEA_BLOB sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          exit $LASTEXITCODE
+      - name: Собрать ConPTY
+        env:
+          MSVC_ARCH: ${{ matrix.msvcArch }}
+        run: |
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $visualStudio = & $installer -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$visualStudio) {
+            $visualStudio = & $installer -latest -products '*' -property installationPath
+          }
+          $vcvars = Join-Path $visualStudio 'VC\Auxiliary\Build\vcvarsall.bat'
+          @(
+            '@echo off',
+            ('call "' + $vcvars + '" ' + $env:MSVC_ARCH + ' || exit /b 1'),
+            'cl /nologo /utf-8 /W4 /Fe:conpty-probe.exe tools\windows\probe\conpty-probe.c /link kernel32.lib'
+          ) | Set-Content -Encoding ascii conpty-build.cmd
+          cmd.exe /d /c conpty-build.cmd
+          exit $LASTEXITCODE
+      - name: Подготовить закреплённый Ubuntu rootfs
+        env:
+          UBUNTU_ARCH: ${{ matrix.ubuntuArch }}
+          ROOTFS_HASH: ${{ matrix.rootfsHash }}
+        run: |
+          $archive = "ubuntu-base-24.04.4-base-$env:UBUNTU_ARCH.tar.gz"
+          curl.exe --fail --location --retry 3 --output $archive "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/$archive"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ine $env:ROOTFS_HASH) { throw 'Ubuntu rootfs digest mismatch' }
+          $inputStream = [IO.File]::OpenRead((Join-Path $PWD $archive))
+          $outputStream = [IO.File]::Create((Join-Path $PWD 'rootfs.tar'))
+          $gzip = [IO.Compression.GZipStream]::new($inputStream, [IO.Compression.CompressionMode]::Decompress)
+          try {
+            $gzip.CopyTo($outputStream)
+          } finally {
+            $gzip.Dispose()
+            $outputStream.Dispose()
+          }
+      - name: Снять фактические результаты проб
+        env:
+          PROBE_RUNNER: ${{ matrix.runner }}
+        run: |
+          ./tools/windows/probe/probe.ps1 -RootfsTar (Join-Path $PWD 'rootfs.tar') -SeaExe (Join-Path $PWD 'sea.exe') -ConPtyExe (Join-Path $PWD 'conpty-probe.exe') -Runner $env:PROBE_RUNNER -OutputDirectory (Join-Path $PWD 'probe-report')
+          if (Test-Path probe-report/status.json) { Get-Content probe-report/status.json }
+      - name: Декодировать полный WSL-отчёт
+        if: always()
+        run: |
+          if (Test-Path probe-report/wsl-report.json) {
+            node --input-type=module -e "import fs from 'node:fs'; import { recordSpikeVerdicts } from './tools/windows/spike.mts'; console.log(await recordSpikeVerdicts('probe-report/verdicts.json', JSON.parse(fs.readFileSync('probe-report/wsl-report.json', 'utf8'))));"
+            exit $LASTEXITCODE
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: windows-probe-${{ matrix.runner }}
+          path: probe-report/
+          if-no-files-found: error
