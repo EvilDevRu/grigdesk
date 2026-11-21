@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "entries": {
+    "bash": {
+      "version": "5.2.37",
+      "sha256ByAbi": {
+        "arm64-v8a": "9a034bd213a8ecb03a8205cb53a59b2e79471e3005df26650873e97883a4cf0e",
+        "x86_64": "d5e15c95078c23614f83440d63caa1d704626dd282472a8b75d9a22dd9f30730"
+      }
+    },
+    "flock": {
+      "version": "2.40.2",
+      "sha256ByAbi": {
+        "arm64-v8a": "c44f52fba5adc753aedae6ff343e9da54e486f0ad7bcf9f90b258503d68ad2fe",
+        "x86_64": "a574ea6dc379c3da1479b4fe2df2f7900d6df1c184d0d61b7334859551f5712f"
+      }
+    },
+    "timeout": {
+      "version": "9.5",
+      "sha256ByAbi": {
+        "arm64-v8a": "7538086598bfd4b600c5ed52d0231b9de582654784aece36e52880218291e463",
+        "x86_64": "87d381c8cb0a8adf9dff9cc5e20bad2acfec786bb750595877909c67de3303a2"
+      }
+    },
+    "nohup": {
+      "version": "9.5",
+      "sha256ByAbi": {
+        "arm64-v8a": "66bd6e953165ea893cae44361330b8f5e80b1b258665261899a8ebdbe131c335",
+        "x86_64": "54ae5b72f9bac7ba353be1a76d3e20d23548afec146dd5f066408009ff0cf132"
+      }
+    },
+    "git": {
+      "version": "2.47.1",
+      "sha256ByAbi": {
+        "arm64-v8a": "fe6a3aec694eb00190d45305771adaa4149c2886e6bafd71fc45f654adcab4d2",
+        "x86_64": "6a13854550753d67aad778080b1a3660fbb96b157ebf7119d5357610f7efe4f4"
+      }
+    },
+    "python3": {
+      "version": "3.12.8",
+      "sha256ByAbi": {
+        "arm64-v8a": "0af4d82de886a73a5bccd214a2310caa5a61669da976ba3af549cd83b7ccee31",
+        "x86_64": "a16e11dc243b2fc579518832b303f929ec780e8e33a602f5b4b88c8cc3b7e9ef"
+      }
+    }
+  }
+}

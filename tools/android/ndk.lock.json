@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "nodeTag": "v24.21.0",
+  "nodeSourceUrl": "https://nodejs.org/download/release/v24.21.0/node-v24.21.0.tar.xz",
+  "nodeSourceSha256": "a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc",
+  "ndkVersion": "r28c",
+  "ndkUrl": "https://dl.google.com/android/repository/android-ndk-r28c-linux.zip",
+  "ndkSizeBytes": 722261334,
+  "ndkSha1": "a7b54a5de87fecd125a17d54f73c446199e72a64",
+  "ndkSha256": "dfb20d396df28ca02a8c708314b814a4d961dc9074f9a161932746f815aa552f",
+  "apiLevel": 30,
+  "abis": ["arm64-v8a", "x86_64"],
+  "outputName": "libnode.so",
+  "maxPageSize": 16384
+}

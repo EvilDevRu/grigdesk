@@ -1,0 +1,36 @@
+// Пробный init-скрипт 3a: добавляет :client buildType probe без правки продуктовых
+// файлов Gradle. Запуск: ./gradlew :client:assembleProbe -I <этот файл>.
+// applicationIdSuffix даёт local.grigdesk.mobile.probe; useLegacyPackaging=true
+// извлекает PIE в nativeLibraryDir (W^X targetSdk 36 запрещает exec из data).
+allprojects {
+    afterEvaluate { project ->
+        if (project.name == 'client' && project.extensions.findByName('android') != null) {
+            def probeRoot = new File(settingsDir, '../../tools/android/probe-apk').canonicalFile
+
+            project.android {
+                buildTypes {
+                    probe {
+                        initWith debug
+                        applicationIdSuffix '.probe'
+                        matchingFallbacks = ['debug']
+                    }
+                }
+
+                sourceSets {
+                    probe {
+                        java.srcDirs += new File(probeRoot, 'src')
+                        manifest.srcFile new File(probeRoot, 'AndroidManifest.xml')
+                        jniLibs.srcDirs += new File(probeRoot, 'jniLibs')
+                        assets.srcDirs += new File(probeRoot, 'assets')
+                    }
+                }
+
+                packaging {
+                    jniLibs {
+                        useLegacyPackaging = true
+                    }
+                }
+            }
+        }
+    }
+}
